@@ -62,11 +62,25 @@ describe("asking the record", () => {
   });
 
   it("gives limits as distances and caps, never as results", () => {
-    const said = lines(interpret("How close is it to its limits?", ctx(AGENT_IDS.swing)));
+    const reply = interpret("How close is it to its limits?", ctx(AGENT_IDS.swing));
+    const said = lines(reply);
     expect(said[0]).toMatch(/^Agent 2: \$[\d,.]+ above its /);
-    expect(said.some((l) => /^Daily loss limit: \$[\d,.]+ headroom under a limit of \$[\d,.]+ below the day's start\. At the limit: /.test(l))).toBe(true);
     expect(said.at(-1)).toMatch(/^Orders today: \d+ of \d+\.$/);
-    expect(said.join(" ")).not.toMatch(/profit|P&L|return|gain/i);
+    const table = reply.kind === "answer" ? reply.table : undefined;
+    expect(table?.columns).toEqual(["Limit", "Headroom", "Set at", "At the limit"]);
+    const daily = table?.rows.find((r) => r[0] === "Daily loss limit");
+    expect(daily?.[1]).toMatch(/^\$[\d,.]+$/);
+    expect(daily?.[2]).toMatch(/^\$[\d,.]+ below the day's start$/);
+    expect(daily?.[3]).not.toBe("");
+    for (const row of table?.rows ?? []) expect(row).toHaveLength(4);
+    expect([...said, ...(table?.rows.flat() ?? [])].join(" ")).not.toMatch(/profit|P&L|return|gain/i);
+  });
+
+  it("names the agent on each row when it gives every agent's limits", () => {
+    const reply = interpret("How close are my agents to their limits?", ctx());
+    const table = reply.kind === "answer" ? reply.table : undefined;
+    expect(table?.columns[0]).toBe("Agent");
+    expect(new Set(table?.rows.map((r) => r[0])).size).toBeGreaterThan(1);
   });
 
   it("names holdings with the time of each mark", () => {

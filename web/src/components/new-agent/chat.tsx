@@ -3,6 +3,8 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { Button } from "@cloudflare/kumo/components/button";
 import { Composer, type ComposerHandle } from "@/components/chat/composer";
+import { Markdown } from "@/components/chat/markdown";
+import { OwnerSaid } from "@/components/chat/record-reply";
 import { KEY } from "@/components/kumo/key";
 import type { NewAgent } from "@/lib/fixture-journey";
 import type { Deployment } from "@/lib/mock-runtime";
@@ -14,21 +16,12 @@ import { Summary, isConfirmed } from "./summary";
 /** The sticky header's height plus a margin, matching the page's `scroll-padding-top` of 5rem. */
 const HEADER_CLEARANCE_PX = 80;
 
-/** The platform's side of the conversation: plain text, as in any chat. */
+/** The platform's side of the conversation: text, as in any chat, which may carry a model's Markdown. */
 function Platform({ children, slot }: { children: ReactNode; slot?: string }) {
   return (
     <div data-slot={slot ?? "platform"} className="grid max-w-measure gap-2 text-pretty">
       <span className="sr-only">Owlhead: </span>
       {children}
-    </div>
-  );
-}
-
-function Owner({ text }: { text: string }) {
-  return (
-    <div data-slot="owner-message" className="ml-auto max-w-[85%] rounded-3xl bg-background px-4 py-2.5 text-pretty whitespace-pre-wrap wrap-anywhere">
-      <span className="sr-only">You: </span>
-      {text}
     </div>
   );
 }
@@ -88,13 +81,11 @@ function Failed({ entry, last, busy, actions }: { entry: Extract<Entry, { kind: 
 function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; c: Conversation; last: boolean; busy: boolean; creation: Creation; actions: ChatActions }) {
   switch (entry.kind) {
     case "owner":
-      return <Owner text={entry.text} />;
+      return <OwnerSaid text={entry.text} />;
     case "said":
       return (
         <Platform slot="said">
-          {entry.lines.map((line, i) => (
-            <p key={i}>{line}</p>
-          ))}
+          <Markdown text={entry.lines.join("\n\n")} links="show" />
           {last && entry.asks.kind === "model" && nextStep(c).kind === "model" ? <ModelChoices busy={busy} onChoose={actions.onChoose} /> : null}
         </Platform>
       );
@@ -131,7 +122,8 @@ function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; 
 
 /**
  * The conversation (brief A0 to A2 and A5, DEC-473, DEC-474): the log, then the composer. The
- * platform's replies are plain text; only deterministic parts carry buttons (PX-18). The composer
+ * platform's replies are text, drawn from Markdown with their links shown but never opened, since a
+ * model wrote part of them (DEC-478); only deterministic parts carry buttons (PX-18). The composer
  * keeps focus as the log grows, and the newest part of the log is brought into view above it.
  */
 export function Chat({

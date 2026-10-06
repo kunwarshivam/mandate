@@ -21,8 +21,16 @@ export interface Cite {
   label: string;
 }
 
+/** Figures that read across and down, written by code like the lines: one row per limit, say. */
+export interface AnswerTable {
+  label: string;
+  columns: string[];
+  rows: string[][];
+}
+
 export type Reply =
-  | { kind: "answer"; lines: string[]; cites: Cite[]; follow: string[] }
+  /** Plain sentences, never parsed as Markdown, so a value from the record always reads as written. */
+  | { kind: "answer"; lines: string[]; table?: AnswerTable; cites: Cite[]; follow: string[] }
   /** The owner asked to pause: a card with Pause, which lowers risk and needs no passkey. */
   | { kind: "pause"; agentId: string }
   /** Stop and resume need a passkey, so the reply opens the Stop sheet rather than sending anything. */
@@ -74,8 +82,8 @@ function scope(ctx: AskContext, text: string): Agent[] {
   return here ? [here] : ctx.ws.agents;
 }
 
-function answer(lines: string[], cites: Cite[] = [], follow: string[] = []): Reply {
-  return { kind: "answer", lines, cites, follow };
+function answer(lines: string[], cites: Cite[] = [], follow: string[] = [], table?: AnswerTable): Reply {
+  return table ? { kind: "answer", lines, table, cites, follow } : { kind: "answer", lines, cites, follow };
 }
 
 function needsYou(ctx: AskContext, agents: Agent[]): Reply {
@@ -127,17 +135,19 @@ function dedupe(cites: Cite[]): Cite[] {
 
 function limits(agents: Agent[]): Reply {
   if (agents.length === 0) return answer(["You have no agents yet."]);
+  const many = agents.length > 1;
   const lines: string[] = [];
+  const rows: string[][] = [];
   for (const agent of agents) {
     const l = agentLimits(agent);
-    lines.push(`${agent.label}: ${headroomLine(agent)}.`);
-    for (const row of headroomRows(l)) lines.push(`${row.label}: ${row.headroom} headroom under a limit of ${row.limit}. At the limit: ${row.atCap.toLowerCase()}.`);
-    lines.push(`Orders today: ${l.ordersToday} of ${l.ordersCap}.`);
+    lines.push(`${agent.label}: ${headroomLine(agent)}.`, `Orders today: ${l.ordersToday} of ${l.ordersCap}.`);
+    for (const row of headroomRows(l)) rows.push([...(many ? [agent.label] : []), row.label, row.headroom, row.limit, row.atCap]);
   }
   return answer(
     lines,
     agents.map((a) => ({ href: agentHref(a.agent_id, "mandate"), label: `${a.label}'s mandate` })),
     ["What does it hold?"],
+    { label: "Headroom under each limit", columns: [...(many ? ["Agent"] : []), "Limit", "Headroom", "Set at", "At the limit"], rows },
   );
 }
 

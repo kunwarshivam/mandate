@@ -10,11 +10,12 @@ import { KEY } from "@/components/kumo/key";
 import { openStop } from "@/components/shell/stop-control";
 import { CommandEntry } from "@/components/stop/command-log";
 import { findAgent } from "@/fixtures/workspace";
-import type { Cite, Reply } from "@/lib/ask-record";
+import type { AnswerTable, Cite, Reply } from "@/lib/ask-record";
 import { type Command, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { agentHref } from "@/lib/screens";
 import { cn } from "@/lib/utils";
+import { Markdown, TABLE } from "./markdown";
 
 /** A record a reply read, as a link back to it. */
 const CITE =
@@ -30,11 +31,12 @@ const PAUSE_KEY =
 const QUIET_KEY =
   "press inline-flex h-11 items-center rounded-xl border border-foreground/25 bg-card px-4 font-medium text-foreground outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring";
 
+/** What the owner sent, as they formatted it: Markdown, with every line break they typed. */
 export function OwnerSaid({ text }: { text: string }) {
   return (
-    <div data-slot="owner-message" className="ml-auto max-w-[85%] rounded-3xl bg-background px-4 py-2.5 text-pretty whitespace-pre-wrap wrap-anywhere">
+    <div data-slot="owner-message" className="ml-auto max-w-[min(85%,44rem)] min-w-0 rounded-3xl bg-background px-4 py-2.5">
       <span className="sr-only">You: </span>
-      {text}
+      <Markdown text={text} />
     </div>
   );
 }
@@ -81,6 +83,37 @@ function FromRecord() {
       <BookOpen aria-hidden className="-my-1 size-6" />
       From the record
     </p>
+  );
+}
+
+/** An answer's figures, in the same frame as a table in a message. */
+function FiguresTable({ table }: { table: AnswerTable }) {
+  return (
+    <div data-slot="answer-table" tabIndex={0} role="region" aria-label={table.label} className={cn(TABLE.frame, "my-1")}>
+      <table className={TABLE.table}>
+        <caption className="sr-only">{table.label}</caption>
+        <thead className={TABLE.head}>
+          <tr>
+            {table.columns.map((c) => (
+              <th key={c} scope="col" className={TABLE.th}>
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className={TABLE.body}>
+          {table.rows.map((row) => (
+            <tr key={row.join("|")}>
+              {row.map((cell, i) => (
+                <td key={i} className={TABLE.td}>
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -166,11 +199,14 @@ export function RecordReply({ reply, onAsk, onCreate }: { reply: Reply; onAsk: (
   switch (reply.kind) {
     case "answer":
       return (
-        <div data-slot="record-answer" className="grid max-w-measure gap-2 text-pretty">
+        <div data-slot="record-answer" className="grid max-w-3xl min-w-0 gap-2">
           <FromRecord />
           {reply.lines.map((line, i) => (
-            <p key={i}>{line}</p>
+            <p key={i} className="max-w-measure text-pretty">
+              {line}
+            </p>
           ))}
+          {reply.table ? <FiguresTable table={reply.table} /> : null}
           <Cites cites={reply.cites} />
           <AskChips asks={reply.follow} onAsk={onAsk} />
         </div>
