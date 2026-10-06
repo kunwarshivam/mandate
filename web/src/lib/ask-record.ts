@@ -1,9 +1,12 @@
 import type { Agent, Iso, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
+import { CHANGE_EXAMPLE, asksForChange, namesLimit, readChange } from "./change-request";
 import { gateRule, verdictLabel } from "./gate-reasons";
 import { clock, price, quantity, usd } from "./format";
 import { MODE_LABEL, MODE_MEANING } from "./labels";
 import { agentLimits, headroomLine, headroomRows } from "./limits";
+import { type EditPath, type Edits, diffMandate, editableFields } from "./mandate-change";
+import { changeLabel } from "./mandate-paths";
 import { type DeskRole, deskFor, figureLine, threadItems } from "./messages";
 import { approvalAt } from "./mock-runtime";
 import { RESTRICTIONS } from "./restrictions";
@@ -12,8 +15,9 @@ import { agentHref, decisionHref, positionHref } from "./screens";
 /**
  * Asking the record (DEC-479): the owner's words matched to a fixed set of questions, each answered
  * by code from the journal and the mandate, with a link to every record it read. No model writes an
- * answer, nothing is kept after the page closes, and no answer places an order, changes a mandate
- * or advises a trade. Only Pause is sent from a message, and only when the owner asked for it.
+ * answer, nothing is kept after the page closes, and no answer places an order or advises a trade.
+ * Two things are sent from a message, each only from a card the owner confirms: Pause, and a new
+ * version of a mandate's limits, through the same review as the Edit form (DEC-483).
  */
 
 export interface Cite {
@@ -39,7 +43,9 @@ export type Reply =
    * Creating an agent ends at its summary, confirmed with a passkey, so the reply hands over to
    * setup. `text` is the owner's words when they say more than "create an agent", else null.
    */
-  | { kind: "create"; text: string | null };
+  | { kind: "create"; text: string | null }
+  /** A change to the agent's limits: the change review, which proposes the version when it opens. */
+  | { kind: "change"; agentId: string; edits: Edits; quote: string };
 
 export interface AskContext {
   ws: Workspace;
@@ -207,6 +213,40 @@ function pick(ctx: AskContext, text: string): Agent | "many" | null {
   return agents.length === 0 ? null : "many";
 }
 
+const LIMITS_HERE =
+  "A message or the Edit form changes these: capital, the lifetime and daily loss limits, the largest order and position, total holdings, orders a day, the protective stop, the approval window, the two-approver threshold and quiet hours.";
+
+/** A request to change limits becomes the change review; nothing here proposes a value of its own. */
+function change(ctx: AskContext, said: string, text: string): Reply {
+  if (ADVICE_WORDS.test(text)) {
+    return answer(["I don't suggest limits: they're yours to set.", `To change one, say which and the new value in figures, like ${CHANGE_EXAMPLE}. You see what it changes before anything is sent.`]);
+  }
+  const one = pick(ctx, text);
+  if (one === null) return answer(["You have no agents yet."]);
+  if (one === "many") return answer([`Which agent? Name it, for example “set ${ctx.ws.agents[0].label}'s largest order to $800”.`]);
+  const edit: Cite = { href: agentHref(one.agent_id, "mandate/edit"), label: `Edit ${one.label}'s mandate` };
+  const reading = readChange(text);
+  switch (reading.kind) {
+    case "not_here":
+      return answer([`That part of ${one.label}'s mandate isn't changed from a message.`, LIMITS_HERE], [{ href: agentHref(one.agent_id, "mandate"), label: `${one.label}'s mandate` }]);
+    case "unclear":
+      return answer(reading.lines, [edit]);
+    case "edits": {
+      const paths = Object.keys(reading.edits) as EditPath[];
+      const editable = new Set(editableFields(one.mandate).map((f) => f.path));
+      if (paths.some((p) => !editable.has(p))) return answer([`${one.label} has no quiet hours set, so there are none to move.`], [edit]);
+      if (diffMandate(one.mandate, reading.edits).changes.length === 0) {
+        return answer([`${paths.map(changeLabel).join(" and ")} ${paths.length === 1 ? "is" : "are"} already set to that. Nothing to change.`], [{ href: agentHref(one.agent_id, "mandate"), label: `${one.label}'s mandate` }]);
+      }
+      return { kind: "change", agentId: one.agent_id, edits: reading.edits, quote: said.trim() };
+    }
+    default: {
+      const unhandled: never = reading;
+      throw new Error(`unhandled reading ${JSON.stringify(unhandled)}`);
+    }
+  }
+}
+
 /**
  * The reply to one message. Matching is by fixed phrases, so the same words always get the same
  * reply; anything unmatched says what can be asked rather than guessing.
@@ -217,6 +257,7 @@ export function interpret(said: string, ctx: AskContext): Reply {
   const asking = QUESTION.test(text);
 
   if (CREATE_WORDS.test(text)) return { kind: "create", text: describes(text) ? said.trim() : null };
+  if ((asksForChange(text) && !asking) || (ADVICE_WORDS.test(text) && namesLimit(text))) return change(ctx, said, text);
   if (RESUME_WORDS.test(text) && !asking) {
     const one = pick(ctx, text);
     return { kind: "stop", agentId: one && one !== "many" ? one.agent_id : null, resume: true };
@@ -254,7 +295,7 @@ export function interpret(said: string, ctx: AskContext): Reply {
     return answer(
       [
         "Ask what needs you, why an agent asked, how close it is to its limits, what it holds, or what happened today. Each answer links to the records behind it.",
-        "I can also pause an agent, open Stop, or set up a new agent.",
+        "I can also pause an agent, open Stop, change an agent's limits, or set up a new agent.",
       ],
       [],
       [...STARTERS],
