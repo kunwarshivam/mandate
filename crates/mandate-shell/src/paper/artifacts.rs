@@ -12,6 +12,7 @@ use mandate_domain::{AssetClass as DomainAssetClass, AssetId};
 use mandate_executor::BindingGateConfigRefs;
 use mandate_num::{Qty, ShareIncrement};
 use mandate_risk::{EtpClass, Exchange as GateExchange};
+use mandate_runtime::Deployment;
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, SYMBOL, absent};
@@ -46,6 +47,25 @@ pub struct ProductionIdentity<'a> {
     pub model_id: &'a str,
     pub model_version: &'a str,
     pub model_hash: Digest,
+}
+
+/// Validated opaque deployment identity for one production cycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeploymentInput {
+    deployment: Deployment,
+    account_ref: String,
+}
+
+impl DeploymentInput {
+    /// The mandate-bound runtime deployment identity.
+    pub fn deployment(&self) -> &Deployment {
+        &self.deployment
+    }
+
+    /// The opaque account-stream subject.
+    pub fn account_ref(&self) -> &str {
+        &self.account_ref
+    }
 }
 
 /// What the instrument artifact states, each field read by the run: the symbol the broker is read
@@ -235,6 +255,19 @@ impl Artifacts {
             model_hash: self.model_hash,
         }
     }
+
+    /// Validates caller-supplied opaque deployment ids and binds the connection from the mandate.
+    ///
+    /// # Errors
+    /// Refuses until E7-19's deployment-input constructor is implemented.
+    pub fn deployment(
+        &self,
+        _workspace: String,
+        _agent: String,
+        _account_ref: String,
+    ) -> Result<DeploymentInput, Cause> {
+        Err(Cause::Unimplemented { story: "E7-19" })
+    }
 }
 
 /// Reads `name` once. Its members must be exactly `members`, which are listed in canonical order.
@@ -310,8 +343,9 @@ mod tests {
     use mandate_canon::Digest;
     use mandate_domain::{AssetClass, AssetId};
     use mandate_risk::Exchange as GateExchange;
+    use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 
-    use super::{ProductionIdentity, exchanges, legacy_identity};
+    use super::{DeploymentInput, ProductionIdentity, exchanges, legacy_identity};
 
     fn text<E: std::fmt::Display>(error: E) -> String {
         error.to_string()
@@ -395,5 +429,21 @@ mod tests {
         assert!(exchanges("otc").is_err());
         assert!(exchanges("other").is_err());
         Ok(())
+    }
+
+    #[test]
+    fn deployment_input_exposes_only_its_validated_values() {
+        let input = DeploymentInput {
+            deployment: Deployment {
+                agent: AgentId("agent-deployment-9".to_owned()),
+                connection: ConnectionId("conn-owner-paper-42".to_owned()),
+                workspace: WorkspaceId("workspace-owner-42".to_owned()),
+            },
+            account_ref: "account-ref-7".to_owned(),
+        };
+        assert_eq!(input.deployment().workspace.0, "workspace-owner-42");
+        assert_eq!(input.deployment().agent.0, "agent-deployment-9");
+        assert_eq!(input.deployment().connection.0, "conn-owner-paper-42");
+        assert_eq!(input.account_ref(), "account-ref-7");
     }
 }

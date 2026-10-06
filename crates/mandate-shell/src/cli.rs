@@ -30,6 +30,19 @@ pub struct Args {
     pub place_one_order: bool,
 }
 
+/// Production-cycle inputs, including the caller-owned opaque deployment identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProductionArgs {
+    pub mandate: PathBuf,
+    pub dataset: PathBuf,
+    pub config_dir: PathBuf,
+    pub journal: Option<String>,
+    pub place_one_order: bool,
+    pub workspace: String,
+    pub agent: String,
+    pub account_ref: String,
+}
+
 /// Parses the arguments after the program name.
 ///
 /// # Errors
@@ -79,6 +92,19 @@ where
     })
 }
 
+/// Parses production-cycle inputs after the program name.
+///
+/// # Errors
+/// Refuses until E7-19's caller-owned deployment arguments are implemented.
+pub fn parse_production<I>(_args: I) -> Result<ProductionArgs, ShellError>
+where
+    I: IntoIterator<Item = String>,
+{
+    Err(usage(
+        "production inputs are not implemented yet (pending E7-19)".to_owned(),
+    ))
+}
+
 fn value_of(flag: &str, value: Option<String>) -> Result<String, ShellError> {
     match value {
         Some(value) if !value.starts_with("--") => Ok(value),
@@ -94,11 +120,91 @@ fn usage(message: String) -> ShellError {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{Args, parse};
+    use super::{Args, parse, parse_production};
     use crate::error::ShellError;
 
     fn args(words: &[&str]) -> Result<Args, ShellError> {
         parse(words.iter().map(|w| (*w).to_owned()))
+    }
+
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn production_arguments_require_caller_owned_deployment_identity() -> Result<(), String> {
+        for (workspace, agent, account_ref) in [
+            ("workspace-owner-42", "agent-deployment-9", "account-ref-7"),
+            ("workspace-owner-84", "agent-deployment-3", "account-ref-2"),
+        ] {
+            let parsed = parse_production(
+                [
+                    "--mandate",
+                    "mandate.json",
+                    "--dataset",
+                    "bars",
+                    "--config-dir",
+                    "config",
+                    "--workspace",
+                    workspace,
+                    "--agent",
+                    agent,
+                    "--account-ref",
+                    account_ref,
+                    "--confirm-paper",
+                ]
+                .into_iter()
+                .map(str::to_owned),
+            )
+            .map_err(|error| error.to_string())?;
+            assert_eq!(parsed.workspace, workspace);
+            assert_eq!(parsed.agent, agent);
+            assert_eq!(parsed.account_ref, account_ref);
+        }
+        for incomplete in [
+            vec![
+                "--mandate",
+                "mandate.json",
+                "--dataset",
+                "bars",
+                "--config-dir",
+                "config",
+                "--agent",
+                "agent-deployment-9",
+                "--account-ref",
+                "account-ref-7",
+                "--confirm-paper",
+            ],
+            vec![
+                "--mandate",
+                "mandate.json",
+                "--dataset",
+                "bars",
+                "--config-dir",
+                "config",
+                "--workspace",
+                "workspace-owner-42",
+                "--account-ref",
+                "account-ref-7",
+                "--confirm-paper",
+            ],
+            vec![
+                "--mandate",
+                "mandate.json",
+                "--dataset",
+                "bars",
+                "--config-dir",
+                "config",
+                "--workspace",
+                "workspace-owner-42",
+                "--agent",
+                "agent-deployment-9",
+                "--confirm-paper",
+            ],
+        ] {
+            assert!(
+                parse_production(incomplete.into_iter().map(str::to_owned)).is_err(),
+                "every deployment identity field is required"
+            );
+        }
+        Ok(())
     }
 
     fn usage_of(words: &[&str]) -> String {
