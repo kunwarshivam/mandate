@@ -95,7 +95,7 @@ for (const [width, height, share] of [
     await expect(bar.locator("[data-slot=environment-badge]")).toContainText("PAPER");
     await expect(page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Stop", exact: true }), "Stop stays on the tab bar").toBeInViewport({ ratio: 1 });
     for (const target of await bar.locator("a[href]").locator("visible=true").all()) {
-      const r = await target.evaluate((el) => (getComputedStyle(el, "::after").position === "absolute" ? el.offsetParent! : el).getBoundingClientRect());
+      const r = await target.evaluate((el: HTMLElement) => (getComputedStyle(el, "::after").position === "absolute" ? el.offsetParent! : el).getBoundingClientRect());
       expect(Math.min(r.width, r.height), `${await target.textContent()} is a 44px target`).toBeGreaterThanOrEqual(44);
     }
 
