@@ -18,8 +18,8 @@ use super::limits::{Figures, Limits, Readings};
 use super::{
     Confirmation, GoalReason, Input, InstrumentRestriction, KillScope, LiftReason, LimitKey,
     Opening, Outcome, Rejection, RemovalReason, Restriction, RestrictionReason, RiskEvent,
-    SessionClock, Snapshot, Step, ThenAction, TriggerReason, UniverseChange, add_seconds,
-    hard_wait_s, rung_index, size_factor,
+    SessionClock, Snapshot, Step, ThenAction, TriggerReason, TripwireUpdate, UniverseChange,
+    add_seconds, hard_wait_s, rung_index, size_factor,
 };
 use crate::SpecError;
 use crate::document::{LadderAction, LadderRung, LimitAction, OnComplete, Pointer};
@@ -67,6 +67,10 @@ pub(super) struct Fold {
     /// The latched rungs and the floor. The daily loss latches in `daily`, which also says when its
     /// lift may come (§5.4).
     latched: BTreeSet<LimitKey>,
+    /// Any fired tripwire blocks allocation increases, including `end_delegations`, which adds no
+    /// mode restriction (§6.7, MI-7).
+    tripwire_latched: bool,
+    tripwire_exits_only: bool,
     daily: Option<DailyLatch>,
     rollover: Option<Rollover>,
     restrictions: BTreeSet<Restriction>,
@@ -190,6 +194,8 @@ impl Fold {
             confirmations: BTreeMap::new(),
             hard_since: BTreeMap::new(),
             latched: BTreeSet::new(),
+            tripwire_latched: false,
+            tripwire_exits_only: false,
             daily: None,
             rollover: None,
             restrictions: BTreeSet::new(),
@@ -207,9 +213,10 @@ impl Fold {
         &self,
         clock: &dyn SessionClock,
         step: &Step,
+        tripwire: Option<&TripwireUpdate>,
     ) -> Result<(Self, Outcome), SpecError> {
         let mut next = self.clone();
-        let outcome = next.fold(clock, step)?;
+        let outcome = next.fold(clock, step, tripwire)?;
         Ok((next, outcome))
     }
 
@@ -217,17 +224,24 @@ impl Fold {
     /// time passing (§5.1): the settling is a clock tick at that instant, and its events come first.
     /// Settling unconditionally is the same as settling only when time has passed, since a tick at
     /// the previous input's instant changes nothing.
-    fn fold(&mut self, clock: &dyn SessionClock, step: &Step) -> Result<Outcome, SpecError> {
+    fn fold(
+        &mut self,
+        clock: &dyn SessionClock,
+        step: &Step,
+        tripwire: Option<&TripwireUpdate>,
+    ) -> Result<Outcome, SpecError> {
         if !matches!(step.input, Input::AllocationChange { .. }) {
-            return self.evaluate(clock, step);
+            return self.evaluate(clock, step, tripwire);
         }
         let settle = Step {
             at: step.at,
             session: step.session,
             input: Input::Clock,
         };
-        let mut journal = self.evaluate(clock, &settle)?.journal;
-        let mut outcome = self.evaluate(clock, step)?;
+        let mut journal = self.evaluate(clock, &settle, None)?.journal;
+        let mut outcome = self.evaluate(clock, step, tripwire)?;
+        outcome.tripwire_journal_index =
+            outcome.tripwire_journal_index.saturating_add(journal.len());
         journal.append(&mut outcome.journal);
         outcome.journal = journal;
         Ok(outcome)
@@ -236,7 +250,12 @@ impl Fold {
     /// One input in §5.2's order: settle time, apply the input, E then H, the rungs in ladder order,
     /// the daily loss, the floor, the profit stop, the instrument's restrictions, then the effective
     /// mode.
-    fn evaluate(&mut self, clock: &dyn SessionClock, step: &Step) -> Result<Outcome, SpecError> {
+    fn evaluate(
+        &mut self,
+        clock: &dyn SessionClock,
+        step: &Step,
+        tripwire: Option<&TripwireUpdate>,
+    ) -> Result<Outcome, SpecError> {
         on_the_risk_clock(step.at)?;
         if step.at < self.at {
             return Err(SpecError::ClockWentBackwards);
@@ -266,12 +285,19 @@ impl Fold {
             restriction: Restriction::LifetimeFloor,
         };
         self.confirm(floor, &readings, moment, &mut journal)?;
+        let tripwire_journal_index = journal.len();
+        let tripwire_journal = tripwire.map_or_else(Vec::new, |update| {
+            self.apply_tripwire(update);
+            update.journal.clone()
+        });
         self.profit_stop(readings.profit, moment, &mut journal)?;
         self.instrument_events(&before, &step.input, &mut journal);
         self.apply_mode(&mut journal);
         Ok(Outcome {
             snapshot: self.snapshot()?,
             journal,
+            tripwire_journal,
+            tripwire_journal_index,
             pending: self.pending(),
             rejection,
         })
@@ -305,6 +331,7 @@ impl Fold {
             agent_mode: self.mode,
             instrument_restrictions: self.instrument_restrictions.clone(),
             net_contributed: self.net_contributed,
+            tripwire_restriction: self.tripwire_exits_only,
         })
     }
 
@@ -376,6 +403,7 @@ impl Fold {
                 None
             }
             Input::OwnerAcknowledged { restriction } => self.acknowledge(*restriction, journal)?,
+            Input::TripwireAcknowledged => None,
             Input::AllocationChange { delta_usd } => self.allocate(*delta_usd, journal)?,
             Input::FloorLoosened {
                 new_max_loss_from_allocation,
@@ -397,6 +425,14 @@ impl Fold {
             }
         };
         Ok((Read::Nothing, refused))
+    }
+
+    fn apply_tripwire(&mut self, update: &TripwireUpdate) {
+        apply_tripwire_update(
+            &mut self.tripwire_latched,
+            &mut self.tripwire_exits_only,
+            update,
+        );
     }
 
     /// For an equity only a regular-session mark counts; crypto counts every mark. A counted sane
@@ -770,6 +806,11 @@ impl Fold {
             .map(|restriction| self.mode_of(*restriction))
             .max()
             .unwrap_or(AgentMode::Normal);
+        let mode = if self.tripwire_exits_only {
+            mode.max(AgentMode::ExitsOnly)
+        } else {
+            mode
+        };
         if mode != self.mode {
             journal.push(RiskEvent::AgentModeApplied {
                 from: self.mode,
@@ -800,6 +841,109 @@ impl Fold {
             .filter(|(_, confirmation)| confirmation.is_pending())
             .map(|(key, _)| *key)
             .collect()
+    }
+}
+
+fn apply_tripwire_update(latched: &mut bool, exits_only: &mut bool, update: &TripwireUpdate) {
+    *latched = update.allocation_increase_blocked;
+    *exits_only = update.effective_action == Some(crate::document::TripwireAction::ExitsOnly);
+}
+
+#[cfg(test)]
+mod tripwire_integration_tests {
+    use mandate_num::Usd;
+
+    use crate::document::{TripwireAction, TripwireId, TripwireMetric};
+    use crate::risk::{TripwireRiskEvent, TripwireUpdate, TripwireValue};
+    use crate::{DecGrammar, SchemaDec};
+
+    use super::apply_tripwire_update;
+
+    fn id() -> Result<TripwireId, String> {
+        TripwireId::parse("loss").map_err(|error| error.to_string())
+    }
+
+    fn trigger(action: TripwireAction) -> Result<TripwireRiskEvent, String> {
+        Ok(TripwireRiskEvent::RiskLimitTriggered {
+            id: id()?,
+            action,
+            metric: TripwireMetric::RealizedLossUsd,
+            threshold: SchemaDec::parse("100", DecGrammar::PositiveDecimal)
+                .map_err(|error| error.to_string())?,
+            value: TripwireValue::Usd(Usd::parse("200").map_err(|error| error.to_string())?),
+        })
+    }
+
+    /// The trigger and opaque alert stay ahead of the mode application performed after this hook.
+    #[test]
+    fn exits_only_projects_a_restriction_and_ordered_effects() -> Result<(), String> {
+        let update = TripwireUpdate {
+            journal: vec![
+                trigger(TripwireAction::ExitsOnly)?,
+                TripwireRiskEvent::OwnerAlertSent {
+                    triggered_event_index: 0,
+                },
+            ],
+            effective_action: Some(TripwireAction::ExitsOnly),
+            allocation_increase_blocked: true,
+        };
+        let mut latched = false;
+        let mut exits_only = false;
+
+        apply_tripwire_update(&mut latched, &mut exits_only, &update);
+
+        assert!(latched);
+        assert!(exits_only);
+        assert_eq!(
+            update.journal,
+            vec![
+                trigger(TripwireAction::ExitsOnly)?,
+                TripwireRiskEvent::OwnerAlertSent {
+                    triggered_event_index: 0,
+                },
+            ]
+        );
+        Ok(())
+    }
+
+    /// `end_delegations` is a latch for MI-7 without becoming a §5.9 mode restriction.
+    #[test]
+    fn end_delegations_latches_without_a_mode_restriction() -> Result<(), String> {
+        let update = TripwireUpdate {
+            journal: vec![trigger(TripwireAction::EndDelegations)?],
+            effective_action: Some(TripwireAction::EndDelegations),
+            allocation_increase_blocked: true,
+        };
+        let mut latched = false;
+        let mut exits_only = false;
+
+        apply_tripwire_update(&mut latched, &mut exits_only, &update);
+
+        assert!(latched);
+        assert!(!exits_only);
+        Ok(())
+    }
+
+    /// A valid owner acknowledgment clears both the latch and an exits-only restriction.
+    #[test]
+    fn owner_acknowledgment_projection_lifts_the_tripwire() -> Result<(), String> {
+        let update = TripwireUpdate {
+            journal: vec![TripwireRiskEvent::RiskLimitLifted { id: id()? }],
+            effective_action: None,
+            allocation_increase_blocked: false,
+        };
+        let mut latched = true;
+        let mut exits_only = true;
+
+        apply_tripwire_update(&mut latched, &mut exits_only, &update);
+
+        assert!(!latched);
+        assert!(!exits_only);
+        assert_eq!(
+            update.journal,
+            vec![TripwireRiskEvent::RiskLimitLifted { id: id()? }]
+        );
+        Ok(())
     }
 }
 

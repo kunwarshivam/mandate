@@ -140,7 +140,7 @@ jobs:
         if: steps.change.outputs.docs_only != 'true'
 
   mutants:
-    name: mutants (${{ matrix.shard }}/12)
+    name: mutants (${{ matrix.shard }}/24)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -148,9 +148,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
     env:
-      MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/12
+      MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/24
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

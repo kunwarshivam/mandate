@@ -17,7 +17,7 @@ use mandate_spec::document::{
     TripwireMetric,
 };
 use mandate_spec::validate::{PreviousVersion, ValidationContext, validate};
-use mandate_spec::{DecGrammar, Mandate, ParseError, SchemaDec, SpecError, Violation};
+use mandate_spec::{DecGrammar, Mandate, ParseError, SchemaDec, Violation};
 use mandate_time::Date;
 use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
@@ -115,20 +115,26 @@ fn tripwire_public_vocabulary_is_closed_and_ordered() {
 }
 
 #[test]
-fn tripwire_stubs_fail_closed() {
+fn tripwire_parser_and_classifier_are_live() {
     let stated = tripwired(vec![tripwire_value(
         "losing_streak",
         "consecutive_losing_exits",
         "2",
         "exits_only",
     )]);
-    assert_eq!(Mandate::parse(&stated), Err(ParseError::Unimplemented));
+    assert_eq!(
+        Mandate::parse(&stated)
+            .expect("the tripwire parses")
+            .autonomy
+            .tripwires,
+        vec![typed("losing_streak", ConsecutiveLosingExits, 2, ExitsOnly)]
+    );
     assert_eq!(
         classify_tripwires(
             &[],
             &[typed("losing_streak", ConsecutiveLosingExits, 2, ExitsOnly)]
         ),
-        Err(SpecError::Unimplemented)
+        Ok(RiskReducing)
     );
     assert_eq!(classify_tripwires(&[], &[]), Ok(Neutral));
 }
@@ -136,7 +142,6 @@ fn tripwire_stubs_fail_closed() {
 /// The four document members parse to the public types, absence is empty, the list accepts twenty,
 /// and a twenty-first item is refused.
 #[test]
-#[ignore = "pending E6-13"]
 fn tripwires_parse_member_by_member_and_enforce_the_schema_list_bound() {
     let values = vec![
         tripwire_value("day_loss", "realized_loss_usd", "100.25", "end_delegations"),
@@ -200,7 +205,6 @@ fn tripwires_parse_member_by_member_and_enforce_the_schema_list_bound() {
 /// The schema's metric and action lists are closed, `paused` is impossible, every member is
 /// required, ids use the rule-id grammar, and thresholds are positive decimal strings.
 #[test]
-#[ignore = "pending E6-13"]
 fn tripwire_schema_rejects_every_member_shape_outside_its_closed_vocabulary() {
     let valid = tripwire_value(
         "losing_streak",
@@ -259,7 +263,6 @@ fn tripwire_schema_rejects_every_member_shape_outside_its_closed_vocabulary() {
 
 /// V-044 requires ids to be strictly sorted and unique.
 #[test]
-#[ignore = "pending E6-13"]
 fn v044_requires_sorted_unique_ids() {
     let item = |id| tripwire_value(id, "new_instruments", "2", "end_delegations");
     let valid = Mandate::parse(&tripwired(vec![item("a"), item("b")])).expect("sorted parses");
@@ -282,7 +285,6 @@ fn v044_requires_sorted_unique_ids() {
 
 /// Count thresholds are whole numbers in the inclusive range 1 through 1,000.
 #[test]
-#[ignore = "pending E6-13"]
 fn v044_checks_every_count_threshold_edge() {
     for (threshold, valid) in [
         ("1", true),
@@ -313,7 +315,6 @@ fn v044_checks_every_count_threshold_edge() {
 
 /// Realized-loss thresholds are in whole cents and no larger than the allocation, inclusively.
 #[test]
-#[ignore = "pending E6-13"]
 fn v044_checks_the_realized_loss_cent_and_allocation_edges() {
     for (threshold, valid) in [
         ("0.01", true),
@@ -341,7 +342,6 @@ fn v044_checks_the_realized_loss_cent_and_allocation_edges() {
 
 /// Tripwires may be platform-proposed only when confirmed; an owner-entered value remains valid.
 #[test]
-#[ignore = "pending E6-13"]
 fn v020_requires_a_proposed_tripwire_to_be_confirmed() {
     let document = tripwired(vec![tripwire_value(
         "day_loss",
@@ -367,7 +367,6 @@ fn v020_requires_a_proposed_tripwire_to_be_confirmed() {
 /// Matching is by id: additions, lower thresholds, and stricter actions reduce; removals, higher
 /// thresholds, softer actions, and metric changes increase and require step-up through `classify`.
 #[test]
-#[ignore = "pending E6-13"]
 fn the_tripwire_change_row_covers_every_shape_and_matches_by_id() {
     let a = typed("a", ConsecutiveLosingExits, 3, EndDelegations);
     let b = typed("b", NewInstruments, 4, ExitsOnly);
@@ -411,7 +410,6 @@ fn the_tripwire_change_row_covers_every_shape_and_matches_by_id() {
 /// The tripwire path is its own row, so a reducing tripwire beside an increasing change joins to
 /// increasing, and a reducing tripwire alone has exactly one changed path and no step-up.
 #[test]
-#[ignore = "pending E6-13"]
 fn the_tripwire_row_is_wired_into_the_whole_mandate_join() {
     let added = tripwired(vec![tripwire_value(
         "losing_streak",
@@ -441,7 +439,6 @@ fn the_tripwire_row_is_wired_into_the_whole_mandate_join() {
 /// Removing a tripwire is increasing and V-042 therefore refuses a carried delegation; adding one
 /// is reducing and carries the same delegation.
 #[test]
-#[ignore = "pending E6-13"]
 fn v042_reads_the_tripwire_change_row() {
     let delegation = obj(vec![
         ("id", s("d1")),
@@ -540,7 +537,6 @@ fn drawn_tripwires() -> impl Strategy<Value = (Vec<Tripwire>, Vec<Tripwire>)> {
 /// MI-31's version clause: an independent id-indexed oracle classifies random valid lists, including
 /// removals and metric changes. It shares no production comparison helper.
 #[test]
-#[ignore = "pending E6-13"]
 fn property_tripwire_classification_matches_an_independent_oracle() {
     let mut runner = TestRunner::default();
     runner

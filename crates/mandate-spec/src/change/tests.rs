@@ -9,7 +9,8 @@ use mandate_canon::Value;
 use mandate_domain::AutonomyDecision::{self, Ask, Auto, Deny};
 
 use super::{
-    ChangeClass, Often, changed_paths, classify, classify_autonomy, how_often, pinning_switch, row,
+    ChangeClass, Often, changed_paths, classify, classify_autonomy, classify_tripwires, how_often,
+    pinning_switch, row,
 };
 use crate::condition::{Condition, ConditionField, ConditionValue, Operator};
 use mandate_time::UtcNanos;
@@ -190,8 +191,7 @@ fn blocks_that_differ_only_in_their_delegations_are_neutral_in_the_autonomy_row(
     Ok(())
 }
 
-/// The general autonomy row excludes tripwires, while the dedicated row reaches the fail-closed
-/// E6-13 classifier in this tests PR.
+/// The general autonomy row excludes tripwires, while the dedicated row classifies their change.
 #[test]
 fn tripwires_are_owned_only_by_their_dedicated_change_row() -> Checked {
     let old_autonomy = autonomy(not_in(ConditionField::Purpose, &["increase"]), Ask)?;
@@ -222,7 +222,31 @@ fn tripwires_are_owned_only_by_their_dedicated_change_row() -> Checked {
             &Value::Null,
             "/autonomy/tripwires"
         ),
-        Err(SpecError::Unimplemented)
+        Ok(ChangeClass::RiskReducing)
+    );
+    Ok(())
+}
+
+/// An invalid duplicate on either side fails closed even when the other side is unique.
+#[test]
+fn duplicate_tripwire_ids_are_increasing_on_either_side() -> Checked {
+    let tripwire = Tripwire {
+        id: TripwireId::parse("loss").map_err(|error| error.to_string())?,
+        metric: TripwireMetric::RealizedLossUsd,
+        threshold: SchemaDec::parse("100", DecGrammar::PositiveDecimal)
+            .map_err(|error| error.to_string())?,
+        action: TripwireAction::ExitsOnly,
+    };
+    let unique = vec![tripwire.clone()];
+    let duplicate = vec![tripwire.clone(), tripwire];
+
+    assert_eq!(
+        classify_tripwires(&duplicate, &unique),
+        Ok(ChangeClass::RiskIncreasing)
+    );
+    assert_eq!(
+        classify_tripwires(&unique, &duplicate),
+        Ok(ChangeClass::RiskIncreasing)
     );
     Ok(())
 }
