@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { AGENT_IDS, APPROVAL_IDS, buildWorkspace } from "@/fixtures/workspace";
 import { type AskContext, type Reply, STARTERS, interpret } from "./ask-record";
+import { editableFields, readInput, valueAt } from "./mandate-change";
+import { changeLabel } from "./mandate-paths";
 
 function ctx(agentId: string | null = null, scenario: Parameters<typeof buildWorkspace>[0] = "normal"): AskContext {
   const ws = buildWorkspace(scenario);
@@ -143,5 +145,98 @@ describe("acting from a message", () => {
 
   it.each(["Create an agent", "can you create a new agent please", "I want another agent"])("hands nothing to setup when %j says nothing about the agent", (said) => {
     expect(interpret(said, ctx())).toEqual({ kind: "create", text: null });
+  });
+});
+
+describe("changing limits from a message (DEC-483)", () => {
+  const change = (said: string, c: AskContext = ctx(AGENT_IDS.swing)) => {
+    const reply = interpret(said, c);
+    if (reply.kind !== "change") throw new Error(`expected a change, got ${JSON.stringify(reply)}`);
+    return reply;
+  };
+
+  it("reads one limit and its new value into the change review, with the owner's words", () => {
+    expect(interpret("Set the largest order to $800", ctx(AGENT_IDS.swing))).toEqual({
+      kind: "change",
+      agentId: AGENT_IDS.swing,
+      edits: { "/risk/max_order_usd": "800" },
+      quote: "Set the largest order to $800",
+    });
+  });
+
+  it("reads several clauses, each in its field's unit", () => {
+    expect(change("lower the largest order to 800 and the daily loss limit to 1.5%, set the approval window to 15 minutes please").edits).toEqual({
+      "/risk/max_order_usd": "800",
+      "/risk/max_daily_loss": "0.015",
+      "/autonomy/approval/timeout_s": 900,
+    });
+    expect(change("set orders a day to 20; the protective stop to 6 percent").edits).toEqual({ "/risk/max_orders_per_day": 20, "/protection/stop_distance": "0.06" });
+    expect(change("approval window to 1 hour").edits).toEqual({ "/autonomy/approval/timeout_s": 3600 });
+    expect(change("set capital to $9,500 for agent 2", ctx()).edits).toEqual({ "/capital/allocation_usd": "9500" });
+  });
+
+  it("reads the largest position as a share when the value is a percentage, else in dollars", () => {
+    expect(change("set the largest position to 30% of equity").edits).toEqual({ "/risk/max_position_fraction": "0.3" });
+    expect(change("set the largest position to $1,200").edits).toEqual({ "/risk/max_position_usd": "1200" });
+  });
+
+  it("reads both quiet hours, a removed second approver, and the stop as a limit rather than Stop", () => {
+    expect(change("set quiet hours between 22:00 and 6:30").edits).toEqual({ "/notifications/quiet_hours/start": "22:00", "/notifications/quiet_hours/end": "06:30" });
+    expect(change("remove the two-approver threshold", ctx(AGENT_IDS.lmn)).edits).toEqual({ "/autonomy/approval/two_approver_above_usd": null });
+    expect(change("set the stop to 6%").edits).toEqual({ "/protection/stop_distance": "0.06" });
+  });
+
+  it("reads every editable field written as the form writes it, to the same value the form reads", () => {
+    for (const agent of ctx().ws.agents) {
+      for (const f of editableFields(agent.mandate)) {
+        const now = valueAt(agent.mandate, f.path);
+        const typed = f.path === "/autonomy/approval/two_approver_above_usd" ? "750" : f.unit === "time" ? "21:15" : f.unit === "count" || f.unit === "minutes" ? "37" : "1.25";
+        const read = readInput(f, typed);
+        if (!read.ok || read.value === now) throw new Error(`pick another value for ${f.path}`);
+        const said = `set ${changeLabel(f.path).toLowerCase().replace(",", "")} to ${typed}${f.unit === "percent" ? "%" : ""}`;
+        expect(change(said, ctx(agent.agent_id)).edits, said).toEqual({ [f.path]: read.value });
+      }
+    }
+  });
+
+  it("finds the agent named in the copilot, and asks which when none is", () => {
+    expect(change("Set Agent 3's largest order to 500", ctx()).agentId).toBe(AGENT_IDS.lmn);
+    expect(lines(interpret("set the largest order to 500", ctx()))).toEqual(["Which agent? Name it, for example “set Agent 1's largest order to $800”."]);
+  });
+
+  it.each([
+    ["raise the largest order by $200", "Largest order: say the new value rather than the difference, like “to $800”, not “by $200”."],
+    ["set the largest order to eight hundred", "Largest order: write the new value in figures, like $800 or 1.5%."],
+    ["set capital to 2k", "Capital: write the whole amount, like 2,000."],
+    ["set the daily loss limit to $200", "Daily loss limit: write a percentage in figures, like 2 or 2.5."],
+    ["set quiet hours to 22:00", "Quiet hours: say both times on a 24-hour clock, like “quiet hours 22:00 to 07:00”."],
+    ["set the largest order to 800 and the largest order to 700", "Largest order is named twice. Say it once, with the value you want."],
+    ["set the largest order to 800 and the vibe to calm", "I couldn't tell which limit “the vibe to calm” is about."],
+  ])("asks rather than guesses for %j", (said, line) => {
+    const reply = interpret(said, ctx(AGENT_IDS.swing));
+    expect(lines(reply)).toEqual([line]);
+    expect(reply.kind === "answer" && reply.cites).toEqual([{ href: `/agents/${AGENT_IDS.swing}/mandate/edit`, label: "Edit Agent 2's mandate" }]);
+  });
+
+  it("says what a message can change when asked for something else", () => {
+    const said = lines(interpret("change the instruments to AAPL", ctx(AGENT_IDS.swing)));
+    expect(said[0]).toBe("That part of Agent 2's mandate isn't changed from a message.");
+    expect(said[1]).toMatch(/^A message or the Edit form changes these: capital/);
+  });
+
+  it.each(["should I raise my capital to 20000?", "What should my daily loss limit be?", "is it a good idea to lower the largest order to 500"])("suggests no limit for %j", (said) => {
+    expect(lines(interpret(said, ctx(AGENT_IDS.swing)))[0]).toBe("I don't suggest limits: they're yours to set.");
+  });
+
+  it.each(["What is my largest order?", "Is the daily loss limit 2%?", "How close is it to its limits?"])("reads %j as a question", (said) => {
+    expect(interpret(said, ctx(AGENT_IDS.swing)).kind).toBe("answer");
+    expect(lines(interpret(said, ctx(AGENT_IDS.swing)))[0]).not.toBe("I don't suggest limits: they're yours to set.");
+  });
+
+  it("says when a value is already the mandate's, and that an agent without quiet hours has none to move", () => {
+    expect(lines(interpret("set the largest order to $1,000.00", ctx(AGENT_IDS.swing)))).toEqual(["Largest order is already set to that. Nothing to change."]);
+    const c = ctx(AGENT_IDS.swing);
+    c.ws.agents.find((a) => a.agent_id === AGENT_IDS.swing)!.mandate.notifications.quiet_hours = null;
+    expect(lines(interpret("set quiet hours 22:00 to 07:00", c))).toEqual(["Agent 2 has no quiet hours set, so there are none to move."]);
   });
 });
