@@ -728,7 +728,9 @@ mod tests {
         let first = cases.first().ok_or("family W has no tripwire case")?;
 
         let mut wrong_kind = first.clone();
-        wrong_kind["kind"] = Json::String("not_tripwire".to_owned());
+        *wrong_kind
+            .get_mut("kind")
+            .ok_or("the tripwire case has no kind")? = Json::String("not_tripwire".to_owned());
         if tripwire_case(&fixture, &wrong_kind).is_ok() {
             return Err("a wrong case kind passed".to_owned());
         }
