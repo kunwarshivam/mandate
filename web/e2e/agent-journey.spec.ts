@@ -117,8 +117,8 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
     await expect(page.getByRole("main")).toContainText("$41.05");
 
     await tabs.getByRole("link", { name: "Orders" }).click();
-    await expect(page.getByRole("main")).toContainText("Filled");
-    await expect(page.getByRole("main")).toContainText("Protective");
+    await expect(page.getByRole("main")).toContainText("Buy 6 MSFT limit $44.62Filled");
+    await expect(page.getByRole("main")).toContainText("Sell 6 MSFT stop $41.05RestingProtection, good until canceled");
 
     await tabs.getByRole("link", { name: "Activity" }).click();
     const main = page.getByRole("main");
@@ -142,5 +142,14 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
     const after = page.locator("[data-slot=after-confirm]");
     await expect(after.locator("[data-phase=recorded]")).toBeVisible();
     await expect(after).toContainText("Stopped");
+  });
+
+  await test.step("after the kill switch, the agent holds nothing and is stopped", async () => {
+    await dock(page).getByRole("link", { name: "Agents" }).click();
+    await page.locator(`a[href="${agentHref}"]`).first().click();
+    const main = page.getByRole("main");
+    await expect(main.getByText("Stopped", { exact: true }).first()).toBeVisible();
+    await page.getByRole("navigation", { name: "Agent sections" }).getByRole("link", { name: "Activity" }).click();
+    await expect(main).toContainText(/Kill switch at [0-9:]+: 1 order canceled; 1 position sold \(fixture fills\)\. Agent stopped\./);
   });
 });
