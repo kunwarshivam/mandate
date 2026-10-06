@@ -12,7 +12,7 @@ use mandate_domain::{AssetClass as DomainAssetClass, AssetId};
 use mandate_executor::BindingGateConfigRefs;
 use mandate_num::{Qty, ShareIncrement};
 use mandate_risk::{EtpClass, Exchange as GateExchange};
-use mandate_runtime::Deployment;
+use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, SYMBOL, absent};
@@ -259,14 +259,36 @@ impl Artifacts {
     /// Validates caller-supplied opaque deployment ids and binds the connection from the mandate.
     ///
     /// # Errors
-    /// Refuses until E7-19's deployment-input constructor is implemented.
+    /// [`Cause::Absent`] when an opaque id is empty, too long, or off-pattern.
     pub fn deployment(
         &self,
-        _workspace: String,
-        _agent: String,
-        _account_ref: String,
+        workspace: String,
+        agent: String,
+        account_ref: String,
     ) -> Result<DeploymentInput, Cause> {
-        Err(Cause::Unimplemented { story: "E7-19" })
+        require_opaque_id(&workspace, "a valid workspace id")?;
+        require_opaque_id(&agent, "a valid agent id")?;
+        require_opaque_id(&account_ref, "a valid account reference")?;
+        Ok(DeploymentInput {
+            deployment: Deployment {
+                agent: AgentId(agent),
+                connection: ConnectionId(self.mandate.connection_id.as_str().to_owned()),
+                workspace: WorkspaceId(workspace),
+            },
+            account_ref,
+        })
+    }
+}
+
+fn require_opaque_id(text: &str, fact: &'static str) -> Result<(), Cause> {
+    if (1..=64).contains(&text.len())
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    {
+        Ok(())
+    } else {
+        Err(absent(fact))
     }
 }
 

@@ -14,6 +14,14 @@ fn tracer(args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_mandate-tracer"));
     command.current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     command.args(args);
+    command.args([
+        "--workspace",
+        "test-workspace",
+        "--agent",
+        "test-agent",
+        "--account-ref",
+        "test-account",
+    ]);
     command.env_remove(KEY_ID_VAR).env_remove(SECRET_VAR);
     for (name, value) in env {
         command.env(name, value);
@@ -121,9 +129,10 @@ fn the_shipping_binary_reads_the_broker_before_it_assembles_the_trusted_contexts
     let source = include_str!("../src/bin/mandate-tracer.rs");
     let body = &source[source.find("fn tracer()").unwrap()..];
     let order = [
-        "cli::parse(",
+        "cli::parse_production(",
         "host::refuse_configured_host(",
-        "Artifacts::load(",
+        "Artifacts::load_production(",
+        "artifacts.deployment(",
         "Credentials::from_env()",
         "AlpacaPaperHttp::new(",
         "preflight(",

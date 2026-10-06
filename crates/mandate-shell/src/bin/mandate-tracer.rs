@@ -2,8 +2,10 @@
 //! ([task brief](../../../../docs/project/tasks/E7-7-tracer-bullet.md), backlog E7-7).
 //!
 //! ```text
-//! mandate-tracer --mandate <path> --dataset <dir> --config-dir <dir> --confirm-paper
-//! mandate-tracer --mandate <path> --dataset <dir> --config-dir <dir> --journal <dsn>
+//! mandate-tracer --mandate <path> --dataset <dir> --config-dir <dir>
+//!   --workspace <id> --agent <id> --account-ref <id> --confirm-paper
+//! mandate-tracer --mandate <path> --dataset <dir> --config-dir <dir>
+//!   --workspace <id> --agent <id> --account-ref <id> --journal <dsn>
 //!   --confirm-paper --place-one-order
 //! ```
 //!
@@ -21,7 +23,6 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mandate_alpaca::{AlpacaPaperHttp, Credentials, TokioPause};
-use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_shell::adapters::{Sources, production};
 use mandate_shell::paper::{
     Artifacts, PaperClock, PaperFacts, liquidity_facts, load_contexts_with_clock, preflight,
@@ -51,7 +52,7 @@ fn main() -> ExitCode {
 }
 
 fn tracer() -> Result<Report, ShellError> {
-    let args = cli::parse(std::env::args().skip(1))?;
+    let args = cli::parse_production(std::env::args().skip(1))?;
     host::refuse_configured_host(std::env::vars_os().map(|(name, value)| {
         (
             name.to_string_lossy().into_owned(),
@@ -59,7 +60,19 @@ fn tracer() -> Result<Report, ShellError> {
         )
     }))?;
     let artifacts =
-        Artifacts::load(&args.mandate, &args.config_dir).map_err(|cause| ShellError::Refused {
+        Artifacts::load_production(&args.mandate, &args.config_dir).map_err(|cause| {
+            ShellError::Refused {
+                stage: Stage::Validate,
+                cause,
+            }
+        })?;
+    let deployment_input = artifacts
+        .deployment(
+            args.workspace.clone(),
+            args.agent.clone(),
+            args.account_ref.clone(),
+        )
+        .map_err(|cause| ShellError::Refused {
             stage: Stage::Validate,
             cause,
         })?;
@@ -81,7 +94,7 @@ fn tracer() -> Result<Report, ShellError> {
                 cause,
             }
         })?;
-    let agent = AgentId(cli::AGENT.to_owned());
+    let agent = deployment_input.deployment().agent.clone();
     let contexts = load_contexts_with_clock(
         &artifacts,
         &PaperFacts { broker, liquidity },
@@ -94,12 +107,8 @@ fn tracer() -> Result<Report, ShellError> {
         cause,
     })?;
     let setup = Setup {
-        deployment: Deployment {
-            agent: agent.clone(),
-            connection: ConnectionId(cli::CONNECTION.to_owned()),
-            workspace: WorkspaceId(cli::WORKSPACE.to_owned()),
-        },
-        account_ref: cli::ACCOUNT_REF.to_owned(),
+        deployment: deployment_input.deployment().clone(),
+        account_ref: deployment_input.account_ref().to_owned(),
         now: recorded_at,
         place_one_order: args.place_one_order,
         new_cycle: false,
@@ -110,8 +119,8 @@ fn tracer() -> Result<Report, ShellError> {
         journal: args.journal,
         recorded_at,
         agent,
-        workspace: cli::WORKSPACE.to_owned(),
-        account_ref: cli::ACCOUNT_REF.to_owned(),
+        workspace: deployment_input.deployment().workspace.0.clone(),
+        account_ref: deployment_input.account_ref().to_owned(),
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         transport,
