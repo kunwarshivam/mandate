@@ -119,11 +119,11 @@ test.describe("Stop is fully visible at every width (brief §5, rule 13)", () =>
  * must not hold Stop, so no more than that many frames per navigation may miss it.
  */
 const CAPTURE_FRAMES = 2;
-const HOPS = ["/approvals", "/", "/approvals", "/"];
+const HOPS = ["/messages", "/", "/messages", "/"];
 
 test.describe("Stop answers a press while the page cross-fades (brief §5, rule 13)", () => {
   for (const width of [390, 1280]) {
-    test(`${width} px, navigating between home and approvals`, async ({ page }) => {
+    test(`${width} px, navigating between home and messages`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 });
       await page.goto("/");
       await page.waitForLoadState("networkidle");
