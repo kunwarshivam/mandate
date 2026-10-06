@@ -305,7 +305,44 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         Some(&loaded.model_hash)
     );
     let gate = decision.gate.ok_or("a production gate context")?;
+    assert_eq!(gate.instrument.instrument.as_str(), OTHER_ASSET);
     assert_eq!(gate.instrument.exchange, Some(GateExchange::Nyse));
+
+    let template = gate_template(
+        &loaded,
+        &snapshot,
+        at(NOW)?,
+        platform_gate_config().map_err(text)?,
+    )
+    .map_err(text)?;
+    let trusted = TrustedPaperContext {
+        template,
+        agent: AGENT.to_owned(),
+        increment: loaded.instrument.increment,
+        fees: loaded.fees.clone(),
+        quote_at: snapshot.broker.quote.at,
+        quote_max_age: loaded.quote_max_age,
+        clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+    };
+    let executor_agent = ExecutorAgentId(AGENT.to_owned());
+    let reviewed = symbol(OTHER_ASSET)?;
+    assert!(trusted.covers(&executor_agent, &reviewed));
+    assert_eq!(trusted.asset_class(&reviewed), Some(AssetClass::UsEquity));
+    assert_eq!(
+        trusted.increment(&reviewed),
+        Some(mandate_num::ShareIncrement::Whole)
+    );
+    let request = BindingGateRequest {
+        agent: &executor_agent,
+        instrument: &reviewed,
+        side: Side::Buy,
+        qty: qty("1")?,
+        limit: price("255.2")?,
+        purpose: Purpose::Open,
+        tif: mandate_executor::TimeInForce::Day,
+        protection: None,
+    };
+    assert!(trusted.input(&request).is_some());
     scratch.remove()
 }
 
