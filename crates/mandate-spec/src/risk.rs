@@ -20,7 +20,9 @@ use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
 use mandate_num::{NumError, Price, Qty, Ratio, Rounding, Usd, UsdExact};
 use mandate_time::{Date, TimeError, UtcNanos, new_york_date_and_hour, new_york_midnight};
 
-use crate::document::{LadderAction, OnComplete, Pointer};
+use crate::document::{
+    LadderAction, OnComplete, Pointer, TripwireAction, TripwireId, TripwireMetric,
+};
 use crate::validate::ValidatedMandate;
 use crate::{SchemaDec, SpecError};
 
@@ -159,6 +161,8 @@ pub struct Snapshot {
     pub agent_mode: AgentMode,
     pub instrument_restrictions: BTreeSet<InstrumentRestriction>,
     pub net_contributed: Usd,
+    /// Whether the executor projection contributes §5.9's `tripwire` restriction.
+    pub tripwire_restriction: bool,
 }
 
 /// What the agent held when the state opened.
@@ -202,6 +206,9 @@ pub enum Input {
     OwnerAcknowledged {
         restriction: Latch,
     },
+    /// The executor has already judged the tripwire acknowledgment and supplies its projection
+    /// through [`RiskState::step_with_tripwire`].
+    TripwireAcknowledged,
     /// Applied when its version applies, after time is settled at that instant, with no time passing
     /// (§5.1).
     AllocationChange {
@@ -402,6 +409,43 @@ pub enum RiskEvent {
     },
 }
 
+/// A tripwire journal effect supplied by the executor's isolated §6.7 fold.
+///
+/// Keeping this vocabulary in `mandate-spec` lets the risk state place the effects in §5.2 order
+/// without making this crate depend on `mandate-executor`, which already depends on this crate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TripwireRiskEvent {
+    RiskLimitTriggered {
+        id: TripwireId,
+        action: TripwireAction,
+        metric: TripwireMetric,
+        threshold: SchemaDec,
+        value: TripwireValue,
+    },
+    OwnerAlertSent {
+        /// Index of the trigger in this transition's tripwire effects.
+        triggered_event_index: usize,
+    },
+    RiskLimitLifted {
+        id: TripwireId,
+    },
+}
+
+/// A metric value whose variant fixes its unit at the risk-state boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TripwireValue {
+    Count(u32),
+    Usd(Usd),
+}
+
+/// The executor tripwire fold's projection for the same account-stream input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TripwireUpdate {
+    pub journal: Vec<TripwireRiskEvent>,
+    pub effective_action: Option<TripwireAction>,
+    pub allocation_increase_blocked: bool,
+}
+
 /// Whether a version or an allocation change took effect (§5.10).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyResult {
@@ -471,6 +515,9 @@ impl Rejection {
 pub struct Outcome {
     pub snapshot: Snapshot,
     pub journal: Vec<RiskEvent>,
+    /// Tripwire effects inserted at `tripwire_journal_index` in the combined account-stream batch.
+    pub tripwire_journal: Vec<TripwireRiskEvent>,
+    pub tripwire_journal_index: usize,
     /// Limits with breach time accumulating, shown in the agent's state (§5.6).
     pub pending: BTreeSet<LimitKey>,
     pub rejection: Option<Rejection>,
@@ -541,7 +588,22 @@ impl<'c> RiskState<'c> {
     /// risk, keep its exit paths open, and escalate. It must never skip the input and step the next
     /// one, since every later figure would then be folded over a stream that is not the journal's.
     pub fn step(&mut self, step: &Step) -> Result<Outcome, SpecError> {
-        let (fold, outcome) = self.fold.step(self.clock, step)?;
+        let (fold, outcome) = self.fold.step(self.clock, step, None)?;
+        self.fold = fold;
+        self.snapshot = outcome.snapshot.clone();
+        Ok(outcome)
+    }
+
+    /// Applies one risk input together with the executor tripwire fold's result for that same input.
+    ///
+    /// The tripwire effects are inserted after the lifetime floor and before the effective mode, as
+    /// §5.2 requires. The executor remains the authority for metric counting and step-up.
+    pub fn step_with_tripwire(
+        &mut self,
+        step: &Step,
+        tripwire: &TripwireUpdate,
+    ) -> Result<Outcome, SpecError> {
+        let (fold, outcome) = self.fold.step(self.clock, step, Some(tripwire))?;
         self.fold = fold;
         self.snapshot = outcome.snapshot.clone();
         Ok(outcome)

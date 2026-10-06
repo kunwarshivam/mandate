@@ -10,7 +10,6 @@ use mandate_accounting::{InstrumentId, Side};
 use mandate_approval::{
     AssertionId, Environment, RiskClock, STEP_UP_WINDOW_S, StepUp, StepUpMethod,
 };
-use mandate_executor::ExecutorError;
 use mandate_executor::tripwire::{
     AcknowledgmentRefusal, TripwireAcknowledgment, TripwireEvent, TripwireFill, TripwireInput,
     TripwireOutcome, TripwireState, TripwireValue, fold,
@@ -101,11 +100,16 @@ fn acknowledge(name: &str, assertion: &str) -> TripwireInput {
 }
 
 #[test]
-fn the_tripwire_fold_stub_fails_closed() {
-    assert_eq!(
-        fold(&TripwireState::default(), &TripwireInput::Clock),
-        Err(ExecutorError::Unimplemented { story: "E6-13" })
-    );
+fn the_tripwire_fold_applies_an_empty_boundary() {
+    let outcome =
+        fold(&TripwireState::default(), &TripwireInput::Clock).expect("the empty fold applies");
+    assert_eq!(outcome.state, TripwireState::default());
+    assert!(outcome.snapshot.fired.is_empty());
+    assert!(outcome.snapshot.metrics.is_empty());
+    assert_eq!(outcome.snapshot.effective_action, None);
+    assert!(!outcome.snapshot.delegations_suspended);
+    assert!(!outcome.snapshot.allocation_increase_blocked);
+    assert!(outcome.journal.is_empty());
 }
 
 #[test]
@@ -131,7 +135,6 @@ fn acknowledgment_refusal_codes_are_exact_and_closed() {
 /// `consecutive_losing_exits` counts each losing sell fill, a non-losing sell resets it, and a buy
 /// neither increments nor resets it. Net realized includes the fill's fee.
 #[test]
-#[ignore = "pending E6-13"]
 fn losing_exits_fire_at_the_threshold_and_only_there() {
     let mut state = armed(vec![tripwire(
         "streak",
@@ -179,7 +182,6 @@ fn losing_exits_fire_at_the_threshold_and_only_there() {
 /// A winning or break-even exit ends a losing streak, including a half-even cost-basis result of
 /// exactly zero; a risk-day boundary does not.
 #[test]
-#[ignore = "pending E6-13"]
 fn only_a_non_losing_sell_resets_a_losing_streak() {
     let mut state = armed(vec![tripwire(
         "streak",
@@ -226,7 +228,6 @@ fn only_a_non_losing_sell_resets_a_losing_streak() {
 /// `realized_loss_usd` is max(0, minus the sum of net realized in the current risk day): buy fees
 /// count, same-day gains offset losses, and a new risk day starts it at zero.
 #[test]
-#[ignore = "pending E6-13"]
 fn realized_loss_is_the_current_risk_days_net_loss() {
     let mut state = armed(vec![tripwire(
         "day_loss",
@@ -263,7 +264,6 @@ fn realized_loss_is_the_current_risk_days_net_loss() {
 /// `new_instruments` counts the agent's first fill ever in an instrument, not the first fill in the
 /// window or the first fill after a position was closed.
 #[test]
-#[ignore = "pending E6-13"]
 fn new_instruments_counts_first_ever_fills_only() {
     let mut state = armed(vec![tripwire(
         "new_names",
@@ -299,7 +299,6 @@ fn apply_stream(inputs: &[TripwireInput]) -> Vec<TripwireOutcome> {
 /// Marks, clocks, restarts, and a risk-day boundary cannot change a streak. Replaying the same
 /// stream reconstructs equal outcomes, and restart cannot forget a spent assertion.
 #[test]
-#[ignore = "pending E6-13"]
 fn unrelated_inputs_never_fire_or_lift_and_restart_replays_the_latch() {
     let inputs = vec![
         TripwireInput::MandateVersionApplied {
@@ -350,7 +349,6 @@ fn unrelated_inputs_never_fire_or_lift_and_restart_replays_the_latch() {
 /// Arming excludes the arming input and all earlier fills. Threshold and action changes preserve
 /// the count; a metric change under the same id arms afresh.
 #[test]
-#[ignore = "pending E6-13"]
 fn version_inputs_apply_the_arming_and_window_rules() {
     let prehistory = applied(
         &TripwireState::default(),
@@ -411,7 +409,6 @@ fn version_inputs_apply_the_arming_and_window_rules() {
 /// Firings are emitted in id order. Each trigger carries the metric, threshold, and reached value,
 /// and is immediately followed by an alert carrying only an opaque reference and generic text.
 #[test]
-#[ignore = "pending E6-13"]
 fn simultaneous_firings_are_ordered_and_alert_without_sensitive_content() {
     let state = armed(vec![
         tripwire("a_loss", RealizedLossUsd, "10", EndDelegations),
@@ -462,7 +459,6 @@ fn simultaneous_firings_are_ordered_and_alert_without_sensitive_content() {
 /// Every fired action suspends delegations and blocks allocation increases. `end_delegations`
 /// leaves the mode normal; any fired `exits_only` holds that stricter action and never `paused`.
 #[test]
-#[ignore = "pending E6-13"]
 fn a_fired_tripwire_only_tightens_the_effective_envelope() {
     for (action, effective) in [
         (EndDelegations, Some(EndDelegations)),
@@ -485,7 +481,6 @@ fn a_fired_tripwire_only_tightens_the_effective_envelope() {
 /// Removing, raising, or softening a fired tripwire never lifts it. It holds the stricter of its
 /// fired action and the current version's action until a valid owner acknowledgment.
 #[test]
-#[ignore = "pending E6-13"]
 fn versions_never_lift_or_soften_a_fired_tripwire() {
     let initial = armed(vec![tripwire(
         "wire",
@@ -520,7 +515,6 @@ fn versions_never_lift_or_soften_a_fired_tripwire() {
 /// A fired tripwire keeps counting its metric but emits no second trigger, including when a later
 /// fill takes the metric farther past the threshold.
 #[test]
-#[ignore = "pending E6-13"]
 fn a_fired_tripwire_keeps_counting_without_firing_again() {
     let initial = armed(vec![tripwire(
         "streak",
@@ -554,7 +548,6 @@ fn a_fired_tripwire_keeps_counting_without_firing_again() {
 /// codes. Under the stricter independence setting at request or processing, both user names are
 /// required and must differ; every refusal stays latched.
 #[test]
-#[ignore = "pending E6-13"]
 fn acknowledgment_fails_closed_with_the_exact_refusal_reason() {
     let initial = armed(vec![tripwire(
         "wire",
@@ -659,7 +652,6 @@ fn acknowledgment_fails_closed_with_the_exact_refusal_reason() {
 /// or non-independent assertion therefore reports `step_up_reused` when replayed; this includes
 /// MC-W49's wrong-method then replay sequence.
 #[test]
-#[ignore = "pending E6-13"]
 fn every_refused_step_up_assertion_is_spent_before_it_can_be_replayed() {
     let initial = armed(vec![tripwire(
         "wire",
@@ -725,7 +717,6 @@ fn every_refused_step_up_assertion_is_spent_before_it_can_be_replayed() {
 /// A valid acknowledgment lifts, journals the lift, and re-arms a still-present tripwire at zero.
 /// Acknowledging one that is not fired changes nothing.
 #[test]
-#[ignore = "pending E6-13"]
 fn a_valid_owner_acknowledgment_is_the_only_lift_and_rearms_at_zero() {
     let initial = armed(vec![tripwire(
         "wire",
@@ -786,7 +777,6 @@ fn first_fire_oracle(losses: &[bool], threshold: usize) -> Option<usize> {
 /// All three metrics over random fill logs match independent accumulators: streak from sell signs,
 /// day loss from a signed sum, and first-ever instruments from a separate set.
 #[test]
-#[ignore = "pending E6-13"]
 fn property_every_metric_matches_an_independent_fill_log_oracle() {
     let strategy = prop::collection::vec((0u8..6, any::<bool>(), -10i16..=10), 0..80);
     let mut runner = TestRunner::default();
@@ -845,7 +835,6 @@ fn property_every_metric_matches_an_independent_fill_log_oracle() {
 
 /// MI-31's exact firing edge over random histories, against a separate streak accumulator.
 #[test]
-#[ignore = "pending E6-13"]
 fn property_a_streak_fires_at_the_first_reaching_input_and_no_other() {
     let strategy = (prop::collection::vec(any::<bool>(), 0..80), 1usize..=20);
     let mut runner = TestRunner::default();
@@ -896,7 +885,6 @@ fn property_a_streak_fires_at_the_first_reaching_input_and_no_other() {
 /// MI-3 and MI-31 over random later inputs: after firing, no non-acknowledgment input clears the
 /// latch, whatever version, risk day, mark, clock, or restart follows.
 #[test]
-#[ignore = "pending E6-13"]
 fn property_only_an_owner_acknowledgment_lifts_a_fired_tripwire() {
     let strategy = prop::collection::vec(0u8..6, 0..80);
     let mut runner = TestRunner::default();
@@ -942,7 +930,6 @@ fn property_only_an_owner_acknowledgment_lifts_a_fired_tripwire() {
 /// MI-31's version monotonicity: lowering a threshold or strengthening an action on the same
 /// history can only fire no later and can only hold an equal or stricter action.
 #[test]
-#[ignore = "pending E6-13"]
 fn property_a_reducing_tripwire_change_never_fires_later_or_holds_less() {
     let strategy = (
         prop::collection::vec(any::<bool>(), 0..80),

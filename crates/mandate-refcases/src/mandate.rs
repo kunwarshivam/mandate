@@ -18,18 +18,32 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use mandate_accounting::{
+    Account, AccountType, AssetClass as AccountingAssetClass, Execution, Input as AccountingInput,
+    InstrumentId, Position, Record, Side as AccountingSide,
+};
+use mandate_approval::{
+    AssertionId, Environment as ApprovalEnvironment, RiskClock, StepUp, StepUpMethod,
+};
 use mandate_canon::Digest;
 use mandate_canon::Value;
 use mandate_domain::{AgentMode, AssetClass, AssetId, Environment, MarketSession, Side};
-use mandate_num::{Price, Qty, Usd};
+use mandate_executor::tripwire::{
+    TripwireAcknowledgment, TripwireEvent as ExecutorTripwireEvent, TripwireFill, TripwireInput,
+    TripwireState, TripwireValue as ExecutorTripwireValue, fold as fold_tripwire,
+};
+use mandate_num::{CostBasis, Price, Qty, SignedQty, Usd};
 use mandate_spec::change;
-use mandate_spec::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
+use mandate_spec::document::{
+    ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source, TripwireId,
+};
 use mandate_spec::goal::{self, GoalInputs, GoalStatus};
 use mandate_spec::policy::{self, LevelName, PolicyKey, PolicyLevel, PolicyValue};
 use mandate_spec::risk::LiftReason;
 use mandate_spec::risk::{
     self, ApplyResult, Input, KillScope, Latch, Opening, RemovalReason, RestrictionReason,
-    RiskEvent, StopReason, TriggerReason, UniverseChange,
+    RiskEvent, StopReason, TriggerReason, TripwireRiskEvent, TripwireUpdate,
+    TripwireValue as RiskTripwireValue, UniverseChange,
 };
 use mandate_spec::validate::{
     self, GroupId, PreviousVersion, RegisteredModel, ValidatedMandate, ValidationContext,
@@ -129,7 +143,7 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
         return escalation::escalation_case(case);
     }
     if kind == "tripwire" {
-        return tripwire::tripwire_case(case);
+        return tripwire::tripwire_case(fixture, case);
     }
     unread_keys(case)?;
     match kind {
@@ -255,7 +269,17 @@ const STEP_KEYS: &[(&str, &[&str])] = &[
     ("mark", &["bid", "sane"]),
     ("fill", &["side", "qty", "price"]),
     ("risk_day_started", &[]),
-    ("owner_acknowledged", &["restriction"]),
+    (
+        "owner_acknowledged",
+        &[
+            "restriction",
+            "step_up",
+            "user",
+            "requester",
+            "independent_approval_required",
+            "independent_now",
+        ],
+    ),
     ("allocation_change", &["delta_usd"]),
     ("clock", &[]),
     ("universe_changed", &["instrument", "change", "reason"]),
@@ -970,13 +994,228 @@ fn risk_state_case(fixture: &Json, case: &Json) -> Result<(), String> {
         risk::RiskState::open(&validated, &opening, &clock),
         "RiskState::open",
     )?;
+    let mut tripwires = (!validated.mandate().autonomy.tripwires.is_empty())
+        .then(|| RiskTripwireAdapter::open(&validated, &opening))
+        .transpose()?;
     for (index, step) in list_at(case, "steps")?.iter().enumerate() {
         let number = index.saturating_add(1);
-        let outcome = spec(state.step(&risk_step(step)?), "RiskState::step")
-            .map_err(|e| format!("step {number}: {e}"))?;
+        let risk_step = risk_step(step)?;
+        let result = match tripwires.as_mut() {
+            Some(adapter) => {
+                let update = adapter.apply(step, index)?;
+                state.step_with_tripwire(&risk_step, &update)
+            }
+            None => state.step(&risk_step),
+        };
+        let outcome = spec(result, "RiskState::step").map_err(|e| format!("step {number}: {e}"))?;
         check_step(at_of(step, "expect")?, &outcome).map_err(|e| format!("step {number}: {e}"))?;
     }
     Ok(())
+}
+
+struct RiskTripwireAdapter {
+    state: TripwireState,
+    account: Account,
+    instrument: InstrumentId,
+    environment: ApprovalEnvironment,
+}
+
+impl RiskTripwireAdapter {
+    fn open(mandate: &ValidatedMandate, opening: &Opening) -> Result<Self, String> {
+        let instrument = InstrumentId::new("risk-state-agent-instrument")
+            .map_err(|error| format!("tripwire instrument: {error}"))?;
+        let qty = SignedQty::parse(&opening.position_qty.to_string())
+            .map_err(|error| format!("tripwire opening quantity: {error}"))?;
+        let basis = opening
+            .position_qty
+            .notional(opening.avg_cost)
+            .and_then(|value| CostBasis::parse(&value.to_string()))
+            .map_err(|error| format!("tripwire opening basis: {error}"))?;
+        let position = Position::new(qty, basis)
+            .map_err(|error| format!("tripwire opening position: {error}"))?;
+        let armed = fold_tripwire(
+            &TripwireState::default(),
+            &TripwireInput::MandateVersionApplied {
+                tripwires: mandate.mandate().autonomy.tripwires.clone(),
+            },
+        )
+        .map_err(|error| format!("tripwire mandate version: {error}"))?;
+        let environment = match mandate.mandate().environment {
+            Environment::Paper => ApprovalEnvironment::Paper,
+            Environment::Live => ApprovalEnvironment::Live,
+        };
+        Ok(Self {
+            state: armed.state,
+            account: Account::opening(
+                AccountType::Margin,
+                Usd::ZERO,
+                [(instrument.clone(), position)],
+            ),
+            instrument,
+            environment,
+        })
+    }
+
+    fn apply(&mut self, step: &Json, index: usize) -> Result<TripwireUpdate, String> {
+        let event = str_at(step, "event")?;
+        let at = instant(at(step, "at")?, "at")?;
+        let input = match event {
+            "fill" => TripwireInput::FillApplied {
+                fill: self.fill(step, index, at)?,
+            },
+            "risk_day_started" => TripwireInput::RiskDayStarted {
+                day: risk::risk_day(at)
+                    .map_err(|error| format!("tripwire risk day: {}", error.code()))?
+                    .day,
+            },
+            "owner_acknowledged" => {
+                let restriction = str_at(step, "restriction")?;
+                let id = restriction
+                    .strip_prefix("tripwire:")
+                    .ok_or_else(|| format!("`{restriction}` is not a tripwire restriction"))?;
+                TripwireInput::OwnerAcknowledged(TripwireAcknowledgment {
+                    tripwire: TripwireId::parse(id)
+                        .map_err(|error| format!("tripwire restriction: {error}"))?,
+                    step_up: risk_step_up(step)?,
+                    committed_at: RiskClock(at.secs()),
+                    processed_at: RiskClock(at.secs()),
+                    environment: self.environment,
+                    requester: optional_text(step, "requester")?,
+                    acknowledging_user: optional_text(step, "user")?,
+                    independent_required_at_request: optional_bool(
+                        step,
+                        "independent_approval_required",
+                    )?
+                    .unwrap_or(false),
+                    independent_required_now: optional_bool(step, "independent_now")?
+                        .unwrap_or(false),
+                })
+            }
+            "mark" => TripwireInput::Mark,
+            "clock" | "allocation_change" => TripwireInput::Clock,
+            other => {
+                return Err(format!(
+                    "`{other}` is not a risk-state input the tripwire adapter applies"
+                ));
+            }
+        };
+        let outcome = fold_tripwire(&self.state, &input)
+            .map_err(|error| format!("tripwire fold: {error}"))?;
+        self.state = outcome.state;
+        let journal = outcome
+            .journal
+            .into_iter()
+            .map(risk_tripwire_event)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(TripwireUpdate {
+            journal,
+            effective_action: outcome.snapshot.effective_action,
+            allocation_increase_blocked: outcome.snapshot.allocation_increase_blocked,
+        })
+    }
+
+    fn fill(&mut self, step: &Json, index: usize, at: UtcNanos) -> Result<TripwireFill, String> {
+        let side = match str_at(step, "side")? {
+            "buy" => AccountingSide::Buy,
+            "sell" => AccountingSide::Sell,
+            other => return Err(format!("`{other}` is not a fill side")),
+        };
+        let qty = Qty::parse(str_at(step, "qty")?).map_err(|error| format!("`qty`: {error}"))?;
+        let price =
+            Price::parse(str_at(step, "price")?).map_err(|error| format!("`price`: {error}"))?;
+        let applied = self
+            .account
+            .apply(
+                &AccountingInput::Fill(Execution {
+                    fill_id: format!("risk-tripwire-fill-{}", index.saturating_add(1)),
+                    client_order_id: None,
+                    instrument: self.instrument.clone(),
+                    asset_class: AccountingAssetClass::UsEquity,
+                    side,
+                    qty_gross: qty,
+                    price,
+                    liquidity: None,
+                    executed_at: at,
+                }),
+                &tripwire::accounting_config()?,
+            )
+            .map_err(|error| format!("tripwire accounting: {error}"))?;
+        let Record::Fill { realized_gross, .. } = applied.record else {
+            return Err("tripwire accounting returned a non-fill record".to_owned());
+        };
+        self.account = applied.account;
+        Ok(TripwireFill {
+            instrument: self.instrument.clone(),
+            side,
+            net_realized_usd: realized_gross,
+        })
+    }
+}
+
+fn risk_tripwire_event(event: ExecutorTripwireEvent) -> Result<TripwireRiskEvent, String> {
+    match event {
+        ExecutorTripwireEvent::RiskLimitTriggered {
+            id,
+            action,
+            metric,
+            threshold,
+            value,
+        } => Ok(TripwireRiskEvent::RiskLimitTriggered {
+            id,
+            action,
+            metric,
+            threshold,
+            value: match value {
+                ExecutorTripwireValue::Count(value) => RiskTripwireValue::Count(value),
+                ExecutorTripwireValue::Usd(value) => RiskTripwireValue::Usd(value),
+            },
+        }),
+        ExecutorTripwireEvent::OwnerAlertSent(alert) => Ok(TripwireRiskEvent::OwnerAlertSent {
+            triggered_event_index: alert.triggered_event_index(),
+        }),
+        ExecutorTripwireEvent::RiskLimitLifted { id } => {
+            Ok(TripwireRiskEvent::RiskLimitLifted { id })
+        }
+        ExecutorTripwireEvent::OwnerCommandRefused { reason } => Err(format!(
+            "risk-state tripwire acknowledgment was refused: {}",
+            reason.as_str()
+        )),
+    }
+}
+
+fn risk_step_up(step: &Json) -> Result<Option<StepUp>, String> {
+    let Some(value) = step.get("step_up") else {
+        return Ok(None);
+    };
+    unknown_members(value, &["assertion", "authenticated_at", "method"])
+        .map_err(|unknown| format!("`step_up` members not interpreted: {unknown}"))?;
+    let method = match str_at(value, "method")? {
+        "cli_confirm" => StepUpMethod::CliConfirm,
+        other => return Err(format!("`{other}` is not a step-up method")),
+    };
+    Ok(Some(StepUp {
+        assertion: AssertionId(str_at(value, "assertion")?.to_owned()),
+        authenticated_at: RiskClock(
+            instant(at(value, "authenticated_at")?, "authenticated_at")?.secs(),
+        ),
+        method,
+    }))
+}
+
+fn optional_text(value: &Json, key: &str) -> Result<Option<String>, String> {
+    match value.get(key) {
+        None | Some(Json::Null) => Ok(None),
+        Some(Json::String(text)) => Ok(Some(text.clone())),
+        Some(_) => Err(format!("`{key}` is neither text nor null")),
+    }
+}
+
+fn optional_bool(value: &Json, key: &str) -> Result<Option<bool>, String> {
+    match value.get(key) {
+        None => Ok(None),
+        Some(Json::Bool(flag)) => Ok(Some(*flag)),
+        Some(_) => Err(format!("`{key}` is not a boolean")),
+    }
 }
 
 /// The case's patched document, parsed and validated. Every `risk_state` case's mandate must be a
@@ -1026,13 +1265,18 @@ fn risk_step(step: &Json) -> Result<risk::Step, String> {
             price: num(Price::parse(str_at(step, "price")?), "price")?,
         },
         "risk_day_started" => Input::RiskDayStarted,
-        "owner_acknowledged" => Input::OwnerAcknowledged {
-            restriction: match str_at(step, "restriction")? {
-                "daily_loss" => Latch::DailyLoss,
-                "drawdown_ladder" => Latch::DrawdownLadder,
-                "lifetime_floor" => Latch::LifetimeFloor,
-                other => return Err(format!("`restriction` is not a latch: `{other}`")),
+        "owner_acknowledged" => match str_at(step, "restriction")? {
+            "daily_loss" => Input::OwnerAcknowledged {
+                restriction: Latch::DailyLoss,
             },
+            "drawdown_ladder" => Input::OwnerAcknowledged {
+                restriction: Latch::DrawdownLadder,
+            },
+            "lifetime_floor" => Input::OwnerAcknowledged {
+                restriction: Latch::LifetimeFloor,
+            },
+            restriction if restriction.starts_with("tripwire:") => Input::TripwireAcknowledged,
+            other => return Err(format!("`restriction` is not a latch: `{other}`")),
         },
         "allocation_change" => Input::AllocationChange {
             delta_usd: num(Usd::parse(str_at(step, "delta_usd")?), "delta_usd")?,
@@ -1115,15 +1359,15 @@ fn check_step(expect: &Json, outcome: &risk::Outcome) -> Result<(), String> {
     ] {
         expect_eq(key, actual, str_at(expect, key)?.to_owned())?;
     }
-    expect_set(
-        expect,
-        "restrictions",
-        snapshot
-            .restrictions
-            .iter()
-            .map(|r| r.as_str().to_owned())
-            .collect(),
-    )?;
+    let mut restrictions: BTreeSet<String> = snapshot
+        .restrictions
+        .iter()
+        .map(|r| r.as_str().to_owned())
+        .collect();
+    if snapshot.tripwire_restriction {
+        restrictions.insert("tripwire".to_owned());
+    }
+    expect_set(expect, "restrictions", restrictions)?;
     expect_set(
         expect,
         "instrument_restrictions",
@@ -1143,7 +1387,7 @@ fn check_step(expect: &Json, outcome: &risk::Outcome) -> Result<(), String> {
             .collect(),
     )?;
     expect_rejection(expect, outcome.rejection)?;
-    expect_journal(expect, &outcome.journal)
+    expect_combined_journal(expect, outcome)
 }
 
 /// A set of names, compared as a set: §5.6 and §5.9 fix which names are present, not the order a
@@ -1191,8 +1435,40 @@ fn expect_rejection(expect: &Json, rejection: Option<risk::Rejection>) -> Result
 /// no `RiskEvent` can carry (this change's Decisions needed) rest on exactly this function failing rather
 /// than skipping.
 pub fn expect_journal(expect: &Json, journal: &[risk::RiskEvent]) -> Result<(), String> {
+    compare_journal_members(
+        expect,
+        journal.iter().map(event_members).collect::<Vec<_>>(),
+    )
+}
+
+fn expect_combined_journal(expect: &Json, outcome: &risk::Outcome) -> Result<(), String> {
+    ensure(
+        outcome.tripwire_journal_index <= outcome.journal.len(),
+        || "the tripwire journal insertion point is outside the risk journal".to_owned(),
+    )?;
+    let mut members = outcome
+        .journal
+        .iter()
+        .map(event_members)
+        .collect::<Vec<_>>();
+    let tripwire = outcome
+        .tripwire_journal
+        .iter()
+        .map(tripwire_event_members)
+        .collect::<Vec<_>>();
+    members.splice(
+        outcome.tripwire_journal_index..outcome.tripwire_journal_index,
+        tripwire,
+    );
+    compare_journal_members(expect, members)
+}
+
+fn compare_journal_members(
+    expect: &Json,
+    actual: Vec<BTreeMap<String, String>>,
+) -> Result<(), String> {
     let listed = list_at(expect, "journal")?;
-    ensure(journal.len() == listed.len(), || {
+    ensure(actual.len() == listed.len(), || {
         format!(
             "journal: expected {} event(s) {:?}, got {} {:?}",
             listed.len(),
@@ -1200,14 +1476,14 @@ pub fn expect_journal(expect: &Json, journal: &[risk::RiskEvent]) -> Result<(), 
                 .iter()
                 .map(|e| e.get("type").and_then(Json::as_str).unwrap_or("?"))
                 .collect::<Vec<_>>(),
-            journal.len(),
-            journal
+            actual.len(),
+            actual
                 .iter()
-                .map(|e| event_members(e).get("type").cloned().unwrap_or_default())
+                .map(|e| e.get("type").cloned().unwrap_or_default())
                 .collect::<Vec<_>>()
         )
     })?;
-    for (index, (event, wanted)) in journal.iter().zip(listed).enumerate() {
+    for (index, (event, wanted)) in actual.iter().zip(listed).enumerate() {
         let members = wanted
             .as_object()
             .ok_or_else(|| format!("journal event {index} is not an object"))?
@@ -1216,8 +1492,8 @@ pub fn expect_journal(expect: &Json, journal: &[risk::RiskEvent]) -> Result<(), 
             .collect::<Result<BTreeMap<String, String>, String>>()?;
         expect_eq(
             &format!("journal event {}", index.saturating_add(1)),
-            event_members(event),
-            members,
+            event,
+            &members,
         )?;
     }
     Ok(())
@@ -1357,6 +1633,49 @@ fn event_members(event: &risk::RiskEvent) -> BTreeMap<String, String> {
             out.insert("type".to_owned(), "AgentStopped".to_owned());
             out.insert("reason".to_owned(), reason.as_str().to_owned());
             out.insert("loss_carry_usd".to_owned(), loss_carry_usd.to_string());
+        }
+    }
+    out
+}
+
+fn tripwire_event_members(event: &TripwireRiskEvent) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    match event {
+        TripwireRiskEvent::RiskLimitTriggered {
+            id,
+            action,
+            metric,
+            threshold,
+            value,
+        } => {
+            out.insert("type".to_owned(), "RiskLimitTriggered".to_owned());
+            out.insert("limit".to_owned(), format!("tripwire:{}", id.as_str()));
+            out.insert("action".to_owned(), action.as_str().to_owned());
+            out.insert("reason".to_owned(), "tripwire_condition".to_owned());
+            out.insert("metric".to_owned(), metric.as_str().to_owned());
+            out.insert("threshold".to_owned(), threshold.as_str().to_owned());
+            out.insert(
+                "value".to_owned(),
+                match value {
+                    RiskTripwireValue::Count(value) => value.to_string(),
+                    RiskTripwireValue::Usd(value) => value.to_string(),
+                },
+            );
+        }
+        TripwireRiskEvent::OwnerAlertSent {
+            triggered_event_index,
+        } => {
+            out.insert("type".to_owned(), "OwnerAlertSent".to_owned());
+            out.insert(
+                "subject".to_owned(),
+                format!("RiskLimitTriggered:{triggered_event_index}"),
+            );
+            out.insert("text".to_owned(), "tripwire_fired".to_owned());
+        }
+        TripwireRiskEvent::RiskLimitLifted { id } => {
+            out.insert("type".to_owned(), "RiskLimitLifted".to_owned());
+            out.insert("limit".to_owned(), format!("tripwire:{}", id.as_str()));
+            out.insert("reason".to_owned(), "owner_acknowledged".to_owned());
         }
     }
     out
@@ -1701,13 +2020,106 @@ mod tests {
     use std::path::Path;
 
     use mandate_spec::MandateVersion;
+    use mandate_spec::document::TripwireId;
+    use serde_json::json;
 
-    use super::policy_case;
+    use super::{
+        Input, Latch, TripwireRiskEvent, optional_bool, optional_text, policy_case,
+        risk_state_case, risk_step, risk_step_up, tripwire_event_members,
+    };
     use crate::{Json, read_fixture};
 
     fn fixture() -> Result<Json, String> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
         read_fixture(&dir, "mandate.json").map(|f| (*f).clone())
+    }
+
+    /// The two family-W risk-state cases run live while their status rows remain pending.
+    #[test]
+    fn tripwire_risk_state_cases_pass_as_stated() -> Result<(), String> {
+        let fixture = fixture()?;
+        let cases = fixture
+            .get("cases")
+            .and_then(Json::as_array)
+            .ok_or("the fixture has no cases")?;
+        for id in ["MC-W52", "MC-W57"] {
+            let case = cases
+                .iter()
+                .find(|case| case.get("id").and_then(Json::as_str) == Some(id))
+                .ok_or_else(|| format!("the fixture has no {id}"))?;
+            risk_state_case(&fixture, case).map_err(|error| format!("{id}: {error}"))?;
+        }
+        Ok(())
+    }
+
+    /// The risk-state adapter reads optional evidence exactly and keeps non-tripwire latches distinct.
+    #[test]
+    fn tripwire_risk_state_adapter_parses_each_evidence_shape() -> Result<(), String> {
+        let values = json!({
+            "text": "owner-b",
+            "yes": true,
+            "no": false,
+            "step_up": {
+                "assertion": "assertion-1",
+                "authenticated_at": "2026-09-21T14:00:00.000000000Z",
+                "method": "cli_confirm"
+            }
+        });
+        assert_eq!(optional_text(&values, "text")?, Some("owner-b".to_owned()));
+        assert_eq!(optional_text(&values, "missing")?, None);
+        assert_eq!(optional_bool(&values, "yes")?, Some(true));
+        assert_eq!(optional_bool(&values, "no")?, Some(false));
+        assert_eq!(optional_bool(&values, "missing")?, None);
+        let step_up = risk_step_up(&values)?.ok_or("the stated step-up was not parsed")?;
+        assert_eq!(step_up.assertion.0, "assertion-1");
+
+        let ordinary = json!({
+            "event": "owner_acknowledged",
+            "at": "2026-09-21T14:00:00.000000000Z",
+            "restriction": "drawdown_ladder",
+            "session": "regular"
+        });
+        assert!(matches!(
+            risk_step(&ordinary)?.input,
+            Input::OwnerAcknowledged {
+                restriction: Latch::DrawdownLadder
+            }
+        ));
+        let tripwire = json!({
+            "event": "owner_acknowledged",
+            "at": "2026-09-21T14:00:00.000000000Z",
+            "restriction": "tripwire:loss",
+            "session": "regular"
+        });
+        assert!(matches!(
+            risk_step(&tripwire)?.input,
+            Input::TripwireAcknowledged
+        ));
+        let unknown = json!({
+            "event": "owner_acknowledged",
+            "at": "2026-09-21T14:00:00.000000000Z",
+            "restriction": "not_a_restriction",
+            "session": "regular"
+        });
+        assert!(risk_step(&unknown).is_err());
+        Ok(())
+    }
+
+    /// Tripwire journal projections retain every member consumed by the risk-state comparer.
+    #[test]
+    fn tripwire_risk_event_members_are_exact() -> Result<(), String> {
+        let id = TripwireId::parse("loss").map_err(|error| error.to_string())?;
+        assert_eq!(
+            tripwire_event_members(&TripwireRiskEvent::RiskLimitLifted { id }),
+            [
+                ("limit".to_owned(), "tripwire:loss".to_owned()),
+                ("reason".to_owned(), "owner_acknowledged".to_owned()),
+                ("type".to_owned(), "RiskLimitLifted".to_owned()),
+            ]
+            .into_iter()
+            .collect()
+        );
+        Ok(())
     }
 
     /// A value no fixture member holds in its place: another decimal, the other flag, another integer,

@@ -19,7 +19,7 @@ use crate::condition::{
 };
 use crate::document::{
     ConnectionId, Goal, LadderAction, Lifts, Mandate, MandateVersion, ModelId, Pointer,
-    ProvenanceMap, ScaleAction, SignalModel, Source, pointer,
+    ProvenanceMap, ScaleAction, SignalModel, Source, TripwireMetric, pointer,
 };
 use crate::policy::{PolicyLevel, PolicyViolation, check, platform_base};
 use crate::{DecGrammar, SchemaDec, SpecError};
@@ -306,7 +306,7 @@ pub fn validate(
     document_rules(mandate, &document, &mut violations);
     condition_rules(mandate, &mut violations);
     delegation_rules(mandate, context, &mut violations)?;
-    tripwire_rules(mandate)?;
+    flag(&mut violations, !tripwire_rules(mandate), Violation::V044);
     provenance_rules(mandate, &document, context, &mut violations);
     universe_rules(mandate, &mut violations);
     let rules = &mandate.autonomy.rules;
@@ -343,14 +343,26 @@ pub fn validate(
     })
 }
 
-/// V-044's tests-PR boundary. A non-empty list is never treated as valid before E6-13 implements
-/// its sorted-id, count-threshold, cent, and allocation checks.
-fn tripwire_rules(mandate: &Mandate) -> Result<(), SpecError> {
-    if mandate.autonomy.tripwires.is_empty() {
-        Ok(())
-    } else {
-        Err(SpecError::Unimplemented)
-    }
+/// V-044: ids are strictly sorted, count thresholds are whole numbers from 1 through 1,000, and a
+/// realized-loss threshold is in whole cents and no larger than the allocation.
+fn tripwire_rules(mandate: &Mandate) -> bool {
+    let tripwires = &mandate.autonomy.tripwires;
+    ascending(tripwires.iter().map(|tripwire| tripwire.id.as_str()))
+        && tripwires.iter().all(|tripwire| match tripwire.metric {
+            TripwireMetric::ConsecutiveLosingExits | TripwireMetric::NewInstruments => tripwire
+                .threshold
+                .as_str()
+                .parse::<u32>()
+                .is_ok_and(|threshold| (1..=1_000).contains(&threshold)),
+            TripwireMetric::RealizedLossUsd => {
+                let threshold = tripwire.threshold.as_str();
+                SchemaDec::parse(threshold, DecGrammar::PositiveDecimal).is_ok()
+                    && threshold
+                        .split_once('.')
+                        .is_none_or(|(_, fraction)| fraction.len() <= 2)
+                    && tripwire.threshold <= mandate.capital.allocation_usd
+            }
+        })
 }
 
 /// The rules §4.1 checks again when a version is applied, against the facts at application: V-002,
