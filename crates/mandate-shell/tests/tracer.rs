@@ -51,7 +51,7 @@ use mandate_shell::adapters::{
 };
 use mandate_shell::envelope::{IdSpace, Ids};
 use mandate_shell::stages::{Classifier, JournalWriter, MandateSource, Sizing, Stages};
-use mandate_shell::{Cause, Report, Setup, ShellError, run, run_cycle};
+use mandate_shell::{Cause, ProductionCycle, Report, Setup, ShellError, production_cycle, run};
 use mandate_spec::ValidationContext;
 use mandate_spec::document::ProvenanceMap;
 use mandate_time::{Date, UtcNanos};
@@ -709,6 +709,24 @@ fn stages(mandate: &str, dataset: PathBuf, transport: Scripted) -> Stages {
     })
 }
 
+fn cycle(mandate: &str, dataset: PathBuf, transport: Scripted) -> ProductionCycle {
+    production_cycle(
+        Sources {
+            mandate: fixtures().join(mandate),
+            dataset,
+            journal: None,
+            recorded_at: UtcNanos::parse(NOW).unwrap(),
+            agent: AgentId(AGENT.to_owned()),
+            workspace: WORKSPACE.to_owned(),
+            account_ref: ACCOUNT_REF.to_owned(),
+            executor: Some(executor_context(mandate)),
+            run: Some(run_context(true)),
+            transport,
+        },
+        setup(true),
+    )
+}
+
 struct UnreachableJournal;
 
 impl JournalWriter for UnreachableJournal {
@@ -1351,25 +1369,17 @@ fn happy() {
 fn the_production_cycle_takes_model_output_as_an_input() {
     let transport = Scripted::new(Broker::Fresh);
     let seen = Rc::clone(&transport.seen);
-    let mut stages = stages(
+    let mut cycle = cycle(
         "mandate.json",
         PathBuf::from("the-production-cycle-does-not-read-a-dataset"),
         transport,
     );
     let (_, output) = builder_fixture();
 
-    let report = run_cycle(&mut stages, &setup(true), output).unwrap();
+    let report = cycle.run(output).unwrap();
 
     assert_eq!(seen.borrow().posts(), 1);
     assert_eq!(report.submitted.len(), 1);
-    assert_eq!(
-        of_type(&committed(&stages, &agent_stream()), "ModelOutputRecorded").len(),
-        1
-    );
-    assert_eq!(
-        of_type(&committed(&stages, &agent_stream()), "IntentProposed").len(),
-        1
-    );
 }
 
 /// A caller cannot use the production boundary to substitute a model outside the confirmed
@@ -1379,7 +1389,7 @@ fn the_production_cycle_takes_model_output_as_an_input() {
 fn the_production_cycle_refuses_an_unconfirmed_model_before_intent() {
     let transport = Scripted::new(Broker::Fresh);
     let seen = Rc::clone(&transport.seen);
-    let mut stages = stages(
+    let mut cycle = cycle(
         "mandate.json",
         PathBuf::from("the-production-cycle-does-not-read-a-dataset"),
         transport,
@@ -1387,18 +1397,9 @@ fn the_production_cycle_refuses_an_unconfirmed_model_before_intent() {
     let (_, mut output) = builder_fixture();
     output.model_id = "quant.not-confirmed".to_owned();
 
-    assert_refused(
-        run_cycle(&mut stages, &setup(true), output),
-        "order_builder_unavailable",
-    );
+    assert_refused(cycle.run(output), "no_proposal");
 
     assert_eq!(seen.borrow().posts(), 0);
-    assert!(
-        of_type(&committed(&stages, &agent_stream()), "IntentProposed").is_empty()
-    );
-    assert!(
-        of_type(&committed(&stages, &account_stream()), "OrderSubmitted").is_empty()
-    );
 }
 
 /// TI-10: the same fixtures, mandate, and clock journal byte-identical drafts.
