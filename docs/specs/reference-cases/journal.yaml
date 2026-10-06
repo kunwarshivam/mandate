@@ -1,4 +1,4 @@
-# Test vectors for docs/specs/journal.md (spec v0.7) - version 3
+# Test vectors for docs/specs/journal.md (spec v0.16) - version 3
 #
 # Implementations must reproduce, byte for byte:
 # - `chain[].canonical`: the canonical body of `chain[].body` (UTF-8), and `chain[].hash` =
@@ -575,6 +575,47 @@ agent_stream:
       parameter_schema:
         lookback_days: integer
     canonical: '{"authorship":"platform","code":"reference fixture: stands for the model code, prompt, and parameter schema (mandate spec §8.1)","kind":"signal_model","model_id":"quant.mean_reversion","model_version":"1.0.0","parameter_schema":{"lookback_days":"integer"}}'
+  - name: momentum_content
+    ref: sha256:fae2b865ada92390496c92079f7dd4e18a4c5e8ed317d3b1400915194ffc2aa4
+    object:
+      kind: signal_model
+      model_id: quant.momentum
+      model_version: 1.0.0
+      authorship: platform
+      code: 'reference fixture: stands for the second configured model'
+      parameter_schema:
+        lookback_days: integer
+    canonical: '{"authorship":"platform","code":"reference fixture: stands for the second configured model","kind":"signal_model","model_id":"quant.momentum","model_version":"1.0.0","parameter_schema":{"lookback_days":"integer"}}'
+  - name: policy_set
+    ref: sha256:9d4765e728410109d601bcc39d80d503e60ce75fbbf419c0cd6c0944a3a426ca
+    object:
+      kind: policy_set
+      levels:
+      - name: platform
+        values:
+        - key: auto_allowed
+          value: true
+        - key: max_order_usd
+          value: '1500'
+    canonical: '{"kind":"policy_set","levels":[{"name":"platform","values":[{"key":"auto_allowed","value":true},{"key":"max_order_usd","value":"1500"}]}]}'
+  - name: model_registry
+    ref: sha256:9da984d2dd1bec9bdd497628f7f5672d5fd9acadd4137351b9dbf94f1b4e484d
+    object:
+      kind: model_registry
+      models:
+      - admits_instruments: false
+        content_hash: sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513
+        model_id: quant.mean_reversion
+        model_version: 1.0.0
+        params:
+        - lookback_days
+      - admits_instruments: false
+        content_hash: sha256:fae2b865ada92390496c92079f7dd4e18a4c5e8ed317d3b1400915194ffc2aa4
+        model_id: quant.momentum
+        model_version: 1.0.0
+        params:
+        - lookback_days
+    canonical: '{"kind":"model_registry","models":[{"admits_instruments":false,"content_hash":"sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513","model_id":"quant.mean_reversion","model_version":"1.0.0","params":["lookback_days"]},{"admits_instruments":false,"content_hash":"sha256:fae2b865ada92390496c92079f7dd4e18a4c5e8ed317d3b1400915194ffc2aa4","model_id":"quant.momentum","model_version":"1.0.0","params":["lookback_days"]}]}'
   chain:
   - seq: 1
     event_type: StreamOpened
@@ -660,6 +701,7 @@ agent_stream:
         build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
       config_refs:
         mandate_version: sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0
+        model_registry: sha256:9da984d2dd1bec9bdd497628f7f5672d5fd9acadd4137351b9dbf94f1b4e484d
       payload:
         model_id: quant.mean_reversion
         model_version: 1.0.0
@@ -682,8 +724,8 @@ agent_stream:
       - sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513
       pii_refs: []
       prev_hash: dfdd16ca7e0612899521c4e6b8ec6514f7bec157f9a114444bdaa54003c6b376
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":["sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513"],"causation_id":null,"clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3M0R000000000000000G3","event_time":"2026-09-21T13:59:59.000000000Z","event_type":"ModelOutputRecorded","payload":{"as_of":"2026-09-21T13:59:58.000000000Z","confidence":"0.98","content_hash":"sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513","conviction":"0.97","direction":"long","evidence":["01J8Z3M0A000000000000000G2"],"expires_at":"2026-09-22T13:59:58.000000000Z","horizon_s":86400,"ignored":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","invalidation":null,"lineage_id":null,"model_id":"quant.mean_reversion","model_version":"1.0.0","thesis_id":null,"thesis_ref":null},"pii_refs":[],"prev_hash":"dfdd16ca7e0612899521c4e6b8ec6514f7bec157f9a114444bdaa54003c6b376","recorded_at":"2026-09-21T13:59:59.000200000Z","schema_version":1,"seq":3,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: cb67091d2cee907437a7b4018bcacf2788958b9c066a3590d5ae4715bdfffd00
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":["sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513"],"causation_id":null,"clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0","model_registry":"sha256:9da984d2dd1bec9bdd497628f7f5672d5fd9acadd4137351b9dbf94f1b4e484d"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3M0R000000000000000G3","event_time":"2026-09-21T13:59:59.000000000Z","event_type":"ModelOutputRecorded","payload":{"as_of":"2026-09-21T13:59:58.000000000Z","confidence":"0.98","content_hash":"sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513","conviction":"0.97","direction":"long","evidence":["01J8Z3M0A000000000000000G2"],"expires_at":"2026-09-22T13:59:58.000000000Z","horizon_s":86400,"ignored":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","invalidation":null,"lineage_id":null,"model_id":"quant.mean_reversion","model_version":"1.0.0","thesis_id":null,"thesis_ref":null},"pii_refs":[],"prev_hash":"dfdd16ca7e0612899521c4e6b8ec6514f7bec157f9a114444bdaa54003c6b376","recorded_at":"2026-09-21T13:59:59.000200000Z","schema_version":1,"seq":3,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: 3a6b5e991974ada4a8cdc20c8bf7415d1be1aba7186b57b4429fff8b9cbf352d
   - seq: 4
     event_type: DecisionMade
     body:
@@ -706,6 +748,8 @@ agent_stream:
         build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
       config_refs:
         mandate_version: sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0
+        policy_set: sha256:9d4765e728410109d601bcc39d80d503e60ce75fbbf419c0cd6c0944a3a426ca
+        model_registry: sha256:9da984d2dd1bec9bdd497628f7f5672d5fd9acadd4137351b9dbf94f1b4e484d
       payload:
         instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
         side: buy
@@ -737,9 +781,9 @@ agent_stream:
         client_id: null
       artifact_refs: []
       pii_refs: []
-      prev_hash: cb67091d2cee907437a7b4018bcacf2788958b9c066a3590d5ae4715bdfffd00
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3M1A000000000000000G4","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"DecisionMade","payload":{"ask_suppressed":null,"autonomy":"auto","buy_conviction":"0.75554","client_id":null,"clips_applied":["max_order_usd"],"combined_score":"0.882","decided_by":"default","delegation_id":null,"dry_run":"allow","exit_conviction":"0.85554","exit_origin":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","model_weights":[{"key":"quant.mean_reversion","value":"0.9"},{"key":"quant.momentum","value":"0.1"}],"outputs_used":["01J8Z3M0R000000000000000G3"],"purpose":"open","qty":"10","reason_code":null,"requested_by":"agent","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"cb67091d2cee907437a7b4018bcacf2788958b9c066a3590d5ae4715bdfffd00","recorded_at":"2026-09-21T14:00:00.000100000Z","schema_version":1,"seq":4,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: 2b07ffa6e2f5604af5e3497979ab1fa476e85909473633f85377c0dfe948c40f
+      prev_hash: 3a6b5e991974ada4a8cdc20c8bf7415d1be1aba7186b57b4429fff8b9cbf352d
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0","model_registry":"sha256:9da984d2dd1bec9bdd497628f7f5672d5fd9acadd4137351b9dbf94f1b4e484d","policy_set":"sha256:9d4765e728410109d601bcc39d80d503e60ce75fbbf419c0cd6c0944a3a426ca"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3M1A000000000000000G4","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"DecisionMade","payload":{"ask_suppressed":null,"autonomy":"auto","buy_conviction":"0.75554","client_id":null,"clips_applied":["max_order_usd"],"combined_score":"0.882","decided_by":"default","delegation_id":null,"dry_run":"allow","exit_conviction":"0.85554","exit_origin":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","model_weights":[{"key":"quant.mean_reversion","value":"0.9"},{"key":"quant.momentum","value":"0.1"}],"outputs_used":["01J8Z3M0R000000000000000G3"],"purpose":"open","qty":"10","reason_code":null,"requested_by":"agent","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"3a6b5e991974ada4a8cdc20c8bf7415d1be1aba7186b57b4429fff8b9cbf352d","recorded_at":"2026-09-21T14:00:00.000100000Z","schema_version":1,"seq":4,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: 1c14bcd3e6054e4da4796672fe1164497d44b361bf90256d1a58c60037e1a214
   - seq: 5
     event_type: IntentProposed
     body:
@@ -772,9 +816,9 @@ agent_stream:
         purpose: open
       artifact_refs: []
       pii_refs: []
-      prev_hash: 2b07ffa6e2f5604af5e3497979ab1fa476e85909473633f85377c0dfe948c40f
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M1A000000000000000G4","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3M1P0000000000000000X","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"IntentProposed","payload":{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","purpose":"open","qty":"10","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"2b07ffa6e2f5604af5e3497979ab1fa476e85909473633f85377c0dfe948c40f","recorded_at":"2026-09-21T14:00:00.000200000Z","schema_version":1,"seq":5,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: 8619c692ee8e722a5671eea76b0d170f1695b2407a703ccecb63c619ac77938e
+      prev_hash: 1c14bcd3e6054e4da4796672fe1164497d44b361bf90256d1a58c60037e1a214
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M1A000000000000000G4","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3M1P0000000000000000X","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"IntentProposed","payload":{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","purpose":"open","qty":"10","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"1c14bcd3e6054e4da4796672fe1164497d44b361bf90256d1a58c60037e1a214","recorded_at":"2026-09-21T14:00:00.000200000Z","schema_version":1,"seq":5,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: 1ccabae9d73fde2da35a9ff96e33b8eb52a1d1dfb4b6adc58725195ce6f979ac
   - seq: 6
     event_type: OwnerExitRequested
     body:
@@ -812,9 +856,9 @@ agent_stream:
           method: webauthn
       artifact_refs: []
       pii_refs: []
-      prev_hash: 8619c692ee8e722a5671eea76b0d170f1695b2407a703ccecb63c619ac77938e
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z6A00000000000000000C1","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z6A0A000000000000000E1","event_time":"2026-09-21T15:00:00.000000000Z","event_type":"OwnerExitRequested","payload":{"bid":null,"bid_size":null,"confirmed":false,"floor":null,"scope":"instrument","step_up":{"assertion_id":"stepup_4b2d","authenticated_at":"2026-09-21T14:59:52.000000000Z","method":"webauthn"},"step_up_status":"valid","subject":"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f","user":"user_7f3a"},"pii_refs":[],"prev_hash":"8619c692ee8e722a5671eea76b0d170f1695b2407a703ccecb63c619ac77938e","recorded_at":"2026-09-21T15:00:00.000100000Z","schema_version":1,"seq":6,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: 972782213bf55e5182a701f88ed71e8195ad9f41e0b41055ef3cf6e7360c4104
+      prev_hash: 1ccabae9d73fde2da35a9ff96e33b8eb52a1d1dfb4b6adc58725195ce6f979ac
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z6A00000000000000000C1","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z6A0A000000000000000E1","event_time":"2026-09-21T15:00:00.000000000Z","event_type":"OwnerExitRequested","payload":{"bid":null,"bid_size":null,"confirmed":false,"floor":null,"scope":"instrument","step_up":{"assertion_id":"stepup_4b2d","authenticated_at":"2026-09-21T14:59:52.000000000Z","method":"webauthn"},"step_up_status":"valid","subject":"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f","user":"user_7f3a"},"pii_refs":[],"prev_hash":"1ccabae9d73fde2da35a9ff96e33b8eb52a1d1dfb4b6adc58725195ce6f979ac","recorded_at":"2026-09-21T15:00:00.000100000Z","schema_version":1,"seq":6,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: 58a73e16b446b605433318f2afbfbf6e032364ef7ec77290c8ad1bc6c28a72a4
   - seq: 7
     event_type: IntentProposed
     body:
@@ -847,9 +891,9 @@ agent_stream:
         purpose: owner_exit
       artifact_refs: []
       pii_refs: []
-      prev_hash: 972782213bf55e5182a701f88ed71e8195ad9f41e0b41055ef3cf6e7360c4104
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z6A0A000000000000000E1","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z6A0M000000000000000P1","event_time":"2026-09-21T15:00:00.000000000Z","event_type":"IntentProposed","payload":{"instrument_id":"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f","limit_price":null,"purpose":"owner_exit","qty":"5","side":"sell","tif":"day","type":"market"},"pii_refs":[],"prev_hash":"972782213bf55e5182a701f88ed71e8195ad9f41e0b41055ef3cf6e7360c4104","recorded_at":"2026-09-21T15:00:00.000200000Z","schema_version":1,"seq":7,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: ebd21dc05e7769384a5376e9955c282deec97cd119db7ca85b6f636094dd3c06
+      prev_hash: 58a73e16b446b605433318f2afbfbf6e032364ef7ec77290c8ad1bc6c28a72a4
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z6A0A000000000000000E1","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z6A0M000000000000000P1","event_time":"2026-09-21T15:00:00.000000000Z","event_type":"IntentProposed","payload":{"instrument_id":"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f","limit_price":null,"purpose":"owner_exit","qty":"5","side":"sell","tif":"day","type":"market"},"pii_refs":[],"prev_hash":"58a73e16b446b605433318f2afbfbf6e032364ef7ec77290c8ad1bc6c28a72a4","recorded_at":"2026-09-21T15:00:00.000200000Z","schema_version":1,"seq":7,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: 1974af976bb9ffab532b308e876fe38dfe7c553da2d947ba1569da64dae49757
   - seq: 8
     event_type: DecisionMade
     body:
@@ -872,6 +916,8 @@ agent_stream:
         build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
       config_refs:
         mandate_version: sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0
+        policy_set: sha256:9d4765e728410109d601bcc39d80d503e60ce75fbbf419c0cd6c0944a3a426ca
+        model_registry: sha256:9da984d2dd1bec9bdd497628f7f5672d5fd9acadd4137351b9dbf94f1b4e484d
       payload:
         instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
         side: sell
@@ -897,9 +943,9 @@ agent_stream:
         client_id: null
       artifact_refs: []
       pii_refs: []
-      prev_hash: ebd21dc05e7769384a5376e9955c282deec97cd119db7ca85b6f636094dd3c06
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZMA0A000000000000000D2","event_time":"2026-09-21T20:05:00.000000000Z","event_type":"DecisionMade","payload":{"ask_suppressed":null,"autonomy":null,"buy_conviction":null,"client_id":null,"clips_applied":[],"combined_score":null,"decided_by":null,"delegation_id":null,"dry_run":"defer","exit_conviction":null,"exit_origin":"goal_completion","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150.25","model_weights":[],"outputs_used":[],"purpose":"discretionary_exit","qty":"10","reason_code":"discretionary_exit_regular_session_only","requested_by":"agent","side":"sell","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"ebd21dc05e7769384a5376e9955c282deec97cd119db7ca85b6f636094dd3c06","recorded_at":"2026-09-21T20:05:00.000100000Z","schema_version":1,"seq":8,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: 6e70380ab87a3238e401ae0dbb880e6edafe7a9accd5b2b244a1bc3f1bfca6f4
+      prev_hash: 1974af976bb9ffab532b308e876fe38dfe7c553da2d947ba1569da64dae49757
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0","model_registry":"sha256:9da984d2dd1bec9bdd497628f7f5672d5fd9acadd4137351b9dbf94f1b4e484d","policy_set":"sha256:9d4765e728410109d601bcc39d80d503e60ce75fbbf419c0cd6c0944a3a426ca"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZMA0A000000000000000D2","event_time":"2026-09-21T20:05:00.000000000Z","event_type":"DecisionMade","payload":{"ask_suppressed":null,"autonomy":null,"buy_conviction":null,"client_id":null,"clips_applied":[],"combined_score":null,"decided_by":null,"delegation_id":null,"dry_run":"defer","exit_conviction":null,"exit_origin":"goal_completion","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150.25","model_weights":[],"outputs_used":[],"purpose":"discretionary_exit","qty":"10","reason_code":"discretionary_exit_regular_session_only","requested_by":"agent","side":"sell","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"1974af976bb9ffab532b308e876fe38dfe7c553da2d947ba1569da64dae49757","recorded_at":"2026-09-21T20:05:00.000100000Z","schema_version":1,"seq":8,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: 0dc325f3847078e0953a0c90462764cb9da632ebd35c0bd43cdce8249d32222a
   - seq: 9
     event_type: OwnerExitRequested
     body:
@@ -937,9 +983,9 @@ agent_stream:
           method: webauthn
       artifact_refs: []
       pii_refs: []
-      prev_hash: 6e70380ab87a3238e401ae0dbb880e6edafe7a9accd5b2b244a1bc3f1bfca6f4
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZMR00000000000000000C2","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZMR0A000000000000000E2","event_time":"2026-09-21T20:10:00.000000000Z","event_type":"OwnerExitRequested","payload":{"bid":"151","bid_size":"300","confirmed":true,"floor":"146.47","scope":"instrument","step_up":{"assertion_id":"stepup_9c1e","authenticated_at":"2026-09-21T20:09:45.000000000Z","method":"webauthn"},"step_up_status":"valid","subject":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","user":"user_7f3a"},"pii_refs":[],"prev_hash":"6e70380ab87a3238e401ae0dbb880e6edafe7a9accd5b2b244a1bc3f1bfca6f4","recorded_at":"2026-09-21T20:10:00.000100000Z","schema_version":1,"seq":9,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: 8011384f673a5a48db0d50e6cb8cb2c6cfb0939fdbd7fbe1da0b2b6f65cb9126
+      prev_hash: 0dc325f3847078e0953a0c90462764cb9da632ebd35c0bd43cdce8249d32222a
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZMR00000000000000000C2","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZMR0A000000000000000E2","event_time":"2026-09-21T20:10:00.000000000Z","event_type":"OwnerExitRequested","payload":{"bid":"151","bid_size":"300","confirmed":true,"floor":"146.47","scope":"instrument","step_up":{"assertion_id":"stepup_9c1e","authenticated_at":"2026-09-21T20:09:45.000000000Z","method":"webauthn"},"step_up_status":"valid","subject":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","user":"user_7f3a"},"pii_refs":[],"prev_hash":"0dc325f3847078e0953a0c90462764cb9da632ebd35c0bd43cdce8249d32222a","recorded_at":"2026-09-21T20:10:00.000100000Z","schema_version":1,"seq":9,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: 5964f1e3f8c96f0286e0ebf657049233b31935343c5b1d50fdda6aa135822994
   - seq: 10
     event_type: IntentProposed
     body:
@@ -972,9 +1018,9 @@ agent_stream:
         purpose: owner_exit
       artifact_refs: []
       pii_refs: []
-      prev_hash: 8011384f673a5a48db0d50e6cb8cb2c6cfb0939fdbd7fbe1da0b2b6f65cb9126
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZMR0A000000000000000E2","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZMR0M000000000000000P2","event_time":"2026-09-21T20:10:00.000000000Z","event_type":"IntentProposed","payload":{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"146.47","purpose":"owner_exit","qty":"10","side":"sell","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"8011384f673a5a48db0d50e6cb8cb2c6cfb0939fdbd7fbe1da0b2b6f65cb9126","recorded_at":"2026-09-21T20:10:00.000200000Z","schema_version":1,"seq":10,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: dfd74225932b347c29c642b09442c380dc3da5ea94e89bfa917f05335164e7c4
+      prev_hash: 5964f1e3f8c96f0286e0ebf657049233b31935343c5b1d50fdda6aa135822994
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZMR0A000000000000000E2","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZMR0M000000000000000P2","event_time":"2026-09-21T20:10:00.000000000Z","event_type":"IntentProposed","payload":{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"146.47","purpose":"owner_exit","qty":"10","side":"sell","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"5964f1e3f8c96f0286e0ebf657049233b31935343c5b1d50fdda6aa135822994","recorded_at":"2026-09-21T20:10:00.000200000Z","schema_version":1,"seq":10,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: cc400e73f2887930dde913b4a36ad6bf152bcc5311311349ca70192ecaef3eb8
   - seq: 11
     event_type: AgentModeChanged
     body:
@@ -1003,9 +1049,9 @@ agent_stream:
         lifecycle: normal
       artifact_refs: []
       pii_refs: []
-      prev_hash: dfd74225932b347c29c642b09442c380dc3da5ea94e89bfa917f05335164e7c4
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0A000000000000000M1","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"AgentModeChanged","payload":{"from":"normal","lifecycle":"normal","reason":"kill_switch","to":"stopped"},"pii_refs":[],"prev_hash":"dfd74225932b347c29c642b09442c380dc3da5ea94e89bfa917f05335164e7c4","recorded_at":"2026-09-21T20:30:00.000100000Z","schema_version":1,"seq":11,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: 7cacb3a75306dd5add04da11e5498ab15c92445fba43c99ae2cbf5a7586ad280
+      prev_hash: cc400e73f2887930dde913b4a36ad6bf152bcc5311311349ca70192ecaef3eb8
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0A000000000000000M1","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"AgentModeChanged","payload":{"from":"normal","lifecycle":"normal","reason":"kill_switch","to":"stopped"},"pii_refs":[],"prev_hash":"cc400e73f2887930dde913b4a36ad6bf152bcc5311311349ca70192ecaef3eb8","recorded_at":"2026-09-21T20:30:00.000100000Z","schema_version":1,"seq":11,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: eb4a28c9ab129f7f42dde6c4b4698f7e810e97ebdafd5cf302db6f509d9673db
   - seq: 12
     event_type: OwnerExitRequested
     body:
@@ -1040,9 +1086,9 @@ agent_stream:
         step_up: null
       artifact_refs: []
       pii_refs: []
-      prev_hash: 7cacb3a75306dd5add04da11e5498ab15c92445fba43c99ae2cbf5a7586ad280
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZNB00000000000000000C3","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0M000000000000000K1","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"OwnerExitRequested","payload":{"bid":null,"bid_size":null,"confirmed":false,"floor":null,"scope":"agent","step_up":null,"step_up_status":"absent","subject":"agent_a","user":"user_7f3a"},"pii_refs":[],"prev_hash":"7cacb3a75306dd5add04da11e5498ab15c92445fba43c99ae2cbf5a7586ad280","recorded_at":"2026-09-21T20:30:00.000200000Z","schema_version":1,"seq":12,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: 6301a9093ea301194a6550430d9726607bf1cd5bbc08b7e33bddfdff68cddc70
+      prev_hash: eb4a28c9ab129f7f42dde6c4b4698f7e810e97ebdafd5cf302db6f509d9673db
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZNB00000000000000000C3","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0M000000000000000K1","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"OwnerExitRequested","payload":{"bid":null,"bid_size":null,"confirmed":false,"floor":null,"scope":"agent","step_up":null,"step_up_status":"absent","subject":"agent_a","user":"user_7f3a"},"pii_refs":[],"prev_hash":"eb4a28c9ab129f7f42dde6c4b4698f7e810e97ebdafd5cf302db6f509d9673db","recorded_at":"2026-09-21T20:30:00.000200000Z","schema_version":1,"seq":12,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: b7bc430e3e974e781184c06b7ed8ca8ff1288718af37a6b3ad77dbbd58fd4359
   - seq: 13
     event_type: KillSwitchActivated
     body:
@@ -1071,9 +1117,9 @@ agent_stream:
         mode_event: 01J8ZNB0A000000000000000M1
       artifact_refs: []
       pii_refs: []
-      prev_hash: 6301a9093ea301194a6550430d9726607bf1cd5bbc08b7e33bddfdff68cddc70
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZNB00000000000000000C3","clock_source":"scheduler","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0R000000000000000K2","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"KillSwitchActivated","payload":{"initiator":"owner","mode_event":"01J8ZNB0A000000000000000M1","scope":"agent","subject":"agent_a"},"pii_refs":[],"prev_hash":"6301a9093ea301194a6550430d9726607bf1cd5bbc08b7e33bddfdff68cddc70","recorded_at":"2026-09-21T20:30:00.000300000Z","schema_version":1,"seq":13,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: 590a02bf0dae0627c12fc13dd407307f532d3f9a2335b7d36d820015cdcb20d6
+      prev_hash: b7bc430e3e974e781184c06b7ed8ca8ff1288718af37a6b3ad77dbbd58fd4359
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZNB00000000000000000C3","clock_source":"scheduler","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0R000000000000000K2","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"KillSwitchActivated","payload":{"initiator":"owner","mode_event":"01J8ZNB0A000000000000000M1","scope":"agent","subject":"agent_a"},"pii_refs":[],"prev_hash":"b7bc430e3e974e781184c06b7ed8ca8ff1288718af37a6b3ad77dbbd58fd4359","recorded_at":"2026-09-21T20:30:00.000300000Z","schema_version":1,"seq":13,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: 7fb05b287d048f59f031b983c4847047e322bb4e0b70f26f59cb87222e68831f
   derivation:
     note: 'Illustrative mandate and account values the DecisionMade vector is recomputed from (mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no fresh output, so it counts as missing. The ask is the observed quote''s (artifact quote_snapshot). The gate dry run, the autonomy result and its decided_by label, and who requested the order are inputs. Gross exposure is the held position''s quantity x mark. After the session closes the profit_stop goal is reached, whose completion is a discretionary exit of every position (mandate spec §3.1), deferred until the session (trading spec §9.6) with nothing proposed (mandate spec §6.2). Outside the session an exit is a limit order (trading spec §9.4), priced at the exit price ladder''s first rung: the reference bid x (1 - exit_offset) for the >= 50 M USD tier, a sell rounded up to the tick (trading spec §2.1, §5.6). The owner closes the held position in the regular session without a confirmed bid, and after the session closes the opened position (taken as filled) with a confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument''s >= 50 M USD tier (trading spec §5.5, §5.6); that close''s own limit is the floor. Step-up is valid for 300 s after authentication (DEC-156 item 8). The regular session is 09:30 to 16:00 America/New_York (EDT, UTC-4, on this date). The owner commands are the control stream''s OwnerCommandIssued events that the owner copies name as their cause (spec §2, §9.1 rule 16); they are on another stream, so only the members the copies are checked against are listed.'
     owner_commands:
@@ -1334,6 +1380,36 @@ agent_stream:
       outcome: Invalid
       reason: missing_config_ref
       path: config_refs.mandate_version
+  - name: decision_without_policy_set
+    clause: §9 required refs
+    base_seq: 4
+    changes:
+    - path: config_refs.policy_set
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.policy_set
+  - name: decision_without_model_registry
+    clause: §9 required refs
+    base_seq: 4
+    changes:
+    - path: config_refs.model_registry
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.model_registry
+  - name: model_output_without_model_registry
+    clause: §9 required refs
+    base_seq: 3
+    changes:
+    - path: config_refs.model_registry
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.model_registry
   - name: intent_sell_labelled_open
     clause: §9.1 rule 1
     base_seq: 5

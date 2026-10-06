@@ -229,8 +229,8 @@ SCHEMAS: dict[tuple[str, str], T] = {
 REQUIRED_REFS = {
     "StreamOpened": (),
     "ObservationRecorded": (),
-    "ModelOutputRecorded": ("mandate_version",),
-    "DecisionMade": ("mandate_version",),
+    "ModelOutputRecorded": ("mandate_version", "model_registry"),
+    "DecisionMade": ("mandate_version", "policy_set", "model_registry"),
     "IntentProposed": ("mandate_version",),
     "AgentModeChanged": (),
     "KillSwitchActivated": (),
@@ -529,7 +529,54 @@ MODEL_CONTENT = {
     "code": "reference fixture: stands for the model code, prompt, and parameter schema (mandate spec §8.1)",
     "parameter_schema": {"lookback_days": "integer"},
 }
-ARTIFACTS = {"quote_snapshot": QUOTE_SNAPSHOT, "model_content": MODEL_CONTENT}
+MOMENTUM_CONTENT = {
+    "kind": "signal_model",
+    "model_id": "quant.momentum",
+    "model_version": "1.0.0",
+    "authorship": "platform",
+    "code": "reference fixture: stands for the second configured model",
+    "parameter_schema": {"lookback_days": "integer"},
+}
+POLICY_SET = {
+    "kind": "policy_set",
+    "levels": [
+        {
+            "name": "platform",
+            "values": [
+                {"key": "auto_allowed", "value": True},
+                {"key": "max_order_usd", "value": "1500"},
+            ],
+        }
+    ],
+}
+MODEL_REGISTRY = {
+    "kind": "model_registry",
+    "models": [
+        {
+            "admits_instruments": False,
+            "content_hash": artifact_ref(MODEL_CONTENT),
+            "model_id": "quant.mean_reversion",
+            "model_version": "1.0.0",
+            "params": ["lookback_days"],
+        },
+        {
+            "admits_instruments": False,
+            "content_hash": artifact_ref(MOMENTUM_CONTENT),
+            "model_id": "quant.momentum",
+            "model_version": "1.0.0",
+            "params": ["lookback_days"],
+        },
+    ],
+}
+POLICY_SET_REF = artifact_ref(POLICY_SET)
+MODEL_REGISTRY_REF = artifact_ref(MODEL_REGISTRY)
+ARTIFACTS = {
+    "quote_snapshot": QUOTE_SNAPSHOT,
+    "model_content": MODEL_CONTENT,
+    "momentum_content": MOMENTUM_CONTENT,
+    "policy_set": POLICY_SET,
+    "model_registry": MODEL_REGISTRY,
+}
 
 DERIVATION = {
     "note": (
@@ -617,6 +664,11 @@ def first_rung_sell_limit(d: dict) -> str:
 
 
 def event(name: str, event_type: str, at: str, recorded: str, payload: dict, **envelope) -> dict:
+    config_refs = dict(MANDATE) if REQUIRED_REFS[event_type] else {}
+    if "policy_set" in REQUIRED_REFS[event_type]:
+        config_refs["policy_set"] = POLICY_SET_REF
+    if "model_registry" in REQUIRED_REFS[event_type]:
+        config_refs["model_registry"] = MODEL_REGISTRY_REF
     body = {
         "envelope_version": 1,
         "environment": "paper",
@@ -631,7 +683,7 @@ def event(name: str, event_type: str, at: str, recorded: str, payload: dict, **e
         "causation_id": envelope.get("causation_id"),
         "correlation_id": None,
         "actor": dict(ACTOR),
-        "config_refs": dict(MANDATE) if REQUIRED_REFS[event_type] else {},
+        "config_refs": config_refs,
         "payload": payload,
         "artifact_refs": sorted(digest_strings(payload)),
         "pii_refs": [],
@@ -1034,6 +1086,30 @@ def invalid_drafts() -> list[dict]:
             [change("config_refs", {})],
             "missing_config_ref",
             "config_refs.mandate_version",
+        ),
+        invalid(
+            "decision_without_policy_set",
+            "§9 required refs",
+            "decision",
+            [delete("config_refs.policy_set")],
+            "missing_config_ref",
+            "config_refs.policy_set",
+        ),
+        invalid(
+            "decision_without_model_registry",
+            "§9 required refs",
+            "decision",
+            [delete("config_refs.model_registry")],
+            "missing_config_ref",
+            "config_refs.model_registry",
+        ),
+        invalid(
+            "model_output_without_model_registry",
+            "§9 required refs",
+            "model_output",
+            [delete("config_refs.model_registry")],
+            "missing_config_ref",
+            "config_refs.model_registry",
         ),
         invalid(
             "intent_sell_labelled_open",

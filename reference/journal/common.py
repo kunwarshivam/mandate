@@ -167,6 +167,8 @@ CONFIG_REF_KINDS = (
     "rule_set",
     "mandate_version",
     "model_version",
+    "policy_set",
+    "model_registry",
 )
 ENVELOPE = rec(
     ("envelope_version", INT),
