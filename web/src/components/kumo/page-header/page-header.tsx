@@ -32,6 +32,8 @@ export interface PageHeaderProps {
   icon?: ReactNode;
   /** Actions on the right of the title row, such as Stop scoped to this agent. */
   actions?: ReactNode;
+  /** The actions are icon-sized on a phone, so they keep the title's row there instead of wrapping under it (DEC-482). */
+  actionsInline?: boolean;
   /** Extra content under the title, such as a mode field. */
   children?: ReactNode;
   className?: string;
@@ -84,22 +86,26 @@ export function PageTabs({ tabs, label, className }: { tabs: readonly PageTab[];
   );
 }
 
-export function PageHeader({ title, description, environment, tabs, tabsLabel = "Sections", status, icon, actions, children, className, tabsClassName }: PageHeaderProps) {
+/**
+ * Below `lg` the app header already carries the paper badge, so the title's copy of it shows from
+ * `lg` only, and the title row keeps its height for what the page is about (DEC-482).
+ */
+export function PageHeader({ title, description, environment, tabs, tabsLabel = "Sections", status, icon, actions, actionsInline = false, children, className, tabsClassName }: PageHeaderProps) {
   return (
     <header data-slot="page-header" className={cn("mb-(--block-gap) grid grid-cols-1 gap-(--block-gap)", className)}>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-4">
+      <div className={cn("flex flex-wrap items-end justify-between gap-3", actionsInline && "max-lg:flex-nowrap max-lg:items-center")}>
+        <div className="flex min-w-0 items-center gap-4 max-lg:gap-3">
           {icon}
           <div className="grid min-w-0 gap-1">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <h1 className="text-h1">{title}</h1>
-              {environment ? <EnvironmentBadge environment={environment} /> : null}
+              {environment ? <EnvironmentBadge environment={environment} className="max-lg:hidden" /> : null}
               {status}
             </div>
             {description ? <p className="max-w-measure text-muted-foreground">{description}</p> : null}
           </div>
         </div>
-        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+        {actions ? <div className={cn("flex flex-wrap items-center gap-2", actionsInline && "max-lg:shrink-0")}>{actions}</div> : null}
       </div>
       {children}
       {tabs && tabs.length > 0 ? <PageTabs tabs={tabs} label={tabsLabel} className={tabsClassName} /> : null}

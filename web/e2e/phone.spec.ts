@@ -268,6 +268,23 @@ for (const width of PHONES) {
       expect(await smallTargets(page.locator("#main"))).toEqual([]);
     });
 
+    test("Stop this agent shares the title's row, one paper badge shows, and the chart is 200 px", async ({ page }) => {
+      await open(page, AGENT, width);
+      const head = page.locator("[data-slot=page-header]");
+      const title = (await head.getByRole("heading", { level: 1 }).boundingBox())!;
+      const stop = head.getByRole("button", { name: "Stop this agent…" });
+      expect((await stop.innerText()).trim()).toBe("Stop");
+      const s = (await stop.boundingBox())!;
+      expect(s.height).toBeGreaterThanOrEqual(MIN_TARGET);
+      expect(s.y, "Stop starts within the title block's height, not under it").toBeLessThan(title.y + title.height);
+      expect(s.x + s.width).toBeLessThanOrEqual(width);
+      await expect(page.locator("[data-slot=environment-badge]").locator("visible=true")).toHaveCount(1);
+      await expect(header(page).locator("[data-slot=environment-badge]")).toBeVisible();
+      expect((await page.locator("[data-slot=agent-equity] [data-slot=chart-canvas]").boundingBox())!.height).toBe(200);
+      await stop.click();
+      await expect(page.getByRole("dialog", { name: /^Stop/ })).toContainText("Agent 1");
+    });
+
     test("the level legend waits behind Levels", async ({ page }) => {
       await open(page, AGENT, width);
       const hero = page.locator("[data-slot=agent-equity]");

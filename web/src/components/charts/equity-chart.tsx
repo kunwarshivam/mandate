@@ -30,6 +30,9 @@ const RANGE_WORDS: Record<EquityRange, string> = {
 /** Short enough on a phone that the range picker clears the tab bar under what needs you (DEC-207). */
 const ACCOUNT_PHONE_HEIGHT = 180;
 
+/** An agent's chart on a phone: its levels still read on the axis, and the headroom starts on the first screen's foot (DEC-482). */
+const AGENT_PHONE_HEIGHT = 200;
+
 /** The account leads Home's main column: the money is what an owner opens Home to see (DEC-468). */
 const ACCOUNT_HEIGHT = 260;
 
@@ -174,7 +177,7 @@ function EquityHero({
           onScrub={onScrub}
           pulse={pulse}
           height={tone === "account" ? ACCOUNT_HEIGHT : 300}
-          phoneHeight={tone === "account" ? ACCOUNT_PHONE_HEIGHT : undefined}
+          phoneHeight={tone === "account" ? ACCOUNT_PHONE_HEIGHT : AGENT_PHONE_HEIGHT}
           className="-mx-1"
         />
       )}

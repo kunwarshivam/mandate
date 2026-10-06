@@ -101,12 +101,14 @@ function PhoneSectionLinks({ agent }: { agent: Agent }) {
  * Every agent screen shares this frame: a title, the paper badge beside it, route tabs, and a Stop
  * scoped to this agent. Sections title it with the owner's label for the agent; a record passes its
  * own title and names the agent underneath. The document title stays generic either way. On a phone
- * the mode sits beside the title, since the mandate card that carries it on desktop does not.
+ * the mode sits beside the title, since the mandate card that carries it on desktop does not, and
+ * Stop this agent is a quiet "Stop" at the end of the title's row: the tab bar's Stop is always a
+ * press away and opens on this agent too, so the page's own need not take a row (DEC-482).
  */
 export function AgentFrame({ agent, title, description, children }: { agent: Agent; title?: string; description?: ReactNode; children: ReactNode }) {
   const canStop = useCan("stop.open");
   return (
-    <div className="grid grid-cols-1 gap-(--section-gap)">
+    <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8">
       <PageHeader
         title={title ?? agent.label}
         icon={<AgentOwl agent={agent} className="size-12 sm:size-16" />}
@@ -117,16 +119,22 @@ export function AgentFrame({ agent, title, description, children }: { agent: Age
         tabsLabel="Agent sections"
         tabsClassName="max-lg:hidden"
         className="mb-0"
+        actionsInline
         actions={
           canStop ? (
             <button
               type="button"
               onClick={() => window.dispatchEvent(new Event(OPEN_STOP_EVENT))}
               aria-haspopup="dialog"
-              className="press inline-flex h-11 items-center gap-2 rounded-lg border border-ink bg-card pr-5 pl-4 text-sm font-semibold text-foreground outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+              aria-label="Stop this agent…"
+              data-slot="stop-agent"
+              className="press inline-flex h-11 items-center gap-2 rounded-lg border border-ink bg-card pr-5 pl-4 text-sm font-semibold text-foreground outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 max-lg:-mr-2 max-lg:gap-1.5 max-lg:border-transparent max-lg:bg-transparent max-lg:px-2 max-lg:font-medium max-lg:text-muted-foreground max-lg:hover:text-foreground"
             >
-              <StopOctagon className="size-6" aria-hidden />
-              Stop this agent…
+              <StopOctagon className="size-6 shrink-0" aria-hidden />
+              <span className="max-lg:hidden">Stop this agent…</span>
+              <span aria-hidden className="lg:hidden">
+                Stop
+              </span>
             </button>
           ) : null
         }
