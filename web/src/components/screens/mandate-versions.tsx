@@ -1,5 +1,5 @@
 import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
-import type { Agent, ChangeClass, MandateVersionRecord } from "@/fixtures/types";
+import type { Agent, ChangeClass, MandateChange, MandateVersionRecord } from "@/fixtures/types";
 import { clock, dateLabel, zoneLabel } from "@/lib/format";
 import { CHANGE_CLASS_LABEL } from "@/lib/labels";
 import { changeLabel, changeValue } from "@/lib/mandate-paths";
@@ -14,11 +14,36 @@ const CLASS_TAG: Record<ChangeClass, string> = {
   neutral: "bg-background text-muted-foreground",
 };
 
-function ClassTag({ value }: { value: ChangeClass }) {
+export function ClassTag({ value }: { value: ChangeClass }) {
   return (
     <span data-slot="change-class" data-classification={value} className={cn(TAG, CLASS_TAG[value])}>
       {CHANGE_CLASS_LABEL[value]}
     </span>
+  );
+}
+
+/** A version's diff: each changed field, its old and new value, and how it moves risk. */
+export function ChangeRows({ changes }: { changes: MandateChange[] }) {
+  return (
+    <ul data-slot="version-changes" className="grid">
+      {changes.map((c) => (
+        <li
+          key={c.path}
+          data-slot="version-change"
+          data-path={c.path}
+          className="grid gap-1.5 border-b border-border/70 py-3 text-sm last:border-b-0 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_auto] sm:items-center sm:gap-4"
+        >
+          <span className="text-muted-foreground">{changeLabel(c.path)}</span>
+          <span className="flex flex-wrap items-center gap-x-2">
+            <span className="font-mono tabular">{changeValue(c.path, c.from)}</span>
+            <ArrowRight aria-hidden className="size-5 text-muted-foreground" />
+            <span className="sr-only">to</span>
+            <span className="font-mono font-medium tabular">{changeValue(c.path, c.to)}</span>
+          </span>
+          <ClassTag value={c.classification} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -38,15 +63,15 @@ function canceledLine(count: number): string {
 
 function Application({ version, number, inEffect }: { version: MandateVersionRecord; number: number; inEffect: number }) {
   const a = version.application;
-  if (version.previous === null) {
-    return (
-      <p>
-        Deployed to paper on <When at={a.at} />.
-      </p>
-    );
-  }
   switch (a.result) {
     case "applied":
+      if (version.previous === null) {
+        return (
+          <p>
+            Deployed to paper on <When at={a.at} />.
+          </p>
+        );
+      }
       return (
         <p>
           {version.classification === "risk_increasing" ? (
@@ -63,6 +88,12 @@ function Application({ version, number, inEffect }: { version: MandateVersionRec
       return (
         <p data-slot="version-rejected">
           Rejected at application, <When at={a.at} />. {a.reason} Version {inEffect} stays in effect; version {number} never applied.
+        </p>
+      );
+    case "pending":
+      return (
+        <p data-slot="version-pending">
+          Waiting for a safe point: it applies at the agent&apos;s next check with no order in an unknown state. Version {inEffect} stays in effect until then.
         </p>
       );
     default: {
@@ -100,6 +131,7 @@ export function MandateVersions({ agent }: { agent: Agent }) {
                     </h3>
                     {current ? <span className={cn(TAG, "bg-mandate text-mandate-strong ring-1 ring-mandate-edge ring-inset")}>In effect</span> : null}
                     {v.application.result === "rejected" ? <span className={cn(TAG, "bg-background text-foreground")}>Not applied</span> : null}
+                    {v.application.result === "pending" ? <span className={cn(TAG, "bg-background text-foreground")}>Waiting</span> : null}
                     {v.classification ? <ClassTag value={v.classification} /> : null}
                   </div>
                   <p className="text-caption text-muted-foreground">
@@ -107,27 +139,7 @@ export function MandateVersions({ agent }: { agent: Agent }) {
                     <span className="font-mono">{v.mandate_version.slice(7, 19)}</span>
                   </p>
                 </header>
-                {v.changes.length > 0 ? (
-                  <ul data-slot="version-changes" className="grid">
-                    {v.changes.map((c) => (
-                      <li
-                        key={c.path}
-                        data-slot="version-change"
-                        data-path={c.path}
-                        className="grid gap-1.5 border-b border-border/70 py-3 text-sm last:border-b-0 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_auto] sm:items-center sm:gap-4"
-                      >
-                        <span className="text-muted-foreground">{changeLabel(c.path)}</span>
-                        <span className="flex flex-wrap items-center gap-x-2">
-                          <span className="font-mono tabular">{changeValue(c.path, c.from)}</span>
-                          <ArrowRight aria-hidden className="size-5 text-muted-foreground" />
-                          <span className="sr-only">to</span>
-                          <span className="font-mono font-medium tabular">{changeValue(c.path, c.to)}</span>
-                        </span>
-                        <ClassTag value={c.classification} />
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
+                {v.changes.length > 0 ? <ChangeRows changes={v.changes} /> : null}
                 <div className="max-w-measure text-sm">
                   <Application version={v} number={number} inEffect={numberOf.get(agent.mandate_version) ?? number} />
                 </div>

@@ -292,8 +292,14 @@ export interface MandateChange {
   classification: ChangeClass;
 }
 
-/** `MandateVersionApplied` (mandate spec §2.2): applied, with the approvals it canceled, or rejected with the reason. */
-export type VersionApplication = { result: "applied"; at: Iso; approvals_canceled: number } | { result: "rejected"; at: Iso; reason: string };
+/**
+ * `MandateVersionApplied` (mandate spec §2.2): applied, with the approvals it canceled, or rejected
+ * with the reason. `pending`: a confirmed risk-increasing version that has not reached a safe point.
+ */
+export type VersionApplication =
+  | { result: "applied"; at: Iso; approvals_canceled: number }
+  | { result: "rejected"; at: Iso; reason: string }
+  | { result: "pending" };
 
 /**
  * A confirmed version of an agent's mandate. The first has no `previous` and no diff; every later one
@@ -431,6 +437,8 @@ export interface Workspace {
   now: Iso;
   environment: Environment;
   connection: Connection;
+  /** Distinct users with the approver role, which V-024 counts for a two-approver threshold. */
+  approver_users: number;
   health: Health;
   agents: Agent[];
   approvals: Approval[];
