@@ -358,7 +358,6 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -> Result<(), String>
 {
     let (scratch, loaded) = production_deployment_artifacts("production-deployment")?;
@@ -400,7 +399,6 @@ fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn shipping_paper_adapter_uses_only_the_validated_deployment_input() -> Result<(), String> {
     let (scratch, loaded) = production_deployment_artifacts("shipping-deployment")?;
     let input = loaded

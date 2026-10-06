@@ -29,11 +29,15 @@ use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_shell::adapters::{Sources, production};
 use mandate_shell::paper::{Artifacts, PaperFacts, liquidity_facts, load_contexts, preflight};
 use mandate_shell::stages::{JournalWriter, Stages};
-use mandate_shell::{Cause, Report, Setup, ShellError, Stage, cli, run};
+use mandate_shell::{Cause, Report, Setup, ShellError, Stage, run};
 use mandate_time::{Date, UtcNanos};
 
 const NOW: &str = "2026-09-28T17:00:00Z";
 const POST: &str = "POST /v2/orders";
+const TEST_WORKSPACE: &str = "tracer";
+const TEST_AGENT: &str = "tracer-aapl";
+const TEST_CONNECTION: &str = "conn_alpaca_paper_01";
+const TEST_ACCOUNT_REF: &str = "tracer-paper";
 /// The one bars read the preflight may send at [`NOW`]: the five complete minutes 16:55 to 16:59.
 const BARS: &str = "/v2/stocks/AAPL/bars?timeframe=1Min&start=2026-09-28T16:55:00Z&\
                     end=2026-09-28T16:59:00Z&limit=5&adjustment=raw&feed=iex&sort=asc";
@@ -370,7 +374,7 @@ fn assemble(
             stage: Stage::MarketData,
             cause,
         })?;
-    let agent = AgentId(cli::AGENT.to_owned());
+    let agent = AgentId(TEST_AGENT.to_owned());
     let contexts = load_contexts(
         &artifacts,
         &PaperFacts {
@@ -390,8 +394,8 @@ fn assemble(
         journal: None,
         recorded_at: now(),
         agent,
-        workspace: cli::WORKSPACE.to_owned(),
-        account_ref: cli::ACCOUNT_REF.to_owned(),
+        workspace: TEST_WORKSPACE.to_owned(),
+        account_ref: TEST_ACCOUNT_REF.to_owned(),
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         transport: broker.clone(),
@@ -410,11 +414,11 @@ fn assemble(
 fn setup() -> Setup {
     Setup {
         deployment: Deployment {
-            agent: AgentId(cli::AGENT.to_owned()),
-            connection: ConnectionId(cli::CONNECTION.to_owned()),
-            workspace: WorkspaceId(cli::WORKSPACE.to_owned()),
+            agent: AgentId(TEST_AGENT.to_owned()),
+            connection: ConnectionId(TEST_CONNECTION.to_owned()),
+            workspace: WorkspaceId(TEST_WORKSPACE.to_owned()),
         },
-        account_ref: cli::ACCOUNT_REF.to_owned(),
+        account_ref: TEST_ACCOUNT_REF.to_owned(),
         now: now(),
         place_one_order: true,
         new_cycle: false,

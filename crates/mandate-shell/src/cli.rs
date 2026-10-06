@@ -8,15 +8,6 @@ use std::path::PathBuf;
 
 use crate::error::ShellError;
 
-/// The workspace the tracer's streams belong to: the team's internal paper workspace (DEC-103).
-pub const WORKSPACE: &str = "tracer";
-/// The tracer's agent deployment.
-pub const AGENT: &str = "tracer-aapl";
-/// The paper connection the mandate names.
-pub const CONNECTION: &str = "conn_alpaca_paper_01";
-/// The account stream's opaque subject, never the broker's account number (TI-8).
-pub const ACCOUNT_REF: &str = "tracer-paper";
-
 /// What the operator asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Args {
@@ -95,14 +86,39 @@ where
 /// Parses production-cycle inputs after the program name.
 ///
 /// # Errors
-/// Refuses until E7-19's caller-owned deployment arguments are implemented.
-pub fn parse_production<I>(_args: I) -> Result<ProductionArgs, ShellError>
+/// [`ShellError::Usage`] under the same conditions as [`parse`], and when any caller-owned
+/// deployment identity field is absent.
+pub fn parse_production<I>(args: I) -> Result<ProductionArgs, ShellError>
 where
     I: IntoIterator<Item = String>,
 {
-    Err(usage(
-        "production inputs are not implemented yet (pending E7-19)".to_owned(),
-    ))
+    let mut workspace = None;
+    let mut agent = None;
+    let mut account_ref = None;
+    let mut common = Vec::new();
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if arg == "--workspace" {
+            workspace = Some(value_of(&arg, args.next())?);
+        } else if arg == "--agent" {
+            agent = Some(value_of(&arg, args.next())?);
+        } else if arg == "--account-ref" {
+            account_ref = Some(value_of(&arg, args.next())?);
+        } else {
+            common.push(arg);
+        }
+    }
+    let parsed = parse(common)?;
+    Ok(ProductionArgs {
+        mandate: parsed.mandate,
+        dataset: parsed.dataset,
+        config_dir: parsed.config_dir,
+        journal: parsed.journal,
+        place_one_order: parsed.place_one_order,
+        workspace: workspace.ok_or_else(|| usage("--workspace is required".to_owned()))?,
+        agent: agent.ok_or_else(|| usage("--agent is required".to_owned()))?,
+        account_ref: account_ref.ok_or_else(|| usage("--account-ref is required".to_owned()))?,
+    })
 }
 
 fn value_of(flag: &str, value: Option<String>) -> Result<String, ShellError> {
@@ -128,7 +144,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "pending E7-19"]
     fn production_arguments_require_caller_owned_deployment_identity() -> Result<(), String> {
         for (workspace, agent, account_ref) in [
             ("workspace-owner-42", "agent-deployment-9", "account-ref-7"),
