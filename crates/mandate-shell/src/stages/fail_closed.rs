@@ -954,10 +954,13 @@ fn the_production_exit_probes_over_the_shells_fixture() {
         flatten.is_ok(),
         "the flatten probe answers over the shell's mandate fixture: {flatten:?}"
     );
-    let protection = crate::adapters::ExecutorProtection::new(std::path::PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/tracer/mandate.json"
-    )))
+    let protection = crate::adapters::ExecutorProtection::new(
+        std::path::PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/tracer/mandate.json"
+        )),
+        Some(mandate_executor::ExecutorConfig::PROPOSED),
+    )
     .probe();
     assert!(
         protection.is_ok(),

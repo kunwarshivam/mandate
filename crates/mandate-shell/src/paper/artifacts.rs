@@ -10,12 +10,12 @@ use mandate_alpaca::Exchange as BrokerExchange;
 use mandate_canon::{Digest, Key, Value};
 use mandate_domain::{AssetClass as DomainAssetClass, AssetId};
 use mandate_executor::{BindingGateConfigRefs, ExecutorConfig};
-use mandate_num::{Qty, ShareIncrement};
+use mandate_num::{Fraction, Qty, ShareIncrement};
 use mandate_risk::{EtpClass, Exchange as GateExchange, GateConfig};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
-use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, SYMBOL, absent};
+use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, SYMBOL, absent, usd};
 use crate::error::Cause;
 
 /// The largest quote-age bound the rule-set artifact may name: a minute-old quote is already older
@@ -35,6 +35,8 @@ pub struct Artifacts {
     pub(super) instrument: ReviewedInstrument,
     pub(super) quote_max_age: Duration,
     pub(super) config_refs: BindingGateConfigRefs,
+    gate_config: GateConfig,
+    executor_config: ExecutorConfig,
 }
 
 /// Instrument and model identity derived from the confirmed mandate and reviewed snapshots.
@@ -227,6 +229,8 @@ impl Artifacts {
             .and_then(Value::as_int)
             .filter(|seconds| (1..=MAX_QUOTE_AGE_S).contains(seconds))
             .ok_or_else(|| absent("a reviewed IEX quote age of 1 to 60 seconds"))?;
+        let gate_config = gate_configuration(&rules.value)?;
+        let executor_config = executor_configuration(&rules.value)?;
 
         let canonical_mandate = mandate
             .canonical_bytes()
@@ -247,6 +251,8 @@ impl Artifacts {
             instrument,
             quote_max_age: Duration::from_secs(quote_max_age_s),
             config_refs,
+            gate_config,
+            executor_config,
         })
     }
 
@@ -272,9 +278,12 @@ impl Artifacts {
     /// Returns the effective gate and executor configuration from the reviewed rule set.
     ///
     /// # Errors
-    /// Refuses until E7-19's content-addressed production configuration is implemented.
+    /// This loaded artifact has already validated both configurations, so this cannot fail.
     pub fn production_configuration(&self) -> Result<ProductionConfiguration<'_>, Cause> {
-        Err(Cause::Unimplemented { story: "E7-19" })
+        Ok(ProductionConfiguration {
+            gate: &self.gate_config,
+            executor: self.executor_config,
+        })
     }
 
     /// Validates caller-supplied opaque deployment ids and binds the connection from the mandate.
@@ -299,6 +308,119 @@ impl Artifacts {
             account_ref,
         })
     }
+}
+
+fn gate_configuration(rule_set: &Value) -> Result<GateConfig, Cause> {
+    let value = required_exact_object(
+        rule_set,
+        "gate_config",
+        &[
+            "close_window_minutes",
+            "collar_crypto_x",
+            "collar_liquid_threshold_usd",
+            "collar_liquid_x",
+            "collar_other_x",
+            "collar_passive_band",
+            "crypto_liquidity_floor_usd",
+            "daily_participation",
+            "etp_classification_max_age_s",
+            "legacy_pdt_equity_threshold",
+            "liquidity_floor_usd",
+            "min_resting_time_s",
+            "opposite_fill_interval_s",
+            "order_size_participation",
+            "order_to_fill_max",
+            "order_to_fill_min_orders",
+            "price_floor",
+        ],
+    )?;
+    Ok(GateConfig {
+        price_floor: usd(required_text(value, "price_floor")?)?,
+        liquidity_floor_usd: usd(required_text(value, "liquidity_floor_usd")?)?,
+        crypto_liquidity_floor_usd: usd(required_text(value, "crypto_liquidity_floor_usd")?)?,
+        collar_liquid_threshold_usd: usd(required_text(value, "collar_liquid_threshold_usd")?)?,
+        collar_liquid_x: Fraction::parse(required_text(value, "collar_liquid_x")?)?,
+        collar_other_x: Fraction::parse(required_text(value, "collar_other_x")?)?,
+        collar_crypto_x: Fraction::parse(required_text(value, "collar_crypto_x")?)?,
+        collar_passive_band: Fraction::parse(required_text(value, "collar_passive_band")?)?,
+        opposite_fill_interval_s: required_positive_u32(value, "opposite_fill_interval_s")?,
+        min_resting_time_s: required_positive_u32(value, "min_resting_time_s")?,
+        order_to_fill_max: required_positive_u32(value, "order_to_fill_max")?,
+        order_to_fill_min_orders: required_positive_u32(value, "order_to_fill_min_orders")?,
+        order_size_participation: Fraction::parse(required_text(
+            value,
+            "order_size_participation",
+        )?)?,
+        daily_participation: Fraction::parse(required_text(value, "daily_participation")?)?,
+        close_window_minutes: required_positive_u32(value, "close_window_minutes")?,
+        legacy_pdt_equity_threshold: usd(required_text(value, "legacy_pdt_equity_threshold")?)?,
+        etp_classification_max_age_s: required_positive_u32(value, "etp_classification_max_age_s")?,
+    })
+}
+
+fn executor_configuration(rule_set: &Value) -> Result<ExecutorConfig, Cause> {
+    let value = required_exact_object(
+        rule_set,
+        "executor",
+        &[
+            "bracket_partial_fill_timeout_s",
+            "exit_step_s",
+            "gtc_expiry_days",
+            "max_intent_age_s",
+            "max_unprotected_s",
+            "protective_replace_buffer_trading_days",
+            "restriction_403_threshold",
+            "stop_watchdog_s",
+            "unknown_absent_lookups",
+            "unknown_absent_window_s",
+        ],
+    )?;
+    Ok(ExecutorConfig {
+        max_intent_age_s: required_positive_i64(value, "max_intent_age_s")?,
+        unknown_absent_lookups: required_positive_u32(value, "unknown_absent_lookups")?,
+        unknown_absent_window_s: required_positive_i64(value, "unknown_absent_window_s")?,
+        protective_replace_buffer_trading_days: required_positive_u32(
+            value,
+            "protective_replace_buffer_trading_days",
+        )?,
+        restriction_403_threshold: required_positive_u32(value, "restriction_403_threshold")?,
+        bracket_partial_fill_timeout_s: required_positive_i64(
+            value,
+            "bracket_partial_fill_timeout_s",
+        )?,
+        max_unprotected_s: required_positive_i64(value, "max_unprotected_s")?,
+        stop_watchdog_s: required_positive_i64(value, "stop_watchdog_s")?,
+        exit_step_s: required_positive_i64(value, "exit_step_s")?,
+        gtc_expiry_days: required_positive_u32(value, "gtc_expiry_days")?,
+    })
+}
+
+fn required_exact_object<'a>(
+    value: &'a Value,
+    name: &'static str,
+    members: &[&str],
+) -> Result<&'a Value, Cause> {
+    let nested = value.get(name).ok_or_else(|| absent(name))?;
+    let exact = nested
+        .as_object()
+        .is_some_and(|object| object.keys().map(Key::as_str).eq(members.iter().copied()));
+    if exact { Ok(nested) } else { Err(absent(name)) }
+}
+
+fn required_positive_u64(value: &Value, name: &'static str) -> Result<u64, Cause> {
+    value
+        .get(name)
+        .and_then(Value::as_int)
+        .filter(|number| *number > 0)
+        .ok_or_else(|| absent(name))
+}
+
+fn required_positive_u32(value: &Value, name: &'static str) -> Result<u32, Cause> {
+    u32::try_from(required_positive_u64(value, name)?).map_err(|_| absent(name))
+}
+
+fn required_positive_i64(value: &Value, name: &'static str) -> Result<i64, Cause> {
+    i64::try_from(required_positive_u64(value, name)?).map_err(|_| absent(name))
 }
 
 fn require_opaque_id(text: &str, fact: &'static str) -> Result<(), Cause> {

@@ -15,8 +15,8 @@ use mandate_builder::{
 };
 use mandate_domain::{AssetClass as DomainAssetClass, MarketSession};
 use mandate_executor::{
-    BindingGateInput, BindingGateRequest, BindingGateSource, ExecutorConfig, InstrumentSnapshot,
-    MandateVersion, MandateView as ExecutorMandateView, equity_bracket_prices,
+    BindingGateInput, BindingGateRequest, BindingGateSource, InstrumentSnapshot, MandateVersion,
+    MandateView as ExecutorMandateView, equity_bracket_prices,
 };
 use mandate_num::{
     CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, ShareIncrement, Signed, SizeFraction,
@@ -29,7 +29,7 @@ use mandate_time::{Date, UtcNanos};
 
 use super::artifacts::Artifacts;
 use super::facts::{BrokerFacts, PaperFacts};
-use super::gate::{advisory_gate_context, gate_template, platform_gate_config, reservation};
+use super::gate::{advisory_gate_context, gate_template, reservation};
 use super::judge::{judge, judge_submission_time};
 use super::{absent, usd};
 use crate::adapters::{BuilderContext, DecisionContext, ExecutorContext, RunContext};
@@ -87,7 +87,8 @@ pub fn load_contexts_with_clock(
     agent: &AgentId,
     clock: Rc<dyn PaperClock>,
 ) -> Result<Contexts, Cause> {
-    let config = platform_gate_config()?;
+    let configuration = artifacts.production_configuration()?;
+    let config = configuration.gate.clone();
     let today = judge(artifacts, &facts.broker, now, &config)?;
     let template = gate_template(artifacts, facts, now, config)?;
     let source = Rc::new(TrustedPaperContext {
@@ -106,7 +107,7 @@ pub fn load_contexts_with_clock(
         source.clone(),
         source.clone(),
         source,
-        ExecutorConfig::PROPOSED,
+        configuration.executor,
         artifacts.fees.clone(),
     );
     Ok(Contexts {
