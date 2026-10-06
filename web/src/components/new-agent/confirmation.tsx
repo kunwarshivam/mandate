@@ -293,6 +293,7 @@ export function Confirmation({ draft, request, onBack, onStartOver }: { draft: D
       <StepUpDialog
         open={asking}
         action={deployAction(draft)}
+        finalFocus={() => progress.current?.querySelector<HTMLElement>("h2") ?? true}
         onVerified={() => {
           setAsking(false);
           confirm();

@@ -35,12 +35,15 @@ export function StepUpDialog({
   onVerified,
   onCancel,
   onFailed,
+  finalFocus = true,
 }: {
   action: string;
   open: boolean;
   onVerified: () => void;
   onCancel: () => void;
   onFailed: () => void;
+  /** Where focus goes once the dialog has closed, when the action that opened it is no longer on the page. */
+  finalFocus?: true | (() => HTMLElement | true);
 }) {
   const passkey = useContext(PasskeyContext);
   const [waiting, setWaiting] = useState(false);
@@ -99,6 +102,7 @@ export function StepUpDialog({
         <Dialog.Popup
           ref={focusOnMount}
           initialFocus={popupRef}
+          finalFocus={finalFocus}
           data-slot="step-up-dialog"
           className="fixed top-1/2 left-1/2 z-60 grid w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-5 rounded-3xl border border-border bg-card p-6 text-foreground shadow-2xl outline-none"
         >
