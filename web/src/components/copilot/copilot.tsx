@@ -11,6 +11,7 @@ import { Plus } from "pixelarticons/react/Plus.js";
 import { Sliders } from "pixelarticons/react/Sliders.js";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { Composer, type ComposerHandle } from "@/components/chat/composer";
+import { JumpToLatest, useFollow } from "@/components/chat/follow";
 import { OwnerSaid, RecordReply } from "@/components/chat/record-reply";
 import type { Icon } from "@/components/icon";
 import { agentIdFrom } from "@/components/shell/stop-control";
@@ -121,7 +122,6 @@ const STARTS: ReadonlyArray<{ say: string; label: string; icon: Icon }> = [
   { say: "Create an agent", label: "Create an agent", icon: Plus },
 ];
 
-const NOTE = "Owlhead answers from your record. Nothing happens until you press.";
 const ICON_BUTTON =
   "press inline-flex size-11 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring";
 
@@ -132,7 +132,7 @@ function Panel({ onClose }: { onClose: () => void }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [unscopedOn, setUnscopedOn] = useState<string | null>(null);
   const composer = useRef<ComposerHandle>(null);
-  const end = useRef<HTMLDivElement>(null);
+  const { scroller, content, away, jump, pin } = useFollow("owlhead");
 
   const onPage = agentIdFrom(pathname);
   const agentId = unscopedOn === pathname ? null : onPage;
@@ -144,13 +144,8 @@ function Panel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     composer.current?.focus();
   }, []);
-  useEffect(() => {
-    if (turns.length === 0) return;
-    const behavior: ScrollBehavior = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-    end.current?.scrollIntoView({ block: "end", behavior });
-  }, [turns.length]);
-
   const ask = (said: string) => {
+    pin();
     setTurns((t) => [...t, { id: t.length, said, reply: interpret(said, { ws, now, agentId: agent?.agent_id ?? null }) }]);
     composer.current?.focus();
   };
@@ -190,58 +185,66 @@ function Panel({ onClose }: { onClose: () => void }) {
         </button>
       </header>
 
-      <div className="grid flex-1 content-start gap-5 overflow-y-auto px-5 py-5" data-slot="copilot-body">
-        <p className="flex flex-wrap items-center gap-2 text-caption text-muted-foreground" data-slot="looking-at">
-          Looking at
-          <span className={cn("inline-flex h-8 items-center gap-0.5 rounded-full border border-border pl-2.5 font-medium text-foreground", agent ? "pr-0.5" : "pr-2.5")}>
-            {agent ? agent.label : screen}
-            {agent ? (
-              <button
-                type="button"
-                aria-label={`Ask about all agents, not only ${agent.label}`}
-                className="press inline-flex size-8 items-center justify-center rounded-full outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring max-lg:-my-1.5 max-lg:size-11"
-                onClick={() => setUnscopedOn(pathname)}
-              >
-                <Close aria-hidden className="size-6" />
-              </button>
-            ) : null}
-          </span>
-        </p>
+      <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div ref={content} className="grid grid-cols-[minmax(0,1fr)] content-start gap-5 px-5 py-5" data-slot="copilot-body">
+          <p className="flex flex-wrap items-center gap-2 text-caption text-muted-foreground" data-slot="looking-at">
+            Looking at
+            <span className={cn("inline-flex h-8 items-center gap-0.5 rounded-full border border-border pl-2.5 font-medium text-foreground", agent ? "pr-0.5" : "pr-2.5")}>
+              {agent ? agent.label : screen}
+              {agent ? (
+                <button
+                  type="button"
+                  aria-label={`Ask about all agents, not only ${agent.label}`}
+                  className="press inline-flex size-8 items-center justify-center rounded-full outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring max-lg:-my-1.5 max-lg:size-11"
+                  onClick={() => setUnscopedOn(pathname)}
+                >
+                  <Close aria-hidden className="size-6" />
+                </button>
+              ) : null}
+            </span>
+          </p>
 
-        {turns.length === 0 ? (
-          <div className="grid gap-4" data-slot="copilot-start">
-            <BrandOwl className="size-12" />
-            <div className="grid gap-1">
-              <p className="text-h3 text-pretty">Ask about your agents.</p>
-              <p className="text-sm text-pretty text-muted-foreground">{summary}</p>
-            </div>
-            <ul aria-label="Start with" className="grid border-t border-border/70">
-              {STARTS.map(({ say, label, icon: Glyph }) => (
-                <li key={say} className="border-b border-border/70">
-                  <button type="button" onClick={() => ask(say)} className="press flex min-h-12 w-full items-center gap-3 rounded-md px-1 text-left text-sm outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring">
-                    <Glyph aria-hidden className="size-6 shrink-0 text-muted-foreground" />
-                    <span className="flex-1">{label}</span>
-                    <ChevronRight aria-hidden className="size-6 shrink-0 text-muted-foreground" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <div role="log" aria-label="Owlhead conversation" className="grid gap-5">
-            {turns.map((turn) => (
-              <div key={turn.id} className="grid gap-3">
-                <OwnerSaid text={turn.said} />
-                <RecordReply reply={turn.reply} onAsk={ask} onCreate={create} />
+          {turns.length === 0 ? (
+            <div className="grid gap-4" data-slot="copilot-start">
+              <BrandOwl className="size-12" />
+              <div className="grid gap-1">
+                <p className="text-h3 text-pretty">Ask about your agents.</p>
+                <p className="text-sm text-pretty text-muted-foreground">{summary}</p>
               </div>
-            ))}
-            <div ref={end} aria-hidden />
-          </div>
-        )}
+              <ul aria-label="Start with" className="grid border-t border-border/70">
+                {STARTS.map(({ say, label, icon: Glyph }) => (
+                  <li key={say} className="border-b border-border/70">
+                    <button type="button" onClick={() => ask(say)} className="press flex min-h-12 w-full items-center gap-3 rounded-md px-1 text-left text-sm outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring">
+                      <Glyph aria-hidden className="size-6 shrink-0 text-muted-foreground" />
+                      <span className="flex-1">{label}</span>
+                      <ChevronRight aria-hidden className="size-6 shrink-0 text-muted-foreground" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div role="log" aria-label="Owlhead conversation" className="grid gap-5">
+              {turns.map((turn) => (
+                <div key={turn.id} className="grid gap-3">
+                  <OwnerSaid text={turn.said} />
+                  <RecordReply reply={turn.reply} onAsk={ask} onCreate={create} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="shrink-0 px-5 pt-2 pb-4">
-        <Composer ref={composer} slot="copilot-composer" label="Ask Owlhead" placeholder="Ask, or tell Owlhead what to do" note={NOTE} onSend={ask} />
+      <div className="relative shrink-0 px-5 pt-2 pb-4">
+        <JumpToLatest
+          away={away}
+          onJump={() => {
+            jump();
+            composer.current?.focus();
+          }}
+        />
+        <Composer ref={composer} slot="copilot-composer" label="Ask Owlhead" placeholder="Ask, or tell Owlhead what to do" onSend={ask} />
       </div>
     </aside>
   );

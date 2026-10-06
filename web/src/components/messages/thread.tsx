@@ -1,7 +1,8 @@
 "use client";
 
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useRef } from "react";
 import { Composer, type ComposerHandle } from "@/components/chat/composer";
+import { JumpToLatest, useFollow } from "@/components/chat/follow";
 import { AskChips, ONE_ROW, OwnerSaid, RecordReply } from "@/components/chat/record-reply";
 import { KIND_LABEL } from "@/components/domain/timeline";
 import type { Agent, Iso, TimelineEvent } from "@/fixtures/types";
@@ -13,11 +14,11 @@ import { useCan } from "@/lib/roles";
 import { type Turn, useTurns } from "./conversations";
 import { PinnedRequest, RequestCard } from "./request-card";
 
-/** The tab bar's height on a phone and the dock's clearance on a desktop, under the composer. */
-export const COMPOSER_DOCK =
-  "sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) bg-card px-(--page-x) pt-2 pb-3 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-[calc(var(--dock-clearance)+1rem)]";
+/** The thread's gutter, matched by the composer under it so the two share one edge. */
+const THREAD_X = "px-(--page-x) lg:px-8";
 
-const COMPOSER_NOTE = "Owlhead answers from your record. Nothing happens until you press.";
+/** Under the composer: nothing on a phone, where the tab bar sits below the pane; the dock's clearance on a desktop. */
+const COMPOSER_DOCK = `relative shrink-0 bg-card pt-2 pb-3 ${THREAD_X} lg:pb-[calc(var(--dock-clearance)+0.5rem)]`;
 
 /** A journal entry in the thread: written by code at the time shown, never in a model's voice. */
 function JournalLine({ event, now }: { event: TimelineEvent; now: Iso }) {
@@ -45,6 +46,9 @@ function entriesOf(items: ThreadItem[], turns: Turn[]): Entry[] {
  * An agent's thread (DEC-476): its journal, oldest first, its requests as cards that open the
  * request, and below them what the owner asked and the record's answers. Asking writes nothing to
  * the journal; only a Pause the owner presses does, and its entry then appears here like any other.
+ * The log scrolls on its own above the composer (DEC-478): it opens at the latest entry, follows new
+ * ones while the owner is there, stays put once they scroll up to read, and comes back down when
+ * they send.
  */
 export function ThreadChat({ agent }: { agent: Agent }) {
   const { ws, now } = useRuntime();
@@ -52,8 +56,7 @@ export function ThreadChat({ agent }: { agent: Agent }) {
   const canPause = useCan("stop.pause");
   const [turns, addTurn] = useTurns(agent.agent_id);
   const composer = useRef<ComposerHandle>(null);
-  const end = useRef<HTMLDivElement>(null);
-  const counted = useRef(turns.length);
+  const { scroller, content, away, jump, pin } = useFollow(agent.agent_id);
 
   const items = threadItems(ws, agent.agent_id, now);
   const entries = entriesOf(items, turns);
@@ -64,47 +67,46 @@ export function ThreadChat({ agent }: { agent: Agent }) {
   const pausable = canPause && (agent.mode === "normal" || agent.mode === "exits_only");
   const starters = pausable ? [...STARTERS, `Pause ${agent.label}`] : STARTERS;
 
-  useEffect(() => {
-    end.current?.scrollIntoView({ block: "end" });
-  }, [agent.agent_id]);
-  useEffect(() => {
-    if (turns.length === counted.current) return;
-    counted.current = turns.length;
-    const behavior: ScrollBehavior = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-    end.current?.scrollIntoView({ block: "end", behavior });
-  }, [turns.length]);
-
   const ask = (said: string) => {
+    pin();
     addTurn({ id: `turn-${agent.agent_id}-${turns.length}`, at: now, said, reply: interpret(said, { ws, now, agentId: agent.agent_id }) });
     composer.current?.focus();
   };
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] content-start gap-6" data-slot="thread-chat">
+    <div className="flex min-h-0 flex-1 flex-col" data-slot="thread-chat">
       {waiting ? <PinnedRequest approval={waiting} /> : null}
-      <div role="log" aria-label={`${agent.label}'s thread`} className="grid gap-5" data-slot="thread">
-        {items.length === 0 && turns.length === 0 ? <p className="text-muted-foreground">Nothing is recorded for {agent.label} yet. Its orders, requests and mode changes appear here.</p> : null}
-        {groups.map((group) => (
-          <section key={group.day} aria-label={group.label} className="grid gap-5">
-            <h3 className="justify-self-center text-label text-muted-foreground">{group.label}</h3>
-            {group.items.map((entry) => {
-              if (entry.kind === "turn") {
-                return (
-                  <Fragment key={entry.turn.id}>
-                    <OwnerSaid text={entry.turn.said} />
-                    <RecordReply reply={entry.turn.reply} onAsk={ask} onCreate={create} />
-                  </Fragment>
-                );
-              }
-              const { item } = entry;
-              return item.kind === "event" ? <JournalLine key={item.id} event={item.event} now={now} /> : <RequestCard key={item.id} approval={item.approval} now={now} />;
-            })}
-          </section>
-        ))}
-        <div ref={end} aria-hidden />
+      <div ref={scroller} data-slot="thread-scroll" className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div ref={content} role="log" aria-label={`${agent.label}'s thread`} className={`grid grid-cols-[minmax(0,1fr)] gap-5 pt-6 pb-4 ${THREAD_X}`} data-slot="thread">
+          {items.length === 0 && turns.length === 0 ? <p className="text-muted-foreground">Nothing is recorded for {agent.label} yet. Its orders, requests and mode changes appear here.</p> : null}
+          {groups.map((group) => (
+            <section key={group.day} aria-label={group.label} className="grid grid-cols-[minmax(0,1fr)] gap-5">
+              <h3 className="justify-self-center text-label text-muted-foreground">{group.label}</h3>
+              {group.items.map((entry) => {
+                if (entry.kind === "turn") {
+                  return (
+                    <Fragment key={entry.turn.id}>
+                      <OwnerSaid text={entry.turn.said} />
+                      <RecordReply reply={entry.turn.reply} onAsk={ask} onCreate={create} />
+                    </Fragment>
+                  );
+                }
+                const { item } = entry;
+                return item.kind === "event" ? <JournalLine key={item.id} event={item.event} now={now} /> : <RequestCard key={item.id} approval={item.approval} now={now} />;
+              })}
+            </section>
+          ))}
+        </div>
       </div>
 
-      <div className={COMPOSER_DOCK}>
+      <div className={COMPOSER_DOCK} data-slot="composer-dock">
+        <JumpToLatest
+          away={away}
+          onJump={() => {
+            jump();
+            composer.current?.focus();
+          }}
+        />
         {turns.length === 0 ? <AskChips asks={starters} onAsk={ask} label="Ask about this agent" className={ONE_ROW} /> : null}
         <Composer
           ref={composer}
@@ -112,7 +114,7 @@ export function ThreadChat({ agent }: { agent: Agent }) {
           placeholder={`Ask about ${agent.label}, or say pause`}
           onSend={ask}
           className={turns.length === 0 ? "pt-3" : undefined}
-          note={COMPOSER_NOTE}
+         
         />
       </div>
     </div>

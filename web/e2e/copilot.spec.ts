@@ -44,7 +44,7 @@ for (const [width, height] of [
   });
 }
 
-test("on an agent's page it answers about that agent, from the record", async ({ page }) => {
+test("on an agent's page it answers about that agent", async ({ page }) => {
   await open(page, `/agents/${AGENT_IDS.swing}`, 1440, 900);
   await page.getByRole("button", { name: "Ask Owlhead" }).click();
   await expect(panel(page).locator("[data-slot=looking-at]")).toContainText("Agent 2");
@@ -52,8 +52,8 @@ test("on an agent's page it answers about that agent, from the record", async ({
   await field.fill("How close is it to its limits?");
   await field.press("Enter");
   const answer = panel(page).locator("[data-slot=record-answer]");
-  await expect(answer).toContainText("From the record");
-  await expect(answer).toContainText(/Daily loss limit: \$[\d,]+\.\d{2} headroom/);
+  await expect(answer).not.toContainText(/from the record/i);
+  await expect(answer.getByRole("table", { name: "Headroom under each limit" }).getByRole("row", { name: /^Daily loss limit/ })).toContainText(/\$[\d,]+\.\d{2}/);
   await expect(answer).not.toContainText(/Agent 1|Agent 3/);
 });
 

@@ -7,6 +7,7 @@ import { AvatarCircle } from "pixelarticons/react/AvatarCircle.js";
 import { Script } from "pixelarticons/react/Script.js";
 import { Shield } from "pixelarticons/react/Shield.js";
 import { Sliders } from "pixelarticons/react/Sliders.js";
+import { Markdown } from "@/components/chat/markdown";
 import type { Icon } from "@/components/icon";
 import type { Agent, Iso } from "@/fixtures/types";
 import { clock } from "@/lib/format";
@@ -66,10 +67,8 @@ function Step({ step, now, last }: { step: DeskStep; now: Iso; last: boolean }) 
                 {clock(q.produced_at)}
               </time>
             </figcaption>
-            <blockquote className="grid gap-0.5 font-mono text-sm">
-              {q.lines.map((line, i) => (
-                <p key={i}>{line}</p>
-              ))}
+            <blockquote className="font-mono text-sm">
+              <Markdown text={q.lines.join("\n")} links="show" />
             </blockquote>
           </figure>
         ))}
@@ -95,15 +94,14 @@ function Step({ step, now, last }: { step: DeskStep; now: Iso; last: boolean }) 
 
 /**
  * The desk (DEC-476): how the agent's latest request was made, from the models to the owner. Each
- * step is a journaled fact; model output is quoted in a dashed frame and named, and nothing on the
- * desk is in the agent's voice.
+ * step is a journaled fact; model output is quoted in a dashed frame and named, its Markdown drawn
+ * and its links shown but never opened (DEC-478), and nothing on the desk is in the agent's voice.
  */
 export function ThreadDesk({ agent }: { agent: Agent }) {
   const { ws, now } = useRuntime();
   const desk = deskFor(ws, agent.agent_id, now);
   return (
     <div className="grid content-start gap-5" data-slot="thread-desk">
-      <p className="max-w-measure text-sm text-pretty text-muted-foreground">Code writes these steps from the journal. Model text is quoted as the model wrote it.</p>
       {desk ? (
         <>
           <h3 className="text-h3 text-pretty">

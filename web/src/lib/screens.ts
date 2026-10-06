@@ -41,7 +41,7 @@ export const SCREENS: readonly Screen[] = [
     key: "messages",
     href: "/messages",
     label: "Messages",
-    purpose: "Each agent's thread, from the journal, and answers from the record to what you ask.",
+    purpose: "Every agent's thread, and answers to what you ask.",
     group: "main",
     built: true,
     needs: "agents.view",

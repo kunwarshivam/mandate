@@ -68,7 +68,7 @@ export function ThreadList({ ws, now, current }: { ws: Workspace; now: Iso; curr
         <BrandOwl still className="size-12" />
         <span className="grid min-w-0 gap-0.5">
           <span className="font-medium">Owlhead</span>
-          <span className="text-sm text-pretty text-muted-foreground">Ask about all your agents, from the record.</span>
+          <span className="text-sm text-pretty text-muted-foreground">Ask about all your agents.</span>
         </span>
       </button>
       {needsYou.length > 0 ? (

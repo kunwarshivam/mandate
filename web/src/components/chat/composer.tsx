@@ -13,8 +13,8 @@ export interface ComposerHandle {
 
 /**
  * The one message field: Enter sends, Shift+Enter breaks the line, and the field keeps focus after
- * sending. `status` sits above it for what is happening now; `note` sits below it for what a message
- * can and cannot do. Where it sticks is the caller's, through `className`.
+ * sending. `status` sits above it for what is happening now; `note`, when there is one, sits below it
+ * for what a message can and cannot do. Where it sticks is the caller's, through `className`.
  */
 export function Composer({
   label,
@@ -30,7 +30,7 @@ export function Composer({
   initialText = null,
 }: {
   label: string;
-  note: ReactNode;
+  note?: ReactNode;
   status?: ReactNode;
   disabled?: boolean;
   busy?: boolean;
@@ -83,7 +83,7 @@ export function Composer({
           disabled={disabled}
           autoFocus={initialText !== null && initialText !== ""}
           placeholder={placeholder}
-          aria-describedby={`${id}-note`}
+          aria-describedby={note === undefined ? undefined : `${id}-note`}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={keys}
           className="field-sizing-content max-h-48 min-h-11 flex-1 resize-none bg-transparent py-2.5 text-base leading-normal text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
@@ -92,9 +92,11 @@ export function Composer({
           <ArrowUp className="size-6" aria-hidden />
         </button>
       </div>
-      <p id={`${id}-note`} className="px-4 text-caption text-pretty text-muted-foreground" data-slot="model-note">
-        {note}
-      </p>
+      {note === undefined ? null : (
+        <p id={`${id}-note`} className="px-4 text-caption text-pretty text-muted-foreground" data-slot="model-note">
+          {note}
+        </p>
+      )}
     </form>
   );
 }
