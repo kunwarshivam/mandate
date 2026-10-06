@@ -12,6 +12,7 @@ use mandate_domain::{AssetClass as DomainAssetClass, AssetId};
 use mandate_executor::BindingGateConfigRefs;
 use mandate_num::{Qty, ShareIncrement};
 use mandate_risk::{EtpClass, Exchange as GateExchange};
+use mandate_runtime::Deployment;
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, SYMBOL, absent};
@@ -46,6 +47,13 @@ pub struct ProductionIdentity<'a> {
     pub model_id: &'a str,
     pub model_version: &'a str,
     pub model_hash: Digest,
+}
+
+/// Validated opaque deployment identity for one production cycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeploymentInput {
+    pub deployment: Deployment,
+    pub account_ref: String,
 }
 
 /// What the instrument artifact states, each field read by the run: the symbol the broker is read
@@ -234,6 +242,19 @@ impl Artifacts {
             model_version: &self.model_version,
             model_hash: self.model_hash,
         }
+    }
+
+    /// Validates caller-supplied opaque deployment ids and binds the connection from the mandate.
+    ///
+    /// # Errors
+    /// Refuses until E7-19's deployment-input constructor is implemented.
+    pub fn deployment(
+        &self,
+        _workspace: String,
+        _agent: String,
+        _account_ref: String,
+    ) -> Result<DeploymentInput, Cause> {
+        Err(Cause::Unimplemented { story: "E7-19" })
     }
 }
 

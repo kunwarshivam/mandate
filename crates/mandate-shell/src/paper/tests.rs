@@ -345,6 +345,44 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
 }
 
 #[test]
+#[ignore = "pending E7-19"]
+fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -> Result<(), String>
+{
+    let loaded = artifacts()?;
+    let input = loaded
+        .deployment(
+            "workspace-owner-42".to_owned(),
+            "agent-deployment-9".to_owned(),
+            "account-ref-7".to_owned(),
+        )
+        .map_err(text)?;
+    assert_eq!(input.deployment.workspace.0, "workspace-owner-42");
+    assert_eq!(input.deployment.agent.0, "agent-deployment-9");
+    assert_eq!(
+        input.deployment.connection.0,
+        loaded.mandate.connection_id.as_str()
+    );
+    assert_eq!(input.account_ref, "account-ref-7");
+    for (name, workspace, agent, account_ref) in [
+        ("workspace", "", "agent-deployment-9", "account-ref-7"),
+        ("agent", "workspace-owner-42", "", "account-ref-7"),
+        ("account", "workspace-owner-42", "agent-deployment-9", ""),
+    ] {
+        assert!(
+            loaded
+                .deployment(
+                    workspace.to_owned(),
+                    agent.to_owned(),
+                    account_ref.to_owned()
+                )
+                .is_err(),
+            "{name} must not be empty"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn a_missing_effective_dated_artifact_refuses_the_load() {
     let loaded = Artifacts::load(
         &fixtures().join("mandate.json"),
