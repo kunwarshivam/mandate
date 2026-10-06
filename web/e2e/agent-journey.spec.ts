@@ -18,6 +18,13 @@ async function answer(page: Page, text: string) {
   await page.getByRole("button", { name: "Continue" }).click();
 }
 
+/** Opens one of the agent's tabs and waits until it is the current page, so what follows reads that tab. */
+async function openTab(page: Page, name: string) {
+  const tab = page.getByRole("navigation", { name: "Agent sections" }).getByRole("link", { name });
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-current", "page");
+}
+
 function section(page: Page, key: string) {
   return page.locator(`[data-slot=review-section][data-section=${key}]`);
 }
@@ -93,11 +100,13 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
     await expect(page.getByRole("heading", { level: 1, name: "Agents" })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^Agent 4/ })).toBeVisible();
     await dock(page).getByRole("link", { name: "Home" }).click();
+    await expect(page).toHaveURL("/");
     await expect(page.getByRole("main")).toContainText("Agent 4");
   });
 
   await test.step("D6: the first buy asks, and the owner approves it", async () => {
     await dock(page).getByRole("link", { name: "Approvals" }).click();
+    await expect(page).toHaveURL("/approvals");
     await page.getByRole("main").getByRole("link", { name: /MSFT/ }).first().click();
     await expect(page.getByRole("main")).toContainText("Buy 6 MSFT at a limit of $44.62");
     await expect(page.getByRole("main")).toContainText("Your mandate asks before every buy.");
@@ -110,24 +119,23 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
     await dock(page).getByRole("link", { name: "Agents" }).click();
     await page.locator(`a[href="${agentHref}"]`).first().click();
     await expect(page).toHaveURL(agentHref);
-    const tabs = page.getByRole("navigation", { name: "Agent sections" });
 
-    await tabs.getByRole("link", { name: "Positions" }).click();
+    await openTab(page, "Positions");
     await expect(page.getByRole("main")).toContainText("MSFT");
     await expect(page.getByRole("main")).toContainText("$41.05");
 
-    await tabs.getByRole("link", { name: "Orders" }).click();
+    await openTab(page, "Orders");
     await expect(page.getByRole("main")).toContainText("Buy 6 MSFT limit $44.62Filled");
     await expect(page.getByRole("main")).toContainText("Sell 6 MSFT stop $41.05RestingProtection, good until canceled");
 
-    await tabs.getByRole("link", { name: "Activity" }).click();
+    await openTab(page, "Activity");
     const main = page.getByRole("main");
     await expect(main).toContainText("Bracket placed for 6 MSFT: stop $41.05.");
     await expect(main).toContainText("Filled buy 6 MSFT at $44.62.");
     await expect(main).toContainText("You approved buy 6 MSFT at $44.62.");
     await expect(main).toContainText("Mandate version 1 confirmed by you and deployed to paper, with $3,000.00 of simulated money.");
 
-    await tabs.getByRole("link", { name: "Decisions" }).click();
+    await openTab(page, "Decisions");
     await expect(main).toContainText("Approved by you; submitted and filled.");
   });
 
@@ -147,9 +155,10 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
   await test.step("after the kill switch, the agent holds nothing and is stopped", async () => {
     await dock(page).getByRole("link", { name: "Agents" }).click();
     await page.locator(`a[href="${agentHref}"]`).first().click();
+    await expect(page).toHaveURL(agentHref);
     const main = page.getByRole("main");
-    await expect(main.getByText("Stopped", { exact: true }).first()).toBeVisible();
-    await page.getByRole("navigation", { name: "Agent sections" }).getByRole("link", { name: "Activity" }).click();
+    await expect(main.locator("[data-slot=mode-badge][data-mode=stopped]").filter({ visible: true })).toHaveText("Stopped");
+    await openTab(page, "Activity");
     await expect(main).toContainText(/Kill switch at [0-9:]+: 1 order canceled; 1 position sold \(fixture fills\)\. Agent stopped\./);
   });
 });
