@@ -19,7 +19,7 @@ implementation PR.
   mandate spec MI-3, MI-7, MI-28, MI-31, V-020, V-042, V-044, §5.2, §5.8 to §5.10, §6.1, §6.5,
   §6.7, §9.2, and §11.
 - **Decisions that apply:** DEC-77, DEC-79, DEC-176, DEC-187, DEC-350, DEC-351, DEC-352, DEC-411,
-  DEC-438.
+  DEC-438, DEC-474.
 
 ## Scope
 
@@ -34,8 +34,10 @@ implementation PR.
   `mandate-approval` for raw step-up evidence and `owner_command(Acknowledge, ...)`.
 - **Safety-critical:** yes. This task describes both PRs in the DEC-77 flow. The merged
   **tests PR** supplied public types, fail-closed stubs, and plain pending tests. The current
-  **implementation PR** removes only the `#[ignore = "pending E6-13"]` attributes from those tests
-  while adding production logic. A final status-only PR moves MC-W01 to MC-W57 to passing.
+  **implementation PR** removes only the `#[ignore = "pending E6-13"]` attributes from the pending
+  tests while adding production logic. DEC-474 explicitly names the three live stub-sentinel tests
+  whose assertions must become implemented-boundary assertions. A final status-only PR moves
+  MC-W01 to MC-W57 to passing.
 - **Size budget:** about 1,400 non-generated lines of tests and 900 lines of implementation.
 
 ## Public data shapes
@@ -90,8 +92,8 @@ index so the append boundary can bind the opaque event id. `fold` is an E6-13 fa
   from the accounting result and preserving journal-before-action order.
 - Complete the `kind: tripwire` adapter and extend the existing risk-state adapter for MC-W52 and
   MC-W57 without changing fixture expectations.
-- Remove only the pending attributes from the tests PR. Move no statuses until a separate status
-  PR.
+- Remove only the pending attributes from the pending tests. Replace only DEC-474's three named
+  live stub-sentinel assertions. Move no statuses until a separate status PR.
 
 ## Commands
 
