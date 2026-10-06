@@ -129,7 +129,7 @@ for (const width of [1440, 390, 360]) {
         expect(Math.abs(r.height - r.lineHeight)).toBeLessThanOrEqual(0.5);
         expect(r.baselineGaps.length, "never alone on its line: it wraps with the words before it").toBeGreaterThan(0);
         for (const gap of r.baselineGaps) expect(gap).toBeLessThanOrEqual(1);
-        expect(r.glyph).toBe(16);
+        expect(r.glyph, "a pixel glyph renders on its 24px grid (DEC-475)").toBe(24);
       }
 
       const layout = () =>
