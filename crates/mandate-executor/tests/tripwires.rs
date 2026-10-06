@@ -629,6 +629,15 @@ fn acknowledgment_fails_closed_with_the_exact_refusal_reason() {
         ),
         (
             TripwireAcknowledgment {
+                acknowledging_user: None,
+                independent_required_at_request: true,
+                independent_required_now: false,
+                ..acknowledgment("wire", "missing-acknowledger-at-request")
+            },
+            AcknowledgmentRefusal::NotIndependent,
+        ),
+        (
+            TripwireAcknowledgment {
                 step_up: Some(step_up("future", 1_002)),
                 processed_at: RiskClock(1_001),
                 ..acknowledgment("wire", "future")
