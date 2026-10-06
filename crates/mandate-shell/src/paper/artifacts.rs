@@ -343,8 +343,9 @@ mod tests {
     use mandate_canon::Digest;
     use mandate_domain::{AssetClass, AssetId};
     use mandate_risk::Exchange as GateExchange;
+    use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 
-    use super::{ProductionIdentity, exchanges, legacy_identity};
+    use super::{DeploymentInput, ProductionIdentity, exchanges, legacy_identity};
 
     fn text<E: std::fmt::Display>(error: E) -> String {
         error.to_string()
@@ -428,5 +429,21 @@ mod tests {
         assert!(exchanges("otc").is_err());
         assert!(exchanges("other").is_err());
         Ok(())
+    }
+
+    #[test]
+    fn deployment_input_exposes_only_its_validated_values() {
+        let input = DeploymentInput {
+            deployment: Deployment {
+                agent: AgentId("agent-deployment-9".to_owned()),
+                connection: ConnectionId("conn-owner-paper-42".to_owned()),
+                workspace: WorkspaceId("workspace-owner-42".to_owned()),
+            },
+            account_ref: "account-ref-7".to_owned(),
+        };
+        assert_eq!(input.deployment().workspace.0, "workspace-owner-42");
+        assert_eq!(input.deployment().agent.0, "agent-deployment-9");
+        assert_eq!(input.deployment().connection.0, "conn-owner-paper-42");
+        assert_eq!(input.account_ref(), "account-ref-7");
     }
 }
