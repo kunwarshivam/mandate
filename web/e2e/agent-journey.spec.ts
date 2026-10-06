@@ -2,7 +2,7 @@ import { type Page, expect, test } from "@playwright/test";
 
 /**
  * The whole journey on the fixture workspace (DEC-472), in one page load so the runtime's state
- * carries from screen to screen: set up an agent in your own words, confirm each section and then
+ * carries from screen to screen: set up an agent in a conversation, confirm each section and then
  * the record with a passkey, find the new agent on Agents and Home, approve its first buy, see it
  * fill with its protective stop in place, read what it decided, and stop it with its kill switch.
  * Every step after the first `goto` is a click, as an owner would take it.
@@ -12,10 +12,16 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 
-async function answer(page: Page, text: string) {
-  const field = page.getByRole("main").getByRole("textbox");
-  await field.fill(text);
-  await page.getByRole("button", { name: "Continue" }).click();
+const log = (page: Page) => page.getByRole("log", { name: "Conversation" });
+const composer = (page: Page) => page.getByRole("textbox", { name: "Your message" });
+const lastAsk = (page: Page) => log(page).locator("[data-slot=ask]").last();
+
+/** Sends one message and waits until the model has read it. */
+async function say(page: Page, text: string) {
+  await composer(page).fill(text);
+  await composer(page).press("Enter");
+  await expect(log(page).locator("[data-slot=owner-message]").last()).toHaveText(`You: ${text}`);
+  await expect(page.locator("[data-slot=thinking]")).toHaveText("");
 }
 
 /** Opens one of the agent's tabs and waits until it is the current page, so what follows reads that tab. */
@@ -26,7 +32,7 @@ async function openTab(page: Page, name: string) {
 }
 
 function section(page: Page, key: string) {
-  return page.locator(`[data-slot=review-section][data-section=${key}]`);
+  return page.locator(`[data-slot=review-section][data-section=${key}]`).last();
 }
 
 test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page }) => {
@@ -35,43 +41,39 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
   await expect(page.getByRole("heading", { level: 1, name: "Agents" })).toBeVisible();
   await expect(page.getByRole("heading", { name: /^Agent 4/ })).toHaveCount(0);
 
-  await test.step("A0: three questions, in the owner's words", async () => {
+  await test.step("A0 and A1: the conversation, in the owner's words, with V-006 refusing a symbol another agent trades", async () => {
     await page.getByRole("link", { name: "Describe an agent" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Set up an agent" })).toBeVisible();
-    await page.getByRole("button", { name: /Answer three questions/ }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "How much money may this agent use?" })).toBeVisible();
-    await answer(page, "$3,000");
-    await expect(page.getByRole("heading", { level: 1, name: "What is the goal?" })).toBeVisible();
-    await answer(page, "Grow it steadily, and avoid oil companies");
-    await expect(page.getByRole("heading", { level: 1, name: "How much could you stand to lose?" })).toBeVisible();
-    await answer(page, "$300");
+    await expect(lastAsk(page)).toContainText("How much money may this agent use?");
+    await say(page, "$3,000");
+    await expect(lastAsk(page)).toContainText("What is it for?");
+    await say(page, "Grow it steadily, and avoid oil companies");
+    await expect(lastAsk(page)).toContainText("How much could you stand to lose, in total?");
+    await say(page, "$300");
+    await expect(lastAsk(page)).toContainText("Which stocks or ETFs may it trade?");
+
+    await say(page, "XYZ");
+    await expect(log(page).locator("[data-slot=refused]").last()).toHaveText("Owlhead: XYZ is already traded by Agent 2. One agent trades an instrument on an account; choose another.");
+    await expect(log(page).locator("[data-slot=refused]").last()).toBeInViewport();
+    await expect(composer(page)).toBeFocused();
+    await say(page, "MSFT");
+
+    const models = page.getByRole("group", { name: "Models" });
+    await expect(models.getByRole("button")).toHaveText([/^Mean reversion/, /^Momentum/]);
+    await models.getByRole("button", { name: /^Momentum/ }).click();
+    await expect(lastAsk(page)).toContainText("How many bars should the model read back over?");
+    await say(page, "20");
   });
 
-  await test.step("A2: every section confirmed by hand, with V-006 refusing a symbol another agent trades", async () => {
-    await expect(page.getByRole("heading", { level: 1, name: "Check your mandate" })).toBeVisible();
+  await test.step("A2: the draft, then every section confirmed by hand, one at a time", async () => {
+    await expect(page.locator("[data-slot=contract-card]")).toBeVisible();
     await expect(page.locator("[data-slot=not-enforced-item]")).toContainText(["avoid oil companies"]);
-
-    await page.getByLabel("Symbols it may trade").fill("XYZ");
-    await section(page, "universe").getByRole("button", { name: /^Confirm section/ }).click();
-    await expect(section(page, "universe").getByRole("alert")).toHaveText("XYZ is already traded by Agent 2. One agent trades an instrument on an account; choose another.");
-    await expect(page.getByLabel("Symbols it may trade")).toBeFocused();
-    await expect(section(page, "universe").getByRole("alert")).toBeInViewport();
-    await page.getByLabel("Symbols it may trade").fill("MSFT");
-
-    const momentum = page.getByRole("radio", { name: /Momentum/ });
-    await expect(momentum).not.toBeChecked();
-    await expect(page.getByRole("radio", { name: /Mean reversion/ })).not.toBeChecked();
-    await momentum.check();
-    await page.getByLabel("Lookback, in bars").fill("20");
-
-    const next = page.getByRole("button", { name: "Continue to confirm" });
     for (const key of ["money", "limits", "strategy", "autonomy", "universe"]) {
-      await expect(next).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Review and confirm" })).toHaveCount(0);
       await section(page, key).getByRole("button", { name: /^Confirm section/ }).click();
       await expect(section(page, key)).toHaveAttribute("data-confirmed", "true");
     }
-    await expect(page.locator("[data-slot=confirmed-count]")).toHaveText("5 of 5 sections confirmed. Every section is confirmed.");
-    await next.click();
+    await page.getByRole("button", { name: "Review and confirm" }).click();
   });
 
   let agentHref = "";
