@@ -150,15 +150,17 @@ fn apply_step(
             scene.mandate = Some(mandate);
             TripwireInput::MandateVersionApplied { tripwires }
         }
-        "FillApplied" | "LateFillApplied" => {
+        "FillApplied" => {
             unknown_members(step, FILL_KEYS)
                 .map_err(|unknown| format!("fill-step members not interpreted: {unknown}"))?;
             let fill = accounting_fill(step, index, clock, scene)?;
-            if event == "FillApplied" {
-                TripwireInput::FillApplied { fill }
-            } else {
-                TripwireInput::LateFillApplied { fill }
-            }
+            TripwireInput::FillApplied { fill }
+        }
+        "LateFillApplied" => {
+            unknown_members(step, FILL_KEYS)
+                .map_err(|unknown| format!("fill-step members not interpreted: {unknown}"))?;
+            let fill = accounting_fill(step, index, clock, scene)?;
+            TripwireInput::LateFillApplied { fill }
         }
         "RiskDayStarted" => {
             unknown_members(step, SIMPLE_KEYS)
@@ -639,10 +641,24 @@ fn decided_by_name(by: &DecidedBy) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::path::Path;
 
-    use super::tripwire_case;
-    use crate::{Json, read_fixture};
+    use mandate_accounting::{Account, AccountType, InstrumentId, Side};
+    use mandate_approval::Environment;
+    use mandate_builder::{ActionContext, Classification, classify};
+    use mandate_domain::{AssetClass, AutonomyDecision};
+    use mandate_executor::tripwire::TripwireState;
+    use mandate_num::{Qty, Unit, Usd};
+    use mandate_spec::document::{Autonomy, Lifts};
+    use mandate_spec::{DecGrammar, SchemaDec, risk};
+    use serde_json::json;
+
+    use super::{
+        Scene, accounting_config, apply_full_precision_unit_buy, apply_step, fill_asset_class,
+        must_parse, patched, probe_result, tripwire_case,
+    };
+    use crate::{Json, at_of, list_at, read_fixture};
 
     fn fixture() -> Result<Json, String> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
@@ -658,6 +674,32 @@ mod tests {
             .filter(|case| case.get("kind").and_then(Json::as_str) == Some("tripwire"))
             .cloned()
             .collect())
+    }
+
+    fn case(fixture: &Json, id: &str) -> Result<Json, String> {
+        fixture
+            .get("cases")
+            .and_then(Json::as_array)
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .find(|case| case.get("id").and_then(Json::as_str) == Some(id))
+            })
+            .cloned()
+            .ok_or_else(|| format!("the fixture has no {id}"))
+    }
+
+    fn scene() -> Result<Scene, String> {
+        Ok(Scene {
+            tripwire: TripwireState::default(),
+            account: Account::opening(AccountType::Margin, Usd::ZERO, []),
+            instruments: BTreeSet::new(),
+            mandate: None,
+            last_at: None,
+            last_snapshot: None,
+            environment: Environment::Paper,
+            accounting: accounting_config()?,
+        })
     }
 
     /// Every family-W tripwire case runs live even while its status remains pending.
@@ -713,6 +755,135 @@ mod tests {
         if tripwire_case(&fixture, &wrong_probe).is_ok() {
             return Err("a wrong probe decision passed".to_owned());
         }
+        Ok(())
+    }
+
+    /// The full-precision fallback rejects zero and updates only the named instrument.
+    #[test]
+    fn full_precision_buys_preserve_other_positions_and_require_a_positive_price()
+    -> Result<(), String> {
+        let mut scene = scene()?;
+        let first = InstrumentId::new("FIRST").map_err(|error| error.to_string())?;
+        let second = InstrumentId::new("SECOND").map_err(|error| error.to_string())?;
+        let one = Qty::parse("1").map_err(|error| error.to_string())?;
+
+        apply_full_precision_unit_buy(&mut scene, &first, Side::Buy, one, "10.000000000001")?;
+        apply_full_precision_unit_buy(&mut scene, &second, Side::Buy, one, "20.000000000001")?;
+        apply_full_precision_unit_buy(&mut scene, &first, Side::Buy, one, "11.000000000001")?;
+
+        assert_eq!(scene.account.position(&first).qty().to_string(), "2");
+        assert_eq!(
+            scene.account.position(&first).basis().to_string(),
+            "21.000000000002"
+        );
+        assert_eq!(scene.account.position(&second).qty().to_string(), "1");
+        assert_eq!(
+            scene.account.position(&second).basis().to_string(),
+            "20.000000000001"
+        );
+        assert!(apply_full_precision_unit_buy(&mut scene, &first, Side::Buy, one, "0").is_err());
+        Ok(())
+    }
+
+    /// Pinned-instrument lookup returns the matching entry rather than another pin.
+    #[test]
+    fn fill_asset_class_uses_the_matching_pin() -> Result<(), String> {
+        let fixture = fixture()?;
+        let mut mandate = must_parse(&patched(
+            &fixture,
+            &json!({"base": "two_stock_swing", "patch": []}),
+        )?)?;
+        if mandate.universe.pinned_instruments.len() < 2 {
+            return Err("two_stock_swing has fewer than two pins".to_owned());
+        }
+        mandate.universe.pinned_instruments[0].asset_class = AssetClass::UsEquity;
+        mandate.universe.pinned_instruments[1].asset_class = AssetClass::Crypto;
+        let second = mandate.universe.pinned_instruments[1]
+            .asset_id
+            .as_str()
+            .to_owned();
+        assert_eq!(fill_asset_class(&mandate, &second)?, AssetClass::Crypto);
+        Ok(())
+    }
+
+    /// Each delegation predicate independently blocks a lift when false, with exact time edges.
+    #[test]
+    fn delegation_probe_requires_every_bound() -> Result<(), String> {
+        let fixture = fixture()?;
+        let case = case(&fixture, "MC-W31")?;
+        let mut scene = scene()?;
+        let steps = list_at(&case, "steps")?;
+        for (index, step) in steps.iter().enumerate() {
+            let outcome = apply_step(&fixture, &case, step, index, &mut scene)?;
+            scene.tripwire = outcome.state;
+            scene.last_snapshot = Some(outcome.snapshot);
+        }
+        let mandate = scene.mandate.ok_or("MC-W31 applies no mandate")?;
+        let now = scene.last_at.ok_or("MC-W31 has no risk clock")?;
+        let probe = list_at(&case, "probes")?
+            .first()
+            .ok_or("MC-W31 has no probe")?;
+        let risk_day = risk::risk_day(now).map_err(|error| error.to_string())?.day;
+        let action = super::super::autonomy::action("MC-W31", at_of(probe, "action")?, risk_day)?;
+        let basic = classify(&mandate.autonomy, &action).map_err(|error| error.to_string())?;
+        let delegated = |autonomy: &Autonomy,
+                         action: &ActionContext,
+                         suspended: bool,
+                         classification: Classification|
+         -> Result<bool, String> {
+            Ok(
+                probe_result(autonomy, action, now, suspended, classification)?
+                    .get("by")
+                    .and_then(Json::as_str)
+                    .is_some_and(|by| by.starts_with("delegation:")),
+            )
+        };
+        assert!(delegated(&mandate.autonomy, &action, false, basic.clone())?);
+        assert!(!delegated(&mandate.autonomy, &action, true, basic.clone())?);
+
+        let mut not_ask = basic.clone();
+        not_ask.decision = AutonomyDecision::Auto;
+        assert!(!delegated(&mandate.autonomy, &action, false, not_ask)?);
+
+        let mut wrong_source = mandate.autonomy.clone();
+        wrong_source.delegations[0].lifts = Lifts::Default;
+        assert!(!delegated(&wrong_source, &action, false, basic.clone())?);
+
+        let mut at_start = mandate.autonomy.clone();
+        at_start.delegations[0].starts_at = Some(now);
+        assert!(delegated(&at_start, &action, false, basic.clone())?);
+
+        let mut at_expiry = mandate.autonomy.clone();
+        at_expiry.delegations[0].expires_at = Some(now);
+        assert!(!delegated(&at_expiry, &action, false, basic.clone())?);
+
+        let mut false_condition = action.clone();
+        false_condition.combined_score = Unit::parse("0").map_err(|error| error.to_string())?;
+        assert!(!delegated(
+            &mandate.autonomy,
+            &false_condition,
+            false,
+            basic.clone()
+        )?);
+
+        let mut over_order = mandate.autonomy.clone();
+        over_order.delegations[0].max_order_usd =
+            SchemaDec::parse("949", DecGrammar::PositiveDecimal)
+                .map_err(|error| error.to_string())?;
+        assert!(!delegated(&over_order, &action, false, basic.clone())?);
+
+        let mut over_total = mandate.autonomy.clone();
+        over_total.delegations[0].max_order_usd =
+            SchemaDec::parse("1000", DecGrammar::PositiveDecimal)
+                .map_err(|error| error.to_string())?;
+        over_total.delegations[0].max_total_usd =
+            SchemaDec::parse("949", DecGrammar::PositiveDecimal)
+                .map_err(|error| error.to_string())?;
+        assert!(!delegated(&over_total, &action, false, basic.clone())?);
+
+        let mut exhausted = mandate.autonomy.clone();
+        exhausted.delegations[0].max_orders = 0;
+        assert!(!delegated(&exhausted, &action, false, basic)?);
         Ok(())
     }
 }

@@ -2095,6 +2095,13 @@ mod tests {
             risk_step(&tripwire)?.input,
             Input::TripwireAcknowledged
         ));
+        let unknown = json!({
+            "event": "owner_acknowledged",
+            "at": "2026-09-21T14:00:00.000000000Z",
+            "restriction": "not_a_restriction",
+            "session": "regular"
+        });
+        assert!(risk_step(&unknown).is_err());
         Ok(())
     }
 
