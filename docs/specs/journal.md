@@ -871,9 +871,10 @@ member.
 Journal spec v0.16 registers `ConfigSnapshotRegistered` schema version 2 with the same payload
 members and consistency rules as version 1, plus the two new `kind` values. A writer uses version 2
 for `policy_set` and `model_registry`; it may use either registered version for an older kind.
-Before a configuration reference is appended, the referenced canonical object is stored, re-hashes
-to `content_hash`, and has a `kind` equal to the registration payload's `kind`. Rules 20 and 21 make
-the model-only members null or empty for both new kinds.
+For either new kind, before a configuration reference is appended, its canonical object is stored
+under `content_hash` and its object `kind` equals the registration payload's `kind`; older kinds
+retain their existing object contracts. Rules 20 and 21 make the model-only members null or empty
+for both new kinds.
 
 **`MandateVersionCreated`** and **`MandateConfirmed`** carry, as members, the parts `JournaledFact`
 reads: the version, the provenance per path, and the confirmed paths. The rest of each
