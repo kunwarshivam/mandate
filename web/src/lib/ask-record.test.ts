@@ -126,4 +126,8 @@ describe("acting from a message", () => {
   it("hands creating an agent to setup with the owner's words", () => {
     expect(interpret("Create an agent that buys BTC weekly with $500", ctx())).toEqual({ kind: "create", text: "Create an agent that buys BTC weekly with $500" });
   });
+
+  it.each(["Create an agent", "can you create a new agent please", "I want another agent"])("hands nothing to setup when %j says nothing about the agent", (said) => {
+    expect(interpret(said, ctx())).toEqual({ kind: "create", text: null });
+  });
 });

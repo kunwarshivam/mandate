@@ -27,8 +27,11 @@ export type Reply =
   | { kind: "pause"; agentId: string }
   /** Stop and resume need a passkey, so the reply opens the Stop sheet rather than sending anything. */
   | { kind: "stop"; agentId: string | null; resume: boolean }
-  /** Creating an agent ends at its summary, confirmed field by field, so the reply hands over to setup. */
-  | { kind: "create"; text: string };
+  /**
+   * Creating an agent ends at its summary, confirmed with a passkey, so the reply hands over to
+   * setup. `text` is the owner's words when they say more than "create an agent", else null.
+   */
+  | { kind: "create"; text: string | null };
 
 export interface AskContext {
   ws: Workspace;
@@ -45,6 +48,16 @@ const RESUME_WORDS = /\b(resume|unpause|un-pause|restart|start (it )?again)\b/;
 const QUESTION = /^(is|are|was|were|why|what|how|when|did|does|do|has|have|who|which|where)\b|\bwhy\b/;
 const ADVICE_WORDS = /\b(should|good (time|idea)|worth|recommend|advi[cs]e)\b/;
 const CREATE_WORDS = /\b(new agent|create (an? )?agent|make (an? )?agent|set up (an? )?agent|another agent|build (an? )?agent)\b/;
+
+const FILLER = new Set(["please", "can", "you", "could", "want", "would", "like", "lets", "let's", "for", "the", "and", "now", "help", "create", "make", "set", "build", "new", "another", "agent"]);
+
+/** Whether a request to create an agent says anything about the agent, beyond asking for one. */
+function describes(text: string): boolean {
+  return text
+    .replace(CREATE_WORDS, " ")
+    .split(/[^a-z0-9$%']+/)
+    .some((w) => w.length > 2 && !FILLER.has(w));
+}
 
 /** Questions an answer may offer next. Plain questions, never a suggestion to trade. */
 export const STARTERS = ["What needs me?", "Why did it ask?", "How close is it to its limits?", "What happened today?", "What does it hold?"] as const;
@@ -193,7 +206,7 @@ export function interpret(said: string, ctx: AskContext): Reply {
   const agents = scope(ctx, text);
   const asking = QUESTION.test(text);
 
-  if (CREATE_WORDS.test(text)) return { kind: "create", text: said.trim() };
+  if (CREATE_WORDS.test(text)) return { kind: "create", text: describes(text) ? said.trim() : null };
   if (RESUME_WORDS.test(text) && !asking) {
     const one = pick(ctx, text);
     return { kind: "stop", agentId: one && one !== "many" ? one.agent_id : null, resume: true };

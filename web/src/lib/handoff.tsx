@@ -1,6 +1,7 @@
 "use client";
 
-import { type ReactNode, createContext, useContext, useMemo, useRef } from "react";
+import { type ReactNode, createContext, useCallback, useContext, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
 
 /**
  * Words the owner typed in Messages or the copilot, carried into agent setup's message field
@@ -35,4 +36,17 @@ export function HandoffProvider({ children }: { children: ReactNode }) {
 
 export function useHandoff(): Handoff {
   return useContext(HandoffContext);
+}
+
+/** Opens agent setup, carrying the owner's words when they said what the agent should do. */
+export function useStartSetup(): (text: string | null) => void {
+  const handoff = useHandoff();
+  const router = useRouter();
+  return useCallback(
+    (text: string | null) => {
+      if (text) handoff.give(text);
+      router.push("/agents/new");
+    },
+    [handoff, router],
+  );
 }

@@ -1,13 +1,12 @@
 "use client";
 
 import { Fragment, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { Composer, type ComposerHandle } from "@/components/chat/composer";
 import { AskChips, ONE_ROW, OwnerSaid, RecordReply } from "@/components/chat/record-reply";
 import { KIND_LABEL } from "@/components/domain/timeline";
 import type { Agent, Iso, TimelineEvent } from "@/fixtures/types";
 import { STARTERS, interpret } from "@/lib/ask-record";
-import { useHandoff } from "@/lib/handoff";
+import { useStartSetup } from "@/lib/handoff";
 import { type ThreadItem, byDay, stamp, threadItems } from "@/lib/messages";
 import { useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
@@ -49,8 +48,7 @@ function entriesOf(items: ThreadItem[], turns: Turn[]): Entry[] {
  */
 export function ThreadChat({ agent }: { agent: Agent }) {
   const { ws, now } = useRuntime();
-  const router = useRouter();
-  const handoff = useHandoff();
+  const create = useStartSetup();
   const canPause = useCan("stop.pause");
   const [turns, addTurn] = useTurns(agent.agent_id);
   const composer = useRef<ComposerHandle>(null);
@@ -79,10 +77,6 @@ export function ThreadChat({ agent }: { agent: Agent }) {
   const ask = (said: string) => {
     addTurn({ id: `turn-${agent.agent_id}-${turns.length}`, at: now, said, reply: interpret(said, { ws, now, agentId: agent.agent_id }) });
     composer.current?.focus();
-  };
-  const create = (text: string) => {
-    handoff.give(text);
-    router.push("/agents/new");
   };
 
   return (

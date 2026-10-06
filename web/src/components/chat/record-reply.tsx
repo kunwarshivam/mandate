@@ -146,11 +146,12 @@ function StopCard({ agentId, resume }: { agentId: string | null; resume: boolean
   );
 }
 
-function CreateCard({ text, onCreate }: { text: string; onCreate: (text: string) => void }) {
+function CreateCard({ text, onCreate }: { text: string | null; onCreate: (text: string | null) => void }) {
   return (
     <section aria-label="Set up an agent" data-slot="create-card" className="grid max-w-md gap-3 rounded-2xl border border-border bg-card p-4">
       <p className="text-sm text-pretty">
-        A new agent is set up in a conversation that ends with one summary of every value, which you confirm with your passkey. Your words go with you, ready to send.
+        A new agent is set up in a conversation that ends with one summary of every value, which you confirm with your passkey.
+        {text ? " Your words go with you, ready to send." : " Setup starts by asking what it should do."}
       </p>
       <button type="button" className={cn(KEY, "w-fit")} onClick={() => onCreate(text)}>
         Continue in setup
@@ -161,7 +162,7 @@ function CreateCard({ text, onCreate }: { text: string; onCreate: (text: string)
 }
 
 /** One reply: the record's answer with the records it read, or the one card the owner asked for. */
-export function RecordReply({ reply, onAsk, onCreate }: { reply: Reply; onAsk: (text: string) => void; onCreate: (text: string) => void }) {
+export function RecordReply({ reply, onAsk, onCreate }: { reply: Reply; onAsk: (text: string) => void; onCreate: (text: string | null) => void }) {
   switch (reply.kind) {
     case "answer":
       return (
