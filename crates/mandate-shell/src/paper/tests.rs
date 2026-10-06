@@ -453,13 +453,26 @@ fn shipping_paper_adapter_uses_only_the_validated_deployment_input() -> Result<(
             "the shipping adapter still selects {forbidden}"
         );
     }
-    for required in ["Artifacts::load_production(", "artifacts.deployment("] {
+    for required in [
+        "cli::parse_production(",
+        "Artifacts::load_production(",
+        "artifacts.deployment(",
+    ] {
         assert!(
             body.contains(required),
             "the shipping adapter must use {required}"
         );
     }
     assert!(!body.contains("Artifacts::load("));
+    let deployment_block = body
+        .split_once("let deployment_input = artifacts.deployment(")
+        .and_then(|(_, after)| after.split_once(".map_err"))
+        .map(|(block, _)| block)
+        .ok_or_else(|| "the deployment-input call is missing".to_owned())?;
+    assert!(!deployment_block.contains('"'));
+    assert!(deployment_block.contains("args.workspace.clone()"));
+    assert!(deployment_block.contains("args.agent.clone()"));
+    assert!(deployment_block.contains("args.account_ref.clone()"));
     assert!(body.contains("let deployment_input = artifacts"));
     assert_eq!(
         body.matches("let agent = deployment_input.deployment().agent.clone();")
