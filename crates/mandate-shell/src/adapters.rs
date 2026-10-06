@@ -2636,7 +2636,7 @@ mod tests {
     fn the_protection_probe_refuses_without_its_mandate() {
         let probe = ExecutorProtection::new(
             PathBuf::from("a-mandate-that-does-not-exist.json"),
-            Some(ExecutorConfig::PROPOSED),
+            Some(mandate_executor::ExecutorConfig::PROPOSED),
         );
         assert!(probe.probe().is_err());
     }
