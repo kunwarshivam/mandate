@@ -33,7 +33,6 @@ from pathlib import Path
 
 import account
 import control
-import jsonschema
 import research
 import risk_state
 import yaml
@@ -2895,9 +2894,61 @@ CONFIG_REGISTRATION_SCHEMA = rec(
     ("params", list_of(STR)),
     ("admits_instruments", opt(BOOL)),
 )
-POLICY_VALIDATOR = jsonschema.Draft202012Validator(
-    json.loads((ROOT / "schemas/policy.schema.json").read_text(encoding="utf-8"))
-)
+POLICY_SCHEMA = json.loads((ROOT / "schemas/policy.schema.json").read_text(encoding="utf-8"))
+
+
+def matches_json_schema(value, schema: dict, root: dict) -> bool:
+    reference = schema.get("$ref")
+    if reference is not None:
+        target = root
+        for member in reference.removeprefix("#/").split("/"):
+            target = target[member]
+        if not matches_json_schema(value, target, root):
+            return False
+    if "oneOf" in schema and sum(matches_json_schema(value, option, root) for option in schema["oneOf"]) != 1:
+        return False
+    if "const" in schema and value != schema["const"]:
+        return False
+    if "enum" in schema and value not in schema["enum"]:
+        return False
+    expected_type = schema.get("type")
+    if expected_type == "null" and value is not None:
+        return False
+    if expected_type == "boolean" and not isinstance(value, bool):
+        return False
+    if expected_type == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+        return False
+    if expected_type == "string" and not isinstance(value, str):
+        return False
+    if expected_type == "array" and not isinstance(value, list):
+        return False
+    if expected_type == "object" and not isinstance(value, dict):
+        return False
+    if isinstance(value, int) and not isinstance(value, bool):
+        if "minimum" in schema and value < schema["minimum"]:
+            return False
+        if "maximum" in schema and value > schema["maximum"]:
+            return False
+    if isinstance(value, str) and "pattern" in schema and re.fullmatch(schema["pattern"], value) is None:
+        return False
+    if isinstance(value, list):
+        if schema.get("uniqueItems") and len({canon(item) for item in value}) != len(value):
+            return False
+        if "items" in schema and any(not matches_json_schema(item, schema["items"], root) for item in value):
+            return False
+    if isinstance(value, dict):
+        required = schema.get("required", ())
+        if any(member not in value for member in required):
+            return False
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False and any(member not in properties for member in value):
+            return False
+        if any(
+            member in properties and not matches_json_schema(member_value, properties[member], root)
+            for member, member_value in value.items()
+        ):
+            return False
+    return True
 
 
 def production_artifact_problems(artifact: dict) -> list[str]:
@@ -2915,8 +2966,7 @@ def production_artifact_problems(artifact: dict) -> list[str]:
             return out
         levels = []
         for index, policy in enumerate(obj["levels"]):
-            errors = list(POLICY_VALIDATOR.iter_errors(policy))
-            if errors:
+            if not matches_json_schema(policy, POLICY_SCHEMA, POLICY_SCHEMA):
                 out.append(f"artifact.policy_shape levels[{index}]")
             elif policy["level"] in levels:
                 out.append("artifact.policy_shape duplicate_level")
