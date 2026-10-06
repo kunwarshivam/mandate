@@ -163,28 +163,6 @@ pub(super) fn reservation(
     )
 }
 
-pub(super) fn platform_gate_config() -> Result<GateConfig, Cause> {
-    Ok(GateConfig {
-        price_floor: usd("5")?,
-        liquidity_floor_usd: usd("1000000")?,
-        crypto_liquidity_floor_usd: usd("1000000")?,
-        collar_liquid_threshold_usd: usd("50000000")?,
-        collar_liquid_x: Fraction::parse("0.01")?,
-        collar_other_x: Fraction::parse("0.02")?,
-        collar_crypto_x: Fraction::parse("0.02")?,
-        collar_passive_band: Fraction::parse("0.2")?,
-        opposite_fill_interval_s: 60,
-        min_resting_time_s: 2,
-        order_to_fill_max: 10,
-        order_to_fill_min_orders: 20,
-        order_size_participation: Fraction::parse("0.05")?,
-        daily_participation: Fraction::parse("0.05")?,
-        close_window_minutes: 10,
-        legacy_pdt_equity_threshold: usd("25000")?,
-        etp_classification_max_age_s: 604_800,
-    })
-}
-
 pub(super) fn gate_mandate(document: &mandate_spec::Mandate) -> Result<GateMandate, Cause> {
     let risk = &document.risk;
     let scale_action = match risk.scale_action {

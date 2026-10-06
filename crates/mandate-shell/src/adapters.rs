@@ -609,12 +609,13 @@ fn working_order_of(
 /// tracer arms anything, rather than taking `is_protected`'s flat-position shortcut.
 pub struct ExecutorProtection {
     mandate: PathBuf,
+    config: Option<ExecutorConfig>,
 }
 
 impl ExecutorProtection {
-    /// A protection probe over the deployment's mandate document.
-    pub fn new(mandate: PathBuf) -> ExecutorProtection {
-        ExecutorProtection { mandate }
+    /// A protection probe over the deployment's mandate document and effective executor config.
+    pub fn new(mandate: PathBuf, config: Option<ExecutorConfig>) -> ExecutorProtection {
+        ExecutorProtection { mandate, config }
     }
 }
 
@@ -744,7 +745,9 @@ impl Protection for ExecutorProtection {
             what: "the protection probe's fee calendar",
         })?;
         let fees = paper_only_fee_config("paper", calendar, "2026-01-01")?;
-        let config = ExecutorConfig::PROPOSED;
+        let config = self.config.ok_or(Cause::Absent {
+            what: "the effective executor configuration",
+        })?;
         let instrument =
             InstrumentId::new(pinned.asset_id.as_str()).map_err(|_| Cause::Absent {
                 what: "the protection probe's instrument",
@@ -1786,6 +1789,10 @@ impl ExecutorContext {
             fees: &self.fees,
         }
     }
+
+    fn configuration(&self) -> ExecutorConfig {
+        self.config
+    }
 }
 
 /// `mandate_executor::handle` and `fold` over the account stream's shared state.
@@ -2070,6 +2077,10 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
 /// The production stages over a caller-supplied connector.
 pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
     let run = sources.run.map(Rc::new);
+    let protection_config = sources
+        .executor
+        .as_ref()
+        .map(ExecutorContext::configuration);
     let (executor, reconciler) = CoreExecutor::pair(
         AccountScope {
             account: AccountRef(sources.account_ref),
@@ -2082,7 +2093,10 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
             sources.agent.clone(),
             sources.mandate.clone(),
         )),
-        protection: Box::new(ExecutorProtection::new(sources.mandate.clone())),
+        protection: Box::new(ExecutorProtection::new(
+            sources.mandate.clone(),
+            protection_config,
+        )),
         mandate: Box::new(SpecMandate {
             path: sources.mandate.clone(),
             context: run.clone(),
@@ -2620,7 +2634,10 @@ mod tests {
 
     #[test]
     fn the_protection_probe_refuses_without_its_mandate() {
-        let probe = ExecutorProtection::new(PathBuf::from("a-mandate-that-does-not-exist.json"));
+        let probe = ExecutorProtection::new(
+            PathBuf::from("a-mandate-that-does-not-exist.json"),
+            Some(mandate_executor::ExecutorConfig::PROPOSED),
+        );
         assert!(probe.probe().is_err());
     }
 

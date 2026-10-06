@@ -15,13 +15,13 @@ use mandate_executor::{
     BrokerAccount, BrokerOrder, BrokerPosition, InstrumentSnapshot, MandateView, Purpose,
 };
 use mandate_num::{Fraction, Price, Qty, SignedQty, Unit, Usd};
-use mandate_risk::{Exchange as GateExchange, SaneQuote};
+use mandate_risk::{Exchange as GateExchange, GateConfig, SaneQuote};
 use mandate_runtime::{AgentId, ProtectionPrices};
 use mandate_time::{Date, UtcNanos};
 
 use super::artifacts::reference;
 use super::context::{PaperClock, TrustedPaperContext, protection_prices};
-use super::gate::{gate_mandate, gate_template, platform_gate_config};
+use super::gate::{gate_mandate, gate_template};
 use super::{Artifacts, BrokerFacts, INSTRUMENT_ID, LiquidityFacts, PaperFacts, load_contexts};
 use crate::{Cause, Setup};
 
@@ -59,6 +59,13 @@ fn symbol(value: &str) -> Result<InstrumentId, String> {
 
 fn artifacts() -> Result<Artifacts, String> {
     Artifacts::load(&fixtures().join("mandate.json"), &fixtures().join("config")).map_err(text)
+}
+
+fn reviewed_gate_config() -> Result<GateConfig, String> {
+    artifacts()?
+        .production_configuration()
+        .map(|configuration| configuration.gate.clone())
+        .map_err(text)
 }
 
 fn production_artifacts(name: &str) -> Result<(Scratch, Artifacts), String> {
@@ -412,13 +419,8 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
     assert_eq!(gate.instrument.instrument.as_str(), OTHER_ASSET);
     assert_eq!(gate.instrument.exchange, Some(GateExchange::Nyse));
 
-    let template = gate_template(
-        &loaded,
-        &snapshot,
-        at(NOW)?,
-        platform_gate_config().map_err(text)?,
-    )
-    .map_err(text)?;
+    let template =
+        gate_template(&loaded, &snapshot, at(NOW)?, reviewed_gate_config()?).map_err(text)?;
     let trusted = TrustedPaperContext {
         template,
         agent: AGENT.to_owned(),
@@ -451,7 +453,6 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn production_configuration_comes_from_the_content_addressed_rule_set() -> Result<(), String> {
     let (scratch, loaded) = production_configuration_artifacts("production-configuration")?;
     let configuration = loaded.production_configuration().map_err(text)?;
@@ -532,7 +533,6 @@ fn production_configuration_comes_from_the_content_addressed_rule_set() -> Resul
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn production_contexts_use_only_the_reviewed_gate_and_executor_configuration() -> Result<(), String>
 {
     let (scratch, loaded) = production_configuration_artifacts("production-context-configuration")?;
@@ -956,7 +956,7 @@ fn the_reviewed_snapshot_assembles_both_contexts_from_its_own_facts() -> Result<
 fn the_gate_template_carries_the_snapshot_and_nothing_invented() -> Result<(), String> {
     let loaded = artifacts()?;
     let mut snapshot = facts()?;
-    let config = platform_gate_config().map_err(text)?;
+    let config = reviewed_gate_config()?;
     let template = gate_template(&loaded, &snapshot, at(NOW)?, config.clone()).map_err(text)?;
     assert_eq!(template.config_refs, loaded.config_refs);
     assert_eq!(template.risk.agent_equity, usd("1000")?);
@@ -1246,8 +1246,8 @@ fn protection_derives_from_the_entry_and_rounds_each_sell_price_up() -> Result<(
 }
 
 #[test]
-fn the_gate_uses_the_spec_defaults_and_the_mandates_exact_limits() -> Result<(), String> {
-    let config = platform_gate_config().map_err(text)?;
+fn the_gate_uses_the_reviewed_config_and_the_mandates_exact_limits() -> Result<(), String> {
+    let config = reviewed_gate_config()?;
     assert_eq!(config.price_floor, usd("5")?);
     assert_eq!(config.liquidity_floor_usd, usd("1000000")?);
     assert_eq!(config.close_window_minutes, 10);
@@ -1262,13 +1262,8 @@ fn the_gate_uses_the_spec_defaults_and_the_mandates_exact_limits() -> Result<(),
 #[test]
 fn trusted_context_exposes_only_the_reviewed_agent_and_instrument() -> Result<(), String> {
     let loaded = artifacts()?;
-    let template = gate_template(
-        &loaded,
-        &facts()?,
-        at(NOW)?,
-        platform_gate_config().map_err(text)?,
-    )
-    .map_err(text)?;
+    let template =
+        gate_template(&loaded, &facts()?, at(NOW)?, reviewed_gate_config()?).map_err(text)?;
     let trusted = TrustedPaperContext {
         template,
         agent: AGENT.to_owned(),
@@ -1332,13 +1327,8 @@ fn trusted_context_exposes_only_the_reviewed_agent_and_instrument() -> Result<()
 #[test]
 fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Result<(), String> {
     let loaded = artifacts()?;
-    let template = gate_template(
-        &loaded,
-        &facts()?,
-        at(NOW)?,
-        platform_gate_config().map_err(text)?,
-    )
-    .map_err(text)?;
+    let template =
+        gate_template(&loaded, &facts()?, at(NOW)?, reviewed_gate_config()?).map_err(text)?;
     let current = Rc::new(Cell::new(at(NOW)?));
     let trusted = TrustedPaperContext {
         template: template.clone(),
@@ -1390,13 +1380,8 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
 #[test]
 fn each_binding_request_reserves_its_own_orders_fees() -> Result<(), String> {
     let loaded = artifacts()?;
-    let template = gate_template(
-        &loaded,
-        &facts()?,
-        at(NOW)?,
-        platform_gate_config().map_err(text)?,
-    )
-    .map_err(text)?;
+    let template =
+        gate_template(&loaded, &facts()?, at(NOW)?, reviewed_gate_config()?).map_err(text)?;
     let trusted = TrustedPaperContext {
         template: template.clone(),
         agent: AGENT.to_owned(),
