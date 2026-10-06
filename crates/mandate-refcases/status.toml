@@ -480,8 +480,8 @@
 'MC-E30' = { status = "passing", story = "E8-3" }
 'MC-E31' = { status = "passing", story = "E8-3" }
 'MC-E32' = { status = "passing", story = "E8-3" }
-# Family W, tripwires (stream H, E6-13; DEC-187, DEC-350 to DEC-352). Passing since #618:
-# mandate-spec V-044 and §9.2, the executor's §6.7 fold, and the `kind: tripwire` harness arm.
+# Family W, tripwires (stream H, E6-13; DEC-77 item 3, DEC-187, DEC-350 to DEC-352). Passing since
+# #618: mandate-spec V-044 and §9.2, the executor's §6.7 fold, and the `kind: tripwire` harness arm.
 'MC-W01' = { status = "passing", story = "E6-13" }
 'MC-W02' = { status = "passing", story = "E6-13" }
 'MC-W03' = { status = "passing", story = "E6-13" }
