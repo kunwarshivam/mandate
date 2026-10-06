@@ -9,9 +9,9 @@ use mandate_accounting::InstrumentId;
 use mandate_alpaca::Exchange as BrokerExchange;
 use mandate_canon::{Digest, Key, Value};
 use mandate_domain::{AssetClass as DomainAssetClass, AssetId};
-use mandate_executor::BindingGateConfigRefs;
+use mandate_executor::{BindingGateConfigRefs, ExecutorConfig};
 use mandate_num::{Qty, ShareIncrement};
-use mandate_risk::{EtpClass, Exchange as GateExchange};
+use mandate_risk::{EtpClass, Exchange as GateExchange, GateConfig};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
@@ -47,6 +47,12 @@ pub struct ProductionIdentity<'a> {
     pub model_id: &'a str,
     pub model_version: &'a str,
     pub model_hash: Digest,
+}
+
+/// Effective gate and executor configuration read from the content-addressed rule set.
+pub struct ProductionConfiguration<'a> {
+    pub gate: &'a GateConfig,
+    pub executor: ExecutorConfig,
 }
 
 /// Validated opaque deployment identity for one production cycle.
@@ -203,7 +209,14 @@ impl Artifacts {
         let rules = artifact(
             config_dir,
             "rule-set.json",
-            &["gate", "iex_quote_max_age_s", "ruleset_version", "story"],
+            &[
+                "executor",
+                "gate",
+                "gate_config",
+                "iex_quote_max_age_s",
+                "ruleset_version",
+                "story",
+            ],
         )?;
         require_text(&rules.value, "gate", "trading-domain-9.1")?;
         require_text(&rules.value, "ruleset_version", "v1")?;
@@ -254,6 +267,14 @@ impl Artifacts {
             model_version: &self.model_version,
             model_hash: self.model_hash,
         }
+    }
+
+    /// Returns the effective gate and executor configuration from the reviewed rule set.
+    ///
+    /// # Errors
+    /// Refuses until E7-19's content-addressed production configuration is implemented.
+    pub fn production_configuration(&self) -> Result<ProductionConfiguration<'_>, Cause> {
+        Err(Cause::Unimplemented { story: "E7-19" })
     }
 
     /// Validates caller-supplied opaque deployment ids and binds the connection from the mandate.
