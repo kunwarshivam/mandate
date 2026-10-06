@@ -122,7 +122,6 @@ const STARTS: ReadonlyArray<{ say: string; label: string; icon: Icon }> = [
   { say: "Create an agent", label: "Create an agent", icon: Plus },
 ];
 
-const NOTE = "Owlhead answers from your record. Nothing happens until you press.";
 const ICON_BUTTON =
   "press inline-flex size-11 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring";
 
@@ -245,7 +244,7 @@ function Panel({ onClose }: { onClose: () => void }) {
             composer.current?.focus();
           }}
         />
-        <Composer ref={composer} slot="copilot-composer" label="Ask Owlhead" placeholder="Ask, or tell Owlhead what to do" note={NOTE} onSend={ask} />
+        <Composer ref={composer} slot="copilot-composer" label="Ask Owlhead" placeholder="Ask, or tell Owlhead what to do" onSend={ask} />
       </div>
     </aside>
   );

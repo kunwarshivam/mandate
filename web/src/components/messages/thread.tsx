@@ -20,8 +20,6 @@ const THREAD_X = "px-(--page-x) lg:px-8";
 /** Under the composer: nothing on a phone, where the tab bar sits below the pane; the dock's clearance on a desktop. */
 const COMPOSER_DOCK = `relative shrink-0 bg-card pt-2 pb-3 ${THREAD_X} lg:pb-[calc(var(--dock-clearance)+0.5rem)]`;
 
-const COMPOSER_NOTE = "Owlhead answers from your record. Nothing happens until you press.";
-
 /** A journal entry in the thread: written by code at the time shown, never in a model's voice. */
 function JournalLine({ event, now }: { event: TimelineEvent; now: Iso }) {
   return (
@@ -116,7 +114,7 @@ export function ThreadChat({ agent }: { agent: Agent }) {
           placeholder={`Ask about ${agent.label}, or say pause`}
           onSend={ask}
           className={turns.length === 0 ? "pt-3" : undefined}
-          note={COMPOSER_NOTE}
+         
         />
       </div>
     </div>
