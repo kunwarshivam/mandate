@@ -36,6 +36,18 @@ pub struct Artifacts {
     pub(super) config_refs: BindingGateConfigRefs,
 }
 
+/// Instrument and model identity derived from the confirmed mandate and reviewed snapshots.
+pub struct ProductionIdentity<'a> {
+    pub asset_id: &'a AssetId,
+    pub symbol: &'a InstrumentId,
+    pub asset_class: DomainAssetClass,
+    pub broker_exchange: BrokerExchange,
+    pub gate_exchange: GateExchange,
+    pub model_id: &'a str,
+    pub model_version: &'a str,
+    pub model_hash: Digest,
+}
+
 /// What the instrument artifact states, each field read by the run: the symbol the broker is read
 /// by, the quantity grid, and the ETP classification.
 pub(super) struct ReviewedInstrument {
@@ -202,6 +214,20 @@ impl Artifacts {
     /// The content-addressed references the executor journals with every gate decision.
     pub fn config_refs(&self) -> &BindingGateConfigRefs {
         &self.config_refs
+    }
+
+    /// The production identity this reviewed input binds.
+    pub fn production_identity(&self) -> ProductionIdentity<'_> {
+        ProductionIdentity {
+            asset_id: &self.instrument.asset_id,
+            symbol: &self.instrument.symbol,
+            asset_class: self.instrument.asset_class,
+            broker_exchange: self.instrument.broker_exchange,
+            gate_exchange: self.instrument.gate_exchange,
+            model_id: &self.model_id,
+            model_version: &self.model_version,
+            model_hash: self.model_hash,
+        }
     }
 }
 

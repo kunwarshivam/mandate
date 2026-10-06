@@ -264,18 +264,16 @@ fn the_reviewed_artifacts_load_and_bind_the_bytes_they_checked() -> Result<(), S
 fn production_artifacts_derive_the_instrument_and_model_without_shell_literals()
 -> Result<(), String> {
     let (scratch, loaded) = production_artifacts("production-inputs")?;
-    assert_eq!(loaded.instrument.asset_id.as_str(), OTHER_ASSET);
-    assert_eq!(loaded.instrument.symbol.as_str(), "MSFT");
-    assert_eq!(
-        loaded.instrument.asset_class,
-        mandate_domain::AssetClass::UsEquity
-    );
-    assert_eq!(loaded.instrument.broker_exchange, BrokerExchange::Nyse);
-    assert_eq!(loaded.instrument.gate_exchange, GateExchange::Nyse);
-    assert_eq!(loaded.model_id, "quant.other_model");
-    assert_eq!(loaded.model_version, "2.0.0");
+    let identity = loaded.production_identity();
+    assert_eq!(identity.asset_id.as_str(), OTHER_ASSET);
+    assert_eq!(identity.symbol.as_str(), "MSFT");
+    assert_eq!(identity.asset_class, mandate_domain::AssetClass::UsEquity);
+    assert_eq!(identity.broker_exchange, BrokerExchange::Nyse);
+    assert_eq!(identity.gate_exchange, GateExchange::Nyse);
+    assert_eq!(identity.model_id, "quant.other_model");
+    assert_eq!(identity.model_version, "2.0.0");
     let model = fs::read(scratch.0.join("config/model-artifact.json")).map_err(text)?;
-    assert_eq!(loaded.model_hash, Digest::of(&model));
+    assert_eq!(identity.model_hash, Digest::of(&model));
     scratch.remove()
 }
 
