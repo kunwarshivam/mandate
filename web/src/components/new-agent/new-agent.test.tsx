@@ -325,6 +325,8 @@ describe("A2, the compiled review", () => {
     confirmSection("universe");
     expect(section("universe")).toHaveAttribute("data-confirmed", "false");
     expect(within(section("universe")).getByRole("alert")).toHaveTextContent("XYZ is already traded by Agent 2. One agent trades an instrument on an account; choose another.");
+    expect(screen.getByLabelText("Symbols it may trade")).toHaveFocus();
+    expect(screen.getByLabelText("Symbols it may trade")).toHaveAttribute("aria-invalid", "true");
     fireEvent.change(screen.getByLabelText("Symbols it may trade"), { target: { value: "MSFT" } });
     expect(within(section("universe")).queryByRole("alert")).toBeNull();
     confirmSection("universe");

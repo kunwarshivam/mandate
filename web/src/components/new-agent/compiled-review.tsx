@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Button } from "@cloudflare/kumo/components/button";
 import { CheckCircle } from "@phosphor-icons/react";
 import { FIELD } from "@/components/auth/buttons";
@@ -22,7 +22,9 @@ function SectionError({ id, error }: { id?: string; error: string | null }) {
 
 /**
  * One section of the draft with its own confirmation (brief A2: per section, never all at once,
- * PX-2). Focus follows the control that replaces the one pressed, so confirming never drops it.
+ * PX-2). Focus follows the control that replaces the one pressed, so confirming never drops it. A
+ * refused confirmation moves focus to the field that is wrong, or brings the reason into view when
+ * no one field is, since the reason can sit far above the button that was pressed.
  */
 function ReviewSection({
   section,
@@ -42,17 +44,25 @@ function ReviewSection({
   children?: ReactNode;
 }) {
   const headingId = `review-${section.key}`;
+  const root = useRef<HTMLElement>(null);
   const actions = useRef<HTMLDivElement>(null);
   const moveFocus = useRef(false);
+  const [refusals, setRefusals] = useState(0);
   useEffect(() => {
     if (!moveFocus.current) return;
     moveFocus.current = false;
     actions.current?.querySelector("button")?.focus();
   }, [confirmed]);
+  useEffect(() => {
+    if (refusals === 0) return;
+    const invalid = root.current?.querySelector<HTMLElement>("[aria-invalid=true]");
+    if (invalid) invalid.focus();
+    else root.current?.querySelector("[data-slot=section-error]")?.scrollIntoView({ block: "nearest" });
+  }, [refusals]);
   const proposed = section.fields.filter((f) => f.provenance !== null && isPlatformAuthored(f.provenance)).length;
 
   return (
-    <section aria-labelledby={headingId} data-slot="review-section" data-section={section.key} data-confirmed={confirmed ? "true" : "false"} className="grid gap-(--block-gap)">
+    <section ref={root} aria-labelledby={headingId} data-slot="review-section" data-section={section.key} data-confirmed={confirmed ? "true" : "false"} className="grid gap-(--block-gap)">
       <div className="grid gap-1.5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 id={headingId} className="text-h2">
@@ -102,7 +112,9 @@ function ReviewSection({
             size="lg"
             className={KEY}
             onClick={() => {
-              moveFocus.current = onConfirm();
+              const ok = onConfirm();
+              moveFocus.current = ok;
+              if (!ok) setRefusals((n) => n + 1);
             }}
           >
             Confirm section<span className="sr-only">: {section.title}</span>

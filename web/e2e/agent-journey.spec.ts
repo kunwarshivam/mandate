@@ -54,6 +54,8 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
     await page.getByLabel("Symbols it may trade").fill("XYZ");
     await section(page, "universe").getByRole("button", { name: /^Confirm section/ }).click();
     await expect(section(page, "universe").getByRole("alert")).toHaveText("XYZ is already traded by Agent 2. One agent trades an instrument on an account; choose another.");
+    await expect(page.getByLabel("Symbols it may trade")).toBeFocused();
+    await expect(section(page, "universe").getByRole("alert")).toBeInViewport();
     await page.getByLabel("Symbols it may trade").fill("MSFT");
 
     const momentum = page.getByRole("radio", { name: /Momentum/ });
