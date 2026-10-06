@@ -120,7 +120,7 @@ export const AGENT_SECTIONS: readonly AgentSection[] = [
   { key: "decisions", label: "Decisions", purpose: "Each allow and deny from the gate for this agent.", built: true },
   { key: "approvals", label: "Approvals", purpose: "Requests from this agent that wait for you, and earlier ones.", built: true },
   { key: "mandate", label: "Mandate", purpose: "The confirmed limits this agent trades within, with where each came from.", built: true },
-  { key: "mandate/versions", label: "Versions", purpose: "Each confirmed version of this mandate and what changed.", built: false, parent: "mandate" },
+  { key: "mandate/versions", label: "Versions", purpose: "Each confirmed version of this mandate and what changed.", built: true, parent: "mandate" },
   { key: "mandate/edit", label: "Edit", purpose: "Propose a change to the mandate; it takes effect only after you confirm each changed field.", built: false, parent: "mandate" },
   { key: "prove", label: "Prove", purpose: "Evidence before money: backtests, a paper run, then going live.", built: true },
   { key: "prove/backtests", label: "Backtests", purpose: "Hypothetical runs of this mandate on past data, labelled as hypothetical.", built: false, parent: "prove" },

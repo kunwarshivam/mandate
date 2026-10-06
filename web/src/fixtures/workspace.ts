@@ -7,6 +7,7 @@ import { add, dec, toFixed } from "@/lib/decimal";
 import { BTC_HISTORY, LMN_HISTORY, SWING_HISTORY } from "./history";
 import { INSTRUMENTS, btcAccumulator, lmnCore, provenance, twoStockSwing } from "./mandates";
 import type { Agent, Approval, CancelReason, GateDecision, Health, Scenario, TimelineEvent, Workspace } from "./types";
+import { BTC_RAISE_REJECTED, BTC_VERSIONS, LMN_VERSIONS, SWING_VERSIONS, VERSION } from "./versions";
 
 export const NOW = "2026-09-28T14:05:20-04:00";
 
@@ -28,7 +29,7 @@ const btc: Agent = {
   agent_id: AGENT_IDS.btc,
   label: "Agent 1",
   mandate: btcAccumulator,
-  mandate_version: "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee",
+  mandate_version: VERSION.btc,
   provenance: provenance["btc-accumulator"],
   mode: "normal",
   restrictions: [],
@@ -90,13 +91,14 @@ const btc: Agent = {
   ...BTC_HISTORY,
   goal_progress: { spent_usd: "6666.67", held_qty: "0.12" },
   deployed_at: t("09:30:00", "2026-09-21"),
+  versions: BTC_VERSIONS,
 };
 
 const swing: Agent = {
   agent_id: AGENT_IDS.swing,
   label: "Agent 2",
   mandate: twoStockSwing,
-  mandate_version: "sha256:587390f50e024688e71d20f95912694b3c72eb20605e1a305bcb38d36bca5471",
+  mandate_version: VERSION.swing,
   provenance: provenance["two-stock-swing"],
   mode: "normal",
   restrictions: [],
@@ -169,13 +171,14 @@ const swing: Agent = {
   ...SWING_HISTORY,
   goal_progress: null,
   deployed_at: t("09:30:00", "2026-09-22"),
+  versions: SWING_VERSIONS,
 };
 
 const lmn: Agent = {
   agent_id: AGENT_IDS.lmn,
   label: "Agent 3",
   mandate: lmnCore,
-  mandate_version: "sha256:95120ef74b1d56aa7db4a8c7c607a374b1f9177d7768d7732483f66ecafd9f9f",
+  mandate_version: VERSION.lmn,
   provenance: provenance["lmn-core"],
   mode: "normal",
   restrictions: [],
@@ -198,6 +201,7 @@ const lmn: Agent = {
   ...LMN_HISTORY,
   goal_progress: null,
   deployed_at: t("09:30:00", "2026-09-23"),
+  versions: LMN_VERSIONS,
 };
 
 const pendingSwing: Approval = {
@@ -368,8 +372,10 @@ const resolved: Approval[] = [
     status: "superseded",
     requested_at: t("08:58:21"),
     deadline: t("09:13:21"),
-    bound: { ...pendingLmn.bound, qty: "12", limit: "44.9", combined_score: "0.49" },
+    bound: { ...pendingLmn.bound, qty: "12", limit: "44.9", combined_score: "0.49", mandate_version: VERSION.lmnFirst },
+    trigger: pendingSwing.trigger,
     risk_impact: [{ field: "order_usd", value: "538.8", cap: "1000" }],
+    approvers_required: 1,
     approvals_so_far: [],
     resolution: {
       at: t("09:05:00"),
@@ -458,6 +464,7 @@ const timeline: Record<string, TimelineEvent[]> = {
     { event_id: "01JBV1SD53TW8JZ38AYTNJKGGS", at: t("10:12:47"), kind: "fill", text: "Filled buy 5 QRS at $98.76." },
     { event_id: "01JBFKYS7AA4DZEWNWV8CF5BN5", at: t("09:27:10"), kind: "gate", text: "Buy 2 XYZ not allowed: opening orders only in the regular session." },
     { event_id: "01JBMFQGC1TRTDRHN3ZHQ8D5HF", at: t("08:02:44"), kind: "gate", text: "Sell 2 QRS waiting for the regular session." },
+    { event_id: "01JBK3W5TQ8N2C6X4R7V9Y1ZAB", at: t("08:15:04", "2026-09-25"), kind: "version", text: "Mandate version applied at the next safe point; no approvals were waiting." },
   ],
   [AGENT_IDS.lmn]: [
     { event_id: "01JBRSWVK182VYZ04SXWF6E996", at: t("12:31:15"), kind: "gate", text: "Buy 11 LMN not allowed: within the 1 h re-entry cooldown after an exit." },
@@ -601,7 +608,9 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
         reason_code: "agent_exits_only",
         action: { side: "buy", qty: "0.01", symbol: "BTC/USD", limit_price: "51700", purpose: "increase" },
       });
+      b.versions = [...b.versions, BTC_RAISE_REJECTED];
       ws.timeline[AGENT_IDS.btc].unshift(
+        { event_id: "01JBF6P2M8XKQ4D7N9R3T5W1YC", at: t("14:03:34"), kind: "version", text: "Mandate version rejected: an allocation increase is refused while a limit is latched." },
         { event_id: "01JBBX2KRQNWA605H5PT7DRPKV", at: t("14:01:12"), kind: "mode", text: "Mode changed from normal to exits-only: drawdown reached 6% of the high-water mark." },
         { event_id: "01JB53YCQWCMQY1TFS2R2X43GC", at: t("14:01:12"), kind: "order", text: "Buy 0.01 BTC/USD canceled on entering exits-only." },
       );

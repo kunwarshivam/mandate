@@ -23,6 +23,7 @@ import { AgentFrame, AgentNotFound, useAgent } from "./agent-frame";
 import { ComingSoon } from "./coming-soon";
 import { NEEDS_CARD, NEEDS_ITEM, NEEDS_STRIP, PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
 import { MandateSummary } from "./mandate-summary";
+import { MandateVersions } from "./mandate-versions";
 import { NewsSection } from "./news-section";
 import { SideRail } from "./side-rail";
 
@@ -330,6 +331,11 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
         </Section>
       );
     case "mandate/versions":
+      return (
+        <Section title="Versions">
+          <MandateVersions agent={agent} />
+        </Section>
+      );
     case "mandate/edit":
     case "prove/backtests":
     case "prove/paper":
