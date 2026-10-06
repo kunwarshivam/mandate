@@ -444,10 +444,11 @@ with exactly `kind: "model_registry"`, `model_registry_version: 1`, and `models`
 exactly `model_id`, `model_version`, `content_hash`, `params`, and `admits_instruments`. Models are
 strictly sorted and unique by `model_id`; `params` are strictly sorted and unique. These objects
 are canonical configuration artifacts registered on the control stream before use.
-At append, a `config_refs` value whose stored object is absent is `missing_artifact` at that
-`config_refs.<kind>`; an object whose own `kind` differs is `config_ref_kind` at the same path.
-For `ConfigSnapshotRegistered`, the corresponding paths are `payload.content_hash` and
-`payload.kind`.
+At append, these two new kinds have an additional object-shape check: a `policy_set` or
+`model_registry` reference whose stored object is absent is `missing_artifact` at that
+`config_refs.<kind>`, and an object whose own `kind` differs is `config_ref_kind` at the same path.
+The older kinds retain their existing object contracts. For a version-2 `ConfigSnapshotRegistered`
+of either new kind, the corresponding paths are `payload.content_hash` and `payload.kind`.
 
 **Account stream** (owner: executor). Risk inputs also carry `risk_clock` (§2).
 
@@ -948,9 +949,11 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
     exactly when `kind` is `model_version`, and `params` is empty when it is not. Reported at the first
     offending member, in that order.
 21a. `ConfigSnapshotRegistered` version 2: `policy_set` and `model_registry` are valid kinds.
-    The stored canonical object's `kind` equals `payload.kind`, and it re-hashes to
-    `payload.content_hash`; a mismatch is `config_ref_kind` at `payload.kind`. Version 1 refuses
-    either new kind as `non_canonical` at `payload.kind`.
+    The canonical object stored under `payload.content_hash` has a `kind` equal to
+    `payload.kind`; absence is `missing_artifact` at `payload.content_hash`, and a kind mismatch is
+    `config_ref_kind` at `payload.kind`. Version 1 refuses either new kind as `non_canonical` at
+    `payload.kind`. §11 check 6 independently verifies that the stored bytes re-hash to their
+    address and reports `artifact_mismatch`.
 22. `AgentDeployed`: `mandate_version` equals `config_refs.mandate_version` (`payload.mandate_version`).
     A missing ref is already `missing_config_ref`.
 23. `AgentStopped`: `loss_added` ≥ 0 (`payload.loss_added`). The loss carried is never negative
