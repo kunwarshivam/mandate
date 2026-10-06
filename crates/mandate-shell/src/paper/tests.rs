@@ -8,12 +8,14 @@ use mandate_alpaca::{
     Asset, AssetSnapshot, Exchange as BrokerExchange, Feed, LatestQuote, MinuteBar, MinuteBars,
 };
 use mandate_builder::buy_action;
+use mandate_canon::Digest;
+use mandate_domain::AssetId;
 use mandate_executor::{
     AgentId as ExecutorAgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
     BrokerAccount, BrokerOrder, BrokerPosition, InstrumentSnapshot, MandateView, Purpose,
 };
 use mandate_num::{Price, Qty, SignedQty, Unit, Usd};
-use mandate_risk::SaneQuote;
+use mandate_risk::{Exchange as GateExchange, SaneQuote};
 use mandate_runtime::{AgentId, ProtectionPrices};
 use mandate_time::{Date, UtcNanos};
 
@@ -57,6 +59,36 @@ fn symbol(value: &str) -> Result<InstrumentId, String> {
 
 fn artifacts() -> Result<Artifacts, String> {
     Artifacts::load(&fixtures().join("mandate.json"), &fixtures().join("config")).map_err(text)
+}
+
+fn production_artifacts(name: &str) -> Result<(Scratch, Artifacts), String> {
+    let scratch = Scratch::new(name)?;
+    scratch.replace("mandate.json", INSTRUMENT_ID, OTHER_ASSET)?;
+    scratch.replace("mandate.json", "AAPL", "MSFT")?;
+    scratch.replace("mandate.json", "quant.ma_crossover", "quant.other_model")?;
+    scratch.replace(
+        "mandate.json",
+        "\"version\": \"1.0.0\"",
+        "\"version\": \"2.0.0\"",
+    )?;
+    scratch.replace(
+        "config/instrument-snapshot.json",
+        INSTRUMENT_ID,
+        OTHER_ASSET,
+    )?;
+    scratch.replace("config/instrument-snapshot.json", "AAPL", "MSFT")?;
+    scratch.replace("config/instrument-snapshot.json", "\"nasdaq\"", "\"nyse\"")?;
+    let model = br#"{"id":"quant.other_model","version":"2.0.0"}"#;
+    fs::write(scratch.0.join("config/model-artifact.json"), model).map_err(text)?;
+    scratch.replace(
+        "mandate.json",
+        "sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc",
+        &format!("sha256:{}", Digest::of(model).to_hex()),
+    )?;
+    let artifacts =
+        Artifacts::load_production(&scratch.0.join("mandate.json"), &scratch.0.join("config"))
+            .map_err(text)?;
+    Ok((scratch, artifacts))
 }
 
 fn agent() -> AgentId {
@@ -225,6 +257,58 @@ fn the_reviewed_artifacts_load_and_bind_the_bytes_they_checked() -> Result<(), S
         at("2026-09-25T00:00:00Z")?
     );
     Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-19"]
+fn production_artifacts_derive_the_instrument_and_model_without_shell_literals()
+-> Result<(), String> {
+    let (scratch, loaded) = production_artifacts("production-inputs")?;
+    assert_eq!(loaded.instrument.asset_id.as_str(), OTHER_ASSET);
+    assert_eq!(loaded.instrument.symbol.as_str(), "MSFT");
+    assert_eq!(
+        loaded.instrument.asset_class,
+        mandate_domain::AssetClass::UsEquity
+    );
+    assert_eq!(loaded.instrument.broker_exchange, BrokerExchange::Nyse);
+    assert_eq!(loaded.instrument.gate_exchange, GateExchange::Nyse);
+    assert_eq!(loaded.model_id, "quant.other_model");
+    assert_eq!(loaded.model_version, "2.0.0");
+    let model = fs::read(scratch.0.join("config/model-artifact.json")).map_err(text)?;
+    assert_eq!(loaded.model_hash, Digest::of(&model));
+    scratch.remove()
+}
+
+#[test]
+#[ignore = "pending E7-19"]
+fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Result<(), String> {
+    let (scratch, loaded) = production_artifacts("production-contexts")?;
+    let mut snapshot = facts()?;
+    snapshot.broker.asset.asset.asset_id = OTHER_ASSET.to_owned();
+    snapshot.broker.asset.asset.instrument = symbol("MSFT")?;
+    snapshot.broker.asset.asset.exchange = BrokerExchange::Nyse;
+    snapshot.broker.quote.instrument = symbol("MSFT")?;
+    snapshot.broker.minute_bars.instrument = symbol("MSFT")?;
+
+    let contexts = load_contexts(&loaded, &snapshot, at(NOW)?, &agent()).map_err(text)?;
+    let decision = contexts
+        .run
+        .decision
+        .ok_or("the production context carries a decision")?;
+    let builder = decision.builder.ok_or("a production builder context")?;
+    assert_eq!(
+        builder.market.instrument,
+        AssetId::parse(OTHER_ASSET).map_err(text)?
+    );
+    assert_eq!(
+        builder
+            .model_content_hashes
+            .get(&("quant.other_model".to_owned(), "2.0.0".to_owned())),
+        Some(&loaded.model_hash)
+    );
+    let gate = decision.gate.ok_or("a production gate context")?;
+    assert_eq!(gate.instrument.exchange, Some(GateExchange::Nyse));
+    scratch.remove()
 }
 
 #[test]
