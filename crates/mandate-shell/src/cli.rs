@@ -100,7 +100,9 @@ pub fn parse_production<I>(_args: I) -> Result<ProductionArgs, ShellError>
 where
     I: IntoIterator<Item = String>,
 {
-    Err(usage("pending E7-19 production inputs".to_owned()))
+    Err(usage(
+        "production inputs are not implemented yet (pending E7-19)".to_owned(),
+    ))
 }
 
 fn value_of(flag: &str, value: Option<String>) -> Result<String, ShellError> {
@@ -128,8 +130,62 @@ mod tests {
     #[test]
     #[ignore = "pending E7-19"]
     fn production_arguments_require_caller_owned_deployment_identity() -> Result<(), String> {
-        let parsed = parse_production(
-            [
+        for (workspace, agent, account_ref) in [
+            ("workspace-owner-42", "agent-deployment-9", "account-ref-7"),
+            ("workspace-owner-84", "agent-deployment-3", "account-ref-2"),
+        ] {
+            let parsed = parse_production(
+                [
+                    "--mandate",
+                    "mandate.json",
+                    "--dataset",
+                    "bars",
+                    "--config-dir",
+                    "config",
+                    "--workspace",
+                    workspace,
+                    "--agent",
+                    agent,
+                    "--account-ref",
+                    account_ref,
+                    "--confirm-paper",
+                ]
+                .into_iter()
+                .map(str::to_owned),
+            )
+            .map_err(|error| error.to_string())?;
+            assert_eq!(parsed.workspace, workspace);
+            assert_eq!(parsed.agent, agent);
+            assert_eq!(parsed.account_ref, account_ref);
+        }
+        for incomplete in [
+            vec![
+                "--mandate",
+                "mandate.json",
+                "--dataset",
+                "bars",
+                "--config-dir",
+                "config",
+                "--agent",
+                "agent-deployment-9",
+                "--account-ref",
+                "account-ref-7",
+                "--confirm-paper",
+            ],
+            vec![
+                "--mandate",
+                "mandate.json",
+                "--dataset",
+                "bars",
+                "--config-dir",
+                "config",
+                "--workspace",
+                "workspace-owner-42",
+                "--account-ref",
+                "account-ref-7",
+                "--confirm-paper",
+            ],
+            vec![
                 "--mandate",
                 "mandate.json",
                 "--dataset",
@@ -140,17 +196,14 @@ mod tests {
                 "workspace-owner-42",
                 "--agent",
                 "agent-deployment-9",
-                "--account-ref",
-                "account-ref-7",
                 "--confirm-paper",
-            ]
-            .into_iter()
-            .map(str::to_owned),
-        )
-        .map_err(|error| error.to_string())?;
-        assert_eq!(parsed.workspace, "workspace-owner-42");
-        assert_eq!(parsed.agent, "agent-deployment-9");
-        assert_eq!(parsed.account_ref, "account-ref-7");
+            ],
+        ] {
+            assert!(
+                parse_production(incomplete.into_iter().map(str::to_owned)).is_err(),
+                "every deployment identity field is required"
+            );
+        }
         Ok(())
     }
 
