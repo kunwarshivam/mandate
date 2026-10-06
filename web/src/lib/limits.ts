@@ -1,5 +1,5 @@
 import type { Agent, LadderRung } from "@/fixtures/types";
-import { type Dec, ONE, ZERO, add, dec, max, min, mul, sub } from "./decimal";
+import { type Dec, ONE, ZERO, add, dec, max, min, mul, ratio, sub } from "./decimal";
 import { percent, usd } from "./format";
 
 /**
@@ -213,4 +213,35 @@ export const NEAR_LIMIT_USED = dec("0.8");
  */
 export function nearLossLimits(limits: AgentLimits): Level[] {
   return limits.levels.filter((l) => l.allowance !== null && headroomAbove(limits, l) <= mul(sub(ONE, NEAR_LIMIT_USED), max(ZERO, l.allowance)));
+}
+
+export interface HeadroomRow {
+  key: string;
+  label: string;
+  headroom: string;
+  limit: string;
+  share: number;
+  over: boolean;
+  atCap: string;
+}
+
+/**
+ * Each limit as the room left under it. Room under the daily loss limit is equity's distance to that
+ * level, the figure Home states, so a day's gain widens it; the other limits are the cap less what is
+ * used. Distances to limits, never results, so they need no disclosure.
+ */
+export function headroomRows(limits: AgentLimits): HeadroomRow[] {
+  const daily = limits.levels.find((l) => l.kind === "daily");
+  return limits.rails.map((rail) => {
+    const left = rail.key === "daily" && daily ? headroomAbove(limits, daily) : sub(rail.cap, rail.used);
+    return {
+      key: rail.key,
+      label: rail.key === "daily" ? "Daily loss limit" : rail.label,
+      headroom: usd(left > 0n ? left : 0n),
+      limit: rail.key === "daily" ? `${usd(rail.cap)} below the day's start` : usd(rail.cap),
+      share: Math.min(ratio(rail.used, rail.cap), 1),
+      over: rail.used > rail.cap,
+      atCap: rail.atCap,
+    };
+  });
 }

@@ -10,7 +10,7 @@ import type { Agent } from "@/fixtures/types";
 import { type Dec, ONE, ratio, sub } from "@/lib/decimal";
 import { usd } from "@/lib/format";
 import { MODE_MEANING } from "@/lib/labels";
-import { type AgentLimits, type Level, type Rail, agentLimits, headroomAbove, nextLevel } from "@/lib/limits";
+import { type Level, type Rail, agentLimits, headroomRows, nextLevel } from "@/lib/limits";
 import { agentHref } from "@/lib/screens";
 import { ModeBadge } from "./mode";
 import { Placeholder } from "./placeholders";
@@ -175,36 +175,6 @@ export function Envelope({ agent, className }: { agent: Agent; className?: strin
       <p className="text-caption text-mandate-muted">{CAVEAT}</p>
     </section>
   );
-}
-
-interface HeadroomRowData {
-  key: string;
-  label: string;
-  headroom: string;
-  limit: string;
-  share: number;
-  over: boolean;
-  atCap: string;
-}
-
-/**
- * Room left under the daily loss limit is equity's distance to that level, the figure Home states, so
- * a day's gain widens it; the other limits are the cap less what is used.
- */
-function headroomRows(limits: AgentLimits): HeadroomRowData[] {
-  const daily = limits.levels.find((l) => l.kind === "daily");
-  return limits.rails.map((rail) => {
-    const left = rail.key === "daily" && daily ? headroomAbove(limits, daily) : sub(rail.cap, rail.used);
-    return {
-      key: rail.key,
-      label: rail.key === "daily" ? "Daily loss limit" : rail.label,
-      headroom: usd(left > 0n ? left : 0n),
-      limit: rail.key === "daily" ? `${usd(rail.cap)} below the day's start` : usd(rail.cap),
-      share: Math.min(ratio(rail.used, rail.cap), 1),
-      over: rail.used > rail.cap,
-      atCap: rail.atCap,
-    };
-  });
 }
 
 function HeadroomMeter({ label, share }: { label: string; share: number }) {

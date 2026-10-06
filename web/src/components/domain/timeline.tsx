@@ -1,7 +1,7 @@
 import type { TimelineEvent } from "@/fixtures/types";
 import { clock, dateLabel } from "@/lib/format";
 
-const KIND_LABEL: Record<TimelineEvent["kind"], string> = {
+export const KIND_LABEL: Record<TimelineEvent["kind"], string> = {
   fill: "Fill",
   order: "Order",
   mode: "Mode",
