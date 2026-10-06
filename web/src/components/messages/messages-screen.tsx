@@ -9,6 +9,7 @@ import { AgentOwl } from "@/components/domain/owl";
 import { type PageTab, PageTabs } from "@/components/kumo/page-header/page-header";
 import { AgentNotFound } from "@/components/screens/agent-frame";
 import { EmptyBoard, WorkspaceGate } from "@/components/screens/common";
+import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import { PAGE_FRAME } from "@/components/shell/frame";
 import type { Agent } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
@@ -41,37 +42,56 @@ export function threadViews(agentId: string): PageTab[] {
   ];
 }
 
+const BAR_LINK =
+  "inline-flex h-11 shrink-0 items-center justify-center rounded-lg outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-ring lg:hidden";
+
+/**
+ * On a phone the thread's bar is the only chrome above it (DEC-482): back, the agent (its owl and
+ * name open its page), the other view, and the paper badge, which the hidden app header would have
+ * carried. On a desktop the header above stays, and Chat and Desk are tabs.
+ */
+function ThreadBar({ agent, view }: { agent: Agent; view: ThreadView }) {
+  const { ws } = useRuntime();
+  const views = threadViews(agent.agent_id);
+  const other = views[view === "chat" ? 1 : 0];
+  return (
+    <header data-slot="thread-bar" className="flex shrink-0 items-center gap-1 border-b border-border/70 py-1.5 pr-(--page-x) pl-1 lg:items-end lg:gap-6 lg:px-6 lg:pt-3 lg:pb-0">
+      <Link href="/messages" aria-label="Back to Messages" className={cn(BAR_LINK, "w-11 text-muted-foreground hover:text-foreground")}>
+        <ArrowLeft aria-hidden className="size-6" />
+      </Link>
+      <div className="relative flex min-w-0 flex-1 items-center gap-2.5 rounded-lg max-lg:min-h-11 max-lg:has-[a:focus-visible]:ring-2 max-lg:has-[a:focus-visible]:ring-ring lg:gap-3 lg:pb-3">
+        <AgentOwl agent={agent} className="size-7 shrink-0 lg:hidden" />
+        <div className="grid min-w-0 gap-0.5 lg:gap-1">
+          <h2 id="thread-title" className="flex min-w-0 items-center gap-x-3 gap-y-1 font-semibold max-lg:leading-5 lg:flex-wrap lg:text-h3">
+            <Link
+              href={agentHref(agent.agent_id, "overview")}
+              className="truncate rounded-sm outline-none hover:underline max-lg:after:absolute max-lg:after:inset-0 lg:focus-visible:ring-2 lg:focus-visible:ring-ring"
+            >
+              {agent.label}
+            </Link>
+            <ModeBadge mode={agent.mode} className="max-lg:hidden" />
+          </h2>
+          <p className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground max-lg:text-caption">
+            <ModeBadge mode={agent.mode} className="h-5 lg:hidden [&>svg]:size-5" />
+            <span className="truncate" translate="no">
+              {agent.mandate.name}
+            </span>
+          </p>
+        </div>
+      </div>
+      <Link href={other.href} className={cn(BAR_LINK, "px-2.5 text-sm font-medium text-lapis hover:bg-lapis-soft")}>
+        {other.label}
+      </Link>
+      <EnvironmentBadge environment={ws.environment} className="ml-1 lg:hidden" />
+      <PageTabs tabs={views} label="Thread views" className="mx-0 px-0 max-lg:hidden [&>ul]:border-b-0" />
+    </header>
+  );
+}
+
 function Thread({ agent, view }: { agent: Agent; view: ThreadView }) {
   return (
     <section aria-labelledby="thread-title" data-slot="thread-pane" className="flex min-h-0 min-w-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-end gap-x-6 border-b border-border/70 px-(--page-x) pt-1.5 lg:px-6 lg:pt-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2 pb-1.5 lg:gap-3 lg:pb-3">
-          <Link
-            href="/messages"
-            aria-label="Back to Messages"
-            className="-ml-2.5 inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
-          >
-            <ArrowLeft aria-hidden className="size-6" />
-          </Link>
-          <AgentOwl agent={agent} className="size-8 shrink-0 lg:hidden" />
-          <div className="grid min-w-0 gap-0.5">
-            <h2 id="thread-title" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-h3">
-              {agent.label}
-              <ModeBadge mode={agent.mode} />
-            </h2>
-            <p className="truncate text-sm text-muted-foreground" translate="no">
-              {agent.mandate.name}
-            </p>
-          </div>
-          <Link
-            href={agentHref(agent.agent_id, "overview")}
-            className="ml-auto inline-flex h-11 shrink-0 items-center rounded-lg px-3 text-sm font-medium text-lapis outline-none hover:bg-lapis-soft focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
-          >
-            Open agent
-          </Link>
-        </div>
-        <PageTabs tabs={threadViews(agent.agent_id)} label="Thread views" className="mx-0 px-0 max-lg:basis-full [&>ul]:border-b-0" />
-      </header>
+      <ThreadBar agent={agent} view={view} />
       {view === "chat" ? (
         <ThreadChat agent={agent} />
       ) : (
@@ -89,8 +109,7 @@ function NoThreadOpen() {
       <MessageText aria-hidden className="size-12 text-muted-foreground" />
       <p className="text-h3">Pick a thread</p>
       <p className="max-w-measure text-pretty text-muted-foreground">
-        Each agent&apos;s thread is its journal: orders, requests and mode changes, at the time each was recorded. Ask about it in its own words; the answers come from the
-        record.
+        Each agent&apos;s thread is its journal: orders, requests and mode changes, at the time each was recorded. Ask about any of it.
       </p>
     </div>
   );

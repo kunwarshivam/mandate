@@ -148,7 +148,7 @@ export function MoreSheet({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange} modal={false}>
       <Dialog.Portal container={container}>
-        <Dialog.Backdrop data-slot="sheet-backdrop" className="fixed inset-x-0 top-[calc(4rem+1px)] bottom-[calc(var(--tab-bar)+env(safe-area-inset-bottom))] z-20 bg-ink/40" />
+        <Dialog.Backdrop data-slot="sheet-backdrop" className="fixed inset-x-0 top-[calc(4rem+1px)] group-has-[[data-slot=thread-pane]]/frame:top-0 bottom-[calc(var(--tab-bar)+env(safe-area-inset-bottom))] z-20 bg-ink/40" />
         <Dialog.Popup
           data-slot="more-sheet"
           className="fixed inset-x-0 bottom-[calc(var(--tab-bar)+env(safe-area-inset-bottom))] z-20 mx-auto flex max-h-[min(85dvh,calc(100dvh-4rem-1px-var(--tab-bar)-env(safe-area-inset-bottom)))] w-full max-w-lg flex-col overflow-y-auto overscroll-contain rounded-t-3xl border-t border-border bg-card pb-4 text-foreground shadow-2xl outline-none sm:border-x"

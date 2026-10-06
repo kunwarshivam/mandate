@@ -75,6 +75,42 @@ test("on a phone the thread fills the width between the header and the tab bar",
   expect(await pageScrolls(page)).toEqual({ down: 0, across: 0 });
 });
 
+/**
+ * On a phone the conversation gets the screen (DEC-482): the thread's one-row bar replaces the app
+ * header and carries the paper badge, the pinned request is 44px with nothing cut off, and the log
+ * is most of what is left, while Stop stays on the tab bar.
+ */
+for (const [width, height, share] of [
+  [390, 844, 0.6],
+  [375, 667, 0.5],
+  [320, 568, 0.4],
+] as const) {
+  test(`${width}×${height}: the thread's bar is the only chrome above it, and the log has ${share * 100}% of the screen or more`, async ({ page }) => {
+    await open(page, THREAD.replace("normal", "approvals"), width, height);
+    await expect(page.locator("[data-slot=app-header]"), "the app header gives way to the thread's bar").toBeHidden();
+    const bar = page.locator("[data-slot=thread-bar]");
+    expect((await bar.boundingBox())!.y, "the bar is at the top of the window").toBe(0);
+    expect((await bar.boundingBox())!.height, "in one row").toBeLessThanOrEqual(60);
+    await expect(bar.locator("[data-slot=environment-badge]"), "and it carries the paper badge").toBeInViewport({ ratio: 1 });
+    await expect(bar.locator("[data-slot=environment-badge]")).toContainText("PAPER");
+    await expect(page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Stop", exact: true }), "Stop stays on the tab bar").toBeInViewport({ ratio: 1 });
+    for (const target of await bar.locator("a[href]").locator("visible=true").all()) {
+      const r = await target.evaluate((el) => (getComputedStyle(el, "::after").position === "absolute" ? el.offsetParent! : el).getBoundingClientRect());
+      expect(Math.min(r.width, r.height), `${await target.textContent()} is a 44px target`).toBeGreaterThanOrEqual(44);
+    }
+
+    const pinned = page.locator("[data-slot=pinned-request]");
+    expect((await pinned.boundingBox())!.height, "the pinned request is 44px").toBeLessThanOrEqual(45);
+    for (const line of await pinned.locator(":scope > span:first-child > span").all()) {
+      const { scroll, client } = await line.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+      expect(scroll, `"${await line.innerText()}" is not cut off`).toBeLessThanOrEqual(client);
+    }
+
+    expect((await log(page).boundingBox())!.height, "the log has most of the screen").toBeGreaterThanOrEqual(height * share);
+    expect(await pageScrolls(page)).toEqual({ down: 0, across: 0 });
+  });
+}
+
 test("the thread follows the latest entry, leaves a reader who scrolled up, and comes back when they send", async ({ page }) => {
   await open(page, THREAD, 1440, 900);
   await expect.poll(() => gapToEnd(page), { message: "it opens at the latest entry" }).toBeLessThanOrEqual(1);

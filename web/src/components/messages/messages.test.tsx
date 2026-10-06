@@ -51,6 +51,49 @@ describe("the frame", () => {
     renderThread(AGENT_IDS.swing);
     expect(within(main()).getAllByRole("heading", { level: 1, name: "Messages" }).length).toBeGreaterThan(0);
   });
+
+  it("gives an open thread the phone's header: the app header gives way only while a thread pane is on the page (DEC-482)", () => {
+    renderThread(AGENT_IDS.swing);
+    const header = document.querySelector<HTMLElement>("[data-slot=app-header]")!;
+    expect(header).toHaveClass("max-lg:group-has-[[data-slot=thread-pane]]/frame:hidden");
+    expect(header.closest(".group\\/frame")).not.toBeNull();
+    expect(main().querySelector("[data-slot=thread-pane]")).not.toBeNull();
+  });
+});
+
+describe("the thread's bar on a phone (DEC-482)", () => {
+  const bar = () => main().querySelector<HTMLElement>("[data-slot=thread-bar]")!;
+  const phoneOnly = (el: Element) => el.closest(".lg\\:hidden") !== null || el.classList.contains("lg:hidden");
+
+  it("holds the way back, the agent, the other view and the paper badge, in one row", () => {
+    renderThread(AGENT_IDS.swing);
+    expect(bar()).not.toHaveClass("flex-wrap");
+    expect(within(bar()).getByRole("link", { name: "Back to Messages" })).toHaveAttribute("href", "/messages");
+    expect(within(bar()).getByRole("heading", { level: 2, name: /^Agent 2/ })).toBeInTheDocument();
+    const badge = bar().querySelector<HTMLElement>("[data-slot=environment-badge]")!;
+    expect(badge).toHaveTextContent("PAPER");
+    expect(badge).toHaveClass("lg:hidden");
+    expect(within(bar()).queryByRole("link", { name: "Open agent" })).toBeNull();
+  });
+
+  it("opens the agent from its name, over the whole of the owl and the name", () => {
+    renderThread(AGENT_IDS.swing);
+    const agent = within(bar()).getByRole("link", { name: "Agent 2" });
+    expect(agent).toHaveAttribute("href", `/agents/${AGENT_IDS.swing}`);
+    expect(agent).toHaveClass("max-lg:after:absolute", "max-lg:after:inset-0");
+  });
+
+  it.each([
+    ["chat", "Desk", `${swingThread}/desk`],
+    ["desk", "Chat", swingThread],
+  ] as const)("on the %s, links to the other view in the bar, in place of the tabs", (view, label, href) => {
+    renderThread(AGENT_IDS.swing, { view });
+    const other = within(bar())
+      .getAllByRole("link", { name: label })
+      .filter((l) => phoneOnly(l) && !l.closest("nav"));
+    expect(other.map((l) => l.getAttribute("href"))).toEqual([href]);
+    expect(within(bar()).getByRole("navigation", { name: "Thread views" })).toHaveClass("max-lg:hidden");
+  });
 });
 
 describe("the threads", () => {
@@ -93,6 +136,14 @@ describe("an agent's thread", () => {
     const pinned = main().querySelector<HTMLElement>("[data-slot=pinned-request]");
     expect(pinned).toHaveAttribute("href", `/approvals/${APPROVAL_IDS.swingXyz}`);
     expect(pinned).toHaveTextContent(/^Buy 2 XYZ at \$141\.30Skipped at \d\d:\d\d:\d\d ET if you do nothingReview$/);
+  });
+
+  it("draws the pinned request in 44px on a phone, the end of its sentence and Review read out rather than drawn", () => {
+    renderThread(AGENT_IDS.swing);
+    const pinned = main().querySelector<HTMLElement>("[data-slot=pinned-request]")!;
+    expect(pinned).toHaveClass("max-lg:min-h-11");
+    const readOnly = [...pinned.querySelectorAll(".max-lg\\:sr-only")].map((el) => el.textContent);
+    expect(readOnly).toEqual([" if you do nothing", "Review"]);
   });
 
   it("pins nothing when no request is waiting", () => {

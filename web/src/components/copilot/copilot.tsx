@@ -167,7 +167,7 @@ function Panel({ onClose }: { onClose: () => void }) {
       }}
       className={cn(
         "z-[21] flex flex-col border-border bg-card",
-        "max-lg:fixed max-lg:inset-x-0 max-lg:top-16 max-lg:bottom-[calc(var(--tab-bar)+env(safe-area-inset-bottom))] max-lg:border-t",
+        "max-lg:fixed max-lg:inset-x-0 max-lg:top-16 max-lg:group-has-[[data-slot=thread-pane]]/frame:top-0 max-lg:bottom-[calc(var(--tab-bar)+env(safe-area-inset-bottom))] max-lg:border-t",
         "lg:fixed lg:top-16 lg:right-0 lg:bottom-(--dock-clearance) lg:w-(--copilot-w) lg:rounded-bl-2xl lg:border-b lg:border-l",
         "min-[110rem]:sticky min-[110rem]:top-0 min-[110rem]:h-dvh min-[110rem]:shrink-0 min-[110rem]:rounded-none min-[110rem]:border-b-0",
       )}

@@ -34,7 +34,8 @@ export function densityFor(pathname: string): "calm" | "dense" {
  * Owlhead, when open, docks to the right of the page from 110rem and the dock recentres on what is
  * left; narrower, it floats over the page's right side, and on a phone it is a sheet between the
  * header and the tab bar (DEC-479). Messages fills the window edge to edge, with no gutter and no
- * page footer; its list of threads carries the fixture tag (DEC-481).
+ * page footer; its list of threads carries the fixture tag (DEC-481). On a phone, an open thread
+ * takes the header's place: its own bar carries the paper badge and the way back (DEC-482).
  */
 export function AppShell({ children }: { children: ReactNode }) {
   return (
@@ -58,12 +59,12 @@ function Frame({ children }: { children: ReactNode }) {
   const bleed = fullBleed(pathname);
 
   return (
-    <div className="relative isolate flex min-h-svh w-full" style={{ "--copilot-w": copilot.open ? COPILOT_WIDTH : "0px" } as CSSProperties}>
+    <div className="group/frame relative isolate flex min-h-svh w-full" style={{ "--copilot-w": copilot.open ? COPILOT_WIDTH : "0px" } as CSSProperties}>
       <a href="#main" className="sr-only z-50 bg-card px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
       <div className={cn("flex min-h-dvh min-w-0 flex-1 flex-col bg-card", bleed && "h-dvh max-lg:pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom))]")}>
-        <AppHeader />
+        <AppHeader className="max-lg:group-has-[[data-slot=thread-pane]]/frame:hidden" />
         {strip ? (
           <div className={record ? undefined : "max-lg:hidden"}>
             <StatusStrip ws={ws} now={now} className="px-(--page-x)" />
