@@ -608,6 +608,16 @@ after U-A1 to U-A5 are recorded.
   text (§6.3) says the stored exchange has other accounts' data dropped before redaction and
   hashing, that the dropped parts cannot be recovered, and that reconciliation disputes rest on
   the filtered record; the connections spec §6.2 says the same.
+- **E7-19 (Must, M6; SC)** As an owner, I want paper deployments to run through a production cycle
+  API over my confirmed mandate and effective configuration, so that an instrument, model or
+  deployment can change without a release and paper proves the path the product uses
+  ([DEC-475](decisions/DEC-475.md)).
+  *Accepted when:* the production cycle takes a validated deployment, authoritative account and
+  market snapshots, and a registered `ModelOutput`; no production shell assembly selects an
+  instrument, model, deployment identity, gate configuration or executor configuration; every
+  effective input is content addressed in the journal; recorded paper tests and the manual Alpaca
+  paper run use that same API with no synthetic model or test-only execution branch; and restart
+  reconciliation sends no duplicate.
 
 ### E8 Escalation and approvals
 
