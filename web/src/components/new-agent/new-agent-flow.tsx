@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { claimedBy, unallocatedUsd } from "@/lib/fixture-journey";
+import { useHandoff } from "@/lib/handoff";
 import { useRuntime } from "@/lib/mock-runtime";
 import { Chat, type Creation } from "./chat";
 import { type Compiler, type CompilerInput, figuresOnly, fixtureCompiler, validateTurn } from "./compiler";
@@ -15,7 +16,8 @@ const FIXTURE_COMPILER = fixtureCompiler();
  * Setting up an agent on the fixture workspace (brief A0 to A2 and A5, DEC-473, DEC-474): one
  * conversation gathers the owner's values, shows the whole agent once, and creates it with a
  * passkey. Everything stays in this component's state until then; only the deployment reaches the
- * runtime, which repeats V-002 and V-006 when it applies it.
+ * runtime, which repeats V-002 and V-006 when it applies it. Words handed over from Messages or the
+ * copilot wait in the message field; nothing is read until the owner sends them.
  */
 export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compiler }) {
   const { ws, deployments } = useRuntime();
@@ -73,17 +75,24 @@ export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compi
     sent: sent && deployment ? { deployment, revision: sent.revision } : null,
   };
 
+  const send = (text: string) => {
+    const [next, input] = say(conversation, text);
+    setConversation(next);
+    void read(input, input.messages[input.messages.length - 1].id, !next.figuresOnly);
+  };
+
+  const handoff = useHandoff();
+  const [handed] = useState(() => handoff.peek());
+  useEffect(() => handoff.clear(), [handoff]);
+
   return (
     <div ref={root} className="mx-auto w-full max-w-2xl reveal" key={`chat-${attempt}`}>
       <Chat
         conversation={conversation}
         busy={busy}
         creation={creation}
-        onSend={(text) => {
-          const [next, input] = say(conversation, text);
-          setConversation(next);
-          void read(input, input.messages[input.messages.length - 1].id, !next.figuresOnly);
-        }}
+        onSend={send}
+        initialText={attempt === 0 ? handed : null}
         actions={{
           onChoose: (model) => setConversation((c) => chooseModel(c, model)),
           onRetry: (messageId) => void read(inputFor(conversation, messageId), messageId, !conversation.figuresOnly),
