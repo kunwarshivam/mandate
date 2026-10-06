@@ -24,8 +24,8 @@ describe("the compiler's guard", () => {
       said,
     );
     expect(t.readings).toEqual([
-      { field: "money", quote: "Use $3,000 on big tech.", value: dec("3000"), check: false },
-      { field: "loss", quote: "I can stand to lose 10%.", loss: { kind: "fraction", value: dec("0.1") }, check: false },
+      { field: "money", quote: "Use $3,000 on big tech.", value: dec("3000"), fromWords: false },
+      { field: "loss", quote: "I can stand to lose 10%.", loss: { kind: "fraction", value: dec("0.1") }, fromWords: false },
     ]);
     expect(t.dropped).toEqual([]);
   });
@@ -49,9 +49,9 @@ describe("the compiler's guard", () => {
     ]);
   });
 
-  it("keeps an amount written in words only as a question for the owner", () => {
+  it("marks an amount written in words, so the conversation says how it read it", () => {
     const t = checked(turn([{ field: "money", quote: "about five grand", value: "5000" }]), "about five grand");
-    expect(t.readings).toEqual([{ field: "money", quote: "about five grand", value: dec("5000"), check: true }]);
+    expect(t.readings).toEqual([{ field: "money", quote: "about five grand", value: dec("5000"), fromWords: true }]);
   });
 
   it("never takes a field the compiler may not set: autonomy, delegations, the environment, the connection, a limit (V-022, V-038)", () => {
@@ -111,17 +111,33 @@ describe("the fixture model", () => {
   it("reads a whole description at once, pointing at the owner's own words", async () => {
     const t = await read("Use $8,000 on big tech. Stop when it is up 12%. I can stand to lose 10%. Avoid oil companies.");
     expect(t.readings.map((r) => [r.field, r.quote])).toEqual([
-      ["loss", "I can stand to lose 10%."],
-      ["money", "Use $8,000 on big tech."],
-      ["goal", "Stop when it is up 12%."],
+      ["loss", "I can stand to lose 10%"],
+      ["money", "Use $8,000 on big tech"],
+      ["goal", "Stop when it is up 12%"],
     ]);
-    expect(t.notes).toEqual(["Avoid oil companies."]);
+    expect(t.notes).toEqual(["Avoid oil companies"]);
     expect(t.dropped).toEqual([]);
   });
 
+  it("reads one run-on sentence as a person would: the amount in words, the goal after it, the loss", async () => {
+    const t = await read("I want it to use about three grand to grow it steadily, avoiding oil companies. I could stand to lose $300.");
+    expect(t.readings.map((r) => [r.field, r.quote])).toEqual([
+      ["loss", "I could stand to lose $300"],
+      ["money", "about three grand"],
+      ["goal", "grow it steadily"],
+    ]);
+    expect(t.readings).toContainEqual({ field: "money", quote: "about three grand", value: dec("3000"), fromWords: true });
+    expect(t.notes).toEqual(["I want it to use about three grand to grow it steadily", "avoiding oil companies"]);
+  });
+
+  it("takes no goal from the money's clause when that part states an amount of its own", async () => {
+    const t = await read("use about three grand to make five hundred");
+    expect(t.readings.map((r) => r.field)).not.toContain("goal");
+  });
+
   it("reads amounts written in words as a model would, and only as a question back", async () => {
-    expect((await read("about five grand")).readings).toEqual([{ field: "money", quote: "about five grand", value: dec("5000"), check: true }]);
-    expect((await read("ten percent", "loss")).readings).toEqual([{ field: "loss", quote: "ten percent", loss: { kind: "fraction", value: dec("0.1") }, check: true }]);
+    expect((await read("about five grand")).readings).toEqual([{ field: "money", quote: "about five grand", value: dec("5000"), fromWords: true }]);
+    expect((await read("ten percent", "loss")).readings).toEqual([{ field: "loss", quote: "ten percent", loss: { kind: "fraction", value: dec("0.1") }, fromWords: true }]);
   });
 
   it("answers a request for advice with a refusal and a question about a model from its methodology, setting nothing", async () => {
@@ -137,7 +153,7 @@ describe("the fixture model", () => {
     const words = checked(await figuresOnly(input("about five grand")), "about five grand");
     expect(words.readings).toEqual([]);
     const figures = checked(await figuresOnly(input("$5,000")), "$5,000");
-    expect(figures.readings).toEqual([{ field: "money", quote: "$5,000", value: dec("5000"), check: false }]);
+    expect(figures.readings).toEqual([{ field: "money", quote: "$5,000", value: dec("5000"), fromWords: false }]);
     expect(checked(await figuresOnly(input("What is momentum?", "model")), "What is momentum?", "model").reply).toBeNull();
   });
 
@@ -155,6 +171,8 @@ describe("the fixture model", () => {
       "two thousand",
       "a grand",
       "twenty five percent",
+      "I want it to use about three grand to grow it steadily, avoiding oil companies. I could stand to lose $300.",
+      "lose about five hundred at most",
     ];
     for (const asked of ["money", "goal", "loss", "symbols", "model", "param:lookback_bars", "review"] as const) {
       for (const text of messages) expect((await read(text, asked)).dropped, `${asked}: ${text}`).toEqual([]);

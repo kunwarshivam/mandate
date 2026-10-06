@@ -9,7 +9,8 @@ import { GOAL_WORDS, LOSS_WORDS, type Loss, MODELS, type ModelId, clauses, const
  * The model only points. A reading names a field and quotes the span of the owner's latest message it
  * read; the guard checks the quote is there word for word, reads the value again from the quote with
  * the same deterministic readers the draft uses, and drops the reading when the two disagree. A value
- * the quote states in words, not figures ("five grand"), is kept only as a question back to the owner.
+ * the quote states in words, not figures ("five grand"), is marked `fromWords`, and the conversation
+ * says how it read it.
  * The model can name no other field: autonomy, delegations, the environment and the connection are
  * not in its vocabulary (V-022), and a symbol counts only when the owner wrote it (V-038).
  *
@@ -18,7 +19,7 @@ import { GOAL_WORDS, LOSS_WORDS, type Loss, MODELS, type ModelId, clauses, const
  */
 
 /** What the conversation last asked the owner, so the model knows what an answer answers. */
-export type Asked = "money" | "goal" | "loss" | "symbols" | "model" | `param:${string}` | "check" | "review";
+export type Asked = "money" | "goal" | "loss" | "symbols" | "model" | `param:${string}` | "review";
 
 export interface OwnerMessage {
   id: string;
@@ -37,8 +38,8 @@ export interface CompilerInput {
 export type Compiler = (input: CompilerInput) => Promise<unknown>;
 
 export type Reading =
-  | { field: "money"; quote: string; value: Dec; check: boolean }
-  | { field: "loss"; quote: string; loss: Loss; check: boolean }
+  | { field: "money"; quote: string; value: Dec; fromWords: boolean }
+  | { field: "loss"; quote: string; loss: Loss; fromWords: boolean }
   | { field: "goal"; quote: string }
   | { field: "symbols"; quote: string; symbols: string[] }
   | { field: "model"; quote: string; model: ModelId }
@@ -93,9 +94,9 @@ function checkReading(raw: Record<string, unknown>, said: string): Checked {
     case "money": {
       if (typeof raw.value !== "string" || !AMOUNT_TEXT.test(raw.value) || dec(raw.value) <= ZERO) return { ok: false, why: "not an amount" };
       const value = dec(raw.value);
-      if (writtenInWords(quote)) return { ok: true, reading: { field: "money", quote, value, check: true } };
+      if (writtenInWords(quote)) return { ok: true, reading: { field: "money", quote, value, fromWords: true } };
       if (!findAmounts(quote).some((m) => m.value === value)) return { ok: false, why: "the amount is not one the quote states" };
-      return { ok: true, reading: { field: "money", quote, value, check: false } };
+      return { ok: true, reading: { field: "money", quote, value, fromWords: false } };
     }
     case "loss": {
       if (raw.unit !== "usd" && raw.unit !== "fraction") return { ok: false, why: "no unit" };
@@ -103,10 +104,10 @@ function checkReading(raw: Record<string, unknown>, said: string): Checked {
       if (typeof raw.value !== "string" || !pattern.test(raw.value)) return { ok: false, why: "not a loss" };
       const loss: Loss = { kind: raw.unit, value: dec(raw.value) };
       if (loss.value <= ZERO || (loss.kind === "fraction" && loss.value > ONE)) return { ok: false, why: "not a loss" };
-      if (writtenInWords(quote)) return { ok: true, reading: { field: "loss", quote, loss, check: true } };
+      if (writtenInWords(quote)) return { ok: true, reading: { field: "loss", quote, loss, fromWords: true } };
       const stated = loss.kind === "usd" ? findAmounts(quote) : findPercents(quote);
       if (!stated.some((m) => m.value === loss.value)) return { ok: false, why: "the loss is not one the quote states" };
-      return { ok: true, reading: { field: "loss", quote, loss, check: false } };
+      return { ok: true, reading: { field: "loss", quote, loss, fromWords: false } };
     }
     case "goal":
       return { ok: true, reading: { field: "goal", quote } };
@@ -170,7 +171,10 @@ interface RawTurn {
 const ONES = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
 const SMALL = [...ONES, "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
 const TENS = ["twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
-const SPOKEN = new RegExp(`\\b(a|${TENS.join("|")}(?:[\\s-](?:${ONES.join("|")}))?|${SMALL.join("|")})\\s+(hundred|thousand|grand|percent)\\b`, "i");
+const SPOKEN = new RegExp(
+  `\\b(?:(?:about|around|roughly|some|maybe)\\s+)?(a|${TENS.join("|")}(?:[\\s-](?:${ONES.join("|")}))?|${SMALL.join("|")})\\s+(hundred|thousand|grand|percent)\\b`,
+  "i",
+);
 
 function spokenNumber(word: string): number {
   const [tens, ones] = word.toLowerCase().split(/[\s-]/);
@@ -180,18 +184,22 @@ function spokenNumber(word: string): number {
   return SMALL.indexOf(tens) + 1;
 }
 
-/** A sum or share written in words, as a model would read it: "five grand", "ten percent". */
-function spoken(text: string): Loss | null {
+/**
+ * A sum or share written in words, as a model would read it ("five grand", "ten percent"), with the
+ * words it was read from, so the reading quotes those and not the whole clause.
+ */
+function spoken(text: string): (Loss & { span: string }) | null {
   const m = SPOKEN.exec(text);
   if (!m) return null;
   const n = fromInt(spokenNumber(m[1]));
+  const span = m[0];
   switch (m[2].toLowerCase()) {
     case "hundred":
-      return { kind: "usd", value: mul(n, fromInt(100)) };
+      return { kind: "usd", value: mul(n, fromInt(100)), span };
     case "percent":
-      return { kind: "fraction", value: div(n, fromInt(100)) };
+      return { kind: "fraction", value: div(n, fromInt(100)), span };
     default:
-      return { kind: "usd", value: mul(n, fromInt(1000)) };
+      return { kind: "usd", value: mul(n, fromInt(1000)), span };
   }
 }
 
@@ -237,6 +245,17 @@ function symbolsIn(text: string, asked: Asked): string[] {
 
 const amountText = (v: Dec) => toDecimalString(v);
 
+/**
+ * The goal in the clause that gave the money, from its first goal word on ("use five grand to grow it
+ * steadily" gives "grow it steadily"), when that part states no amount of its own.
+ */
+function goalAfterMoney(clause: string): string | undefined {
+  const at = GOAL_WORDS.exec(clause)?.index;
+  if (at === undefined) return undefined;
+  const goal = clause.slice(at).trim();
+  return findAmounts(goal).length > 0 || findPercents(goal).length > 0 || spoken(goal) ? undefined : goal;
+}
+
 function lossReading(quote: string, loss: Loss): Record<string, string> {
   return { field: "loss", quote, value: amountText(loss.value), unit: loss.kind };
 }
@@ -270,9 +289,11 @@ function reading(input: CompilerInput, asModel: boolean): RawTurn {
   } else {
     const lossClause = parts.find((c) => LOSS_WORDS.test(c) && (figures(c) || inWords(c))) ?? (asked === "loss" ? parts.find((c) => figures(c) || inWords(c)) : undefined);
     if (lossClause) {
-      const stated = firstLoss(lossClause) ?? inWords(lossClause);
+      const figured = firstLoss(lossClause);
+      const said = figured ? null : inWords(lossClause);
+      const stated = figured ?? said;
       if (stated) {
-        readings.push(lossReading(lossClause, stated));
+        readings.push(lossReading(said ? said.span : lossClause, stated));
         used.add(lossClause);
       }
     }
@@ -283,16 +304,18 @@ function reading(input: CompilerInput, asModel: boolean): RawTurn {
       (asked === "money" ? parts.find((c) => c !== lossClause && (findAmounts(c).length > 0 || inWords(c)?.kind === "usd")) : undefined);
     if (moneyClause) {
       const figure = findAmounts(moneyClause).find((m) => m.dollars) ?? findAmounts(moneyClause)[0];
-      const value = figure ? figure.value : inWords(moneyClause)?.value;
+      const said = figure ? null : inWords(moneyClause);
+      const value = figure ? figure.value : said?.value;
       if (value) {
-        readings.push({ field: "money", quote: moneyClause, value: amountText(value) });
+        readings.push({ field: "money", quote: said ? said.span : moneyClause, value: amountText(value) });
         used.add(moneyClause);
       }
     }
     const goalClause =
       parts.find((c) => !used.has(c) && GOAL_WORDS.test(c) && figures(c)) ??
       parts.find((c) => c === moneyClause && GOAL_WORDS.test(c) && findAmounts(c).length + findPercents(c).length > 1) ??
-      (asked === "money" ? parts.find((c) => !used.has(c) && GOAL_WORDS.test(c)) : undefined);
+      (asked === "money" ? parts.find((c) => !used.has(c) && GOAL_WORDS.test(c)) : undefined) ??
+      (moneyClause && used.has(moneyClause) ? goalAfterMoney(moneyClause) : undefined);
     if (goalClause) {
       readings.push({ field: "goal", quote: goalClause });
       used.add(goalClause);
