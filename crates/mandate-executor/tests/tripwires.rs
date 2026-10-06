@@ -201,14 +201,26 @@ fn only_a_non_losing_sell_resets_a_losing_streak() {
         },
     )
     .state;
-    let reset = applied(
+    assert_eq!(
+        applied(&state, TripwireInput::Clock).snapshot.metrics[&id("streak")],
+        count(1)
+    );
+    let fired = applied(
         &state,
+        TripwireInput::FillApplied {
+            fill: fill("AAPL", Side::Sell, "-1"),
+        },
+    );
+    assert_eq!(fired.snapshot.metrics[&id("streak")], count(2));
+    assert_eq!(fired.snapshot.fired.get(&id("streak")), Some(&ExitsOnly));
+    let reset = applied(
+        &fired.state,
         TripwireInput::FillApplied {
             fill: fill("AAPL", Side::Sell, "0"),
         },
     );
     assert_eq!(reset.snapshot.metrics[&id("streak")], count(0));
-    assert!(reset.snapshot.fired.is_empty());
+    assert_eq!(reset.snapshot.fired.get(&id("streak")), Some(&ExitsOnly));
 }
 
 /// `realized_loss_usd` is max(0, minus the sum of net realized in the current risk day): buy fees
@@ -273,42 +285,66 @@ fn new_instruments_counts_first_ever_fills_only() {
     assert_eq!(snapshot.fired.get(&id("new_names")), Some(&EndDelegations));
 }
 
-/// Marks, clocks, restarts, and a risk-day boundary cannot fire or lift a streak tripwire. Replay
-/// of the same stream reconstructs the same state and emits no second firing for an existing latch.
+fn apply_stream(inputs: &[TripwireInput]) -> Vec<TripwireOutcome> {
+    let mut state = TripwireState::default();
+    let mut outcomes = Vec::new();
+    for input in inputs {
+        let outcome = applied(&state, input.clone());
+        state = outcome.state.clone();
+        outcomes.push(outcome);
+    }
+    outcomes
+}
+
+/// Marks, clocks, restarts, and a risk-day boundary cannot change a streak. Replaying the same
+/// stream reconstructs equal outcomes, and restart cannot forget a spent assertion.
 #[test]
 #[ignore = "pending E6-13"]
 fn unrelated_inputs_never_fire_or_lift_and_restart_replays_the_latch() {
-    let mut state = armed(vec![tripwire(
-        "streak",
-        ConsecutiveLosingExits,
-        "1",
-        ExitsOnly,
-    )]);
-    state = applied(
-        &state,
+    let inputs = vec![
+        TripwireInput::MandateVersionApplied {
+            tripwires: vec![tripwire("streak", ConsecutiveLosingExits, "2", ExitsOnly)],
+        },
         TripwireInput::FillApplied {
             fill: fill("AAPL", Side::Sell, "-1"),
         },
-    )
-    .state;
-    for event in [
         TripwireInput::Mark,
         TripwireInput::Clock,
         TripwireInput::RiskDayStarted {
             day: Date::parse("2026-09-23").expect("a date"),
         },
         TripwireInput::Restart,
-    ] {
-        let outcome = applied(&state, event);
-        assert_eq!(outcome.snapshot.fired.get(&id("streak")), Some(&ExitsOnly));
-        assert!(
-            !outcome
-                .journal
-                .iter()
-                .any(|event| matches!(event, TripwireEvent::RiskLimitTriggered { .. }))
-        );
-        state = outcome.state;
+        TripwireInput::FillApplied {
+            fill: fill("AAPL", Side::Sell, "-1"),
+        },
+    ];
+    let first = apply_stream(&inputs);
+    let replay = apply_stream(&inputs);
+    assert_eq!(first, replay);
+    for outcome in &first[1..6] {
+        assert_eq!(outcome.snapshot.metrics[&id("streak")], count(1));
+        assert!(outcome.snapshot.fired.is_empty());
+        assert!(outcome.journal.is_empty());
     }
+    let fired = first.last().expect("the second loss has an outcome");
+    assert_eq!(fired.snapshot.metrics[&id("streak")], count(2));
+    assert_eq!(fired.snapshot.fired.get(&id("streak")), Some(&ExitsOnly));
+
+    let mut wrong_method = acknowledgment("streak", "spent-before-restart");
+    wrong_method.environment = Environment::Live;
+    let refused = applied(&fired.state, TripwireInput::OwnerAcknowledged(wrong_method));
+    let restarted = applied(&refused.state, TripwireInput::Restart);
+    let replayed = applied(
+        &restarted.state,
+        acknowledge("streak", "spent-before-restart"),
+    );
+    assert_eq!(
+        replayed.journal,
+        vec![TripwireEvent::OwnerCommandRefused {
+            reason: AcknowledgmentRefusal::StepUpReused,
+        }]
+    );
+    assert_eq!(replayed.snapshot.fired.get(&id("streak")), Some(&ExitsOnly));
 }
 
 /// Arming excludes the arming input and all earlier fills. Threshold and action changes preserve
@@ -355,6 +391,21 @@ fn version_inputs_apply_the_arming_and_window_rules() {
         },
     );
     assert_eq!(changed.snapshot.metrics[&id("wire")], count(0));
+    assert_eq!(changed.snapshot.fired.get(&id("wire")), Some(&ExitsOnly));
+    assert_eq!(changed.snapshot.effective_action, Some(ExitsOnly));
+    assert!(changed.snapshot.delegations_suspended);
+    assert!(changed.snapshot.allocation_increase_blocked);
+    let already_seen = applied(
+        &changed.state,
+        TripwireInput::FillApplied {
+            fill: fill("AAPL", Side::Buy, "0"),
+        },
+    );
+    assert_eq!(already_seen.snapshot.metrics[&id("wire")], count(0));
+    assert_eq!(
+        already_seen.snapshot.fired.get(&id("wire")),
+        Some(&ExitsOnly)
+    );
 }
 
 /// Firings are emitted in id order. Each trigger carries the metric, threshold, and reached value,
@@ -373,24 +424,39 @@ fn simultaneous_firings_are_ordered_and_alert_without_sensitive_content() {
         },
     );
     assert_eq!(outcome.journal.len(), 4);
-    assert!(matches!(
-        &outcome.journal[0],
-        TripwireEvent::RiskLimitTriggered { id: wire, .. } if wire == &id("a_loss")
-    ));
+    assert_eq!(
+        outcome.journal[0],
+        TripwireEvent::RiskLimitTriggered {
+            id: id("a_loss"),
+            action: EndDelegations,
+            metric: RealizedLossUsd,
+            threshold: threshold("10"),
+            value: usd("20"),
+        }
+    );
     let TripwireEvent::OwnerAlertSent(alert) = &outcome.journal[1] else {
         panic!("a trigger must be followed immediately by its owner alert");
     };
     assert_eq!(alert.triggered_event_index(), 0);
     assert_eq!(alert.generic_text(), "tripwire_fired");
-    assert!(matches!(
-        &outcome.journal[2],
-        TripwireEvent::RiskLimitTriggered { id: wire, .. } if wire == &id("b_streak")
-    ));
+    assert_eq!(
+        outcome.journal[2],
+        TripwireEvent::RiskLimitTriggered {
+            id: id("b_streak"),
+            action: ExitsOnly,
+            metric: ConsecutiveLosingExits,
+            threshold: threshold("1"),
+            value: count(1),
+        }
+    );
     let TripwireEvent::OwnerAlertSent(alert) = &outcome.journal[3] else {
         panic!("the second trigger must be followed immediately by its owner alert");
     };
     assert_eq!(alert.triggered_event_index(), 2);
     assert_eq!(alert.generic_text(), "tripwire_fired");
+    assert_eq!(outcome.snapshot.effective_action, Some(ExitsOnly));
+    assert!(outcome.snapshot.delegations_suspended);
+    assert!(outcome.snapshot.allocation_increase_blocked);
 }
 
 /// Every fired action suspends delegations and blocks allocation increases. `end_delegations`
@@ -537,11 +603,37 @@ fn acknowledgment_fails_closed_with_the_exact_refusal_reason() {
         ),
         (
             TripwireAcknowledgment {
+                requester: Some("user:u1".to_owned()),
+                acknowledging_user: Some("user:u1".to_owned()),
+                independent_required_at_request: true,
+                independent_required_now: false,
+                ..acknowledgment("wire", "same-user-at-request")
+            },
+            AcknowledgmentRefusal::NotIndependent,
+        ),
+        (
+            TripwireAcknowledgment {
                 requester: None,
                 independent_required_at_request: true,
                 ..acknowledgment("wire", "missing-user")
             },
             AcknowledgmentRefusal::NotIndependent,
+        ),
+        (
+            TripwireAcknowledgment {
+                acknowledging_user: None,
+                independent_required_now: true,
+                ..acknowledgment("wire", "missing-acknowledger")
+            },
+            AcknowledgmentRefusal::NotIndependent,
+        ),
+        (
+            TripwireAcknowledgment {
+                step_up: Some(step_up("future", 1_002)),
+                processed_at: RiskClock(1_001),
+                ..acknowledgment("wire", "future")
+            },
+            AcknowledgmentRefusal::StepUpStale,
         ),
     ];
     for (ack, reason) in invalid {
@@ -635,12 +727,25 @@ fn a_valid_owner_acknowledgment_is_the_only_lift_and_rearms_at_zero() {
     let no_op = applied(&initial, acknowledge("wire", "not-fired"));
     assert!(no_op.journal.is_empty());
     let fired = applied(
-        &initial,
+        &no_op.state,
         TripwireInput::FillApplied {
             fill: fill("AAPL", Side::Sell, "-1"),
         },
     );
-    let lifted = applied(&fired.state, acknowledge("wire", "lift-present"));
+    let replayed = applied(&fired.state, acknowledge("wire", "not-fired"));
+    assert_eq!(
+        replayed.journal,
+        vec![TripwireEvent::OwnerCommandRefused {
+            reason: AcknowledgmentRefusal::StepUpReused,
+        }]
+    );
+    assert_eq!(replayed.snapshot.fired.get(&id("wire")), Some(&ExitsOnly));
+    let mut independent = acknowledgment("wire", "lift-present");
+    independent.independent_required_at_request = true;
+    let lifted = applied(
+        &replayed.state,
+        TripwireInput::OwnerAcknowledged(independent),
+    );
     assert!(lifted.snapshot.fired.is_empty());
     assert_eq!(lifted.snapshot.metrics[&id("wire")], count(0));
     assert_eq!(
