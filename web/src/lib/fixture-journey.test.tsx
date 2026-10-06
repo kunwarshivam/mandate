@@ -124,6 +124,9 @@ describe("deploying", () => {
     expect(next.agents).toHaveLength(ws.agents.length + 1);
     expect(agent).toMatchObject({ label: "Agent 4", mode: "normal", startup: "ready", positions: [], orders: [], restrictions: [], deployed_at: ws.now });
     expect(agent.mandate_version).toBe(mandateVersion(request.mandate));
+    expect(agent.versions).toEqual([
+      { mandate_version: agent.mandate_version, previous: null, confirmed_at: ws.now, step_up: true, classification: null, changes: [], application: { result: "applied", at: ws.now, approvals_canceled: 0 } },
+    ]);
     expect(agent.state).toMatchObject({ equity: "3000", capital_base: "3000", high_water_mark: "3000", orders_today: 0 });
     expect(next.timeline[agentId].map((e) => e.text)).toEqual(["Mandate version 1 confirmed by you and deployed to paper, with $3,000.00 of simulated money."]);
     expect(next.connection.account_equity).toBe(ws.connection.account_equity);

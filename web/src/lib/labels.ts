@@ -1,4 +1,4 @@
-import type { AgentMode, ApprovalStatus, CancelReason, OrderState, Provenance, Purpose, RiskFigure } from "@/fixtures/types";
+import type { AgentMode, ApprovalStatus, CancelReason, ChangeClass, OrderState, Provenance, Purpose, RiskFigure } from "@/fixtures/types";
 
 export const MODE_LABEL: Record<AgentMode, string> = {
   normal: "Normal",
@@ -82,4 +82,11 @@ export const RISK_CAP_LABEL: Record<RiskFigure["field"], string> = {
   position_usd_after: "position limit",
   gross_usd_after: "total holdings limit",
   bought_today_usd: "",
+};
+
+/** Mandate spec §9.2, in the brief's words (A6). */
+export const CHANGE_CLASS_LABEL: Record<ChangeClass, string> = {
+  risk_increasing: "Risk-increasing",
+  risk_reducing: "Risk-reducing",
+  neutral: "Neutral",
 };
