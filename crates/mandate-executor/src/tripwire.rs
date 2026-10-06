@@ -453,39 +453,42 @@ mod tests {
 
     /// A later version's stronger action is held only while that action remains current.
     #[test]
-    fn a_version_does_not_rewrite_the_action_that_fired() {
-        let id = TripwireId::parse("wire").expect("a tripwire id");
-        let wire = |action| Tripwire {
-            id: id.clone(),
-            metric: TripwireMetric::ConsecutiveLosingExits,
-            threshold: SchemaDec::parse("1", DecGrammar::PositiveDecimal).expect("a threshold"),
-            action,
+    fn a_version_does_not_rewrite_the_action_that_fired() -> Result<(), String> {
+        let id = TripwireId::parse("wire").map_err(|error| error.to_string())?;
+        let wire = |action| -> Result<Tripwire, String> {
+            Ok(Tripwire {
+                id: id.clone(),
+                metric: TripwireMetric::ConsecutiveLosingExits,
+                threshold: SchemaDec::parse("1", DecGrammar::PositiveDecimal)
+                    .map_err(|error| error.to_string())?,
+                action,
+            })
         };
         let armed = fold(
             &TripwireState::default(),
             &TripwireInput::MandateVersionApplied {
-                tripwires: vec![wire(TripwireAction::EndDelegations)],
+                tripwires: vec![wire(TripwireAction::EndDelegations)?],
             },
         )
-        .expect("the tripwire arms");
+        .map_err(|error| error.to_string())?;
         let fired = fold(
             &armed.state,
             &TripwireInput::FillApplied {
                 fill: TripwireFill {
-                    instrument: InstrumentId::new("AAPL").expect("an instrument"),
+                    instrument: InstrumentId::new("AAPL").map_err(|error| error.to_string())?,
                     side: Side::Sell,
-                    net_realized_usd: Usd::parse("-1").expect("dollars"),
+                    net_realized_usd: Usd::parse("-1").map_err(|error| error.to_string())?,
                 },
             },
         )
-        .expect("the tripwire fires");
+        .map_err(|error| error.to_string())?;
         let strengthened = fold(
             &fired.state,
             &TripwireInput::MandateVersionApplied {
-                tripwires: vec![wire(TripwireAction::ExitsOnly)],
+                tripwires: vec![wire(TripwireAction::ExitsOnly)?],
             },
         )
-        .expect("the stronger version applies");
+        .map_err(|error| error.to_string())?;
         assert_eq!(
             strengthened.snapshot.effective_action,
             Some(TripwireAction::ExitsOnly)
@@ -493,13 +496,14 @@ mod tests {
         let restored = fold(
             &strengthened.state,
             &TripwireInput::MandateVersionApplied {
-                tripwires: vec![wire(TripwireAction::EndDelegations)],
+                tripwires: vec![wire(TripwireAction::EndDelegations)?],
             },
         )
-        .expect("the later version applies");
+        .map_err(|error| error.to_string())?;
         assert_eq!(
             restored.snapshot.effective_action,
             Some(TripwireAction::EndDelegations)
         );
+        Ok(())
     }
 }
