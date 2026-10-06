@@ -3244,6 +3244,194 @@
    }
   ]
  },
+ "production_config_refs": {
+  "spec": "docs/specs/journal.md v0.16 §9 (DEC-483)",
+  "artifacts": [
+   {
+    "name": "policy_set",
+    "ref": "sha256:9d4765e728410109d601bcc39d80d503e60ce75fbbf419c0cd6c0944a3a426ca",
+    "object": {
+     "kind": "policy_set",
+     "levels": [
+      {
+       "name": "platform",
+       "values": [
+        {
+         "key": "auto_allowed",
+         "value": true
+        },
+        {
+         "key": "max_order_usd",
+         "value": "1500"
+        }
+       ]
+      }
+     ]
+    },
+    "canonical": "{\"kind\":\"policy_set\",\"levels\":[{\"name\":\"platform\",\"values\":[{\"key\":\"auto_allowed\",\"value\":true},{\"key\":\"max_order_usd\",\"value\":\"1500\"}]}]}"
+   },
+   {
+    "name": "model_registry",
+    "ref": "sha256:10ae50e7add478997c3b7e469f31d52c482945850902707dc36118e7390ecb1f",
+    "object": {
+     "kind": "model_registry",
+     "models": [
+      {
+       "admits_instruments": false,
+       "content_hash": "sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513",
+       "model_id": "quant.mean_reversion",
+       "model_version": "1.0.0",
+       "params": [
+        "lookback_days"
+       ]
+      }
+     ]
+    },
+    "canonical": "{\"kind\":\"model_registry\",\"models\":[{\"admits_instruments\":false,\"content_hash\":\"sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513\",\"model_id\":\"quant.mean_reversion\",\"model_version\":\"1.0.0\",\"params\":[\"lookback_days\"]}]}"
+   }
+  ],
+  "valid_drafts": {
+   "model_output": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3M0R000000000000000G3",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "ModelOutputRecorded",
+    "schema_version": 1,
+    "event_time": "2026-09-21T13:59:59.000000000Z",
+    "clock_source": "scheduler",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0",
+     "model_registry": "sha256:10ae50e7add478997c3b7e469f31d52c482945850902707dc36118e7390ecb1f"
+    },
+    "payload": {
+     "model_id": "quant.mean_reversion",
+     "model_version": "1.0.0",
+     "content_hash": "sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513",
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "as_of": "2026-09-21T13:59:58.000000000Z",
+     "expires_at": "2026-09-22T13:59:58.000000000Z",
+     "direction": "long",
+     "conviction": "0.97",
+     "confidence": "0.98",
+     "horizon_s": 86400,
+     "thesis_ref": null,
+     "evidence": [
+      "01J8Z3M0A000000000000000G2"
+     ],
+     "invalidation": null,
+     "thesis_id": null,
+     "lineage_id": null,
+     "ignored": null
+    },
+    "artifact_refs": [
+     "sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513"
+    ],
+    "pii_refs": []
+   },
+   "decision": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZMA0A000000000000000D2",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "DecisionMade",
+    "schema_version": 1,
+    "event_time": "2026-09-21T20:05:00.000000000Z",
+    "clock_source": "scheduler",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0",
+     "policy_set": "sha256:9d4765e728410109d601bcc39d80d503e60ce75fbbf419c0cd6c0944a3a426ca",
+     "model_registry": "sha256:10ae50e7add478997c3b7e469f31d52c482945850902707dc36118e7390ecb1f"
+    },
+    "payload": {
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "side": "sell",
+     "type": "limit",
+     "tif": "day",
+     "qty": "10",
+     "limit_price": "150.25",
+     "purpose": "discretionary_exit",
+     "exit_origin": "goal_completion",
+     "exit_conviction": null,
+     "buy_conviction": null,
+     "combined_score": null,
+     "outputs_used": [],
+     "model_weights": [],
+     "clips_applied": [],
+     "dry_run": "defer",
+     "reason_code": "discretionary_exit_regular_session_only",
+     "autonomy": null,
+     "ask_suppressed": null,
+     "decided_by": null,
+     "delegation_id": null,
+     "requested_by": "agent",
+     "client_id": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "model_output_without_model_registry",
+    "base": "model_output",
+    "changes": [
+     {
+      "path": "config_refs.model_registry",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "reason": "missing_config_ref",
+     "path": "config_refs.model_registry"
+    }
+   },
+   {
+    "name": "decision_without_policy_set",
+    "base": "decision",
+    "changes": [
+     {
+      "path": "config_refs.policy_set",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "reason": "missing_config_ref",
+     "path": "config_refs.policy_set"
+    }
+   },
+   {
+    "name": "decision_without_model_registry",
+    "base": "decision",
+    "changes": [
+     {
+      "path": "config_refs.model_registry",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "reason": "missing_config_ref",
+     "path": "config_refs.model_registry"
+    }
+   }
+  ]
+ },
  "control_stream": {
   "spec": "docs/specs/journal.md v0.7 §9.2 (DEC-261)",
   "stream_id": "ctl:ws_01J8Z2",

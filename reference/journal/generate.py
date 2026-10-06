@@ -229,8 +229,8 @@ SCHEMAS: dict[tuple[str, str], T] = {
 REQUIRED_REFS = {
     "StreamOpened": (),
     "ObservationRecorded": (),
-    "ModelOutputRecorded": ("mandate_version", "model_registry"),
-    "DecisionMade": ("mandate_version", "policy_set", "model_registry"),
+    "ModelOutputRecorded": ("mandate_version",),
+    "DecisionMade": ("mandate_version",),
     "IntentProposed": ("mandate_version",),
     "AgentModeChanged": (),
     "KillSwitchActivated": (),
@@ -529,14 +529,6 @@ MODEL_CONTENT = {
     "code": "reference fixture: stands for the model code, prompt, and parameter schema (mandate spec §8.1)",
     "parameter_schema": {"lookback_days": "integer"},
 }
-MOMENTUM_CONTENT = {
-    "kind": "signal_model",
-    "model_id": "quant.momentum",
-    "model_version": "1.0.0",
-    "authorship": "platform",
-    "code": "reference fixture: stands for the second configured model",
-    "parameter_schema": {"lookback_days": "integer"},
-}
 POLICY_SET = {
     "kind": "policy_set",
     "levels": [
@@ -559,24 +551,11 @@ MODEL_REGISTRY = {
             "model_version": "1.0.0",
             "params": ["lookback_days"],
         },
-        {
-            "admits_instruments": False,
-            "content_hash": artifact_ref(MOMENTUM_CONTENT),
-            "model_id": "quant.momentum",
-            "model_version": "1.0.0",
-            "params": ["lookback_days"],
-        },
     ],
 }
 POLICY_SET_REF = artifact_ref(POLICY_SET)
 MODEL_REGISTRY_REF = artifact_ref(MODEL_REGISTRY)
-ARTIFACTS = {
-    "quote_snapshot": QUOTE_SNAPSHOT,
-    "model_content": MODEL_CONTENT,
-    "momentum_content": MOMENTUM_CONTENT,
-    "policy_set": POLICY_SET,
-    "model_registry": MODEL_REGISTRY,
-}
+ARTIFACTS = {"quote_snapshot": QUOTE_SNAPSHOT, "model_content": MODEL_CONTENT}
 
 DERIVATION = {
     "note": (
@@ -664,11 +643,6 @@ def first_rung_sell_limit(d: dict) -> str:
 
 
 def event(name: str, event_type: str, at: str, recorded: str, payload: dict, **envelope) -> dict:
-    config_refs = dict(MANDATE) if REQUIRED_REFS[event_type] else {}
-    if "policy_set" in REQUIRED_REFS[event_type]:
-        config_refs["policy_set"] = POLICY_SET_REF
-    if "model_registry" in REQUIRED_REFS[event_type]:
-        config_refs["model_registry"] = MODEL_REGISTRY_REF
     body = {
         "envelope_version": 1,
         "environment": "paper",
@@ -683,7 +657,7 @@ def event(name: str, event_type: str, at: str, recorded: str, payload: dict, **e
         "causation_id": envelope.get("causation_id"),
         "correlation_id": None,
         "actor": dict(ACTOR),
-        "config_refs": config_refs,
+        "config_refs": dict(MANDATE) if REQUIRED_REFS[event_type] else {},
         "payload": payload,
         "artifact_refs": sorted(digest_strings(payload)),
         "pii_refs": [],
@@ -1086,30 +1060,6 @@ def invalid_drafts() -> list[dict]:
             [change("config_refs", {})],
             "missing_config_ref",
             "config_refs.mandate_version",
-        ),
-        invalid(
-            "decision_without_policy_set",
-            "§9 required refs",
-            "decision",
-            [delete("config_refs.policy_set")],
-            "missing_config_ref",
-            "config_refs.policy_set",
-        ),
-        invalid(
-            "decision_without_model_registry",
-            "§9 required refs",
-            "decision",
-            [delete("config_refs.model_registry")],
-            "missing_config_ref",
-            "config_refs.model_registry",
-        ),
-        invalid(
-            "model_output_without_model_registry",
-            "§9 required refs",
-            "model_output",
-            [delete("config_refs.model_registry")],
-            "missing_config_ref",
-            "config_refs.model_registry",
         ),
         invalid(
             "intent_sell_labelled_open",
@@ -2553,6 +2503,128 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
 # --------------------------------------------------------------------------- output
 
 
+PRODUCTION_REQUIRED_REFS = {
+    "ModelOutputRecorded": ("mandate_version", "model_registry"),
+    "DecisionMade": ("mandate_version", "policy_set", "model_registry"),
+}
+
+
+def production_ref_violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violation]:
+    """The v0.16 requirements, over a draft already valid under its historical §9.1 schema."""
+    out = violations(draft, frozenset({"config_refs.required"}))
+    if out:
+        return out
+    required = PRODUCTION_REQUIRED_REFS[draft["event_type"]]
+    for kind in required:
+        mutant = f"required.{draft['event_type']}.{kind}"
+        if kind not in draft["config_refs"] and mutant not in skip:
+            return [Violation(mutant, "missing_config_ref", f"config_refs.{kind}")]
+    return []
+
+
+def build_production_config_refs_section() -> dict:
+    historical = {body["event_type"]: draft_of(body) for body in chain_bodies()}
+    model_output = copy.deepcopy(historical["ModelOutputRecorded"])
+    model_output["config_refs"]["model_registry"] = MODEL_REGISTRY_REF
+    decision = copy.deepcopy(historical["DecisionMade"])
+    decision["config_refs"]["policy_set"] = POLICY_SET_REF
+    decision["config_refs"]["model_registry"] = MODEL_REGISTRY_REF
+    artifacts = [
+        {"name": name, "ref": artifact_ref(obj), "object": obj, "canonical": canon(obj)}
+        for name, obj in (("policy_set", POLICY_SET), ("model_registry", MODEL_REGISTRY))
+    ]
+    return {
+        "spec": "docs/specs/journal.md v0.16 §9 (DEC-483)",
+        "artifacts": artifacts,
+        "valid_drafts": {
+            "model_output": model_output,
+            "decision": decision,
+        },
+        "invalid_drafts": [
+            {
+                "name": "model_output_without_model_registry",
+                "base": "model_output",
+                "changes": [delete("config_refs.model_registry")],
+                "expect": {
+                    "reason": "missing_config_ref",
+                    "path": "config_refs.model_registry",
+                },
+            },
+            {
+                "name": "decision_without_policy_set",
+                "base": "decision",
+                "changes": [delete("config_refs.policy_set")],
+                "expect": {
+                    "reason": "missing_config_ref",
+                    "path": "config_refs.policy_set",
+                },
+            },
+            {
+                "name": "decision_without_model_registry",
+                "base": "decision",
+                "changes": [delete("config_refs.model_registry")],
+                "expect": {
+                    "reason": "missing_config_ref",
+                    "path": "config_refs.model_registry",
+                },
+            },
+        ],
+    }
+
+
+def changed_production_draft(section: dict, case: dict) -> dict:
+    draft = copy.deepcopy(section["valid_drafts"][case["base"]])
+    for item in case["changes"]:
+        apply_change(draft, item)
+    return draft
+
+
+def check_production_config_refs(section: dict) -> list[str]:
+    problems = []
+    stored = {}
+    for artifact in section["artifacts"]:
+        expected = artifact_ref(artifact["object"])
+        if artifact["canonical"] != canon(artifact["object"]) or artifact["ref"] != expected:
+            problems.append(f"production_config_refs artifact {artifact['name']} does not re-hash")
+        stored[artifact["ref"]] = artifact
+    for name, draft in section["valid_drafts"].items():
+        found = production_ref_violations(draft)
+        if found:
+            problems.append(f"production_config_refs valid {name}: {found}")
+        for kind in PRODUCTION_REQUIRED_REFS[draft["event_type"]]:
+            if kind != "mandate_version" and draft["config_refs"][kind] not in stored:
+                problems.append(f"production_config_refs valid {name}: missing stored {kind}")
+    for case in section["invalid_drafts"]:
+        found = production_ref_violations(changed_production_draft(section, case))
+        want = case["expect"]
+        if len(found) != 1 or (found[0].reason, found[0].path) != (want["reason"], want["path"]):
+            problems.append(f"production_config_refs invalid {case['name']}: {found}")
+    return problems
+
+
+def run_production_config_ref_mutants(section: dict) -> list[str]:
+    escaped = []
+    cases = {case["name"]: case for case in section["invalid_drafts"]}
+    for name, event_type, kind in (
+        ("model_output_without_model_registry", "ModelOutputRecorded", "model_registry"),
+        ("decision_without_policy_set", "DecisionMade", "policy_set"),
+        ("decision_without_model_registry", "DecisionMade", "model_registry"),
+    ):
+        draft = changed_production_draft(section, cases[name])
+        mutant = frozenset({f"required.{event_type}.{kind}"})
+        if production_ref_violations(draft, mutant):
+            escaped.append(f"production_config_refs validator mutant {event_type}.{kind}")
+    broken_hash = copy.deepcopy(section)
+    broken_hash["artifacts"][0]["canonical"] += " "
+    if not check_production_config_refs(broken_hash):
+        escaped.append("production_config_refs vector mutant artifact rehash")
+    missing = copy.deepcopy(section)
+    missing["artifacts"] = missing["artifacts"][1:]
+    if not check_production_config_refs(missing):
+        escaped.append("production_config_refs vector mutant missing artifact")
+    return escaped
+
+
 def build_section(v3: dict) -> dict:
     chain = hash_chain(chain_bodies(), v3["genesis_prev_hash"])
     artifacts = [
@@ -2582,11 +2654,20 @@ def split_file(text: str) -> tuple[str, str | None]:
     return (head, tail) if found else (text, None)
 
 
-def render(v3_text: str, section: dict, control_section: dict, risk_section: dict, research_section: dict, account_section: dict) -> str:
+def render(
+    v3_text: str,
+    section: dict,
+    production_config_refs: dict,
+    control_section: dict,
+    risk_section: dict,
+    research_section: dict,
+    account_section: dict,
+) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
         {
             "agent_stream": section,
+            "production_config_refs": production_config_refs,
             "control_stream": control_section,
             "risk_state": risk_section,
             "research": research_section,
@@ -2614,6 +2695,7 @@ def main(argv: list[str] | None = None) -> int:
     v3 = yaml.safe_load(split_file(text)[0])
     self_test(v3)
     section = build_section(v3)
+    production_config_refs = build_production_config_refs_section()
     control_section = control.build_section(v3)
     risk_section = risk_state.build_section()
     research_section = research.build_section()
@@ -2621,6 +2703,8 @@ def main(argv: list[str] | None = None) -> int:
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
+    problems += check_production_config_refs(production_config_refs)
+    problems += run_production_config_ref_mutants(production_config_refs)
     problems += control.check_section(control_section)
     problems += control.run_mutants(control_section)
     problems += risk_state.check_section(risk_section)
@@ -2634,10 +2718,19 @@ def main(argv: list[str] | None = None) -> int:
     if problems:
         return 1
 
-    rendered = render(text, section, control_section, risk_section, research_section, account_section)
+    rendered = render(
+        text,
+        section,
+        production_config_refs,
+        control_section,
+        risk_section,
+        research_section,
+        account_section,
+    )
     reread = yaml.safe_load(rendered)
     if (
         check_chain(reread["agent_stream"], v3)
+        or check_production_config_refs(reread["production_config_refs"])
         or control.check_section(reread["control_stream"])
         or risk_state.check_section(reread["risk_state"])
         or research.check_section(reread["research"])
@@ -2657,6 +2750,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(section['invalid_batches']) + len(section['valid_batches'])} batches, "
         f"{len(section['range_verification'])} range cases; {len(VALIDATOR_MUTANTS)} validator and "
         f"{len(vector_mutants(section))} vector mutants caught; "
+        f"{len(production_config_refs['valid_drafts'])} production config-ref drafts, "
+        f"{len(production_config_refs['invalid_drafts'])} invalid, 3 validator and 2 vector mutants caught; "
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
         f"and {len(control_section['valid_drafts'])} valid drafts; {len(control.VALIDATOR_MUTANTS)} validator and "
