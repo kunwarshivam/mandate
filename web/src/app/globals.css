@@ -434,6 +434,13 @@ html:root[data-cvd="on"] {
         scroll-padding-bottom: calc(var(--dock-clearance) + 8rem);
       }
     }
+    /* The setup conversation's composer is pinned above the tab bar or dock. */
+    &:has([data-slot="composer"]) {
+      scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 12rem);
+      @media (min-width: 64rem) {
+        scroll-padding-bottom: calc(var(--dock-clearance) + 12rem);
+      }
+    }
   }
   body {
     @apply bg-card text-foreground;

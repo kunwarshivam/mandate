@@ -57,6 +57,14 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
     await expect(log(page).locator("[data-slot=refused]").last()).toBeInViewport();
     await expect(composer(page)).toBeFocused();
     await say(page, "MSFT");
+    const send = page.getByRole("button", { name: "Send" });
+    await expect(send).toBeInViewport();
+    await expect
+      .poll(async () => {
+        const [button, bar] = await Promise.all([send.boundingBox(), dock(page).boundingBox()]);
+        return button && bar ? button.y + button.height <= bar.y : false;
+      }, { message: "the composer stays clear of the dock as the conversation grows" })
+      .toBe(true);
 
     const models = page.getByRole("group", { name: "Models" });
     await expect(models.getByRole("button")).toHaveText([/^Mean reversion/, /^Momentum/]);

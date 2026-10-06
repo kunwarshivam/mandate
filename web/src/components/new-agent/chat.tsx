@@ -4,7 +4,6 @@ import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useId, u
 import { Button } from "@cloudflare/kumo/components/button";
 import { CheckCircle, PaperPlaneRight } from "@phosphor-icons/react";
 import { FIELD } from "@/components/auth/buttons";
-import { ProvenanceBadge } from "@/components/domain/provenance-badge";
 import { KEY } from "@/components/kumo/key";
 import { type Dec } from "@/lib/decimal";
 import { percent, usd } from "@/lib/format";
@@ -28,6 +27,9 @@ const QUESTION: Record<Exclude<Step["kind"], "param" | "section" | "check" | "re
   symbols: { text: "Which stocks or ETFs may it trade?", hint: "Write their symbols. Only you choose them; the platform suggests none. One agent trades an instrument on an account." },
   model: { text: "How should it decide?", hint: "Choose a model, or name it. They are in alphabetical order; the platform ranks none and recommends none." },
 };
+
+/** The sticky header's height plus a margin, matching the page's `scroll-padding-top` of 5rem. */
+const HEADER_CLEARANCE_PX = 80;
 
 const READY_TEXT = "Every section is confirmed. Next you read the whole mandate once more, exactly as the journal will keep it, and confirm it with your passkey.";
 
@@ -60,7 +62,6 @@ function Noted({ items }: { items: NotedItem[] }) {
             <dt className="text-sm text-mandate-muted">{item.label}</dt>
             <dd className="grid min-w-0 justify-items-start gap-1 wrap-anywhere">
               <span className="font-medium text-pretty tabular">{item.value}</span>
-              <ProvenanceBadge provenance={{ path: item.label, provenance: item.provenance, quote: item.quote }} />
               <QuotedSpan quote={item.quote} className="text-mandate-muted" />
             </dd>
           </div>
@@ -361,10 +362,20 @@ export function Chat({ conversation, busy, onSend, actions }: { conversation: Co
   useEffect(() => {
     const added = entries.length - seen.current;
     seen.current = entries.length;
-    if (added <= 0) return;
-    const firstNew = log.current?.children[entries.length - added] as HTMLElement | undefined;
-    if (firstNew?.dataset.kind === "draft") firstNew.scrollIntoView({ block: "start" });
-    else field.current?.scrollIntoView({ block: "nearest" });
+    const box = log.current;
+    if (added <= 0 || !box) return;
+    const fresh = [...box.children].slice(-added) as HTMLElement[];
+    const behavior: ScrollBehavior = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    const draft = fresh.find((e) => e.dataset.kind === "draft");
+    if (draft) {
+      draft.scrollIntoView({ block: "start", behavior });
+      return;
+    }
+    const top = fresh[0].getBoundingClientRect().top;
+    const bottom = fresh[fresh.length - 1].getBoundingClientRect().bottom;
+    const visible = (field.current?.closest("form")?.getBoundingClientRect().top ?? window.innerHeight) - HEADER_CLEARANCE_PX;
+    if (bottom - top > visible) fresh[0].scrollIntoView({ block: "start", behavior });
+    else fresh[fresh.length - 1].scrollIntoView({ block: "nearest", behavior });
   }, [entries.length]);
 
   const submit = (event?: FormEvent) => {
@@ -409,8 +420,13 @@ export function Chat({ conversation, busy, onSend, actions }: { conversation: Co
         ))}
       </div>
 
-      <form onSubmit={submit} noValidate className="grid gap-2" data-slot="composer">
-        <p role="status" className="min-h-5 text-sm text-muted-foreground" data-slot="thinking">
+      <form
+        onSubmit={submit}
+        noValidate
+        data-slot="composer"
+        className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-2 border-t border-border/70 bg-card px-(--page-x) pt-2 pb-4 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-[calc(var(--dock-clearance)+1rem)]"
+      >
+        <p role="status" className="min-h-5 text-sm leading-5 text-muted-foreground" data-slot="thinking">
           {busy ? "Reading your words…" : ""}
         </p>
         <label htmlFor={`${id}-message`} className="sr-only">
@@ -427,12 +443,12 @@ export function Chat({ conversation, busy, onSend, actions }: { conversation: Co
           onKeyDown={keys}
           className={cn(FIELD, "h-auto min-h-14 resize-y py-3 leading-normal")}
         />
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start justify-between gap-3">
           <p id={`${id}-note`} className="max-w-measure text-caption text-pretty text-muted-foreground" data-slot="model-note">
-            {conversation.figuresOnly ? "Reading without the model now: figures only, read exactly as written." : "A model reads your words and quotes back what it read. It sets nothing: every value comes from your words, and you confirm each one."}
-            {" In this workspace a fixture stands in for the model, and nothing leaves this page."}
+            {conversation.figuresOnly ? "Reading without the model now: figures only, read exactly as written." : "A model reads your words and quotes back what it read; it sets nothing."}
+            {" Here a fixture stands in for it, and nothing leaves this page."}
           </p>
-          <Button type="submit" variant="secondary" size="lg" className={cn(KEY, "w-full shrink-0 sm:w-auto")} disabled={busy || text.trim() === ""}>
+          <Button type="submit" variant="secondary" size="lg" className={cn(KEY, "shrink-0")} disabled={busy || text.trim() === ""}>
             Send
             <PaperPlaneRight className="size-4" aria-hidden />
           </Button>

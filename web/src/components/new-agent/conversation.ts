@@ -46,7 +46,6 @@ export interface NotedItem {
   label: string;
   value: string;
   quote: string;
-  provenance: "user_stated" | "user_entered";
 }
 
 /** A value read from words, not figures, held until the owner says it is right. */
@@ -222,7 +221,7 @@ export function lossWords(loss: Loss, money: Dec | null): string {
 function setMoney(c: Conversation, value: Dec, quote: string, messageId: string, checks: Checks): [Conversation, NotedItem | string] {
   const full = moneyRoom(value, checks);
   if (full) return [c, full];
-  return [{ ...unconfirm(c, "money", "limits"), money: { value, quote, messageId } }, { label: "Money it may use", value: usd(value), quote, provenance: "user_stated" }];
+  return [{ ...unconfirm(c, "money", "limits"), money: { value, quote, messageId } }, { label: "Money it may use", value: usd(value), quote }];
 }
 
 function setLoss(c: Conversation, loss: Loss, quote: string, messageId: string): [Conversation, NotedItem | string] {
@@ -230,7 +229,7 @@ function setLoss(c: Conversation, loss: Loss, quote: string, messageId: string):
     const fits = checkLoss(loss, c.money.value);
     if (!fits.ok) return [c, fits.error];
   }
-  return [{ ...unconfirm(c, "money", "limits"), loss: { loss, quote, messageId } }, { label: "Most it may lose, in total", value: lossWords(loss, c.money?.value ?? null), quote, provenance: "user_stated" }];
+  return [{ ...unconfirm(c, "money", "limits"), loss: { loss, quote, messageId } }, { label: "Most it may lose, in total", value: lossWords(loss, c.money?.value ?? null), quote }];
 }
 
 function apply(c: Conversation, r: Reading, messageId: string, checks: Checks): [Conversation, NotedItem | string | null] {
@@ -242,7 +241,7 @@ function apply(c: Conversation, r: Reading, messageId: string, checks: Checks): 
       if (r.check) return [{ ...c, pending: [...c.pending, { field: "loss", loss: r.loss, quote: r.quote, messageId }] }, null];
       return setLoss(c, r.loss, r.quote, messageId);
     case "goal":
-      return [{ ...unconfirm(c, "money", "limits"), goal: { quote: r.quote, messageId } }, { label: "Goal", value: "In your words, as the mandate's description.", quote: r.quote, provenance: "user_stated" }];
+      return [{ ...unconfirm(c, "money", "limits"), goal: { quote: r.quote, messageId } }, { label: "Goal", value: "In your words, as the mandate's description.", quote: r.quote }];
     case "symbols": {
       const read = readSymbols(r.symbols.join(" "));
       if (!read.ok) return [c, read.error];
@@ -250,12 +249,12 @@ function apply(c: Conversation, r: Reading, messageId: string, checks: Checks): 
         const holder = checks.claimedBy(s);
         if (holder) return [c, `${s} is already traded by ${holder}. One agent trades an instrument on an account; choose another.`];
       }
-      return [{ ...unconfirm(c, "universe"), symbols: read.value }, { label: "What it may trade", value: read.value.join(", "), quote: r.quote, provenance: "user_entered" }];
+      return [{ ...unconfirm(c, "universe"), symbols: read.value }, { label: "What it may trade", value: read.value.join(", "), quote: r.quote }];
     }
     case "model": {
       const model = MODELS.find((m) => m.id === r.model);
       if (!model || c.strategy.model === model.id) return [c, null];
-      return [chosen(c, model.id), { label: "How it decides", value: `${model.name} (${model.id} ${model.version})`, quote: r.quote, provenance: "user_entered" }];
+      return [chosen(c, model.id), { label: "How it decides", value: `${model.name} (${model.id} ${model.version})`, quote: r.quote }];
     }
     case "param": {
       const param = MODELS.find((m) => m.id === c.strategy.model)?.params.find((p) => p.key === r.key);
@@ -264,7 +263,7 @@ function apply(c: Conversation, r: Reading, messageId: string, checks: Checks): 
       if (!read.ok) return [c, read.error];
       return [
         { ...unconfirm(c, "strategy"), strategy: { ...c.strategy, params: { ...c.strategy.params, [r.key]: read.value } } },
-        { label: param.label, value: read.value, quote: r.quote, provenance: "user_entered" },
+        { label: param.label, value: read.value, quote: r.quote },
       ];
     }
     default: {

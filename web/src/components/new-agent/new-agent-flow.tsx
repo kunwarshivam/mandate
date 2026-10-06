@@ -59,7 +59,8 @@ export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compi
       firstStep.current = false;
       return;
     }
-    root.current?.querySelector<HTMLElement>(`#${STEP_HEADING}`)?.focus();
+    root.current?.scrollIntoView({ block: "start" });
+    root.current?.querySelector<HTMLElement>(`#${STEP_HEADING}`)?.focus({ preventScroll: true });
   }, [step, attempt]);
 
   const read = async (input: CompilerInput, messageId: string, withModel: boolean) => {
