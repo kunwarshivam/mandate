@@ -6,11 +6,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
+use mandate_alpaca::Exchange as BrokerExchange;
 use mandate_canon::{Digest, Key, Value};
-use mandate_domain::AssetClass as DomainAssetClass;
+use mandate_domain::{AssetClass as DomainAssetClass, AssetId};
 use mandate_executor::BindingGateConfigRefs;
 use mandate_num::{Qty, ShareIncrement};
-use mandate_risk::EtpClass;
+use mandate_risk::{EtpClass, Exchange as GateExchange};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, SYMBOL, absent};
@@ -26,6 +27,8 @@ const WHOLE_SHARE: &str = "1";
 /// `config_refs`.
 pub struct Artifacts {
     pub(super) mandate: mandate_spec::Mandate,
+    pub(super) model_id: String,
+    pub(super) model_version: String,
     pub(super) model_hash: Digest,
     pub(super) fees: mandate_accounting::Config,
     pub(super) instrument: ReviewedInstrument,
@@ -33,10 +36,26 @@ pub struct Artifacts {
     pub(super) config_refs: BindingGateConfigRefs,
 }
 
+/// Instrument and model identity derived from the confirmed mandate and reviewed snapshots.
+pub struct ProductionIdentity<'a> {
+    pub asset_id: &'a AssetId,
+    pub symbol: &'a InstrumentId,
+    pub asset_class: DomainAssetClass,
+    pub broker_exchange: BrokerExchange,
+    pub gate_exchange: GateExchange,
+    pub model_id: &'a str,
+    pub model_version: &'a str,
+    pub model_hash: Digest,
+}
+
 /// What the instrument artifact states, each field read by the run: the symbol the broker is read
 /// by, the quantity grid, and the ETP classification.
 pub(super) struct ReviewedInstrument {
+    pub(super) asset_id: AssetId,
     pub(super) symbol: InstrumentId,
+    pub(super) asset_class: DomainAssetClass,
+    pub(super) broker_exchange: BrokerExchange,
+    pub(super) gate_exchange: GateExchange,
     pub(super) increment: ShareIncrement,
     pub(super) increment_qty: Qty,
     pub(super) etp: EtpClass,
@@ -50,6 +69,14 @@ struct Artifact {
 }
 
 impl Artifacts {
+    /// Loads production artifacts without selecting an instrument or model in the shell.
+    ///
+    /// # Errors
+    /// Refuses until E7-19's production input loader is implemented.
+    pub fn load_production(_mandate_path: &Path, _config_dir: &Path) -> Result<Self, Cause> {
+        Err(Cause::Unimplemented { story: "E7-19" })
+    }
+
     /// Loads the mandate and the five effective-dated artifacts in `config_dir`.
     ///
     /// # Errors
@@ -136,7 +163,11 @@ impl Artifacts {
             UtcNanos::parse_rfc3339(required_text(reviewed, "etp_classified_at")?)
                 .map_err(|_| absent("the instrument's ETP classification date"))?;
         let instrument = ReviewedInstrument {
+            asset_id: AssetId::parse(INSTRUMENT_ID).map_err(|_| absent("the AAPL asset id"))?,
             symbol: InstrumentId::new(SYMBOL).map_err(|_| absent("the AAPL symbol"))?,
+            asset_class: DomainAssetClass::UsEquity,
+            broker_exchange: BrokerExchange::Nasdaq,
+            gate_exchange: GateExchange::Nasdaq,
             increment: ShareIncrement::Whole,
             increment_qty: Qty::parse(WHOLE_SHARE)?,
             etp: EtpClass::Plain,
@@ -170,6 +201,8 @@ impl Artifacts {
         );
         Ok(Self {
             mandate,
+            model_id: MODEL_ID.to_owned(),
+            model_version: MODEL_VERSION.to_owned(),
             model_hash,
             fees,
             instrument,
@@ -181,6 +214,20 @@ impl Artifacts {
     /// The content-addressed references the executor journals with every gate decision.
     pub fn config_refs(&self) -> &BindingGateConfigRefs {
         &self.config_refs
+    }
+
+    /// The production identity this reviewed input binds.
+    pub fn production_identity(&self) -> ProductionIdentity<'_> {
+        ProductionIdentity {
+            asset_id: &self.instrument.asset_id,
+            symbol: &self.instrument.symbol,
+            asset_class: self.instrument.asset_class,
+            broker_exchange: self.instrument.broker_exchange,
+            gate_exchange: self.instrument.gate_exchange,
+            model_id: &self.model_id,
+            model_version: &self.model_version,
+            model_hash: self.model_hash,
+        }
     }
 }
 
