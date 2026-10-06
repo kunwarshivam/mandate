@@ -1,6 +1,6 @@
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Strategy, compile, mandateFrom, read, readStrategy } from "@/components/new-agent/draft";
+import { type Strategy, compile, mandateFrom, readAnswers, readStrategy } from "@/components/new-agent/draft";
 import { Providers } from "@/components/providers";
 import { lastPrice } from "@/fixtures/market";
 import type { Mandate, Workspace } from "@/fixtures/types";
@@ -27,7 +27,7 @@ import {
 const MOMENTUM: Strategy = { model: "quant.momentum", params: { lookback_bars: "20" } };
 
 function newAgent(ws: Workspace, { money = "$3,000", loss = "$300", symbols = ["MSFT"], strategy = MOMENTUM } = {}): NewAgent {
-  const r = read({ kind: "questions", answers: { money, goal: "Grow it", loss } });
+  const r = readAnswers(money, "Grow it", loss);
   if (!r.ok) throw new Error(r.error);
   const s = readStrategy(strategy);
   if (!s.ok) throw new Error(s.error);

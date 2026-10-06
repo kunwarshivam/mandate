@@ -45,7 +45,7 @@ export const SCREENS: readonly Screen[] = [
     key: "agents-new",
     href: "/agents/new",
     label: "New agent",
-    purpose: "Describe an agent in your own words, review every drafted field with where it came from, and confirm each section before it deploys to paper.",
+    purpose: "Describe an agent in your own words, in a conversation, then create it on paper from one summary of every value.",
     group: "agents",
     built: true,
     needs: "agents.view",

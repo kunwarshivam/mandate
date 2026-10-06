@@ -7,32 +7,25 @@ import { type Dec, ONE, ZERO, add, dec, div, fromInt, min, mul, sub, toDecimalSt
 import { percent, usd } from "@/lib/format";
 
 /**
- * The fixture workspace's stand-in for the compiler (brief A0 to A5, mandate spec §7): a fixed,
- * deterministic reading of the owner's words, so the same answers always draft the same mandate.
- * Nothing here is a model call.
+ * The deterministic half of the compiler (brief A0 to A5, mandate spec §7, DEC-476): from the values
+ * the owner stated, each with its quoted span, it drafts the rest of the mandate, so the same words
+ * always draft the same mandate. The model half (`compiler.ts`) only points at the owner's words;
+ * nothing here is a model call.
  *
  * What the owner states is `user_stated` with its quoted span. Every other envelope value is drafted
  * as `platform_proposed`, or `platform_default` where spec §7 allows a default. Never proposed: any
  * `auto`, a delegation, the instrument list, the environment or the connection (V-022, V-038).
  */
 
-export interface Answers {
-  money: string;
-  goal: string;
-  loss: string;
-}
-
-export type Source = { kind: "questions"; answers: Answers } | { kind: "description"; text: string };
-
 export type SectionKey = "money" | "limits" | "strategy" | "autonomy" | "universe";
-
-export const SECTION_KEYS: readonly SectionKey[] = ["money", "limits", "strategy", "autonomy", "universe"];
 
 export type ModelId = "quant.mean_reversion" | "quant.momentum";
 
 interface ModelParam {
   key: string;
   label: string;
+  /** How the conversation asks for it, with no suggested value. */
+  question: string;
   hint: string;
   read: (text: string) => CheckResult<string>;
 }
@@ -66,6 +59,7 @@ function decimalBetween(label: string, low: string, high: string) {
 const LOOKBACK: ModelParam = {
   key: "lookback_bars",
   label: "Lookback, in bars",
+  question: "How many bars should the model read back over?",
   hint: "How many bars the model reads back over. A whole number from 2 to 500.",
   read: wholeNumber("Lookback", 2, 500),
 };
@@ -83,6 +77,7 @@ export const MODELS: readonly ModelChoice[] = [
       {
         key: "z_entry",
         label: "Entry z-score",
+        question: "How far below its average, in standard deviations, must a price be before the model scores a buy?",
         hint: "How far below its average a price must be, in standard deviations, before the model scores a buy. From 0.5 to 4.",
         read: decimalBetween("Entry z-score", "0.5", "4"),
       },
@@ -142,7 +137,6 @@ export interface DraftField {
 export interface DraftSection {
   key: SectionKey;
   title: string;
-  lead: string;
   fields: DraftField[];
 }
 
@@ -185,7 +179,10 @@ export interface Draft {
   terms: Terms;
   symbols: string[];
   strategy: ChosenModel | null;
+  /** The owner's messages the envelope was read from, in full. */
   answers: Array<{ label: string; quote: string }>;
+  /** The goal in the owner's words, kept as `behavior.description`. */
+  description: string;
   sections: DraftSection[];
   figures: Figures;
   notEnforced: NotEnforced[];
@@ -237,14 +234,15 @@ export function findPercents(text: string): Match[] {
   return Array.from(text.matchAll(PERCENT), (m) => ({ value: div(dec(m[1]), fromInt(100)), span: m[0].trim(), index: m.index, dollars: false }));
 }
 
-/** A loss in dollars or as a percentage of the money, whichever the owner wrote first. */
-type Loss = { kind: "usd"; value: Dec } | { kind: "fraction"; value: Dec };
+/** A loss in dollars or as a percentage of the money. */
+export type Loss = { kind: "usd"; value: Dec } | { kind: "fraction"; value: Dec };
 
-function firstLoss(text: string): Loss | null {
+/** The loss the owner wrote first in figures, dollars or a percentage, with the span it was read from. */
+export function firstLoss(text: string): (Loss & { span: string }) | null {
   const amount = findAmounts(text)[0];
   const share = findPercents(text)[0];
-  if (share && (!amount || share.index <= amount.index)) return { kind: "fraction", value: share.value };
-  if (amount) return { kind: "usd", value: amount.value };
+  if (share && (!amount || share.index <= amount.index)) return { kind: "fraction", value: share.value, span: share.span };
+  if (amount) return { kind: "usd", value: amount.value, span: amount.span };
   return null;
 }
 
@@ -252,20 +250,26 @@ function firstLoss(text: string): Loss | null {
 const CONSTRAINT =
   /\b(avoid|avoiding|never|don['’]?t|do not|except|ethical|sustainable|esg|news|earnings|announcements?|macro|fed|weekends?|overnight|dividends?|tax|taxes|steady|steadily|slowly|carefully|gently|retire|retirement|boring|calm)\b/i;
 
-const LOSS_WORDS = /\b(lose|losing|loss|losses|drop|down)\b/i;
-const GOAL_WORDS = /\b(stop|stops|reach|reaches|until|gain|gains|grow|grows|make|makes|up|target|double)\b/i;
+export const LOSS_WORDS = /\b(lose|losing|loss|losses|drop|down)\b/i;
+export const GOAL_WORDS = /\b(stop|stops|reach|reaches|until|gain|gains|grow|grows|make|makes|up|target|double)\b/i;
 
-function clauses(text: string): string[] {
+export const NOT_ENFORCED_WHY = "No limit in the mandate can check this, so nothing enforces it. It reaches the agent's models only as description text.";
+const GOAL_NOT_ENFORCED_WHY = "No goal type can express this, so it is kept as description text and nothing enforces it. The agent runs until you stop it.";
+
+/**
+ * The owner's words split where a new thought starts: sentences, lines, commas, "and", "but". A
+ * clause drops the punctuation that ended it, so a quote of it reads as the owner's words alone.
+ */
+export function clauses(text: string): string[] {
   return text
     .split(/(?<=[.;!?])\s+|\n+|,\s+|\s+(?:and|but)\s+/i)
-    .map((c) => c.trim())
+    .map((c) => c.trim().replace(/(?<=[A-Za-z0-9%)])[.;!?]+$/, ""))
     .filter((c) => c.length > 0);
 }
 
-function constraintsIn(text: string): NotEnforced[] {
-  return clauses(text)
-    .filter((c) => CONSTRAINT.test(c))
-    .map((quote) => ({ quote, why: "No limit in the mandate can check this, so nothing enforces it. It reaches the agent's models only as description text." }));
+/** The clauses that state a constraint no field can express, whatever the model made of them. */
+export function constraintsIn(text: string): string[] {
+  return clauses(text).filter((c) => CONSTRAINT.test(c));
 }
 
 export type CheckResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -277,19 +281,13 @@ export function readMoney(text: string): CheckResult<Dec> {
   return { ok: true, value: amount.value };
 }
 
-export function readGoal(text: string): CheckResult<string> {
-  if (text.trim() === "") return { ok: false, error: "Say what this agent is for, in your own words." };
-  return { ok: true, value: text.trim() };
-}
-
 /** The ceiling in dollars for a given allocation, for the hint beside the loss question. */
 export function lossCeilingUsd(allocation: Dec): Dec {
   return cents(mul(allocation, LOSS_CEILING));
 }
 
-export function readLoss(text: string, allocation: Dec): CheckResult<{ usd: Dec; fraction: Dec }> {
-  const loss = firstLoss(text);
-  if (!loss) return { ok: false, error: "Write it in figures: dollars, or a percentage of the money." };
+/** A stated loss against the money: more than zero, no more than the money, and inside the workspace's ceiling, never moved to fit it. */
+export function checkLoss(loss: Loss, allocation: Dec): CheckResult<{ usd: Dec; fraction: Dec }> {
   const usdValue = loss.kind === "usd" ? loss.value : cents(mul(allocation, loss.value));
   const fraction = loss.kind === "fraction" ? loss.value : div(loss.value, allocation);
   if (usdValue <= ZERO) return { ok: false, error: "The loss must be more than zero." };
@@ -303,80 +301,94 @@ export function readLoss(text: string, allocation: Dec): CheckResult<{ usd: Dec;
   return { ok: true, value: { usd: usdValue, fraction } };
 }
 
-/** A level stated in the goal: a percentage gain, or dollars (above the allocation, an equity level; at or below it, a gain). */
-function readLevel(text: string, allocation: Dec, skip?: Match): Goal | null {
+export function readLoss(text: string, allocation: Dec): CheckResult<{ usd: Dec; fraction: Dec }> {
+  const loss = firstLoss(text);
+  if (!loss) return { ok: false, error: "Write it in figures: dollars, or a percentage of the money." };
+  return checkLoss(loss, allocation);
+}
+
+/**
+ * A level stated in the goal: a percentage gain, or dollars (above the allocation, an equity level;
+ * at or below it, a gain). When the goal's words also state the money, that amount is not a level.
+ */
+function readLevel(text: string, allocation: Dec, alsoMoney: boolean): Goal | null {
   const share = findPercents(text)[0];
-  const amount = findAmounts(text).find((m) => m.index !== skip?.index);
+  const amounts = findAmounts(text);
+  const skip = alsoMoney ? amounts.findIndex((m) => m.value === allocation) : -1;
+  const amount = amounts.find((_, i) => i !== skip);
   if (share && (!amount || share.index <= amount.index)) return share.value > ZERO ? { type: "profit_stop", level: share.value, quote: share.span } : null;
   if (!amount || amount.value <= ZERO) return null;
   const gain = amount.value > allocation ? sub(amount.value, allocation) : amount.value;
   return { type: "profit_stop", level: div(gain, allocation), quote: amount.span };
 }
 
-export type Read = { allocation: Dec; loss: { usd: Dec; fraction: Dec }; goal: Goal; answers: Draft["answers"]; quotes: Record<"money" | "loss", string>; notEnforced: NotEnforced[] };
+export type Read = {
+  allocation: Dec;
+  loss: { usd: Dec; fraction: Dec };
+  goal: Goal;
+  answers: Draft["answers"];
+  quotes: Record<"money" | "loss", string>;
+  notEnforced: NotEnforced[];
+  description: string;
+};
 
-/** The three answers, from the questions or from a description; an error names what is missing. */
-export function read(source: Source): CheckResult<Read> {
-  switch (source.kind) {
-    case "questions": {
-      const { money, goal, loss } = source.answers;
-      const allocation = readMoney(money);
-      if (!allocation.ok) return allocation;
-      const goalText = readGoal(goal);
-      if (!goalText.ok) return goalText;
-      const lossValue = readLoss(loss, allocation.value);
-      if (!lossValue.ok) return lossValue;
-      const level = readLevel(goal, allocation.value);
-      const notEnforced = level
-        ? constraintsIn(goal)
-        : [{ quote: goal.trim(), why: "No goal type can express this, so it is kept as description text and nothing enforces it. The agent runs until you stop it." }];
-      return {
-        ok: true,
-        value: {
-          allocation: allocation.value,
-          loss: lossValue.value,
-          goal: level ?? { type: "continuous" },
-          answers: [
-            { label: "Money", quote: money.trim() },
-            { label: "Goal", quote: goal.trim() },
-            { label: "Loss you can stand", quote: loss.trim() },
-          ],
-          quotes: { money: money.trim(), loss: loss.trim() },
-          notEnforced,
-        },
-      };
-    }
-    case "description": {
-      const text = source.text.trim();
-      if (text === "") return { ok: false, error: "Write a description first." };
-      const parts = clauses(text);
-      const lossClause = parts.find((c) => LOSS_WORDS.test(c) && (findAmounts(c).length > 0 || findPercents(c).length > 0));
-      const moneyClause = parts.find((c) => c !== lossClause && findAmounts(c).some((m) => m.dollars)) ?? parts.find((c) => c !== lossClause && findAmounts(c).length > 0);
-      const missing = [moneyClause ? null : "how much money it may use, in dollars", lossClause ? null : "how much it may lose, in dollars or as a percentage"].filter(Boolean);
-      if (!moneyClause || !lossClause) return { ok: false, error: `We could not find ${missing.join(", or ")} in your words. Add it, or answer the three questions instead.` };
-      const amounts = findAmounts(moneyClause);
-      const allocation = amounts.find((m) => m.dollars) ?? amounts[0];
-      const lossValue = readLoss(lossClause, allocation.value);
-      if (!lossValue.ok) return lossValue;
-      const goalClause = parts.find((c) => c !== lossClause && GOAL_WORDS.test(c) && readLevel(c, allocation.value, c === moneyClause ? allocation : undefined));
-      const goal = goalClause ? readLevel(goalClause, allocation.value, goalClause === moneyClause ? allocation : undefined) : null;
-      return {
-        ok: true,
-        value: {
-          allocation: allocation.value,
-          loss: lossValue.value,
-          goal: goal ?? { type: "continuous" },
-          answers: [{ label: "Your description", quote: text }],
-          quotes: { money: moneyClause, loss: lossClause },
-          notEnforced: constraintsIn(text),
-        },
-      };
-    }
-    default: {
-      const unhandled: never = source;
-      throw new Error(`unhandled source ${JSON.stringify(unhandled)}`);
-    }
+/** The envelope values the owner stated, each with the words it was read from. */
+export interface Stated {
+  money: { value: Dec; quote: string };
+  loss: { loss: Loss; quote: string };
+  /** The goal in the owner's words. */
+  goal: string;
+  answers: Draft["answers"];
+  /** Quotes the compiler marked as constraints no field can express. */
+  notes: readonly string[];
+}
+
+/**
+ * The stated values as the draft reads them. A goal with no level is kept whole as not enforced;
+ * every clause that states a constraint is listed too, whether or not the compiler marked it, so a
+ * model that misses one cannot hide it.
+ */
+export function readStated(s: Stated): CheckResult<Read> {
+  const goal = s.goal.trim();
+  if (goal === "") return { ok: false, error: "Say what this agent is for, in your own words." };
+  const loss = checkLoss(s.loss.loss, s.money.value);
+  if (!loss.ok) return loss;
+  const level = readLevel(goal, s.money.value, goal === s.money.quote.trim());
+  const notEnforced: NotEnforced[] = level ? [] : [{ quote: goal, why: GOAL_NOT_ENFORCED_WHY }];
+  for (const quote of [...s.notes, ...s.answers.flatMap((a) => constraintsIn(a.quote))]) {
+    if (!notEnforced.some((n) => n.quote.includes(quote) || quote.includes(n.quote))) notEnforced.push({ quote, why: NOT_ENFORCED_WHY });
   }
+  return {
+    ok: true,
+    value: {
+      allocation: s.money.value,
+      loss: loss.value,
+      goal: level ?? { type: "continuous" },
+      answers: s.answers,
+      quotes: { money: s.money.quote, loss: s.loss.quote },
+      notEnforced,
+      description: goal,
+    },
+  };
+}
+
+/** Three answers in figures and words, read the way the conversation reads them. */
+export function readAnswers(money: string, goal: string, loss: string): CheckResult<Read> {
+  const allocation = readMoney(money);
+  if (!allocation.ok) return allocation;
+  const stated = firstLoss(loss);
+  if (!stated) return { ok: false, error: "Write it in figures: dollars, or a percentage of the money." };
+  return readStated({
+    money: { value: allocation.value, quote: money.trim() },
+    loss: { loss: stated, quote: loss.trim() },
+    goal,
+    answers: [
+      { label: "Money", quote: money.trim() },
+      { label: "Goal", quote: goal.trim() },
+      { label: "Loss you can stand", quote: loss.trim() },
+    ],
+    notes: [],
+  });
 }
 
 const SYMBOL = /^[A-Z]{1,5}(\.[A-Z])?$/;
@@ -464,7 +476,6 @@ function strategySection(strategy: ChosenModel | null): DraftSection {
   return {
     key: "strategy",
     title: "How it decides",
-    lead: "You choose the model and its settings; the platform ranks none and fills in none. A model gives a score, never an order.",
     fields: [
       strategy
         ? { path: "/behavior/signal_models/0/id", label: "Model", value: `${strategy.model.name} (${strategy.model.id} ${strategy.model.version})`, provenance: "user_entered" }
@@ -493,7 +504,6 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
     {
       key: "money",
       title: "Money and goal",
-      lead: "Your three answers, as the mandate reads them.",
       fields: [
         { path: "/capital/allocation_usd", label: "Money it may use", value: usd(t.allocationUsd), provenance: "user_stated", quote: r.quotes.money },
         {
@@ -510,7 +520,6 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
     {
       key: "limits",
       title: "Limits",
-      lead: "Drafted to fit inside the loss you stated. The risk gate enforces each one, whatever the agent proposes.",
       fields: [
         {
           path: "/risk/max_daily_loss",
@@ -543,7 +552,6 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
     {
       key: "autonomy",
       title: "When it asks you",
-      lead: "Selling to cut risk never asks: protective stops, the loss limits and the kill switch act at once.",
       fields: [
         { path: "/autonomy/default", label: "Buying", value: "Asks you before every buy.", provenance: "platform_default" },
         { path: "/autonomy/approval/timeout_s", label: "Time to answer", value: `${t.approvalTimeoutS / 60} minutes.`, provenance: "platform_proposed" },
@@ -555,7 +563,6 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
     {
       key: "universe",
       title: "What it may trade",
-      lead: "You choose the instruments. The platform never fills in your list.",
       fields: [
         symbols.length > 0
           ? { path: "/universe/pinned_instruments", label: "Instruments", value: symbols.join(", "), provenance: "user_entered" }
@@ -571,7 +578,7 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
 export function compile(r: Read, symbols: string[], strategy: ChosenModel | null = null): Draft {
   const terms = termsFor(r);
   const figures = figuresFor(terms);
-  return { terms, symbols, strategy, answers: r.answers, sections: sectionsFor(terms, r, symbols, figures, strategy), figures, notEnforced: r.notEnforced };
+  return { terms, symbols, strategy, answers: r.answers, description: r.description, sections: sectionsFor(terms, r, symbols, figures, strategy), figures, notEnforced: r.notEnforced };
 }
 
 const KNOWN: Record<string, InstrumentRef> = Object.fromEntries(Object.values(INSTRUMENTS).map((i) => [i.symbol, i]));
@@ -597,7 +604,6 @@ export function mandateFrom(draft: Draft, connectionId: string): NewAgent | null
     t.goal.type === "profit_stop"
       ? { type: "profit_stop", profit_level: toDecimalString(t.goal.level), end_date: null }
       : { type: "continuous", end_date: null, on_complete: "hold_protected" };
-  const description = draft.answers.find((a) => a.label === "Goal" || a.label === "Your description")?.quote ?? "";
   const mandate: Mandate = {
     mandate_schema_version: 1,
     name: `${draft.symbols.join("-").toLowerCase().replaceAll(".", "")}-agent`,
@@ -615,7 +621,7 @@ export function mandateFrom(draft: Draft, connectionId: string): NewAgent | null
       leveraged_etp_disclosure_version: null,
     },
     behavior: {
-      description,
+      description: draft.description,
       signal_models: [
         {
           id: strategy.model.id,
