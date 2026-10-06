@@ -4,6 +4,7 @@ import { type ReactNode, createContext, useCallback, useContext, useEffect, useM
 import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, ContentRef, Environment, Iso, Workspace } from "@/fixtures/types";
 import { type NewAgent, addMs, agentIdFor, checkDeploy, deployAgent, fillApproved, firstProposal, mandateVersion, noteSkip, submitApproved } from "./fixture-journey";
 import { clock } from "./format";
+import { type Origin, type Proposal, type Recorded, reachSafePoint, recordChange } from "./mandate-change";
 import { RESTRICTIONS } from "./restrictions";
 
 /**
@@ -81,6 +82,32 @@ export interface Deployment {
   record: DeployRecord;
 }
 
+/** What the change review showed when the owner confirmed (brief §4.1): every line, in order. */
+export interface ChangeRecord {
+  screen: "A6";
+  environment: Environment;
+  shown: string[];
+}
+
+export interface MandateChangeRequest {
+  id: string;
+  agentId: string;
+  version: ContentRef;
+  number: number;
+  /**
+   * `waiting`: recorded as a risk-increasing version, which applies at the agent's next safe point.
+   * `rejected`: refused when it was recorded or applied, and `reason` says why.
+   * `unknown`: the deployment took it but no journal entry came back.
+   */
+  phase: "sent" | "waiting" | "applied" | "rejected" | "undelivered" | "unknown";
+  sentAt: Iso;
+  recordedAt?: Iso;
+  appliedAt?: Iso;
+  reason?: string;
+  origin: Origin;
+  record: ChangeRecord;
+}
+
 export interface Runtime {
   ws: Workspace;
   now: Iso;
@@ -88,9 +115,11 @@ export interface Runtime {
   commands: Command[];
   responses: Record<string, ApprovalResponse>;
   deployments: Deployment[];
+  mandateChanges: MandateChangeRequest[];
   send: (kind: CommandKind, agentId: string | null, record?: CommandRecord) => Command;
   respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => void;
   deploy: (request: NewAgent, record: DeployRecord) => Deployment;
+  changeMandate: (proposal: Proposal, origin: Origin, record: ChangeRecord) => MandateChangeRequest;
 }
 
 const RuntimeContext = createContext<Runtime | null>(null);
@@ -232,6 +261,7 @@ export function RuntimeProvider({
   const [commands, setCommands] = useState<Command[]>([]);
   const [responses, setResponses] = useState<Record<string, ApprovalResponse>>({});
   const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [mandateChanges, setMandateChanges] = useState<MandateChangeRequest[]>([]);
   const nowRef = useRef(initial.now);
   const wsRef = useRef(initial);
   const counter = useRef(0);
@@ -241,8 +271,23 @@ export function RuntimeProvider({
     wsRef.current = apply(wsRef.current);
     setWs(wsRef.current);
   }, []);
+  const recorded = useCallback((apply: (current: Workspace) => { ws: Workspace; recorded: Recorded } | null): Recorded | null => {
+    const result = apply(wsRef.current);
+    if (!result) return null;
+    wsRef.current = result.ws;
+    setWs(result.ws);
+    return result.recorded;
+  }, []);
   const reachable = initial.status !== "unreachable";
   const silent = initial.journal === "silent";
+  /** A version waiting for a safe point is checked again until it settles, so the checks stop with the provider. */
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!tick) return;
@@ -334,9 +379,61 @@ export function RuntimeProvider({
     [initial.scenario, reachable, silent, recordAfterMs, change],
   );
 
+  const changeMandate = useCallback(
+    (proposal: Proposal, origin: Origin, record: ChangeRecord): MandateChangeRequest => {
+      counter.current += 1;
+      const request: MandateChangeRequest = {
+        id: `chg-${counter.current}`,
+        agentId: proposal.agentId,
+        version: proposal.version,
+        number: proposal.number,
+        phase: "sent",
+        sentAt: nowRef.current,
+        origin,
+        record,
+      };
+      setMandateChanges((list) => [...list, request]);
+      const update = (patch: Partial<MandateChangeRequest>) => setMandateChanges((list) => list.map((c) => (c.id === request.id ? { ...c, ...patch } : c)));
+      const settle = (outcome: Recorded, at: Iso) => {
+        switch (outcome.result) {
+          case "applied":
+            return update({ phase: "applied", appliedAt: at });
+          case "rejected":
+            return update({ phase: "rejected", reason: outcome.reason });
+          case "pending":
+            return update({ phase: "waiting" });
+          default: {
+            const unhandled: never = outcome;
+            throw new Error(`unhandled outcome ${JSON.stringify(unhandled)}`);
+          }
+        }
+      };
+      const nextCheck = () =>
+        window.setTimeout(() => {
+          if (!mounted.current) return;
+          const at = nowRef.current;
+          const outcome = recorded((current) => reachSafePoint(current, proposal.agentId, proposal.version, origin, at));
+          if (outcome) settle(outcome, at);
+          else nextCheck();
+        }, recordAfterMs * 2);
+      window.setTimeout(() => {
+        const at = nowRef.current;
+        if (!reachable) return update({ phase: "undelivered" });
+        if (silent) return update({ phase: "unknown" });
+        const outcome = recorded((current) => recordChange(current, proposal, origin, at));
+        if (!outcome) return;
+        update({ recordedAt: at });
+        settle(outcome, at);
+        if (outcome.result === "pending") nextCheck();
+      }, recordAfterMs);
+      return request;
+    },
+    [reachable, silent, recordAfterMs, recorded],
+  );
+
   const value = useMemo(
-    () => ({ ws, now, reachable, commands, responses, deployments, send, respond, deploy }),
-    [ws, now, reachable, commands, responses, deployments, send, respond, deploy],
+    () => ({ ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
+    [ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
