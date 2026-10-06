@@ -512,6 +512,7 @@ mod tests {
 
     use super::{
         DeploymentInput, ProductionIdentity, exchanges, legacy_identity, require_opaque_id,
+        required_positive_u64,
     };
 
     fn text<E: std::fmt::Display>(error: E) -> String {
@@ -622,5 +623,14 @@ mod tests {
         for invalid in ["", "A.z", "A z", too_long.as_str()] {
             assert!(require_opaque_id(invalid, "id").is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn configured_counts_and_durations_are_strictly_positive() -> Result<(), String> {
+        let zero = mandate_canon::parse(br#"{"n":0}"#).map_err(text)?;
+        let one = mandate_canon::parse(br#"{"n":1}"#).map_err(text)?;
+        assert!(required_positive_u64(&zero, "n").is_err());
+        assert_eq!(required_positive_u64(&one, "n").map_err(text)?, 1);
+        Ok(())
     }
 }
