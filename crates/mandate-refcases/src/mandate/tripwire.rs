@@ -655,10 +655,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        Scene, accounting_config, apply_full_precision_unit_buy, apply_step, fill_asset_class,
-        must_parse, patched, probe_result, tripwire_case,
+        Scene, accounting_config, apply_full_precision_unit_buy, apply_step, at_of,
+        fill_asset_class, must_parse, patched, probe_result, tripwire_case,
     };
-    use crate::{Json, at_of, list_at, read_fixture};
+    use crate::{Json, list_at, read_fixture};
 
     fn fixture() -> Result<Json, String> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
