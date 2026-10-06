@@ -109,21 +109,21 @@ fn production_configuration_artifacts(name: &str) -> Result<(Scratch, Artifacts)
     for (old, new) in [
         (
             "\"bracket_partial_fill_timeout_s\":60",
-            "\"bracket_partial_fill_timeout_s\":61",
+            "\"bracket_partial_fill_timeout_s\":62",
         ),
-        ("\"exit_step_s\":5", "\"exit_step_s\":6"),
+        ("\"exit_step_s\":5", "\"exit_step_s\":7"),
         ("\"gtc_expiry_days\":90", "\"gtc_expiry_days\":91"),
         ("\"max_intent_age_s\":120", "\"max_intent_age_s\":121"),
-        ("\"max_unprotected_s\":60", "\"max_unprotected_s\":61"),
+        ("\"max_unprotected_s\":60", "\"max_unprotected_s\":63"),
         (
             "\"protective_replace_buffer_trading_days\":5",
             "\"protective_replace_buffer_trading_days\":6",
         ),
         (
             "\"restriction_403_threshold\":3",
-            "\"restriction_403_threshold\":4",
+            "\"restriction_403_threshold\":7",
         ),
-        ("\"stop_watchdog_s\":60", "\"stop_watchdog_s\":61"),
+        ("\"stop_watchdog_s\":60", "\"stop_watchdog_s\":64"),
         (
             "\"unknown_absent_lookups\":3",
             "\"unknown_absent_lookups\":4",
@@ -135,7 +135,7 @@ fn production_configuration_artifacts(name: &str) -> Result<(Scratch, Artifacts)
         ("\"close_window_minutes\":10", "\"close_window_minutes\":11"),
         (
             "\"collar_crypto_x\":\"0.02\"",
-            "\"collar_crypto_x\":\"0.03\"",
+            "\"collar_crypto_x\":\"0.033\"",
         ),
         (
             "\"collar_liquid_threshold_usd\":\"50000000\"",
@@ -147,11 +147,11 @@ fn production_configuration_artifacts(name: &str) -> Result<(Scratch, Artifacts)
         ),
         (
             "\"collar_other_x\":\"0.02\"",
-            "\"collar_other_x\":\"0.021\"",
+            "\"collar_other_x\":\"0.022\"",
         ),
         (
             "\"collar_passive_band\":\"0.2\"",
-            "\"collar_passive_band\":\"0.21\"",
+            "\"collar_passive_band\":\"0.24\"",
         ),
         (
             "\"crypto_liquidity_floor_usd\":\"1000000\"",
@@ -159,7 +159,7 @@ fn production_configuration_artifacts(name: &str) -> Result<(Scratch, Artifacts)
         ),
         (
             "\"daily_participation\":\"0.05\"",
-            "\"daily_participation\":\"0.06\"",
+            "\"daily_participation\":\"0.066\"",
         ),
         (
             "\"etp_classification_max_age_s\":604800",
@@ -180,9 +180,9 @@ fn production_configuration_artifacts(name: &str) -> Result<(Scratch, Artifacts)
         ),
         (
             "\"order_size_participation\":\"0.05\"",
-            "\"order_size_participation\":\"0.06\"",
+            "\"order_size_participation\":\"0.055\"",
         ),
-        ("\"order_to_fill_max\":10", "\"order_to_fill_max\":11"),
+        ("\"order_to_fill_max\":10", "\"order_to_fill_max\":12"),
         (
             "\"order_to_fill_min_orders\":20",
             "\"order_to_fill_min_orders\":21",
@@ -483,11 +483,11 @@ fn production_configuration_comes_from_the_content_addressed_rule_set() -> Resul
         ),
         (
             Fraction::parse("0.011").map_err(text)?,
-            Fraction::parse("0.021").map_err(text)?,
-            Fraction::parse("0.03").map_err(text)?,
-            Fraction::parse("0.21").map_err(text)?,
-            Fraction::parse("0.06").map_err(text)?,
-            Fraction::parse("0.06").map_err(text)?,
+            Fraction::parse("0.022").map_err(text)?,
+            Fraction::parse("0.033").map_err(text)?,
+            Fraction::parse("0.24").map_err(text)?,
+            Fraction::parse("0.055").map_err(text)?,
+            Fraction::parse("0.066").map_err(text)?,
         )
     );
     assert_eq!(
@@ -499,7 +499,7 @@ fn production_configuration_comes_from_the_content_addressed_rule_set() -> Resul
             gate.close_window_minutes,
             gate.etp_classification_max_age_s,
         ),
-        (61, 3, 11, 21, 11, 604_801)
+        (61, 3, 12, 21, 11, 604_801)
     );
     let executor = configuration.executor;
     assert_eq!(
@@ -510,7 +510,7 @@ fn production_configuration_comes_from_the_content_addressed_rule_set() -> Resul
             executor.protective_replace_buffer_trading_days,
             executor.restriction_403_threshold,
         ),
-        (121, 4, 16, 6, 4)
+        (121, 4, 16, 6, 7)
     );
     assert_eq!(
         (
@@ -520,7 +520,7 @@ fn production_configuration_comes_from_the_content_addressed_rule_set() -> Resul
             executor.exit_step_s,
             executor.gtc_expiry_days,
         ),
-        (61, 61, 61, 6, 91)
+        (62, 63, 64, 7, 91)
     );
     let bytes = fs::read(scratch.0.join("config/rule-set.json")).map_err(text)?;
     let expected_ref = reference(&bytes);
