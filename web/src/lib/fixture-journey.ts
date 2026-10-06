@@ -1,9 +1,10 @@
 /**
  * What the fixture deployment does after the owner acts, as pure functions over a workspace: a
  * confirmed mandate becomes an agent, the agent's first check proposes one buy that asks the owner,
- * an approved buy is submitted and then filled at the fixture market, never above its limit, with protection placed, and a skip is
- * noted. The runtime applies each step only once it is "recorded", the way the journal would;
- * nothing here is market data or a broker, and every price is a fixture price.
+ * an approved buy is submitted and then filled at the fixture market, never above its limit, with
+ * protection placed, and a skip is noted. The runtime applies each step only once it is
+ * "recorded", the way the journal would; nothing here is market data or a broker, and every price
+ * is a fixture price.
  */
 import type {
   Agent,
@@ -108,14 +109,14 @@ export interface NewAgent {
   provenance: FieldProvenance[];
 }
 
-/**
- * The confirmed mandate as a running paper agent with nothing held: version 1, its allocation as
- * its equity, and one timeline entry saying who confirmed it. The caller checks `checkDeploy` first.
- */
 export function agentIdFor(mandate: Mandate, seed: string): string {
   return `agt_${fixtureUlid(`agent:${seed}:${mandateVersion(mandate)}`)}`;
 }
 
+/**
+ * The confirmed mandate as a running paper agent with nothing held: version 1, its allocation as
+ * its equity, and one timeline entry saying who confirmed it. The caller checks `checkDeploy` first.
+ */
 export function deployAgent(ws: Workspace, request: NewAgent, at: Iso, seed: string): { ws: Workspace; agentId: string } {
   const next = structuredClone(ws);
   const version = mandateVersion(request.mandate);
