@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Owner** | Product |
-| **Status** | Draft v0.4, 2026-10-05. Adds Volaren (YC F26), which v0.3 listed as pre-launch. Replaces v0.3 of 2026-09-30, which added the general-purpose agents section [ADR-0003](../adr/0003-earned-autonomy.md) sequenced; v0.2 of 2026-09-27 replaced v0.1 after it made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
+| **Status** | Draft v0.4, 2026-10-05. Adds Volaren (YC F26), which v0.3 listed as pre-launch, including what its app shows a visitor who is not signed in. Replaces v0.3 of 2026-09-30, which added the general-purpose agents section [ADR-0003](../adr/0003-earned-autonomy.md) sequenced; v0.2 of 2026-09-27 replaced v0.1 after it made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
 | **Method** | Public web pages only, read 2026-09-26 and 2026-09-27; the general-agents section's sources were read 2026-09-30, and Volaren's on 2026-10-05, including its app as a visitor who is not signed in. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
 | **Regulatory material** | Public commentary, not legal advice. Legal and compliance text is reserved for the founder and counsel ([DEC-79](../project/04-decision-log.md#decisions)) |
 | **Related** | [Strategy options](10-strategy-options.md), [Vision](01-vision-and-strategy.md), [Compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) |
@@ -550,7 +550,7 @@ may also be a source of strategies for the bring-your-own-strategy mode.
   basis" [VL6].
 
 **What its app shows a signed-out visitor (viewed 2026-10-05).** Creating a thesis, running a
-backtest, and following a strategy each lead to account creation [VL12] [VL13]; what follows is
+backtest, and following a strategy each lead to account creation [VL12] [VL13] [VL14]; what follows is
 what a visitor can see without one.
 
 - Studio offers two modes: "Auto", "We'll build the full trade for you", and "Step by Step",
@@ -588,8 +588,7 @@ is specific to brokers; the pricing and "Who we are" pages carry no date.
 **What it does not document**
 
 - What its "agents watching the market" do, or whether any can act without a confirmation. Its
-  agents page shows a signed-out visitor only a cookie notice to a fetch, and "404 This page
-  could not be found" in a browser [VL11].
+  agents page shows a signed-out visitor "404 This page could not be found" [VL11].
 - When order placement ships, through which provider, with which order types, and whether a ticket
   expires or is checked against the account again before it is sent.
 - Limits that hold outside a strategy or ticket (capital, loss, concentration), or a kill switch.
