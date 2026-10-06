@@ -72,6 +72,29 @@ describe("Home on a phone", () => {
     expect(needsYou().querySelector("h2")).toHaveTextContent("Needs you7 items");
   });
 
+  it("lays Needs you out as one row of cards that scrolls sideways on a phone, and as stacked rows on desktop", () => {
+    render(
+      <Providers workspace={buildWorkspace("approvals")} tick={false}>
+        <AppShell>
+          <DashboardScreen />
+        </AppShell>
+      </Providers>,
+    );
+    const list = needsYou().querySelector("ul")!;
+    expect(list).toHaveClass("grid", "max-lg:flex", "max-lg:overflow-x-auto", "max-lg:snap-x", "max-lg:snap-mandatory");
+    expect(list.className).not.toMatch(/max-lg:flex-(col|wrap)/);
+    const items = [...list.querySelectorAll<HTMLElement>(":scope > li")];
+    expect(items.length).toBeGreaterThan(1);
+    for (const li of items) {
+      expect(li).toHaveClass("max-lg:shrink-0", "max-lg:snap-start", "lg:border-b");
+      const link = within(li).getByRole("link");
+      expect(link).toHaveClass("max-lg:rounded-xl");
+      expect(link.innerHTML, "a card wraps its words rather than cutting off the price").not.toMatch(/\btruncate\b/);
+    }
+    const request = items.find((li) => li.dataset.kind === "request")!;
+    expect(within(request).getByRole("link")).toHaveClass("max-lg:bg-lapis-soft");
+  });
+
   it.each([
     ["a phone", onPhone],
     ["a desktop", onDesktop],
