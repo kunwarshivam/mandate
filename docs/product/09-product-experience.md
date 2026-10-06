@@ -406,7 +406,8 @@ never as values (mandate §4.3).
   (risk-increasing, reducing, neutral); when it applies ("now" for reducing and neutral; "at the next
   safe point" for increasing); that pending approvals will be canceled and re-proposed.
 - *Primary action:* Confirm the new version (step-up if risk-increasing; independent approval where
-  policy requires it).
+  policy requires it). The version comes from Mandate › Edit or from the owner's words in a thread
+  or the copilot; both show the same review (DEC-483).
 - *States:* Rejected at application (for example an allocation increase while a limit is latched, or
   `waiting_period`): the reason in words. Policy nonconforming: a conforming version is required
   before any risk-increasing change.
@@ -596,7 +597,7 @@ activity, account restriction, surveillance), because each acknowledgment restor
   renders a button. When a message asks for an action, deterministic code shows one of two cards: an
   **owner request** (the order the builder would propose, the gate's verdict, and the autonomy
   outcome, before anything is sent) or a **proposed version** (opens A6 with its classification and
-  step-up). "Why" answers are assembled from the journal with links to each event, and a missing
+  step-up; the review opens inline under the message, DEC-483). "Why" answers are assembled from the journal with links to each event, and a missing
   fact reads "not recorded" (E12-5).
 - *Never:* an order placed from a message alone; a change to the envelope without A6.
 - *Governs:* rules 4 and 11; DEC-141; compliance question 41.
