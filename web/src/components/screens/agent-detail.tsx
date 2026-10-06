@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, CaretRight, Tray } from "@phosphor-icons/react";
+import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
+import { ChevronRight } from "pixelarticons/react/ChevronRight.js";
+import { Inbox } from "pixelarticons/react/Inbox.js";
 import { Deadline } from "@/components/approvals/deadline";
 import { AgentEquityChart } from "@/components/charts/equity-chart";
 import { AsOf } from "@/components/domain/as-of";
@@ -61,7 +63,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
                   href={`/approvals/${a.approval_id}`}
                   className="press -mx-2 grid min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1rem] items-start gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
                 >
-                  <Tray aria-hidden weight="fill" className="mt-0.5 size-5 text-lapis" />
+                  <Inbox aria-hidden className="size-6 text-lapis" />
                   <span className="grid gap-0.5">
                     <span className="font-medium text-pretty">
                       Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of <span className="font-mono tabular">{price(a.bound.limit)}</span>
@@ -74,7 +76,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
                       if you do nothing
                     </span>
                   </span>
-                  <CaretRight aria-hidden className="mt-1 size-4 text-muted-foreground" />
+                  <ChevronRight aria-hidden className="size-6 text-muted-foreground" />
                 </Link>
               </li>
             ))}
@@ -142,7 +144,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
                         <span>
                           Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of <span className="font-mono tabular">{price(a.bound.limit)}</span>
                         </span>
-                        <ArrowRight className="size-4 shrink-0 self-center text-lapis transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" aria-hidden />
+                        <ArrowRight className="size-6 shrink-0 self-center text-lapis transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" aria-hidden />
                       </span>
                       <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
                     </Link>
@@ -209,7 +211,7 @@ function AgentApprovals({ agent }: { agent: Agent }) {
               <span>
                 Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of <span className="font-mono tabular">{price(a.bound.limit)}</span>
               </span>
-              <ArrowRight className="size-4 shrink-0 self-center" aria-hidden />
+              <ArrowRight className="size-6 shrink-0 self-center" aria-hidden />
             </span>
             {a.status === "delivered" ? (
               <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
@@ -308,7 +310,7 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
                 <Link href={agentHref(agent.agent_id, s.key)} className={ROW_LINK}>
                   <span className="flex items-center justify-between gap-3 font-medium">
                     {s.label}
-                    <ArrowRight className="size-4 shrink-0" aria-hidden />
+                    <ArrowRight className="size-6 shrink-0" aria-hidden />
                   </span>
                   <span className="text-sm text-muted-foreground">{s.purpose}</span>
                 </Link>

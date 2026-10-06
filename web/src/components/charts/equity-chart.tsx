@@ -2,7 +2,7 @@
 
 import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
 import type { UTCTimestamp } from "lightweight-charts";
-import { CaretDown } from "@phosphor-icons/react";
+import { ChevronDown } from "pixelarticons/react/ChevronDown.js";
 import { AsOf } from "@/components/domain/as-of";
 import { HeroFigure, SignedMoney } from "@/components/domain/money";
 import { FixtureTag, Placeholder } from "@/components/domain/placeholders";
@@ -190,7 +190,7 @@ function EquityHero({
             className="press -mx-2 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-md px-2 text-sm font-semibold outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring lg:hidden"
           >
             Levels
-            <CaretDown aria-hidden className={cn("size-3.5 transition-transform duration-(--duration-hover) motion-reduce:transition-none", levelsOpen && "rotate-180")} />
+            <ChevronDown aria-hidden className={cn("size-6 transition-transform duration-(--duration-hover) motion-reduce:transition-none", levelsOpen && "rotate-180")} />
           </button>
           <div id={legendId} data-slot="levels" className={cn("lg:contents", !levelsOpen && "max-lg:hidden")}>
             {legend}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Plugs } from "@phosphor-icons/react";
+import { Plug } from "pixelarticons/react/Plug.js";
 import { clock } from "@/lib/format";
 import { type Command, useRuntime } from "@/lib/mock-runtime";
 import { commandTitle, recordedLine } from "./commands";
@@ -39,7 +39,7 @@ export function UnreachableAlert() {
   return (
     <div role="alert" className="grid gap-1.5 rounded-xl bg-background px-4 py-3 text-foreground" data-slot="unreachable">
       <p className="flex items-center gap-2 text-base font-semibold">
-        <Plugs className="size-4 shrink-0" aria-hidden />
+        <Plug className="size-6 shrink-0" aria-hidden />
         Cannot reach your deployment
       </p>
       <div className="grid gap-2 text-sm">

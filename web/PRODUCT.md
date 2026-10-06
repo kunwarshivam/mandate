@@ -83,7 +83,7 @@ a word, never colour alone; compliance text appears only as named placeholders s
 button label (rule 4).
 
 Stack (DEC-200): Next.js 16, React 19, TypeScript strict, Tailwind v4, Kumo components on Base UI,
-Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or telemetry.
+Pixelarticons icons (DEC-475), Motion, Vitest. No third-party analytics, session replay, or telemetry.
 
 ## Brand Commitments
 

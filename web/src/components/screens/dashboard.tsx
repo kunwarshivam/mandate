@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { CaretRight, Tray, WarningCircle } from "@phosphor-icons/react";
+import { ChevronRight } from "pixelarticons/react/ChevronRight.js";
+import { Inbox } from "pixelarticons/react/Inbox.js";
+import { SquareAlert } from "pixelarticons/react/SquareAlert.js";
 import { AccountEquityChart } from "@/components/charts/equity-chart";
 import { ModeBadge } from "@/components/domain/mode";
 import { BrandOwl } from "@/components/brand/brand-owl";
@@ -67,7 +69,7 @@ function NeedsYou({ ws, open }: { ws: Workspace; open: Approval[] }) {
           {open.map((a) => (
             <li key={a.approval_id} data-kind="request" className="border-b border-border/70 last:border-b-0">
               <Link href={`/approvals/${a.approval_id}`} className={NEEDS_ROW}>
-                <Tray aria-hidden weight="fill" className="mt-0.5 size-5 text-lapis" />
+                <Inbox aria-hidden className="size-6 text-lapis" />
                 <span className="grid gap-0.5">
                   <span className="font-medium text-pretty">{requestSentence(ws, a)}</span>
                   <span data-slot="deadline" className="text-sm text-muted-foreground">
@@ -78,16 +80,16 @@ function NeedsYou({ ws, open }: { ws: Workspace; open: Approval[] }) {
                     if you do nothing
                   </span>
                 </span>
-                <CaretRight aria-hidden className="mt-1 size-4 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" />
+                <ChevronRight aria-hidden className="size-6 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" />
               </Link>
             </li>
           ))}
           {lines.map((l) => (
             <li key={l.key} data-kind="alert" className="border-b border-border/70 last:border-b-0">
               <Link href={l.href} className={NEEDS_ROW}>
-                <WarningCircle aria-hidden weight="fill" className="mt-0.5 size-5 text-foreground" />
+                <SquareAlert aria-hidden className="size-6 text-foreground" />
                 <span className="font-medium text-pretty">{l.text}</span>
-                <CaretRight aria-hidden className="mt-1 size-4 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" />
+                <ChevronRight aria-hidden className="size-6 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" />
               </Link>
             </li>
           ))}
@@ -118,7 +120,7 @@ function PhoneAgentRow({ agent }: { agent: Agent }) {
             {headroomLine(agent)}
           </span>
         </span>
-        <CaretRight aria-hidden className="size-4 text-muted-foreground" />
+        <ChevronRight aria-hidden className="size-6 text-muted-foreground" />
       </Link>
     </li>
   );

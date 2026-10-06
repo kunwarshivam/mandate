@@ -10,7 +10,7 @@ cannot place an order.
 The screens follow the [product-experience brief](../docs/product/09-product-experience.md). The
 stack is DEC-200: Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Cloudflare's
 Kumo components (`@cloudflare/kumo`, themed in `src/app/kumo-theme.css`), Base UI primitives through Kumo, Motion,
-Phosphor icons, and Vitest with Testing Library.
+Pixelarticons icons (DEC-475), and Vitest with Testing Library.
 
 ## Run it
 

@@ -3,7 +3,8 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { ArrowRight, Plugs } from "@phosphor-icons/react";
+import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
+import { Plug } from "pixelarticons/react/Plug.js";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { Skeleton } from "@/components/domain/skeleton";
 import { clock } from "@/lib/format";
@@ -42,7 +43,7 @@ export function SectionLink({ href, children, className }: { href: string; child
       )}
     >
       {children}
-      <ArrowRight aria-hidden className="size-3.5" />
+      <ArrowRight aria-hidden className="size-6" />
     </Link>
   );
 }
@@ -65,7 +66,7 @@ export function EmptyBoard() {
         href="/agents/new"
         className={cn("w-fit", KEY)}
       >
-        Describe your first agent <ArrowRight aria-hidden className="size-4" />
+        Describe your first agent <ArrowRight aria-hidden className="size-6" />
       </Link>
     </section>
   );
@@ -76,7 +77,7 @@ export function UnreachableNotice() {
   const { ws } = useRuntime();
   return (
     <div role="alert" data-slot="unreachable-notice" className="reveal grid max-w-2xl gap-4 pt-6 text-foreground sm:pt-12">
-      <Plugs aria-hidden className="size-7 text-muted-foreground" />
+      <Plug aria-hidden className="-ml-2.5 size-12 text-muted-foreground" />
       <h1 className="text-h1">Cannot reach your deployment</h1>
       <div className="grid max-w-measure gap-3 text-base">
         <p>

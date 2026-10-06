@@ -3,7 +3,8 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CaretRight, Octagon } from "@phosphor-icons/react";
+import { ChevronRight } from "pixelarticons/react/ChevronRight.js";
+import { StopOctagon } from "@/components/icon";
 import { LinkButton } from "@cloudflare/kumo/components/button";
 import { AgentOwl } from "@/components/domain/owl";
 import { ModeBadge, ModeBanner } from "@/components/domain/mode";
@@ -86,7 +87,7 @@ function PhoneSectionLinks({ agent }: { agent: Agent }) {
                 <Icon className="size-5 shrink-0 text-muted-foreground group-aria-[current=page]:text-foreground" aria-hidden />
                 <span className="flex-1">{s.label}</span>
                 {count === null ? null : <span className="font-mono text-sm text-muted-foreground tabular">{count}</span>}
-                <CaretRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <ChevronRight className="size-6 shrink-0 text-muted-foreground" aria-hidden />
               </Link>
             </li>
           );
@@ -124,7 +125,7 @@ export function AgentFrame({ agent, title, description, children }: { agent: Age
               aria-haspopup="dialog"
               className="press inline-flex h-11 items-center gap-2 rounded-lg border border-ink bg-card pr-5 pl-4 text-sm font-semibold text-foreground outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              <Octagon className="size-4.5" weight="fill" aria-hidden />
+              <StopOctagon className="size-6" aria-hidden />
               Stop this agent…
             </button>
           ) : null

@@ -2,7 +2,7 @@
 
 import { type CSSProperties, useMemo } from "react";
 import Link from "next/link";
-import { CaretRight } from "@phosphor-icons/react";
+import { ChevronRight } from "pixelarticons/react/ChevronRight.js";
 import { cn } from "@/lib/utils";
 import { useMarket } from "@/components/charts/chart-parts";
 import { Sparkline } from "@/components/charts/sparkline";
@@ -100,7 +100,7 @@ export function AgentCard({
             <SignedMoney value={agent.pnl_today} showWord={false} /> <span className="text-muted-foreground">today</span>
           </p>
         </div>
-        <CaretRight aria-hidden className="hidden size-4 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5 sm:block" />
+        <ChevronRight aria-hidden className="hidden size-6 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5 sm:block" />
       </div>
 
       <p className="col-start-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">

@@ -3,7 +3,8 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
-import { ArrowRight, ArrowsClockwise } from "@phosphor-icons/react";
+import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
+import { Reload } from "pixelarticons/react/Reload.js";
 import { cn } from "@/lib/utils";
 import type { Agent } from "@/fixtures/types";
 import { type Dec, ONE, ratio, sub } from "@/lib/decimal";
@@ -236,7 +237,7 @@ export function Headroom({ agent, className }: { agent: Agent; className?: strin
       {agent.mode !== "normal" ? <p className="text-sm text-muted-foreground">{MODE_MEANING[agent.mode]}</p> : null}
       {agent.startup === "reconciling" ? (
         <p role="status" data-slot="reconciling" className="flex items-center gap-2 text-sm font-medium">
-          <ArrowsClockwise className="size-4 shrink-0 motion-safe:animate-spin motion-safe:[animation-duration:2.4s]" aria-hidden />
+          <Reload className="size-6 shrink-0 motion-safe:animate-spin motion-safe:[animation-duration:2.4s]" aria-hidden />
           Checking with the broker. Nothing is needed from you.
         </p>
       ) : null}
@@ -273,7 +274,7 @@ export function Headroom({ agent, className }: { agent: Agent; className?: strin
         className="-mx-2 inline-flex min-h-11 w-fit items-center gap-1 rounded-md px-2 text-sm font-semibold underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
       >
         View full mandate
-        <ArrowRight aria-hidden className="size-3.5" />
+        <ArrowRight aria-hidden className="size-6" />
       </Link>
     </section>
   );
@@ -302,7 +303,7 @@ export function MandateCard({ agent, className }: { agent: Agent; className?: st
           <p className="text-sm text-mandate-muted">{MODE_MEANING[agent.mode]}</p>
           {agent.startup === "reconciling" ? (
             <p role="status" data-slot="reconciling" className="flex items-center gap-2 text-sm font-medium">
-              <ArrowsClockwise className="size-4 shrink-0 motion-safe:animate-spin motion-safe:[animation-duration:2.4s]" aria-hidden />
+              <Reload className="size-6 shrink-0 motion-safe:animate-spin motion-safe:[animation-duration:2.4s]" aria-hidden />
               Checking with the broker. Nothing is needed from you.
             </p>
           ) : null}
@@ -344,7 +345,7 @@ export function MandateCard({ agent, className }: { agent: Agent; className?: st
         className="-mx-2 inline-flex min-h-9 w-fit items-center gap-1 rounded-md px-2 text-sm font-semibold text-mandate-strong underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
       >
         View full mandate
-        <ArrowRight aria-hidden className="size-3.5" />
+        <ArrowRight aria-hidden className="size-6" />
       </Link>
     </section>
   );

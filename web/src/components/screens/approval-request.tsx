@@ -3,7 +3,8 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
-import { ArrowLeft, CaretDown } from "@phosphor-icons/react";
+import { ArrowLeft } from "pixelarticons/react/ArrowLeft.js";
+import { ChevronDown } from "pixelarticons/react/ChevronDown.js";
 import { Button, LinkButton } from "@cloudflare/kumo/components/button";
 import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Deadline } from "@/components/approvals/deadline";
@@ -227,7 +228,7 @@ function Request({ approvalId }: { approvalId: string }) {
   return (
     <article className={cn("mx-auto grid w-full max-w-2xl grid-cols-1 gap-6", (open || response) && "max-lg:-mb-[calc(4.5rem-1px)]")} aria-labelledby="request-title">
       <Link href="/approvals" className={BACK}>
-        <ArrowLeft className="size-4" aria-hidden />
+        <ArrowLeft className="size-6" aria-hidden />
         Approvals
       </Link>
 
@@ -317,7 +318,7 @@ function Request({ approvalId }: { approvalId: string }) {
         <Collapsible.Root className="border-y border-border/70" onOpenChange={(opened) => (opened ? setModelOutputExpanded(true) : undefined)}>
           <Collapsible.Trigger className="group -mx-2 flex min-h-12 w-[calc(100%+1rem)] scroll-mb-72 items-center justify-between gap-3 rounded-lg px-2 py-3 text-left font-medium outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset lg:scroll-mb-40">
             View model output
-            <CaretDown className="size-4 text-muted-foreground transition-transform duration-200 ease-(--ease-out) group-data-[panel-open]:rotate-180" aria-hidden />
+            <ChevronDown className="size-6 text-muted-foreground transition-transform duration-200 ease-(--ease-out) group-data-[panel-open]:rotate-180" aria-hidden />
           </Collapsible.Trigger>
           <Collapsible.Panel className="grid gap-2 pb-4">
             {a.evidence.map((e) => (

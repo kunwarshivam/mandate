@@ -44,13 +44,13 @@ describe("the performance disclosure symbol", () => {
     expect(popover()).toBeNull();
   });
 
-  it("uses the icon set's info glyph, muted, 16px, inside a 24px target that grows to 44px on touch", () => {
+  it("uses the icon set's info glyph, muted, on its 24px grid, as its own 24px target that grows to 44px on touch", () => {
     render(<Row />);
     const button = trigger();
     const glyph = button.querySelector("svg")!;
     expect(glyph).toHaveAttribute("aria-hidden", "true");
-    expect(glyph.getAttribute("class")).toMatch(/\bsize-4\b/);
-    expect(button).toHaveClass("text-muted-foreground", "w-4", "before:size-6", "pointer-coarse:before:size-11");
+    expect(glyph.getAttribute("class")).toMatch(/\bsize-6\b/);
+    expect(button).toHaveClass("text-muted-foreground", "w-6", "before:size-6", "pointer-coarse:before:size-11");
   });
 
   it("opens on click and closes on a second click", async () => {

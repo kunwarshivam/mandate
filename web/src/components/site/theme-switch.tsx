@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { Moon } from "@phosphor-icons/react";
+import { Moon } from "pixelarticons/react/Moon.js";
 import { type ThemeMode, writeThemePref } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { PIXEL, RAISED, SUNKEN } from "./letter";
@@ -34,7 +34,7 @@ export function ThemeSwitch() {
         PIXEL,
       )}
     >
-      <Moon aria-hidden weight={dark ? "fill" : "regular"} className="size-4" />
+      <Moon aria-hidden className="size-6" />
       Dark
     </button>
   );

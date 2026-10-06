@@ -4,7 +4,12 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
-import { Buildings, DotsThree, GearSix, House, type Icon as PhosphorIcon, Scroll } from "@phosphor-icons/react";
+import { BuildingCommunity } from "pixelarticons/react/BuildingCommunity.js";
+import { Gear } from "pixelarticons/react/Gear.js";
+import { Home } from "pixelarticons/react/Home.js";
+import { MoreHorizontal } from "pixelarticons/react/MoreHorizontal.js";
+import { Script } from "pixelarticons/react/Script.js";
+import { type Icon, menuIcon } from "@/components/icon";
 import { useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
 import { GROUP_LABEL, SCREENS, SECTION_INDEX, type Screen, type ScreenGroup } from "@/lib/screens";
@@ -35,7 +40,7 @@ export function menuFor(group: ScreenGroup): DockMenu {
 interface MenuLink {
   href: string;
   label: string;
-  icon: PhosphorIcon;
+  icon: Icon;
 }
 
 interface MenuGroup {
@@ -43,10 +48,10 @@ interface MenuGroup {
   links: MenuLink[];
 }
 
-const INDEX_ICON: Record<"audit" | "workspace", PhosphorIcon> = { audit: Scroll, workspace: GearSix };
+const INDEX_ICON: Record<"audit" | "workspace", Icon> = { audit: Script, workspace: Gear };
 
 function linkOf(s: Screen): MenuLink {
-  return { href: s.href, label: s.label, icon: SCREEN_ICON[s.key] ?? House };
+  return { href: s.href, label: s.label, icon: SCREEN_ICON[s.key] ?? Home };
 }
 
 /** A menu's groups for a role: its section index first, then each screen group in the order of `SCREENS`. */
@@ -113,18 +118,18 @@ function Count({ n }: { n: number }) {
 }
 
 function DockLink({ screen, current, count }: { screen: Screen; current: boolean; count: number }) {
-  const Icon = SCREEN_ICON[screen.key] ?? House;
+  const Glyph = SCREEN_ICON[screen.key] ?? Home;
   const label = DOCK_LABEL[screen.key] ?? screen.label;
   return (
     <Link href={screen.href} aria-current={current ? "page" : undefined} data-current={current ? "" : undefined} className={ITEM}>
-      <Icon className="size-5" weight={current ? "fill" : "regular"} aria-hidden />
+      <Glyph className="size-6" aria-hidden />
       <Label>{label}</Label>
       {screen.key === "approvals" ? <Count n={count} /> : null}
     </Link>
   );
 }
 
-function DockMenuButton({ label, icon: Icon, current, children }: { label: string; icon: PhosphorIcon; current: boolean; children: ReactNode }) {
+function DockMenuButton({ label, icon: Glyph, current, children }: { label: string; icon: Icon; current: boolean; children: ReactNode }) {
   return (
     <DropdownMenu>
       <DropdownMenu.Trigger
@@ -133,7 +138,7 @@ function DockMenuButton({ label, icon: Icon, current, children }: { label: strin
         data-current={current ? "" : undefined}
         className={ITEM}
       >
-        <Icon className="size-5" weight={current ? "fill" : "regular"} aria-hidden />
+        <Glyph className="size-6" aria-hidden />
         <Label>{label}</Label>
       </DropdownMenu.Trigger>
       <DropdownMenu.Content side="top" align="center" sideOffset={12} className="min-w-56">
@@ -151,7 +156,7 @@ function MenuLinks({ groups, pathname }: { groups: MenuGroup[]; pathname: string
       {g.links.map((l) => {
         const current = isCurrent(pathname, l.href);
         return (
-          <DropdownMenu.LinkItem key={l.href} render={<Link href={l.href} />} icon={l.icon} aria-current={current ? "page" : undefined}>
+          <DropdownMenu.LinkItem key={l.href} render={<Link href={l.href} />} icon={menuIcon(l.icon)} aria-current={current ? "page" : undefined}>
             {l.label}
           </DropdownMenu.LinkItem>
         );
@@ -189,14 +194,14 @@ export function Dock({ approvals }: { approvals: number }) {
       ))}
       {links.length > 0 ? <span aria-hidden data-slot="dock-divider" className="mx-1 h-8 w-px bg-(--dock-edge)" /> : null}
       {audit.length > 0 ? (
-        <DockMenuButton label="Audit" icon={Scroll} current={pathname === "/audit" || pathname.startsWith("/audit/")}>
+        <DockMenuButton label="Audit" icon={Script} current={pathname === "/audit" || pathname.startsWith("/audit/")}>
           <MenuLinks groups={audit} pathname={pathname} />
         </DockMenuButton>
       ) : null}
-      <DockMenuButton label="More" icon={DotsThree} current={within(more)}>
+      <DockMenuButton label="More" icon={MoreHorizontal} current={within(more)}>
         <DropdownMenu.Group>
           <DropdownMenu.Label>Account</DropdownMenu.Label>
-          <DropdownMenu.Item icon={Buildings} selected>
+          <DropdownMenu.Item icon={menuIcon(BuildingCommunity)} selected>
             {ws.connection.broker}
           </DropdownMenu.Item>
         </DropdownMenu.Group>

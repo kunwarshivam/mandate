@@ -1,7 +1,7 @@
 "use client";
 
 import { Banner } from "@cloudflare/kumo/components/banner";
-import { Question } from "@phosphor-icons/react";
+import { CircleQuestion } from "pixelarticons/react/CircleQuestion.js";
 import { useRuntime } from "@/lib/mock-runtime";
 
 /**
@@ -17,7 +17,7 @@ export function AccountBanners() {
     <div role="alert" data-slot="result-unknown" className="border-b px-(--page-x) py-2">
       <Banner
         variant="default"
-        icon={<Question className="size-5" aria-hidden />}
+        icon={<CircleQuestion className="size-6" aria-hidden />}
         title="The result is unknown; we are checking."
         description="Your deployment took the request but has not journaled it. Nothing on screen changes until it does; if it matters now, act at the broker directly."
       />

@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { type FormEvent, useState } from "react";
-import { CircleNotch, EnvelopeSimple, Fingerprint, GoogleLogo } from "@phosphor-icons/react";
+import { Google } from "pixelarticons/react/Google.js";
+import { Key } from "pixelarticons/react/Key.js";
+import { Loader } from "pixelarticons/react/Loader.js";
+import { Mail } from "pixelarticons/react/Mail.js";
 import { CALLBACK_PATH } from "@/lib/auth-routes";
 import { EMAIL_SENT, SIGN_IN_FAILED, SIGN_IN_PASSKEY_COPY, UNREACHABLE, isNetworkFailure, passkeyProblem, webAuthnSupported } from "@/lib/auth-errors";
 import { type BrowserClient, createClient } from "@/lib/supabase/client";
@@ -30,7 +33,7 @@ export function callbackUrl(origin: string, next: string): string {
 }
 
 function Busy() {
-  return <CircleNotch className="size-5 shrink-0 motion-safe:animate-spin" aria-hidden />;
+  return <Loader className="size-6 shrink-0 motion-safe:animate-spin" aria-hidden />;
 }
 
 /**
@@ -123,11 +126,11 @@ export function LoginPanel({ next, failed, enabled, emailEnabled, auth, navigate
 
       <div className="grid gap-2">
         <button type="button" onClick={google} disabled={busy} className={LOGON_PRIMARY}>
-          {pending === "google" ? <Busy /> : <GoogleLogo className="size-5 shrink-0" weight="bold" aria-hidden />}
+          {pending === "google" ? <Busy /> : <Google className="size-6 shrink-0" aria-hidden />}
           Continue with Google
         </button>
         <button type="button" onClick={passkey} disabled={busy} className={LOGON_SECONDARY}>
-          {pending === "passkey" ? <Busy /> : <Fingerprint className="size-5 shrink-0" aria-hidden />}
+          {pending === "passkey" ? <Busy /> : <Key className="size-6 shrink-0" aria-hidden />}
           Sign in with a passkey
         </button>
       </div>
@@ -167,7 +170,7 @@ export function LoginPanel({ next, failed, enabled, emailEnabled, auth, navigate
                 className={LOGON_FIELD}
               />
               <button type="submit" disabled={busy || email.trim() === ""} className={LOGON_SECONDARY}>
-                {pending === "email" ? <Busy /> : <EnvelopeSimple className="size-5 shrink-0" aria-hidden />}
+                {pending === "email" ? <Busy /> : <Mail className="size-6 shrink-0" aria-hidden />}
                 Email me a link
               </button>
             </form>

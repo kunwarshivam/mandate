@@ -4,7 +4,16 @@ import type { RefObject } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Dialog } from "@cloudflare/kumo/primitives/dialog";
-import { Buildings, CaretRight, GearSix, House, MagnifyingGlass, type Icon as PhosphorIcon, Scroll, SignOut, UserCircle, X } from "@phosphor-icons/react";
+import { AvatarCircle } from "pixelarticons/react/AvatarCircle.js";
+import { BuildingCommunity } from "pixelarticons/react/BuildingCommunity.js";
+import { ChevronRight } from "pixelarticons/react/ChevronRight.js";
+import { Close } from "pixelarticons/react/Close.js";
+import { Gear } from "pixelarticons/react/Gear.js";
+import { Home } from "pixelarticons/react/Home.js";
+import { Logout } from "pixelarticons/react/Logout.js";
+import { Script } from "pixelarticons/react/Script.js";
+import { Search } from "pixelarticons/react/Search.js";
+import type { Icon } from "@/components/icon";
 import { cn } from "@/lib/utils";
 import { homeFor } from "@/lib/access";
 import { useRuntime } from "@/lib/mock-runtime";
@@ -26,7 +35,7 @@ export interface PhoneTab {
   key: string;
   href: string;
   label: string;
-  icon: PhosphorIcon;
+  icon: Icon;
 }
 
 const TAB_LABEL: Record<(typeof PHONE_TAB_LINKS)[number], string> = { home: "Home", approvals: "Approvals", agents: "Agents" };
@@ -36,18 +45,18 @@ export function phoneTabs(role: Role): PhoneTab[] {
   if (can(role, "agents.view")) {
     return PHONE_TAB_LINKS.map((key) => {
       const screen = SCREENS.find((s) => s.key === key)!;
-      return { key, href: screen.href, label: TAB_LABEL[key], icon: SCREEN_ICON[key] ?? House };
+      return { key, href: screen.href, label: TAB_LABEL[key], icon: SCREEN_ICON[key] ?? Home };
     });
   }
   const home = homeFor(role);
   const index = home.href === SECTION_INDEX.audit.href ? SECTION_INDEX.audit : SECTION_INDEX.workspace;
-  return [{ key: "home", href: index.href, label: index.label, icon: index === SECTION_INDEX.audit ? Scroll : GearSix }];
+  return [{ key: "home", href: index.href, label: index.label, icon: index === SECTION_INDEX.audit ? Script : Gear }];
 }
 
 interface MoreLink {
   href: string;
   label: string;
-  icon: PhosphorIcon;
+  icon: Icon;
 }
 
 export interface MoreGroup {
@@ -59,12 +68,12 @@ export interface MoreGroup {
 const MORE_LABEL: Record<ScreenGroup, string | null> = { ...GROUP_LABEL, workspace: "Settings" };
 
 const INDEX_LINK: Partial<Record<ScreenGroup, MoreLink>> = {
-  audit: { href: SECTION_INDEX.audit.href, label: "Audit overview", icon: Scroll },
-  workspace: { href: SECTION_INDEX.workspace.href, label: "All settings", icon: GearSix },
+  audit: { href: SECTION_INDEX.audit.href, label: "Audit overview", icon: Script },
+  workspace: { href: SECTION_INDEX.workspace.href, label: "All settings", icon: Gear },
 };
 
 function linkOf(s: Screen): MoreLink {
-  return { href: s.href, label: s.label, icon: SCREEN_ICON[s.key] ?? House };
+  return { href: s.href, label: s.label, icon: SCREEN_ICON[s.key] ?? Home };
 }
 
 /**
@@ -94,13 +103,13 @@ const ROW =
 
 function Row({ link, pathname, onGo }: { link: MoreLink; pathname: string; onGo: () => void }) {
   const current = isCurrent(pathname, link.href);
-  const Icon = link.icon;
+  const Glyph = link.icon;
   return (
     <li className="border-b border-border/70 last:border-b-0">
       <Link href={link.href} onClick={onGo} aria-current={current ? "page" : undefined} className={ROW}>
-        <Icon className="size-5 shrink-0 text-muted-foreground" weight={current ? "fill" : "regular"} aria-hidden />
+        <Glyph className="size-6 shrink-0 text-muted-foreground" aria-hidden />
         <span className="min-w-0 flex-1">{link.label}</span>
-        <CaretRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <ChevronRight className="size-6 shrink-0 text-muted-foreground" aria-hidden />
       </Link>
     </li>
   );
@@ -150,7 +159,7 @@ export function MoreSheet({
               aria-label="Close"
               className="-mr-2 grid size-11 place-items-center rounded-lg text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
             >
-              <X className="size-5" aria-hidden />
+              <Close className="size-6" aria-hidden />
             </Dialog.Close>
           </div>
           <Dialog.Description className="sr-only">Your account and workspace, search, and every other screen.</Dialog.Description>
@@ -158,7 +167,7 @@ export function MoreSheet({
           <div className="grid gap-6 px-5 pt-2">
             <section aria-label="Account and workspace" data-slot="more-account" className="grid gap-1 border-b border-border/70 pb-3">
               <div className="flex min-h-11 min-w-0 items-center gap-3">
-                <Buildings className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                <BuildingCommunity className="size-6 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="grid min-w-0">
                   <span className="field-label text-muted-foreground">Account</span>
                   <span className="truncate text-sm font-medium">{ws.connection.broker}</span>
@@ -166,7 +175,7 @@ export function MoreSheet({
               </div>
               {session ? (
                 <div data-slot="more-identity" className="flex min-h-11 min-w-0 items-center gap-3">
-                  <UserCircle className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                  <AvatarCircle className="size-6 shrink-0 text-muted-foreground" aria-hidden />
                   <span className="grid min-w-0">
                     <span className="field-label text-muted-foreground">You, {role}</span>
                     <span className="truncate text-sm font-medium">{session.email ?? "Signed in"}</span>
@@ -177,7 +186,7 @@ export function MoreSheet({
             </section>
 
             <button type="button" onClick={search} data-slot="more-search" className={cn(ROW, "mx-0 -mt-3 w-full")}>
-              <MagnifyingGlass className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+              <Search className="size-6 shrink-0 text-muted-foreground" aria-hidden />
               <span className="min-w-0 flex-1">Search</span>
               <span className="text-caption text-muted-foreground">Agents and screens</span>
             </button>
@@ -200,7 +209,7 @@ export function MoreSheet({
 
             {session ? (
               <button type="button" onClick={() => void signOut()} data-slot="more-sign-out" className={cn(ROW, "mx-0 -mt-3 w-full")}>
-                <SignOut className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                <Logout className="size-6 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="min-w-0 flex-1">Sign out</span>
               </button>
             ) : null}

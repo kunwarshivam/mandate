@@ -2,7 +2,7 @@
 
 import { type ReactNode, createContext, useContext, useId } from "react";
 import { Popover } from "@cloudflare/kumo/components/popover";
-import { Info } from "@phosphor-icons/react";
+import { CircleInfo } from "pixelarticons/react/CircleInfo.js";
 import { cn } from "@/lib/utils";
 
 /**
@@ -38,9 +38,9 @@ export function InlineDisclosures({ inline = true, children }: { inline?: boolea
 
 /**
  * The symbol takes one line of the text beside it and no more, so it moves nothing: a zero-width
- * space gives it the text's line height and baseline, and the 24px target (44px on touch) is a
- * pseudo-element around the 16px glyph. The text it opens is also its description, kept in the
- * same row so a screen reader hears it without opening, and printed in full where nothing opens.
+ * space gives it the text's line height and baseline, and the target is a pseudo-element over the
+ * 24px glyph (44px on touch). The text it opens is also its description, kept in the same row so a
+ * screen reader hears it without opening, and printed in full where nothing opens.
  */
 function PerformanceDisclosure({ className }: { className?: string }) {
   const id = useId();
@@ -53,10 +53,10 @@ function PerformanceDisclosure({ className }: { className?: string }) {
           aria-label="Performance disclosure"
           aria-describedby={id}
           data-slot="disclosure-trigger"
-          className="relative inline-block w-4 shrink-0 cursor-pointer text-muted-foreground outline-none transition-colors duration-(--duration-hover) ease-(--ease-out) before:absolute before:top-1/2 before:left-1/2 before:size-6 before:-translate-1/2 before:rounded-lg before:content-[''] hover:text-foreground focus-visible:before:ring-2 focus-visible:before:ring-ring data-popup-open:text-foreground pointer-coarse:before:size-11 print:hidden"
+          className="relative inline-block w-6 shrink-0 cursor-pointer text-muted-foreground outline-none transition-colors duration-(--duration-hover) ease-(--ease-out) before:absolute before:top-1/2 before:left-1/2 before:size-6 before:-translate-1/2 before:rounded-lg before:content-[''] hover:text-foreground focus-visible:before:ring-2 focus-visible:before:ring-ring data-popup-open:text-foreground pointer-coarse:before:size-11 print:hidden"
         >
           <span aria-hidden>{"\u200b"}</span>
-          <Info aria-hidden weight="regular" className="pointer-events-none absolute top-1/2 left-0 size-4 -translate-y-1/2" />
+          <CircleInfo aria-hidden className="pointer-events-none absolute top-1/2 left-0 size-6 -translate-y-1/2" />
         </Popover.Trigger>
         <Popover.Content sideOffset={10} className="max-w-[min(20rem,calc(100vw-2rem))]">
           <Popover.Title className="sr-only">Performance disclosure</Popover.Title>

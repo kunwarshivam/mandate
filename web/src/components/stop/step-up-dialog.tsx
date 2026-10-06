@@ -2,7 +2,8 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Dialog } from "@cloudflare/kumo/primitives/dialog";
-import { Fingerprint, X } from "@phosphor-icons/react";
+import { Close } from "pixelarticons/react/Close.js";
+import { Key } from "pixelarticons/react/Key.js";
 import { KEY } from "@/components/kumo/key";
 import { cn } from "@/lib/utils";
 
@@ -108,7 +109,7 @@ export function StepUpDialog({
         >
           <div className="grid gap-1.5">
             <Dialog.Title className="flex items-center gap-2 pr-10 text-h1">
-              <Fingerprint className="size-6 shrink-0 text-lapis" aria-hidden />
+              <Key className="size-6 shrink-0 text-lapis" aria-hidden />
               Confirm it is you
             </Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground">
@@ -118,7 +119,7 @@ export function StepUpDialog({
               aria-label="Close"
               className="absolute top-3 right-3 grid size-11 place-items-center rounded-lg text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
             >
-              <X className="size-5" aria-hidden />
+              <Close className="size-6" aria-hidden />
             </Dialog.Close>
           </div>
           <p className="rounded-xl bg-background px-4 py-3 font-medium text-foreground" data-slot="step-up-action">

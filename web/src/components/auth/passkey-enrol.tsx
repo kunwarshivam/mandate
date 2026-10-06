@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { CircleNotch, Fingerprint } from "@phosphor-icons/react";
+import { Key } from "pixelarticons/react/Key.js";
+import { Loader } from "pixelarticons/react/Loader.js";
 import { ADD_PASSKEY_COPY, passkeyProblem, webAuthnSupported } from "@/lib/auth-errors";
 import { LOGIN_PATH } from "@/lib/auth-routes";
 import { type BrowserClient, createClient } from "@/lib/supabase/client";
@@ -71,7 +72,7 @@ export function PasskeyEnrol({
 
       <div className="grid gap-2">
         <button type="button" onClick={add} disabled={pending || !enabled} className={LOGON_PRIMARY}>
-          {pending ? <CircleNotch className="size-5 shrink-0 motion-safe:animate-spin" aria-hidden /> : <Fingerprint className="size-5 shrink-0" aria-hidden />}
+          {pending ? <Loader className="size-6 shrink-0 motion-safe:animate-spin" aria-hidden /> : <Key className="size-6 shrink-0" aria-hidden />}
           Add a passkey
         </button>
         <Link href={next} className={LOGON_SECONDARY}>

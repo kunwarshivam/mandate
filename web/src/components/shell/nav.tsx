@@ -4,7 +4,7 @@ import { type ReactNode, type RefObject, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
-import { DotsThreeOutline } from "@phosphor-icons/react";
+import { MoreHorizontal } from "pixelarticons/react/MoreHorizontal.js";
 import { cn } from "@/lib/utils";
 import { can, useRole } from "@/lib/roles";
 import { isCurrent } from "./dock";
@@ -38,7 +38,7 @@ function TabFace({ active, icon, label, badge }: { active: boolean; icon: ReactN
  * The phone's one navigation (DEC-207): Home, Approvals with its count, Agents, and More, a sheet
  * with every other screen, then Stop at the bar's end for a role that may stop (DEC-452). A role
  * that sees no agents gets its home and More. The current tab's
- * icon fills and sits on a pale pill that glides between tabs; with reduced motion it jumps.
+ * icon sits on a pale pill that glides between tabs; with reduced motion it jumps.
  */
 export function TabNav({ approvals, sheetLayer }: { approvals: number; sheetLayer?: RefObject<HTMLElement | null> }) {
   const pathname = usePathname();
@@ -55,14 +55,14 @@ export function TabNav({ approvals, sheetLayer }: { approvals: number; sheetLaye
       className="glass grid border-t pb-[env(safe-area-inset-bottom)]"
       style={{ gridTemplateColumns: `repeat(${tabs.length + 1}, minmax(0, 1fr))${stops ? " auto" : ""}` }}
     >
-      {tabs.map(({ href, label, icon: Icon }) => {
+      {tabs.map(({ href, label, icon: Glyph }) => {
         const active = !more && isCurrent(pathname, href);
         return (
           <Link key={href} href={href} aria-current={isCurrent(pathname, href) ? "page" : undefined} className={cn(TAB, active && "text-lapis")}>
             <TabFace
               active={active}
               label={label}
-              icon={<Icon className="relative size-5.5" weight={active ? "fill" : "regular"} aria-hidden />}
+              icon={<Glyph className="relative size-6" aria-hidden />}
               badge={
                 href === "/approvals" && approvals > 0 ? (
                   <span
@@ -90,7 +90,7 @@ export function TabNav({ approvals, sheetLayer }: { approvals: number; sheetLaye
         <TabFace
           active={moreActive}
           label="More"
-          icon={<DotsThreeOutline className="relative size-5.5" weight={moreActive ? "fill" : "regular"} aria-hidden />}
+          icon={<MoreHorizontal className="relative size-6" aria-hidden />}
         />
       </button>
       {stops ? <StopButton place="tab" className="pr-3 pl-1" /> : null}

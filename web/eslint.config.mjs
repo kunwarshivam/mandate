@@ -7,6 +7,19 @@ import nextTs from "eslint-config-next/typescript";
  * variants are banned and `KillSwitchButton` is the only way to draw one. The root barrel pulls in
  * every Kumo component (and a syntax highlighter), so imports go per component.
  */
+/**
+ * Icons are Pixelarticons (DEC-475), imported one file per icon. Phosphor stays installed only
+ * because Kumo needs it inside its own components, and the Pixelarticons barrel loads every icon.
+ */
+const ICON_MESSAGE = "Icons are Pixelarticons, one file each: import { Home } from \"pixelarticons/react/Home.js\" (DEC-475).";
+const ICON_IMPORTS = {
+  paths: [
+    { name: "pixelarticons", message: ICON_MESSAGE },
+    { name: "pixelarticons/react", message: ICON_MESSAGE },
+  ],
+  patterns: [{ group: ["@phosphor-icons/*", "lucide-react", "lucide-react/*"], message: ICON_MESSAGE }],
+};
+
 export const SAFETY_RULES = {
   "no-restricted-syntax": [
     "error",
@@ -30,7 +43,8 @@ export const SAFETY_RULES = {
   "no-restricted-imports": [
     "error",
     {
-      paths: [{ name: "@cloudflare/kumo", message: "Import Kumo per component, e.g. @cloudflare/kumo/components/button." }],
+      paths: [{ name: "@cloudflare/kumo", message: "Import Kumo per component, e.g. @cloudflare/kumo/components/button." }, ...ICON_IMPORTS.paths],
+      patterns: ICON_IMPORTS.patterns,
     },
   ],
 };
@@ -43,7 +57,7 @@ const APP_RULES = {
     "error",
     {
       paths: [...SAFETY_RULES["no-restricted-imports"][1].paths, { name: "apca-w3", message: APCA_MESSAGE }, { name: "colorparsley", message: APCA_MESSAGE }],
-      patterns: [{ group: ["**/test/apca", "@/test/apca"], message: APCA_MESSAGE }],
+      patterns: [...ICON_IMPORTS.patterns, { group: ["**/test/apca", "@/test/apca"], message: APCA_MESSAGE }],
     },
   ],
 };
