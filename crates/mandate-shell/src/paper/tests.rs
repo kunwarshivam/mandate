@@ -356,13 +356,13 @@ fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -
             "account-ref-7".to_owned(),
         )
         .map_err(text)?;
-    assert_eq!(input.deployment.workspace.0, "workspace-owner-42");
-    assert_eq!(input.deployment.agent.0, "agent-deployment-9");
+    assert_eq!(input.deployment().workspace.0, "workspace-owner-42");
+    assert_eq!(input.deployment().agent.0, "agent-deployment-9");
     assert_eq!(
-        input.deployment.connection.0,
+        input.deployment().connection.0,
         loaded.mandate.connection_id.as_str()
     );
-    assert_eq!(input.account_ref, "account-ref-7");
+    assert_eq!(input.account_ref(), "account-ref-7");
     for (name, workspace, agent, account_ref) in [
         ("workspace", "", "agent-deployment-9", "account-ref-7"),
         ("agent", "workspace-owner-42", "", "account-ref-7"),

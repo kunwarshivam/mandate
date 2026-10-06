@@ -52,8 +52,20 @@ pub struct ProductionIdentity<'a> {
 /// Validated opaque deployment identity for one production cycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeploymentInput {
-    pub deployment: Deployment,
-    pub account_ref: String,
+    deployment: Deployment,
+    account_ref: String,
+}
+
+impl DeploymentInput {
+    /// The mandate-bound runtime deployment identity.
+    pub fn deployment(&self) -> &Deployment {
+        &self.deployment
+    }
+
+    /// The opaque account-stream subject.
+    pub fn account_ref(&self) -> &str {
+        &self.account_ref
+    }
 }
 
 /// What the instrument artifact states, each field read by the run: the symbol the broker is read
