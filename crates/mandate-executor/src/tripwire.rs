@@ -434,12 +434,13 @@ fn snapshot(state: &TripwireState) -> TripwireSnapshot {
 
 #[cfg(test)]
 mod tests {
+    use mandate_approval::StepUpMethod;
     use mandate_spec::DecGrammar;
 
     use super::{
-        AssertionId, Environment, InstrumentId, RiskClock, SchemaDec, Side, StepUp, StepUpMethod,
-        Tripwire, TripwireAcknowledgment, TripwireAction, TripwireAlert, TripwireEvent,
-        TripwireFill, TripwireId, TripwireInput, TripwireMetric, TripwireState, Usd, fold,
+        AssertionId, Environment, InstrumentId, RiskClock, SchemaDec, Side, StepUp, Tripwire,
+        TripwireAcknowledgment, TripwireAction, TripwireAlert, TripwireEvent, TripwireFill,
+        TripwireId, TripwireInput, TripwireMetric, TripwireState, Usd, fold,
     };
 
     /// The notification boundary exposes only the trigger link and fixed generic text.
