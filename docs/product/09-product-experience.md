@@ -91,9 +91,10 @@ Each journey lists its steps with the screens of §3 in brackets, and the moment
 
 **J-B. Authoring a mandate** (Alex, Jordan)
 
-1. **Goal first** [A0] (DEC-182): three questions, how much money, what the goal is, and how much the
-   owner can stand to lose, each answered in the owner's own words or numbers. "Describe it yourself"
-   [A1] and templates stay available for owners who want to write it.
+1. **Goal first** [A0] (DEC-182), as one conversation (DEC-473): three questions, how much money,
+   what the goal is, and how much the owner can stand to lose, each answered in the owner's own
+   words or numbers, one at a time or all at once [A1]. Templates stay available for owners who
+   want to write it.
 2. The compiler returns the mandate [A2], led by the **contract card**: the whole envelope in plain
    language on one card, with the three answers quoted, every value the compiler drafted marked
    *proposed*, and the dollar figures of step 5. Nothing proposed is active until confirmed. Below
@@ -329,20 +330,28 @@ exists.
 
 #### Authoring
 
-**A0 Goal questions** ⚠ (DEC-182)
-- *Shows:* three questions, one per step: how much money, what the goal is, and how much the owner
-  can stand to lose, each in the owner's words or numbers, and "Describe it yourself" (A1) as an
-  equal choice. No example returns, no suggested amounts.
+**A0 Goal questions** ⚠ (DEC-182, DEC-473)
+- *Shows:* one conversation with one composer. The platform asks one question at a time: how much
+  money, what the goal is, and how much the owner can stand to lose, then the symbols, the model,
+  and each of its settings. The owner answers in their own words or numbers, one question at a
+  time or all at once (A1), and is asked only what is still missing. Each answer is quoted back
+  under "Noted from your words". No example returns, no suggested amounts.
+- *The model only points* (DEC-473): a model reads each message and returns readings that quote
+  the owner's words; a reading is kept only when deterministic code reads the same value back from
+  the quote. A value written in words, not figures, is asked back as a Yes or No. The model's own
+  replies are quotations with no buttons (PX-18), and one that reads as advice is withheld.
 - *Writes:* `capital.allocation_usd`, `goal` (one of the goal types, with `on_complete`), and
   `capital.max_loss_from_allocation`, each `user_stated` with its quoted span; the compiler drafts
   the rest as `platform_proposed` (never `auto` or a delegation, V-022).
-- *Primary action:* Continue, to A2 with the contract card on top.
+- *Primary action:* Send. Once money, goal and loss are known, the conversation shows A2.
 - *States:* A goal the types cannot express: kept as description text and flagged **not enforced**
-  on A2. A loss answer above the policy ceiling: the ceiling shown as a limit, never substituted.
-- *Governs:* mandate §2.1, §7; V-020, V-022, V-038; compliance question 36.
+  on A2. A loss answer above the policy ceiling: the ceiling shown as a limit, never substituted;
+  the answer is refused with the reason. More money than the account has free (V-002), or a symbol
+  another agent trades (V-006): refused when said, with the reason.
+- *Governs:* mandate §2.1, §7; V-002, V-006, V-020, V-022, V-038; compliance question 36.
 
-**A1 Describe**: a text box for the description and an optional template (FR-3.8). Empty state
-explains what a mandate is, without example returns.
+**A1 Describe**: the same conversation, answered all at once (DEC-473), plus an optional template
+(FR-3.8). The opening message explains what a mandate is, without example returns.
 
 **A2 Compiled review** ⚠
 - *Shows:* every envelope field grouped by section (goal, capital, universe, behavior, sizing,
@@ -350,10 +359,13 @@ explains what a mandate is, without example returns.
   *from template* included) and, for a stated value, the quoted span. Proposed values look inactive
   until confirmed. **Not enforced** constraints listed apart, with the note that they reach models
   only as description text.
-- *Primary action:* Review and confirm, per section.
-- *States:* Loading (the compiler is a model call): progress, never partial fields shown as final.
-  Error (compiler output fails the schema): "we could not compile this", and the form stays
-  available. Degraded (model gateway down): the form is available; the description is kept.
+- *Primary action:* Confirm section, one section at a time in the conversation (DEC-473), then
+  Review and confirm, to A5. Saying a change unconfirms the sections it touches and drafts again.
+- *States:* Loading (the compiler is a model call): "Reading your words…", and no second message
+  until it answers; never partial fields shown as final. Error (compiler output fails the schema):
+  "We could not compile this.", and none of it is used. Degraded (the model does not answer): the
+  owner's words are kept, with Try again and "Read it without the model", which reads figures
+  only.
 - *Governs:* mandate §2.1, §7; V-020, V-022, V-038; FR-3.1, FR-3.4; PX-1, PX-2.
 - *Contract card* (DEC-182): the whole envelope in plain language on one card above the fields: the
   three answers quoted, every drafted value marked *proposed*, the dollar figures of A5, and the
