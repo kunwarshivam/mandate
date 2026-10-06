@@ -73,36 +73,65 @@ function FigureRow({ label, value, provenance }: { label: string; value: Dec; pr
   );
 }
 
+/** The contract card's sentences, one per line, as the card shows them and the A5 record keeps them. */
+export function contractTerms(draft: Draft): string[] {
+  const t = draft.terms;
+  const model = draft.strategy ? `It decides with ${draft.strategy.model.name.toLowerCase()} (${draft.strategy.model.id}), with the settings you chose.` : "It decides with the model you choose, and you have not chosen one yet.";
+  return [
+    `This agent may use ${usd(t.allocationUsd)} of simulated money, on paper.`,
+    goalWords(t),
+    `If it loses ${usd(t.maxLossUsd)} in total, at ${usd(sub(t.allocationUsd, t.maxLossUsd))}, it closes everything and pauses until you change the mandate.`,
+    model,
+    "It asks you before every buy. A buy you do not answer is skipped.",
+    draft.symbols.length > 0 ? `It trades only ${draft.symbols.join(", ")}.` : "It trades only the instruments you list, and you have not listed any yet.",
+  ];
+}
+
+/** The unasked-dollars note under the figure, as shown. */
+export function unaskedNote(draft: Draft): string {
+  const lead =
+    draft.figures.unasked === ZERO
+      ? "No buy runs without your answer: nothing in this mandate is set to go ahead without asking, and the platform never proposes that. Only you can set it, later, and this figure would show how much it lets through."
+      : "The most the agent could buy today without asking you, under the rules set to go ahead without an answer.";
+  return `${lead} Selling to cut risk never waits for you.`;
+}
+
+/** The loss figures in dollars, with who drafted each: the owner stated only the last. */
+export function lossFigures(draft: Draft): Array<{ label: string; value: Dec; provenance: Provenance }> {
+  const f = draft.figures;
+  return [
+    { label: "One full position stopped out", value: f.positionLossAtStop, provenance: "platform_proposed" },
+    { label: "Most it may lose in one day", value: f.dailyLossBudget, provenance: "platform_proposed" },
+    { label: "Fall at which it closes everything", value: f.flattenLoss, provenance: "platform_proposed" },
+    { label: "Most it may lose, in total", value: f.floorLoss, provenance: "user_stated" },
+  ];
+}
+
+export const CONTRACT_TITLE = "Your mandate in plain words";
+export const CONTRACT_LEAD = "The fields below, read as sentences. Anything marked as proposed is not active until you confirm its section.";
+export const CONTRACT_LEAD_CONFIRMED = "The fields below, read as sentences. You confirmed every section.";
+export const UNASKED_LABEL = "Unasked dollars: what could trade without asking you once you confirm";
+export const GAP_NOTE = "Price gaps and exit prices can make any of these losses larger. You stated only the last one; the platform worked out the others from it.";
+
 /**
  * The contract card (brief A2, DEC-182): the whole envelope in plain words on the mandate field,
  * the owner's answers quoted, the loss figures in dollars with who drafted each, and the unasked
  * dollars (DEC-189). A rendering of the fields, not a separate object.
  */
-export function ContractCard({ draft, headingLevel = 2 }: { draft: Draft; headingLevel?: 2 | 3 }) {
-  const t = draft.terms;
-  const f = draft.figures;
-  const Heading = headingLevel === 2 ? "h2" : "h3";
-  const nothingUnasked = f.unasked === ZERO;
+export function ContractCard({ draft, confirmed = false }: { draft: Draft; confirmed?: boolean }) {
   return (
     <section aria-labelledby="contract-title" data-slot="contract-card" className="grid gap-6 rounded-2xl bg-mandate px-5 py-6 text-mandate-foreground sm:px-7">
       <div className="grid gap-1.5">
-        <Heading id="contract-title" className="text-h2 text-mandate-strong">
-          Your mandate in plain words
-        </Heading>
-        <p className="max-w-measure text-sm text-mandate-muted">The fields below, read as sentences. Anything marked as proposed is not active until you confirm its section.</p>
+        <h2 id="contract-title" className="text-h2 text-mandate-strong">
+          {CONTRACT_TITLE}
+        </h2>
+        <p className="max-w-measure text-sm text-mandate-muted">{confirmed ? CONTRACT_LEAD_CONFIRMED : CONTRACT_LEAD}</p>
       </div>
 
-      <ul className="grid max-w-measure gap-2.5 text-base text-pretty" data-slot="contract-terms">
-        <li>
-          This agent may use <span className="font-mono font-medium tabular">{usd(t.allocationUsd)}</span> of simulated money, on paper.
-        </li>
-        <li>{goalWords(t)}</li>
-        <li>
-          If it loses <span className="font-mono font-medium tabular">{usd(t.maxLossUsd)}</span> in total, at{" "}
-          <span className="font-mono tabular">{usd(sub(t.allocationUsd, t.maxLossUsd))}</span>, it closes everything and pauses until you change the mandate.
-        </li>
-        <li>It asks you before every buy. A buy you do not answer is skipped.</li>
-        <li>{draft.symbols.length > 0 ? `It trades only ${draft.symbols.join(", ")}.` : "It trades only the instruments you list, and you have not listed any yet."}</li>
+      <ul className="grid max-w-measure gap-2.5 text-base text-pretty tabular" data-slot="contract-terms">
+        {contractTerms(draft).map((term) => (
+          <li key={term}>{term}</li>
+        ))}
       </ul>
 
       <div className="grid gap-2">
@@ -118,43 +147,39 @@ export function ContractCard({ draft, headingLevel = 2 }: { draft: Draft; headin
       </div>
 
       <div data-slot="unasked" className="grid gap-1.5 border-y border-mandate-strong/15 py-4">
-        <p className="text-label text-mandate-muted">Unasked dollars: what could trade without asking you once you confirm</p>
-        <Money value={f.unasked} className="w-fit text-figure" />
-        <p className="max-w-measure text-sm text-pretty">
-          {nothingUnasked
-            ? "No buy runs without your answer: nothing in this mandate is set to go ahead without asking, and the platform never proposes that. Only you can set it, later, and this figure would show how much it lets through."
-            : "The most the agent could buy today without asking you, under the rules set to go ahead without an answer."}{" "}
-          Selling to cut risk never waits for you.
-        </p>
+        <p className="text-label text-mandate-muted">{UNASKED_LABEL}</p>
+        <Money value={draft.figures.unasked} className="w-fit text-figure" />
+        <p className="max-w-measure text-sm text-pretty">{unaskedNote(draft)}</p>
       </div>
 
       <div className="grid gap-1">
         <p className="text-label text-mandate-muted">Losses in dollars</p>
         <dl data-slot="loss-figures" className="grid">
-          <FigureRow label="One full position stopped out" value={f.positionLossAtStop} provenance="platform_proposed" />
-          <FigureRow label="Most it may lose in one day" value={f.dailyLossBudget} provenance="platform_proposed" />
-          <FigureRow label="Fall at which it closes everything" value={f.flattenLoss} provenance="platform_proposed" />
-          <FigureRow label="Most it may lose, in total" value={f.floorLoss} provenance="user_stated" />
+          {lossFigures(draft).map((figure) => (
+            <FigureRow key={figure.label} {...figure} />
+          ))}
         </dl>
-        <p className="pt-1 text-caption text-pretty text-mandate-muted">Price gaps and exit prices can make any of these losses larger. You stated only the last one; the platform worked out the others from it.</p>
+        <p className="pt-1 text-caption text-pretty text-mandate-muted">{GAP_NOTE}</p>
       </div>
     </section>
   );
 }
 
+export const NOT_ENFORCED_LEAD = "Things you said that no limit can check. They reach the agent's models only as description text.";
+export const NOT_ENFORCED_EMPTY = "Nothing. Everything you said is a field above.";
+
 /** Constraints in the owner's words that no mandate field can express (spec §7), listed apart from the fields. */
-export function NotEnforcedList({ draft, headingLevel = 2 }: { draft: Draft; headingLevel?: 2 | 3 }) {
-  const Heading = headingLevel === 2 ? "h2" : "h3";
+export function NotEnforcedList({ draft }: { draft: Draft }) {
   return (
     <section aria-labelledby="not-enforced-title" data-slot="not-enforced" className="grid gap-(--block-gap)">
       <div className="grid gap-1.5">
-        <Heading id="not-enforced-title" className="text-h2">
+        <h2 id="not-enforced-title" className="text-h2">
           Not enforced
-        </Heading>
-        <p className="max-w-measure text-muted-foreground">Things you said that no limit can check. They reach the agent&apos;s models only as description text.</p>
+        </h2>
+        <p className="max-w-measure text-muted-foreground">{NOT_ENFORCED_LEAD}</p>
       </div>
       {draft.notEnforced.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nothing. Everything you said is a field above.</p>
+        <p className="text-sm text-muted-foreground">{NOT_ENFORCED_EMPTY}</p>
       ) : (
         <ul className="grid rounded-2xl bg-background px-5">
           {draft.notEnforced.map((n) => (

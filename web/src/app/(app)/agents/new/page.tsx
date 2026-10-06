@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { RegistryScreen } from "@/components/screens/account-screens";
-import { findScreen } from "@/lib/screens";
+import { NewAgentFlow } from "@/components/new-agent/new-agent-flow";
+import { WorkspaceGate } from "@/components/screens/common";
 
 export const metadata: Metadata = { title: "New agent" };
 
 export default function NewAgentPage() {
-  const screen = findScreen("/agents/new");
-  if (!screen) notFound();
-  return <RegistryScreen screen={screen} />;
+  return (
+    <WorkspaceGate>
+      <NewAgentFlow />
+    </WorkspaceGate>
+  );
 }

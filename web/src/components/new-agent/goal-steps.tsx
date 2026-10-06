@@ -7,7 +7,7 @@ import { FIELD } from "@/components/auth/buttons";
 import { cn } from "@/lib/utils";
 import { KEY } from "@/components/kumo/key";
 
-/** The id of every step's heading, so the prototype can move focus to it when the step changes. */
+/** The id of every step's heading, so the flow can move focus to it when the step changes. */
 export const STEP_HEADING = "new-agent-step";
 
 /** A step's heading, the one focus target when the step changes. */
@@ -16,16 +16,6 @@ export function StepHeading({ children, className }: { children: ReactNode; clas
     <h1 id={STEP_HEADING} tabIndex={-1} className={cn("text-h1 text-balance outline-none", className)}>
       {children}
     </h1>
-  );
-}
-
-/** Says, on every step, that this is a prototype on fixture data. */
-export function PrototypeNote() {
-  return (
-    <p data-slot="prototype-note" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
-      <span className="inline-flex h-5 items-center rounded-sm bg-muted px-1.5 text-label">Prototype</span>
-      Fixture data only. Nothing you enter is saved or sent.
-    </p>
   );
 }
 
@@ -49,7 +39,6 @@ export function StartStep({ onQuestions, onDescribe }: { onQuestions: () => void
   return (
     <div className="grid gap-8">
       <div className="grid gap-3">
-        <PrototypeNote />
         <StepHeading>Set up an agent</StepHeading>
         <p className="max-w-measure text-pretty text-muted-foreground">
           Say what this agent is for and the platform drafts its mandate: the limits it must stay inside. You then check every field, see where each came from, and confirm it
@@ -113,7 +102,6 @@ export function QuestionStep({
   return (
     <form onSubmit={submit} noValidate className="grid gap-8">
       <div className="grid gap-3">
-        <PrototypeNote />
         <p className="text-label text-muted-foreground">
           Question <span className="tabular">{index}</span> of <span className="tabular">3</span>
         </p>
@@ -169,7 +157,6 @@ export function DescribeStep({
   return (
     <form onSubmit={submit} noValidate className="grid gap-8">
       <div className="grid gap-3">
-        <PrototypeNote />
         <StepHeading>Describe it yourself</StepHeading>
         <p className="max-w-measure text-pretty text-muted-foreground">
           A mandate is the set of limits your agent must stay inside. Say how much money it may use, what it is for, and how much it may lose, in your own words. The draft quotes them

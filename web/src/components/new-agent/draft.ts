@@ -1,11 +1,15 @@
-import type { Provenance } from "@/fixtures/types";
+import type { ContentRef, FieldProvenance, InstrumentRef, Mandate, Provenance } from "@/fixtures/types";
+import { INSTRUMENTS } from "@/fixtures/mandates";
+import { fixtureAssetId } from "@/lib/fixture-ids";
+import type { NewAgent } from "@/lib/fixture-journey";
+import { sha256Hex } from "@/lib/sha256";
 import { type Dec, ONE, ZERO, add, dec, div, fromInt, min, mul, sub, toDecimalString } from "@/lib/decimal";
 import { percent, usd } from "@/lib/format";
 
 /**
- * The mandate-writing prototype's stand-in for the compiler (brief A0 to A5, mandate spec §7), on
- * fixture rules only: a fixed, deterministic reading of the owner's words, so the same answers always
- * draft the same mandate. Nothing here is a model call and nothing is stored or sent.
+ * The fixture workspace's stand-in for the compiler (brief A0 to A5, mandate spec §7): a fixed,
+ * deterministic reading of the owner's words, so the same answers always draft the same mandate.
+ * Nothing here is a model call.
  *
  * What the owner states is `user_stated` with its quoted span. Every other envelope value is drafted
  * as `platform_proposed`, or `platform_default` where spec §7 allows a default. Never proposed: any
@@ -20,9 +24,109 @@ export interface Answers {
 
 export type Source = { kind: "questions"; answers: Answers } | { kind: "description"; text: string };
 
-export type SectionKey = "money" | "limits" | "autonomy" | "universe";
+export type SectionKey = "money" | "limits" | "strategy" | "autonomy" | "universe";
 
-export const SECTION_KEYS: readonly SectionKey[] = ["money", "limits", "autonomy", "universe"];
+export const SECTION_KEYS: readonly SectionKey[] = ["money", "limits", "strategy", "autonomy", "universe"];
+
+export type ModelId = "quant.mean_reversion" | "quant.momentum";
+
+interface ModelParam {
+  key: string;
+  label: string;
+  hint: string;
+  read: (text: string) => CheckResult<string>;
+}
+
+/** A signal model the owner may choose. Methodology only: no ranking, no recommendation, no defaults (brief A3). */
+export interface ModelChoice {
+  id: ModelId;
+  name: string;
+  what: string;
+  version: string;
+  contentHash: ContentRef;
+  params: ModelParam[];
+}
+
+function wholeNumber(label: string, low: number, high: number) {
+  return (text: string): CheckResult<string> => {
+    const t = text.trim();
+    if (!/^\d+$/.test(t) || Number(t) < low || Number(t) > high) return { ok: false, error: `${label}: a whole number from ${low} to ${high}.` };
+    return { ok: true, value: String(Number(t)) };
+  };
+}
+
+function decimalBetween(label: string, low: string, high: string) {
+  return (text: string): CheckResult<string> => {
+    const t = text.trim();
+    if (!/^\d+(\.\d{1,2})?$/.test(t) || dec(t) < dec(low) || dec(t) > dec(high)) return { ok: false, error: `${label}: a number from ${low} to ${high}, with at most two decimals.` };
+    return { ok: true, value: toDecimalString(dec(t)) };
+  };
+}
+
+const LOOKBACK: ModelParam = {
+  key: "lookback_bars",
+  label: "Lookback, in bars",
+  hint: "How many bars the model reads back over. A whole number from 2 to 500.",
+  read: wholeNumber("Lookback", 2, 500),
+};
+
+/** The fixture registry's models, in alphabetical order. Hashes match the fixture agents' (`fixtures/mandates.ts`). */
+export const MODELS: readonly ModelChoice[] = [
+  {
+    id: "quant.mean_reversion",
+    name: "Mean reversion",
+    what: "Scores a buy when a price has fallen well below its recent average.",
+    version: "1.0.0",
+    contentHash: `sha256:${"1".repeat(64)}`,
+    params: [
+      LOOKBACK,
+      {
+        key: "z_entry",
+        label: "Entry z-score",
+        hint: "How far below its average a price must be, in standard deviations, before the model scores a buy. From 0.5 to 4.",
+        read: decimalBetween("Entry z-score", "0.5", "4"),
+      },
+    ],
+  },
+  {
+    id: "quant.momentum",
+    name: "Momentum",
+    what: "Scores a buy when a price has held above its recent average.",
+    version: "1.0.0",
+    contentHash: `sha256:${"2".repeat(64)}`,
+    params: [LOOKBACK],
+  },
+];
+
+/** What the owner chose in "How it decides": nothing until they choose. */
+export interface Strategy {
+  model: ModelId | null;
+  params: Record<string, string>;
+}
+
+export const NO_STRATEGY: Strategy = { model: null, params: {} };
+
+export interface ChosenModel {
+  model: ModelChoice;
+  params: Array<{ key: string; value: string }>;
+}
+
+export function readStrategy(s: Strategy): CheckResult<ChosenModel> {
+  const model = MODELS.find((m) => m.id === s.model);
+  if (!model) return { ok: false, error: "Choose the model this agent uses. The platform does not choose it for you." };
+  const params: ChosenModel["params"] = [];
+  for (const p of model.params) {
+    const read = p.read(s.params[p.key] ?? "");
+    if (!read.ok) return read;
+    params.push({ key: p.key, value: read.value });
+  }
+  return { ok: true, value: { model, params } };
+}
+
+/** The sizing thresholds and cadence the platform proposes for a new agent. */
+const ENTRY_THRESHOLD = "0.3";
+const CADENCE_S = 300;
+const MAX_OUTPUT_AGE_S = 900;
 
 export interface DraftField {
   /** The mandate field, as a JSON Pointer. */
@@ -80,6 +184,7 @@ export interface Figures {
 export interface Draft {
   terms: Terms;
   symbols: string[];
+  strategy: ChosenModel | null;
   answers: Array<{ label: string; quote: string }>;
   sections: DraftSection[];
   figures: Figures;
@@ -354,7 +459,32 @@ export function goalWords(t: Terms): string {
   }
 }
 
-function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures): DraftSection[] {
+function strategySection(strategy: ChosenModel | null): DraftSection {
+  const settings = strategy ? strategy.params.map((p) => `${strategy.model.params.find((m) => m.key === p.key)?.label ?? p.key}: ${p.value}`).join("; ") : null;
+  return {
+    key: "strategy",
+    title: "How it decides",
+    lead: "You choose the model and its settings; the platform ranks none and fills in none. A model gives a score, never an order.",
+    fields: [
+      strategy
+        ? { path: "/behavior/signal_models/0/id", label: "Model", value: `${strategy.model.name} (${strategy.model.id} ${strategy.model.version})`, provenance: "user_entered" }
+        : { path: "/behavior/signal_models/0/id", label: "Model", value: "None chosen yet.", provenance: null },
+      settings
+        ? { path: "/behavior/signal_models/0/params", label: "Its settings", value: settings, provenance: "user_entered" }
+        : { path: "/behavior/signal_models/0/params", label: "Its settings", value: "Not set yet.", provenance: null },
+      { path: "/behavior/signal_models/0/weight", label: "Weight", value: "1: its only model, so its score is the combined score.", provenance: "platform_default" },
+      { path: "/behavior/cadence/interval_s", label: "How often it checks", value: `Every ${CADENCE_S / 60} minutes.`, provenance: "platform_proposed" },
+      {
+        path: "/behavior/sizing/entry_threshold",
+        label: "When it may buy",
+        value: `When the score is at least ${ENTRY_THRESHOLD}. Fixed code sizes the order inside your limits; the model never does.`,
+        provenance: "platform_proposed",
+      },
+    ],
+  };
+}
+
+function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, strategy: ChosenModel | null): DraftSection[] {
   const goal: DraftField =
     t.goal.type === "profit_stop"
       ? { path: "/goal/profit_level", label: "Goal", value: goalWords(t), provenance: "user_stated", quote: t.goal.quote }
@@ -405,8 +535,11 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures): Dr
           provenance: "platform_proposed",
         },
         { path: "/risk/scale_action", label: "When sizes are scaled down", value: "Limits new buys only. It does not sell to shrink a position.", provenance: "platform_proposed" },
+        { path: "/risk/breach_confirm_s", label: "Before a loss limit acts", value: "The loss must last 60 seconds, so one bad price cannot set it off.", provenance: "platform_proposed" },
+        { path: "/risk/reentry_cooldown_s", label: "After it sells", value: "It waits an hour before buying the same symbol again.", provenance: "platform_proposed" },
       ],
     },
+    strategySection(strategy),
     {
       key: "autonomy",
       title: "When it asks you",
@@ -416,6 +549,7 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures): Dr
         { path: "/autonomy/approval/timeout_s", label: "Time to answer", value: `${t.approvalTimeoutS / 60} minutes.`, provenance: "platform_proposed" },
         { path: "/autonomy/approval/on_timeout", label: "If you do not answer", value: "The buy is skipped. Silence never buys.", provenance: "platform_default" },
         { path: "/autonomy/approval/approvers", label: "Who answers", value: "You.", provenance: "platform_default" },
+        { path: "/notifications/channels", label: "How it reaches you", value: "A notification in this browser that says only that an agent needs you.", provenance: "platform_default" },
       ],
     },
     {
@@ -434,32 +568,98 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures): Dr
   ];
 }
 
-export function compile(r: Read, symbols: string[]): Draft {
+export function compile(r: Read, symbols: string[], strategy: ChosenModel | null = null): Draft {
   const terms = termsFor(r);
   const figures = figuresFor(terms);
-  return { terms, symbols, answers: r.answers, sections: sectionsFor(terms, r, symbols, figures), figures, notEnforced: r.notEnforced };
+  return { terms, symbols, strategy, answers: r.answers, sections: sectionsFor(terms, r, symbols, figures, strategy), figures, notEnforced: r.notEnforced };
+}
+
+const KNOWN: Record<string, InstrumentRef> = Object.fromEntries(Object.values(INSTRUMENTS).map((i) => [i.symbol, i]));
+
+/** The owner's symbol as an instrument: a fixture one when the fixtures list it, otherwise a US stock with an ID drawn from the symbol. */
+export function instrumentFor(symbol: string): InstrumentRef {
+  return KNOWN[symbol] ?? { asset_id: fixtureAssetId(symbol), symbol, asset_class: "us_equity" };
 }
 
 /**
- * A stand-in for the version hash: FNV-1a (64-bit) over the drafted values. It names this draft on
- * the prototype's record screen; no version exists anywhere.
+ * The confirmed draft as the mandate document (schema v1) and its provenance. Every value shown on
+ * the review is here as the owner confirmed it. The three the review does not list, `hysteresis`,
+ * `scale_lift_after_s` and `daily_breach_min_s`, take the reference bases' values
+ * (`reference/mandate/bases.py`) as platform defaults: the first two act only on a `scale_sizes`
+ * rung, which this ladder has none of, and the last only delays lifting the daily-loss limit.
+ * Null without a model or an instrument, which the review never lets through.
  */
-export function draftDigest(draft: Draft): string {
-  const t = draft.terms;
-  const canonical = JSON.stringify([
-    toDecimalString(t.allocationUsd),
-    toDecimalString(t.maxLossUsd),
-    t.goal.type === "profit_stop" ? toDecimalString(t.goal.level) : null,
-    toDecimalString(t.maxDailyLoss),
-    toDecimalString(t.maxDrawdown),
-    toDecimalString(t.maxPositionUsd),
-    toDecimalString(t.maxOrderUsd),
-    draft.symbols,
-  ]);
-  let hash = 0xcbf29ce484222325n;
-  for (const byte of new TextEncoder().encode(canonical)) {
-    hash ^= BigInt(byte);
-    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
-  }
-  return hash.toString(16).padStart(16, "0");
+export function mandateFrom(draft: Draft, connectionId: string): NewAgent | null {
+  const { terms: t, strategy } = draft;
+  if (!strategy || draft.symbols.length === 0) return null;
+  const words = draft.answers.map((a) => a.quote).join("\n");
+  const goal: Mandate["goal"] =
+    t.goal.type === "profit_stop"
+      ? { type: "profit_stop", profit_level: toDecimalString(t.goal.level), end_date: null }
+      : { type: "continuous", end_date: null, on_complete: "hold_protected" };
+  const description = draft.answers.find((a) => a.label === "Goal" || a.label === "Your description")?.quote ?? "";
+  const mandate: Mandate = {
+    mandate_schema_version: 1,
+    name: `${draft.symbols.join("-").toLowerCase().replaceAll(".", "")}-agent`,
+    source_text_ref: `sha256:${sha256Hex(words)}`,
+    environment: "paper",
+    connection_id: connectionId,
+    capital: { allocation_usd: toDecimalString(t.allocationUsd), max_loss_from_allocation: toDecimalString(t.maxLossFraction) },
+    goal,
+    universe: {
+      pinned: true,
+      pinned_instruments: draft.symbols.map(instrumentFor),
+      max_instruments: Math.max(PROPOSED_MAX_INSTRUMENTS, draft.symbols.length),
+      asset_classes: ["us_equity"],
+      leveraged_etps_enabled: false,
+      leveraged_etp_disclosure_version: null,
+    },
+    behavior: {
+      description,
+      signal_models: [
+        {
+          id: strategy.model.id,
+          version: strategy.model.version,
+          content_hash: strategy.model.contentHash,
+          params: strategy.params,
+          weight: "1",
+          max_output_age_s: MAX_OUTPUT_AGE_S,
+          admits_instruments: false,
+        },
+      ],
+      research: null,
+      cadence: { interval_s: CADENCE_S, event_sources: ["price"] },
+      sizing: { method: "conviction_linear", entry_threshold: ENTRY_THRESHOLD, exit_threshold: ENTRY_THRESHOLD, rebalance_band: "0.05" },
+    },
+    protection: { enabled: true, stop_distance: toDecimalString(t.stopDistance), take_profit_distance: null, crypto_stop_limit_offset: null },
+    risk: {
+      max_position_usd: toDecimalString(t.maxPositionUsd),
+      max_position_fraction: toDecimalString(t.maxPositionFraction),
+      max_gross_exposure_usd: toDecimalString(t.maxGrossExposureUsd),
+      max_order_usd: toDecimalString(t.maxOrderUsd),
+      max_orders_per_day: t.maxOrdersPerDay,
+      max_daily_loss: toDecimalString(t.maxDailyLoss),
+      daily_loss_action: "exits_only",
+      max_drawdown: toDecimalString(t.maxDrawdown),
+      drawdown_ladder: [{ at: toDecimalString(t.maxDrawdown), action: "flatten_and_pause", factor: null }],
+      hysteresis: "0.01",
+      scale_action: "limit_buys",
+      breach_confirm_s: 60,
+      daily_breach_min_s: 3600,
+      scale_lift_after_s: 600,
+      reentry_cooldown_s: 3600,
+    },
+    autonomy: {
+      rules: [],
+      default: t.autonomyDefault,
+      admission: "ask",
+      approval: { timeout_s: t.approvalTimeoutS, on_timeout: "skip", approvers: ["role:owner"], two_approver_above_usd: null },
+    },
+    notifications: { channels: ["web_push"], quiet_hours: null },
+  };
+  const shown: FieldProvenance[] = draft.sections.flatMap((s) =>
+    s.fields.filter((f) => f.provenance !== null).map((f): FieldProvenance => ({ path: f.path, provenance: f.provenance as Provenance, ...(f.quote ? { quote: f.quote } : {}) })),
+  );
+  const unlisted: FieldProvenance[] = ["/risk/hysteresis", "/risk/daily_breach_min_s", "/risk/scale_lift_after_s"].map((path) => ({ path, provenance: "platform_default" }));
+  return { mandate, provenance: [...shown, ...unlisted] };
 }
