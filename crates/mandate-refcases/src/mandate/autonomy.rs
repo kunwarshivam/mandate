@@ -183,7 +183,7 @@ fn compare_trigger(
 
 /// Case `id`'s `action` as the facts `classify` reads, every member of it read. An opening may not
 /// name [`UNREAD_INSTRUMENT`], so no case is ever decided against the placeholder by accident.
-fn action(id: &str, stated: &Json, risk_day: Date) -> Result<ActionContext, String> {
+pub(super) fn action(id: &str, stated: &Json, risk_day: Date) -> Result<ActionContext, String> {
     let purpose = purpose(str_at(stated, "purpose")?)?;
     if purpose.reduces_risk() {
         unknown_members(stated, &["purpose"]).map_err(|unknown| {

@@ -17,7 +17,8 @@ use super::{
     ConnectionId, Delegation, DelegationId, EventSource, Goal, HourMinute, InstrumentRef,
     LadderAction, LadderRung, Lifts, LimitAction, Mandate, ModelId, ModelParam, Notifications,
     OnComplete, OnTimeout, ParamValue, Protection, QuietHours, Research, Risk, Rule, RuleId,
-    ScaleAction, SignalModel, Sizing, SizingMethod, Universe,
+    ScaleAction, SignalModel, Sizing, SizingMethod, Tripwire, TripwireAction, TripwireId,
+    TripwireMetric, Universe,
 };
 use crate::condition::{
     Condition, ConditionField, ConditionValue, FieldKind, MAX_CONDITION_DEPTH, Operator,
@@ -664,9 +665,6 @@ fn ladder_rung(node: &Node<'_>) -> Parsed<LadderRung> {
 
 fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
     let m = node.members("rules default admission approval review_by delegations tripwires")?;
-    if m.optional("tripwires").is_some() {
-        return Err(ParseError::Unimplemented);
-    }
     let approval = m.get("approval")?;
     let approval = approval.members("timeout_s on_timeout approvers two_approver_above_usd")?;
     Ok(Autonomy {
@@ -696,7 +694,29 @@ fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
                 .collect::<Parsed<_>>()?,
             None => Vec::new(),
         },
-        tripwires: Vec::new(),
+        tripwires: match m.optional("tripwires") {
+            Some(list) => list
+                .items(0, 20, false)?
+                .iter()
+                .map(tripwire)
+                .collect::<Parsed<_>>()?,
+            None => Vec::new(),
+        },
+    })
+}
+
+fn tripwire(node: &Node<'_>) -> Parsed<Tripwire> {
+    let m = node.members("id metric threshold action")?;
+    let id = m.get("id")?;
+    Ok(Tripwire {
+        id: TripwireId::parse(id.text()?).map_err(|_| id.off_pattern())?,
+        metric: m
+            .get("metric")?
+            .named(&TripwireMetric::ALL, TripwireMetric::as_str)?,
+        threshold: m.dec("threshold", DecGrammar::PositiveDecimal)?,
+        action: m
+            .get("action")?
+            .named(&TripwireAction::ALL, TripwireAction::as_str)?,
     })
 }
 

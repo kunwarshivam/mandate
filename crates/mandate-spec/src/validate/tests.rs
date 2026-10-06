@@ -125,10 +125,9 @@ pub(crate) fn mandate(patches: &[(&str, &str)]) -> Result<Mandate, String> {
     Mandate::parse(&document(patches)?).map_err(|e| format!("{patches:?}: {e}"))
 }
 
-/// The tests-PR validator refuses a non-empty typed tripwire list rather than accepting unchecked
-/// values assembled by an internal caller.
+/// V-044 accepts a well-formed typed tripwire and rejects a threshold below one cent.
 #[test]
-fn a_typed_tripwire_fails_closed_at_the_validation_stub() -> Checked {
+fn typed_tripwires_obey_v044() -> Checked {
     let mut value = mandate(&[])?;
     value.autonomy.tripwires.push(Tripwire {
         id: TripwireId::parse("loss").map_err(|error| error.to_string())?,
@@ -137,7 +136,15 @@ fn a_typed_tripwire_fails_closed_at_the_validation_stub() -> Checked {
             .map_err(|error| error.to_string())?,
         action: TripwireAction::ExitsOnly,
     });
-    assert_eq!(tripwire_rules(&value), Err(SpecError::Unimplemented));
+    assert!(tripwire_rules(&value));
+    value
+        .autonomy
+        .tripwires
+        .first_mut()
+        .ok_or("the tripwire is present")?
+        .threshold = SchemaDec::parse("0.001", DecGrammar::PositiveDecimal)
+        .map_err(|error| error.to_string())?;
+    assert!(!tripwire_rules(&value));
     Ok(())
 }
 

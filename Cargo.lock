@@ -1497,6 +1497,7 @@ dependencies = [
  "mandate-builder",
  "mandate-canon",
  "mandate-domain",
+ "mandate-executor",
  "mandate-journal",
  "mandate-num",
  "mandate-research",
