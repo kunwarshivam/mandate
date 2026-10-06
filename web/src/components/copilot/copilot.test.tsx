@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConversationsProvider } from "@/components/messages/conversations";
@@ -27,7 +28,7 @@ function HandoffProbe() {
   );
 }
 
-function renderAt(path: string, ui = <HandoffProbe />, role: "owner" | "viewer" | "auditor" = "owner") {
+function renderAt(path: string, ui: ReactNode = <HandoffProbe />, role: "owner" | "viewer" | "auditor" = "owner") {
   setPathname(path);
   return renderWithRuntime(<AppShell>{ui}</AppShell>, "normal", { role });
 }
