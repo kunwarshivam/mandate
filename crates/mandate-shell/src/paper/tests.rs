@@ -91,6 +91,19 @@ fn production_artifacts(name: &str) -> Result<(Scratch, Artifacts), String> {
     Ok((scratch, artifacts))
 }
 
+fn production_deployment_artifacts(name: &str) -> Result<(Scratch, Artifacts), String> {
+    let scratch = Scratch::new(name)?;
+    scratch.replace(
+        "mandate.json",
+        "conn_alpaca_paper_01",
+        "conn_owner_paper_42",
+    )?;
+    let artifacts =
+        Artifacts::load_production(&scratch.0.join("mandate.json"), &scratch.0.join("config"))
+            .map_err(text)?;
+    Ok((scratch, artifacts))
+}
+
 fn agent() -> AgentId {
     AgentId(AGENT.to_owned())
 }
@@ -348,7 +361,7 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
 #[ignore = "pending E7-19"]
 fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -> Result<(), String>
 {
-    let loaded = artifacts()?;
+    let (scratch, loaded) = production_deployment_artifacts("production-deployment")?;
     let input = loaded
         .deployment(
             "workspace-owner-42".to_owned(),
@@ -358,10 +371,7 @@ fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -
         .map_err(text)?;
     assert_eq!(input.deployment().workspace.0, "workspace-owner-42");
     assert_eq!(input.deployment().agent.0, "agent-deployment-9");
-    assert_eq!(
-        input.deployment().connection.0,
-        loaded.mandate.connection_id.as_str()
-    );
+    assert_eq!(input.deployment().connection.0, "conn_owner_paper_42");
     assert_eq!(input.account_ref(), "account-ref-7");
     for (name, workspace, agent, account_ref) in [
         ("workspace", "", "agent-deployment-9", "account-ref-7"),
@@ -379,7 +389,47 @@ fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -
             "{name} must not be empty"
         );
     }
-    Ok(())
+    scratch.remove()
+}
+
+#[test]
+#[ignore = "pending E7-19"]
+fn shipping_paper_adapter_uses_only_the_validated_deployment_input() -> Result<(), String> {
+    let (scratch, loaded) = production_deployment_artifacts("shipping-deployment")?;
+    let _input = loaded
+        .deployment(
+            "workspace-owner-42".to_owned(),
+            "agent-deployment-9".to_owned(),
+            "account-ref-7".to_owned(),
+        )
+        .map_err(text)?;
+    let source = include_str!("../bin/mandate-tracer.rs");
+    for forbidden in [
+        "cli::WORKSPACE",
+        "cli::AGENT",
+        "cli::CONNECTION",
+        "cli::ACCOUNT_REF",
+        "conn_alpaca_paper_01",
+        "tracer-aapl",
+        "tracer-paper",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "the shipping adapter still selects {forbidden}"
+        );
+    }
+    for required in [
+        "Artifacts::load_production(",
+        "artifacts.deployment(",
+        ".deployment()",
+        ".account_ref()",
+    ] {
+        assert!(
+            source.contains(required),
+            "the shipping adapter must use {required}"
+        );
+    }
+    scratch.remove()
 }
 
 #[test]
