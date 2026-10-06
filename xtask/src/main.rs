@@ -4954,6 +4954,16 @@ jq -r "$filter" "$src"
 
     const APPROVED_HEAD: &str = "1111111111111111111111111111111111111111";
 
+    #[test]
+    fn merge_workflow_supplies_the_authorized_coordinator_identities() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/merge.yml"))?;
+        assert!(workflow.contains(
+            "MERGE_APPROVERS: ${{ vars.MERGE_APPROVERS || format('{0} kunwar-vp', \
+             github.repository_owner) }}"
+        ));
+        Ok(())
+    }
+
     /// A case's name, the change that makes the script refuse it, and the reason it must print.
     type Refusal<'a> = (&'a str, &'a dyn Fn(&mut MergeCase), &'a str);
 
