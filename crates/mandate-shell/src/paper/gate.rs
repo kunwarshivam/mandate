@@ -13,7 +13,7 @@ use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAct
 use mandate_risk::{
     AccountSnapshot, AccountState, AgentId as GateAgentId, AgentMode, AgentSnapshot,
     AssetId as GateAssetId, ClientOrderId as GateOrderId, ConductState, DayTradeLedger,
-    DayTradeRegime, Exchange, GateConfig, GatePass, InstrumentSnapshot as GateInstrumentSnapshot,
+    DayTradeRegime, GateConfig, GatePass, InstrumentSnapshot as GateInstrumentSnapshot,
     MarketSnapshot, Origin, ProposedKind, QuoteCurrency, RiskSnapshot, SaneQuote,
     TimeInForce as GateTimeInForce, ValidatedMandate as GateMandate, WorkingUniverse,
 };
@@ -21,7 +21,7 @@ use mandate_time::UtcNanos;
 
 use super::artifacts::Artifacts;
 use super::facts::PaperFacts;
-use super::{INSTRUMENT_ID, absent, usd};
+use super::{absent, usd};
 use crate::adapters::{AdvisoryGateContext, AdvisoryOrderFacts};
 use crate::error::Cause;
 
@@ -38,7 +38,8 @@ pub(super) fn gate_template(
     let asset_record = &facts.broker.asset.asset;
     let liquidity = &facts.liquidity;
     let allocation = usd(artifacts.mandate.capital.allocation_usd.as_str())?;
-    let asset = GateAssetId::new(INSTRUMENT_ID).map_err(|_| absent("the AAPL asset id"))?;
+    let asset = GateAssetId::new(artifacts.instrument.asset_id.as_str())
+        .map_err(|_| absent("the reviewed instrument id"))?;
     let gate_agent = GateAgentId(1);
     let planned_reservation = reservation(
         &artifacts.fees,
@@ -98,7 +99,7 @@ pub(super) fn gate_template(
         instrument: GateInstrumentSnapshot {
             instrument: asset.clone(),
             asset_class: mandate_risk::AssetClass::UsEquity,
-            exchange: Some(Exchange::Nasdaq),
+            exchange: Some(artifacts.instrument.gate_exchange),
             status_active: asset_record.active,
             tradable: asset_record.tradable,
             fractionable: asset_record.fractionable,

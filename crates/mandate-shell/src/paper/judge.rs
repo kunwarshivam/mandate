@@ -3,15 +3,15 @@
 //! Only instants are compared and moved here; no money or quantity is computed.
 
 use mandate_accounting::AssetClass;
-use mandate_alpaca::{Exchange as BrokerExchange, Feed};
+use mandate_alpaca::Feed;
 use mandate_num::Usd;
 use mandate_risk::GateConfig;
 use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos, new_york_date_and_hour};
 use std::time::Duration;
 
+use super::absent;
 use super::artifacts::Artifacts;
 use super::facts::BrokerFacts;
-use super::{INSTRUMENT_ID, absent};
 use crate::error::Cause;
 
 const MINUTE_S: i64 = 60;
@@ -41,10 +41,10 @@ pub(super) fn judge(
         .asset
         .current(now, artifacts.quote_max_age)
         .map_err(|_| absent("a current asset record"))?;
-    if asset.asset_id != INSTRUMENT_ID
+    if asset.asset_id != artifacts.instrument.asset_id.as_str()
         || asset.instrument != artifacts.instrument.symbol
         || asset.class != AssetClass::UsEquity
-        || asset.exchange != BrokerExchange::Nasdaq
+        || asset.exchange != artifacts.instrument.broker_exchange
     {
         return Err(absent("the reviewed AAPL asset record"));
     }
