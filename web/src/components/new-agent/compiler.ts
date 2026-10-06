@@ -2,7 +2,7 @@ import { type Dec, ONE, ZERO, dec, div, fromInt, mul, toDecimalString } from "@/
 import { GOAL_WORDS, LOSS_WORDS, type Loss, MODELS, type ModelId, clauses, constraintsIn, findAmounts, findPercents, firstLoss } from "./draft";
 
 /**
- * The compiler's model turn (mandate spec §7, inference spec INF-5, DEC-473). Each owner message goes
+ * The compiler's model turn (mandate spec §7, inference spec INF-5, DEC-476). Each owner message goes
  * to a model with what the conversation last asked; the model answers in JSON, and nothing it returns
  * is a mandate value until `validateTurn` has re-read it from the owner's own words.
  *
@@ -261,7 +261,7 @@ function lossReading(quote: string, loss: Loss): Record<string, string> {
 }
 
 /**
- * How the fixture workspace reads a message, standing in for the model (DEC-473): fixed rules over the
+ * How the fixture workspace reads a message, standing in for the model (DEC-476): fixed rules over the
  * owner's words, so the same words always read the same way. With `asModel` it also does what only a
  * model could, reading amounts written in words and answering questions from the registry's text;
  * without it, it reads figures only, as the conversation does when no model answers.

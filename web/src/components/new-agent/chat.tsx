@@ -131,7 +131,7 @@ function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; 
 }
 
 /**
- * The conversation (brief A0 to A2 and A5, DEC-473, DEC-474): the log, then the composer. The
+ * The conversation (brief A0 to A2 and A5, DEC-476, DEC-477): the log, then the composer. The
  * platform's replies are plain text; only deterministic parts carry buttons (PX-18). The composer
  * keeps focus as the log grows, and the newest part of the log is brought into view above it.
  */

@@ -7,7 +7,7 @@ import { type Dec, ONE, ZERO, add, dec, div, fromInt, min, mul, sub, toDecimalSt
 import { percent, usd } from "@/lib/format";
 
 /**
- * The deterministic half of the compiler (brief A0 to A5, mandate spec §7, DEC-473): from the values
+ * The deterministic half of the compiler (brief A0 to A5, mandate spec §7, DEC-476): from the values
  * the owner stated, each with its quoted span, it drafts the rest of the mandate, so the same words
  * always draft the same mandate. The model half (`compiler.ts`) only points at the owner's words;
  * nothing here is a model call.
