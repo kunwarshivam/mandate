@@ -16,6 +16,7 @@ mandate-approval.workspace = true
 mandate-builder.workspace = true
 mandate-canon.workspace = true
 mandate-domain.workspace = true
+mandate-executor.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
 mandate-research.workspace = true

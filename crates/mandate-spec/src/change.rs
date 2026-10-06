@@ -172,15 +172,35 @@ pub fn classify_autonomy(old: &Autonomy, new: &Autonomy) -> Result<ChangeClass, 
 }
 
 /// §9.2's `autonomy.tripwires` row, matched by id (DEC-352).
-///
-/// The tests PR names the API but refuses every unequal pair until E6-13 implements all six change
-/// shapes. Equality is neutral because no path changed.
 pub fn classify_tripwires(old: &[Tripwire], new: &[Tripwire]) -> Result<ChangeClass, SpecError> {
     if old == new {
-        Ok(ChangeClass::Neutral)
-    } else {
-        Err(SpecError::Unimplemented)
+        return Ok(ChangeClass::Neutral);
     }
+    let unique = |tripwires: &[Tripwire]| {
+        tripwires
+            .iter()
+            .map(|tripwire| &tripwire.id)
+            .collect::<BTreeSet<_>>()
+            .len()
+            == tripwires.len()
+    };
+    if !unique(old) || !unique(new) {
+        return Ok(ChangeClass::RiskIncreasing);
+    }
+    let increasing = old.iter().any(|before| {
+        new.iter()
+            .find(|after| after.id == before.id)
+            .is_none_or(|after| {
+                after.metric != before.metric
+                    || after.threshold > before.threshold
+                    || after.action < before.action
+            })
+    });
+    Ok(if increasing {
+        ChangeClass::RiskIncreasing
+    } else {
+        ChangeClass::RiskReducing
+    })
 }
 
 /// §9.2's `autonomy.delegations` row (DEC-181), matched by `id`: reducing only if every change

@@ -465,6 +465,7 @@ pub(super) mod tests {
             agent_mode: AgentMode::Normal,
             instrument_restrictions: BTreeSet::new(),
             net_contributed: Usd::ZERO,
+            tripwire_restriction: false,
         })
     }
 
