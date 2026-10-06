@@ -2464,8 +2464,8 @@ production_config_refs:
     - path: schema_version
       value: 1
     expect:
-      reason: unknown_schema
-      path: payload
+      reason: non_canonical
+      path: payload.kind
 control_stream:
   spec: docs/specs/journal.md v0.7 §9.2 (DEC-261)
   stream_id: ctl:ws_01J8Z2

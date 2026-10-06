@@ -540,7 +540,7 @@ and `ModelInvocationRecorded` in its own story. `ThesisProposed` and `ThesisRevi
 `OwnerCommandRefused` is closed in §9.2, on both streams that write it.
 
 Journal spec v0.16 adds `schema_version` 2 for `ModelOutputRecorded` and `DecisionMade`. Each has
-exactly its version-1 payload, with the stricter `config_refs` §9 lists. Rule 17 requires a
+exactly its version-1 payload, with the stricter `config_refs` §9 lists. Rule 13a requires a
 version-2 model output's `model_registry` object to contain exactly one entry whose `model_id`,
 `model_version`, and `content_hash` equal the payload's. Version 1 remains registered and replayable;
 a writer emits version 2 once it has the two new registered snapshots. The additive
@@ -741,6 +741,10 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
     when `step_up_status` is `valid` — `payload.step_up`. `confirmed` governs only the bid members:
     `user` and the step-up are recorded on every owner exit.
 13. `ModelOutputRecorded`: `thesis_id` and `lineage_id` are `null` together — the one that is `null`.
+13a. `ModelOutputRecorded` version 2: the canonical object named by
+    `config_refs.model_registry` contains exactly one model whose `model_id`, `model_version`, and
+    `content_hash` equal the payload's — `payload.model_version`; otherwise
+    `config_ref_mismatch`.
 
 **Subject rules** (reason `stream_mismatch`):
 
@@ -941,7 +945,7 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
     offending member, in that order.
 21a. `ConfigSnapshotRegistered` version 2: `policy_set` and `model_registry` are valid kinds.
     The stored canonical object's `kind` equals `payload.kind`, and it re-hashes to
-    `payload.content_hash`. Version 1 refuses either new kind as `schema` at `payload.kind`.
+    `payload.content_hash`. Version 1 refuses either new kind as `non_canonical` at `payload.kind`.
 22. `AgentDeployed`: `mandate_version` equals `config_refs.mandate_version` (`payload.mandate_version`).
     A missing ref is already `missing_config_ref`.
 23. `AgentStopped`: `loss_added` ≥ 0 (`payload.loss_added`). The loss carried is never negative

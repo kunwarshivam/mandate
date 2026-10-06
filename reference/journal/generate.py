@@ -2894,6 +2894,14 @@ CONFIG_REGISTRATION_SCHEMA = rec(
     ("params", list_of(STR)),
     ("admits_instruments", opt(BOOL)),
 )
+LEGACY_CONFIG_REGISTRATION_SCHEMA = rec(
+    ("kind", one_of(*CONFIG_REF_KINDS)),
+    ("content_hash", REF),
+    ("model_id", opt(STR)),
+    ("model_version", opt(STR)),
+    ("params", list_of(STR)),
+    ("admits_instruments", opt(BOOL)),
+)
 POLICY_SCHEMA = json.loads((ROOT / "schemas/policy.schema.json").read_text(encoding="utf-8"))
 
 
@@ -3020,14 +3028,15 @@ def production_registration_violations(draft: dict, stored: dict[str, dict]) -> 
     out = type_violations(ENVELOPE, draft, "", frozenset())
     if out:
         return out
-    if draft["schema_version"] != 2:
+    if draft["schema_version"] not in (1, 2):
         return [Violation("catalogue", "unknown_schema", "payload")]
     if draft["event_type"] != "ConfigSnapshotRegistered":
         return [Violation("catalogue", "unknown_event_type", "event_type")]
     stream = draft["stream_id"].split(":")
     if len(stream) != 2 or stream[0] != "ctl" or not all(IDENT.match(part) for part in stream):
         return [Violation("stream", "wrong_stream", "event_type")]
-    payload_types = type_violations(CONFIG_REGISTRATION_SCHEMA, draft["payload"], "payload", frozenset())
+    schema = CONFIG_REGISTRATION_SCHEMA if draft["schema_version"] == 2 else LEGACY_CONFIG_REGISTRATION_SCHEMA
+    payload_types = type_violations(schema, draft["payload"], "payload", frozenset())
     if payload_types:
         return payload_types
     payload = draft["payload"]
@@ -3105,7 +3114,7 @@ def production_ref_violations(
             )
         ]
         if len(matches) != 1:
-            return [Violation("model.binding", "config_ref_mismatch", "payload.model_version")]
+            return [Violation("rule.13a", "config_ref_mismatch", "payload.model_version")]
     return []
 
 
@@ -3227,7 +3236,7 @@ def build_production_config_refs_section(control_section: dict) -> dict:
                 "name": "policy_registration_version_1",
                 "base": "policy_registration",
                 "changes": [change("schema_version", 1)],
-                "expect": {"reason": "unknown_schema", "path": "payload"},
+                "expect": {"reason": "non_canonical", "path": "payload.kind"},
             },
         ],
     }

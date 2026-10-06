@@ -3556,8 +3556,8 @@
      }
     ],
     "expect": {
-     "reason": "unknown_schema",
-     "path": "payload"
+     "reason": "non_canonical",
+     "path": "payload.kind"
     }
    }
   ]
