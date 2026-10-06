@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | Product |
 | **Status** | Draft v0.4, 2026-10-05. Adds Volaren (YC F26), which v0.3 listed as pre-launch. Replaces v0.3 of 2026-09-30, which added the general-purpose agents section [ADR-0003](../adr/0003-earned-autonomy.md) sequenced; v0.2 of 2026-09-27 replaced v0.1 after it made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
-| **Method** | Public web pages only, read 2026-09-26 and 2026-09-27; the general-agents section's sources were read 2026-09-30, and Volaren's on 2026-10-05. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
+| **Method** | Public web pages only, read 2026-09-26 and 2026-09-27; the general-agents section's sources were read 2026-09-30, and Volaren's on 2026-10-05, including its app as a visitor who is not signed in. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
 | **Regulatory material** | Public commentary, not legal advice. Legal and compliance text is reserved for the founder and counsel ([DEC-79](../project/04-decision-log.md#decisions)) |
 | **Related** | [Strategy options](10-strategy-options.md), [Vision](01-vision-and-strategy.md), [Compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) |
 
@@ -549,6 +549,35 @@ may also be a source of strategies for the bring-your-own-strategy mode.
   assumptions and theses into crowd statistics and "performance leaderboards on a per-ticker
   basis" [VL6].
 
+**What its app shows a signed-out visitor (viewed 2026-10-05).** Creating a thesis, running a
+backtest, and following a strategy each lead to account creation [VL12] [VL13]; what follows is
+what a visitor can see without one.
+
+- Studio offers two modes: "Auto", "We'll build the full trade for you", and "Step by Step",
+  "You'll review and can adjust each part, and stop early if it's enough" [VL12].
+- A worked example, "Defense budgets keep rising", is "A finished example run from 2026-10-01".
+  It maps each thesis assumption to a change in each company's model value and then to an
+  allocation: 8 holdings, with an "expected volatility, whole book" of 19.6%, and a correlation
+  table with each holding's share of risk. It explains every exclusion, for example "Of the 36
+  valued, 28 are not held: 13 sized to zero by the solve, 5 left out because you asked for about 8
+  stocks". It notes "No hedges were built: this account holds long positions only", and "The
+  horizon is when the thesis should play out, not a price target". It ends with weights, not
+  orders: "Sign up to add this allocation" [VL12].
+- Backtest: "Describe a strategy in plain words. The rules come back as one sentence you can
+  change setting by setting, with what was assumed marked, and run over real history"; the input
+  covers "US stocks and ETFs, daily prices from 1998", and "Writing a spec needs a free account"
+  [VL13].
+- The Alpha Hub list labels each strategy "HOUSE" and shows annualized return, the difference
+  from the S&P 500, maximum drawdown, and year-to-date return; every price shown is "Free" [VL14].
+  One strategy's rules state a universe that includes "companies that later delisted or were
+  acquired", that "orders fill at the next session's open, with spread and market-impact costs
+  that grow for less liquid names", and that "Every figure is as it was known on the decision
+  date" [VL15].
+- Its "Verify" tab lists a "Rules fingerprint", a record ID, and a last-updated date; the page does
+  not say how a visitor can recompute or check the fingerprint [VL9] [VL15].
+- The portfolio page has "All", "Paper", and "Real money" tabs, and sample positions marked "NOT
+  PLACED" with a "CONNECT BROKER" link and a "Buy" button [VL16].
+
 Pages disagree in two places. The pricing page lists trading from Volaren in every paid plan
 [VL5], while the brokerages page and the terms describe read-only connections [VL4] [VL6]. The
 "Who we are" page says users pay "if you choose to follow a premium strategy" [VL3], while the
@@ -559,7 +588,8 @@ is specific to brokers; the pricing and "Who we are" pages carry no date.
 **What it does not document**
 
 - What its "agents watching the market" do, or whether any can act without a confirmation. Its
-  agents page shows only a cookie notice to a visitor who is not signed in [VL11].
+  agents page shows a signed-out visitor only a cookie notice to a fetch, and "404 This page
+  could not be found" in a browser [VL11].
 - When order placement ships, through which provider, with which order types, and whether a ticket
   expires or is checked against the account again before it is sent.
 - Limits that hold outside a strategy or ticket (capital, loss, concentration), or a kill switch.
@@ -580,8 +610,10 @@ Mandate's proposition is an agent that acts within limits the owner set (AUTO), 
 watching the market" start to act, Volaren will need the layer Mandate builds (inference). Its
 rules fingerprint and never-backfilled forward record are the closest public analogue found to
 Mandate's forward-paper evidence (DEC-99) and journal, though they cover a strategy's rules and
-simulated book, not one owner's decisions. Its Alpha Hub sends strategies, Volaren's own among
-them [VL6], as tickets under an information-platform posture, the same adviser question
+simulated book, not one owner's decisions. Its Studio example sets the bar for explaining a
+sizing result: every candidate left out is counted with its reason [VL12], which is the standard
+Mandate's order-builder reasons and decision view will be compared against (inference). Its
+Alpha Hub sends strategies, Volaren's own among them [VL6] [VL14], as tickets under an information-platform posture, the same adviser question
 [Strategy options](10-strategy-options.md#option-0-baseline-platform-originated-theses-dec-97)
 raises for platform-originated theses; any reading is for counsel. Its copy
 publishes return figures and says "room to beat the market opened back up" [VL2] [VL9]; Mandate's
@@ -657,7 +689,7 @@ Legend: **Yes** documented; **Partly** documented for part of the capability, sc
 | D5 Documented handling of ambiguous submissions and restarts | Partly: repeated failures become "action required" [PU7] | Not documented [RH3] | Yes: idempotent execution, pending-order rule, reconcile and freeze [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Partly (vc): resumes after reboot [TA1] | Not documented [RG1] | Not applicable today: places no orders [VL4] [VL6] | Specified (E7-2, E7-3); tests #152 and implementation #174 open [M5] |
 | D6 Rehearsal before live (paper or forward evidence) | No backtest as of 2026-09-14; paper not documented [PU6] [PU7] | Not documented: no paper environment found [RH2] | Partly: paper on Alpaca; no evidence page [SF3] | Yes: backtest, paper, divergence monitoring [QC1] | Partly: backtest before activation [CO1] | Partly (vc): out-of-sample scoring [TA1] | Not applicable | Partly: backtests, and forward simulated records for its strategies [VL2] [VL9] | Alpaca paper tracer (E7-7, #173) and forward-paper evaluation (DEC-99, E17-8) specified [M6] |
 | D7 One mandate across brokers | No: Public accounts only [PU8] | No: Robinhood accounts only [RH2] | Partly: same code across venues and paper or live; no mandate object [SF3] | Partly: one algorithm across many brokerages [QC3] | Not documented [CO2] | Not documented: brokers undisclosed [TA1] | Not documented [RG1] | Not applicable today: read-only sync from several brokers; trading at five "coming soon" [VL4] | Alpaca first, Robinhood at M8 (E7-6); not built [M7] |
-| D8 Ideas originated by the platform inside an owner envelope | No: "does only what you told it to do" [PU1] | No: the user's own agent; Robinhood does not recommend [RH1] | No: "user-defined logic" [SF9] | Yes: Mia generates ideas; the user decides live capital [QC1] | Partly: AI helps build rules the user activates [CO1] | Yes (vc) [TA2] | Not applicable | Partly: Volaren's strategies and thesis baskets arrive as tickets the user reviews; no owner envelope documented [VL2] [VL6] | Accepted (DEC-97); users only after DEC-99 passes [M8] |
+| D8 Ideas originated by the platform inside an owner envelope | No: "does only what you told it to do" [PU1] | No: the user's own agent; Robinhood does not recommend [RH1] | No: "user-defined logic" [SF9] | Yes: Mia generates ideas; the user decides live capital [QC1] | Partly: AI helps build rules the user activates [CO1] | Yes (vc) [TA2] | Not applicable | Partly: Volaren's "HOUSE" strategies and thesis baskets arrive as tickets the user reviews; no owner envelope documented [VL2] [VL6] [VL14] | Accepted (DEC-97); users only after DEC-99 passes [M8] |
 | D9 Runs on the customer's infrastructure | Not applicable (broker) | Not applicable (broker) | Partly: Enterprise private workspaces [SF6] | Yes: LEAN is open source [QC5] | Not documented [CO2] | Yes (vc): self-hosted desktop [TA1] | Not documented [RG1] | Not documented [VL3] | Planned (M11 hybrid) [M9] |
 
 **Reading the matrix.** No column is all "Yes". Mandate's column is specification and partial code,
@@ -819,6 +851,11 @@ Accessed means the page carried no date and was read on 2026-09-26 or 2026-09-27
 | VL9 | [Volaren: Congress Tracker strategy](https://www.volaren.ai/strategies/revisions/congress-tracker) | record through 2026-10-02 |
 | VL10 | [Martin Pestana on LinkedIn: joining YC Fall 2026](https://www.linkedin.com/posts/martin-pestana_activity-7505737757198233602-lC4U) | 2026-09-15 |
 | VL11 | [Volaren: Agents](https://www.volaren.ai/agents) (signed out) | accessed 2026-10-05 |
+| VL12 | [Volaren Studio](https://www.volaren.ai/studio) and its [defense example](https://www.volaren.ai/studio?session=example-defense&view=flow) (signed out) | example run 2026-10-01; viewed 2026-10-05 |
+| VL13 | [Volaren Backtest](https://www.volaren.ai/backtest) (signed out) | viewed 2026-10-05 |
+| VL14 | [Volaren Alpha Hub, app view](https://www.volaren.ai/alpha-hub) (signed out) | viewed 2026-10-05 |
+| VL15 | [Volaren: Megacap Momentum strategy](https://www.volaren.ai/alpha-hub/momentum) (signed out) | last updated 2026-10-05 |
+| VL16 | [Volaren portfolio](https://www.volaren.ai/portfolio) (signed out) | viewed 2026-10-05 |
 | QC1 | [QuantConnect: Mia](https://www.quantconnect.com/docs/v2/ai-assistance/predefined-agents/mia) | accessed |
 | QC2 | [QuantConnect: risk management key concepts](https://www.quantconnect.com/docs/v2/writing-algorithms/algorithm-framework/risk-management/key-concepts) | accessed |
 | QC3 | [QuantConnect: live brokerages](https://www.quantconnect.com/docs/v2/cloud-platform/live-trading/brokerages) | accessed |
