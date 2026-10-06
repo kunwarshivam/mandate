@@ -53,7 +53,7 @@ test.describe("The desktop dock stays pinned while a long page scrolls", () => {
       expect(found.lastBottom, "the page's last line ends above the dock").toBeLessThanOrEqual(found.box.top);
 
       const items = dock.locator("a[href], button");
-      expect(await items.count(), "six links, the Audit and More menus, and Stop").toBe(9);
+      expect(await items.count(), "seven links, the Audit and More menus, and Stop").toBe(10);
       for (const item of await items.all()) await expect(item).toBeInViewport({ ratio: 1 });
       await expect(dock.getByRole("link", { name: "Agents", exact: true }), "the current page's item").toHaveAttribute("aria-current", "page");
 
