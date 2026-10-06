@@ -2020,13 +2020,99 @@ mod tests {
     use std::path::Path;
 
     use mandate_spec::MandateVersion;
+    use mandate_spec::document::TripwireId;
+    use serde_json::json;
 
-    use super::policy_case;
+    use super::{
+        Input, Latch, TripwireRiskEvent, optional_bool, optional_text, policy_case,
+        risk_state_case, risk_step, risk_step_up, tripwire_event_members,
+    };
     use crate::{Json, read_fixture};
 
     fn fixture() -> Result<Json, String> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
         read_fixture(&dir, "mandate.json").map(|f| (*f).clone())
+    }
+
+    /// The two family-W risk-state cases run live while their status rows remain pending.
+    #[test]
+    fn tripwire_risk_state_cases_pass_as_stated() -> Result<(), String> {
+        let fixture = fixture()?;
+        let cases = fixture
+            .get("cases")
+            .and_then(Json::as_array)
+            .ok_or("the fixture has no cases")?;
+        for id in ["MC-W52", "MC-W57"] {
+            let case = cases
+                .iter()
+                .find(|case| case.get("id").and_then(Json::as_str) == Some(id))
+                .ok_or_else(|| format!("the fixture has no {id}"))?;
+            risk_state_case(&fixture, case).map_err(|error| format!("{id}: {error}"))?;
+        }
+        Ok(())
+    }
+
+    /// The risk-state adapter reads optional evidence exactly and keeps non-tripwire latches distinct.
+    #[test]
+    fn tripwire_risk_state_adapter_parses_each_evidence_shape() -> Result<(), String> {
+        let values = json!({
+            "text": "owner-b",
+            "yes": true,
+            "no": false,
+            "step_up": {
+                "assertion": "assertion-1",
+                "authenticated_at": "2026-09-21T14:00:00.000000000Z",
+                "method": "cli_confirm"
+            }
+        });
+        assert_eq!(optional_text(&values, "text")?, Some("owner-b".to_owned()));
+        assert_eq!(optional_text(&values, "missing")?, None);
+        assert_eq!(optional_bool(&values, "yes")?, Some(true));
+        assert_eq!(optional_bool(&values, "no")?, Some(false));
+        assert_eq!(optional_bool(&values, "missing")?, None);
+        let step_up = risk_step_up(&values)?.ok_or("the stated step-up was not parsed")?;
+        assert_eq!(step_up.assertion.0, "assertion-1");
+
+        let ordinary = json!({
+            "event": "owner_acknowledged",
+            "at": "2026-09-21T14:00:00.000000000Z",
+            "restriction": "drawdown_ladder",
+            "session": "regular"
+        });
+        assert!(matches!(
+            risk_step(&ordinary)?.input,
+            Input::OwnerAcknowledged {
+                restriction: Latch::DrawdownLadder
+            }
+        ));
+        let tripwire = json!({
+            "event": "owner_acknowledged",
+            "at": "2026-09-21T14:00:00.000000000Z",
+            "restriction": "tripwire:loss",
+            "session": "regular"
+        });
+        assert!(matches!(
+            risk_step(&tripwire)?.input,
+            Input::TripwireAcknowledged
+        ));
+        Ok(())
+    }
+
+    /// Tripwire journal projections retain every member consumed by the risk-state comparer.
+    #[test]
+    fn tripwire_risk_event_members_are_exact() -> Result<(), String> {
+        let id = TripwireId::parse("loss").map_err(|error| error.to_string())?;
+        assert_eq!(
+            tripwire_event_members(&TripwireRiskEvent::RiskLimitLifted { id }),
+            [
+                ("limit".to_owned(), "tripwire:loss".to_owned()),
+                ("reason".to_owned(), "owner_acknowledged".to_owned()),
+                ("type".to_owned(), "RiskLimitLifted".to_owned()),
+            ]
+            .into_iter()
+            .collect()
+        );
+        Ok(())
     }
 
     /// A value no fixture member holds in its place: another decimal, the other flag, another integer,

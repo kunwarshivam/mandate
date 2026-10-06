@@ -437,8 +437,9 @@ mod tests {
     use mandate_spec::DecGrammar;
 
     use super::{
-        InstrumentId, SchemaDec, Side, Tripwire, TripwireAction, TripwireAlert, TripwireFill,
-        TripwireId, TripwireInput, TripwireMetric, TripwireState, Usd, fold,
+        AssertionId, Environment, InstrumentId, RiskClock, SchemaDec, Side, StepUp, StepUpMethod,
+        Tripwire, TripwireAcknowledgment, TripwireAction, TripwireAlert, TripwireEvent,
+        TripwireFill, TripwireId, TripwireInput, TripwireMetric, TripwireState, Usd, fold,
     };
 
     /// The notification boundary exposes only the trigger link and fixed generic text.
@@ -504,6 +505,61 @@ mod tests {
             restored.snapshot.effective_action,
             Some(TripwireAction::EndDelegations)
         );
+        Ok(())
+    }
+
+    /// A workspace that does not require independence needs no requester or second user to lift.
+    #[test]
+    fn acknowledgment_without_an_independence_requirement_needs_no_user_pair() -> Result<(), String>
+    {
+        let id = TripwireId::parse("wire").map_err(|error| error.to_string())?;
+        let tripwire = Tripwire {
+            id: id.clone(),
+            metric: TripwireMetric::ConsecutiveLosingExits,
+            threshold: SchemaDec::parse("1", DecGrammar::PositiveDecimal)
+                .map_err(|error| error.to_string())?,
+            action: TripwireAction::ExitsOnly,
+        };
+        let armed = fold(
+            &TripwireState::default(),
+            &TripwireInput::MandateVersionApplied {
+                tripwires: vec![tripwire],
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        let fired = fold(
+            &armed.state,
+            &TripwireInput::FillApplied {
+                fill: TripwireFill {
+                    instrument: InstrumentId::new("AAPL").map_err(|error| error.to_string())?,
+                    side: Side::Sell,
+                    net_realized_usd: Usd::parse("-1").map_err(|error| error.to_string())?,
+                },
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        let lifted = fold(
+            &fired.state,
+            &TripwireInput::OwnerAcknowledged(TripwireAcknowledgment {
+                tripwire: id.clone(),
+                step_up: Some(StepUp {
+                    assertion: AssertionId("assertion-no-independence".to_owned()),
+                    authenticated_at: RiskClock(100),
+                    method: StepUpMethod::CliConfirm,
+                }),
+                committed_at: RiskClock(100),
+                processed_at: RiskClock(100),
+                environment: Environment::Paper,
+                requester: None,
+                acknowledging_user: None,
+                independent_required_at_request: false,
+                independent_required_now: false,
+            }),
+        )
+        .map_err(|error| error.to_string())?;
+
+        assert!(lifted.snapshot.fired.is_empty());
+        assert_eq!(lifted.journal, vec![TripwireEvent::RiskLimitLifted { id }]);
         Ok(())
     }
 }

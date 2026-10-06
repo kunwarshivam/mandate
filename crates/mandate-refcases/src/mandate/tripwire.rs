@@ -636,3 +636,83 @@ fn decision_name(decision: AutonomyDecision) -> &'static str {
 fn decided_by_name(by: &DecidedBy) -> String {
     by.label()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::tripwire_case;
+    use crate::{Json, read_fixture};
+
+    fn fixture() -> Result<Json, String> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
+        read_fixture(&dir, "mandate.json").map(|fixture| (*fixture).clone())
+    }
+
+    fn cases(fixture: &Json) -> Result<Vec<Json>, String> {
+        Ok(fixture
+            .get("cases")
+            .and_then(Json::as_array)
+            .ok_or("the fixture has no case list")?
+            .iter()
+            .filter(|case| case.get("kind").and_then(Json::as_str) == Some("tripwire"))
+            .cloned()
+            .collect())
+    }
+
+    /// Every family-W tripwire case runs live even while its status remains pending.
+    #[test]
+    fn every_tripwire_case_passes_as_stated() -> Result<(), String> {
+        let fixture = fixture()?;
+        let cases = cases(&fixture)?;
+        if cases.len() != 29 {
+            return Err(format!(
+                "family W has 29 tripwire cases, found {}",
+                cases.len()
+            ));
+        }
+        for case in &cases {
+            let id = case.get("id").and_then(Json::as_str).unwrap_or("?");
+            tripwire_case(&fixture, case).map_err(|error| format!("{id}: {error}"))?;
+        }
+        Ok(())
+    }
+
+    /// The arm, outcome comparer, and probe comparer each reject a doctored fixture.
+    #[test]
+    fn doctored_tripwire_cases_fail_at_each_comparison_boundary() -> Result<(), String> {
+        let fixture = fixture()?;
+        let cases = cases(&fixture)?;
+        let first = cases.first().ok_or("family W has no tripwire case")?;
+
+        let mut wrong_kind = first.clone();
+        wrong_kind["kind"] = Json::String("not_tripwire".to_owned());
+        if tripwire_case(&fixture, &wrong_kind).is_ok() {
+            return Err("a wrong case kind passed".to_owned());
+        }
+
+        let mut wrong_outcome = first.clone();
+        let expectation = wrong_outcome
+            .pointer_mut("/expect/0")
+            .and_then(Json::as_object_mut)
+            .ok_or("the first tripwire case has no first expectation")?;
+        expectation.insert("unread".to_owned(), Json::Bool(true));
+        if tripwire_case(&fixture, &wrong_outcome).is_ok() {
+            return Err("an unread outcome member passed".to_owned());
+        }
+
+        let with_probes = cases
+            .iter()
+            .find(|case| case.get("probes").is_some())
+            .ok_or("family W has no probe case")?;
+        let mut wrong_probe = with_probes.clone();
+        let decision = wrong_probe
+            .pointer_mut("/probes/0/expect/decision")
+            .ok_or("the probe has no expected decision")?;
+        *decision = Json::String("not_a_decision".to_owned());
+        if tripwire_case(&fixture, &wrong_probe).is_ok() {
+            return Err("a wrong probe decision passed".to_owned());
+        }
+        Ok(())
+    }
+}

@@ -9,7 +9,8 @@ use mandate_canon::Value;
 use mandate_domain::AutonomyDecision::{self, Ask, Auto, Deny};
 
 use super::{
-    ChangeClass, Often, changed_paths, classify, classify_autonomy, how_often, pinning_switch, row,
+    ChangeClass, Often, changed_paths, classify, classify_autonomy, classify_tripwires, how_often,
+    pinning_switch, row,
 };
 use crate::condition::{Condition, ConditionField, ConditionValue, Operator};
 use mandate_time::UtcNanos;
@@ -222,6 +223,30 @@ fn tripwires_are_owned_only_by_their_dedicated_change_row() -> Checked {
             "/autonomy/tripwires"
         ),
         Ok(ChangeClass::RiskReducing)
+    );
+    Ok(())
+}
+
+/// An invalid duplicate on either side fails closed even when the other side is unique.
+#[test]
+fn duplicate_tripwire_ids_are_increasing_on_either_side() -> Checked {
+    let tripwire = Tripwire {
+        id: TripwireId::parse("loss").map_err(|error| error.to_string())?,
+        metric: TripwireMetric::RealizedLossUsd,
+        threshold: SchemaDec::parse("100", DecGrammar::PositiveDecimal)
+            .map_err(|error| error.to_string())?,
+        action: TripwireAction::ExitsOnly,
+    };
+    let unique = vec![tripwire.clone()];
+    let duplicate = vec![tripwire.clone(), tripwire];
+
+    assert_eq!(
+        classify_tripwires(&duplicate, &unique),
+        Ok(ChangeClass::RiskIncreasing)
+    );
+    assert_eq!(
+        classify_tripwires(&unique, &duplicate),
+        Ok(ChangeClass::RiskIncreasing)
     );
     Ok(())
 }
