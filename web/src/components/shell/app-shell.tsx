@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useRef } from "react";
+import { type CSSProperties, type ReactNode, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { canOpen } from "@/lib/access";
 import { isRecordRoute } from "@/lib/frozen";
@@ -8,6 +8,7 @@ import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { allFeedsOk } from "@/lib/feeds";
 import { useRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
+import { COPILOT_WIDTH, CopilotPanel, CopilotProvider, useCopilot } from "@/components/copilot/copilot";
 import { FixtureTag, InlineDisclosures } from "@/components/domain/placeholders";
 import { AccessDenied } from "./access-denied";
 import { AccountBanners } from "./account-banners";
@@ -29,9 +30,21 @@ export function densityFor(pathname: string): "calm" | "dense" {
  * decision is read against every feed's age, not against the absence of a warning. With no strip,
  * the "Fixture data" tag sits at the foot of the page. The More sheet opens into a layer inside the
  * frame, under the header and the tab bar, so it rises from behind the bar and never covers Stop.
+ * Owlhead, when open, docks to the right of the page from 110rem and the dock recentres on what is
+ * left; narrower, it floats over the page's right side, and on a phone it is a sheet between the
+ * header and the tab bar (DEC-476).
  */
 export function AppShell({ children }: { children: ReactNode }) {
+  return (
+    <CopilotProvider>
+      <Frame>{children}</Frame>
+    </CopilotProvider>
+  );
+}
+
+function Frame({ children }: { children: ReactNode }) {
   const { ws, now } = useRuntime();
+  const copilot = useCopilot();
   const { role } = useRole();
   const pathname = usePathname();
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
@@ -42,7 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const sheetLayer = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="relative isolate flex min-h-svh w-full">
+    <div className="relative isolate flex min-h-svh w-full" style={{ "--copilot-w": copilot.open ? COPILOT_WIDTH : "0px" } as CSSProperties}>
       <a href="#main" className="sr-only z-50 bg-card px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
@@ -77,11 +90,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           {record ? null : <FixtureTag />}
         </div>
       </div>
+      <CopilotPanel />
       <div ref={sheetLayer} data-slot="sheet-layer" />
       <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden">
         <TabNav approvals={open} sheetLayer={sheetLayer} />
       </div>
-      <div className="fixed bottom-[calc(var(--dock-gap)+env(safe-area-inset-bottom))] left-1/2 z-30 hidden -translate-x-1/2 lg:block">
+      <div className="fixed bottom-[calc(var(--dock-gap)+env(safe-area-inset-bottom))] left-1/2 z-30 min-[110rem]:left-[calc((100%-var(--copilot-w))/2)] hidden -translate-x-1/2 lg:block">
         <Dock approvals={open} />
       </div>
       <StopSheetHost />

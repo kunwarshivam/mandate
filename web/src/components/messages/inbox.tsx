@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { BrandOwl } from "@/components/brand/brand-owl";
+import { useCopilot } from "@/components/copilot/copilot";
 import { ModeBadge } from "@/components/domain/mode";
 import { AgentOwl } from "@/components/domain/owl";
 import type { Iso, Workspace } from "@/fixtures/types";
@@ -52,8 +54,23 @@ function Row({ row, now, current }: { row: InboxRow; now: Iso; current: boolean 
  */
 export function ThreadList({ ws, now, current }: { ws: Workspace; now: Iso; current: string | null }) {
   const { needsYou, earlier } = inboxRows(ws, now);
+  const copilot = useCopilot();
   return (
     <nav aria-label="Threads" data-slot="thread-list" className="grid content-start gap-6">
+      <button
+        type="button"
+        onClick={copilot.show}
+        aria-expanded={copilot.open}
+        aria-controls="owlhead-copilot"
+        data-slot="copilot-row"
+        className="press -mx-2 grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-3 rounded-2xl px-2 py-3 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring"
+      >
+        <BrandOwl still className="size-12" />
+        <span className="grid min-w-0 gap-0.5">
+          <span className="font-medium">Owlhead</span>
+          <span className="text-sm text-pretty text-muted-foreground">Ask about all your agents, from the record.</span>
+        </span>
+      </button>
       {needsYou.length > 0 ? (
         <section aria-labelledby="threads-needs-you" className="grid gap-1">
           <h2 id="threads-needs-you" className="text-label text-muted-foreground">
