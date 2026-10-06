@@ -1365,7 +1365,6 @@ fn happy() {
 /// E7-19 slice 1: production execution starts from a registered model output supplied across the
 /// public cycle boundary. It does not read bars or run a strategy in the execution shell.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_production_cycle_takes_model_output_as_an_input() {
     let transport = Scripted::new(Broker::Fresh);
     let seen = Rc::clone(&transport.seen);
@@ -1385,7 +1384,6 @@ fn the_production_cycle_takes_model_output_as_an_input() {
 /// A caller cannot use the production boundary to substitute a model outside the confirmed
 /// mandate. The runtime may record the opinion, but the builder emits no intent and nothing sends.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_production_cycle_refuses_an_unconfirmed_model_before_intent() {
     let transport = Scripted::new(Broker::Fresh);
     let seen = Rc::clone(&transport.seen);

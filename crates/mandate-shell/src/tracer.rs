@@ -25,7 +25,7 @@ use crate::envelope::{
 };
 use crate::error::{Cause, ShellError, refused};
 use crate::map;
-use crate::stages::{Classifier, ExitPath, Gate, JournalWriter, Sizing, Stage, Stages};
+use crate::stages::{Admitted, Classifier, ExitPath, Gate, JournalWriter, Sizing, Stage, Stages};
 
 /// What a run is for, besides its stages. Nothing here is secret: every id is opaque (TI-8).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,18 +59,7 @@ pub struct Report {
 /// # Errors
 /// Every [`ShellError`] is a stop after which nothing further is sent.
 pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
-    stages.exit.probe().map_err(refused(Stage::FlattenProbe))?;
-    stages
-        .protection
-        .probe()
-        .map_err(refused(Stage::ProtectionProbe))?;
-    let admitted = stages
-        .mandate
-        .admitted()
-        .map_err(refused(Stage::Validate))?;
-    if admitted.environment != Environment::Paper {
-        return Err(ShellError::NonPaperEnvironment);
-    }
+    let admitted = admit(stages)?;
     let instrument = pinned(&admitted.view)?;
     let closes = stages
         .bars
@@ -83,6 +72,33 @@ pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
     let output = map::model_output(signal, &admitted.model, &instrument, clock)
         .map_err(refused(Stage::Signal))?;
+    execute_cycle(stages, setup, &admitted, output)
+}
+
+fn admit(stages: &mut Stages) -> Result<Admitted, ShellError> {
+    stages.exit.probe().map_err(refused(Stage::FlattenProbe))?;
+    stages
+        .protection
+        .probe()
+        .map_err(refused(Stage::ProtectionProbe))?;
+    let admitted = stages
+        .mandate
+        .admitted()
+        .map_err(refused(Stage::Validate))?;
+    if admitted.environment != Environment::Paper {
+        return Err(ShellError::NonPaperEnvironment);
+    }
+    pinned(&admitted.view)?;
+    Ok(admitted)
+}
+
+fn execute_cycle(
+    stages: &mut Stages,
+    setup: &Setup,
+    admitted: &Admitted,
+    output: mandate_runtime::ModelOutput,
+) -> Result<Report, ShellError> {
+    let clock = RiskClock::from_secs(setup.now.secs());
     let mut session = Session::open(stages, setup, &admitted.view)?;
     session.start()?;
     if session.cycle_open && !setup.new_cycle {
@@ -108,13 +124,10 @@ impl ProductionCycle {
     /// Runs one cycle from a model output supplied by the model gateway.
     ///
     /// # Errors
-    /// This tests-first API refuses until E7-19's production-cycle implementation lands.
-    pub fn run(&mut self, _output: mandate_runtime::ModelOutput) -> Result<Report, ShellError> {
-        let _ = (&mut self.stages, &self.setup);
-        Err(ShellError::Refused {
-            stage: Stage::Signal,
-            cause: Cause::Unimplemented { story: "E7-19" },
-        })
+    /// Every [`ShellError`] is a fail-closed stop after which nothing further is sent.
+    pub fn run(&mut self, output: mandate_runtime::ModelOutput) -> Result<Report, ShellError> {
+        let admitted = admit(&mut self.stages)?;
+        execute_cycle(&mut self.stages, &self.setup, &admitted, output)
     }
 }
 
