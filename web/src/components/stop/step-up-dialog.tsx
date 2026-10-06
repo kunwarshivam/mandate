@@ -127,14 +127,14 @@ export function StepUpDialog({
             <button
               type="button"
               onClick={cancel}
-              className={cn("min-w-28", KEY)}
+              className={cn("min-w-28 shrink-0 whitespace-nowrap", KEY)}
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={verify}
-              className={cn("min-w-28", KEY)}
+              className={cn("min-w-28 shrink-0 whitespace-nowrap", KEY)}
             >
               Use passkey
             </button>
