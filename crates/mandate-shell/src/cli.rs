@@ -98,11 +98,14 @@ where
     let mut common = Vec::new();
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--workspace" => workspace = Some(value_of(&arg, args.next())?),
-            "--agent" => agent = Some(value_of(&arg, args.next())?),
-            "--account-ref" => account_ref = Some(value_of(&arg, args.next())?),
-            _ => common.push(arg),
+        if arg == "--workspace" {
+            workspace = Some(value_of(&arg, args.next())?);
+        } else if arg == "--agent" {
+            agent = Some(value_of(&arg, args.next())?);
+        } else if arg == "--account-ref" {
+            account_ref = Some(value_of(&arg, args.next())?);
+        } else {
+            common.push(arg);
         }
     }
     let parsed = parse(common)?;
