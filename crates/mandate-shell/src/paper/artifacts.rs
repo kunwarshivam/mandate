@@ -282,13 +282,18 @@ fn require_text(value: &Value, name: &'static str, expected: &str) -> Result<(),
 }
 
 fn exchanges(text: &str) -> Result<(BrokerExchange, GateExchange), Cause> {
-    match text {
-        "nasdaq" => Ok((BrokerExchange::Nasdaq, GateExchange::Nasdaq)),
-        "nyse" => Ok((BrokerExchange::Nyse, GateExchange::Nyse)),
-        "arca" => Ok((BrokerExchange::Arca, GateExchange::Arca)),
-        "amex" => Ok((BrokerExchange::Amex, GateExchange::Amex)),
-        "bats" => Ok((BrokerExchange::Bats, GateExchange::Bats)),
-        _ => Err(absent("an eligible reviewed exchange")),
+    if text == "nasdaq" {
+        Ok((BrokerExchange::Nasdaq, GateExchange::Nasdaq))
+    } else if text == "nyse" {
+        Ok((BrokerExchange::Nyse, GateExchange::Nyse))
+    } else if text == "arca" {
+        Ok((BrokerExchange::Arca, GateExchange::Arca))
+    } else if text == "amex" {
+        Ok((BrokerExchange::Amex, GateExchange::Amex))
+    } else if text == "bats" {
+        Ok((BrokerExchange::Bats, GateExchange::Bats))
+    } else {
+        Err(absent("an eligible reviewed exchange"))
     }
 }
 
