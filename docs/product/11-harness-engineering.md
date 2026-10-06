@@ -21,8 +21,9 @@
    arguments. None of those read here models positions, P&L, drawdown, settlement, or budgets
    [inference].
 3. No well-adopted open-source guardrail harness for **trading** agents exists. The popular trading
-   agent projects are research or educational, and their risk management is LLM debate or a YAML file
-   with no enforcement layer.
+   agent projects are research or educational and place no orders. TradingAgents' risk management is
+   LLM debate; ai-hedge-fund's is deterministic position and gross caps the model cannot override,
+   with no loss, drawdown, or account-rule limits documented (corrected 2026-10-05; see section 3).
 4. Mandate's gate, autonomy rules, journal, and executor are an inner harness for a regulated domain,
    and its `AGENTS.md` trust ladder is an outer harness. That is the basis of
    [DEC-149](../project/04-decision-log.md#decisions): the harness becomes an enterprise product, and

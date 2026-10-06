@@ -66,7 +66,7 @@
    Mandate's core rules.** Financial Datasets (YC S26) is a candidate fundamentals supplier once the
    DEC-99 evaluation passes [M10]. Its terms count feeding a hosted agent's answers as
    redistribution, which only its $2,000-a-month plan or Enterprise allows, and require deleting the
-   data when access ends, which collides with Mandate's six-year record [FD1] [FD2]. Its founder's
+   data when access ends, which collides with Mandate's six-year record [FD1] [FD2] [M10]. Its founder's
    ai-hedge-fund (63,855 stars, MIT) documents "The LLM never touches the trade", hard caps outside
    the model, an approval step, a kill switch, and a hash-chained ledger, on paper, with a live
    broker planned [AH1] [AH2] [AH3]. Mandate can claim none of those as a difference against it; an
@@ -82,7 +82,7 @@
 | General-purpose agents with money ambitions | Meta Muse, SpaceXAI Grok Bot, OpenAI Dots | Not competitors today (no documented trading); the money-layer plugin (DEC-183) makes them a channel, and their permission scopes set the expectations ADR-0003's delegations answer |
 | Strategy and automation platforms | QuantConnect (Mia, LEAN), Volaren, Composer, Surmount, Autopilot, Option Alpha, TradersPost, Capitalise.ai, Autonomous | Substitutes for delegated execution; several are registered advisers |
 | Broker channels and MCP servers | Alpaca, Interactive Brokers, Webull, Tradier, tastytrade, TradeStation, Kraken, Coinbase, Public MCP, Robinhood MCP | Channels and suppliers; each is also a substitute when a user connects their own agent directly |
-| Open-source fund and research agents | ai-hedge-fund, Dexter | Free substitutes a technical owner runs on their own machine; the closest designs to Mandate's, and holders of its vocabulary's mindshare |
+| Open-source fund and research agents | ai-hedge-fund, Dexter | Open-source, self-hosted substitutes a technical owner runs on their own machine with their own data and model keys; ai-hedge-fund's design is the closest to Mandate's we found (inference) |
 | Infrastructure | Alpaca (API, paper, OAuth), NautilusTrader, LEAN, SnapTrade, Financial Datasets (data) | Suppliers, or build-versus-buy alternatives |
 
 ## Broker-native agents
@@ -629,7 +629,8 @@ both ask for a Financial Datasets API key [AH1] [DX1]. Stars were read on 2026-1
 
 ### ai-hedge-fund
 
-MIT-licensed, 63,855 stars, read at commit `78b779c` (version 2.5.0, 2026-10-02).
+MIT-licensed, 63,855 stars, read at commit `78b779c` of 2026-10-02 (version 2.5.0) [AH1]. Running it
+needs a Financial Datasets key and a model provider's key [AH1].
 
 **What it documents**
 
@@ -660,7 +661,7 @@ MIT-licensed, 63,855 stars, read at commit `78b779c` (version 2.5.0, 2026-10-02)
   validation gate, and auto-promotion are not started [AH3]. The goal is "an AI hedge fund that
   genuinely tries to **outperform the market**" [AH2].
 
-**Overlap with Mandate.** The closest design to Mandate's that we have found, and free
+**Overlap with Mandate.** The closest design to Mandate's that we have found, and open source
 (inference). Its principles restate `AGENTS.md` rule 4 almost word for word, and it ships hard
 caps outside the model, an approval step, a kill switch, paper before live, and a hash-chained
 ledger that refuses a broken chain. Not documented there: an owner envelope with autonomy rules
@@ -668,7 +669,7 @@ ledger that refuses a broken chain. Not documented there: an owner envelope with
 trading, settlement, market hours); coordination with other agents or the owner's own trades on one
 account; handling of an ambiguous broker submission; and anchoring the ledger outside the owner's
 disk. Several of these cannot arise while it places no orders. Once its live broker plugin ships it
-becomes a free, self-hosted substitute on Alpaca, Mandate's first connector. Its audience already
+would be a self-hosted substitute on Alpaca, Mandate's first connector (inference). Its audience already
 knows Mandate's own words ("mandate", "kill switch", a hash-chained record) from it, so those words
 alone will not set Mandate apart (inference).
 
@@ -768,23 +769,24 @@ counsel, not legal advice, and spending is the founder's ([DEC-79](../project/04
   your customers or users inside your application". It is "permitted only on plans that expressly
   include data redistribution (currently Professional and Enterprise), with attribution". Its YC
   page says "Redistribution included" [FD4], without naming the plans. A thesis that cites a value
-  in the decision view would be both.
+  in the decision view would be both (inference).
 - **An owner's own key is unresolved.** The Personal license covers "personal investing" by a
   natural person, "not for the benefit of any other person or entity", and "does not permit use by
   or on behalf of any business or organization" [FD2]. The terms do not say whether a hosted
   platform may use an owner's Personal key for that owner.
 - **Deletion collides with the record.** "When your access ends, your right to use the Services and
   data stops, and you must stop using and delete the data" [FD2]. Mandate keeps what a thesis cited
-  as journal artifacts for six years (DEC-433 item 20, Proposed for counsel) [M10]. A contract would
-  need a carve-out for cited values, the case item 20 anticipated.
+  as journal artifacts for six years, and the founder decided to "Allowlist only sources whose terms
+  allow that, and counsel confirms per vendor" (DEC-433 item 20, 2026-10-03) [M10]. On these terms
+  the data could not be allowlisted; a contract would need a carve-out for cited values (inference).
 - **Small print.** Liability is capped at "ONE HUNDRED U.S. DOLLARS (US$100)", and prepaid balances
   "expire twelve (12) months after purchase" [FD2].
 
 **Overlap with Mandate.** A supplier. The founder chose no paid vendor before the DEC-99 evaluation
 passes, with SEC EDGAR and XBRL facts first (DEC-433 item 16) [M10], and Financial Datasets' SEC
 datasets come from EDGAR too [FD5]. What it would add is breadth Mandate does not parse itself
-(KPIs, guidance, segments, earnings within seconds) at a licensing cost set by redistribution, not
-volume (inference). Its self-signup flow is the "agent asks, a human pays" pattern Mandate's ASK
+(KPIs, guidance, segments, earnings within seconds), and the redistribution right sets a floor of
+$2,000 a month however few requests the research agent makes [FD1] (inference). Its self-signup flow is the "agent asks, a human pays" pattern Mandate's ASK
 applies to orders; the research agent must not be able to start it, because a paid source is
 spending and enters only through the vetted allowlist ([mandate spec §8.4](../specs/mandate.md#84-the-research-agent-dec-97-adr-0002))
 (inference).
@@ -862,8 +864,8 @@ not shipped product, so no row supports a comparative claim until the demo in
     on its roadmap, not built [AH3].
 28. Financial Datasets' accuracy figures as fact. "99.9%+" and "99.99%" come from its own
     benchmark [FD3] [FD4].
-29. That Mandate uses, partners with, or is endorsed by Financial Datasets. No contract exists, and
-    no paid vendor may be added before the DEC-99 evaluation passes [M10].
+29. That Mandate uses, partners with, or is endorsed by Financial Datasets. No paid vendor may be
+    added before the DEC-99 evaluation passes [M10].
 30. That Financial Datasets covers non-US markets. Its coverage page says "Non-US markets are not
     yet available", although its pricing FAQ and YC page say "global" [FD1] [FD4] [FD6].
 
