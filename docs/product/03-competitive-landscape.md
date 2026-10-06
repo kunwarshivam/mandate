@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Owner** | Product |
-| **Status** | Draft v0.4, 2026-10-05. Adds Volaren (YC F26), which v0.3 listed as pre-launch, including what its app shows a visitor who is not signed in. Replaces v0.3 of 2026-09-30, which added the general-purpose agents section [ADR-0003](../adr/0003-earned-autonomy.md) sequenced; v0.2 of 2026-09-27 replaced v0.1 after it made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
-| **Method** | Public web pages only, read 2026-09-26 and 2026-09-27; the general-agents section's sources were read 2026-09-30, and Volaren's on 2026-10-05, including its app as a visitor who is not signed in. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
+| **Status** | Draft v0.5, 2026-10-06. Adds Minara, an AI trading product on crypto venues whose agent rules read close to Mandate's. Replaces v0.4 of 2026-10-05, which added Volaren (YC F26), Financial Datasets, and the open-source fund agents; v0.3 of 2026-09-30, which added the general-purpose agents section [ADR-0003](../adr/0003-earned-autonomy.md) sequenced; v0.2 of 2026-09-27 replaced v0.1 after it made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
+| **Method** | Public web pages only, read 2026-09-26 and 2026-09-27; the general-agents section's sources were read 2026-09-30, and Volaren's on 2026-10-05, including its app as a visitor who is not signed in. Minara's were read on 2026-10-06: its site, docs, terms, privacy policy, the audit report it links, and its public GitHub repositories. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
 | **Regulatory material** | Public commentary, not legal advice. Legal and compliance text is reserved for the founder and counsel ([DEC-79](../project/04-decision-log.md#decisions)) |
 | **Related** | [Strategy options](10-strategy-options.md), [Vision](01-vision-and-strategy.md), [Compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) |
 
@@ -72,13 +72,23 @@
    broker planned [AH1] [AH2] [AH3]. Mandate can claim none of those as a difference against it; an
    owner envelope with autonomy rules and expiry, US account rules, and coordination across agents
    on one account are not documented there (inference: where to look, not proof of absence).
+9. **A crypto product backed by Circle Ventures already publishes agent rules close to Mandate's,
+   and runs its autopilot without per-trade approval on wallets it signs for.** Minara's docs say "The model can
+   propose an action. It cannot manufacture its own authority to carry it out", and that an
+   uncertain submission is checked, not repeated [MN11]. Its Autopilot trades perpetual contracts
+   on Hyperliquid and Lighter "without requiring your manual approval for each individual trade",
+   inside a scope, mandatory stops, and a drawdown exit [MN3] [MN9]. Its terms bar US persons from
+   every Hyperliquid-routed feature [MN9]. What it does not document is an owner envelope beyond
+   that, strategy changes held until the owner confirms them, or how a user checks the signed
+   receipts it describes [MN5] [MN25]. Its rules leave Mandate with no difference in wording; the
+   difference is the US brokerage account, a confirmed mandate version, and evidence (inference).
 
 ## Segment map
 
 | Segment | Members covered here | Relationship to Mandate |
 |---|---|---|
 | Agentic features inside brokers | Public Agents, Robinhood Agentic Trading, eToro Agent Portfolios, Composer by SoFi | Competitors for the retail user, and channels when they let outside agents in |
-| Direct agent-trading products on the user's own account | Scalar Field, Conviction, TradeAgentic, NexusTrade, Coil, Regent (a control layer, not an end-user product) | Closest competitors |
+| Direct agent-trading products on the user's own account | Scalar Field, Conviction, TradeAgentic, NexusTrade, Coil, Regent (a control layer, not an end-user product), Minara (on wallets it creates and signs for, on crypto venues) | Closest competitors; Minara is not a US channel for its Hyperliquid features [MN9] |
 | General-purpose agents with money ambitions | Meta Muse, SpaceXAI Grok Bot, OpenAI Dots | Not competitors today (no documented trading); the money-layer plugin (DEC-183) makes them a channel, and their permission scopes set the expectations ADR-0003's delegations answer |
 | Strategy and automation platforms | QuantConnect (Mia, LEAN), Volaren, Composer, Surmount, Autopilot, Option Alpha, TradersPost, Capitalise.ai, Autonomous | Substitutes for delegated execution; several are registered advisers |
 | Broker channels and MCP servers | Alpaca, Interactive Brokers, Webull, Tradier, tastytrade, TradeStation, Kraken, Coinbase, Public MCP, Robinhood MCP | Channels and suppliers; each is also a substitute when a user connects their own agent directly |
@@ -347,6 +357,171 @@ Terms are governed by the laws of Kazakhstan [RG3].
 **Overlap with Mandate.** The only product found that describes a verifiable, operator-independent
 audit trail. Its primitives are payment-shaped (amounts, destinations). A possible partner, format
 peer, or competitor for the control-layer story.
+
+### Minara
+
+An AI trading product for crypto and perpetual contracts, which trades on wallets it creates for
+each user and signs for. Its pages were read on 2026-10-06, from public pages only.
+
+**What it documents**
+
+- **Company.** "the AI-powered digital finance assistant backed by Circle Ventures", created "by
+  the same team behind NFTGo"; Lowes Yang is co-founder and CEO. Limited early-access beta on
+  2025-08-14, from Singapore [MN29]; "now fully live for everyone" on 2025-11-25 [MN30].
+- **Proposition.** "Run Your Own Wall Street. The AI-native financial OS that evolves with you.
+  Trade anything, from anywhere"; "Vibe Trading: One sentence, one quant strategy"; "Agentic
+  Trading: Set it, forget it. Minara trades while you sleep" [MN1]. Its surfaces are chat and
+  research, Copilot, Autopilot, Strategy Studio, a strategy marketplace, prediction markets, agent
+  workflows, and an Agent API [MN2].
+- **Venues and assets.** "Minara executes the trades through its own venues on Lighter and
+  Hyperliquid. You do not connect or fund an outside exchange account" [MN6]. Crypto, stock, and
+  commodity exposure is "crypto perpetuals, tokenized stock perpetuals, and commodity perpetuals,
+  all settled in USDC", "up to 25x leverage on crypto perpetuals", and spot across eight chains
+  [MN2] [MN32]. "Minara is never your counterparty" [MN3].
+- **Wallets and keys.** "Minara generates and operates the controlling key on your behalf"; it
+  "has technical access to the signing keys necessary to execute trades", and the user retains
+  beneficial ownership and may export the key [MN9]. Export is limited to "up to three times per
+  24 hours" [MN33].
+- **Autopilot.** It "executes trading strategies on your behalf, 24 hours a day ... without
+  requiring manual input". The user picks a strategy, confirms a Trading Scope (the assets it may
+  manage) and risk settings, then starts it [MN3]. It "Uses all available funds in your Perps
+  Wallet, including any funds you deposit while Autopilot is running", cancels all open orders on
+  start, requires cross margin, and will not start while the user holds a position outside the
+  scope [MN3]. Occupied funds include the "worst-case estimated loss" of the user's own positions,
+  computed from their stop-loss prices [MN3]. Every position carries a take-profit and a stop-loss
+  that the user "cannot cancel ... while Autopilot is active"; it "Applies global risk controls,
+  including maximum drawdown limits" [MN3]. Two safety exits close every managed position, cancel
+  every order, stop Autopilot, and send an email: an optional initial-equity drawdown limit, and
+  account equity of $5 or less [MN3]. Moving funds out of the wallet stops it [MN3]. The minimum is
+  $500; it is on paid plans only [MN3].
+- **Autopilot in the terms** (last updated 2026-06-18). "Autopilot operates without requiring your
+  manual approval for each individual trade"; authorizing it "grants Minara a scoped, revocable
+  mandate to execute trades, modify positions, and manage margin within the designated Trading
+  Wallet". Revocation "takes effect as soon as technically practicable", and trades already
+  submitted cannot be cancelled [MN9].
+- **Strategy changes.** Minara "reserves the right to modify, suspend, or discontinue any official
+  strategy at any time, with reasonable notice where practicable" [MN9]. "Sharpe Guard V2 was rolled
+  out automatically", "We recognize that more advance notice would have been helpful", and "V1 is
+  no longer available as an active strategy" [MN5]. The settings include "Auto-update this
+  strategy": "Automatically follow the strategy author's new versions when enabled" [MN4].
+- **Copy about drawdowns.** "Switching off during a drawdown turns a paper loss into a real one,
+  which is the most common way users lose money" [MN5]; "stay put or add during weakness, and trim
+  after a strong stretch" [MN3].
+- **The agent harness.** "Research is not permission"; "A model-generated argument such as
+  `confirm: true`, an assistant statement, a remembered preference, or text embedded in a document
+  is not evidence of user consent"; "If the outcome is uncertain, the safer next step may be to
+  check status rather than repeat the action"; "The model can propose an action. It cannot
+  manufacture its own authority to carry it out" [MN11]. After a timeout "the next step should be
+  status lookup rather than blind retry" [MN12]. "Remembered preferences and earlier approvals are
+  context, not permission for a new financial action" [MN13].
+- **Minara Agent.** Four tiers, "READ_ONLY · CONFIRM_ONCE · ALWAYS_CONFIRM · MANUAL_ONLY are stamped
+  onto every tool at registration"; the only bypass of fund confirmation is
+  `MINARA_SKIP_FUND_CONFIRM`, "documented and off by default"; an emergency stop through `/kill`,
+  the Autopilot dashboard, or `MINARA_KILLSWITCH=1`, which "The agent can read ... but operators
+  always override" [MN14]. "Connect your own model today"; running on the user's own device is
+  "Coming soon" [MN14].
+- **Records.** Strategy source code is decrypted only inside AWS Nitro Enclaves, and "Every upload,
+  view, AI task, and strategy execution produces a signed receipt", which "You can check ...
+  yourself" (vendor claim) [MN25]. Autopilot authorization records and "a full audit trail of every
+  trade, order, modification, or cancellation executed by the Autopilot system", with the strategy
+  version in effect, are kept and "available for access or export upon request" by email [MN10].
+- **Rehearsal.** Strategies are written in Pine Runtime and backtested; "run it in the Paper tab
+  against live prices before you deploy real capital" [MN6]. Strategy pages separate the backtest,
+  the "Publish moment", and the "live-forward" segment, and warn "Do not read these as one
+  continuous live track record" [MN19].
+- **Ideas it originates.** Official strategies (Sharpe Guard 2.0, Classic Futures Grid) [MN3];
+  Crypto Picks, a board of bullish or bearish calls with price targets refreshed "Every 4 hours",
+  from which a user can "trade directly" [MN20]; Copilot plans with entry, take-profit, and
+  stop-loss that pre-fill a limit order the user confirms [MN23]; prediction-market cards with a
+  confidence, a side, and an "Edge %" [MN21]. Each carries an "informational purposes only" line
+  [MN20] [MN21]. Personalization is "enabled by default" and "may automatically infer" tags such as
+  a risk profile from conversations [MN24].
+- **Marketplace.** Creators set a profit-share rate, minimum and maximum investment (platform
+  minimum $500), and a subscriber cap; code stays private unless marked open source. "Top
+  Strategies is a comparison view, not an investment recommendation" [MN19].
+- **Workflows.** Copy-trading bots mirror chosen wallets' spot trades; deployed workflows cannot be
+  edited; "If your credit balance runs out, all active workflows pause automatically"; "Risk Control
+  (e.g. setting daily/weekly spend limits)" is listed as future [MN22].
+- **Pricing.** Free $0 (300 credits), Lite $19, Starter $49, and Pro $199 a month; "All paid plans
+  include unlimited Copilot and Autopilot" [MN17]. Trading fees for Autopilot on Hyperliquid crypto
+  are 0.030% maker and 0.060% taker; for Copilot and manual trades, 0.055% and 0.075% [MN18].
+- **Posture.** "You are interacting with an AI system, not a licensed human financial adviser,
+  broker, or investment professional"; outputs are informational [MN9]. US and Ontario persons are
+  barred from "any feature of the Services that routes transactions to or interacts with the
+  Hyperliquid protocol" (§4.6); other restricted jurisdictions are listed in §11; disputes go to
+  SIAC arbitration seated in Singapore, with a class-action waiver [MN9].
+- **Security audit.** SlowMist tested the web application from 2025-07-30 to 2025-08-19. Among its
+  findings were a critical one, where "the purchased asset does not match the asset displayed in
+  the dialog" after an AI-recommended purchase, and a high one, "Default slippage is 25% and cannot
+  be changed". Both are marked fixed, with fixes "verified using the black-box method"; nine
+  suggestions, among them "API Does Not Check Account Balance" and "Missing AML Strategy", are
+  marked acknowledged [MN26].
+- **Open source.** `minara-skills` (356 stars, last commit 2026-09-17; its README says MIT, and
+  GitHub detects no license file) packages Minara for Claude Code, Codex, and other agents, and
+  reports "88/100" on Minara's own benchmark [MN15]. `minara-cli` (MIT, 70 stars, last commit
+  2026-04-03) calls its fund confirmation "an extra safety net. Disable it via `minara config`",
+  and blocks manual orders on a wallet while Autopilot is on [MN16].
+- **Model.** DMind, "an open-source research organization", whose models are "paired with
+  general-purpose models such as Claude and GPT"; its benchmark of 1,917 questions was accepted to
+  KDD 2026 [MN28].
+
+**Reported.** PitchBook lists an early-stage venture round on 2025-08-01, investors Circle Ventures
+and SeaX Ventures, and an office in Boston [MN31].
+
+Pages disagree in six places:
+
+- **Per-trade confirmation.** The wallet FAQ says "Every trade requires your explicit
+  confirmation" [MN7], and the agent site says of Autopilot "Every trade still pings you before it
+  lands" [MN14]. The terms say Autopilot runs "without requiring your manual approval for each
+  individual trade" [MN9], and the Autopilot docs agree [MN3].
+- **Custody.** The terms and docs say non-custodial [MN8] [MN9]; the Autopilot product page says
+  "Trade assets with stablecoins through a built-in custodial wallet" [MN4].
+- **Wallet stack.** The wallet-security page names EIP-7702 [MN8]; the FAQ says ERC-4337 "powered
+  by Privy" [MN7]; the privacy policy names Particle Network as the signer infrastructure [MN10].
+- **Stopping a strategy.** The Autopilot docs say the user can stop "choosing to keep or close its
+  positions" [MN3]; the Strategy Studio FAQ says "Stopping it closes every position it holds. There
+  is no way to pause" [MN6].
+- **The AI's role.** The product page says "deterministic rules — no discretionary AI trades"
+  [MN4]; the benchmark page shows, for each trade, "the rationale Minara's AI used to enter or exit
+  the position", "the same reasoning layer that drives Autopilot" [MN27].
+- **Strategy updates.** The terms promise notice "where practicable" [MN9], the FAQ says Sharpe
+  Guard V2 rolled out without enough of it [MN5], and the settings offer an auto-update switch
+  [MN4]. Prefer the terms, which are dated, for what Minara commits to.
+
+**What it does not document**
+
+- Limits on an Autopilot session beyond its scope, the mandatory stops, and the two safety exits,
+  such as a daily loss limit, an order-count or position-size cap the owner sets, or a notional
+  ceiling; spend limits for workflows are listed as future [MN3] [MN22].
+- Whether an order intent is recorded before it is sent, or what happens to a lost acknowledgment
+  from Hyperliquid or Lighter, beyond the harness guidance to check status first [MN11].
+- Whether an approval or confirmation expires, or is checked against the account again before it
+  is sent.
+- How a user checks a signed receipt, against which published key, or whether receipts cover
+  Autopilot trades as well as strategy runs [MN25].
+- Whether Lighter-routed features, Autopilot included, are open to US persons [MN9].
+- Any user, subscriber, or asset figure.
+- A public repository for Minara Agent: the GitHub repository its installer names returns "404"
+  [MN14].
+
+**Overlap with Mandate.** Minara's harness pages state Mandate's agent rules in its own words:
+research is not permission, a model cannot authorize itself, a remembered approval is not consent,
+and an uncertain submission is looked up, not repeated [MN11] [MN12] [MN13]. Its Minara Agent adds
+permission tiers and an operator kill switch [MN14]. None of those is a difference Mandate can
+claim. The differences are where the authority comes from and where the money sits. Autopilot
+trades without per-trade approval on wallets Minara signs for, on two crypto venues [MN6] [MN9].
+Its envelope is a scope, mandatory stops, and a drawdown exit [MN3]. Official strategies can change
+under the user, with notice only where practicable [MN5] [MN9]. Its copy tells owners that
+switching off in a drawdown "is the most common way users lose money" [MN5]. Mandate trades the
+owner's own brokerage account, changes nothing without a confirmed mandate version, and keeps the
+kill switch available in every state (`AGENTS.md` rules 11 and 13). For a US owner, Minara's terms
+close every Hyperliquid-routed feature [MN9], and its stocks are perpetual contracts, not shares at
+a broker [MN32]; Mandate's market is the US account it bars (inference). SlowMist's critical
+finding, an asset bought that did not match the one shown [MN26], is the gap between shown and sent
+that Mandate's order builder and journal are built to close; Minara reports it fixed. Its Crypto
+Picks, official strategies, and "stay put or add during weakness" copy [MN3] [MN20] raise what
+[Compliance](08-compliance-and-regulatory.md) questions 26 (nudges) and 31 (platform-originated
+ideas) ask; any reading is for counsel.
 
 ### NexusTrade
 
@@ -827,19 +1002,19 @@ spending and enters only through the vetted allowlist ([mandate spec §8.4](../s
 
 Legend: **Yes** documented; **Partly** documented for part of the capability, scope in the cell;
 **No** the company's own material says it does not, or its design excludes it;
-**Not documented** no public statement found as of 2026-09-27 (Volaren: 2026-10-05). "(vc)" marks a vendor claim with no mechanism shown.
+**Not documented** no public statement found as of 2026-09-27 (Volaren: 2026-10-05; Minara: 2026-10-06). "(vc)" marks a vendor claim with no mechanism shown.
 
-| Differentiator | Public Agents | Robinhood Agentic | Scalar Field | QuantConnect Mia + LEAN | Composer by SoFi | TradeAgentic | Regent | Volaren | Mandate (status) |
-|---|---|---|---|---|---|---|---|---|---|
-| D1 Owner limits enforced outside strategy or agent logic | Partly: limits live in each plan; buying power, eligibility, per-agent margin outside it [PU3] [PU10] | Partly: the funded agentic account caps capital; Robinhood states it does not supervise agents [RH1] [RH2] | Partly: capital and buying power enforced per strategy; drawdown thresholds only in the AI disclosure and guidance [SF1] [SF5] [SF16] | Partly: LEAN risk model runs inside the algorithm [QC2] | Not documented [CO1] | Yes (vc) [TA1] | Yes (vc), payments, devnet [RG1] | Not documented: every trade is placed or confirmed by the user [VL5] [VL6] | Specified; gate code merged (#157, #160), flatten open (#176) [M1] |
-| D2 Coordination across agents on one account | No: agents run independently [PU5] | Not documented [RH2] | Partly: isolated books, aggregate reconciliation [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Yes (vc): one shared capital pool [TA2] | Not documented [RG1] | Not documented [VL3] | Specified (E7-5, RC-17); not built [M2] |
-| D3 Per-action approval with expiry and revalidation | No: no confirmation before each transaction [PU8] | Partly: optional per-trade approval; expiry not documented [RH3] | Not documented: activation approval only; `venue.trade()` has no approval workflow [SF16] [SF19] | Not documented: live deployment decision stays with the user [QC1] | Not documented [CO1] | No: no per-trade override by design [TA2] | Partly (vc): hold verdict [RG1] | Partly: "you confirm every order" once order placement ships; expiry and revalidation not documented [VL4] [VL5] | Classification tests merged (#175); approvals and drift revalidation are M7 (E8-1 to E8-3) [M3] |
-| D4 Exportable, verifiable decision record | Partly: run logs and activity feed; export not documented; automated extraction barred [PU5] [PU8] | Not documented [RH1] | Not documented [SF1] | Not documented [QC1] | Not documented [CO1] | Partly (vc): refusals recorded and scored; integrity not documented [TA1] | Yes (vc): anchored, operator-independent [RG1] | Partly: strategy pages carry a rules fingerprint and a never-backfilled forward record; covers strategies, not a user's decisions; export not documented [VL9] | Journal hash chain and verify CLI merged (E5-1, E5-4); decision view is M9 (E12) [M4] |
-| D5 Documented handling of ambiguous submissions and restarts | Partly: repeated failures become "action required" [PU7] | Not documented [RH3] | Yes: idempotent execution, pending-order rule, reconcile and freeze [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Partly (vc): resumes after reboot [TA1] | Not documented [RG1] | Not applicable today: places no orders [VL4] [VL6] | Specified (E7-2, E7-3); tests #152 and implementation #174 open [M5] |
-| D6 Rehearsal before live (paper or forward evidence) | No backtest as of 2026-09-14; paper not documented [PU6] [PU7] | Not documented: no paper environment found [RH2] | Partly: paper on Alpaca; no evidence page [SF3] | Yes: backtest, paper, divergence monitoring [QC1] | Partly: backtest before activation [CO1] | Partly (vc): out-of-sample scoring [TA1] | Not applicable | Partly: backtests, and forward simulated records for its strategies [VL2] [VL9] | Alpaca paper tracer (E7-7, #173) and forward-paper evaluation (DEC-99, E17-8) specified [M6] |
-| D7 One mandate across brokers | No: Public accounts only [PU8] | No: Robinhood accounts only [RH2] | Partly: same code across venues and paper or live; no mandate object [SF3] | Partly: one algorithm across many brokerages [QC3] | Not documented [CO2] | Not documented: brokers undisclosed [TA1] | Not documented [RG1] | Not applicable today: read-only sync from several brokers; trading at five "coming soon" [VL4] | Alpaca first, Robinhood at M8 (E7-6); not built [M7] |
-| D8 Ideas originated by the platform inside an owner envelope | No: "does only what you told it to do" [PU1] | No: the user's own agent; Robinhood does not recommend [RH1] | No: "user-defined logic" [SF9] | Yes: Mia generates ideas; the user decides live capital [QC1] | Partly: AI helps build rules the user activates [CO1] | Yes (vc) [TA2] | Not applicable | Partly: Volaren's "HOUSE" strategies and thesis baskets arrive as tickets the user reviews; no owner envelope documented [VL2] [VL6] [VL14] | Accepted (DEC-97); users only after DEC-99 passes [M8] |
-| D9 Runs on the customer's infrastructure | Not applicable (broker) | Not applicable (broker) | Partly: Enterprise private workspaces [SF6] | Yes: LEAN is open source [QC5] | Not documented [CO2] | Yes (vc): self-hosted desktop [TA1] | Not documented [RG1] | Not documented [VL3] | Planned (M11 hybrid) [M9] |
+| Differentiator | Public Agents | Robinhood Agentic | Scalar Field | QuantConnect Mia + LEAN | Composer by SoFi | TradeAgentic | Regent | Volaren | Minara | Mandate (status)  |
+|---|---|---|---|---|---|---|---|---|---|---|
+| D1 Owner limits enforced outside strategy or agent logic | Partly: limits live in each plan; buying power, eligibility, per-agent margin outside it [PU3] [PU10] | Partly: the funded agentic account caps capital; Robinhood states it does not supervise agents [RH1] [RH2] | Partly: capital and buying power enforced per strategy; drawdown thresholds only in the AI disclosure and guidance [SF1] [SF5] [SF16] | Partly: LEAN risk model runs inside the algorithm [QC2] | Not documented [CO1] | Yes (vc) [TA1] | Yes (vc), payments, devnet [RG1] | Not documented: every trade is placed or confirmed by the user [VL5] [VL6] | Partly: a scope the owner confirms, mandatory stops, "global risk controls, including maximum drawdown limits", and two safety exits apply to every strategy it runs; it uses all funds in the wallet [MN3] | Specified; gate code merged (#157, #160), flatten open (#176) [M1]  |
+| D2 Coordination across agents on one account | No: agents run independently [PU5] | Not documented [RH2] | Partly: isolated books, aggregate reconciliation [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Yes (vc): one shared capital pool [TA2] | Not documented [RG1] | Not documented [VL3] | Partly: Autopilot reserves the stop-bounded risk of the owner's own positions, and the CLI blocks manual orders while it runs; several strategies on one wallet not documented [MN3] [MN16] | Specified (E7-5, RC-17); not built [M2]  |
+| D3 Per-action approval with expiry and revalidation | No: no confirmation before each transaction [PU8] | Partly: optional per-trade approval; expiry not documented [RH3] | Not documented: activation approval only; `venue.trade()` has no approval workflow [SF16] [SF19] | Not documented: live deployment decision stays with the user [QC1] | Not documented [CO1] | No: no per-trade override by design [TA2] | Partly (vc): hold verdict [RG1] | Partly: "you confirm every order" once order placement ships; expiry and revalidation not documented [VL4] [VL5] | Partly: the harness verifies consent at runtime and Minara Agent has confirmation tiers; Autopilot needs no per-trade approval; expiry and revalidation not documented [MN9] [MN11] [MN14] | Classification tests merged (#175); approvals and drift revalidation are M7 (E8-1 to E8-3) [M3]  |
+| D4 Exportable, verifiable decision record | Partly: run logs and activity feed; export not documented; automated extraction barred [PU5] [PU8] | Not documented [RH1] | Not documented [SF1] | Not documented [QC1] | Not documented [CO1] | Partly (vc): refusals recorded and scored; integrity not documented [TA1] | Yes (vc): anchored, operator-independent [RG1] | Partly: strategy pages carry a rules fingerprint and a never-backfilled forward record; covers strategies, not a user's decisions; export not documented [VL9] | Partly: signed receipts the user can check (vc), and Autopilot audit logs exportable on request by email [MN10] [MN25] | Journal hash chain and verify CLI merged (E5-1, E5-4); decision view is M9 (E12) [M4]  |
+| D5 Documented handling of ambiguous submissions and restarts | Partly: repeated failures become "action required" [PU7] | Not documented [RH3] | Yes: idempotent execution, pending-order rule, reconcile and freeze [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Partly (vc): resumes after reboot [TA1] | Not documented [RG1] | Not applicable today: places no orders [VL4] [VL6] | Partly: the harness says to check status rather than repeat an uncertain action; intent recording and restart not documented [MN11] [MN12] | Specified (E7-2, E7-3); tests #152 and implementation #174 open [M5]  |
+| D6 Rehearsal before live (paper or forward evidence) | No backtest as of 2026-09-14; paper not documented [PU6] [PU7] | Not documented: no paper environment found [RH2] | Partly: paper on Alpaca; no evidence page [SF3] | Yes: backtest, paper, divergence monitoring [QC1] | Partly: backtest before activation [CO1] | Partly (vc): out-of-sample scoring [TA1] | Not applicable | Partly: backtests, and forward simulated records for its strategies [VL2] [VL9] | Yes: backtest, a Paper tab against live prices, and a live-forward segment shown apart from the backtest [MN6] [MN19] | Alpaca paper tracer (E7-7, #173) and forward-paper evaluation (DEC-99, E17-8) specified [M6]  |
+| D7 One mandate across brokers | No: Public accounts only [PU8] | No: Robinhood accounts only [RH2] | Partly: same code across venues and paper or live; no mandate object [SF3] | Partly: one algorithm across many brokerages [QC3] | Not documented [CO2] | Not documented: brokers undisclosed [TA1] | Not documented [RG1] | Not applicable today: read-only sync from several brokers; trading at five "coming soon" [VL4] | Partly: Hyperliquid and Lighter wallets; no outside broker or exchange account [MN6] | Alpaca first, Robinhood at M8 (E7-6); not built [M7]  |
+| D8 Ideas originated by the platform inside an owner envelope | No: "does only what you told it to do" [PU1] | No: the user's own agent; Robinhood does not recommend [RH1] | No: "user-defined logic" [SF9] | Yes: Mia generates ideas; the user decides live capital [QC1] | Partly: AI helps build rules the user activates [CO1] | Yes (vc) [TA2] | Not applicable | Partly: Volaren's "HOUSE" strategies and thesis baskets arrive as tickets the user reviews; no owner envelope documented [VL2] [VL6] [VL14] | Partly: official strategies, Crypto Picks, and Copilot plans; the envelope is a scope, stops, and a drawdown exit [MN3] [MN20] [MN23] | Accepted (DEC-97); users only after DEC-99 passes [M8]  |
+| D9 Runs on the customer's infrastructure | Not applicable (broker) | Not applicable (broker) | Partly: Enterprise private workspaces [SF6] | Yes: LEAN is open source [QC5] | Not documented [CO2] | Yes (vc): self-hosted desktop [TA1] | Not documented [RG1] | Not documented [VL3] | Not documented: own model "today", own device "Coming soon"; the agent's repository returns 404 [MN14] | Planned (M11 hybrid) [M9]  |
 
 **Reading the matrix.** No column is all "Yes". Mandate's column is specification and partial code,
 not shipped product, so no row supports a comparative claim until the demo in
@@ -900,6 +1075,29 @@ not shipped product, so no row supports a comparative claim until the demo in
     added before the DEC-99 evaluation passes [M10].
 30. That Financial Datasets covers non-US markets. Its coverage page says "Non-US markets are not
     yet available", although its pricing FAQ and YC page say "global" [FD1] [FD4] [FD6].
+31. That Minara has no kill switch, no permission tiers, or no consent check, or that it lets a
+    model approve its own trades. Its agent site and docs document all of these controls
+    [MN11] [MN14].
+32. That Mandate is the first to say a model cannot authorize its own actions. Minara's docs say
+    "The model can propose an action. It cannot manufacture its own authority to carry it out"
+    [MN11].
+33. That Minara is custodial, or that it is not, as a settled fact. Its terms say non-custodial
+    with Minara operating the controlling key [MN9]; its Autopilot product page says "built-in
+    custodial wallet" [MN4].
+34. That Minara asks before every Autopilot trade, or that it never does, without the source. Its
+    terms and Autopilot docs say no per-trade approval [MN3] [MN9]; its wallet FAQ and agent site
+    say the opposite [MN7] [MN14].
+35. Any Minara leaderboard, backtest, benchmark, or home-page return as a performance figure. It
+    calls Top Strategies "a comparison view, not an investment recommendation" [MN19].
+36. That Minara is closed to US users. Its terms bar US persons from Hyperliquid-routed features
+    [MN9]; they carry no such clause for Lighter, whose own terms were not read.
+37. That Minara needs a registration it lacks, or any other regulatory conclusion about it. Its
+    terms say it is "an AI system, not a licensed human financial adviser, broker, or investment
+    professional" [MN9]; readings are for counsel.
+38. That Minara's audit findings are open. The SlowMist report marks every finding fixed except
+    nine suggestions, which are acknowledged [MN26].
+39. That Minara Agent is open source. Its site says "Everything is open and auditable", and the
+    repository its installer names returns 404 as of 2026-10-06 [MN14].
 
 ## Unknowns to verify by product trial
 
@@ -933,6 +1131,13 @@ may place an order (`AGENTS.md` rule 8). Where access is unavailable, record "no
 | Financial Datasets | For counsel: may a hosted platform use an owner's Personal key for that owner? Would an Enterprise contract let Mandate keep cited values for six years after access ends? |
 | ai-hedge-fund | When its live broker ships, is an order intent recorded before it is sent, and what happens on a lost acknowledgment? Does an approval expire? |
 | ai-hedge-fund | Decided at T and executed at T+1: are its caps checked again at execution against the book and prices of T+1? |
+| Minara | Does a running Autopilot wait for a confirmation before each trade, as its wallet FAQ and agent site say, or not, as its terms say? Is the agent site's Autopilot the same product? |
+| Minara | Are Lighter-routed features, Autopilot included, open to US persons under Minara's terms and Lighter's own? |
+| Minara | When an official strategy changes, does a running session move to the new version without the owner's consent? What does "Auto-update this strategy" default to? |
+| Minara | Does stopping a strategy offer keeping its positions, as the Autopilot docs say, or always close them, as the Strategy Studio FAQ says? |
+| Minara | Is an order intent recorded before it is sent, and what happens after a lost acknowledgment from Hyperliquid or Lighter? Does any confirmation expire? |
+| Minara | Can a user check a signed receipt for an Autopilot trade without asking Minara, and against which published key? |
+| Minara | Which signer holds the controlling key today: the EIP-7702 setup, Privy, or Particle Network? |
 
 ## Sources
 
@@ -1080,6 +1285,39 @@ Accessed means the page carried no date and was read on 2026-09-26 or 2026-09-27
 | AH5 | [ai-hedge-fund `hedge_fund/paper/ledger.py`](https://github.com/virattt/ai-hedge-fund/blob/78b779c/hedge_fund/paper/ledger.py) | commit `78b779c`; added 2026-10-01 |
 | AH6 | [ai-hedge-fund `hedge_fund/paper/tick.py`](https://github.com/virattt/ai-hedge-fund/blob/78b779c/hedge_fund/paper/tick.py) | commit `78b779c` |
 | DX1 | [Dexter README](https://github.com/virattt/dexter) | accessed 2026-10-05 |
+| MN1 | [Minara home page](https://minara.ai/home) | accessed 2026-10-06 |
+| MN2 | [Minara docs: About Minara](https://minara.ai/docs/readme) | accessed 2026-10-06 |
+| MN3 | [Minara docs: Autopilot](https://minara.ai/docs/trade/trading-autopilot) | accessed 2026-10-06 |
+| MN4 | [Minara: Autopilot trading](https://minara.ai/product/autopilot-trading) (product page, including its settings text) | accessed 2026-10-06 |
+| MN5 | [Minara FAQ: Autopilot and Sharpe Guard](https://minara.ai/docs/support/faq/trading/autopilot-and-sharpe-guard) | accessed 2026-10-06 |
+| MN6 | [Minara FAQ: Strategy Studio, deploying and live trading](https://minara.ai/docs/support/faq/strategy-studio/deploying-and-live-trading) and the [Academy FAQ](https://minara.ai/docs/academy/faq) | accessed 2026-10-06 |
+| MN7 | [Minara FAQ: wallet basics](https://minara.ai/docs/support/faq/wallet-and-security/wallet-basics) | accessed 2026-10-06 |
+| MN8 | [Minara docs: wallet security](https://minara.ai/docs/technology/wallet-security) | accessed 2026-10-06 |
+| MN9 | [Minara Terms of Use (PDF)](https://minara.ai/doc/terms-of-use.pdf) | last updated 2026-06-18 |
+| MN10 | [Minara Privacy Policy (PDF)](https://minara.ai/doc/privacy-policy.pdf) | last updated 2026-05-11 |
+| MN11 | [Minara docs: Financial Authorization](https://minara.ai/docs/agent/operate-safely/financial-authorization) | accessed 2026-10-06 |
+| MN12 | [Minara docs: Human Review](https://minara.ai/docs/agent/operate-safely/human-review) | accessed 2026-10-06 |
+| MN13 | [Minara docs: memory and learning](https://minara.ai/docs/agent/core-concepts/memory-and-learning) | accessed 2026-10-06 |
+| MN14 | [Minara Agent](https://agent.minara.ai/); the [repository](https://github.com/minara-ai/minara-agent) its installer names returned 404 | accessed 2026-10-06 |
+| MN15 | [minara-skills on GitHub](https://github.com/Minara-AI/minara-skills/tree/8badf3b) | commit `8badf3b`, 2026-09-17 |
+| MN16 | [minara-cli on GitHub](https://github.com/Minara-AI/minara-cli/tree/25e64ae) | commit `25e64ae`, 2026-04-03 |
+| MN17 | [Minara docs: credits](https://minara.ai/docs/reference/credits) | accessed 2026-10-06 |
+| MN18 | [Minara docs: trading fees](https://minara.ai/docs/trade/trading-fees) | accessed 2026-10-06 |
+| MN19 | Minara docs: [Strategy Marketplace](https://minara.ai/docs/trade/strategy-market), [evaluate a strategy](https://minara.ai/docs/trade/strategy-market/evaluate-a-strategy), [publish and manage](https://minara.ai/docs/trade/strategy-market/publish-and-manage), and the [marketplace FAQ](https://minara.ai/docs/support/faq/trading/strategy-marketplace) | accessed 2026-10-06 |
+| MN20 | [Minara docs: Crypto Picks](https://minara.ai/docs/chat/crypto-picks) | accessed 2026-10-06 |
+| MN21 | [Minara docs: Prediction Markets](https://minara.ai/docs/trade/prediction-markets) | accessed 2026-10-06 |
+| MN22 | Minara docs: [agentic workflow](https://minara.ai/docs/workflow/agentic-workflow) and [copy-trading bot](https://minara.ai/docs/workflow/how-to-create-a-copy-trading-bot) | accessed 2026-10-06 |
+| MN23 | [Minara docs: AI trading copilot](https://minara.ai/docs/trade/trading-copilot) | accessed 2026-10-06 |
+| MN24 | [Minara docs: personalization](https://minara.ai/docs/reference/personalization) | accessed 2026-10-06 |
+| MN25 | [Minara docs: TEE-based data security](https://minara.ai/docs/technology/data-security) | accessed 2026-10-06 |
+| MN26 | [SlowMist: Minara AI security audit report (PDF)](https://static.minara.ai/audit/Minara%20AI%20-%20SlowMist%20Audit%20Report.pdf), linked from the home page | audit 2025-07-30 to 2025-08-19 |
+| MN27 | [Minara docs: benchmark](https://minara.ai/docs/trade/benchmark) | accessed 2026-10-06 |
+| MN28 | Minara docs: [DMind](https://minara.ai/docs/technology/dmind) and [DMind Benchmark](https://minara.ai/docs/technology/dmind/benchmark) | accessed 2026-10-06 |
+| MN29 | [PR Newswire: Minara announces limited early access beta](https://www.prnewswire.com/news-releases/minara-announces-limited-early-access-beta-launch-of-aipowered-virtual-cfo-for-digital-finance-302530341.html) | 2025-08-14 |
+| MN30 | [Minara blog: full launch](https://minara.ai/blog/minara-full-launch-ai-financial-assistant-for-intent-execution-and-digital-finance/) | 2025-11-25 |
+| MN31 | [PitchBook: Minara profile preview](https://pitchbook.com/profiles/company/919676-44) (reported) | accessed 2026-10-06 |
+| MN32 | [Minara docs: trade assets](https://minara.ai/docs/trade/trade-assets) | accessed 2026-10-06 |
+| MN33 | [Minara FAQ: export private key](https://minara.ai/docs/support/faq/wallet-and-security/export-private-key) | accessed 2026-10-06 |
 
 Not re-verified in this refresh, and so carrying no claims here: the open-source research frameworks
 v0.1 listed other than ai-hedge-fund (TradingAgents, RD-Agent with Qlib, FinRobot, FinRL), the research
