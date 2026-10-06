@@ -422,22 +422,30 @@ fn shipping_paper_adapter_uses_only_the_validated_deployment_input() -> Result<(
     let source_account_ref = input.account_ref().to_owned();
     assert_eq!(setup.deployment.agent, source_agent);
     assert_eq!(setup.deployment.workspace.0, source_workspace);
-    assert_eq!(setup.deployment.connection.0, "conn_owner_paper_42");
+    assert_eq!(
+        setup.deployment.connection.0,
+        loaded.mandate.connection_id.as_str()
+    );
     assert_eq!(setup.account_ref, source_account_ref);
     let source = include_str!("../bin/mandate-tracer.rs");
-    let body = source
+    let after_signature = source
         .split_once("fn tracer()")
-        .map(|(_, body)| body)
+        .map(|(_, after)| after)
         .ok_or_else(|| "the shipping tracer function is missing".to_owned())?;
+    let body = after_signature
+        .split_once("\n}\n\nstruct SystemClock")
+        .map(|(body, _)| body)
+        .ok_or_else(|| "the shipping tracer function boundary is missing".to_owned())?;
     let cli_source = include_str!("../cli.rs");
     for forbidden in [
-        "cli::WORKSPACE",
-        "cli::AGENT",
-        "cli::CONNECTION",
-        "cli::ACCOUNT_REF",
+        "WORKSPACE",
+        "AGENT",
+        "CONNECTION",
+        "ACCOUNT_REF",
         "conn_alpaca_paper_01",
         "tracer-aapl",
         "tracer-paper",
+        "\"tracer\"",
     ] {
         assert!(
             !body.contains(forbidden) && !cli_source.contains(forbidden),
@@ -451,15 +459,22 @@ fn shipping_paper_adapter_uses_only_the_validated_deployment_input() -> Result<(
         );
     }
     assert!(!body.contains("Artifacts::load("));
+    for required in [
+        "let deployment_input = artifacts",
+        "let agent = deployment_input.deployment().agent.clone();",
+        "deployment: deployment_input.deployment().clone(),",
+        "account_ref: deployment_input.account_ref().to_owned(),",
+        "workspace: deployment_input.deployment().workspace.0.clone(),",
+    ] {
+        assert!(
+            body.contains(required),
+            "the shipping tracer body must use `{required}`"
+        );
+    }
     assert_eq!(
-        body.matches("deployment_input.deployment()").count(),
-        3,
-        "one validated deployment must populate context, setup, and stage sources"
-    );
-    assert_eq!(
-        body.matches("deployment_input.account_ref()").count(),
-        2,
-        "one validated account reference must populate setup and stage sources"
+        body.matches("account_ref: deployment_input.account_ref()")
+            .count(),
+        2
     );
     scratch.remove()
 }
