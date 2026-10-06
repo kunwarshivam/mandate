@@ -84,15 +84,7 @@ impl Artifacts {
     pub fn load(mandate_path: &Path, config_dir: &Path) -> Result<Self, Cause> {
         let loaded = Self::load_inputs(mandate_path, config_dir)?;
         let identity = loaded.production_identity();
-        if identity.asset_id.as_str() != INSTRUMENT_ID
-            || identity.symbol.as_str() != SYMBOL
-            || identity.asset_class != DomainAssetClass::UsEquity
-            || identity.broker_exchange != BrokerExchange::Nasdaq
-            || identity.model_id != MODEL_ID
-            || identity.model_version != MODEL_VERSION
-            || loaded.instrument.increment != ShareIncrement::Whole
-            || loaded.instrument.etp != EtpClass::Plain
-        {
+        if !legacy_identity(&identity) {
             return Err(absent("the reviewed E7-7 production inputs"));
         }
         Ok(loaded)
@@ -117,10 +109,9 @@ impl Artifacts {
             return Err(absent("the one reviewed signal model"));
         };
         let model_artifact = artifact(config_dir, "model-artifact.json", &["id", "version"])?;
-        if required_text(&model_artifact.value, "id")? != model.id.as_str()
-            || required_text(&model_artifact.value, "version")? != model.version
-            || model.content_hash != Digest::of(&model_artifact.bytes)
-        {
+        require_text(&model_artifact.value, "id", model.id.as_str())?;
+        require_text(&model_artifact.value, "version", &model.version)?;
+        if model.content_hash != Digest::of(&model_artifact.bytes) {
             return Err(absent("the reviewed model artifact"));
         }
         let model_id = model.id.as_str().to_owned();
@@ -281,6 +272,14 @@ fn require_text(value: &Value, name: &'static str, expected: &str) -> Result<(),
     }
 }
 
+fn legacy_identity(identity: &ProductionIdentity<'_>) -> bool {
+    identity.asset_id.as_str() == INSTRUMENT_ID
+        && identity.symbol.as_str() == SYMBOL
+        && identity.broker_exchange == BrokerExchange::Nasdaq
+        && identity.model_id == MODEL_ID
+        && identity.model_version == MODEL_VERSION
+}
+
 fn exchanges(text: &str) -> Result<(BrokerExchange, GateExchange), Cause> {
     if text == "nasdaq" {
         Ok((BrokerExchange::Nasdaq, GateExchange::Nasdaq))
@@ -301,5 +300,100 @@ fn require_empty_array(value: &Value, name: &'static str) -> Result<(), Cause> {
     match value.get(name).and_then(Value::as_array) {
         Some([]) => Ok(()),
         Some(_) | None => Err(absent(name)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_accounting::InstrumentId;
+    use mandate_alpaca::Exchange as BrokerExchange;
+    use mandate_canon::Digest;
+    use mandate_domain::{AssetClass, AssetId};
+    use mandate_risk::Exchange as GateExchange;
+
+    use super::{ProductionIdentity, exchanges, legacy_identity};
+
+    fn text<E: std::fmt::Display>(error: E) -> String {
+        error.to_string()
+    }
+
+    #[test]
+    fn every_legacy_identity_field_is_required_independently() -> Result<(), String> {
+        let aapl = AssetId::parse("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415").map_err(text)?;
+        let other = AssetId::parse("b0b6dd9d-8b9b-48a9-ba46-b9d54906e416").map_err(text)?;
+        let aapl_symbol = InstrumentId::new("AAPL").map_err(text)?;
+        let other_symbol = InstrumentId::new("MSFT").map_err(text)?;
+        let matches = |asset_id, symbol, exchange, model_id, model_version| {
+            legacy_identity(&ProductionIdentity {
+                asset_id,
+                symbol,
+                asset_class: AssetClass::UsEquity,
+                broker_exchange: exchange,
+                gate_exchange: GateExchange::Nasdaq,
+                model_id,
+                model_version,
+                model_hash: Digest::of(b"model"),
+            })
+        };
+        assert!(matches(
+            &aapl,
+            &aapl_symbol,
+            BrokerExchange::Nasdaq,
+            "quant.ma_crossover",
+            "1.0.0"
+        ));
+        assert!(!matches(
+            &other,
+            &aapl_symbol,
+            BrokerExchange::Nasdaq,
+            "quant.ma_crossover",
+            "1.0.0"
+        ));
+        assert!(!matches(
+            &aapl,
+            &other_symbol,
+            BrokerExchange::Nasdaq,
+            "quant.ma_crossover",
+            "1.0.0"
+        ));
+        assert!(!matches(
+            &aapl,
+            &aapl_symbol,
+            BrokerExchange::Nyse,
+            "quant.ma_crossover",
+            "1.0.0"
+        ));
+        assert!(!matches(
+            &aapl,
+            &aapl_symbol,
+            BrokerExchange::Nasdaq,
+            "quant.other_model",
+            "1.0.0"
+        ));
+        assert!(!matches(
+            &aapl,
+            &aapl_symbol,
+            BrokerExchange::Nasdaq,
+            "quant.ma_crossover",
+            "2.0.0"
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn every_eligible_exchange_maps_to_both_consumers() -> Result<(), String> {
+        let cases = [
+            ("nasdaq", BrokerExchange::Nasdaq, GateExchange::Nasdaq),
+            ("nyse", BrokerExchange::Nyse, GateExchange::Nyse),
+            ("arca", BrokerExchange::Arca, GateExchange::Arca),
+            ("amex", BrokerExchange::Amex, GateExchange::Amex),
+            ("bats", BrokerExchange::Bats, GateExchange::Bats),
+        ];
+        for (name, broker, gate) in cases {
+            assert_eq!(exchanges(name).map_err(text)?, (broker, gate), "{name}");
+        }
+        assert!(exchanges("otc").is_err());
+        assert!(exchanges("other").is_err());
+        Ok(())
     }
 }
