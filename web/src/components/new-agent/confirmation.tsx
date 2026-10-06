@@ -172,6 +172,10 @@ export function Confirmation({ draft, request, onBack, onStartOver }: { draft: D
     progress.current?.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true });
     progress.current?.scrollIntoView({ block: "start" });
   }, [sentId]);
+  const phase = deployment?.phase ?? null;
+  useEffect(() => {
+    if (phase === "recorded") progress.current?.scrollIntoView({ block: "nearest" });
+  }, [phase]);
 
   const confirm = () => {
     const sent = deploy(request, { screen: "A5", environment: ws.environment, shown: confirmationLines(draft, shownVersion) });

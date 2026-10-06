@@ -95,6 +95,14 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
     await expect(progress.locator("[data-slot=owl]")).toBeVisible();
     await expect(page.getByText("Your confirmed mandate.")).toBeVisible();
     await expect(progress.locator("[data-slot=first-ask]")).toContainText(/Its first check asks you: buy 6 MSFT at \$44\.62\./);
+    const review = progress.getByRole("link", { name: "Review the request" });
+    await expect(review).toBeInViewport();
+    await expect
+      .poll(async () => {
+        const [link, bar] = await Promise.all([review.boundingBox(), dock(page).boundingBox()]);
+        return link && bar ? link.y + link.height <= bar.y : false;
+      }, { message: "the request's link clears the dock" })
+      .toBe(true);
     agentHref = (await progress.getByRole("link", { name: "Open Agent 4" }).getAttribute("href")) ?? "";
     expect(agentHref).toMatch(/^\/agents\/agt_[0-9A-HJKMNP-TV-Z]{26}$/);
   });
