@@ -629,7 +629,7 @@ both ask for a Financial Datasets API key [AH1] [DX1]. Stars were read on 2026-1
 
 ### ai-hedge-fund
 
-MIT-licensed, 63,855 stars, read at commit `78b779c` of 2026-10-02 (version 2.5.0) [AH1]. Running it
+MIT-licensed, 63,855 stars, read at commit `78b779c` of 2026-10-02, version 2.5.0 in its `pyproject.toml` [AH1]. Running it
 needs a Financial Datasets key and a model provider's key [AH1].
 
 **What it documents**
@@ -785,8 +785,9 @@ counsel, not legal advice, and spending is the founder's ([DEC-79](../project/04
 **Overlap with Mandate.** A supplier. The founder chose no paid vendor before the DEC-99 evaluation
 passes, with SEC EDGAR and XBRL facts first (DEC-433 item 16) [M10], and Financial Datasets' SEC
 datasets come from EDGAR too [FD5]. What it would add is breadth Mandate does not parse itself
-(KPIs, guidance, segments, earnings within seconds), and the redistribution right sets a floor of
-$2,000 a month however few requests the research agent makes [FD1] (inference). Its self-signup flow is the "agent asks, a human pays" pattern Mandate's ASK
+(KPIs, guidance, segments, earnings within seconds), and the redistribution right sets the published
+self-serve floor at $2,000 a month however few requests the research agent makes; Enterprise rates
+are custom [FD1] (inference). Its self-signup flow is the "agent asks, a human pays" pattern Mandate's ASK
 applies to orders; the research agent must not be able to start it, because a paid source is
 spending and enters only through the vetted allowlist ([mandate spec §8.4](../specs/mandate.md#84-the-research-agent-dec-97-adr-0002))
 (inference).
@@ -1036,7 +1037,7 @@ Accessed means the page carried no date and was read on 2026-09-26 or 2026-09-27
 | FD9 | [Financial Datasets: webhooks](https://docs.financialdatasets.ai/webhooks) | accessed 2026-10-05 |
 | FD10 | [Financial Datasets: EarningsBench](https://www.financialdatasets.ai/blogs/earningsbench) | 2026-06-29 |
 | FD11 | [Financial Datasets: partnership with Julius](https://www.financialdatasets.ai/blogs/julius-ai-partnership) | 2026-03-26 |
-| AH1 | [ai-hedge-fund README](https://github.com/virattt/ai-hedge-fund/blob/78b779c/README.md) | commit `78b779c`, 2026-10-02 |
+| AH1 | [ai-hedge-fund README](https://github.com/virattt/ai-hedge-fund/blob/78b779c/README.md) and [`pyproject.toml`](https://github.com/virattt/ai-hedge-fund/blob/78b779c/pyproject.toml) | commit `78b779c`, 2026-10-02 |
 | AH2 | [ai-hedge-fund VISION.md](https://github.com/virattt/ai-hedge-fund/blob/78b779c/VISION.md) | commit `78b779c`, 2026-10-02 |
 | AH3 | [ai-hedge-fund ROADMAP.md](https://github.com/virattt/ai-hedge-fund/blob/78b779c/ROADMAP.md) | commit `78b779c`, 2026-10-02 |
 | AH4 | [ai-hedge-fund `hedge_fund/risk/limits.py`](https://github.com/virattt/ai-hedge-fund/blob/78b779c/hedge_fund/risk/limits.py) | commit `78b779c`; file history from 2026-08-02 |
