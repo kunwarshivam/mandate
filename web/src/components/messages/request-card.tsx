@@ -18,7 +18,7 @@ export function PinnedRequest({ approval }: { approval: Approval }) {
     <Link
       href={`/approvals/${approval.approval_id}`}
       data-slot="pinned-request"
-      className="press sticky top-16 z-10 -mx-(--page-x) flex items-center gap-3 bg-lapis-soft px-(--page-x) py-2.5 outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset lg:mx-0 lg:rounded-xl lg:px-4"
+      className="press flex shrink-0 items-center gap-3 bg-lapis-soft px-(--page-x) py-2.5 outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset lg:px-8"
     >
       <span className="grid min-w-0 flex-1 gap-0.5">
         <span className="truncate font-semibold">

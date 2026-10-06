@@ -14,6 +14,7 @@ import { AccessDenied } from "./access-denied";
 import { AccountBanners } from "./account-banners";
 import { AppHeader } from "./app-header";
 import { Dock } from "./dock";
+import { PAGE_FRAME, fullBleed } from "./frame";
 import { TabNav } from "./nav";
 import { StatusStrip } from "./status-strip";
 import { StopSheetHost } from "./stop-control";
@@ -32,7 +33,8 @@ export function densityFor(pathname: string): "calm" | "dense" {
  * frame, under the header and the tab bar, so it rises from behind the bar and never covers Stop.
  * Owlhead, when open, docks to the right of the page from 110rem and the dock recentres on what is
  * left; narrower, it floats over the page's right side, and on a phone it is a sheet between the
- * header and the tab bar (DEC-476).
+ * header and the tab bar (DEC-476). Messages fills the window edge to edge, with no gutter and no
+ * page footer; its list of threads carries the fixture tag (DEC-478).
  */
 export function AppShell({ children }: { children: ReactNode }) {
   return (
@@ -53,13 +55,14 @@ function Frame({ children }: { children: ReactNode }) {
   const strip = record || !fresh;
   const banner = !record && !fresh && ws.status !== "loading";
   const sheetLayer = useRef<HTMLDivElement>(null);
+  const bleed = fullBleed(pathname);
 
   return (
     <div className="relative isolate flex min-h-svh w-full" style={{ "--copilot-w": copilot.open ? COPILOT_WIDTH : "0px" } as CSSProperties}>
       <a href="#main" className="sr-only z-50 bg-card px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
-      <div className="flex min-h-dvh min-w-0 flex-1 flex-col bg-card">
+      <div className={cn("flex min-h-dvh min-w-0 flex-1 flex-col bg-card", bleed && "h-dvh max-lg:pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom))]")}>
         <AppHeader />
         {strip ? (
           <div className={record ? undefined : "max-lg:hidden"}>
@@ -76,19 +79,25 @@ function Frame({ children }: { children: ReactNode }) {
           id="main"
           tabIndex={-1}
           data-density={densityFor(pathname)}
-          className={cn("mx-auto w-full max-w-(--content-max) flex-1 px-(--page-x) pt-(--page-top) pb-10 outline-none", strip && "lg:pb-[calc(var(--dock-clearance)+2rem)]")}
+          className={cn(
+            "flex-1 outline-none",
+            bleed ? "flex min-h-0 w-full flex-col" : PAGE_FRAME,
+            strip && !bleed && "lg:pb-[calc(var(--dock-clearance)+2rem)]",
+          )}
         >
           <InlineDisclosures inline={isRecordRoute(pathname)}>{canOpen(role, pathname) ? children : <AccessDenied role={role} />}</InlineDisclosures>
         </main>
-        <div
-          data-slot="page-footer"
-          className={cn(
-            "mx-auto w-full max-w-(--content-max) px-(--page-x) pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom)+2rem)]",
-            strip ? "lg:hidden" : "lg:pb-[calc(var(--dock-clearance)+2rem)]",
-          )}
-        >
-          {record ? null : <FixtureTag />}
-        </div>
+        {bleed ? null : (
+          <div
+            data-slot="page-footer"
+            className={cn(
+              "mx-auto w-full max-w-(--content-max) px-(--page-x) pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom)+2rem)]",
+              strip ? "lg:hidden" : "lg:pb-[calc(var(--dock-clearance)+2rem)]",
+            )}
+          >
+            {record ? null : <FixtureTag />}
+          </div>
+        )}
       </div>
       <CopilotPanel />
       <div ref={sheetLayer} data-slot="sheet-layer" />

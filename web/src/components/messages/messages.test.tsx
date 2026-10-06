@@ -38,6 +38,21 @@ function say(text: string) {
 beforeEach(() => setPathname("/messages"));
 afterEach(() => vi.useRealTimers());
 
+describe("the frame", () => {
+  it("fills the window edge to edge, with no page gutter, content width or page footer", () => {
+    renderThread(AGENT_IDS.swing);
+    expect(main().className).not.toMatch(/px-\(--page-x\)|max-w-\(--content-max\)|mx-auto/);
+    expect(main().querySelector("[data-slot=messages]")).not.toBeNull();
+    expect(document.querySelector("[data-slot=page-footer]")).toBeNull();
+    expect(main().querySelector("[data-slot=threads-pane] [data-slot=fixture-tag]")).toHaveTextContent("Fixture data");
+  });
+
+  it("keeps a heading for the page while a thread hides the list on a phone", () => {
+    renderThread(AGENT_IDS.swing);
+    expect(within(main()).getAllByRole("heading", { level: 1, name: "Messages" }).length).toBeGreaterThan(0);
+  });
+});
+
 describe("the threads", () => {
   it("puts agents with a request waiting under Needs you, each row opening its thread", () => {
     renderThread(null);
@@ -114,6 +129,24 @@ describe("an agent's thread", () => {
     expect(within(answer!).getByRole("link", { name: "The request" })).toHaveAttribute("href", `/approvals/${APPROVAL_IDS.swingXyz}`);
     expect(thread().querySelectorAll("[data-slot=journal-line]")).toHaveLength(before);
     expect(field()).toHaveValue("");
+  });
+
+  it("draws the owner's Markdown as they formatted it", () => {
+    renderThread(AGENT_IDS.swing);
+    say("Compare **these**:\n\n| Agent | Cap |\n| --- | --: |\n| Agent 2 | $1,500 |\n\n```\nwhy did it ask\n```");
+    const mine = thread().querySelector<HTMLElement>("[data-slot=owner-message]")!;
+    expect(within(mine).getByText("these").tagName).toBe("STRONG");
+    expect(within(mine).getByRole("table")).toHaveTextContent("Agent 2$1,500");
+    expect(mine.querySelector("[data-slot=markdown-code] pre")).toHaveTextContent("why did it ask");
+  });
+
+  it("gives limits as a table, one row per limit", () => {
+    renderThread(AGENT_IDS.swing, { scenario: "normal" });
+    say("How close is it to its limits?");
+    const answer = thread().querySelector<HTMLElement>("[data-slot=record-answer]")!;
+    const table = within(answer).getByRole("table", { name: "Headroom under each limit" });
+    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Limit", "Headroom", "Set at", "At the limit"]);
+    expect(within(table).getByRole("cell", { name: "Daily loss limit" })).toBeInTheDocument();
   });
 
   it("refuses to place an order from a message", () => {
