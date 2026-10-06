@@ -131,6 +131,17 @@ describe("the owner's values", () => {
       }
     }
   });
+
+  it("treat a value written another way as no change, so the document and its hash stay as they were", () => {
+    const btc = buildWorkspace("normal").agents[0];
+    const longer = (v: string) => (v.includes(".") ? `${v}0` : `${v}.0`);
+    const diff = diffMandate(btc.mandate, {
+      "/risk/max_order_usd": longer(btc.mandate.risk.max_order_usd),
+      "/risk/max_position_fraction": longer(btc.mandate.risk.max_position_fraction),
+    });
+    expect(diff.changes).toEqual([]);
+    expect(diff.mandate).toEqual(btc.mandate);
+  });
 });
 
 function valueOf(m: Mandate, path: EditPath): FieldValue {

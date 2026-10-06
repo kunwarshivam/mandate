@@ -296,10 +296,28 @@ export interface Diff {
   stepUp: boolean;
 }
 
+/** Equal as values, so `1000.0` against `1000` is no change and leaves the document, and its hash, as they were. */
+function sameValue(path: EditPath, a: FieldValue, b: FieldValue): boolean {
+  if (a === null || b === null) return a === b;
+  switch (FIELD[path].unit) {
+    case "usd":
+    case "percent":
+      return num(a) === num(b);
+    case "count":
+    case "minutes":
+    case "time":
+      return a === b;
+    default: {
+      const unhandled: never = FIELD[path].unit;
+      throw new Error(`unhandled unit ${String(unhandled)}`);
+    }
+  }
+}
+
 /** The edited document and its diff against `before`, paths sorted, unchanged edits dropped. */
 export function diffMandate(before: Mandate, edits: Edits): Diff {
   const mandate = structuredClone(before);
-  for (const path of EDIT_PATHS) if (path in edits) put(mandate, path, edits[path] ?? null);
+  for (const path of EDIT_PATHS) if (path in edits && !sameValue(path, valueAt(before, path), edits[path] ?? null)) put(mandate, path, edits[path] ?? null);
   const changes = EDIT_PATHS.filter((p) => valueAt(before, p) !== valueAt(mandate, p))
     .sort()
     .map((path): MandateChange => {
