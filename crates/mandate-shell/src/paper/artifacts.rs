@@ -367,7 +367,9 @@ mod tests {
     use mandate_risk::Exchange as GateExchange;
     use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 
-    use super::{DeploymentInput, ProductionIdentity, exchanges, legacy_identity};
+    use super::{
+        DeploymentInput, ProductionIdentity, exchanges, legacy_identity, require_opaque_id,
+    };
 
     fn text<E: std::fmt::Display>(error: E) -> String {
         error.to_string()
@@ -467,5 +469,15 @@ mod tests {
         assert_eq!(input.deployment().agent.0, "agent-deployment-9");
         assert_eq!(input.deployment().connection.0, "conn-owner-paper-42");
         assert_eq!(input.account_ref(), "account-ref-7");
+    }
+
+    #[test]
+    fn opaque_deployment_ids_use_the_schema_id_grammar() {
+        assert!(require_opaque_id("A_z-9", "id").is_ok());
+        assert!(require_opaque_id(&"a".repeat(64), "id").is_ok());
+        let too_long = "a".repeat(65);
+        for invalid in ["", "A.z", "A z", too_long.as_str()] {
+            assert!(require_opaque_id(invalid, "id").is_err(), "{invalid}");
+        }
     }
 }
