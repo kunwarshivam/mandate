@@ -23,7 +23,7 @@ use super::artifacts::reference;
 use super::context::{PaperClock, TrustedPaperContext, protection_prices};
 use super::gate::{gate_mandate, gate_template, platform_gate_config};
 use super::{Artifacts, BrokerFacts, INSTRUMENT_ID, LiquidityFacts, PaperFacts, load_contexts};
-use crate::Cause;
+use crate::{Cause, Setup};
 
 const NOW: &str = "2026-09-28T17:00:00Z";
 const AGENT: &str = "tracer-aapl";
@@ -371,7 +371,14 @@ fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -
         .map_err(text)?;
     assert_eq!(input.deployment().workspace.0, "workspace-owner-42");
     assert_eq!(input.deployment().agent.0, "agent-deployment-9");
-    assert_eq!(input.deployment().connection.0, "conn_owner_paper_42");
+    assert_ne!(
+        loaded.mandate.connection_id.as_str(),
+        "conn_alpaca_paper_01"
+    );
+    assert_eq!(
+        input.deployment().connection.0,
+        loaded.mandate.connection_id.as_str()
+    );
     assert_eq!(input.account_ref(), "account-ref-7");
     for (name, workspace, agent, account_ref) in [
         ("workspace", "", "agent-deployment-9", "account-ref-7"),
@@ -396,14 +403,33 @@ fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -
 #[ignore = "pending E7-19"]
 fn shipping_paper_adapter_uses_only_the_validated_deployment_input() -> Result<(), String> {
     let (scratch, loaded) = production_deployment_artifacts("shipping-deployment")?;
-    let _input = loaded
+    let input = loaded
         .deployment(
             "workspace-owner-42".to_owned(),
             "agent-deployment-9".to_owned(),
             "account-ref-7".to_owned(),
         )
         .map_err(text)?;
+    let setup = Setup {
+        deployment: input.deployment().clone(),
+        account_ref: input.account_ref().to_owned(),
+        now: at(NOW)?,
+        place_one_order: false,
+        new_cycle: false,
+    };
+    let source_agent = input.deployment().agent.clone();
+    let source_workspace = input.deployment().workspace.0.clone();
+    let source_account_ref = input.account_ref().to_owned();
+    assert_eq!(setup.deployment.agent, source_agent);
+    assert_eq!(setup.deployment.workspace.0, source_workspace);
+    assert_eq!(setup.deployment.connection.0, "conn_owner_paper_42");
+    assert_eq!(setup.account_ref, source_account_ref);
     let source = include_str!("../bin/mandate-tracer.rs");
+    let body = source
+        .split_once("fn tracer()")
+        .map(|(_, body)| body)
+        .ok_or_else(|| "the shipping tracer function is missing".to_owned())?;
+    let cli_source = include_str!("../cli.rs");
     for forbidden in [
         "cli::WORKSPACE",
         "cli::AGENT",
@@ -414,21 +440,27 @@ fn shipping_paper_adapter_uses_only_the_validated_deployment_input() -> Result<(
         "tracer-paper",
     ] {
         assert!(
-            !source.contains(forbidden),
+            !body.contains(forbidden) && !cli_source.contains(forbidden),
             "the shipping adapter still selects {forbidden}"
         );
     }
-    for required in [
-        "Artifacts::load_production(",
-        "artifacts.deployment(",
-        ".deployment()",
-        ".account_ref()",
-    ] {
+    for required in ["Artifacts::load_production(", "artifacts.deployment("] {
         assert!(
-            source.contains(required),
+            body.contains(required),
             "the shipping adapter must use {required}"
         );
     }
+    assert!(!body.contains("Artifacts::load("));
+    assert_eq!(
+        body.matches("deployment_input.deployment()").count(),
+        3,
+        "one validated deployment must populate context, setup, and stage sources"
+    );
+    assert_eq!(
+        body.matches("deployment_input.account_ref()").count(),
+        2,
+        "one validated account reference must populate setup and stage sources"
+    );
     scratch.remove()
 }
 
