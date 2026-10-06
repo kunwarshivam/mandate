@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft } from "@phosphor-icons/react";
+import { ArrowLeft } from "pixelarticons/react/ArrowLeft.js";
 import { ModeBadge } from "@/components/domain/mode";
 import { ScreenSkeleton } from "@/components/screens/common";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
@@ -131,7 +131,7 @@ export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetI
     <article className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-6" aria-labelledby="record-title" data-slot="record-screen" data-kind={kind}>
       {shown ? (
         <Link href={shown.back.href} className={BACK}>
-          <ArrowLeft className="size-4" aria-hidden />
+          <ArrowLeft className="size-6" aria-hidden />
           {shown.back.label}
         </Link>
       ) : null}

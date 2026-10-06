@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { Key } from "@phosphor-icons/react/ssr";
+import { Key } from "pixelarticons/react/Key.js";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
 import { type Guide, LocationField, MenuBar, Toolbar } from "./browser-chrome";
@@ -109,7 +109,7 @@ export function Browser({ address, bookmarks, children }: { address: string; boo
 
       <div aria-hidden className={cn("mt-0.5 flex shrink-0 gap-0.5 text-[0.875rem]", PIXEL)}>
         <span className={cn(SUNKEN, "grid w-8 shrink-0 place-items-center")}>
-          <Key className="size-4" />
+          <Key className="size-6" />
         </span>
         <StatusText origin={address} className={cn(SUNKEN, "min-w-0 flex-1 truncate px-2 py-0.5")} />
         <span className={cn(SUNKEN, "hidden w-40 px-2 py-0.5 sm:block")}>Private beta</span>

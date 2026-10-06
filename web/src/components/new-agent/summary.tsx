@@ -3,7 +3,8 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@cloudflare/kumo/components/button";
-import { ArrowCounterClockwise, ArrowRight } from "@phosphor-icons/react";
+import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
+import { Undo } from "pixelarticons/react/Undo.js";
 import { Owl } from "@/components/domain/owl";
 import { KEY } from "@/components/kumo/key";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
@@ -158,7 +159,7 @@ function Progress({ deployment }: { deployment: Deployment }) {
             {firstAsk && firstAsk.status === "delivered" ? (
               <Link href={`/approvals/${firstAsk.approval_id}`} className={cn("w-full sm:w-auto", KEY)}>
                 Review the request
-                <ArrowRight className="size-4" aria-hidden />
+                <ArrowRight className="size-6" aria-hidden />
               </Link>
             ) : null}
             {agent ? (
@@ -335,7 +336,7 @@ export function Summary({
       {deployment?.phase === "recorded" ? (
         <div>
           <Button type="button" variant="secondary" size="lg" className={cn(KEY, "w-full sm:w-auto")} onClick={onStartOver}>
-            <ArrowCounterClockwise className="size-4" aria-hidden />
+            <Undo className="size-6" aria-hidden />
             Set up another agent
           </Button>
         </div>

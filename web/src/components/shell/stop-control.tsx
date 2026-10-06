@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Octagon } from "@phosphor-icons/react";
+import { StopOctagon } from "@/components/icon";
 import { cn } from "@/lib/utils";
 import type { Workspace } from "@/fixtures/types";
 import { StopSheet } from "@/components/stop/stop-sheet";
@@ -59,18 +59,18 @@ export type StopPlace = "dock" | "tab" | "inline";
 const PLACE: Record<StopPlace, { button: string; pill: string; icon: string }> = {
   dock: {
     button: "h-12.5 rounded-2xl",
-    pill: "h-12.5 gap-2 rounded-2xl pr-5 pl-4",
-    icon: "size-5",
+    pill: "h-12.5 gap-1 rounded-2xl pr-5 pl-3",
+    icon: "size-6",
   },
   tab: {
     button: "h-(--tab-bar) w-full min-w-0 place-content-center",
-    pill: "h-11 min-w-16 gap-1.5 rounded-xl px-3",
-    icon: "size-4.5",
+    pill: "h-11 min-w-16 gap-0.5 rounded-xl pr-3 pl-2",
+    icon: "size-6",
   },
   inline: {
     button: "h-11 rounded-lg",
-    pill: "h-11 gap-2 rounded-lg pr-4.5 pl-3.5 lg:h-10 lg:gap-1.5 lg:pr-4 lg:pl-3 lg:text-sm",
-    icon: "size-5 lg:size-4",
+    pill: "h-11 gap-1 rounded-lg pr-4.5 pl-2.5 lg:h-10 lg:pr-4 lg:pl-2 lg:text-sm",
+    icon: "size-6",
   },
 };
 
@@ -110,7 +110,7 @@ export function StopButton({ place, className }: { place: StopPlace; className?:
             loud ? "bg-ink text-ink-foreground group-hover:bg-ink/88" : "bg-card text-ink group-hover:bg-background",
           )}
         >
-          <Octagon className={icon} weight="fill" aria-hidden />
+          <StopOctagon className={icon} aria-hidden />
           Stop
         </span>
       </button>

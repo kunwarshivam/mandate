@@ -2,7 +2,7 @@
 
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Button } from "@cloudflare/kumo/components/button";
-import { ArrowUp } from "@phosphor-icons/react";
+import { ArrowUp } from "pixelarticons/react/ArrowUp.js";
 import { KEY } from "@/components/kumo/key";
 import type { NewAgent } from "@/lib/fixture-journey";
 import type { Deployment } from "@/lib/mock-runtime";
@@ -218,7 +218,7 @@ export function Chat({ conversation, busy, onSend, creation, actions }: { conver
             className="field-sizing-content max-h-48 min-h-11 flex-1 resize-none bg-transparent py-2.5 text-base leading-normal text-foreground outline-none disabled:cursor-not-allowed"
           />
           <button type="submit" aria-label="Send" className={cn(KEY, "size-11 shrink-0 rounded-full px-0")} disabled={busy || done || text.trim() === ""}>
-            <ArrowUp className="size-5" weight="bold" aria-hidden />
+            <ArrowUp className="size-6" aria-hidden />
           </button>
         </div>
         <p id={`${id}-note`} className="px-4 text-caption text-pretty text-muted-foreground" data-slot="model-note">

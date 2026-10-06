@@ -2,7 +2,8 @@
 
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, Tray } from "@phosphor-icons/react";
+import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
+import { Inbox as InboxIcon } from "pixelarticons/react/Inbox.js";
 import { cn } from "@/lib/utils";
 import { Deadline } from "@/components/approvals/deadline";
 import type { Agent, Approval, Workspace } from "@/fixtures/types";
@@ -29,18 +30,18 @@ function Row({ approval, now, label, index }: { approval: Approval; now: string;
         className={cn(
           "press group grid gap-1.5 rounded-2xl px-4 py-4 outline-none focus-visible:ring-3 focus-visible:ring-ring",
           open
-            ? "bg-lapis-soft hover:bg-lapis-soft/70 max-lg:-mx-2 max-lg:grid-cols-[1.25rem_minmax(0,1fr)] max-lg:gap-x-3 max-lg:rounded-xl max-lg:bg-transparent max-lg:px-2 max-lg:py-3 max-lg:hover:bg-background"
+            ? "bg-lapis-soft hover:bg-lapis-soft/70 max-lg:-mx-2 max-lg:grid-cols-[1.5rem_minmax(0,1fr)] max-lg:gap-x-3 max-lg:rounded-xl max-lg:bg-transparent max-lg:px-2 max-lg:py-3 max-lg:hover:bg-background"
             : "-mx-4 text-muted-foreground hover:bg-background hover:text-foreground max-lg:-mx-2 max-lg:rounded-xl max-lg:px-2 max-lg:py-3",
         )}
       >
-        {open ? <Tray aria-hidden weight="fill" className="row-span-2 mt-0.5 size-5 text-lapis lg:hidden" /> : null}
+        {open ? <InboxIcon aria-hidden className="row-span-2 size-6 text-lapis lg:hidden" /> : null}
         <span className={cn("flex justify-between gap-x-3 gap-y-1", open ? "items-start" : "flex-wrap items-center")}>
           <span className={cn("min-w-0 font-medium", open && "text-foreground")}>
             {label}: buy <span className="font-mono tabular">{quantity(approval.bound.qty)}</span> {approval.bound.symbol} at a limit of{" "}
             <span className="font-mono tabular">{price(approval.bound.limit)}</span>
           </span>
           {open ? (
-            <ArrowRight className="mt-1 size-4 shrink-0 text-lapis transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" aria-hidden />
+            <ArrowRight className="size-6 shrink-0 text-lapis transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" aria-hidden />
           ) : (
             <span className="inline-flex h-6 items-center rounded-md bg-background px-2.5 text-label text-foreground">{APPROVAL_STATUS_LABEL[approval.status]}</span>
           )}

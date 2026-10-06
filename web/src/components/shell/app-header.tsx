@@ -4,7 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Breadcrumbs } from "@cloudflare/kumo/components/breadcrumbs";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
-import { Bell, Briefcase, CaretUpDown, DotsThreeVertical, SignOut, UserCircle } from "@phosphor-icons/react";
+import { AvatarCircle } from "pixelarticons/react/AvatarCircle.js";
+import { Bell } from "pixelarticons/react/Bell.js";
+import { ChevronsVertical } from "pixelarticons/react/ChevronsVertical.js";
+import { Logout } from "pixelarticons/react/Logout.js";
+import { MoreVertical } from "pixelarticons/react/MoreVertical.js";
+import { Suitcase } from "pixelarticons/react/Suitcase.js";
+import { menuIcon } from "@/components/icon";
 import { canOpen, homeFor } from "@/lib/access";
 import { useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
@@ -72,9 +78,9 @@ export function WorkspaceSwitcher({ inSheet = false, className }: { inSheet?: bo
           className,
         )}
       >
-        <Briefcase className={cn("size-5 shrink-0", inSheet ? "text-muted-foreground" : "min-[100rem]:hidden")} aria-hidden />
+        <Suitcase className={cn("size-6 shrink-0", inSheet ? "text-muted-foreground" : "min-[100rem]:hidden")} aria-hidden />
         <span className={cn("truncate", !inSheet && "max-[100rem]:sr-only")}>{current.label}</span>
-        <CaretUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <ChevronsVertical className="size-6 shrink-0 text-muted-foreground" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="start">
         <DropdownMenu.Group>
@@ -114,7 +120,7 @@ function AccountLinks({ role }: { role: Role }) {
         <>
           <DropdownMenu.Separator />
           <DropdownMenu.Group>
-            <DropdownMenu.Item icon={SignOut} onClick={() => void signOut()}>
+            <DropdownMenu.Item icon={menuIcon(Logout)} onClick={() => void signOut()}>
               Sign out
             </DropdownMenu.Item>
           </DropdownMenu.Group>
@@ -129,7 +135,7 @@ function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenu.Trigger render={<button type="button" />} aria-label="Your account" className={ICON_LINK}>
-        <UserCircle className="size-5" aria-hidden />
+        <AvatarCircle className="size-6" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end">
         <AccountLinks role={role} />
@@ -144,7 +150,7 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
   return (
     <DropdownMenu>
       <DropdownMenu.Trigger render={<button type="button" />} aria-label="Alerts and account" className={ICON_LINK}>
-        <DotsThreeVertical className="size-5" weight="bold" aria-hidden />
+        <MoreVertical className="size-6" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end">
         {seesAgents ? <DropdownMenu.LinkItem render={<Link href="/alerts" />}>Alerts</DropdownMenu.LinkItem> : null}
@@ -213,7 +219,7 @@ export function AppHeader() {
           <EnvironmentBadge environment={ws.environment} className="lg:max-[100rem]:[&>span+span]:sr-only" />
           {seesAgents ? (
             <Link href="/alerts" aria-label="Alerts" className={`${ICON_LINK} max-xl:hidden`}>
-              <Bell className="size-5" aria-hidden />
+              <Bell className="size-6" aria-hidden />
             </Link>
           ) : null}
           <div className="max-xl:hidden">

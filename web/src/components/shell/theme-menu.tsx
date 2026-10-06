@@ -2,13 +2,17 @@
 
 import { useSyncExternalStore } from "react";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
-import { CircleHalf, Desktop, Moon, Sun } from "@phosphor-icons/react";
+import { Invert } from "pixelarticons/react/Invert.js";
+import { Monitor } from "pixelarticons/react/Monitor.js";
+import { Moon } from "pixelarticons/react/Moon.js";
+import { Sun } from "pixelarticons/react/Sun.js";
+import { menuIcon } from "@/components/icon";
 import { type ThemePref, isThemePref, writeThemePref } from "@/lib/theme";
 
 const OPTIONS = [
   { id: "light", label: "Light", icon: Sun },
   { id: "dark", label: "Dark", icon: Moon },
-  { id: "system", label: "System", icon: Desktop },
+  { id: "system", label: "System", icon: Monitor },
 ] as const;
 
 function watchPref(onChange: () => void): () => void {
@@ -31,13 +35,13 @@ export function ThemeMenu({ className }: { className?: string }) {
   return (
     <DropdownMenu>
       <DropdownMenu.Trigger render={<button type="button" />} aria-label="Theme" className={className}>
-        <CircleHalf className="size-5" aria-hidden />
+        <Invert className="size-6" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end">
         <DropdownMenu.Group>
           <DropdownMenu.Label>Theme</DropdownMenu.Label>
           {OPTIONS.map((o) => (
-            <DropdownMenu.Item key={o.id} icon={o.icon} selected={pref === o.id} onClick={() => writeThemePref(o.id)}>
+            <DropdownMenu.Item key={o.id} icon={menuIcon(o.icon)} selected={pref === o.id} onClick={() => writeThemePref(o.id)}>
               {o.label}
             </DropdownMenu.Item>
           ))}

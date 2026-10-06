@@ -29,7 +29,7 @@ async function tokenColor(page: Page, token: string): Promise<string> {
   }, token);
 }
 
-test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide, with 20 px icons over 12 px labels", async ({ page }, testInfo) => {
+test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide, with 24 px pixel icons over 12 px labels", async ({ page }, testInfo) => {
   await open(page, "/");
   const found = await dock(page).evaluate((el) => {
     const style = getComputedStyle(el);
@@ -54,7 +54,7 @@ test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide
   for (const item of found.items) {
     expect(item.width).toBeGreaterThanOrEqual(64);
     expect(item.height).toBe(50);
-    expect(item.icon).toEqual([20, 20]);
+    expect(item.icon, "pixel icons stay on their 24px grid (DEC-478)").toEqual([24, 24]);
     expect(item.size).toBe("12px");
   }
   if (testInfo.project.name.includes("dark")) expect(found.shadow, "flat in dark").toMatch(/^(none|rgba\(0, 0, 0, 0\) 0px 0px 0px 0px(, rgba\(0, 0, 0, 0\) 0px 0px 0px 0px)*)$/);

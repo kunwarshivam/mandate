@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { ShieldCheck } from "@phosphor-icons/react/ssr";
+import { Shield } from "pixelarticons/react/Shield.js";
 import type { Position } from "@/fixtures/types";
 import { clockShort, dateLabel, price, quantity, usd } from "@/lib/format";
 import { ORDER_STATE_LABEL, PURPOSE_LABEL } from "@/lib/labels";
@@ -72,7 +72,7 @@ export function PositionsTable({
                     p.instrument.symbol
                   )}
                   <span className="mt-1 flex items-start gap-1 text-caption font-normal text-muted-foreground">
-                    <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                    <Shield className="size-6 shrink-0" aria-hidden />
                     {protectionText(p)}
                   </span>
                 </th>

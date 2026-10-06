@@ -1,14 +1,17 @@
 "use client";
 
 import { motion } from "motion/react";
+import { Cancel } from "pixelarticons/react/Cancel.js";
+import { CheckboxOn } from "pixelarticons/react/CheckboxOn.js";
+import { Logout } from "pixelarticons/react/Logout.js";
+import { Pause } from "pixelarticons/react/Pause.js";
 import { cn } from "@/lib/utils";
-import { CheckCircle, PauseCircle, Prohibit, SignOut } from "@phosphor-icons/react";
 import type { ActiveRestriction, AgentMode } from "@/fixtures/types";
 import { clock } from "@/lib/format";
 import { MODE_LABEL, MODE_MEANING } from "@/lib/labels";
 import { type RestrictionSource, SOURCE_LABEL, describeRestriction } from "@/lib/restrictions";
 
-const MODE_ICON = { normal: CheckCircle, exits_only: SignOut, paused: PauseCircle, stopped: Prohibit } as const;
+const MODE_ICON = { normal: CheckboxOn, exits_only: Logout, paused: Pause, stopped: Cancel } as const;
 
 /**
  * Running is quiet; exits only is outlined in ink (half stopped); paused and stopped are solid ink.
@@ -32,12 +35,12 @@ export function ModeBadge({ mode, className }: { mode: AgentMode; className?: st
       data-slot="mode-badge"
       data-mode={mode}
       className={cn(
-        "inline-flex h-6 w-fit shrink-0 items-center gap-1 rounded-md pr-2.5 pl-2 text-label whitespace-nowrap transition-colors duration-(--duration-hover) [&>svg]:size-3.5",
+        "inline-flex h-6 w-fit shrink-0 items-center gap-1 rounded-md pr-2.5 pl-1 text-label whitespace-nowrap transition-colors duration-(--duration-hover) [&>svg]:size-6",
         MODE_FIELD[mode],
         className,
       )}
     >
-      <Icon aria-hidden weight={mode === "normal" ? "regular" : "fill"} />
+      <Icon aria-hidden />
       {MODE_LABEL[mode]}
     </motion.span>
   );

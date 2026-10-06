@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
-import { CaretRight } from "@phosphor-icons/react";
+import { ChevronRight } from "pixelarticons/react/ChevronRight.js";
 import { useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { HealthState, Workspace } from "@/fixtures/types";
@@ -160,7 +160,7 @@ export function StatusStrip({
           )}
         >
           +{hidden}
-          <CaretRight className="size-3.5" weight="bold" />
+          <ChevronRight className="size-6" />
         </button>
       ) : null}
     </div>

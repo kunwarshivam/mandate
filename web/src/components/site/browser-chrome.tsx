@@ -1,7 +1,15 @@
 "use client";
 
 import { type KeyboardEvent, type ReactNode, type RefObject, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowClockwise, ArrowLeft, ArrowRight, FolderOpen, HandPalm, House, Image as ImageIcon, MagnifyingGlass, Printer } from "@phosphor-icons/react";
+import { ArrowLeft } from "pixelarticons/react/ArrowLeft.js";
+import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
+import { Folder } from "pixelarticons/react/Folder.js";
+import { Hand } from "pixelarticons/react/Hand.js";
+import { Home } from "pixelarticons/react/Home.js";
+import { Image as ImageIcon } from "pixelarticons/react/Image.js";
+import { Printer } from "pixelarticons/react/Printer.js";
+import { Reload } from "pixelarticons/react/Reload.js";
+import { Search } from "pixelarticons/react/Search.js";
 import { cn } from "@/lib/utils";
 import { ETCHED, MENU_ITEM, MONO, PIXEL, RAISED, SUNKEN } from "./letter";
 import { OpenAppContext } from "./open-app";
@@ -191,7 +199,7 @@ export function MenuBar({ bookmarks, directory }: { bookmarks: { id: string; tit
   );
 }
 
-const ICON = "size-5";
+const ICON = "size-6";
 
 /**
  * The toolbar. Home takes the page back to its top and Reload loads it again; the rest are greyed,
@@ -202,13 +210,13 @@ const ICON = "size-5";
 const TOOLS: { label: string; name?: string; icon: ReactNode; act?: Act; wide?: boolean }[] = [
   { label: "Back", icon: <ArrowLeft className={ICON} /> },
   { label: "Forward", icon: <ArrowRight className={ICON} /> },
-  { label: "Home", icon: <House className={ICON} />, act: "home" },
-  { label: "Reload", icon: <ArrowClockwise className={ICON} />, act: "reload" },
+  { label: "Home", icon: <Home className={ICON} />, act: "home" },
+  { label: "Reload", icon: <Reload className={ICON} />, act: "reload" },
   { label: "Images", icon: <ImageIcon className={ICON} />, wide: true },
-  { label: "Open", icon: <FolderOpen className={ICON} />, wide: true },
+  { label: "Open", icon: <Folder className={ICON} />, wide: true },
   { label: "Print", icon: <Printer className={ICON} />, wide: true },
-  { label: "Find", icon: <MagnifyingGlass className={ICON} />, wide: true },
-  { label: "Stop", name: "Stop loading", icon: <HandPalm className={ICON} />, wide: true },
+  { label: "Find", icon: <Search className={ICON} />, wide: true },
+  { label: "Stop", name: "Stop loading", icon: <Hand className={ICON} />, wide: true },
 ];
 
 const TOOL = "grid w-[4.25rem] justify-items-center gap-0.5 bg-muted px-1 py-1 text-[0.8125rem] leading-none";

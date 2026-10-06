@@ -2,7 +2,9 @@
 
 import { type FormEvent, useCallback, useEffect, useId, useState } from "react";
 import type { PasskeyListItem } from "@supabase/supabase-js";
-import { CircleNotch, Fingerprint, Plus } from "@phosphor-icons/react";
+import { Key } from "pixelarticons/react/Key.js";
+import { Loader } from "pixelarticons/react/Loader.js";
+import { Plus } from "pixelarticons/react/Plus.js";
 import { Section } from "@/components/screens/common";
 import { ADD_PASSKEY_COPY, passkeyProblem, webAuthnSupported } from "@/lib/auth-errors";
 import { clockShort, dateLabel, zoneLabel } from "@/lib/format";
@@ -125,7 +127,7 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
       className="max-w-3xl"
       action={
         <button type="button" onClick={add} disabled={busy !== null || passkeys === null} className={KEY_SM}>
-          {adding ? <CircleNotch className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden /> : <Plus className="size-4 shrink-0" aria-hidden />}
+          {adding ? <Loader className="size-6 shrink-0 motion-safe:animate-spin" aria-hidden /> : <Plus className="size-6 shrink-0" aria-hidden />}
           Add a passkey
         </button>
       }
@@ -146,7 +148,7 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
           </div>
         ) : passkeys === null ? (
           <p className="flex items-center gap-2 text-muted-foreground">
-            <CircleNotch className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden />
+            <Loader className="size-6 shrink-0 motion-safe:animate-spin" aria-hidden />
             Loading passkeys…
           </p>
         ) : passkeys.length === 0 ? (
@@ -159,7 +161,7 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
               return (
                 <li key={p.id} data-slot="passkey" className="grid gap-3 py-3.5">
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                    <Fingerprint className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                    <Key className="size-6 shrink-0 text-muted-foreground" aria-hidden />
                     <div className="grid min-w-0 flex-1 gap-0.5">
                       <span className="truncate font-semibold">{nameOf(p)}</span>
                       <span className="text-sm text-muted-foreground tabular">
@@ -205,7 +207,7 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
                           className={cn(FIELD, "h-11 min-w-0 flex-1 basis-48")}
                         />
                         <button type="submit" disabled={rowBusy || edit.draft.trim() === ""} className={KEY_SM}>
-                          {rowBusy ? <CircleNotch className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden /> : null}
+                          {rowBusy ? <Loader className="size-6 shrink-0 motion-safe:animate-spin" aria-hidden /> : null}
                           Save
                         </button>
                         <button type="button" onClick={() => setEditing(null)} disabled={rowBusy} className={KEY_SM}>
@@ -223,7 +225,7 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={() => void remove(p.id)} disabled={rowBusy} className={KEY_SM}>
-                          {rowBusy ? <CircleNotch className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden /> : null}
+                          {rowBusy ? <Loader className="size-6 shrink-0 motion-safe:animate-spin" aria-hidden /> : null}
                           Delete passkey
                         </button>
                         <button type="button" onClick={() => setEditing(null)} disabled={rowBusy} className={KEY_SM}>

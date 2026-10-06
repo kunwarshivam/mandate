@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Flask } from "@phosphor-icons/react";
+import { TestTube } from "pixelarticons/react/TestTube.js";
 import type { Scenario } from "@/fixtures/types";
 import { SCENARIOS } from "@/fixtures/workspace";
 import { CVD_COOKIE } from "@/lib/colour-pref";
@@ -41,7 +41,7 @@ export function ScenarioSwitcher({ scenario, colourBlind }: { scenario: Scenario
     <div
       data-slot="scenario-switcher"
       className="fixed right-3 bottom-20 z-20 flex flex-wrap items-center gap-2 border border-dashed border-foreground bg-card py-1 pr-1 pl-2.5 text-caption lg:bottom-[calc(var(--dock-clearance)+0.5rem)]">
-      <Flask className="size-3.5 text-muted-foreground" aria-hidden />
+      <TestTube className="size-6 text-muted-foreground" aria-hidden />
       <label className="flex items-center gap-1.5">
         <span className="text-muted-foreground">Scenario</span>
         <select

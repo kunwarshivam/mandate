@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LockSimple } from "@phosphor-icons/react";
+import { Lock } from "pixelarticons/react/Lock.js";
 import { homeFor } from "@/lib/access";
 import { ROLES, type Role, can } from "@/lib/roles";
 import { KEY } from "@/components/kumo/key";
@@ -13,7 +13,7 @@ export function AccessDenied({ role }: { role: Role }) {
   const label = ROLES.find((r) => r.id === role)?.label ?? role;
   return (
     <section data-slot="access-denied" aria-labelledby="denied-title" className="reveal grid max-w-2xl gap-4 pt-6 sm:pt-12">
-      <LockSimple className="size-6" aria-hidden />
+      <Lock className="size-6" aria-hidden />
       <h1 id="denied-title" className="text-h1 sm:text-h1">
         Not available to your role
       </h1>

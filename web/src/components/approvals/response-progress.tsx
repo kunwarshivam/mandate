@@ -1,4 +1,6 @@
-import { CheckCircle, Circle, CircleDashed } from "@phosphor-icons/react";
+import { CheckboxOn } from "pixelarticons/react/CheckboxOn.js";
+import { Circle } from "pixelarticons/react/Circle.js";
+import { Loader } from "pixelarticons/react/Loader.js";
 import type { Approval } from "@/fixtures/types";
 import { APPROVAL_STATUS_LABEL } from "@/lib/labels";
 import type { ApprovalResponse } from "@/lib/mock-runtime";
@@ -35,7 +37,7 @@ export function responseSteps(approval: Approval, response: ApprovalResponse): S
   ];
 }
 
-const GLYPH = { done: CheckCircle, current: CircleDashed, waiting: Circle } as const;
+const GLYPH = { done: CheckboxOn, current: Loader, waiting: Circle } as const;
 const STATE_WORD: Record<StepState, string> = { done: "done", current: "in progress", waiting: "not yet" };
 
 export function ResponseProgress({ steps, className }: { steps: Step[]; className?: string }) {
@@ -53,7 +55,7 @@ export function ResponseProgress({ steps, className }: { steps: Step[]; classNam
               s.state === "current" && "font-medium",
             )}
           >
-            <Glyph className="mt-px size-4 shrink-0" weight={s.state === "done" ? "fill" : "regular"} aria-hidden />
+            <Glyph className="-my-1 size-6 shrink-0" aria-hidden />
             <span className="min-w-0 text-pretty">
               {s.label}
               <span className="sr-only">, {STATE_WORD[s.state]}</span>

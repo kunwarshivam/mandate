@@ -2,8 +2,8 @@ import { type Locator, type Page, expect, test } from "@playwright/test";
 import { AGENT_IDS } from "../src/fixtures/workspace";
 
 /**
- * DEC-210: beside every P&L, the performance disclosure is an info symbol, muted, 16px in a 24px
- * target (44px on touch), that takes no more room than the text beside it. It opens the disclosure
+ * DEC-210: beside every P&L, the performance disclosure is an info symbol, muted, a 24px pixel glyph
+ * that is its own 24px target (44px on touch, DEC-478), that takes no more room than the text beside it. It opens the disclosure
  * text in a Kumo popover on hover, click, tap, or focus and Enter or Space; Escape closes it and gives
  * focus back. The text is the symbol's description, and print shows it in full in the symbol's place.
  */
@@ -129,7 +129,7 @@ for (const width of [1440, 390, 360]) {
         expect(Math.abs(r.height - r.lineHeight)).toBeLessThanOrEqual(0.5);
         expect(r.baselineGaps.length, "never alone on its line: it wraps with the words before it").toBeGreaterThan(0);
         for (const gap of r.baselineGaps) expect(gap).toBeLessThanOrEqual(1);
-        expect(r.glyph).toBe(16);
+        expect(r.glyph, "a pixel glyph renders on its 24px grid (DEC-478)").toBe(24);
       }
 
       const layout = () =>
@@ -253,13 +253,13 @@ test.describe("with a mouse and keyboard, at 1440px", () => {
     await expect(t).toHaveAttribute("aria-expanded", "false");
   });
 
-  test("the target is 24px around a 16px glyph", async ({ page }) => {
+  test("the target is the 24px glyph, on its pixel grid", async ({ page }) => {
     await open(page, "/", 1440);
     const size = await heroTrigger(page).evaluate((t) => {
       const before = getComputedStyle(t, "::before");
       return { target: [before.width, before.height], glyph: [t.querySelector("svg")!.getBoundingClientRect().width, t.querySelector("svg")!.getBoundingClientRect().height] };
     });
-    expect(size).toEqual({ target: ["24px", "24px"], glyph: [16, 16] });
+    expect(size).toEqual({ target: ["24px", "24px"], glyph: [24, 24] });
   });
 
   test("focus alone does not open it; Enter and Space do; Escape closes it and gives focus back", async ({ page }) => {

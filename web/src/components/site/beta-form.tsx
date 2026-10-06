@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
-import { Warning } from "@phosphor-icons/react";
+import { WarningDiamond } from "pixelarticons/react/WarningDiamond.js";
 import { BETA_REQUEST_PATH } from "@/lib/auth-routes";
 import { BETA_ROLES, type BetaRole } from "@/lib/beta";
 import { cn } from "@/lib/utils";
@@ -121,7 +121,7 @@ export function BetaForm({ id = "beta", className }: { id?: string; className?: 
           className={message ? "flex max-w-[22rem] items-start gap-2 border border-foreground bg-warning-soft px-3 py-2" : "sr-only"}
           data-slot={message ? "beta-problem" : undefined}
         >
-          {message && <Warning aria-hidden weight="fill" className="mt-0.5 size-5 shrink-0" />}
+          {message && <WarningDiamond aria-hidden className="size-6 shrink-0" />}
           <span>{message ?? (status === "sending" ? "Sending your request" : "")}</span>
         </p>
       </div>

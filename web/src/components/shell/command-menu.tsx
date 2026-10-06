@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CommandPalette } from "@cloudflare/kumo/components/command-palette";
-import { MagnifyingGlass } from "@phosphor-icons/react";
+import { Search } from "pixelarticons/react/Search.js";
 import { useRuntime } from "@/lib/mock-runtime";
 import { can, useRole } from "@/lib/roles";
 import { GROUP_LABEL, SCREENS } from "@/lib/screens";
@@ -95,7 +95,7 @@ export function CommandMenu() {
         data-slot="command-bar"
         className="press hidden h-10 min-w-60 flex-[0_1_23.75rem] items-center gap-2.5 rounded-lg border border-border bg-muted pr-1.5 pl-3 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring lg:flex min-[100rem]:flex-[0_1_28.75rem]"
       >
-        <MagnifyingGlass className="size-4.5 shrink-0" aria-hidden />
+        <Search className="size-6 shrink-0" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-left">Jump to an agent or screen…</span>
         <kbd className="inline-flex h-6 shrink-0 items-center rounded-md border border-border bg-card px-1.5 font-sans text-label text-muted-foreground">⌘K</kbd>
       </button>

@@ -2,7 +2,8 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ArrowRight, ShieldCheck } from "@phosphor-icons/react";
+import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
+import { Shield } from "pixelarticons/react/Shield.js";
 import { LinkButton } from "@cloudflare/kumo/components/button";
 import { ChartSkeleton } from "@/components/charts/chart-parts";
 import { PositionChart } from "@/components/charts/price-chart";
@@ -50,7 +51,7 @@ function RelatedLink({ href, children }: { href: string; children: ReactNode }) 
     <li>
       <Link href={href} className="press -mx-3 flex min-h-12 items-center justify-between gap-3 rounded-xl px-3 py-3 font-medium outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4">
         {children}
-        <ArrowRight className="size-4 shrink-0" aria-hidden />
+        <ArrowRight className="size-6 shrink-0" aria-hidden />
       </Link>
     </li>
   );
@@ -184,7 +185,7 @@ function PositionRecord({ agent, assetId }: { agent: Agent; assetId: string }) {
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <Section title="Protection">
           <p className={cn("flex items-start gap-2 rounded-xl px-4 py-3 text-sm", unprotected ? "bg-muted font-medium" : "bg-mandate-soft")} data-slot="protection">
-            <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+            <Shield className="size-6 shrink-0" aria-hidden />
             {protectionText(position)}
           </p>
           <OrdersTable orders={legs} hrefFor={(o) => orderHref(agent.agent_id, o.client_order_id)} empty="No protective order is resting at the broker." />

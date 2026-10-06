@@ -4,7 +4,10 @@ import { type ReactNode, useRef, useState } from "react";
 import Link from "next/link";
 import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Dialog } from "@cloudflare/kumo/primitives/dialog";
-import { CaretDown, Octagon, WarningCircle, X } from "@phosphor-icons/react";
+import { ChevronDown } from "pixelarticons/react/ChevronDown.js";
+import { Close } from "pixelarticons/react/Close.js";
+import { SquareAlert } from "pixelarticons/react/SquareAlert.js";
+import { StopOctagon } from "@/components/icon";
 import { cn } from "@/lib/utils";
 import { ModeBadge, SourceTag } from "@/components/domain/mode";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
@@ -94,7 +97,7 @@ function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (k
         <p className="grid gap-1.5 rounded-xl bg-lapis-soft px-4 py-3 text-sm" data-source="account">
           <span className="flex items-center gap-2">
             <SourceTag source="account" />
-            <WarningCircle className="size-4 shrink-0" aria-hidden />
+            <SquareAlert className="size-6 shrink-0" aria-hidden />
           </span>
           An order has an unknown state. Exits in that instrument are held until the broker answers; the kill switch still works.
         </p>
@@ -169,7 +172,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
         >
           <div className="grid gap-2 border-b border-border/70 px-5 pt-6 pr-16 pb-5">
             <Dialog.Title className="flex flex-wrap items-center gap-3 text-h1">
-              <Octagon aria-hidden weight="fill" className="size-6 text-ink" />
+              <StopOctagon aria-hidden className="size-6 text-ink" />
               Stop
               <EnvironmentBadge environment={ws.environment} />
             </Dialog.Title>
@@ -178,7 +181,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               aria-label="Close"
               className="absolute top-4 right-4 grid size-11 place-items-center rounded-lg text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
             >
-              <X className="size-5" aria-hidden />
+              <Close className="size-6" aria-hidden />
             </Dialog.Close>
           </div>
 
@@ -213,7 +216,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
                       </span>
                       <span className="flex items-center gap-2">
                         <ModeBadge mode={agent.mode} />
-                        <CaretDown className="size-4 text-muted-foreground transition-transform duration-200 ease-(--ease-in-out) group-data-[panel-open]:rotate-180" aria-hidden />
+                        <ChevronDown className="size-6 text-muted-foreground transition-transform duration-200 ease-(--ease-in-out) group-data-[panel-open]:rotate-180" aria-hidden />
                       </span>
                     </Collapsible.Trigger>
                     <Collapsible.Panel className="pb-3">

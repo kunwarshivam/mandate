@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight } from "@phosphor-icons/react";
+import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { SourceTag } from "@/components/domain/mode";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
@@ -59,7 +59,7 @@ function Alerts() {
                         {agent.label}: {text.label}
                         {r.symbol ? ` (${r.symbol})` : ""}
                       </span>
-                      <ArrowRight className="ml-auto size-4 shrink-0" aria-hidden />
+                      <ArrowRight className="ml-auto size-6 shrink-0" aria-hidden />
                     </span>
                     <span className="text-sm text-muted-foreground">
                       Since <span className="font-mono tabular">{clock(r.since)}</span>. Blocks: {text.blocks}. Ends when: {text.endsWhen}.
@@ -174,7 +174,7 @@ export function SectionIndexScreen({ title, purpose, prefix }: { title: string; 
                 {s.label}
                 <span className="flex items-center gap-2 text-caption font-normal text-muted-foreground">
                   {s.built ? null : "Next slice"}
-                  <ArrowRight className="size-4 shrink-0 text-foreground" aria-hidden />
+                  <ArrowRight className="size-6 shrink-0 text-foreground" aria-hidden />
                 </span>
               </span>
               <span className="text-sm text-muted-foreground">{s.purpose}</span>
