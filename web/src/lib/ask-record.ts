@@ -225,7 +225,7 @@ export function interpret(said: string, ctx: AskContext): Reply {
   if (/\bwhy\b/.test(text)) return why(ctx, agents);
   if (/\b(limit|headroom|how close|loss today|budget|room)/.test(text)) return limits(agents);
   if (/\b(hold|position|own)/.test(text)) return holdings(agents, ctx.now);
-  if (/\b(happen|today|recent|activit|latest|update|doing)/.test(text)) return happened(ctx, agents);
+  if (/\b(happen|today|recent|activity|activities|latest|update|doing)/.test(text)) return happened(ctx, agents);
   if (/\b(status|mode|running|state)\b|\bis it (paused|running|stopped|on)\b/.test(text)) return status(agents);
   if (/\b(help|what can you|how do i|what do you)\b/.test(text)) {
     return answer(
