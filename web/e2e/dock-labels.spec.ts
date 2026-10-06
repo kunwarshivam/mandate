@@ -10,8 +10,8 @@ import { SCREENS, SECTION_INDEX, type Screen } from "../src/lib/screens";
  */
 
 const WIDTHS = [1024, 1280, 1440, 1920] as const;
-const LABELS = ["Home", "Approvals", "Alerts", "Agents", "Positions", "Connections", "Audit", "More"];
-const DOCKED: Record<string, string> = { home: "Home", approvals: "Approvals", alerts: "Alerts", agents: "Agents", positions: "Positions", connections: "Connections" };
+const LABELS = ["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions", "Connections", "Audit", "More"];
+const DOCKED: Record<string, string> = { home: "Home", messages: "Messages", approvals: "Approvals", alerts: "Alerts", agents: "Agents", positions: "Positions", connections: "Connections" };
 
 const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 const items = (page: Page) => dock(page).locator("a, button:not([data-slot=stop-control])");
@@ -37,6 +37,8 @@ const ROUTES: [string, string][] = [
   [`/agents/${AGENT_IDS.swing}/mandate`, "Agents"],
   [`/agents/${AGENT_IDS.btc}/kill-switch`, "Agents"],
   [`/approvals/${APPROVAL_IDS.swingXyz}`, "Approvals"],
+  [`/messages/${AGENT_IDS.swing}`, "Messages"],
+  [`/messages/${AGENT_IDS.swing}/desk`, "Messages"],
   ["/audit/decisions", "Audit"],
   ["/audit/timeline", "Audit"],
   ["/settings/policies", "More"],

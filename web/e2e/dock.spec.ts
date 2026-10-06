@@ -49,7 +49,7 @@ test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide
   expect(found.radius).toBe(10);
   expect(found.padding).toBe(6);
   expect(found.height, "the dock's height matches --dock-h").toBe(64);
-  expect(found.items).toHaveLength(8);
+  expect(found.items).toHaveLength(9);
   expect(found.stop, "Stop, at the dock's end, is as tall as its items").toBe(50);
   for (const item of found.items) {
     expect(item.width).toBeGreaterThanOrEqual(64);
@@ -90,7 +90,7 @@ test("the labels name every item: no tooltip on hover or focus, and a visible fo
   await open(page, "/");
   const items = dock(page).locator("a, button:not([data-slot=stop-control])");
   const names = await items.evaluateAll((els) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent));
-  expect(names).toEqual(["Home", "Approvals", "Alerts", "Agents", "Positions", "Connections", "Audit", "More"]);
+  expect(names).toEqual(["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions", "Connections", "Audit", "More"]);
   await items.nth(4).hover();
   await page.waitForTimeout(600);
   await expect(page.locator(".kumo-tooltip-popup")).toHaveCount(0);

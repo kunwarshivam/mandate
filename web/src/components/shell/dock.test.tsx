@@ -25,8 +25,8 @@ describe("the desktop dock", () => {
   it("labels every item under its icon: the everyday screens in order, then the Audit and More menus", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const names = (els: HTMLElement[]) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent);
-    expect(within(dock()).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/", "/approvals", "/alerts", "/agents", "/positions", "/connections"]);
-    expect(names(within(dock()).getAllByRole("link"))).toEqual(["Home", "Approvals", "Alerts", "Agents", "Positions", "Connections"]);
+    expect(within(dock()).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/", "/messages", "/approvals", "/alerts", "/agents", "/positions", "/connections"]);
+    expect(names(within(dock()).getAllByRole("link"))).toEqual(["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions", "Connections"]);
     const menus = within(dock()).getAllByRole("button").filter((b) => b.getAttribute("data-slot") !== "stop-control");
     expect(names(menus)).toEqual(["Audit", "More"]);
     expect(within(dock()).getByRole("link", { name: /^Approvals\s*\d+\s*open$/ })).toBeInTheDocument();

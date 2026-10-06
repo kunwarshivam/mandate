@@ -14,7 +14,7 @@ export const OPEN_STOP_EVENT = "owlhead:open-stop";
 
 /** The agent a path is scoped to, if any. IDs are opaque and never shown as titles. */
 export function agentIdFrom(pathname: string): string | null {
-  const match = /^\/agents\/(agt_[0-9A-Z]+)/.exec(pathname);
+  const match = /^\/(?:agents|messages)\/(agt_[0-9A-Z]+)/.exec(pathname);
   return match ? match[1] : null;
 }
 

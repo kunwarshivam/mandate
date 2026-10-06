@@ -17,7 +17,7 @@ import { SCREEN_ICON } from "./screen-icons";
 import { StopButton } from "./stop-control";
 
 /** The screens that sit on the dock itself, in order; every other screen is one menu away. */
-export const DOCK_LINKS = ["home", "approvals", "alerts", "agents", "positions", "connections"] as const;
+export const DOCK_LINKS = ["home", "messages", "approvals", "alerts", "agents", "positions", "connections"] as const;
 
 export type DockMenu = "audit" | "more";
 

@@ -37,6 +37,15 @@ export const GROUP_NEEDS: Record<ScreenGroup, Capability> = {
 
 export const SCREENS: readonly Screen[] = [
   { key: "home", href: "/", label: "Home", purpose: "Your account, every agent against its limits, and what needs you.", group: "main", built: true, needs: "agents.view" },
+  {
+    key: "messages",
+    href: "/messages",
+    label: "Messages",
+    purpose: "Each agent's thread, from the journal, and answers from the record to what you ask.",
+    group: "main",
+    built: true,
+    needs: "agents.view",
+  },
   { key: "approvals", href: "/approvals", label: "Approvals", purpose: "Requests waiting for you, by deadline, and what happened to earlier ones.", group: "main", built: true, needs: "agents.view" },
   { key: "alerts", href: "/alerts", label: "Alerts", purpose: "Data, deployment, and agent conditions that change what agents may do.", group: "main", built: true, needs: "agents.view" },
   { key: "agents", href: "/agents", label: "All agents", purpose: "Each agent trading on paper within its own confirmed mandate.", group: "agents", built: true, needs: "agents.view" },
@@ -205,6 +214,12 @@ export function crumbsFor(pathname: string, agentLabel: (id: string) => string |
       if (!child && sub && rest[2] === "close") trail.push({ href: pathname, label: "Close position" });
       return trail;
     }
+    case "messages":
+      trail.push({ href: "/messages", label: "Messages" });
+      if (!second) return trail;
+      trail.push({ href: `/messages/${second}`, label: agentLabel(second) ?? "Agent" });
+      if (rest[0] === "desk") trail.push({ href: pathname, label: "Desk" });
+      return trail;
     case "approvals":
       trail.push({ href: "/approvals", label: "Approvals" });
       if (second) trail.push({ href: pathname, label: "Request" });

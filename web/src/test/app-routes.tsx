@@ -14,6 +14,9 @@ import * as closeAll from "@/app/(app)/connections/[connectionId]/close-all/page
 import * as stopAll from "@/app/(app)/connections/[connectionId]/stop-all/page";
 import * as connections from "@/app/(app)/connections/page";
 import * as design from "@/app/(app)/design/page";
+import * as desk from "@/app/(app)/messages/[agentId]/desk/page";
+import * as thread from "@/app/(app)/messages/[agentId]/page";
+import * as messages from "@/app/(app)/messages/page";
 import * as dashboard from "@/app/(app)/page";
 import * as positions from "@/app/(app)/positions/page";
 import * as settingsScreen from "@/app/(app)/settings/[screen]/page";
@@ -42,6 +45,11 @@ export async function pageFor(path: string): Promise<ReactNode> {
     case "approvals":
       if (!second) return <approvals.default />;
       return approval.default(params({ approvalId: second }));
+    case "messages":
+      if (!second) return <messages.default />;
+      if (rest.length === 0) return thread.default(params({ agentId: second }));
+      if (rest.length === 1 && rest[0] === "desk") return desk.default(params({ agentId: second }));
+      throw new Error(`no page for ${path}`);
     case "alerts":
       return <alerts.default />;
     case "positions":
@@ -68,7 +76,7 @@ export async function pageFor(path: string): Promise<ReactNode> {
 
 /**
  * Every route a scenario can reach: each screen, and for every agent each section, record screen,
- * position (and its close page), order and gate decision, and every approval request.
+ * position (and its close page), order and gate decision, its thread and desk, and every approval request.
  */
 export function pathsFor(scenario: Scenario): string[] {
   const ws = buildWorkspace(scenario);
@@ -79,6 +87,8 @@ export function pathsFor(scenario: Scenario): string[] {
     ...a.positions.flatMap((p) => [positionHref(a.agent_id, p.instrument.asset_id), `${positionHref(a.agent_id, p.instrument.asset_id)}/close`]),
     ...allOrders(a).map((o) => orderHref(a.agent_id, o.client_order_id)),
     ...ws.decisions.filter((d) => d.agent_id === a.agent_id).map((d) => decisionHref(a.agent_id, d.event_id)),
+    `/messages/${a.agent_id}`,
+    `/messages/${a.agent_id}/desk`,
   ]);
   const connection = ws.connection.connection_id;
   return [

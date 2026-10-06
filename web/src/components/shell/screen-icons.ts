@@ -16,6 +16,7 @@ import { GitCommit } from "pixelarticons/react/GitCommit.js";
 import { Grid2x22 } from "pixelarticons/react/Grid2x22.js";
 import { Home } from "pixelarticons/react/Home.js";
 import { Inbox } from "pixelarticons/react/Inbox.js";
+import { MessageText } from "pixelarticons/react/MessageText.js";
 import { Notebook } from "pixelarticons/react/Notebook.js";
 import { Pencil } from "pixelarticons/react/Pencil.js";
 import { Plug } from "pixelarticons/react/Plug.js";
@@ -34,6 +35,7 @@ import type { AgentSectionKey } from "@/lib/screens";
 /** One icon per screen, shared by the dock, the phone tabs and More. */
 export const SCREEN_ICON: Record<string, Icon> = {
   home: Home,
+  messages: MessageText,
   approvals: Inbox,
   alerts: Bell,
   agents: Robot,
