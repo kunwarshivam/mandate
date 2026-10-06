@@ -46,7 +46,7 @@ pub(super) fn judge(
         || asset.class != AssetClass::UsEquity
         || asset.exchange != artifacts.instrument.broker_exchange
     {
-        return Err(absent("the reviewed production asset record"));
+        return Err(absent("the reviewed AAPL asset record"));
     }
     if artifacts.instrument.etp_classified_at > now {
         return Err(absent("an ETP classification dated before the run"));
