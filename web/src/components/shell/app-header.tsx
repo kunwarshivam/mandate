@@ -10,6 +10,7 @@ import { ChevronsVertical } from "pixelarticons/react/ChevronsVertical.js";
 import { Logout } from "pixelarticons/react/Logout.js";
 import { MoreVertical } from "pixelarticons/react/MoreVertical.js";
 import { Suitcase } from "pixelarticons/react/Suitcase.js";
+import { CopilotButton } from "@/components/copilot/copilot";
 import { menuIcon } from "@/components/icon";
 import { canOpen, homeFor } from "@/lib/access";
 import { useRuntime } from "@/lib/mock-runtime";
@@ -215,6 +216,7 @@ export function AppHeader() {
         </div>
         <CommandMenu />
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1.5 lg:flex-1 lg:basis-0 lg:justify-end">
+          {seesAgents ? <CopilotButton className="max-lg:hidden" /> : null}
           <ThemeMenu className={`${ICON_LINK} max-lg:hidden`} />
           <EnvironmentBadge environment={ws.environment} className="lg:max-[100rem]:[&>span+span]:sr-only" />
           {seesAgents ? (

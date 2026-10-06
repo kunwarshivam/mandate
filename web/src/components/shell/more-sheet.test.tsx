@@ -29,12 +29,13 @@ describe("what the phone reaches (DEC-207)", () => {
     expect(reached.has(SECTION_INDEX.workspace.href)).toBe(settings);
   });
 
-  it("gives a role that sees agents Home, Approvals and Agents as tabs", () => {
+  it("gives a role that sees agents Home, Messages and Agents as tabs, with Approvals under More (DEC-479)", () => {
     expect(phoneTabs("owner").map((t) => [t.label, t.href])).toEqual([
       ["Home", "/"],
-      ["Approvals", "/approvals"],
+      ["Messages", "/messages"],
       ["Agents", "/agents"],
     ]);
+    expect(moreGroups("owner").flatMap((g) => g.links.map((l) => l.href))).toContain("/approvals");
   });
 
   it("gives an auditor its own home, the audit, as its one tab", () => {

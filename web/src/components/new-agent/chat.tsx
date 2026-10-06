@@ -1,12 +1,13 @@
 "use client";
 
-import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { Button } from "@cloudflare/kumo/components/button";
-import { ArrowUp } from "pixelarticons/react/ArrowUp.js";
+import { Composer, type ComposerHandle } from "@/components/chat/composer";
+import { Markdown } from "@/components/chat/markdown";
+import { OwnerSaid } from "@/components/chat/record-reply";
 import { KEY } from "@/components/kumo/key";
 import type { NewAgent } from "@/lib/fixture-journey";
 import type { Deployment } from "@/lib/mock-runtime";
-import { cn } from "@/lib/utils";
 import { type Conversation, type Entry, currentSummary, nextStep } from "./conversation";
 import { type Draft, MODELS, type ModelId } from "./draft";
 import { StepHeading } from "./steps";
@@ -15,21 +16,12 @@ import { Summary, isConfirmed } from "./summary";
 /** The sticky header's height plus a margin, matching the page's `scroll-padding-top` of 5rem. */
 const HEADER_CLEARANCE_PX = 80;
 
-/** The platform's side of the conversation: plain text, as in any chat. */
+/** The platform's side of the conversation: text, as in any chat, which may carry a model's Markdown. */
 function Platform({ children, slot }: { children: ReactNode; slot?: string }) {
   return (
     <div data-slot={slot ?? "platform"} className="grid max-w-measure gap-2 text-pretty">
       <span className="sr-only">Owlhead: </span>
       {children}
-    </div>
-  );
-}
-
-function Owner({ text }: { text: string }) {
-  return (
-    <div data-slot="owner-message" className="ml-auto max-w-[85%] rounded-3xl bg-background px-4 py-2.5 text-pretty whitespace-pre-wrap wrap-anywhere">
-      <span className="sr-only">You: </span>
-      {text}
     </div>
   );
 }
@@ -89,13 +81,11 @@ function Failed({ entry, last, busy, actions }: { entry: Extract<Entry, { kind: 
 function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; c: Conversation; last: boolean; busy: boolean; creation: Creation; actions: ChatActions }) {
   switch (entry.kind) {
     case "owner":
-      return <Owner text={entry.text} />;
+      return <OwnerSaid text={entry.text} />;
     case "said":
       return (
         <Platform slot="said">
-          {entry.lines.map((line, i) => (
-            <p key={i}>{line}</p>
-          ))}
+          <Markdown text={entry.lines.join("\n\n")} links="show" />
           {last && entry.asks.kind === "model" && nextStep(c).kind === "model" ? <ModelChoices busy={busy} onChoose={actions.onChoose} /> : null}
         </Platform>
       );
@@ -132,13 +122,26 @@ function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; 
 
 /**
  * The conversation (brief A0 to A2 and A5, DEC-476, DEC-477): the log, then the composer. The
- * platform's replies are plain text; only deterministic parts carry buttons (PX-18). The composer
+ * platform's replies are text, drawn from Markdown with their links shown but never opened, since a
+ * model wrote part of them (DEC-481); only deterministic parts carry buttons (PX-18). The composer
  * keeps focus as the log grows, and the newest part of the log is brought into view above it.
  */
-export function Chat({ conversation, busy, onSend, creation, actions }: { conversation: Conversation; busy: boolean; onSend: (text: string) => void; creation: Creation; actions: ChatActions }) {
-  const id = useId();
-  const [text, setText] = useState("");
-  const field = useRef<HTMLTextAreaElement>(null);
+export function Chat({
+  conversation,
+  busy,
+  onSend,
+  creation,
+  actions,
+  initialText = null,
+}: {
+  conversation: Conversation;
+  busy: boolean;
+  onSend: (text: string) => void;
+  creation: Creation;
+  actions: ChatActions;
+  initialText?: string | null;
+}) {
+  const composer = useRef<ComposerHandle>(null);
   const log = useRef<HTMLDivElement>(null);
   const { entries } = conversation;
   const seen = useRef(entries.length);
@@ -153,30 +156,16 @@ export function Chat({ conversation, busy, onSend, creation, actions }: { conver
     const behavior: ScrollBehavior = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
     const top = fresh[0].getBoundingClientRect().top;
     const bottom = fresh[fresh.length - 1].getBoundingClientRect().bottom;
-    const visible = (field.current?.closest("form")?.getBoundingClientRect().top ?? window.innerHeight) - HEADER_CLEARANCE_PX;
+    const visible = (composer.current?.top() ?? window.innerHeight) - HEADER_CLEARANCE_PX;
     if (bottom - top > visible) fresh[0].scrollIntoView({ block: "start", behavior });
     else fresh[fresh.length - 1].scrollIntoView({ block: "nearest", behavior });
   }, [entries.length]);
 
-  const submit = (event?: FormEvent) => {
-    event?.preventDefault();
-    const said = text.trim();
-    if (said === "" || busy || done) return;
-    setText("");
-    onSend(said);
-    field.current?.focus();
-  };
-  const keys = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      submit();
-    }
-  };
   const refocus =
     <A extends unknown[]>(act: (...args: A) => void) =>
     (...args: A) => {
       act(...args);
-      field.current?.focus();
+      composer.current?.focus();
     };
   const wrapped: ChatActions = { ...actions, onChoose: refocus(actions.onChoose), onRetry: refocus(actions.onRetry), onWithoutModel: refocus(actions.onWithoutModel) };
 
@@ -192,40 +181,22 @@ export function Chat({ conversation, busy, onSend, creation, actions }: { conver
         ))}
       </div>
 
-      <form
-        onSubmit={submit}
-        noValidate
-        data-slot="composer"
-        className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-1.5 bg-card px-(--page-x) pt-1 pb-3 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-[calc(var(--dock-clearance)+1rem)]"
-      >
-        <p role="status" className="min-h-5 text-sm leading-5 text-muted-foreground" data-slot="thinking">
-          {busy ? "Reading your message…" : ""}
-        </p>
-        <div className="flex items-end gap-2 rounded-3xl border border-border bg-card py-1.5 pr-1.5 pl-4 focus-within:ring-3 focus-within:ring-ring">
-          <label htmlFor={`${id}-message`} className="sr-only">
-            Your message
-          </label>
-          <textarea
-            ref={field}
-            id={`${id}-message`}
-            rows={1}
-            value={text}
-            spellCheck
-            disabled={done}
-            aria-describedby={`${id}-note`}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={keys}
-            className="field-sizing-content max-h-48 min-h-11 flex-1 resize-none bg-transparent py-2.5 text-base leading-normal text-foreground outline-none disabled:cursor-not-allowed"
-          />
-          <button type="submit" aria-label="Send" className={cn(KEY, "size-11 shrink-0 rounded-full px-0")} disabled={busy || done || text.trim() === ""}>
-            <ArrowUp className="size-6" aria-hidden />
-          </button>
-        </div>
-        <p id={`${id}-note`} className="px-4 text-caption text-pretty text-muted-foreground" data-slot="model-note">
-          {conversation.figuresOnly ? "Reading without the model now: figures only, exactly as written." : "A model reads your words; it can't set anything you didn't say."} Here a fixture stands in for it, and
-          nothing leaves this page.
-        </p>
-      </form>
+      <Composer
+        ref={composer}
+        label="Your message"
+        initialText={initialText}
+        busy={busy}
+        disabled={done}
+        status={busy ? "Reading your message…" : ""}
+        onSend={onSend}
+        className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) bg-card px-(--page-x) pt-1 pb-3 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-[calc(var(--dock-clearance)+1rem)]"
+        note={
+          <>
+            {conversation.figuresOnly ? "Reading without the model now: figures only, exactly as written." : "A model reads your words; it can't set anything you didn't say."} Here a fixture stands
+            in for it, and nothing leaves this page.
+          </>
+        }
+      />
     </div>
   );
 }

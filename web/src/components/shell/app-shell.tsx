@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useRef } from "react";
+import { type CSSProperties, type ReactNode, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { canOpen } from "@/lib/access";
 import { isRecordRoute } from "@/lib/frozen";
@@ -8,11 +8,13 @@ import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { allFeedsOk } from "@/lib/feeds";
 import { useRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
+import { COPILOT_WIDTH, CopilotPanel, CopilotProvider, useCopilot } from "@/components/copilot/copilot";
 import { FixtureTag, InlineDisclosures } from "@/components/domain/placeholders";
 import { AccessDenied } from "./access-denied";
 import { AccountBanners } from "./account-banners";
 import { AppHeader } from "./app-header";
 import { Dock } from "./dock";
+import { PAGE_FRAME, fullBleed } from "./frame";
 import { TabNav } from "./nav";
 import { StatusStrip } from "./status-strip";
 import { StopSheetHost } from "./stop-control";
@@ -29,9 +31,22 @@ export function densityFor(pathname: string): "calm" | "dense" {
  * decision is read against every feed's age, not against the absence of a warning. With no strip,
  * the "Fixture data" tag sits at the foot of the page. The More sheet opens into a layer inside the
  * frame, under the header and the tab bar, so it rises from behind the bar and never covers Stop.
+ * Owlhead, when open, docks to the right of the page from 110rem and the dock recentres on what is
+ * left; narrower, it floats over the page's right side, and on a phone it is a sheet between the
+ * header and the tab bar (DEC-479). Messages fills the window edge to edge, with no gutter and no
+ * page footer; its list of threads carries the fixture tag (DEC-481).
  */
 export function AppShell({ children }: { children: ReactNode }) {
+  return (
+    <CopilotProvider>
+      <Frame>{children}</Frame>
+    </CopilotProvider>
+  );
+}
+
+function Frame({ children }: { children: ReactNode }) {
   const { ws, now } = useRuntime();
+  const copilot = useCopilot();
   const { role } = useRole();
   const pathname = usePathname();
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
@@ -40,13 +55,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const strip = record || !fresh;
   const banner = !record && !fresh && ws.status !== "loading";
   const sheetLayer = useRef<HTMLDivElement>(null);
+  const bleed = fullBleed(pathname);
 
   return (
-    <div className="relative isolate flex min-h-svh w-full">
+    <div className="relative isolate flex min-h-svh w-full" style={{ "--copilot-w": copilot.open ? COPILOT_WIDTH : "0px" } as CSSProperties}>
       <a href="#main" className="sr-only z-50 bg-card px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
-      <div className="flex min-h-dvh min-w-0 flex-1 flex-col bg-card">
+      <div className={cn("flex min-h-dvh min-w-0 flex-1 flex-col bg-card", bleed && "h-dvh max-lg:pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom))]")}>
         <AppHeader />
         {strip ? (
           <div className={record ? undefined : "max-lg:hidden"}>
@@ -63,25 +79,32 @@ export function AppShell({ children }: { children: ReactNode }) {
           id="main"
           tabIndex={-1}
           data-density={densityFor(pathname)}
-          className={cn("mx-auto w-full max-w-(--content-max) flex-1 px-(--page-x) pt-(--page-top) pb-10 outline-none", strip && "lg:pb-[calc(var(--dock-clearance)+2rem)]")}
+          className={cn(
+            "flex-1 outline-none",
+            bleed ? "flex min-h-0 w-full flex-col" : PAGE_FRAME,
+            strip && !bleed && "lg:pb-[calc(var(--dock-clearance)+2rem)]",
+          )}
         >
           <InlineDisclosures inline={isRecordRoute(pathname)}>{canOpen(role, pathname) ? children : <AccessDenied role={role} />}</InlineDisclosures>
         </main>
-        <div
-          data-slot="page-footer"
-          className={cn(
-            "mx-auto w-full max-w-(--content-max) px-(--page-x) pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom)+2rem)]",
-            strip ? "lg:hidden" : "lg:pb-[calc(var(--dock-clearance)+2rem)]",
-          )}
-        >
-          {record ? null : <FixtureTag />}
-        </div>
+        {bleed ? null : (
+          <div
+            data-slot="page-footer"
+            className={cn(
+              "mx-auto w-full max-w-(--content-max) px-(--page-x) pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom)+2rem)]",
+              strip ? "lg:hidden" : "lg:pb-[calc(var(--dock-clearance)+2rem)]",
+            )}
+          >
+            {record ? null : <FixtureTag />}
+          </div>
+        )}
       </div>
+      <CopilotPanel />
       <div ref={sheetLayer} data-slot="sheet-layer" />
       <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden">
         <TabNav approvals={open} sheetLayer={sheetLayer} />
       </div>
-      <div className="fixed bottom-[calc(var(--dock-gap)+env(safe-area-inset-bottom))] left-1/2 z-30 hidden -translate-x-1/2 lg:block">
+      <div className="fixed bottom-[calc(var(--dock-gap)+env(safe-area-inset-bottom))] left-1/2 z-30 min-[110rem]:left-[calc((100%-var(--copilot-w))/2)] hidden -translate-x-1/2 lg:block">
         <Dock approvals={open} />
       </div>
       <StopSheetHost />

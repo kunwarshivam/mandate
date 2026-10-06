@@ -14,6 +14,7 @@ import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
 import { asPhone, shownOnDesktop, shownOnPhone } from "@/test/viewport";
 import { AppShell } from "./app-shell";
+import { fullBleed } from "./frame";
 import { hiddenToTheRight } from "./status-strip";
 
 const SCENARIO_IDS = SCENARIOS.map((s) => s.id);
@@ -151,13 +152,13 @@ describe("the phone frame (DEC-207)", () => {
     expect(within(header).queryByRole("button", { name: /sidebar/i })).toBeNull();
   });
 
-  it("offers four tabs: Home, Approvals with its count, Agents and More, then Stop at the bar's end", () => {
+  it("offers four tabs: Home, Messages with the count of requests waiting, Agents and More, then Stop at the bar's end", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const tabs = screen.getByRole("navigation", { name: "Main" });
     expect(tabs.parentElement).toHaveClass("lg:hidden");
     const items = phoneControls(tabs);
-    expect(items.map((i) => i.textContent?.replace(/\d+ open/, "").trim())).toEqual(["Home", "Approvals", "Agents", "More", "Stop"]);
-    expect(items.map((i) => i.getAttribute("href"))).toEqual(["/", "/approvals", "/agents", null, null]);
+    expect(items.map((i) => i.textContent?.replace(/\d+ open/, "").trim())).toEqual(["Home", "Messages", "Agents", "More", "Stop"]);
+    expect(items.map((i) => i.getAttribute("href"))).toEqual(["/", "/messages", "/agents", null, null]);
     expect(items[1].querySelector("[data-slot=approvals-count]")?.textContent).toMatch(/^\d+ open$/);
     expect(items[3]).toHaveAttribute("aria-haspopup", "dialog");
     expect(items[3]).toHaveAttribute("aria-expanded", "false");
@@ -275,6 +276,27 @@ describe("the desktop frame (DEC-215)", () => {
 });
 
 describe("the frame", () => {
+  it.each([
+    ["/messages", true],
+    ["/messages/agt_1", true],
+    ["/messages/agt_1/desk", true],
+    ["/", false],
+    ["/messagesx", false],
+    ["/agents/agt_1/activity", false],
+  ])("fills the window edge to edge on %s: %s", (path, bleed) => {
+    expect(fullBleed(path)).toBe(bleed);
+  });
+
+  it("holds Messages to the window's height, above the phone's tab bar, with no gutter and no page footer", () => {
+    setPathname("/messages");
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const main = screen.getByRole("main");
+    expect(main).toHaveClass("flex", "min-h-0", "flex-col");
+    expect(main).not.toHaveClass("px-(--page-x)", "max-w-(--content-max)");
+    expect(main.parentElement).toHaveClass("h-dvh", "max-lg:pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom))]");
+    expect(document.querySelector("[data-slot=page-footer]")).toBeNull();
+  });
+
   it("frosts the header, the phone tab bar and the desktop dock, and nothing else", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const [header] = screen.getAllByRole("banner");

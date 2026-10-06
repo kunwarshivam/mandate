@@ -67,7 +67,7 @@ for (const width of PHONES) {
     test("four tabs and then Stop sit at the bottom, 44 px or more, frosted, and the page never scrolls sideways", async ({ page }) => {
       await open(page, "/", width);
       const items = tabBar(page).locator(":scope > a, :scope > button");
-      expect((await labels(items)).map((l) => l.replace(/\d+ open/, "").trim())).toEqual(["Home", "Approvals", "Agents", "More", "Stop"]);
+      expect((await labels(items)).map((l) => l.replace(/\d+ open/, "").trim())).toEqual(["Home", "Messages", "Agents", "More", "Stop"]);
       await expect(tabStop(page)).toBeEnabled();
       await expect(tabStop(page)).toBeInViewport({ ratio: 1 });
       const bar = (await tabBar(page).boundingBox())!;

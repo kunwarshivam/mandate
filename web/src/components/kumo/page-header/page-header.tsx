@@ -46,9 +46,45 @@ export function isCurrentTab(pathname: string, href: string, tabs: readonly Page
   return longest?.href === href;
 }
 
-export function PageHeader({ title, description, environment, tabs, tabsLabel = "Sections", status, icon, actions, children, className, tabsClassName }: PageHeaderProps) {
+/** The route tabs alone, for a pane inside a page, such as a thread's Chat and Desk. */
+export function PageTabs({ tabs, label, className }: { tabs: readonly PageTab[]; label: string; className?: string }) {
   const pathname = usePathname();
-  const underline = `page-tabs-${tabsLabel}`;
+  const underline = `page-tabs-${label}`;
+  return (
+    <nav aria-label={label} className={cn("-mx-(--page-x) overflow-x-auto px-(--page-x) [scrollbar-width:none] lg:mx-0 lg:px-0", className)}>
+      <ul className="flex min-w-max gap-1 border-b border-border/70">
+        {tabs.map((tab) => {
+          const current = isCurrentTab(pathname, tab.href, tabs);
+          return (
+            <li key={tab.href} className="group/tab">
+              <Link
+                href={tab.href}
+                aria-current={current ? "page" : undefined}
+                className={cn(
+                  "relative inline-flex h-11 items-center px-3 text-sm text-muted-foreground outline-none transition-colors duration-(--duration-hover) group-first/tab:pl-0 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
+                  current && "font-medium text-foreground",
+                )}
+              >
+                {tab.label}
+                {current ? (
+                  <motion.span
+                    layoutId={underline}
+                    aria-hidden
+                    data-slot="tab-underline"
+                    className="absolute inset-x-3 -bottom-px h-0.5 rounded-xs bg-lapis-line group-first/tab:left-0"
+                    transition={{ type: "spring", duration: 0.35, bounce: 0.2 }}
+                  />
+                ) : null}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+export function PageHeader({ title, description, environment, tabs, tabsLabel = "Sections", status, icon, actions, children, className, tabsClassName }: PageHeaderProps) {
   return (
     <header data-slot="page-header" className={cn("mb-(--block-gap) grid grid-cols-1 gap-(--block-gap)", className)}>
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -66,38 +102,7 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>
       {children}
-      {tabs && tabs.length > 0 ? (
-        <nav aria-label={tabsLabel} className={cn("-mx-(--page-x) overflow-x-auto px-(--page-x) [scrollbar-width:none] lg:mx-0 lg:px-0", tabsClassName)}>
-          <ul className="flex min-w-max gap-1 border-b border-border/70">
-            {tabs.map((tab) => {
-              const current = isCurrentTab(pathname, tab.href, tabs);
-              return (
-                <li key={tab.href} className="group/tab">
-                  <Link
-                    href={tab.href}
-                    aria-current={current ? "page" : undefined}
-                    className={cn(
-                      "relative inline-flex h-11 items-center px-3 text-sm text-muted-foreground outline-none transition-colors duration-(--duration-hover) group-first/tab:pl-0 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
-                      current && "font-medium text-foreground",
-                    )}
-                  >
-                    {tab.label}
-                    {current ? (
-                      <motion.span
-                        layoutId={underline}
-                        aria-hidden
-                        data-slot="tab-underline"
-                        className="absolute inset-x-3 -bottom-px h-0.5 rounded-xs bg-lapis-line group-first/tab:left-0"
-                        transition={{ type: "spring", duration: 0.35, bounce: 0.2 }}
-                      />
-                    ) : null}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-      ) : null}
+      {tabs && tabs.length > 0 ? <PageTabs tabs={tabs} label={tabsLabel} className={tabsClassName} /> : null}
     </header>
   );
 }

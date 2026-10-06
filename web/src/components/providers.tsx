@@ -8,6 +8,7 @@ import { TooltipProvider } from "@cloudflare/kumo/components/tooltip";
 import { KumoLocaleProvider, LinkProvider, type LinkComponentProps } from "@cloudflare/kumo/utils";
 import { JournalToasts } from "@/components/shell/journal-toasts";
 import type { Workspace } from "@/fixtures/types";
+import { HandoffProvider } from "@/lib/handoff";
 import { RuntimeProvider } from "@/lib/mock-runtime";
 
 const AppLink = forwardRef<HTMLAnchorElement, LinkComponentProps>(function AppLink({ href, to, ...rest }, ref) {
@@ -32,8 +33,10 @@ export function Providers({
           <TooltipProvider delay={300}>
             <Toasty>
               <RuntimeProvider initial={workspace} recordAfterMs={recordAfterMs} tick={tick}>
-                {children}
-                <JournalToasts />
+                <HandoffProvider>
+                  {children}
+                  <JournalToasts />
+                </HandoffProvider>
               </RuntimeProvider>
             </Toasty>
           </TooltipProvider>

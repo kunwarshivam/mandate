@@ -35,8 +35,9 @@ function TabFace({ active, icon, label, badge }: { active: boolean; icon: ReactN
 }
 
 /**
- * The phone's one navigation (DEC-207): Home, Approvals with its count, Agents, and More, a sheet
- * with every other screen, then Stop at the bar's end for a role that may stop (DEC-452). A role
+ * The phone's one navigation (DEC-207, DEC-479): Home, Messages with the count of requests waiting,
+ * Agents, and More, a sheet with every other screen, Approvals among them, then Stop at the bar's
+ * end for a role that may stop (DEC-452). A role
  * that sees no agents gets its home and More. The current tab's
  * icon sits on a pale pill that glides between tabs; with reduced motion it jumps.
  */
@@ -64,7 +65,7 @@ export function TabNav({ approvals, sheetLayer }: { approvals: number; sheetLaye
               label={label}
               icon={<Glyph className="relative size-6" aria-hidden />}
               badge={
-                href === "/approvals" && approvals > 0 ? (
+                href === "/messages" && approvals > 0 ? (
                   <span
                     data-slot="approvals-count"
                     className="absolute -top-1 right-1 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-sm bg-lapis px-1 font-mono text-[0.6875rem] font-semibold text-lapis-foreground tabular ring-2 ring-card"

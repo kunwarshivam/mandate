@@ -40,7 +40,7 @@ export function ScenarioSwitcher({ scenario, colourBlind }: { scenario: Scenario
   return (
     <div
       data-slot="scenario-switcher"
-      className="fixed right-3 bottom-20 z-20 flex flex-wrap items-center gap-2 border border-dashed border-foreground bg-card py-1 pr-1 pl-2.5 text-caption lg:bottom-[calc(var(--dock-clearance)+0.5rem)]">
+      className="fixed right-3 bottom-20 z-20 flex flex-wrap items-center gap-2 border border-dashed border-foreground bg-card py-1 pr-1 pl-2.5 text-caption lg:bottom-[calc(var(--dock-clearance)+0.5rem)] [body:has([data-slot=copilot])_&]:hidden max-lg:[body:has([data-slot=composer-dock])_&]:hidden">
       <TestTube className="size-6 text-muted-foreground" aria-hidden />
       <label className="flex items-center gap-1.5">
         <span className="text-muted-foreground">Scenario</span>

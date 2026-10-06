@@ -29,7 +29,7 @@ import { healthItems } from "./status-strip";
 import { ThemeMenu } from "./theme-menu";
 
 /** The phone's own tabs for a role that sees agents; the rest of the app is under More. */
-export const PHONE_TAB_LINKS = ["home", "approvals", "agents"] as const;
+export const PHONE_TAB_LINKS = ["home", "messages", "agents"] as const;
 
 export interface PhoneTab {
   key: string;
@@ -38,7 +38,7 @@ export interface PhoneTab {
   icon: Icon;
 }
 
-const TAB_LABEL: Record<(typeof PHONE_TAB_LINKS)[number], string> = { home: "Home", approvals: "Approvals", agents: "Agents" };
+const TAB_LABEL: Record<(typeof PHONE_TAB_LINKS)[number], string> = { home: "Home", messages: "Messages", agents: "Agents" };
 
 /** A role that cannot see agents gets its own home as the one tab beside More. */
 export function phoneTabs(role: Role): PhoneTab[] {
