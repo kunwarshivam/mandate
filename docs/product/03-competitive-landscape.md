@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Owner** | Product |
-| **Status** | Draft v0.4, 2026-10-05. Adds Volaren (YC F26), which v0.3 listed as pre-launch. Replaces v0.3 of 2026-09-30, which added the general-purpose agents section [ADR-0003](../adr/0003-earned-autonomy.md) sequenced; v0.2 of 2026-09-27 replaced v0.1 after it made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
-| **Method** | Public web pages only, read 2026-09-26 and 2026-09-27; the general-agents section's sources were read 2026-09-30, and Volaren's on 2026-10-05. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
+| **Status** | Draft v0.4, 2026-10-05. Adds Volaren (YC F26), which v0.3 listed as pre-launch; Financial Datasets (YC S26), a data supplier; and its founder's open-source projects ai-hedge-fund and Dexter. Replaces v0.3 of 2026-09-30, which added the general-purpose agents section [ADR-0003](../adr/0003-earned-autonomy.md) sequenced; v0.2 of 2026-09-27 replaced v0.1 after it made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
+| **Method** | Public web pages only, read 2026-09-26 and 2026-09-27; the general-agents section's sources were read 2026-09-30, and Volaren's, Financial Datasets', and the open-source projects' on 2026-10-05 (the projects at the commits named in their sources). Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
 | **Regulatory material** | Public commentary, not legal advice. Legal and compliance text is reserved for the founder and counsel ([DEC-79](../project/04-decision-log.md#decisions)) |
 | **Related** | [Strategy options](10-strategy-options.md), [Vision](01-vision-and-strategy.md), [Compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) |
 
@@ -62,6 +62,16 @@
    [VL5]. It does not document orders placed for the owner within limits the owner set, which is
    where Mandate's difference sits. Its free tier [VL6] is likely to set what owners expect to pay
    for the research half of the journey (inference).
+8. **The data layer sells to agent builders, and its founder's open-source fund already states
+   Mandate's core rules.** Financial Datasets (YC S26) is a candidate fundamentals supplier once the
+   DEC-99 evaluation passes [M10]. Its terms count feeding a hosted agent's answers as
+   redistribution, which only its $2,000-a-month plan or Enterprise allows, and require deleting the
+   data when access ends, which collides with Mandate's six-year record [FD1] [FD2] [M10]. Its founder's
+   ai-hedge-fund (63,855 stars, MIT) documents "The LLM never touches the trade", hard caps outside
+   the model, an approval step, a kill switch, and a hash-chained ledger, on paper, with a live
+   broker planned [AH1] [AH2] [AH3]. Mandate can claim none of those as a difference against it; an
+   owner envelope with autonomy rules and expiry, US account rules, and coordination across agents
+   on one account are not documented there (inference: where to look, not proof of absence).
 
 ## Segment map
 
@@ -72,7 +82,8 @@
 | General-purpose agents with money ambitions | Meta Muse, SpaceXAI Grok Bot, OpenAI Dots | Not competitors today (no documented trading); the money-layer plugin (DEC-183) makes them a channel, and their permission scopes set the expectations ADR-0003's delegations answer |
 | Strategy and automation platforms | QuantConnect (Mia, LEAN), Volaren, Composer, Surmount, Autopilot, Option Alpha, TradersPost, Capitalise.ai, Autonomous | Substitutes for delegated execution; several are registered advisers |
 | Broker channels and MCP servers | Alpaca, Interactive Brokers, Webull, Tradier, tastytrade, TradeStation, Kraken, Coinbase, Public MCP, Robinhood MCP | Channels and suppliers; each is also a substitute when a user connects their own agent directly |
-| Infrastructure | Alpaca (API, paper, OAuth), NautilusTrader, LEAN, SnapTrade | Suppliers, or build-versus-buy alternatives |
+| Open-source fund and research agents | ai-hedge-fund, Dexter | Open-source, self-hosted substitutes a technical owner runs on their own machine with their own data and model keys; ai-hedge-fund's design is the closest to Mandate's we found (inference) |
+| Infrastructure | Alpaca (API, paper, OAuth), NautilusTrader, LEAN, SnapTrade, Financial Datasets (data) | Suppliers, or build-versus-buy alternatives |
 
 ## Broker-native agents
 
@@ -611,6 +622,72 @@ an adviser registration. The regulatory template closest to DEC-98's working ass
   [TP1].
 - **Capitalise.ai:** natural-language automation supplied through brokers [CA1].
 
+## Open-source fund and research agents
+
+Both projects are by Virat Singh, founder of [Financial Datasets](#financial-datasets-yc-s26), and
+both ask for a Financial Datasets API key [AH1] [DX1]. Stars were read on 2026-10-05.
+
+### ai-hedge-fund
+
+MIT-licensed, 63,855 stars, read at commit `78b779c` of 2026-10-02, version 2.5.0 in its `pyproject.toml` [AH1]. Running it
+needs a Financial Datasets key and a model provider's key [AH1].
+
+**What it documents**
+
+- **Educational, and paper only.** It is "for **educational** purposes only and is not intended for
+  real trading or investment", and "the system does not actually make any trades" [AH1].
+- **Paper funds.** "your funds, each with a ledger of real market days and fake money"; "an
+  approval step shows the exact decision about to execute before anything trades"; `h` and `r` for
+  the kill switch; "Every session is appended to a hash-chained ledger" [AH1]. "Fund definitions
+  live in `~/.hedge-fund/mandates/`", and a paper fund is built from "strategies, capital, cadence,
+  tickers" [AH1].
+- **Principles.** "The LLM never touches the trade. Language models form *views* and *narrate*
+  decisions. Deterministic code sizes positions and places orders, and risk limits are hard gates
+  an agent cannot exceed." Also "Point-in-time honesty", "Paper before real, always. Live trading
+  is opt-in and off by default", and nothing the fund invents "gets capital without passing the
+  validation gate (overfitting checks like CPCV/PBO) — and promotion into a live book stays
+  human-approved by default" [AH2].
+- **Risk limits.** "hard caps the analysts cannot override": a per-ticker position cap and a gross
+  exposure cap, applied as deterministic clamps after portfolio construction, each clamp recorded.
+  "Exposure removed by a clamp is NOT redistributed to other names; it stays in cash" [AH4]. The
+  file's history starts on 2026-08-02. Pod-level budgets are in progress [AH3].
+- **Ledger and halts.** Each record carries the hash of the one before it: "A gap, a reordered
+  file, or an edited record breaks the chain and `replay` refuses", and "control.json is the kill
+  switch" [AH5]. A redo takes the latest record off the chain and keeps it in a `superseded`
+  folder [AH5]. "Any failure inside `advance` halts the fund", and "a human clears the halt"
+  [AH6]. Each session decides at T and executes at T+1, and the broker book "is reconciled against
+  it before every tick" [AH3].
+- **Roadmap.** "Live broker (Interactive Brokers / Alpaca) — opt-in plugin, off by default", the
+  validation gate, and auto-promotion are not started [AH3]. The goal is "an AI hedge fund that
+  genuinely tries to **outperform the market**" [AH2].
+
+**Overlap with Mandate.** The closest design to Mandate's that we have found, and open source
+(inference). Its principles restate `AGENTS.md` rule 4 almost word for word, and it ships hard
+caps outside the model, an approval step, a kill switch, paper before live, and a hash-chained
+ledger that refuses a broken chain. Not documented there: an owner envelope with autonomy rules
+(AUTO, ASK, DENY) and expiry; loss, drawdown, or order-count limits; US account rules (pattern day
+trading, settlement, market hours); coordination with other agents or the owner's own trades on one
+account; handling of an ambiguous broker submission; and anchoring the ledger outside the owner's
+disk. Several of these cannot arise while it places no orders. Once its live broker plugin ships it
+would be a self-hosted substitute on Alpaca, Mandate's first connector (inference). Its audience already
+knows Mandate's own words ("mandate", "kill switch", a hash-chained record) from it, so those words
+alone will not set Mandate apart (inference).
+
+The [harness engineering](11-harness-engineering.md) table of 2026-09-27 said it had "no
+enforcement layer"; its risk limits, present since 2026-08-02, contradict that, and the row is
+corrected in this version.
+
+### Dexter
+
+"An autonomous agent for deep financial research"; 27,638 stars; its README says MIT, and the
+repository has no license file [DX1]. It is "for **educational, entertainment, and informational
+purposes only**. It is not intended for real trading or investment." It logs every tool call to a
+JSONL scratchpad, has "Built-in loop detection and step limits to prevent runaway execution", scores
+itself with "an LLM-as-judge approach", and answers through a WhatsApp gateway [DX1].
+
+**Overlap with Mandate.** A substitute for the research agent alone, for an owner who can run it;
+it documents no order placement [DX1].
+
 ## Broker channels and MCP servers
 
 | Broker | What its public material documents for agents | Source |
@@ -642,23 +719,96 @@ itself (RAID R-13).
 - **SnapTrade:** multi-broker linking; its Robinhood page says Robinhood "does not offer the ability
   to place trades" through it [ST1].
 
+### Financial Datasets (YC S26)
+
+A financial data API sold to agent builders: a candidate supplier for Mandate's research agent,
+not a competitor. Founded 2024 in New York, team size 1, founder Virat Singh [FD4], who also wrote
+[ai-hedge-fund and Dexter](#open-source-fund-and-research-agents).
+
+**What it documents**
+
+- **Data.** "complete coverage of US publicly-traded companies - both active and delisted - with
+  over 27,000 tickers and 30+ years of historical data"; "Non-US markets are not yet available",
+  nor are "Options, indices, and currencies" [FD6]. Its pricing FAQ and YC page call the tickers
+  "global" [FD1] [FD4]. Datasets include standardized, segmented, and as-reported statements,
+  KPIs, guidance, non-GAAP metrics, insider trades, 13F holdings, SEC filings, earnings, news, and
+  prices [FD1] [FD8].
+- **Provenance.** SEC data is pulled "directly from EDGAR. There is no intermediary"; prices come
+  "via Databento"; news "from publicly available news feeds" [FD5]. Its KPIs are extracted by a
+  language model: it chose "Opus 4.6 with Extended Thinking", which scored "99.3% accuracy across 60
+  earnings releases", and runs "multiple validation steps on top of the model's output" [FD10].
+- **Accuracy and latency (vendor claim).** "99.9%+ verified accuracy" and "< 200ms API latency",
+  from a sample of "1,000 companies across 75 sectors, 20,000 data points verified per audit cycle"
+  [FD3]; its YC page says "99.99% precision" [FD4].
+- **Delivery.** REST; an MCP server with sign-in connectors for Claude, ChatGPT, Gemini, Grok,
+  Hermes, OpenClaw, and Cursor [FD8]; and webhooks, "available on **Scale** and **Enterprise**
+  plans", signed with HMAC-SHA256, with a warning that "We may deliver the same event more than
+  once" [FD9].
+- **Agents sign themselves up.** An agent posts the owner's email to `/agent/signup` and receives a
+  key; "Every data call returns `402 Payment Required` until the account is funded"; the agent
+  mints a Stripe link ("$20 minimum credits purchase") for the owner to pay, and "Links expire
+  after 24 hours". The owner is emailed: "An AI agent created a Financial Datasets account with your
+  email" [FD7].
+- **Pricing.** Credits, $20 once for 1,000 requests and 1 year of history; Build, $200 a month for
+  100,000 requests and 30+ years; Scale, $2,000 a month for 2,000,000 requests, which "Adds data
+  redistribution rights, webhooks, and uptime SLAs"; premium requests count "8x on Credits, 4x on
+  Build, and 2x on Scale"; Enterprise adds "zero data retention" [FD1]. The table names the plans
+  Build and Scale, while the FAQ and terms call them Personal and Professional [FD1] [FD2]. "every
+  API request, including each tool call made through our MCP server, counts as one billable unit"
+  [FD2].
+- **Customers (vendor claim).** "trusted by 1,000+ customers, serving millions of requests daily",
+  and "hedge funds and companies building finance agents use Financial Datasets as their market
+  data layer" [FD4]; Julius uses its API as "the data layer behind it" [FD11].
+
+**What its terms would mean for Mandate.** Terms as of 2026-10-05 [FD2]; this is a reading for
+counsel, not legal advice, and spending is the founder's ([DEC-79](../project/04-decision-log.md#decisions)).
+
+- **A hosted research agent needs Professional or Enterprise.** "Redistribution" includes
+  "providing the data to an AI model, agent, or other automated system that uses it to produce
+  answers, summaries, or other outputs for your customers or users", and "displaying the data to
+  your customers or users inside your application". It is "permitted only on plans that expressly
+  include data redistribution (currently Professional and Enterprise), with attribution". Its YC
+  page says "Redistribution included" [FD4], without naming the plans. A thesis that cites a value
+  in the decision view would be both (inference).
+- **An owner's own key is unresolved.** The Personal license covers "personal investing" by a
+  natural person, "not for the benefit of any other person or entity", and "does not permit use by
+  or on behalf of any business or organization" [FD2]. The terms do not say whether a hosted
+  platform may use an owner's Personal key for that owner.
+- **Deletion collides with the record.** "When your access ends, your right to use the Services and
+  data stops, and you must stop using and delete the data" [FD2]. Mandate keeps what a thesis cited
+  as journal artifacts for six years, and the founder decided to "Allowlist only sources whose terms
+  allow that, and counsel confirms per vendor" (DEC-433 item 20, 2026-10-03) [M10]. On these terms
+  the data could not be allowlisted; a contract would need a carve-out for cited values (inference).
+- **Small print.** Liability is capped at "ONE HUNDRED U.S. DOLLARS (US$100)", and prepaid balances
+  "expire twelve (12) months after purchase" [FD2].
+
+**Overlap with Mandate.** A supplier. The founder chose no paid vendor before the DEC-99 evaluation
+passes, with SEC EDGAR and XBRL facts first (DEC-433 item 16) [M10], and Financial Datasets' SEC
+datasets come from EDGAR too [FD5]. What it would add is breadth Mandate does not parse itself
+(KPIs, guidance, segments, earnings within seconds), and the redistribution right sets the published
+self-serve floor at $2,000 a month however few requests the research agent makes; Enterprise rates
+are custom [FD1] (inference). Its self-signup flow is the "agent asks, a human pays" pattern Mandate's ASK
+applies to orders; the research agent must not be able to start it, because a paid source is
+spending and enters only through the vetted allowlist ([mandate spec §8.4](../specs/mandate.md#84-the-research-agent-dec-97-adr-0002))
+(inference).
+
 ## Capability matrix
 
 Legend: **Yes** documented; **Partly** documented for part of the capability, scope in the cell;
 **No** the company's own material says it does not, or its design excludes it;
-**Not documented** no public statement found as of 2026-09-27 (Volaren: 2026-10-05). "(vc)" marks a vendor claim with no mechanism shown.
+**Not documented** no public statement found as of 2026-09-27 (Volaren and ai-hedge-fund: 2026-10-05). "(vc)" marks a vendor claim with no mechanism shown.
 
-| Differentiator | Public Agents | Robinhood Agentic | Scalar Field | QuantConnect Mia + LEAN | Composer by SoFi | TradeAgentic | Regent | Volaren | Mandate (status) |
-|---|---|---|---|---|---|---|---|---|---|
-| D1 Owner limits enforced outside strategy or agent logic | Partly: limits live in each plan; buying power, eligibility, per-agent margin outside it [PU3] [PU10] | Partly: the funded agentic account caps capital; Robinhood states it does not supervise agents [RH1] [RH2] | Partly: capital and buying power enforced per strategy; drawdown thresholds only in the AI disclosure and guidance [SF1] [SF5] [SF16] | Partly: LEAN risk model runs inside the algorithm [QC2] | Not documented [CO1] | Yes (vc) [TA1] | Yes (vc), payments, devnet [RG1] | Not documented: every trade is placed or confirmed by the user [VL5] [VL6] | Specified; gate code merged (#157, #160), flatten open (#176) [M1] |
-| D2 Coordination across agents on one account | No: agents run independently [PU5] | Not documented [RH2] | Partly: isolated books, aggregate reconciliation [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Yes (vc): one shared capital pool [TA2] | Not documented [RG1] | Not documented [VL3] | Specified (E7-5, RC-17); not built [M2] |
-| D3 Per-action approval with expiry and revalidation | No: no confirmation before each transaction [PU8] | Partly: optional per-trade approval; expiry not documented [RH3] | Not documented: activation approval only; `venue.trade()` has no approval workflow [SF16] [SF19] | Not documented: live deployment decision stays with the user [QC1] | Not documented [CO1] | No: no per-trade override by design [TA2] | Partly (vc): hold verdict [RG1] | Partly: "you confirm every order" once order placement ships; expiry and revalidation not documented [VL4] [VL5] | Classification tests merged (#175); approvals and drift revalidation are M7 (E8-1 to E8-3) [M3] |
-| D4 Exportable, verifiable decision record | Partly: run logs and activity feed; export not documented; automated extraction barred [PU5] [PU8] | Not documented [RH1] | Not documented [SF1] | Not documented [QC1] | Not documented [CO1] | Partly (vc): refusals recorded and scored; integrity not documented [TA1] | Yes (vc): anchored, operator-independent [RG1] | Partly: strategy pages carry a rules fingerprint and a never-backfilled forward record; covers strategies, not a user's decisions; export not documented [VL9] | Journal hash chain and verify CLI merged (E5-1, E5-4); decision view is M9 (E12) [M4] |
-| D5 Documented handling of ambiguous submissions and restarts | Partly: repeated failures become "action required" [PU7] | Not documented [RH3] | Yes: idempotent execution, pending-order rule, reconcile and freeze [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Partly (vc): resumes after reboot [TA1] | Not documented [RG1] | Not applicable today: places no orders [VL4] [VL6] | Specified (E7-2, E7-3); tests #152 and implementation #174 open [M5] |
-| D6 Rehearsal before live (paper or forward evidence) | No backtest as of 2026-09-14; paper not documented [PU6] [PU7] | Not documented: no paper environment found [RH2] | Partly: paper on Alpaca; no evidence page [SF3] | Yes: backtest, paper, divergence monitoring [QC1] | Partly: backtest before activation [CO1] | Partly (vc): out-of-sample scoring [TA1] | Not applicable | Partly: backtests, and forward simulated records for its strategies [VL2] [VL9] | Alpaca paper tracer (E7-7, #173) and forward-paper evaluation (DEC-99, E17-8) specified [M6] |
-| D7 One mandate across brokers | No: Public accounts only [PU8] | No: Robinhood accounts only [RH2] | Partly: same code across venues and paper or live; no mandate object [SF3] | Partly: one algorithm across many brokerages [QC3] | Not documented [CO2] | Not documented: brokers undisclosed [TA1] | Not documented [RG1] | Not applicable today: read-only sync from several brokers; trading at five "coming soon" [VL4] | Alpaca first, Robinhood at M8 (E7-6); not built [M7] |
-| D8 Ideas originated by the platform inside an owner envelope | No: "does only what you told it to do" [PU1] | No: the user's own agent; Robinhood does not recommend [RH1] | No: "user-defined logic" [SF9] | Yes: Mia generates ideas; the user decides live capital [QC1] | Partly: AI helps build rules the user activates [CO1] | Yes (vc) [TA2] | Not applicable | Partly: Volaren's strategies and thesis baskets arrive as tickets the user reviews; no owner envelope documented [VL2] [VL6] | Accepted (DEC-97); users only after DEC-99 passes [M8] |
-| D9 Runs on the customer's infrastructure | Not applicable (broker) | Not applicable (broker) | Partly: Enterprise private workspaces [SF6] | Yes: LEAN is open source [QC5] | Not documented [CO2] | Yes (vc): self-hosted desktop [TA1] | Not documented [RG1] | Not documented [VL3] | Planned (M11 hybrid) [M9] |
+| Differentiator | Public Agents | Robinhood Agentic | Scalar Field | QuantConnect Mia + LEAN | Composer by SoFi | TradeAgentic | Regent | Volaren | ai-hedge-fund | Mandate (status) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| D1 Owner limits enforced outside strategy or agent logic | Partly: limits live in each plan; buying power, eligibility, per-agent margin outside it [PU3] [PU10] | Partly: the funded agentic account caps capital; Robinhood states it does not supervise agents [RH1] [RH2] | Partly: capital and buying power enforced per strategy; drawdown thresholds only in the AI disclosure and guidance [SF1] [SF5] [SF16] | Partly: LEAN risk model runs inside the algorithm [QC2] | Not documented [CO1] | Yes (vc) [TA1] | Yes (vc), payments, devnet [RG1] | Not documented: every trade is placed or confirmed by the user [VL5] [VL6] | Yes: position and gross caps clamp after construction; the LLM's influence "ends at the Signal" [AH4] | Specified; gate code merged (#157, #160), flatten open (#176) [M1] |
+| D2 Coordination across agents on one account | No: agents run independently [PU5] | Not documented [RH2] | Partly: isolated books, aggregate reconciliation [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Yes (vc): one shared capital pool [TA2] | Not documented [RG1] | Not documented [VL3] | Partly: a fund's strategies are netted into one book before its caps; across funds not documented [AH3] | Specified (E7-5, RC-17); not built [M2] |
+| D3 Per-action approval with expiry and revalidation | No: no confirmation before each transaction [PU8] | Partly: optional per-trade approval; expiry not documented [RH3] | Not documented: activation approval only; `venue.trade()` has no approval workflow [SF16] [SF19] | Not documented: live deployment decision stays with the user [QC1] | Not documented [CO1] | No: no per-trade override by design [TA2] | Partly (vc): hold verdict [RG1] | Partly: "you confirm every order" once order placement ships; expiry and revalidation not documented [VL4] [VL5] | Partly: an approval step shows each session's decision before it runs; expiry and revalidation not documented [AH1] | Classification tests merged (#175); approvals and drift revalidation are M7 (E8-1 to E8-3) [M3] |
+| D4 Exportable, verifiable decision record | Partly: run logs and activity feed; export not documented; automated extraction barred [PU5] [PU8] | Not documented [RH1] | Not documented [SF1] | Not documented [QC1] | Not documented [CO1] | Partly (vc): refusals recorded and scored; integrity not documented [TA1] | Yes (vc): anchored, operator-independent [RG1] | Partly: strategy pages carry a rules fingerprint and a never-backfilled forward record; covers strategies, not a user's decisions; export not documented [VL9] | Partly: hash-chained session ledger with each thesis; replay refuses a broken chain; local files, anchoring not documented [AH3] [AH5] | Journal hash chain and verify CLI merged (E5-1, E5-4); decision view is M9 (E12) [M4] |
+| D5 Documented handling of ambiguous submissions and restarts | Partly: repeated failures become "action required" [PU7] | Not documented [RH3] | Yes: idempotent execution, pending-order rule, reconcile and freeze [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Partly (vc): resumes after reboot [TA1] | Not documented [RG1] | Not applicable today: places no orders [VL4] [VL6] | Partly: any failure halts the fund until a human clears it; book reconciled before every tick; places no orders [AH3] [AH6] | Specified (E7-2, E7-3); tests #152 and implementation #174 open [M5] |
+| D6 Rehearsal before live (paper or forward evidence) | No backtest as of 2026-09-14; paper not documented [PU6] [PU7] | Not documented: no paper environment found [RH2] | Partly: paper on Alpaca; no evidence page [SF3] | Yes: backtest, paper, divergence monitoring [QC1] | Partly: backtest before activation [CO1] | Partly (vc): out-of-sample scoring [TA1] | Not applicable | Partly: backtests, and forward simulated records for its strategies [VL2] [VL9] | Yes: backtest and paper on the same code path [AH1] [AH3] | Alpaca paper tracer (E7-7, #173) and forward-paper evaluation (DEC-99, E17-8) specified [M6] |
+| D7 One mandate across brokers | No: Public accounts only [PU8] | No: Robinhood accounts only [RH2] | Partly: same code across venues and paper or live; no mandate object [SF3] | Partly: one algorithm across many brokerages [QC3] | Not documented [CO2] | Not documented: brokers undisclosed [TA1] | Not documented [RG1] | Not applicable today: read-only sync from several brokers; trading at five "coming soon" [VL4] | Not applicable today: no live broker; Interactive Brokers and Alpaca planned [AH3] | Alpaca first, Robinhood at M8 (E7-6); not built [M7] |
+| D8 Ideas originated by the platform inside an owner envelope | No: "does only what you told it to do" [PU1] | No: the user's own agent; Robinhood does not recommend [RH1] | No: "user-defined logic" [SF9] | Yes: Mia generates ideas; the user decides live capital [QC1] | Partly: AI helps build rules the user activates [CO1] | Yes (vc) [TA2] | Not applicable | Partly: Volaren's strategies and thesis baskets arrive as tickets the user reviews; no owner envelope documented [VL2] [VL6] | Partly: LLM analysts form views on tickers the owner picks; strategy invention is planned [AH1] [AH2] [AH3] | Accepted (DEC-97); users only after DEC-99 passes [M8] |
+| D9 Runs on the customer's infrastructure | Not applicable (broker) | Not applicable (broker) | Partly: Enterprise private workspaces [SF6] | Yes: LEAN is open source [QC5] | Not documented [CO2] | Yes (vc): self-hosted desktop [TA1] | Not documented [RG1] | Not documented [VL3] | Yes: runs on the owner's machine; MIT [AH1] | Planned (M11 hybrid) [M9] |
 
 **Reading the matrix.** No column is all "Yes". Mandate's column is specification and partial code,
 not shipped product, so no row supports a comparative claim until the demo in
@@ -707,6 +857,18 @@ not shipped product, so no row supports a comparative claim until the demo in
     terms say it is not a registered adviser or broker-dealer [VL6]; readings are for counsel.
 24. That Volaren charges for strategies. Its terms of 2026-10-02 say every public strategy is free
     [VL6], although its undated "Who we are" page mentions paying for premium strategies [VL3].
+25. That ai-hedge-fund has no risk limits, enforcement layer, approval step, kill switch, or audit
+    trail. Its code and README document all five [AH1] [AH4] [AH5].
+26. That Mandate is the only product in which "the LLM never touches the trade", or the first to
+    say so. ai-hedge-fund's vision says it in those words [AH2].
+27. That ai-hedge-fund cannot trade live, without a date. As of 2026-10-05 a live broker plugin is
+    on its roadmap, not built [AH3].
+28. Financial Datasets' accuracy figures as fact. "99.9%+" and "99.99%" come from its own
+    benchmark [FD3] [FD4].
+29. That Mandate uses, partners with, or is endorsed by Financial Datasets. No paid vendor may be
+    added before the DEC-99 evaluation passes [M10].
+30. That Financial Datasets covers non-US markets. Its coverage page says "Non-US markets are not
+    yet available", although its pricing FAQ and YC page say "global" [FD1] [FD4] [FD6].
 
 ## Unknowns to verify by product trial
 
@@ -735,6 +897,11 @@ may place an order (`AGENTS.md` rule 8). Where access is unavailable, record "no
 | Volaren | When order placement ships: through which provider, with which order types? Does a ticket expire, and is it checked against the account again before it is sent? |
 | Volaren | Can a user check a strategy's rules fingerprint against its record independently? Can records be exported? |
 | Webull | Can an agent submit without confirmation? |
+| Financial Datasets | Are fundamentals point in time: after a restatement, is the value as first filed kept and queryable by `filing_date`? |
+| Financial Datasets | Does each language-model-extracted value (KPIs, guidance, non-GAAP) carry its source citation in the API response, and how is a later correction signalled? |
+| Financial Datasets | For counsel: may a hosted platform use an owner's Personal key for that owner? Would an Enterprise contract let Mandate keep cited values for six years after access ends? |
+| ai-hedge-fund | When its live broker ships, is an order intent recorded before it is sent, and what happens on a lost acknowledgment? Does an approval expire? |
+| ai-hedge-fund | Decided at T and executed at T+1: are its caps checked again at execution against the book and prices of T+1? |
 
 ## Sources
 
@@ -858,8 +1025,27 @@ Accessed means the page carried no date and was read on 2026-09-26 or 2026-09-27
 | M7 | Mandate: [DEC-98](../project/04-decision-log.md#decisions), E7-6 | 2026-09-27 |
 | M8 | Mandate: [DEC-97](../project/04-decision-log.md#decisions), [DEC-103](../project/04-decision-log.md#decisions), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) | 2026-09-27 |
 | M9 | Mandate: [milestones](../project/02-milestones-and-wbs.md) (M11) | 2026-09-27 |
+| M10 | Mandate: [data plane spec §4.1](../specs/data-plane.md#41-sources), [DEC-433](../project/decisions/DEC-433.md) items 16 and 20 | 2026-10-05 |
+| FD1 | [Financial Datasets pricing](https://www.financialdatasets.ai/pricing) | accessed 2026-10-05 |
+| FD2 | [Financial Datasets terms of service](https://www.financialdatasets.ai/terms-of-use) | as of 2026-10-05 |
+| FD3 | [Financial Datasets home page](https://www.financialdatasets.ai/) | accessed 2026-10-05 |
+| FD4 | [Financial Datasets, YC company page](https://www.ycombinator.com/companies/financial-datasets) | accessed 2026-10-05 |
+| FD5 | [Financial Datasets: data provenance](https://docs.financialdatasets.ai/data-provenance) | accessed 2026-10-05 |
+| FD6 | [Financial Datasets: market coverage](https://docs.financialdatasets.ai/market-coverage) | accessed 2026-10-05 |
+| FD7 | [Financial Datasets: for agents](https://docs.financialdatasets.ai/agents) | accessed 2026-10-05 |
+| FD8 | [Financial Datasets: MCP server](https://docs.financialdatasets.ai/mcp-server) | accessed 2026-10-05 |
+| FD9 | [Financial Datasets: webhooks](https://docs.financialdatasets.ai/webhooks) | accessed 2026-10-05 |
+| FD10 | [Financial Datasets: EarningsBench](https://www.financialdatasets.ai/blogs/earningsbench) | 2026-06-29 |
+| FD11 | [Financial Datasets: partnership with Julius](https://www.financialdatasets.ai/blogs/julius-ai-partnership) | 2026-03-26 |
+| AH1 | [ai-hedge-fund README](https://github.com/virattt/ai-hedge-fund/blob/78b779c/README.md) and [`pyproject.toml`](https://github.com/virattt/ai-hedge-fund/blob/78b779c/pyproject.toml) | commit `78b779c`, 2026-10-02 |
+| AH2 | [ai-hedge-fund VISION.md](https://github.com/virattt/ai-hedge-fund/blob/78b779c/VISION.md) | commit `78b779c`, 2026-10-02 |
+| AH3 | [ai-hedge-fund ROADMAP.md](https://github.com/virattt/ai-hedge-fund/blob/78b779c/ROADMAP.md) | commit `78b779c`, 2026-10-02 |
+| AH4 | [ai-hedge-fund `hedge_fund/risk/limits.py`](https://github.com/virattt/ai-hedge-fund/blob/78b779c/hedge_fund/risk/limits.py) | commit `78b779c`; file history from 2026-08-02 |
+| AH5 | [ai-hedge-fund `hedge_fund/paper/ledger.py`](https://github.com/virattt/ai-hedge-fund/blob/78b779c/hedge_fund/paper/ledger.py) | commit `78b779c`; added 2026-10-01 |
+| AH6 | [ai-hedge-fund `hedge_fund/paper/tick.py`](https://github.com/virattt/ai-hedge-fund/blob/78b779c/hedge_fund/paper/tick.py) | commit `78b779c` |
+| DX1 | [Dexter README](https://github.com/virattt/dexter) | accessed 2026-10-05 |
 
 Not re-verified in this refresh, and so carrying no claims here: the open-source research frameworks
-v0.1 listed (TradingAgents, AI Hedge Fund, RD-Agent with Qlib, FinRobot, FinRL), the research
+v0.1 listed other than ai-hedge-fund (TradingAgents, RD-Agent with Qlib, FinRobot, FinRL), the research
 copilots for funds, AI-native funds, and compliance vendors for trading firms. See this file's
 history for v0.1.
