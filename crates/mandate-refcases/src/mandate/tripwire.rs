@@ -796,12 +796,19 @@ mod tests {
         if mandate.universe.pinned_instruments.len() < 2 {
             return Err("two_stock_swing has fewer than two pins".to_owned());
         }
-        mandate.universe.pinned_instruments[0].asset_class = AssetClass::UsEquity;
-        mandate.universe.pinned_instruments[1].asset_class = AssetClass::Crypto;
-        let second = mandate.universe.pinned_instruments[1]
-            .asset_id
-            .as_str()
-            .to_owned();
+        mandate
+            .universe
+            .pinned_instruments
+            .get_mut(0)
+            .ok_or("two_stock_swing has no first pin")?
+            .asset_class = AssetClass::UsEquity;
+        let second_pin = mandate
+            .universe
+            .pinned_instruments
+            .get_mut(1)
+            .ok_or("two_stock_swing has no second pin")?;
+        second_pin.asset_class = AssetClass::Crypto;
+        let second = second_pin.asset_id.as_str().to_owned();
         assert_eq!(fill_asset_class(&mandate, &second)?, AssetClass::Crypto);
         Ok(())
     }
@@ -846,15 +853,27 @@ mod tests {
         assert!(!delegated(&mandate.autonomy, &action, false, not_ask)?);
 
         let mut wrong_source = mandate.autonomy.clone();
-        wrong_source.delegations[0].lifts = Lifts::Default;
+        wrong_source
+            .delegations
+            .first_mut()
+            .ok_or("MC-W31 has no delegation")?
+            .lifts = Lifts::Default;
         assert!(!delegated(&wrong_source, &action, false, basic.clone())?);
 
         let mut at_start = mandate.autonomy.clone();
-        at_start.delegations[0].starts_at = Some(now);
+        at_start
+            .delegations
+            .first_mut()
+            .ok_or("MC-W31 has no delegation")?
+            .starts_at = Some(now);
         assert!(delegated(&at_start, &action, false, basic.clone())?);
 
         let mut at_expiry = mandate.autonomy.clone();
-        at_expiry.delegations[0].expires_at = Some(now);
+        at_expiry
+            .delegations
+            .first_mut()
+            .ok_or("MC-W31 has no delegation")?
+            .expires_at = Some(now);
         assert!(!delegated(&at_expiry, &action, false, basic.clone())?);
 
         let mut false_condition = action.clone();
@@ -867,22 +886,31 @@ mod tests {
         )?);
 
         let mut over_order = mandate.autonomy.clone();
-        over_order.delegations[0].max_order_usd =
-            SchemaDec::parse("949", DecGrammar::PositiveDecimal)
-                .map_err(|error| error.to_string())?;
+        over_order
+            .delegations
+            .first_mut()
+            .ok_or("MC-W31 has no delegation")?
+            .max_order_usd = SchemaDec::parse("949", DecGrammar::PositiveDecimal)
+            .map_err(|error| error.to_string())?;
         assert!(!delegated(&over_order, &action, false, basic.clone())?);
 
         let mut over_total = mandate.autonomy.clone();
-        over_total.delegations[0].max_order_usd =
-            SchemaDec::parse("1000", DecGrammar::PositiveDecimal)
-                .map_err(|error| error.to_string())?;
-        over_total.delegations[0].max_total_usd =
-            SchemaDec::parse("949", DecGrammar::PositiveDecimal)
-                .map_err(|error| error.to_string())?;
+        let over_total_delegation = over_total
+            .delegations
+            .first_mut()
+            .ok_or("MC-W31 has no delegation")?;
+        over_total_delegation.max_order_usd = SchemaDec::parse("1000", DecGrammar::PositiveDecimal)
+            .map_err(|error| error.to_string())?;
+        over_total_delegation.max_total_usd = SchemaDec::parse("949", DecGrammar::PositiveDecimal)
+            .map_err(|error| error.to_string())?;
         assert!(!delegated(&over_total, &action, false, basic.clone())?);
 
         let mut exhausted = mandate.autonomy.clone();
-        exhausted.delegations[0].max_orders = 0;
+        exhausted
+            .delegations
+            .first_mut()
+            .ok_or("MC-W31 has no delegation")?
+            .max_orders = 0;
         assert!(!delegated(&exhausted, &action, false, basic)?);
         Ok(())
     }
