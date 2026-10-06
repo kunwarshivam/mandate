@@ -19,8 +19,6 @@ import { percent, usd } from "@/lib/format";
 
 export type SectionKey = "money" | "limits" | "strategy" | "autonomy" | "universe";
 
-export const SECTION_KEYS: readonly SectionKey[] = ["money", "limits", "strategy", "autonomy", "universe"];
-
 export type ModelId = "quant.mean_reversion" | "quant.momentum";
 
 interface ModelParam {
@@ -139,7 +137,6 @@ export interface DraftField {
 export interface DraftSection {
   key: SectionKey;
   title: string;
-  lead: string;
   fields: DraftField[];
 }
 
@@ -259,11 +256,14 @@ export const GOAL_WORDS = /\b(stop|stops|reach|reaches|until|gain|gains|grow|gro
 export const NOT_ENFORCED_WHY = "No limit in the mandate can check this, so nothing enforces it. It reaches the agent's models only as description text.";
 const GOAL_NOT_ENFORCED_WHY = "No goal type can express this, so it is kept as description text and nothing enforces it. The agent runs until you stop it.";
 
-/** The owner's words split where a new thought starts: sentences, lines, commas, "and", "but". */
+/**
+ * The owner's words split where a new thought starts: sentences, lines, commas, "and", "but". A
+ * clause drops the punctuation that ended it, so a quote of it reads as the owner's words alone.
+ */
 export function clauses(text: string): string[] {
   return text
     .split(/(?<=[.;!?])\s+|\n+|,\s+|\s+(?:and|but)\s+/i)
-    .map((c) => c.trim())
+    .map((c) => c.trim().replace(/(?<=[A-Za-z0-9%)])[.;!?]+$/, ""))
     .filter((c) => c.length > 0);
 }
 
@@ -476,7 +476,6 @@ function strategySection(strategy: ChosenModel | null): DraftSection {
   return {
     key: "strategy",
     title: "How it decides",
-    lead: "You choose the model and its settings; the platform ranks none and fills in none. A model gives a score, never an order.",
     fields: [
       strategy
         ? { path: "/behavior/signal_models/0/id", label: "Model", value: `${strategy.model.name} (${strategy.model.id} ${strategy.model.version})`, provenance: "user_entered" }
@@ -505,7 +504,6 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
     {
       key: "money",
       title: "Money and goal",
-      lead: "What you said, as the mandate reads it.",
       fields: [
         { path: "/capital/allocation_usd", label: "Money it may use", value: usd(t.allocationUsd), provenance: "user_stated", quote: r.quotes.money },
         {
@@ -522,7 +520,6 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
     {
       key: "limits",
       title: "Limits",
-      lead: "Drafted to fit inside the loss you stated. The risk gate enforces each one, whatever the agent proposes.",
       fields: [
         {
           path: "/risk/max_daily_loss",
@@ -555,7 +552,6 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
     {
       key: "autonomy",
       title: "When it asks you",
-      lead: "Selling to cut risk never asks: protective stops, the loss limits and the kill switch act at once.",
       fields: [
         { path: "/autonomy/default", label: "Buying", value: "Asks you before every buy.", provenance: "platform_default" },
         { path: "/autonomy/approval/timeout_s", label: "Time to answer", value: `${t.approvalTimeoutS / 60} minutes.`, provenance: "platform_proposed" },
@@ -567,7 +563,6 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
     {
       key: "universe",
       title: "What it may trade",
-      lead: "You choose the instruments. The platform never fills in your list.",
       fields: [
         symbols.length > 0
           ? { path: "/universe/pinned_instruments", label: "Instruments", value: symbols.join(", "), provenance: "user_entered" }
