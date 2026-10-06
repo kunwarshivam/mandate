@@ -650,7 +650,11 @@ export function recordChange(ws: Workspace, proposal: Proposal, origin: Origin, 
 export function reachSafePoint(ws: Workspace, agentId: string, version: ContentRef, origin: Origin, at: Iso): { ws: Workspace; recorded: Recorded } | null {
   const current = ws.agents.find((a) => a.agent_id === agentId);
   const pendingAt = current?.versions.findIndex((v) => v.mandate_version === version && v.application.result === "pending") ?? -1;
-  if (!current || pendingAt === -1) return { ws, recorded: { result: "rejected", reason: "This version is no longer waiting to apply." } };
+  if (!current || pendingAt === -1) {
+    const settled = current?.versions.find((v) => v.mandate_version === version)?.application;
+    if (settled?.result === "applied") return { ws, recorded: { result: "applied" } };
+    return { ws, recorded: { result: "rejected", reason: settled?.result === "rejected" ? settled.reason : "This version is no longer waiting to apply." } };
+  }
   if (current.orders.some((o) => o.state === "Unknown")) return null;
   const next = structuredClone(ws);
   const agent = next.agents.find((a) => a.agent_id === agentId);
