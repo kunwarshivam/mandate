@@ -50,4 +50,4 @@ pub mod tracer;
 
 pub use error::{Cause, ShellError};
 pub use stages::Stage;
-pub use tracer::{Report, Setup, run};
+pub use tracer::{Report, Setup, run, run_cycle};

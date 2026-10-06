@@ -51,7 +51,7 @@ use mandate_shell::adapters::{
 };
 use mandate_shell::envelope::{IdSpace, Ids};
 use mandate_shell::stages::{Classifier, JournalWriter, MandateSource, Sizing, Stages};
-use mandate_shell::{Cause, Report, Setup, ShellError, run};
+use mandate_shell::{Cause, Report, Setup, ShellError, run, run_cycle};
 use mandate_spec::ValidationContext;
 use mandate_spec::document::ProvenanceMap;
 use mandate_time::{Date, UtcNanos};
@@ -1342,6 +1342,63 @@ fn happy() {
     ] {
         assert!(!written.contains(secret), "{secret} reached the journal");
     }
+}
+
+/// E7-19 slice 1: production execution starts from a registered model output supplied across the
+/// public cycle boundary. It does not read bars or run a strategy in the execution shell.
+#[test]
+#[ignore = "pending E7-19"]
+fn the_production_cycle_takes_model_output_as_an_input() {
+    let transport = Scripted::new(Broker::Fresh);
+    let seen = Rc::clone(&transport.seen);
+    let mut stages = stages(
+        "mandate.json",
+        PathBuf::from("the-production-cycle-does-not-read-a-dataset"),
+        transport,
+    );
+    let (_, output) = builder_fixture();
+
+    let report = run_cycle(&mut stages, &setup(true), output).unwrap();
+
+    assert_eq!(seen.borrow().posts(), 1);
+    assert_eq!(report.submitted.len(), 1);
+    assert_eq!(
+        of_type(&committed(&stages, &agent_stream()), "ModelOutputRecorded").len(),
+        1
+    );
+    assert_eq!(
+        of_type(&committed(&stages, &agent_stream()), "IntentProposed").len(),
+        1
+    );
+}
+
+/// A caller cannot use the production boundary to substitute a model outside the confirmed
+/// mandate. The runtime may record the opinion, but the builder emits no intent and nothing sends.
+#[test]
+#[ignore = "pending E7-19"]
+fn the_production_cycle_refuses_an_unconfirmed_model_before_intent() {
+    let transport = Scripted::new(Broker::Fresh);
+    let seen = Rc::clone(&transport.seen);
+    let mut stages = stages(
+        "mandate.json",
+        PathBuf::from("the-production-cycle-does-not-read-a-dataset"),
+        transport,
+    );
+    let (_, mut output) = builder_fixture();
+    output.model_id = "quant.not-confirmed".to_owned();
+
+    assert_refused(
+        run_cycle(&mut stages, &setup(true), output),
+        "order_builder_unavailable",
+    );
+
+    assert_eq!(seen.borrow().posts(), 0);
+    assert!(
+        of_type(&committed(&stages, &agent_stream()), "IntentProposed").is_empty()
+    );
+    assert!(
+        of_type(&committed(&stages, &account_stream()), "OrderSubmitted").is_empty()
+    );
 }
 
 /// TI-10: the same fixtures, mandate, and clock journal byte-identical drafts.

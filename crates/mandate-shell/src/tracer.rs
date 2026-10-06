@@ -93,6 +93,22 @@ pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
     Ok(session.report)
 }
 
+/// Runs one production decision cycle from a model output supplied by the model gateway
+/// (DEC-475, E7-19).
+///
+/// # Errors
+/// This tests-first API refuses until E7-19's production-cycle implementation lands.
+pub fn run_cycle(
+    _stages: &mut Stages,
+    _setup: &Setup,
+    _output: mandate_runtime::ModelOutput,
+) -> Result<Report, ShellError> {
+    Err(ShellError::Refused {
+        stage: Stage::Signal,
+        cause: Cause::Unimplemented { story: "E7-19" },
+    })
+}
+
 /// The one instrument the mandate pins. The tracer trades exactly one (DEC-138).
 fn pinned(view: &MandateView) -> Result<InstrumentId, ShellError> {
     let mut universe = view.working_universe.iter();
