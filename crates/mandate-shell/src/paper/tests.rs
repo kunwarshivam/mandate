@@ -436,6 +436,7 @@ fn shipping_paper_adapter_uses_only_the_validated_deployment_input() -> Result<(
         .split_once("\n}\n\nstruct SystemClock")
         .map(|(body, _)| body)
         .ok_or_else(|| "the shipping tracer function boundary is missing".to_owned())?;
+    assert!(!body.contains("//") && !body.contains("/*"));
     let cli_source = include_str!("../cli.rs");
     for forbidden in [
         "WORKSPACE",
@@ -459,23 +460,35 @@ fn shipping_paper_adapter_uses_only_the_validated_deployment_input() -> Result<(
         );
     }
     assert!(!body.contains("Artifacts::load("));
-    for required in [
-        "let deployment_input = artifacts",
-        "let agent = deployment_input.deployment().agent.clone();",
-        "deployment: deployment_input.deployment().clone(),",
-        "account_ref: deployment_input.account_ref().to_owned(),",
-        "workspace: deployment_input.deployment().workspace.0.clone(),",
-    ] {
-        assert!(
-            body.contains(required),
-            "the shipping tracer body must use `{required}`"
-        );
-    }
+    assert!(body.contains("let deployment_input = artifacts"));
     assert_eq!(
-        body.matches("account_ref: deployment_input.account_ref()")
+        body.matches("let agent = deployment_input.deployment().agent.clone();")
             .count(),
-        2
+        1
     );
+    let context_block = body
+        .split_once("load_contexts_with_clock(")
+        .and_then(|(_, after)| after.split_once(")"))
+        .map(|(block, _)| block)
+        .ok_or_else(|| "the trusted-context call is missing".to_owned())?;
+    assert!(context_block.contains("&agent,"));
+    let setup_block = body
+        .split_once("let setup = Setup {")
+        .and_then(|(_, after)| after.split_once("\n    };"))
+        .map(|(block, _)| block)
+        .ok_or_else(|| "the production setup block is missing".to_owned())?;
+    assert!(setup_block.contains("deployment: deployment_input.deployment().clone(),"));
+    assert!(setup_block.contains("account_ref: deployment_input.account_ref().to_owned(),"));
+    let sources_block = body
+        .split_once("production(Sources {")
+        .and_then(|(_, after)| after.split_once("\n    });"))
+        .map(|(block, _)| block)
+        .ok_or_else(|| "the production sources block is missing".to_owned())?;
+    assert!(sources_block.contains("agent,"));
+    assert!(
+        sources_block.contains("workspace: deployment_input.deployment().workspace.0.clone(),")
+    );
+    assert!(sources_block.contains("account_ref: deployment_input.account_ref().to_owned(),"));
     scratch.remove()
 }
 
