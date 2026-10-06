@@ -66,16 +66,15 @@ fn tracer() -> Result<Report, ShellError> {
                 cause,
             }
         })?;
-    let deployment_input = artifacts
-        .deployment(
-            args.workspace.clone(),
-            args.agent.clone(),
-            args.account_ref.clone(),
-        )
-        .map_err(|cause| ShellError::Refused {
-            stage: Stage::Validate,
-            cause,
-        })?;
+    let deployment_input = artifacts.deployment(
+        args.workspace.clone(),
+        args.agent.clone(),
+        args.account_ref.clone(),
+    );
+    let deployment_input = deployment_input.map_err(|cause| ShellError::Refused {
+        stage: Stage::Validate,
+        cause,
+    })?;
     let credentials = Credentials::from_env()
         .map_err(|_| ShellError::Usage("Alpaca paper credentials are unavailable".to_owned()))?;
     let transport = AlpacaPaperHttp::new(credentials)
