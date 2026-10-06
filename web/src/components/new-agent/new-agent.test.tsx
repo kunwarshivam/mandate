@@ -438,6 +438,7 @@ describe("A5, the confirmation record", () => {
     expect(progress()).toHaveTextContent("Sent at 14:05:20 ET; waiting for the runtime to record it. Nothing is active until it does.");
     expect(main().querySelector("[data-slot=confirmed]")).toHaveTextContent("You confirmed the record above.");
     expect(screen.queryByRole("button", { name: "Confirm and deploy to paper" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "After you confirmed" })).toHaveFocus();
 
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
     const [d] = deployments();

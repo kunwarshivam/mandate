@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@cloudflare/kumo/components/button";
 import { ArrowCounterClockwise, ArrowRight } from "@phosphor-icons/react";
@@ -166,6 +166,12 @@ export function Confirmation({ draft, request, onBack, onStartOver }: { draft: D
   const deployment = deployments.find((d) => d.id === sentId) ?? null;
   const shownVersion = mandateVersion(request.mandate);
   const confirmed = deployment !== null && deployment.phase !== "rejected" && deployment.phase !== "undelivered";
+  const progress = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!sentId) return;
+    progress.current?.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true });
+    progress.current?.scrollIntoView({ block: "start" });
+  }, [sentId]);
 
   const confirm = () => {
     const sent = deploy(request, { screen: "A5", environment: ws.environment, shown: confirmationLines(draft, shownVersion) });
@@ -247,8 +253,8 @@ export function Confirmation({ draft, request, onBack, onStartOver }: { draft: D
       <div role="status" aria-live="polite" className="grid gap-3">
         {notice ? <p className="rounded-xl bg-background px-4 py-3 text-sm">{notice}</p> : null}
         {deployment ? (
-          <section aria-labelledby="after-confirm" data-slot="after-confirm" className="grid gap-3 rounded-2xl border border-dashed border-muted-foreground px-5 py-4">
-            <h2 id="after-confirm" className="text-h3">
+          <section ref={progress} aria-labelledby="after-confirm" data-slot="after-confirm" className="grid gap-3 rounded-2xl border border-dashed border-muted-foreground px-5 py-4">
+            <h2 id="after-confirm" tabIndex={-1} className="text-h3 outline-none">
               After you confirmed
             </h2>
             <p className="text-sm text-muted-foreground">Live progress. It is not part of the record above.</p>

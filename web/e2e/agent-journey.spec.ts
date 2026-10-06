@@ -89,6 +89,8 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
 
     const progress = page.locator("[data-slot=after-confirm]");
     await expect(progress.locator("[data-phase=sent]")).toBeVisible();
+    await expect(progress.getByRole("heading", { name: "After you confirmed" })).toBeFocused();
+    await expect(progress).toBeInViewport();
     await expect(progress.locator("[data-phase=recorded]")).toContainText("Agent 4 is running on paper");
     await expect(progress.locator("[data-slot=owl]")).toBeVisible();
     await expect(page.getByText("Your confirmed mandate.")).toBeVisible();
