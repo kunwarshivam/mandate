@@ -1401,10 +1401,12 @@ name = "mandate-executor"
 version = "0.0.0"
 dependencies = [
  "mandate-accounting",
+ "mandate-approval",
  "mandate-canon",
  "mandate-journal",
  "mandate-num",
  "mandate-risk",
+ "mandate-spec",
  "mandate-time",
  "proptest",
  "serde_json",

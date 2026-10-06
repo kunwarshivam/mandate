@@ -93,6 +93,7 @@ mod reconcile;
 mod session;
 mod state;
 mod step;
+pub mod tripwire;
 mod types;
 
 pub use error::{ExecutorError, JsonError};

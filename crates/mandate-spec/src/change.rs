@@ -22,7 +22,7 @@ use mandate_domain::AutonomyDecision;
 use crate::condition::{Condition, ConditionValue, Operator};
 use crate::document::{
     Approval, Autonomy, Delegation, Goal, LadderRung, Lifts, Mandate, Pointer, Rule, ScaleAction,
-    SignalModel, pointer,
+    SignalModel, Tripwire, pointer,
 };
 use crate::{SchemaDec, SpecError};
 
@@ -158,6 +158,7 @@ pub fn classify_autonomy(old: &Autonomy, new: &Autonomy) -> Result<ChangeClass, 
     let lifted: BTreeSet<&Lifts> = new.delegations.iter().map(|d| &d.lifts).collect();
     let bare = |a: &Autonomy| Autonomy {
         delegations: Vec::new(),
+        tripwires: Vec::new(),
         ..a.clone()
     };
     if bare(old) == bare(new) {
@@ -168,6 +169,18 @@ pub fn classify_autonomy(old: &Autonomy, new: &Autonomy) -> Result<ChangeClass, 
     } else {
         ChangeClass::RiskIncreasing
     })
+}
+
+/// §9.2's `autonomy.tripwires` row, matched by id (DEC-352).
+///
+/// The tests PR names the API but refuses every unequal pair until E6-13 implements all six change
+/// shapes. Equality is neutral because no path changed.
+pub fn classify_tripwires(old: &[Tripwire], new: &[Tripwire]) -> Result<ChangeClass, SpecError> {
+    if old == new {
+        Ok(ChangeClass::Neutral)
+    } else {
+        Err(SpecError::Unimplemented)
+    }
 }
 
 /// §9.2's `autonomy.delegations` row (DEC-181), matched by `id`: reducing only if every change
@@ -441,6 +454,7 @@ fn row(
         "/autonomy/delegations" => {
             classify_delegations(&o.autonomy.delegations, &n.autonomy.delegations)?
         }
+        "/autonomy/tripwires" => classify_tripwires(&o.autonomy.tripwires, &n.autonomy.tripwires)?,
         autonomy if autonomy.starts_with("/autonomy/") => {
             classify_autonomy(&o.autonomy, &n.autonomy)?
         }
@@ -594,6 +608,7 @@ fn autonomy_reduces(old: &Autonomy, new: &Autonomy, lifted: &BTreeSet<&Lifts>) -
             },
         review_by: _,
         delegations: _,
+        tripwires: _,
     } = old;
     approvers == &new.approval.approvers
         && timeout_s == &new.approval.timeout_s

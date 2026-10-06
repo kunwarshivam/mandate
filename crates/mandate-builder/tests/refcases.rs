@@ -276,6 +276,7 @@ fn autonomy_of(c: &Value) -> Autonomy {
         },
         review_by: None,
         delegations: Vec::new(),
+        tripwires: Vec::new(),
     }
 }
 

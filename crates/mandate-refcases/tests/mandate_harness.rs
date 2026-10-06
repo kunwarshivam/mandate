@@ -107,7 +107,7 @@ fn passing(id: &str) -> bool {
 }
 
 /// Every kind an arm of `mandate::cases` interprets, this harness's and the other streams'.
-const INTERPRETED: [&str; 17] = [
+const INTERPRETED: [&str; 18] = [
     "schema",
     "semantic",
     "policy",
@@ -125,6 +125,7 @@ const INTERPRETED: [&str; 17] = [
     "builder",
     "review",
     "escalation",
+    "tripwire",
 ];
 
 /// A case ID's family: `MC-V` for `MC-V07`.
@@ -247,6 +248,21 @@ fn a_kind_no_arm_interprets_fails_naming_it() {
     assert!(
         failure.contains("`a_kind_no_arm_interprets`"),
         "{id}: the failure must name the kind, got: {failure}"
+    );
+}
+
+/// MC-W27 reaches the E6-13-owned arm and fails on its named adapter stub, rather than on the
+/// generic unknown-kind guard or by silently passing.
+#[test]
+fn a_tripwire_case_reaches_the_fail_closed_e6_13_adapter() {
+    let failure = run(fixture(), "MC-W27").expect_err("the tests-PR adapter must fail closed");
+    assert!(
+        failure.contains("E6-13 tripwire reference adapter is not implemented"),
+        "MC-W27 must stop at the owned tripwire adapter, got: {failure}"
+    );
+    assert!(
+        !failure.contains("unknown case kind"),
+        "the tripwire family has an owned arm"
     );
 }
 

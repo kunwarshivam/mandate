@@ -44,6 +44,7 @@ mod escalation;
 mod order_builder;
 mod research;
 mod risk_gate;
+mod tripwire;
 
 const SUITE: &str = "mandate";
 /// The fixture version this harness reads (`version: 4`, spec v0.6).
@@ -126,6 +127,9 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
     let kind = str_at(case, "kind")?;
     if kind == "escalation" {
         return escalation::escalation_case(case);
+    }
+    if kind == "tripwire" {
+        return tripwire::tripwire_case(case);
     }
     unread_keys(case)?;
     match kind {

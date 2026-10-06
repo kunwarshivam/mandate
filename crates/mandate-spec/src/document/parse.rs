@@ -663,7 +663,10 @@ fn ladder_rung(node: &Node<'_>) -> Parsed<LadderRung> {
 }
 
 fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
-    let m = node.members("rules default admission approval review_by delegations")?;
+    let m = node.members("rules default admission approval review_by delegations tripwires")?;
+    if m.optional("tripwires").is_some() {
+        return Err(ParseError::Unimplemented);
+    }
     let approval = m.get("approval")?;
     let approval = approval.members("timeout_s on_timeout approvers two_approver_above_usd")?;
     Ok(Autonomy {
@@ -693,6 +696,7 @@ fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
                 .collect::<Parsed<_>>()?,
             None => Vec::new(),
         },
+        tripwires: Vec::new(),
     })
 }
 
