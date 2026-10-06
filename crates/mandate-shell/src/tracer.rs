@@ -93,6 +93,31 @@ pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
     Ok(session.report)
 }
 
+/// One production deployment cycle. Its assembled stages and setup are private, so callers can
+/// supply model opinions but cannot replace the builder, gate, journal or executor (DEC-475).
+pub struct ProductionCycle {
+    stages: Stages,
+    setup: Setup,
+}
+
+impl ProductionCycle {
+    pub(crate) fn new(stages: Stages, setup: Setup) -> Self {
+        Self { stages, setup }
+    }
+
+    /// Runs one cycle from a model output supplied by the model gateway.
+    ///
+    /// # Errors
+    /// This tests-first API refuses until E7-19's production-cycle implementation lands.
+    pub fn run(&mut self, _output: mandate_runtime::ModelOutput) -> Result<Report, ShellError> {
+        let _ = (&mut self.stages, &self.setup);
+        Err(ShellError::Refused {
+            stage: Stage::Signal,
+            cause: Cause::Unimplemented { story: "E7-19" },
+        })
+    }
+}
+
 /// The one instrument the mandate pins. The tracer trades exactly one (DEC-138).
 fn pinned(view: &MandateView) -> Result<InstrumentId, ShellError> {
     let mut universe = view.working_universe.iter();
