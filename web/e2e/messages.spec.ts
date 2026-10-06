@@ -2,7 +2,7 @@ import { type Page, expect, test } from "@playwright/test";
 import { AGENT_IDS } from "../src/fixtures/workspace";
 
 /**
- * Messages fills the window edge to edge (DEC-478): no gutter and no content width, the panes each
+ * Messages fills the window edge to edge (DEC-481): no gutter and no content width, the panes each
  * scrolling on their own under the header, and the page itself never scrolling. The thread follows
  * the latest entry while the owner is at it, leaves them be once they scroll up, offers a way back,
  * and comes back down when they send. A message's Markdown scrolls inside itself, never the page.

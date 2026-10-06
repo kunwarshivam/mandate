@@ -47,7 +47,7 @@ export function useCopilot(): Copilot {
 }
 
 /**
- * Whether Owlhead is open (DEC-476 item 8). On a desktop it is docked and stays open across pages,
+ * Whether Owlhead is open (DEC-479 item 8). On a desktop it is docked and stays open across pages,
  * following the screen it looks at. On a phone it is a sheet over one page and closes when the owner
  * leaves that page. ⌘J or Ctrl+J opens and closes it anywhere in the app.
  */
@@ -250,7 +250,7 @@ function Panel({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** Mounted only while open, so nothing asked outlives the panel (DEC-476 item 8). */
+/** Mounted only while open, so nothing asked outlives the panel (DEC-479 item 8). */
 export function CopilotPanel() {
   const { open, hide } = useCopilot();
   return open ? <Panel onClose={hide} /> : null;

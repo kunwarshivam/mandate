@@ -93,9 +93,9 @@ function Step({ step, now, last }: { step: DeskStep; now: Iso; last: boolean }) 
 }
 
 /**
- * The desk (DEC-476): how the agent's latest request was made, from the models to the owner. Each
+ * The desk (DEC-479): how the agent's latest request was made, from the models to the owner. Each
  * step is a journaled fact; model output is quoted in a dashed frame and named, its Markdown drawn
- * and its links shown but never opened (DEC-478), and nothing on the desk is in the agent's voice.
+ * and its links shown but never opened (DEC-481), and nothing on the desk is in the agent's voice.
  */
 export function ThreadDesk({ agent }: { agent: Agent }) {
   const { ws, now } = useRuntime();

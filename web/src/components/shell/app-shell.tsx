@@ -33,8 +33,8 @@ export function densityFor(pathname: string): "calm" | "dense" {
  * frame, under the header and the tab bar, so it rises from behind the bar and never covers Stop.
  * Owlhead, when open, docks to the right of the page from 110rem and the dock recentres on what is
  * left; narrower, it floats over the page's right side, and on a phone it is a sheet between the
- * header and the tab bar (DEC-476). Messages fills the window edge to edge, with no gutter and no
- * page footer; its list of threads carries the fixture tag (DEC-478).
+ * header and the tab bar (DEC-479). Messages fills the window edge to edge, with no gutter and no
+ * page footer; its list of threads carries the fixture tag (DEC-481).
  */
 export function AppShell({ children }: { children: ReactNode }) {
   return (

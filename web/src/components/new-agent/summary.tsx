@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import { type Draft, goalWords } from "./draft";
 
 /**
- * The whole agent, shown once in the conversation when nothing is missing (DEC-474). It is the
+ * The whole agent, shown once in the conversation when nothing is missing (DEC-477). It is the
  * confirmation record (brief A5, mandate §10): every value in compact form, nothing collapsed (PX-1),
  * what the platform drafted marked as such, and the version its confirmation binds. One button
  * creates it, with a passkey (G3); the journal keeps every line shown.

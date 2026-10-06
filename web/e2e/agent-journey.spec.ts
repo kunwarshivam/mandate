@@ -1,7 +1,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
 /**
- * The whole journey on the fixture workspace (DEC-472, DEC-474), in one page load so the runtime's
+ * The whole journey on the fixture workspace (DEC-472, DEC-477), in one page load so the runtime's
  * state carries from screen to screen: set up an agent in a conversation, create it from its summary
  * with a passkey, find the new agent on Agents and Home, approve its first buy, see it fill with its
  * protective stop in place, read what it decided, and stop it with its kill switch. Every step after

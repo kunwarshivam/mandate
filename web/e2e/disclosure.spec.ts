@@ -3,7 +3,7 @@ import { AGENT_IDS } from "../src/fixtures/workspace";
 
 /**
  * DEC-210: beside every P&L, the performance disclosure is an info symbol, muted, a 24px pixel glyph
- * that is its own 24px target (44px on touch, DEC-475), that takes no more room than the text beside it. It opens the disclosure
+ * that is its own 24px target (44px on touch, DEC-478), that takes no more room than the text beside it. It opens the disclosure
  * text in a Kumo popover on hover, click, tap, or focus and Enter or Space; Escape closes it and gives
  * focus back. The text is the symbol's description, and print shows it in full in the symbol's place.
  */
@@ -129,7 +129,7 @@ for (const width of [1440, 390, 360]) {
         expect(Math.abs(r.height - r.lineHeight)).toBeLessThanOrEqual(0.5);
         expect(r.baselineGaps.length, "never alone on its line: it wraps with the words before it").toBeGreaterThan(0);
         for (const gap of r.baselineGaps) expect(gap).toBeLessThanOrEqual(1);
-        expect(r.glyph, "a pixel glyph renders on its 24px grid (DEC-475)").toBe(24);
+        expect(r.glyph, "a pixel glyph renders on its 24px grid (DEC-478)").toBe(24);
       }
 
       const layout = () =>

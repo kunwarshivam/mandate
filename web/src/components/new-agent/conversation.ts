@@ -4,7 +4,7 @@ import type { Asked, CompilerInput, OwnerMessage, Reading, Turn } from "./compil
 import { type Draft, LOSS_CEILING, type Loss, MODELS, NO_STRATEGY, type Strategy, checkLoss, compile, lossCeilingUsd, readStated, readStrategy, readSymbols } from "./draft";
 
 /**
- * Setting up an agent as one conversation (brief A0 to A2, DEC-473, DEC-474). The owner answers in
+ * Setting up an agent as one conversation (brief A0 to A2, DEC-476, DEC-477). The owner answers in
  * their own words, one question at a time or all at once; the compiler's model reads each message,
  * and this module, deterministic and pure, decides what that changes, what it refuses, and what to
  * say next. Once nothing is missing it shows the whole agent once, for the owner to create or change.

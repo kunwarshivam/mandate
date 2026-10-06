@@ -5,7 +5,7 @@ import { APPROVAL_STATUS_LABEL, PURPOSE_LABEL, RISK_CAP_LABEL, RISK_FIGURE_LABEL
 import { approvalAt } from "./mock-runtime";
 
 /**
- * Messages (DEC-476): each agent's thread, read from the journal. Nothing here is written by a model
+ * Messages (DEC-479): each agent's thread, read from the journal. Nothing here is written by a model
  * or kept on the device; every item is a journaled event or request, at the time it was recorded.
  */
 
@@ -187,7 +187,7 @@ function decisionDesk(agent: Agent, decision: GateDecision): Desk {
 }
 
 /**
- * The desk: how the agent's latest request was made, step by step, from the journal (DEC-476).
+ * The desk: how the agent's latest request was made, step by step, from the journal (DEC-479).
  * Model output is quoted; every other line is written by code from a recorded fact, and a step the
  * journal did not time carries no time. With no request yet, the latest gate decision; with neither, null.
  */

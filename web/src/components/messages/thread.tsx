@@ -43,10 +43,10 @@ function entriesOf(items: ThreadItem[], turns: Turn[]): Entry[] {
 }
 
 /**
- * An agent's thread (DEC-476): its journal, oldest first, its requests as cards that open the
+ * An agent's thread (DEC-479): its journal, oldest first, its requests as cards that open the
  * request, and below them what the owner asked and the record's answers. Asking writes nothing to
  * the journal; only a Pause the owner presses does, and its entry then appears here like any other.
- * The log scrolls on its own above the composer (DEC-478): it opens at the latest entry, follows new
+ * The log scrolls on its own above the composer (DEC-481): it opens at the latest entry, follows new
  * ones while the owner is there, stays put once they scroll up to read, and comes back down when
  * they send.
  */

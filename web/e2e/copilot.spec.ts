@@ -2,7 +2,7 @@ import { type Page, expect, test } from "@playwright/test";
 import { AGENT_IDS } from "../src/fixtures/workspace";
 
 /**
- * Owlhead (DEC-476 item 8) never hides the frame's safety: below 110rem it floats between the
+ * Owlhead (DEC-479 item 8) never hides the frame's safety: below 110rem it floats between the
  * header and the dock, so the paper badge and Stop stay whole; from 110rem it docks and the page and
  * the dock make room; on a phone it is a sheet between the header and the tab bar.
  */

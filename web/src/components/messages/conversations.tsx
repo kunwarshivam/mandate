@@ -22,7 +22,7 @@ const ConversationsContext = createContext<Store | null>(null);
 /**
  * What the owner asked in each thread, held while they stay in Messages so moving between threads,
  * or between Chat and Desk, keeps it. Leaving Messages drops it: nothing is written to browser
- * storage, and there is no history to reopen (DEC-476).
+ * storage, and there is no history to reopen (DEC-479).
  */
 export function ConversationsProvider({ children }: { children: ReactNode }) {
   const [turns, setTurns] = useState<Record<string, Turn[]>>({});

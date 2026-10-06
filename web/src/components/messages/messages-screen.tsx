@@ -24,7 +24,7 @@ import { ThreadChat } from "./thread";
 export type ThreadView = "chat" | "desk";
 
 /**
- * The panes fill the window under the header, edge to edge (DEC-478). On a desktop: the threads,
+ * The panes fill the window under the header, edge to edge (DEC-481). On a desktop: the threads,
  * the open thread, and the agent beside it, divided by hairlines. On a phone: one of the first two.
  */
 const MESSAGES_GRID =
@@ -134,7 +134,7 @@ function Messages({ agentId, view }: { agentId: string | null; view: ThreadView 
   );
 }
 
-/** Messages (DEC-476, DEC-478): every agent's thread, read from the journal, with the record answering questions. */
+/** Messages (DEC-479, DEC-481): every agent's thread, read from the journal, with the record answering questions. */
 export function MessagesScreen({ agentId = null, view = "chat" }: { agentId?: string | null; view?: ThreadView }) {
   const { ws } = useRuntime();
   if (ws.status !== "ready") {

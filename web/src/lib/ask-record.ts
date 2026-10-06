@@ -10,7 +10,7 @@ import { RESTRICTIONS } from "./restrictions";
 import { agentHref, decisionHref, positionHref } from "./screens";
 
 /**
- * Asking the record (DEC-476): the owner's words matched to a fixed set of questions, each answered
+ * Asking the record (DEC-479): the owner's words matched to a fixed set of questions, each answered
  * by code from the journal and the mandate, with a link to every record it read. No model writes an
  * answer, nothing is kept after the page closes, and no answer places an order, changes a mandate
  * or advises a trade. Only Pause is sent from a message, and only when the owner asked for it.

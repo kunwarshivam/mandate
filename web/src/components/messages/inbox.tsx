@@ -49,7 +49,7 @@ function Row({ row, now, current }: { row: InboxRow; now: Iso; current: boolean 
 }
 
 /**
- * The threads (DEC-476): agents with a request waiting first, by deadline, then the rest by their
+ * The threads (DEC-479): agents with a request waiting first, by deadline, then the rest by their
  * latest entry. A row names the agent by its opaque label and quotes no model output.
  */
 export function ThreadList({ ws, now, current }: { ws: Workspace; now: Iso; current: string | null }) {
