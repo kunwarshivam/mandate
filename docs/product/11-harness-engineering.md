@@ -168,7 +168,7 @@ repositories with 0 to 2 stars.
 | Project | Stars (as of 2026-09-27) | What it does | What it does not do |
 |---|---|---|---|
 | TauricResearch/TradingAgents | 108,883 | Multi-agent research; "risk management" is LLM debate; "The Portfolio Manager approves/rejects"; a simulated exchange | "designed for research purposes"; no deterministic enforcement layer |
-| virattt/ai-hedge-fund | 63,770 | A YAML "mandate"; withholds ticker, industry, and dates in backtests to reduce memorization | "educational" and "is not intended for real trading"; no enforcement layer |
+| virattt/ai-hedge-fund | 63,770 | A YAML "mandate"; withholds ticker, industry, and dates in backtests to reduce memorization; deterministic position and gross caps the model cannot override (corrected 2026-10-05: this row said "no enforcement layer", but the caps date from 2026-08-02; see [competitive landscape](03-competitive-landscape.md#ai-hedge-fund)) | "educational" and "is not intended for real trading"; places no orders |
 | alpacahq/alpaca-mcp-server | 994 | Paper by default; toolset filtering | No per-order limits, approvals, journal, or idempotency |
 | coiltrade/claude-robinhood-deterministic-trading | 0 (last push 2026-09-07) | "The agent operates the system. The agent never originates a trading decision"; a "Policy gate … hard limits the agent CANNOT modify" | Evidence is README-level only |
 | google-agentic-commerce/AP2 | 3,195 | User-signed Checkout and Payment mandates "anchored to deterministic, non-repudiable proof of intent" | A payments protocol, not a trading harness |
