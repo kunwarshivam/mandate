@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
-import { BookOpen } from "pixelarticons/react/BookOpen.js";
 import { Pause } from "pixelarticons/react/Pause.js";
 import { StopOctagon } from "@/components/icon";
 import { KEY } from "@/components/kumo/key";
@@ -70,19 +69,6 @@ export function AskChips({ asks, onAsk, label = "Ask next", className }: { asks:
         </button>
       ))}
     </div>
-  );
-}
-
-/**
- * Who is speaking. The record's answers are written by code from the journal, so they carry the
- * record's mark, never an agent's or a model's voice (D14).
- */
-function FromRecord() {
-  return (
-    <p className="flex items-center gap-1.5 text-label text-muted-foreground">
-      <BookOpen aria-hidden className="-my-1 size-6" />
-      From the record
-    </p>
   );
 }
 
@@ -200,7 +186,7 @@ export function RecordReply({ reply, onAsk, onCreate }: { reply: Reply; onAsk: (
     case "answer":
       return (
         <div data-slot="record-answer" className="grid max-w-3xl min-w-0 gap-2">
-          <FromRecord />
+          <span className="sr-only">Owlhead: </span>
           {reply.lines.map((line, i) => (
             <p key={i} className="max-w-measure text-pretty">
               {line}

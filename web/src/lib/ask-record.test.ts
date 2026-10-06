@@ -101,7 +101,7 @@ describe("asking the record", () => {
 
   it("says what it can answer when nothing matches, without guessing", () => {
     const reply = interpret("tell me a joke", ctx());
-    expect(lines(reply)[0]).toBe("That isn't something I can find in the record.");
+    expect(lines(reply)).toEqual(["I can't answer that one. Try one of these."]);
     expect(reply.kind === "answer" && reply.follow).toEqual([...STARTERS]);
   });
 });

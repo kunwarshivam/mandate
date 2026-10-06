@@ -124,7 +124,8 @@ describe("an agent's thread", () => {
     const before = thread().querySelectorAll("[data-slot=journal-line]").length;
     say("Why did it ask?");
     const answer = thread().querySelector<HTMLElement>("[data-slot=record-answer]");
-    expect(answer).toHaveTextContent(/^From the record/);
+    expect(answer).toHaveTextContent(/^Owlhead: /);
+    expect(answer).not.toHaveTextContent(/from the record/i);
     expect(within(answer!).getByRole("link", { name: "Gate decision" })).toHaveAttribute("href", expect.stringMatching(/\/decisions\//));
     expect(within(answer!).getByRole("link", { name: "The request" })).toHaveAttribute("href", `/approvals/${APPROVAL_IDS.swingXyz}`);
     expect(thread().querySelectorAll("[data-slot=journal-line]")).toHaveLength(before);

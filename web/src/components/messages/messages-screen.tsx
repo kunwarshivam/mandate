@@ -119,7 +119,7 @@ function Messages({ agentId, view }: { agentId: string | null; view: ThreadView 
       <div data-slot="threads-pane" className={cn(SIDE_PANE, "grid content-start gap-5 px-(--page-x) pt-4 pb-6 lg:px-4", agent && "max-lg:hidden")}>
         <header className="grid gap-1">
           <h1 className="text-h2">Messages</h1>
-          <p className="text-sm text-pretty text-muted-foreground">Each agent&apos;s thread, from the journal. Requests waiting for you come first.</p>
+          <p className="text-sm text-pretty text-muted-foreground">Every agent&apos;s thread. Requests waiting for you come first.</p>
         </header>
         <ThreadList ws={ws} now={now} current={agent?.agent_id ?? null} />
         <FixtureTag className={cn("w-fit", !allFeedsOk(ws) && "lg:hidden")} />

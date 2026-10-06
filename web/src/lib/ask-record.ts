@@ -253,12 +253,12 @@ export function interpret(said: string, ctx: AskContext): Reply {
   if (/\b(help|what can you|how do i|what do you)\b/.test(text)) {
     return answer(
       [
-        "I answer from your record: what needs you, why an agent asked, how close it is to its limits, what it holds, and what happened today. Each answer links to the records it read.",
-        "I can pause an agent when you ask, open Stop, or start setting up a new agent. I don't place orders or change a mandate.",
+        "Ask what needs you, why an agent asked, how close it is to its limits, what it holds, or what happened today. Each answer links to the records behind it.",
+        "I can also pause an agent, open Stop, or set up a new agent.",
       ],
       [],
       [...STARTERS],
     );
   }
-  return answer(["That isn't something I can find in the record.", "Try one of these, or open the records directly."], [], [...STARTERS]);
+  return answer(["I can't answer that one. Try one of these."], [], [...STARTERS]);
 }

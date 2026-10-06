@@ -102,7 +102,6 @@ export function ThreadDesk({ agent }: { agent: Agent }) {
   const desk = deskFor(ws, agent.agent_id, now);
   return (
     <div className="grid content-start gap-5" data-slot="thread-desk">
-      <p className="max-w-measure text-sm text-pretty text-muted-foreground">Code writes these steps from the journal. Model text is quoted as the model wrote it.</p>
       {desk ? (
         <>
           <h3 className="text-h3 text-pretty">

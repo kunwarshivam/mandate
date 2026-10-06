@@ -120,7 +120,8 @@ describe("asking Owlhead", () => {
     const starts = within(panel()).getByRole("list", { name: "Start with" });
     fireEvent.click(within(starts).getByRole("button", { name: /What needs me\?/ }));
     const answer = panel().querySelector<HTMLElement>("[data-slot=record-answer]")!;
-    expect(answer).toHaveTextContent(/^From the record/);
+    expect(answer).toHaveTextContent(/^Owlhead: /);
+    expect(answer).not.toHaveTextContent(/from the record/i);
     expect(within(answer).getAllByRole("link").length).toBeGreaterThan(0);
   });
 
