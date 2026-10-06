@@ -16,12 +16,12 @@ use mandate_num::{Price, Qty, Ratio, Usd};
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
 
-use crate::document::LadderAction;
+use crate::document::{LadderAction, TripwireAction};
 use crate::risk::limits::tests::base;
 use crate::risk::{
     GoalReason, Input, InstrumentRestriction, KillScope, Latch, LiftReason, LimitKey, Opening,
     Outcome, RemovalReason, Restriction, RestrictionReason, RiskEvent, RiskState, SessionClock,
-    Step, StopReason, ThenAction, TriggerReason, UniverseChange,
+    Step, StopReason, ThenAction, TriggerReason, TripwireUpdate, UniverseChange,
 };
 use crate::validate::ValidatedMandate;
 use crate::validate::tests::{context, mandate};
@@ -223,6 +223,28 @@ fn one(state: &mut RiskState<'_>, step: Result<Step, String>) -> Result<Outcome,
     state
         .step(&step?)
         .map_err(|e| format!("{e} ({})", e.code()))
+}
+
+/// The public combined step applies the executor's tripwire projection before effective mode.
+#[test]
+fn a_tripwire_projection_changes_the_effective_risk_state() -> Result<(), String> {
+    let mandate = base()?;
+    let opening = equity()?;
+    let mut state = open(&mandate, &opening, &Every)?;
+    let outcome = state
+        .step_with_tripwire(
+            &tick(1)?,
+            &TripwireUpdate {
+                journal: Vec::new(),
+                effective_action: Some(TripwireAction::ExitsOnly),
+                allocation_increase_blocked: true,
+            },
+        )
+        .map_err(|error| error.to_string())?;
+
+    assert!(outcome.snapshot.tripwire_restriction);
+    assert_eq!(outcome.snapshot.agent_mode, AgentMode::ExitsOnly);
+    Ok(())
 }
 
 fn triggered(limit: LimitKey, action: LadderAction, reason: Option<TriggerReason>) -> RiskEvent {

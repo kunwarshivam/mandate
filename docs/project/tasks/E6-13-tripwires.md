@@ -2,8 +2,9 @@
 
 Agent task brief ([ADR-0001](../../adr/0001-engineering-setup.md) ES-15). Stream H, claim
 [#439](https://github.com/kunwarshivam/mandate/issues/439), reassigned to this Cursor session on
-2026-10-05. This brief covers the DEC-77 tests PR and the implementation PR; the current change is
-only the tests PR.
+2026-10-05. This brief covers the DEC-77 tests PR and the implementation PR. The tests PR
+([#613](https://github.com/kunwarshivam/mandate/pull/613)) has merged; the current change is the
+implementation PR.
 
 ## Story
 
@@ -18,7 +19,7 @@ only the tests PR.
   mandate spec MI-3, MI-7, MI-28, MI-31, V-020, V-042, V-044, §5.2, §5.8 to §5.10, §6.1, §6.5,
   §6.7, §9.2, and §11.
 - **Decisions that apply:** DEC-77, DEC-79, DEC-176, DEC-187, DEC-350, DEC-351, DEC-352, DEC-411,
-  DEC-438.
+  DEC-438, DEC-474.
 
 ## Scope
 
@@ -31,10 +32,12 @@ only the tests PR.
 - **New external dependencies allowed:** none. The executor may use the existing
   workspace-internal `mandate-spec` crate for the canonical tripwire document vocabulary and
   `mandate-approval` for raw step-up evidence and `owner_command(Acknowledge, ...)`.
-- **Safety-critical:** yes. This task describes both PRs in the DEC-77 flow. The current change is
-  the **tests PR**: public types, fail-closed stubs, and plain pending tests only. The later
-  **implementation PR** removes only the `#[ignore = "pending E6-13"]` attributes from these tests
-  while adding production logic. A final status-only PR moves MC-W01 to MC-W57 to passing.
+- **Safety-critical:** yes. This task describes both PRs in the DEC-77 flow. The merged
+  **tests PR** supplied public types, fail-closed stubs, and plain pending tests. The current
+  **implementation PR** removes only the `#[ignore = "pending E6-13"]` attributes from the pending
+  tests while adding production logic. DEC-474 explicitly names the three live stub-sentinel tests
+  whose assertions must become implemented-boundary assertions. A final status-only PR moves
+  MC-W01 to MC-W57 to passing.
 - **Size budget:** about 1,400 non-generated lines of tests and 900 lines of implementation.
 
 ## Public data shapes
@@ -89,8 +92,8 @@ index so the append boundary can bind the opaque event id. `fold` is an E6-13 fa
   from the accounting result and preserving journal-before-action order.
 - Complete the `kind: tripwire` adapter and extend the existing risk-state adapter for MC-W52 and
   MC-W57 without changing fixture expectations.
-- Remove only the pending attributes from the tests PR. Move no statuses until a separate status
-  PR.
+- Remove only the pending attributes from the pending tests. Replace only DEC-474's three named
+  live stub-sentinel assertions. Move no statuses until a separate status PR.
 
 ## Commands
 
@@ -98,11 +101,9 @@ index so the append boundary can bind the opaque event id. `fold` is an E6-13 fa
 cargo fmt --all -- --check
 cargo nextest run -p mandate-spec
 cargo nextest run -p mandate-executor
-cargo nextest run -p mandate-spec --run-ignored ignored-only -E 'test(/tripwire/)'
-cargo nextest run -p mandate-executor --run-ignored ignored-only -E 'test(/tripwire/)'
 cargo nextest run -p mandate-refcases --run-ignored all -E 'test(/MC-W/)'
 cargo xtask ci pending
-MANDATE_BASE_REF=origin/cursor/e77-paper-send-4832 cargo xtask ci spec-guard
+MANDATE_BASE_REF=origin/main cargo xtask ci spec-guard
 cargo xtask check
 ```
 
@@ -117,7 +118,7 @@ Stop and write a DEC proposal instead of continuing if any of these happen:
 
 ## Definition of done
 
-- [ ] The tests PR compiles; every pending test fails on a named fail-closed stub; no MC-W status
+- [x] The tests PR compiles; every pending test fails on a named fail-closed stub; no MC-W status
       moves.
 - [ ] The implementation PR makes MC-W01 to MC-W57 pass, and no existing passing case fails.
 - [ ] Each touched invariant has a property test whose oracle is independent and is shown to fail

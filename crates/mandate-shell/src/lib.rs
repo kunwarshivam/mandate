@@ -50,4 +50,13 @@ pub mod tracer;
 
 pub use error::{Cause, ShellError};
 pub use stages::Stage;
-pub use tracer::{Report, Setup, run};
+pub use tracer::{ProductionCycle, Report, Setup, run};
+
+/// Assembles one production paper cycle. Callers provide deployment inputs and the paper transport;
+/// the returned cycle accepts model outputs but exposes none of its safety-critical stages.
+pub fn production_cycle<T>(sources: adapters::Sources<T>, setup: Setup) -> ProductionCycle
+where
+    T: mandate_alpaca::TradingTransport + Clone + 'static,
+{
+    ProductionCycle::new(adapters::production(sources), setup)
+}
