@@ -3166,7 +3166,7 @@ def build_production_config_refs_section(control_section: dict) -> dict:
         )
     ]
     return {
-        "spec": "docs/specs/journal.md v0.16 §9 (DEC-483)",
+        "spec": "docs/specs/journal.md v0.16 §9 (DEC-484)",
         "artifacts": artifacts,
         "valid_drafts": {
             "model_output": model_output,

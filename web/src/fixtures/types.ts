@@ -281,6 +281,41 @@ export interface TimelineEvent {
   text: string;
 }
 
+/** Mandate spec §9.2: how a changed path, or a whole version, moves risk. */
+export type ChangeClass = "risk_increasing" | "risk_reducing" | "neutral";
+
+/** One changed path of a version's diff, classified, as `MandateVersionCreated` records it (mandate spec §10). */
+export interface MandateChange {
+  path: string;
+  from: Decimal | number | null;
+  to: Decimal | number | null;
+  classification: ChangeClass;
+}
+
+/**
+ * `MandateVersionApplied` (mandate spec §2.2): applied, with the approvals it canceled, or rejected
+ * with the reason. `pending`: a confirmed risk-increasing version that has not reached a safe point.
+ */
+export type VersionApplication =
+  | { result: "applied"; at: Iso; approvals_canceled: number }
+  | { result: "rejected"; at: Iso; reason: string }
+  | { result: "pending" };
+
+/**
+ * A confirmed version of an agent's mandate. The first has no `previous` and no diff; every later one
+ * is diffed against the version in effect when it was confirmed.
+ */
+export interface MandateVersionRecord {
+  mandate_version: ContentRef;
+  previous: ContentRef | null;
+  confirmed_at: Iso;
+  /** Confirmed with a passkey: deploying, and every risk-increasing version (mandate spec §9.2). */
+  step_up: boolean;
+  classification: ChangeClass | null;
+  changes: MandateChange[];
+  application: VersionApplication;
+}
+
 export interface LimitState {
   equity: Decimal;
   equity_day_start: Decimal;
@@ -312,6 +347,8 @@ export interface Agent {
   fills: Fill[];
   goal_progress: { spent_usd: Decimal; held_qty: Decimal } | null;
   deployed_at: Iso;
+  /** Oldest first. The last applied one is `mandate_version`. */
+  versions: MandateVersionRecord[];
 }
 
 /** M7 brief, "The approval lifecycle". */
@@ -400,6 +437,8 @@ export interface Workspace {
   now: Iso;
   environment: Environment;
   connection: Connection;
+  /** Distinct users with the approver role, which V-024 counts for a two-approver threshold. */
+  approver_users: number;
   health: Health;
   agents: Agent[];
   approvals: Approval[];

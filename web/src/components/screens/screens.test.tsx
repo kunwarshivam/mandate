@@ -28,6 +28,8 @@ const SCREENS: Array<[string, () => ReactElement]> = [
   [`/agents/${AGENT_IDS.btc}`, () => <AgentDetailScreen agentId={AGENT_IDS.btc} />],
   [`/agents/${AGENT_IDS.swing}`, () => <AgentDetailScreen agentId={AGENT_IDS.swing} />],
   [`/agents/${AGENT_IDS.lmn}`, () => <AgentDetailScreen agentId={AGENT_IDS.lmn} />],
+  [`/agents/${AGENT_IDS.btc}/mandate/versions`, () => <AgentSectionScreen agentId={AGENT_IDS.btc} section="mandate/versions" />],
+  [`/agents/${AGENT_IDS.swing}/mandate/edit`, () => <AgentSectionScreen agentId={AGENT_IDS.swing} section="mandate/edit" />],
   ["/approvals", () => <ApprovalsInboxScreen />],
   [`/approvals/${APPROVAL_IDS.swingXyz}`, () => <ApprovalRequestScreen approvalId={APPROVAL_IDS.swingXyz} />],
   [`/approvals/${APPROVAL_IDS.btc}`, () => <ApprovalRequestScreen approvalId={APPROVAL_IDS.btc} />],
@@ -189,6 +191,57 @@ describe("D2 agent detail", () => {
     expect(fields.className).toMatch(/\bgrid-cols-1\b.*\blg:grid-cols-2\b/);
     expect(fields.querySelectorAll("[data-slot=mandate-field]").length).toBeGreaterThan(10);
     expect(fields.querySelector("[data-slot=provenance-badge], [data-provenance]")).not.toBeNull();
+  });
+
+  describe("A6 versions", () => {
+    const versions = (agentId: string, scenario: (typeof SCENARIO_IDS)[number] = "normal") => {
+      renderScreen(`/agents/${agentId}/mandate/versions`, <AgentSectionScreen agentId={agentId} section="mandate/versions" />, scenario);
+      return [...main().querySelectorAll<HTMLElement>("[data-slot=version]")];
+    };
+    const changes = (version: HTMLElement) => [...version.querySelectorAll("[data-slot=version-change]")].map((c) => c.textContent);
+
+    it("lists every version newest first, marks the one in effect, and diffs a reducing one that applied on confirmation", () => {
+      const [second, first] = versions(AGENT_IDS.lmn);
+      expect(main().querySelector("[data-slot=coming-soon]")).toBeNull();
+      expect(within(second).getByRole("heading", { level: 3 })).toHaveTextContent("Version 2");
+      expect(second).toHaveAttribute("data-current", "true");
+      expect(first).not.toHaveAttribute("data-current");
+      expect(second).toHaveTextContent("In effect");
+      expect(second).toHaveTextContent("Confirmed by you on Sep 28, 2026 at 09:05:00 ET.");
+      expect(second).not.toHaveTextContent("passkey");
+      expect(changes(second)).toEqual(["Two approvers aboveNot setto$400.00Risk-reducing", "Largest position$3,000.00to$2,500.00Risk-reducing"]);
+      expect(second).toHaveTextContent("Applied when you confirmed it. 1 request waiting for you was canceled; anything still wanted is proposed again under this version.");
+      expect(first).toHaveTextContent("Confirmed by you with your passkey on Sep 23, 2026 at 09:18:30 ET.");
+      expect(first).toHaveTextContent("Deployed to paper on Sep 23, 2026 at 09:30:00 ET.");
+      expect(first.querySelector("[data-slot=version-changes]")).toBeNull();
+    });
+
+    it("classifies each path, and says a risk-increasing version took a passkey and applied at the next safe point", () => {
+      const [second] = versions(AGENT_IDS.swing);
+      const tags = [...second.querySelectorAll("[data-slot=change-class]")].map((t) => t.textContent);
+      expect(tags).toEqual(["Risk-increasing", "Neutral", "Risk-increasing"]);
+      expect(changes(second)).toEqual(["Quiet hours start22:30to23:00Neutral", "Total holdings limit$1,500.00to$2,000.00Risk-increasing"]);
+      expect(second).toHaveTextContent("Confirmed by you with your passkey on Sep 25, 2026 at 08:15:00 ET.");
+      expect(second).toHaveTextContent("Applied at the next safe point, Sep 25, 2026 at 08:15:04 ET. No requests were waiting for you.");
+      expect(main()).toHaveTextContent("A risk-increasing version takes your passkey and applies at the next safe point");
+    });
+
+    it("gives a version rejected at application its reason in words, and keeps the earlier one in effect", () => {
+      const [raise, first] = versions(AGENT_IDS.btc, "drawdown");
+      expect(raise).toHaveAttribute("data-result", "rejected");
+      expect(raise).not.toHaveAttribute("data-current");
+      expect(raise).toHaveTextContent("Not applied");
+      expect(raise.querySelector("[data-slot=version-rejected]")).toHaveTextContent(
+        "Rejected at application, Sep 28, 2026 at 14:03:34 ET. An allocation increase is refused while a limit is latched, and the drawdown ladder holds this agent at exits only. Version 1 stays in effect; version 2 never applied.",
+      );
+      expect(changes(raise)).toEqual(["Capital$10,000.00to$12,000.00Risk-increasing"]);
+      expect(first).toHaveAttribute("data-current", "true");
+    });
+
+    it("is reached from the Mandate tab", () => {
+      renderScreen(`/agents/${AGENT_IDS.lmn}/mandate`, <AgentSectionScreen agentId={AGENT_IDS.lmn} section="mandate" />);
+      expect(within(main()).getByRole("link", { name: "Versions" })).toHaveAttribute("href", `/agents/${AGENT_IDS.lmn}/mandate/versions`);
+    });
   });
 
   it("never implies a limit caps a realized loss", () => {

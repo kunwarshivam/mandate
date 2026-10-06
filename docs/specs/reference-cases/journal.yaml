@@ -24,7 +24,7 @@
 # at the listed seq. `derivation` holds the inputs the chain is recomputed from. The
 # section is additive: `version` stays 3 until the harness reads it (DEC-177).
 #
-# `production_config_refs` (spec v0.16 §9, DEC-483) is generated beside the historical agent
+# `production_config_refs` (spec v0.16 §9, DEC-484) is generated beside the historical agent
 # chain. Its valid drafts bind the effective policy and model-registry snapshots without rewriting
 # that stored chain, and each invalid draft removes one newly required reference. The DEC-77 tests
 # PR interprets this additive section before the implementation enforces it.
@@ -2233,7 +2233,7 @@ agent_stream:
       code: mode_event_mismatch
       seq: 13
 production_config_refs:
-  spec: docs/specs/journal.md v0.16 §9 (DEC-483)
+  spec: docs/specs/journal.md v0.16 §9 (DEC-484)
   artifacts:
   - name: policy_set
     ref: sha256:41e70aae8ec57235d03979673ca9dacb6c747a071b82a66953e8e6ba3ef1888c

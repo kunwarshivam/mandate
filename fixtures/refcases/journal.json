@@ -3245,7 +3245,7 @@
   ]
  },
  "production_config_refs": {
-  "spec": "docs/specs/journal.md v0.16 §9 (DEC-483)",
+  "spec": "docs/specs/journal.md v0.16 §9 (DEC-484)",
   "artifacts": [
    {
     "name": "policy_set",

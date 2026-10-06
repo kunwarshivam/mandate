@@ -9,6 +9,7 @@ import { AgentEquityChart } from "@/components/charts/equity-chart";
 import { AsOf } from "@/components/domain/as-of";
 import { Envelope, Headroom, MandateCard } from "@/components/domain/envelope";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
+import { MandateEdit } from "@/components/mandate/mandate-edit";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import { OrdersTable, PositionsTable } from "@/components/domain/positions";
@@ -23,6 +24,7 @@ import { AgentFrame, AgentNotFound, useAgent } from "./agent-frame";
 import { ComingSoon } from "./coming-soon";
 import { NEEDS_CARD, NEEDS_ITEM, NEEDS_STRIP, PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
 import { MandateSummary } from "./mandate-summary";
+import { MandateVersions } from "./mandate-versions";
 import { NewsSection } from "./news-section";
 import { SideRail } from "./side-rail";
 
@@ -330,7 +332,17 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
         </Section>
       );
     case "mandate/versions":
+      return (
+        <Section title="Versions">
+          <MandateVersions agent={agent} />
+        </Section>
+      );
     case "mandate/edit":
+      return (
+        <Section title="Edit mandate" action={<SectionLink href={agentHref(agent.agent_id, "mandate/versions")}>Versions</SectionLink>}>
+          <MandateEdit agent={agent} />
+        </Section>
+      );
     case "prove/backtests":
     case "prove/paper":
     case "prove/live":

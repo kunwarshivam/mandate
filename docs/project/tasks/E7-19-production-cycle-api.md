@@ -19,7 +19,7 @@ story. E7-19 corrects E7-7's one-shot assembly without weakening its safety chec
   spec §6 and §8; trading-domain spec §9 to §12; journal spec §3, §5.2 and §8.
 - **Decisions that apply:** DEC-07, DEC-79, DEC-97, DEC-133, DEC-138, DEC-157, DEC-466,
   DEC-470, DEC-471, [DEC-475](../decisions/DEC-475.md), and
-  [DEC-483](../decisions/DEC-483.md).
+  [DEC-484](../decisions/DEC-484.md).
 
 ## Scope
 

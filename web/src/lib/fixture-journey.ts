@@ -150,6 +150,17 @@ export function deployAgent(ws: Workspace, request: NewAgent, at: Iso, seed: str
     fills: [],
     goal_progress: null,
     deployed_at: at,
+    versions: [
+      {
+        mandate_version: version,
+        previous: null,
+        confirmed_at: at,
+        step_up: true,
+        classification: null,
+        changes: [],
+        application: { result: "applied", at, approvals_canceled: 0 },
+      },
+    ],
   };
   next.agents = [...next.agents, agent];
   prepend(next, agentId, event(`${agentId}:deployed`, at, "version", `Mandate version 1 confirmed by you and deployed to paper, with ${usd(allocation)} of simulated money.`));

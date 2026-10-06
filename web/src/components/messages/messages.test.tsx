@@ -237,6 +237,34 @@ describe("an agent's thread", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
+  it("changes a limit through the same review as the Edit form, and the applied version joins the thread (DEC-483)", () => {
+    vi.useFakeTimers();
+    renderThread(AGENT_IDS.swing, { scenario: "normal" });
+    say("Set the largest order to $800");
+    const review = thread().querySelector<HTMLElement>("[data-slot=change-review]")!;
+    expect(review).toHaveAttribute("data-classification", "risk_reducing");
+    expect(review).toHaveTextContent("You said “Set the largest order to $800”");
+    expect(review.querySelector("[data-slot=version-change]")).toHaveTextContent(/Largest order.*\$1,000\.00.*\$800\.00/);
+
+    fireEvent.click(within(review).getByRole("button", { name: "Confirm change" }));
+    expect(review.querySelector("[data-phase]")).toHaveAttribute("data-phase", "sent");
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(review.querySelector("[data-phase]")).toHaveAttribute("data-phase", "applied");
+    const versionLines = Array.from(thread().querySelectorAll("[data-slot=journal-line][data-kind=version]"), (l) => l.textContent);
+    expect(versionLines.some((t) => t?.includes("Mandate version 3 applied: Largest order from $1,000.00 to $800.00."))).toBe(true);
+    expect(thread().querySelectorAll("[data-slot=change-review]")).toHaveLength(1);
+  });
+
+  it("takes a passkey for a change that raises risk, and sends nothing when the owner keeps it as is", () => {
+    renderThread(AGENT_IDS.swing, { scenario: "normal" });
+    say("raise the largest order to $1,500");
+    const review = thread().querySelector<HTMLElement>("[data-slot=change-review]")!;
+    expect(within(review).getByRole("button", { name: "Confirm with passkey" })).toBeInTheDocument();
+    fireEvent.click(within(review).getByRole("button", { name: "Keep as is" }));
+    expect(thread().querySelector("[data-slot=change-review]")).toBeNull();
+    expect(thread()).toHaveTextContent("Kept as is. Nothing was sent.");
+  });
+
   it("hands the owner's words to setup when they ask for a new agent", () => {
     let held: string | null = null;
     function Probe() {

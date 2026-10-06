@@ -6,10 +6,12 @@ import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
 import { Pause } from "pixelarticons/react/Pause.js";
 import { StopOctagon } from "@/components/icon";
 import { KEY } from "@/components/kumo/key";
+import { ChangeReview } from "@/components/mandate/change-review";
 import { openStop } from "@/components/shell/stop-control";
 import { CommandEntry } from "@/components/stop/command-log";
 import { findAgent } from "@/fixtures/workspace";
 import type { AnswerTable, Cite, Reply } from "@/lib/ask-record";
+import { type Edits, propose } from "@/lib/mandate-change";
 import { type Command, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { agentHref } from "@/lib/screens";
@@ -180,6 +182,19 @@ function CreateCard({ text, onCreate }: { text: string | null; onCreate: (text: 
   );
 }
 
+/** The version is proposed once, when the reply opens, so what the owner reviews never shifts under them. */
+function ChangeCard({ agentId, edits, quote }: { agentId: string; edits: Edits; quote: string }) {
+  const { ws } = useRuntime();
+  const [proposal] = useState(() => {
+    const agent = findAgent(ws, agentId);
+    return agent ? propose(ws, agent, edits) : null;
+  });
+  const [kept, setKept] = useState(false);
+  if (!proposal) return null;
+  if (kept) return <p className="text-sm text-muted-foreground">Kept as is. Nothing was sent.</p>;
+  return <ChangeReview proposal={proposal} origin={{ kind: "message", quote }} onKeep={() => setKept(true)} fixHint="Tell me a different value." />;
+}
+
 /** One reply: the record's answer with the records it read, or the one card the owner asked for. */
 export function RecordReply({ reply, onAsk, onCreate }: { reply: Reply; onAsk: (text: string) => void; onCreate: (text: string | null) => void }) {
   switch (reply.kind) {
@@ -203,6 +218,8 @@ export function RecordReply({ reply, onAsk, onCreate }: { reply: Reply; onAsk: (
       return <StopCard agentId={reply.agentId} resume={reply.resume} />;
     case "create":
       return <CreateCard text={reply.text} onCreate={onCreate} />;
+    case "change":
+      return <ChangeCard agentId={reply.agentId} edits={reply.edits} quote={reply.quote} />;
     default: {
       const unhandled: never = reply;
       throw new Error(`unhandled reply ${JSON.stringify(unhandled)}`);
