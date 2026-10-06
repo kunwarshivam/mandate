@@ -111,7 +111,9 @@ Each journey lists its steps with the screens of §3 in brackets, and the moment
    loss; the statement that gaps and exit pricing can exceed each of them; `scale_action` in plain
    words; with a research agent, that the platform chooses what to propose within the envelope and
    that the agent's confidence is self-reported and uncalibrated (DEC-126). Per-section confirmation,
-   then step-up [G3]. The confirmation binds the version hash.
+   then step-up [G3]. The confirmation binds the version hash. For a new agent, A2 and A5 are one
+   summary card at the end of the conversation, confirmed once, with every drafted value marked
+   (DEC-474).
 
 *Moment that matters:* the compiled mandate reads exactly like what the owner meant, and nothing the
 platform proposed became active without the owner's hand on it. In the goal-first path, the owner
@@ -330,20 +332,22 @@ exists.
 
 #### Authoring
 
-**A0 Goal questions** ⚠ (DEC-182, DEC-473)
-- *Shows:* one conversation with one composer. The platform asks one question at a time: how much
-  money, what the goal is, and how much the owner can stand to lose, then the symbols, the model,
-  and each of its settings. The owner answers in their own words or numbers, one question at a
-  time or all at once (A1), and is asked only what is still missing. Each answer is quoted back
-  under "Noted from your words". No example returns, no suggested amounts.
+**A0 Goal questions** ⚠ (DEC-182, DEC-473, DEC-474)
+- *Shows:* one conversation with one composer, as in any chat. The platform asks one question at a
+  time: how much money, what the goal is, and how much the owner can stand to lose, then the
+  symbols, the model, and each of its settings. The owner answers in their own words or numbers,
+  one question at a time or all at once (A1), and is asked only what is still missing. The
+  platform answers in plain sentences: what it understood ("Got it: …"), what it refused and why,
+  then the next question. No example returns, no suggested amounts.
 - *The model only points* (DEC-473): a model reads each message and returns readings that quote
   the owner's words; a reading is kept only when deterministic code reads the same value back from
-  the quote. A value written in words, not figures, is asked back as a Yes or No. The model's own
-  replies are quotations with no buttons (PX-18), and one that reads as advice is withheld.
+  the quote. A value written in words, not figures, is read and said back once ("I read “about
+  three grand” as $3,000.00.", DEC-474). The model's own reply is plain text in the platform's
+  reply, with no buttons (PX-18), and one that reads as advice is withheld.
 - *Writes:* `capital.allocation_usd`, `goal` (one of the goal types, with `on_complete`), and
   `capital.max_loss_from_allocation`, each `user_stated` with its quoted span; the compiler drafts
   the rest as `platform_proposed` (never `auto` or a delegation, V-022).
-- *Primary action:* Send. Once money, goal and loss are known, the conversation shows A2.
+- *Primary action:* Send. Once nothing is missing, the conversation shows A2 and A5 as one card.
 - *States:* A goal the types cannot express: kept as description text and flagged **not enforced**
   on A2. A loss answer above the policy ceiling: the ceiling shown as a limit, never substituted;
   the answer is refused with the reason. More money than the account has free (V-002), or a symbol
@@ -358,14 +362,16 @@ exists.
   protection, risk, autonomy, notifications), each with its provenance badge (the five of J-B step 2,
   *from template* included) and, for a stated value, the quoted span. Proposed values look inactive
   until confirmed. **Not enforced** constraints listed apart, with the note that they reach models
-  only as description text.
-- *Primary action:* Confirm section, one section at a time in the conversation (DEC-473), then
-  Review and confirm, to A5. Saying a change unconfirms the sections it touches and drafts again.
-- *States:* Loading (the compiler is a model call): "Reading your words…", and no second message
+  only as description text. For a new agent (DEC-474), A2 and A5 are one summary card in the
+  conversation: every value in compact form, each drafted one marked *proposed* or *default*.
+- *Primary action:* Create agent, once, with a passkey (DEC-474). Saying a change shows a new card,
+  and the earlier one can no longer be created.
+- *States:* Loading (the compiler is a model call): "Reading your message…", and no second message
   until it answers; never partial fields shown as final. Error (compiler output fails the schema):
-  "We could not compile this.", and none of it is used. Degraded (the model does not answer): the
-  owner's words are kept, with Try again and "Read it without the model", which reads figures
-  only.
+  the reply says none of it was used. Degraded (the model does not answer): the owner's words are
+  kept, with Try again and "Continue without the model", which reads figures only. The account
+  changed since a value was said (V-002, V-006): the card says why it cannot be created, with no
+  button.
 - *Governs:* mandate §2.1, §7; V-020, V-022, V-038; FR-3.1, FR-3.4; PX-1, PX-2.
 - *Contract card* (DEC-182): the whole envelope in plain language on one card above the fields: the
   three answers quoted, every drafted value marked *proposed*, the dollar figures of A5, and the
@@ -388,8 +394,9 @@ never as values (mandate §4.3).
 - *Shows:* §2.3 J-B step 5; platform defaults marked "platform default", proposals marked "proposed
   by the platform — confirm or change"; `on_complete` in words; for `profit_stop`, the level at which
   the agent stops; when `universe.asset_classes` includes crypto, the disclosure that a stop-limit may
-  not fill on a gap (trading §5.4).
-- *Primary action:* Confirm (step-up).
+  not fill on a gap (trading §5.4). For a new agent, the summary card at the end of the
+  conversation (DEC-474), with the marks *proposed* and *default*.
+- *Primary action:* Confirm (step-up); Create agent for a new agent.
 - *States:* Error after step-up: nothing was confirmed; the version does not exist yet.
 - *Governs:* mandate §2.1, §4.2, §10 (`MandateConfirmed` stores the rendered screen and UI build);
   compliance questions 23 and 24; PX-1, PX-2.
@@ -759,7 +766,9 @@ section must be ticked or edited. (c) Per-field confirmation for everything.
 platform choosing limits in all but name (compliance question 23). Per-field for all fields (c) is
 tedious for values the owner stated in their own words.
 
-*Decision: (b), accepted.*
+*Decision: (b), accepted.* For setting up a new agent, superseded by
+[DEC-474](../project/decisions/DEC-474.md) (founder, 2026-10-06): one confirmation of a summary that
+shows every value, each drafted one marked.
 
 **PX-3. What the one Stop control offers.**
 (a) Only the kill switch. (b) Pause first (instant, no flatten, reversible), then the owner Stop
