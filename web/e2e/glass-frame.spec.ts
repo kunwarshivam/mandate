@@ -107,8 +107,8 @@ test.describe("the frame is frosted glass over the scrolling page", () => {
   });
 
   for (const [width, height, frame] of [
-    [390, 844, ["header", "nav Main"]],
-    [1440, 900, ["header", "nav Primary"]],
+    [390, 844, ["header app-header", "nav Main"]],
+    [1440, 900, ["header app-header", "nav Primary"]],
   ] as const) {
     test(`${width} px: nothing but the frame is glass`, async ({ page }) => {
       await page.setViewportSize({ width, height });

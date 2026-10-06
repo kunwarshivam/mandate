@@ -10,7 +10,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * The waiting request, pinned above a thread while it scrolls, so it is never lost under newer
- * entries. Static time only, like a list row; the request itself counts down (DEC-207).
+ * entries. Static time only, like a list row; the request itself counts down (DEC-207). On a phone
+ * it is 44px tall (DEC-482): the order over the time it is skipped at, and the arrow; the rest of
+ * the sentence and "Review" are read out, not drawn.
  */
 export function PinnedRequest({ approval }: { approval: Approval }) {
   const { bound } = approval;
@@ -18,22 +20,22 @@ export function PinnedRequest({ approval }: { approval: Approval }) {
     <Link
       href={`/approvals/${approval.approval_id}`}
       data-slot="pinned-request"
-      className="press flex shrink-0 items-center gap-3 bg-lapis-soft px-(--page-x) py-2.5 outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset lg:px-8"
+      className="press flex shrink-0 items-center gap-3 bg-lapis-soft px-(--page-x) py-2.5 outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset max-lg:min-h-11 max-lg:gap-2 max-lg:py-1 lg:px-8"
     >
-      <span className="grid min-w-0 flex-1 gap-0.5">
-        <span className="truncate font-semibold">
+      <span className="grid min-w-0 flex-1 gap-0.5 max-lg:gap-0">
+        <span className="truncate font-semibold max-lg:text-sm max-lg:leading-5">
           Buy <span className="font-mono tabular">{quantity(bound.qty)}</span> {bound.symbol} at <span className="font-mono tabular">{price(bound.limit)}</span>
         </span>
-        <span className="text-caption text-muted-foreground">
+        <span className="text-caption text-muted-foreground max-lg:leading-4">
           Skipped at{" "}
           <time dateTime={approval.deadline} className="font-mono tabular">
             {clock(approval.deadline)} {zoneLabel(approval.deadline)}
-          </time>{" "}
-          if you do nothing
+          </time>
+          <span className="max-lg:sr-only"> if you do nothing</span>
         </span>
       </span>
       <span className="inline-flex shrink-0 items-center gap-0.5 text-sm font-medium text-lapis">
-        Review
+        <span className="max-lg:sr-only">Review</span>
         <ArrowRight aria-hidden className="-my-1 size-6" />
       </span>
     </Link>
@@ -53,7 +55,7 @@ export function RequestCard({ approval, now }: { approval: Approval; now: Iso })
       data-slot="request-card"
       data-status={approval.status}
       aria-label={`Request: buy ${quantity(bound.qty)} ${bound.symbol}`}
-      className={cn("grid max-w-lg gap-3 rounded-2xl p-4", open ? "bg-lapis-soft" : "border border-border")}
+      className={cn("grid max-w-lg gap-3 rounded-2xl p-4 max-lg:gap-2.5 max-lg:p-3.5", open ? "bg-lapis-soft" : "border border-border")}
     >
       <p className="flex flex-wrap items-center justify-between gap-2 text-caption text-muted-foreground">
         <span className={cn("inline-flex h-6 items-center rounded-md px-2.5 text-label", open ? "bg-card text-lapis" : "bg-background text-foreground")}>
@@ -63,7 +65,7 @@ export function RequestCard({ approval, now }: { approval: Approval; now: Iso })
           {stamp(approval.requested_at, now)}
         </time>
       </p>
-      <p className={cn("text-lg font-semibold text-pretty", !open && "text-muted-foreground")}>
+      <p className={cn("text-lg font-semibold text-pretty max-lg:text-base", !open && "text-muted-foreground")}>
         Buy <span className="font-mono tabular">{quantity(bound.qty)}</span> {bound.symbol} at a limit of <span className="font-mono tabular">{price(bound.limit)}</span>
       </p>
       <dl className="grid gap-1 text-sm">
@@ -90,7 +92,7 @@ export function RequestCard({ approval, now }: { approval: Approval; now: Iso })
             Open the request
             <ArrowRight aria-hidden className="size-6" />
           </Link>
-          <p className="text-caption text-pretty text-muted-foreground">You approve or skip on the request itself, where every line is shown.</p>
+          <p className="text-caption text-pretty text-muted-foreground max-lg:hidden">You approve or skip on the request itself, where every line is shown.</p>
         </>
       ) : (
         <>

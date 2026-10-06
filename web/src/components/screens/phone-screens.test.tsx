@@ -72,6 +72,29 @@ describe("Home on a phone", () => {
     expect(needsYou().querySelector("h2")).toHaveTextContent("Needs you7 items");
   });
 
+  it("lays Needs you out as one row of cards that scrolls sideways on a phone, and as stacked rows on desktop", () => {
+    render(
+      <Providers workspace={buildWorkspace("approvals")} tick={false}>
+        <AppShell>
+          <DashboardScreen />
+        </AppShell>
+      </Providers>,
+    );
+    const list = needsYou().querySelector("ul")!;
+    expect(list).toHaveClass("grid", "max-lg:flex", "max-lg:overflow-x-auto", "max-lg:snap-x", "max-lg:snap-mandatory");
+    expect(list.className).not.toMatch(/max-lg:flex-(col|wrap)/);
+    const items = [...list.querySelectorAll<HTMLElement>(":scope > li")];
+    expect(items.length).toBeGreaterThan(1);
+    for (const li of items) {
+      expect(li).toHaveClass("max-lg:shrink-0", "max-lg:snap-start", "lg:border-b");
+      const link = within(li).getByRole("link");
+      expect(link).toHaveClass("max-lg:rounded-xl");
+      expect(link.innerHTML, "a card wraps its words rather than cutting off the price").not.toMatch(/\btruncate\b/);
+    }
+    const request = items.find((li) => li.dataset.kind === "request")!;
+    expect(within(request).getByRole("link")).toHaveClass("max-lg:bg-lapis-soft");
+  });
+
   it.each([
     ["a phone", onPhone],
     ["a desktop", onDesktop],
@@ -196,6 +219,37 @@ describe("an agent on a phone", () => {
     expect(onPhone(within(header()).getAllByRole("button", { name: "Stop this agent…" }))).toHaveLength(1);
     const order = onPhone(main().querySelectorAll("h2")).map((h) => h.textContent);
     expect(order).toEqual(["Waiting for you", "Equity against your mandate", "Headroom", "This agent"]);
+  });
+
+  it("keeps Stop this agent on the title's row as a quiet Stop, and leaves the paper badge to the app header", () => {
+    overview();
+    const stop = within(header()).getByRole("button", { name: "Stop this agent…" });
+    expect(stop).toHaveAttribute("aria-haspopup", "dialog");
+    expect(stop).toHaveClass("h-11", "max-lg:border-transparent", "max-lg:bg-transparent", "max-lg:text-muted-foreground");
+    expect(onPhone(stop.querySelectorAll("span")).map((s) => s.textContent)).toEqual(["Stop"]);
+    expect(onDesktop(stop.querySelectorAll("span")).map((s) => s.textContent)).toEqual(["Stop this agent…"]);
+    expect(stop.parentElement).toHaveClass("max-lg:shrink-0");
+    expect(stop.parentElement!.parentElement).toHaveClass("max-lg:flex-nowrap");
+    const badges = [...document.querySelectorAll<HTMLElement>("[data-slot=environment-badge]")];
+    const inTitle = badges.filter((b) => header().contains(b));
+    expect(inTitle).toHaveLength(1);
+    expect(shownOnPhone(inTitle[0])).toBe(false);
+    expect(shownOnDesktop(inTitle[0])).toBe(true);
+    expect(onPhone(badges)).toHaveLength(1);
+  });
+
+  it("lays what waits out as one row of cards that scrolls sideways", () => {
+    overview();
+    const list = main().querySelector<HTMLElement>("[data-slot=phone-waiting] ul")!;
+    expect(list).toHaveClass("max-lg:flex", "max-lg:overflow-x-auto", "max-lg:snap-x");
+    for (const li of list.querySelectorAll(":scope > li")) expect(li).toHaveClass("max-lg:shrink-0", "max-lg:snap-start");
+  });
+
+  it("draws the agent's chart at 200px on a phone", () => {
+    overview();
+    const canvas = main().querySelector<HTMLElement>("[data-slot=agent-equity] [data-slot=chart-canvas]")!;
+    expect(canvas).toHaveClass("h-(--chart-phone)", "lg:h-(--chart-height)");
+    expect(canvas.style.getPropertyValue("--chart-phone")).toBe("200px");
   });
 
   it("moves key figures, positions, orders, decisions, activity and the mandate card off the phone, and keeps them all on desktop", () => {

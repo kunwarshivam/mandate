@@ -15,10 +15,11 @@ import { clock, price, quantity, zoneLabel } from "@/lib/format";
 import { headroomLine } from "@/lib/limits";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
+import { cn } from "@/lib/utils";
 import { AgentCard, PaperPnlNote } from "./agent-card";
 import { AssetsSection } from "./assets-section";
 import { DecisionTimeline, tally } from "./decision-timeline";
-import { EmptyBoard, PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
+import { EmptyBoard, NEEDS_CARD, NEEDS_ITEM, NEEDS_STRIP, PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
 import { SideRail } from "./side-rail";
 
 /** Home's rail shows the latest decisions beside the money; the audit has them all. */
@@ -27,30 +28,38 @@ const DECISIONS_SHOWN = 4;
 /** A phone's Home ends on this many decisions; the rest is one link away. */
 const DECISIONS_SHOWN_ON_PHONE = 3;
 
+/** On a phone the sentence is drawn short ("Agent 2: buy 2 XYZ at $141.30") and read in full. */
 function requestSentence(ws: Workspace, a: Approval) {
   return (
     <>
-      {findAgent(ws, a.agent_id)?.label ?? "An agent"} asks to buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of{" "}
-      <span className="font-mono tabular">{price(a.bound.limit)}</span>
+      {findAgent(ws, a.agent_id)?.label ?? "An agent"}
+      <span aria-hidden className="lg:hidden">
+        :
+      </span>
+      <span className="max-lg:sr-only"> asks to</span> buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at
+      <span className="max-lg:sr-only"> a limit of</span> <span className="font-mono tabular">{price(a.bound.limit)}</span>
     </>
   );
 }
 
-const NEEDS_ROW =
-  "press group -mx-2 grid min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1rem] items-start gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset";
+const NEEDS_ROW = cn(
+  "press group -mx-2 grid min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1rem] items-start gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
+  NEEDS_CARD,
+);
 
 /**
  * Home's first question, answered first at every width (DEC-207, DEC-467): the requests waiting for
  * you, soonest deadline first, each with the static time it is skipped at, then the open alerts. Each
  * row opens where it is read in full. With nothing, it says so plainly. The only place Home shows a
- * request; the dock carries the count.
+ * request; the dock carries the count. On a phone they are one sideways row of cards, never a stack
+ * above the money (DEC-482).
  */
 function NeedsYou({ ws, open }: { ws: Workspace; open: Approval[] }) {
   const lines = alertLines(ws);
   const count = open.length + lines.length;
   return (
     <section aria-labelledby="needs-you-title" data-slot="needs-you" data-count={count} className="grid content-start gap-2">
-      <h2 id="needs-you-title" className="flex items-center gap-2.5 text-h2">
+      <h2 id="needs-you-title" className="flex items-center gap-2.5 text-h2 max-lg:text-h3">
         Needs you
         {count > 0 ? (
           <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
@@ -65,19 +74,19 @@ function NeedsYou({ ws, open }: { ws: Workspace; open: Approval[] }) {
           All clear. Nothing needs you.
         </p>
       ) : (
-        <ul className="grid">
+        <ul className={NEEDS_STRIP}>
           {open.map((a) => (
-            <li key={a.approval_id} data-kind="request" className="border-b border-border/70 last:border-b-0">
-              <Link href={`/approvals/${a.approval_id}`} className={NEEDS_ROW}>
+            <li key={a.approval_id} data-kind="request" className={NEEDS_ITEM}>
+              <Link href={`/approvals/${a.approval_id}`} className={cn(NEEDS_ROW, "max-lg:bg-lapis-soft")}>
                 <Inbox aria-hidden className="size-6 text-lapis" />
-                <span className="grid gap-0.5">
-                  <span className="font-medium text-pretty">{requestSentence(ws, a)}</span>
-                  <span data-slot="deadline" className="text-sm text-muted-foreground">
+                <span className="grid min-w-0 gap-0.5 max-lg:gap-0">
+                  <span className="font-medium text-pretty max-lg:text-sm max-lg:leading-5">{requestSentence(ws, a)}</span>
+                  <span data-slot="deadline" className="text-sm text-muted-foreground max-lg:text-caption">
                     Skipped at{" "}
                     <time dateTime={a.deadline} className="font-mono tabular">
                       {clock(a.deadline)} {zoneLabel(a.deadline)}
-                    </time>{" "}
-                    if you do nothing
+                    </time>
+                    <span className="max-lg:sr-only"> if you do nothing</span>
                   </span>
                 </span>
                 <ChevronRight aria-hidden className="size-6 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" />
@@ -85,10 +94,10 @@ function NeedsYou({ ws, open }: { ws: Workspace; open: Approval[] }) {
             </li>
           ))}
           {lines.map((l) => (
-            <li key={l.key} data-kind="alert" className="border-b border-border/70 last:border-b-0">
-              <Link href={l.href} className={NEEDS_ROW}>
+            <li key={l.key} data-kind="alert" className={NEEDS_ITEM}>
+              <Link href={l.href} className={cn(NEEDS_ROW, "max-lg:bg-background")}>
                 <SquareAlert aria-hidden className="size-6 text-foreground" />
-                <span className="font-medium text-pretty">{l.text}</span>
+                <span className="font-medium text-pretty max-lg:text-sm max-lg:leading-5">{l.text}</span>
                 <ChevronRight aria-hidden className="size-6 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" />
               </Link>
             </li>
@@ -165,7 +174,7 @@ function Dashboard() {
   const marketStale = ws.health.market_data.state !== "ok";
 
   return (
-    <div className={PAGE_GRID}>
+    <div className={cn(PAGE_GRID, "max-lg:gap-8")}>
       <h1 className="sr-only">Dashboard</h1>
       <SideRail className="max-lg:gap-8 lg:col-start-2 lg:row-start-1">
         <NeedsYou ws={ws} open={open} />

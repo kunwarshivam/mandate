@@ -191,6 +191,24 @@ for (const width of PHONES) {
       await expect(page.locator("#main").getByText(/asks to buy|asked you to buy/).locator("visible=true")).toHaveCount(1);
     });
 
+    test("Needs you is one row of cards that scrolls sideways, however many wait, with each price in full", async ({ page }) => {
+      await open(page, "/?scenario=stale", width);
+      const list = page.locator("[data-slot=needs-you] ul");
+      const items = list.locator(":scope > li");
+      expect(await items.count()).toBeGreaterThan(3);
+      const tops = await items.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+      expect(new Set(tops).size, "every card sits on the same row").toBe(1);
+      const box = (await list.boundingBox())!;
+      expect(box.height, "the strip stays one card tall").toBeLessThanOrEqual(110);
+      expect(await list.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+      const first = (await items.first().boundingBox())!;
+      expect(first.x + first.width, "the next card shows at the edge").toBeLessThan(width);
+      const request = items.first().getByRole("link");
+      expect(await request.evaluate((el) => el.scrollWidth <= el.clientWidth && [...el.querySelectorAll("*")].every((s) => getComputedStyle(s).textOverflow !== "ellipsis"))).toBe(true);
+      await expect(request).toContainText(/\$[\d,]+\.\d{2}/);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    });
+
     test("the range picker sits wholly above the tab bar on the first screen", async ({ page }) => {
       await open(page, "/", width);
       const picker = (await page.locator("[data-slot=account-equity] [data-slot=range-picker]").boundingBox())!;
@@ -248,6 +266,23 @@ for (const width of PHONES) {
       await expect(page.getByRole("region", { name: "Key figures" })).toBeHidden();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
       expect(await smallTargets(page.locator("#main"))).toEqual([]);
+    });
+
+    test("Stop this agent shares the title's row, one paper badge shows, and the chart is 200 px", async ({ page }) => {
+      await open(page, AGENT, width);
+      const head = page.locator("[data-slot=page-header]");
+      const title = (await head.getByRole("heading", { level: 1 }).boundingBox())!;
+      const stop = head.getByRole("button", { name: "Stop this agent…" });
+      expect((await stop.innerText()).trim()).toBe("Stop");
+      const s = (await stop.boundingBox())!;
+      expect(s.height).toBeGreaterThanOrEqual(MIN_TARGET);
+      expect(s.y, "Stop starts within the title block's height, not under it").toBeLessThan(title.y + title.height);
+      expect(s.x + s.width).toBeLessThanOrEqual(width);
+      await expect(page.locator("[data-slot=environment-badge]").locator("visible=true")).toHaveCount(1);
+      await expect(header(page).locator("[data-slot=environment-badge]")).toBeVisible();
+      expect((await page.locator("[data-slot=agent-equity] [data-slot=chart-canvas]").boundingBox())!.height).toBe(200);
+      await stop.click();
+      await expect(page.getByRole("dialog", { name: /^Stop/ })).toContainText("Agent 1");
     });
 
     test("the level legend waits behind Levels", async ({ page }) => {

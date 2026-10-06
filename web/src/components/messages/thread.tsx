@@ -17,8 +17,11 @@ import { PinnedRequest, RequestCard } from "./request-card";
 /** The thread's gutter, matched by the composer under it so the two share one edge. */
 const THREAD_X = "px-(--page-x) lg:px-8";
 
-/** Under the composer: nothing on a phone, where the tab bar sits below the pane; the dock's clearance on a desktop. */
-const COMPOSER_DOCK = `relative shrink-0 bg-card pt-2 pb-3 ${THREAD_X} lg:pb-[calc(var(--dock-clearance)+0.5rem)]`;
+/** Under the composer: a sliver on a phone, where the tab bar sits below the pane; the dock's clearance on a desktop. */
+const COMPOSER_DOCK = `relative shrink-0 bg-card pt-2 pb-2 ${THREAD_X} lg:pb-[calc(var(--dock-clearance)+0.5rem)]`;
+
+/** Between entries: tighter on a phone, where the screen is the conversation's (DEC-482). */
+const ENTRY_GAP = "gap-4 lg:gap-5";
 
 /** A journal entry in the thread: written by code at the time shown, never in a model's voice. */
 function JournalLine({ event, now }: { event: TimelineEvent; now: Iso }) {
@@ -30,7 +33,7 @@ function JournalLine({ event, now }: { event: TimelineEvent; now: Iso }) {
           {stamp(event.at, now)}
         </time>
       </p>
-      <p className="rounded-2xl rounded-tl-md bg-background px-4 py-2.5 text-pretty">{event.text}</p>
+      <p className="rounded-2xl rounded-tl-md bg-background px-3.5 py-2 text-pretty lg:px-4 lg:py-2.5">{event.text}</p>
     </div>
   );
 }
@@ -77,10 +80,10 @@ export function ThreadChat({ agent }: { agent: Agent }) {
     <div className="flex min-h-0 flex-1 flex-col" data-slot="thread-chat">
       {waiting ? <PinnedRequest approval={waiting} /> : null}
       <div ref={scroller} data-slot="thread-scroll" className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <div ref={content} role="log" aria-label={`${agent.label}'s thread`} className={`grid grid-cols-[minmax(0,1fr)] gap-5 pt-6 pb-4 ${THREAD_X}`} data-slot="thread">
+        <div ref={content} role="log" aria-label={`${agent.label}'s thread`} className={`grid grid-cols-[minmax(0,1fr)] ${ENTRY_GAP} pt-4 pb-3 lg:pt-6 lg:pb-4 ${THREAD_X}`} data-slot="thread">
           {items.length === 0 && turns.length === 0 ? <p className="text-muted-foreground">Nothing is recorded for {agent.label} yet. Its orders, requests and mode changes appear here.</p> : null}
           {groups.map((group) => (
-            <section key={group.day} aria-label={group.label} className="grid grid-cols-[minmax(0,1fr)] gap-5">
+            <section key={group.day} aria-label={group.label} className={`grid grid-cols-[minmax(0,1fr)] ${ENTRY_GAP}`}>
               <h3 className="justify-self-center text-label text-muted-foreground">{group.label}</h3>
               {group.items.map((entry) => {
                 if (entry.kind === "turn") {
@@ -113,8 +116,7 @@ export function ThreadChat({ agent }: { agent: Agent }) {
           label={`Ask about ${agent.label}`}
           placeholder={`Ask about ${agent.label}, or say pause`}
           onSend={ask}
-          className={turns.length === 0 ? "pt-3" : undefined}
-         
+          className={turns.length === 0 ? "pt-2 lg:pt-3" : undefined}
         />
       </div>
     </div>

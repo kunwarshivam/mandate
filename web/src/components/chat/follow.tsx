@@ -10,6 +10,12 @@ const NEAR_END_PX = 48;
 /** For this long after a thread opens, it settles at its end at once while fonts and cards still grow it. */
 const SETTLE_MS = 600;
 
+/** How long a reader's wheel, key or lifted finger still owns the scroll that follows it, momentum included; each scroll in that time extends it. */
+const GESTURE_MS = 250;
+
+/** Keys that move a focused scroller up. */
+const UP_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
+
 export interface Follow {
   /** The element that scrolls. */
   scroller: RefObject<HTMLDivElement | null>;
@@ -35,9 +41,10 @@ function toEnd(el: HTMLElement | null, behavior: ScrollBehavior) {
 
 /**
  * A chat log that keeps the latest entry in view while the reader is at it, and leaves them be once
- * they scroll up to read: only scrolling up stops the following, so the log's own smooth scroll, or
- * content growing under it, never does. Reaching the end again resumes it. A new `thread` opens at
- * its end.
+ * they scroll up to read: only the reader moving it up, by wheel, touch, key or scrollbar, stops the
+ * following. The log's own smooth scroll, content growing or shrinking under it, and the frame
+ * resizing (a phone's toolbar, a banner coming or going) never do. Reaching the end again resumes
+ * it. A new `thread` opens at its end.
  */
 export function useFollow(thread: string): Follow {
   const scroller = useRef<HTMLDivElement>(null);
@@ -58,16 +65,57 @@ export function useFollow(thread: string): Follow {
     if (!el || !box) return;
     let lastTop = el.scrollTop;
     let height = box.offsetHeight;
+    let touching = false;
+    let gestureUntil = 0;
+    const gesture = () => {
+      gestureUntil = performance.now() + GESTURE_MS;
+    };
+    const reading = () => touching || performance.now() < gestureUntil;
     const onScroll = () => {
       const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
       if (gap <= NEAR_END_PX) {
         following.current = true;
         setAwayIn(null);
-      } else if (el.scrollTop < lastTop - 1) {
+      } else if (el.scrollTop < lastTop - 1 && reading()) {
         following.current = false;
         setAwayIn(thread);
       }
+      if (reading()) gesture();
       lastTop = el.scrollTop;
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) gesture();
+    };
+    const onTouchStart = () => {
+      touching = true;
+    };
+    const onTouchEnd = () => {
+      touching = false;
+      gesture();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (UP_KEYS.has(e.key) || (e.key === " " && e.shiftKey)) gesture();
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.target === el) {
+        touching = true;
+        window.addEventListener("pointerup", onTouchEnd, { once: true });
+      }
+    };
+    const listeners: [string, EventListener][] = [
+      ["scroll", onScroll as EventListener],
+      ["wheel", onWheel as EventListener],
+      ["touchstart", onTouchStart],
+      ["touchend", onTouchEnd],
+      ["touchcancel", onTouchEnd],
+      ["pointerdown", onPointerDown as EventListener],
+    ];
+    for (const [type, listener] of listeners) el.addEventListener(type, listener, { passive: true });
+    window.addEventListener("keydown", onKey);
+    const unlisten = () => {
+      for (const [type, listener] of listeners) el.removeEventListener(type, listener);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerup", onTouchEnd);
     };
     const grown = () => {
       const grew = box.offsetHeight > height;
@@ -77,14 +125,13 @@ export function useFollow(thread: string): Follow {
     const resized = () => {
       if (following.current) toEnd(el, "instant");
     };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    if (typeof ResizeObserver === "undefined") return () => el.removeEventListener("scroll", onScroll);
+    if (typeof ResizeObserver === "undefined") return unlisten;
     const growth = new ResizeObserver(grown);
     const frame = new ResizeObserver(resized);
     growth.observe(box);
     frame.observe(el);
     return () => {
-      el.removeEventListener("scroll", onScroll);
+      unlisten();
       growth.disconnect();
       frame.disconnect();
     };

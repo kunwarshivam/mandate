@@ -171,9 +171,10 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
  * workspace switcher becomes an icon (below 100rem), alerts and the account menu fold into "Alerts
  * and account" (below `xl`), and the paper badge keeps its gloss for screen readers only (at `lg`
  * below 100rem, and below 30rem). Below `lg` the header holds two things, the brand owl and the
- * paper badge (DEC-207, DEC-452); the tab bar and its More sheet carry the rest.
+ * paper badge (DEC-207, DEC-452); the tab bar and its More sheet carry the rest. There, an open
+ * thread hides it through `className` and carries the paper badge in its own bar (DEC-482).
  */
-export function AppHeader() {
+export function AppHeader({ className }: { className?: string }) {
   const pathname = usePathname();
   const { ws } = useRuntime();
   const { role } = useRole();
@@ -185,7 +186,7 @@ export function AppHeader() {
   const home = homeFor(role);
 
   return (
-    <header className="glass sticky top-0 z-30 shrink-0 border-b">
+    <header data-slot="app-header" className={cn("glass sticky top-0 z-30 shrink-0 border-b", className)}>
       <div className="flex h-16 items-center gap-1 overflow-hidden px-(--page-x) whitespace-nowrap sm:gap-2 lg:gap-4">
         <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2 lg:min-w-auto lg:basis-0">
           <Link

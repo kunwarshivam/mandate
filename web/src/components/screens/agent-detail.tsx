@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { AGENT_SECTIONS, type AgentSectionKey, agentHref, decisionHref, orderHref, positionHref } from "@/lib/screens";
 import { AgentFrame, AgentNotFound, useAgent } from "./agent-frame";
 import { ComingSoon } from "./coming-soon";
-import { PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
+import { NEEDS_CARD, NEEDS_ITEM, NEEDS_STRIP, PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
 import { MandateSummary } from "./mandate-summary";
 import { NewsSection } from "./news-section";
 import { SideRail } from "./side-rail";
@@ -53,27 +53,31 @@ function AgentDetail({ agentId }: { agentId: string }) {
     <AgentFrame agent={agent}>
       {open.length > 0 ? (
         <section aria-labelledby="phone-waiting-title" data-slot="phone-waiting" className="grid gap-2 lg:hidden">
-          <h2 id="phone-waiting-title" className="text-h2">
+          <h2 id="phone-waiting-title" className="text-h3">
             Waiting for you
           </h2>
-          <ul className="grid">
+          <ul className={NEEDS_STRIP}>
             {open.map((a) => (
-              <li key={a.approval_id} className="border-b border-border/70 last:border-b-0">
+              <li key={a.approval_id} className={NEEDS_ITEM}>
                 <Link
                   href={`/approvals/${a.approval_id}`}
-                  className="press -mx-2 grid min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1rem] items-start gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
+                  className={cn(
+                    "press -mx-2 grid min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1rem] items-start gap-x-3 rounded-xl bg-lapis-soft px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
+                    NEEDS_CARD,
+                  )}
                 >
                   <Inbox aria-hidden className="size-6 text-lapis" />
-                  <span className="grid gap-0.5">
-                    <span className="font-medium text-pretty">
-                      Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of <span className="font-mono tabular">{price(a.bound.limit)}</span>
+                  <span className="grid min-w-0 gap-0">
+                    <span className="text-sm leading-5 font-medium text-pretty">
+                      Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at<span className="sr-only"> a limit of</span>{" "}
+                      <span className="font-mono tabular">{price(a.bound.limit)}</span>
                     </span>
-                    <span data-slot="deadline" className="text-sm text-muted-foreground">
+                    <span data-slot="deadline" className="text-caption text-muted-foreground">
                       Skipped at{" "}
                       <time dateTime={a.deadline} className="font-mono tabular">
                         {clock(a.deadline)} {zoneLabel(a.deadline)}
-                      </time>{" "}
-                      if you do nothing
+                      </time>
+                      <span className="sr-only"> if you do nothing</span>
                     </span>
                   </span>
                   <ChevronRight aria-hidden className="size-6 text-muted-foreground" />

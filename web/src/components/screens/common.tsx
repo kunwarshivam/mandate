@@ -17,6 +17,20 @@ import { KEY } from "@/components/kumo/key";
  */
 export const PAGE_GRID = "grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14";
 
+/**
+ * What needs the owner, on a phone (DEC-482): one row of tinted cards that scrolls sideways, edge to
+ * edge, however many there are, so the money below keeps its place. One card spans the row; with
+ * more, each takes most of it and the next shows at the edge. From `lg`, a list on hairlines.
+ */
+export const NEEDS_STRIP =
+  "grid max-lg:-mx-(--page-x) max-lg:flex max-lg:snap-x max-lg:snap-mandatory max-lg:gap-2 max-lg:overflow-x-auto max-lg:scroll-px-(--page-x) max-lg:px-(--page-x) max-lg:[scrollbar-width:none]";
+
+/** One card in the strip; a hairline row from `lg`. */
+export const NEEDS_ITEM = "lg:border-b lg:border-border/70 lg:last:border-b-0 max-lg:flex max-lg:w-full max-lg:shrink-0 max-lg:snap-start max-lg:not-only:w-[min(19rem,85%)]";
+
+/** The card's link on a phone: a tint at least 56px tall. Its words wrap rather than truncate, so a price or a time is never cut. */
+export const NEEDS_CARD = "max-lg:mx-0 max-lg:w-full max-lg:items-center max-lg:rounded-xl max-lg:px-3 max-lg:py-2";
+
 export function Section({ title, action, children, className, id }: { title: string; action?: ReactNode; children: ReactNode; className?: string; id?: string }) {
   const headingId = id ?? `section-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
