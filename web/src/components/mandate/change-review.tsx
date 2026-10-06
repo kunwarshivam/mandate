@@ -178,7 +178,6 @@ export function ChangeReview({
         <p className="text-caption text-muted-foreground">
           Version {p.number}, diffed against version {inEffect}. Hash <span className="font-mono">{p.version.slice(7, 19)}</span>
         </p>
-        {origin.kind === "message" ? <p className="text-sm text-pretty text-muted-foreground">You said “{origin.quote}”</p> : null}
       </header>
 
       <ChangeRows changes={p.changes} />

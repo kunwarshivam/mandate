@@ -243,7 +243,8 @@ describe("an agent's thread", () => {
     say("Set the largest order to $800");
     const review = thread().querySelector<HTMLElement>("[data-slot=change-review]")!;
     expect(review).toHaveAttribute("data-classification", "risk_reducing");
-    expect(review).toHaveTextContent("You said “Set the largest order to $800”");
+    expect(review.previousElementSibling).toHaveTextContent("Set the largest order to $800");
+    expect(review).not.toHaveTextContent("Set the largest order to $800");
     expect(review.querySelector("[data-slot=version-change]")).toHaveTextContent(/Largest order.*\$1,000\.00.*\$800\.00/);
 
     fireEvent.click(within(review).getByRole("button", { name: "Confirm change" }));
