@@ -159,3 +159,18 @@ pub fn fold(
 ) -> Result<TripwireOutcome, ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E6-13" })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TripwireAlert;
+
+    /// The notification boundary exposes only the trigger link and fixed generic text.
+    #[test]
+    fn an_alert_exposes_only_its_trigger_index_and_generic_text() {
+        let alert = TripwireAlert {
+            triggered_event_index: 7,
+        };
+        assert_eq!(alert.triggered_event_index(), 7);
+        assert_eq!(alert.generic_text(), "tripwire_fired");
+    }
+}

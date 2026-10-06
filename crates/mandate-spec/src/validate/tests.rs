@@ -15,10 +15,13 @@ use proptest::prelude::*;
 
 use super::{
     GroupId, PreviousVersion, RegisteredModel, ValidationContext, ValidationReport, Violation,
-    Warning, covers, pointer, recheck_at_application, validate,
+    Warning, covers, pointer, recheck_at_application, tripwire_rules, validate,
 };
-use crate::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
-use crate::{Mandate, ParseError, SpecError};
+use crate::document::{
+    ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source, Tripwire, TripwireAction,
+    TripwireId, TripwireMetric,
+};
+use crate::{DecGrammar, Mandate, ParseError, SchemaDec, SpecError};
 
 type Checked = Result<(), String>;
 /// `(pointer, JSON text)` pairs, applied in order.
@@ -120,6 +123,22 @@ fn document(patches: &[(&str, &str)]) -> Result<Value, String> {
 
 pub(crate) fn mandate(patches: &[(&str, &str)]) -> Result<Mandate, String> {
     Mandate::parse(&document(patches)?).map_err(|e| format!("{patches:?}: {e}"))
+}
+
+/// The tests-PR validator refuses a non-empty typed tripwire list rather than accepting unchecked
+/// values assembled by an internal caller.
+#[test]
+fn a_typed_tripwire_fails_closed_at_the_validation_stub() -> Checked {
+    let mut value = mandate(&[])?;
+    value.autonomy.tripwires.push(Tripwire {
+        id: TripwireId::parse("loss").map_err(|error| error.to_string())?,
+        metric: TripwireMetric::RealizedLossUsd,
+        threshold: SchemaDec::parse("100", DecGrammar::PositiveDecimal)
+            .map_err(|error| error.to_string())?,
+        action: TripwireAction::ExitsOnly,
+    });
+    assert_eq!(tripwire_rules(&value), Err(SpecError::Unimplemented));
+    Ok(())
 }
 
 fn digest(hex: &str) -> Result<Digest, String> {
