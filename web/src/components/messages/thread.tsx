@@ -43,7 +43,7 @@ function entriesOf(items: ThreadItem[], turns: Turn[]): Entry[] {
 }
 
 /**
- * An agent's thread (DEC-476): its journal, oldest first, its requests as cards that open the
+ * An agent's thread (DEC-479): its journal, oldest first, its requests as cards that open the
  * request, and below them what the owner asked and the record's answers. Asking writes nothing to
  * the journal; only a Pause the owner presses does, and its entry then appears here like any other.
  */

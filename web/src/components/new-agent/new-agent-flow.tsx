@@ -13,7 +13,7 @@ import { STEP_HEADING } from "./steps";
 const FIXTURE_COMPILER = fixtureCompiler();
 
 /**
- * Setting up an agent on the fixture workspace (brief A0 to A2 and A5, DEC-473, DEC-474): one
+ * Setting up an agent on the fixture workspace (brief A0 to A2 and A5, DEC-476, DEC-477): one
  * conversation gathers the owner's values, shows the whole agent once, and creates it with a
  * passkey. Everything stays in this component's state until then; only the deployment reaches the
  * runtime, which repeats V-002 and V-006 when it applies it. Words handed over from Messages or the

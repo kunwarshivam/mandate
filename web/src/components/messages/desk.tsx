@@ -94,7 +94,7 @@ function Step({ step, now, last }: { step: DeskStep; now: Iso; last: boolean }) 
 }
 
 /**
- * The desk (DEC-476): how the agent's latest request was made, from the models to the owner. Each
+ * The desk (DEC-479): how the agent's latest request was made, from the models to the owner. Each
  * step is a journaled fact; model output is quoted in a dashed frame and named, and nothing on the
  * desk is in the agent's voice.
  */

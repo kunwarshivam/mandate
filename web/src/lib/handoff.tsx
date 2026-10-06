@@ -4,7 +4,7 @@ import { type ReactNode, createContext, useContext, useMemo, useRef } from "reac
 
 /**
  * Words the owner typed in Messages or the copilot, carried into agent setup's message field
- * (DEC-476). Held in memory until setup has read them, then cleared; never written to browser storage.
+ * (DEC-479). Held in memory until setup has read them, then cleared; never written to browser storage.
  */
 export interface Handoff {
   give: (text: string) => void;

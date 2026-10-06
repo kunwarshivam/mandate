@@ -42,7 +42,7 @@ export function PinnedRequest({ approval }: { approval: Approval }) {
 
 /**
  * A request in a thread. It says what was asked and links to the request itself, the record screen
- * where the owner approves or skips with every line shown (D6); a message never approves (DEC-477).
+ * where the owner approves or skips with every line shown (D6); a message never approves (DEC-480).
  */
 export function RequestCard({ approval, now }: { approval: Approval; now: Iso }) {
   const open = approval.status === "delivered";

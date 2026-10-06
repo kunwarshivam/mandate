@@ -111,7 +111,7 @@ function Messages({ agentId, view }: { agentId: string | null; view: ThreadView 
   );
 }
 
-/** Messages (DEC-476): every agent's thread, read from the journal, with the record answering questions. */
+/** Messages (DEC-479): every agent's thread, read from the journal, with the record answering questions. */
 export function MessagesScreen({ agentId = null, view = "chat" }: { agentId?: string | null; view?: ThreadView }) {
   return (
     <WorkspaceGate>

@@ -8,10 +8,10 @@ import nextTs from "eslint-config-next/typescript";
  * every Kumo component (and a syntax highlighter), so imports go per component.
  */
 /**
- * Icons are Pixelarticons (DEC-475), imported one file per icon. Phosphor stays installed only
+ * Icons are Pixelarticons (DEC-478), imported one file per icon. Phosphor stays installed only
  * because Kumo needs it inside its own components, and the Pixelarticons barrel loads every icon.
  */
-const ICON_MESSAGE = "Icons are Pixelarticons, one file each: import { Home } from \"pixelarticons/react/Home.js\" (DEC-475).";
+const ICON_MESSAGE = "Icons are Pixelarticons, one file each: import { Home } from \"pixelarticons/react/Home.js\" (DEC-478).";
 const ICON_IMPORTS = {
   paths: [
     { name: "pixelarticons", message: ICON_MESSAGE },
