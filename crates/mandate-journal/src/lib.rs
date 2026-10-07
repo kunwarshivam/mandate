@@ -182,8 +182,6 @@ pub enum InvalidReason {
     PiiRefs,
     #[error("risk_clock is earlier than the stream's last risk_clock")]
     RiskClockRegressed,
-    #[error("Unimplemented {story}")]
-    Unimplemented { story: &'static str },
 }
 
 impl InvalidReason {
@@ -209,7 +207,6 @@ impl InvalidReason {
             Self::ArtifactRefs => "artifact_refs",
             Self::PiiRefs => "pii_refs",
             Self::RiskClockRegressed => "risk_clock_regressed",
-            Self::Unimplemented { .. } => "unimplemented",
         }
     }
 }
@@ -357,6 +354,140 @@ struct StreamState {
     epoch: u64,
     /// The latest `risk_clock` appended, which later risk inputs may not undercut (spec §2).
     risk_clock: Option<UtcNanos>,
+}
+
+enum ConfigArtifactFailure {
+    Invalid(Invalid),
+    Unavailable,
+}
+
+fn text_at<'a>(draft: &'a Draft, object: &str, member: &str) -> Option<&'a str> {
+    draft
+        .fields()
+        .get(object)
+        .and_then(Value::as_object)
+        .and_then(|value| value.get(member))
+        .and_then(Value::as_str)
+}
+
+fn referenced_config_object(
+    artifacts: &dyn ArtifactSource,
+    reference_text: Option<&str>,
+    expected_kind: &str,
+    reference_path: &str,
+    kind_path: &str,
+) -> Result<Value, ConfigArtifactFailure> {
+    let reference = reference_text.and_then(ArtifactRef::parse).ok_or_else(|| {
+        ConfigArtifactFailure::Invalid(Invalid::new(
+            InvalidReason::ConfigRefMismatch,
+            reference_path,
+        ))
+    })?;
+    let bytes = match artifacts.read_artifact(&reference) {
+        Ok(bytes) => bytes,
+        Err(ArtifactError::Missing) => {
+            return Err(ConfigArtifactFailure::Invalid(Invalid::new(
+                InvalidReason::MissingArtifact,
+                reference_path,
+            )));
+        }
+        Err(ArtifactError::Corrupt | ArtifactError::Unavailable) => {
+            return Err(ConfigArtifactFailure::Unavailable);
+        }
+    };
+    if check_artifact(&reference, &bytes).is_err() {
+        return Err(ConfigArtifactFailure::Unavailable);
+    }
+    let object = parse(&bytes).map_err(|_| {
+        ConfigArtifactFailure::Invalid(Invalid::new(
+            InvalidReason::ConfigRefMismatch,
+            reference_path,
+        ))
+    })?;
+    if to_canonical(&object) != bytes {
+        return Err(ConfigArtifactFailure::Invalid(Invalid::new(
+            InvalidReason::ConfigRefMismatch,
+            reference_path,
+        )));
+    }
+    if object.get("kind").and_then(Value::as_str) != Some(expected_kind) {
+        return Err(ConfigArtifactFailure::Invalid(Invalid::new(
+            InvalidReason::ConfigRefKind,
+            kind_path,
+        )));
+    }
+    Ok(object)
+}
+
+fn validate_config_artifacts(
+    draft: &Draft,
+    artifacts: &dyn ArtifactSource,
+) -> Result<(), ConfigArtifactFailure> {
+    if draft.schema_version() != 2 {
+        return Ok(());
+    }
+    match draft.event_type() {
+        "ModelOutputRecorded" => {
+            let registry = referenced_config_object(
+                artifacts,
+                text_at(draft, "config_refs", catalogue::REG),
+                catalogue::REG,
+                "config_refs.model_registry",
+                "config_refs.model_registry",
+            )?;
+            let payload = draft.fields().get("payload").unwrap_or(&Value::Null);
+            let matches = registry
+                .get("models")
+                .and_then(Value::as_array)
+                .map(|models| {
+                    models
+                        .iter()
+                        .filter(|model| {
+                            ["model_id", "model_version", "content_hash"]
+                                .iter()
+                                .all(|member| model.get(member) == payload.get(member))
+                        })
+                        .count()
+                })
+                .unwrap_or_default();
+            if matches != 1 {
+                return Err(ConfigArtifactFailure::Invalid(Invalid::new(
+                    InvalidReason::ConfigRefMismatch,
+                    "payload.model_version",
+                )));
+            }
+        }
+        "DecisionMade" => {
+            referenced_config_object(
+                artifacts,
+                text_at(draft, "config_refs", catalogue::POL),
+                catalogue::POL,
+                "config_refs.policy_set",
+                "config_refs.policy_set",
+            )?;
+            referenced_config_object(
+                artifacts,
+                text_at(draft, "config_refs", catalogue::REG),
+                catalogue::REG,
+                "config_refs.model_registry",
+                "config_refs.model_registry",
+            )?;
+        }
+        "ConfigSnapshotRegistered" => {
+            let kind = text_at(draft, "payload", "kind").unwrap_or_default();
+            if matches!(kind, catalogue::POL | catalogue::REG) {
+                referenced_config_object(
+                    artifacts,
+                    text_at(draft, "payload", "content_hash"),
+                    kind,
+                    "payload.content_hash",
+                    "payload.kind",
+                )?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// An in-memory journal implementing the append protocol. Streams exist implicitly with head 0
@@ -527,19 +658,34 @@ impl MemoryJournal {
     /// content-addressed artifact source before sequencing.
     pub fn append_with_config_artifacts(
         &mut self,
-        _stream: &StreamId,
-        _expected_head: u64,
-        _writer_epoch: u64,
-        _recorded_at: UtcNanos,
-        _drafts: &[&[u8]],
-        _artifacts: &dyn ArtifactSource,
+        stream: &StreamId,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[&[u8]],
+        artifacts: &dyn ArtifactSource,
     ) -> AppendOutcome {
-        AppendOutcome::Invalid {
-            draft: 0,
-            error: Invalid::new(
-                InvalidReason::Unimplemented { story: "E7-19" },
-                "config_refs",
-            ),
+        for (index, bytes) in drafts.iter().enumerate() {
+            let draft = match Draft::parse(bytes) {
+                Ok(draft) => draft,
+                Err(error) => {
+                    return AppendOutcome::Invalid {
+                        draft: index,
+                        error,
+                    };
+                }
+            };
+            match validate_config_artifacts(&draft, artifacts) {
+                Ok(()) => {}
+                Err(ConfigArtifactFailure::Invalid(error)) => {
+                    return AppendOutcome::Invalid {
+                        draft: index,
+                        error,
+                    };
+                }
+                Err(ConfigArtifactFailure::Unavailable) => return AppendOutcome::Unavailable,
+            }
         }
+        self.append(stream, expected_head, writer_epoch, recorded_at, drafts)
     }
 }
