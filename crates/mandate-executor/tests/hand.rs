@@ -4695,6 +4695,40 @@ fn an_agent_kill_switch_cancels_a_watchdog_exit_of_no_agent_and_sells_only_its_o
         watchdog_id,
         "under the switch's own id, never the watchdog's"
     );
+    let sold = sell.client_order_id.as_str().to_owned();
+    let filled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-2",
+            Some(&sold),
+            "5",
+            "139",
+        ))),
+        &ports,
+    );
+    let re_placed = filled
+        .drafts
+        .iter()
+        .find(|d| {
+            d.event_type == "ProtectionChanged"
+                && d.payload.get("action").and_then(mandate_canon::Value::as_str) == Some("placed")
+        })
+        .expect("the ten shares nobody attributed are re-protected once the switch's sell is done (§5.4)");
+    assert_eq!(
+        re_placed
+            .payload
+            .get("qty")
+            .and_then(mandate_canon::Value::as_str),
+        Some("10"),
+        "for exactly what is left, neither the fifteen the watchdog covered nor the five sold"
+    );
+    assert!(
+        filled
+            .submissions()
+            .iter()
+            .any(|o| o.purpose == Purpose::Protective && o.qty == qty("10")),
+        "and the OCO for them goes to the broker: {:?}",
+        filled.submissions()
+    );
 }
 
 #[test]
