@@ -47,7 +47,8 @@ pub struct VerifyColdArgs {
     pub anchor: Option<PathBuf>,
     /// The anchor's RFC 3161 timestamp token, as stored. It must contain the anchor's imprint
     /// (`tsa_token_invalid` otherwise), and it is never reported verified until DEC-265 item 1's
-    /// crypto half lands: the result is `tsa_verification_incomplete`, a non-zero exit.
+    /// crypto half lands: the result is `tsa_verification_incomplete`, a non-zero exit. A token
+    /// needs `--anchor`; [`verify`] refuses one without it (`anchor_invalid`), whoever calls it.
     #[arg(long, requires = "anchor")]
     pub token: Option<PathBuf>,
     /// The `seq` the range starts at, from the manifest or anchor the start is trusted from.
@@ -134,6 +135,13 @@ impl fmt::Display for ColdOutcome {
 /// # Errors
 /// Returns the input refusal, code first, when the export cannot be covered.
 pub fn verify(args: &VerifyColdArgs, report: &mut impl Write) -> anyhow::Result<ColdOutcome> {
+    if args.token.is_some() && args.anchor.is_none() {
+        return Err(refuse(
+            Refusal::Anchor,
+            "--token is checked against an anchor's root, so it needs --anchor: a token with no \
+             anchor vouches for nothing (DEC-490 item 6)",
+        ));
+    }
     let start = trusted_start(args.from_seq, args.trusted_prev_hash.as_deref())?;
     let segments = read_export(&args.export)?;
     let artifacts = open_source(args.store.as_deref())?;
@@ -200,7 +208,14 @@ fn read_export(dir: &Path) -> anyhow::Result<Vec<Segment>> {
     for entry in entries {
         let path = entry.map_err(|e| unreadable(dir, &e))?.path();
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
+            return Err(refuse(
+                Refusal::Unreadable,
+                format_args!(
+                    "{} has a name that is not UTF-8, so the command cannot tell whether it is a \
+                     segment of the export (DEC-490 item 2)",
+                    path.display()
+                ),
+            ));
         };
         if let Some(name) = file_name.strip_suffix(MANIFEST_SUFFIX) {
             manifests.insert(name.to_owned(), path);
@@ -390,4 +405,77 @@ fn walked_rows(segments: &[Segment], from_seq: u64) -> anyhow::Result<Vec<Stored
         }
     }
     Ok(rows)
+}
+
+/// In-module tests the independent review of #662 required (finding M1 and minor m1), under
+/// DEC-77's allowance for a test a review ruling requires: no suite in `tests/` reaches these two
+/// refusals, so without them the mutation gate could not judge either branch.
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test setup and assertions: a failure here is the test failing, not a trading path"
+)]
+mod review_tests {
+    use std::ffi::OsStr;
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+
+    use super::{VerifyColdArgs, read_export, verify};
+
+    /// A scratch directory of this process, made empty.
+    fn scratch(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "mandate-cli-cold-review-{label}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("the scratch directory is created");
+        dir
+    }
+
+    /// The library call refuses a token given without an anchor, code first, before it reads
+    /// anything and before any report line: the token would otherwise be read, never checked, and
+    /// the run reported `verified` beside it (DEC-490 item 6; the binary's `requires` is not the
+    /// only caller).
+    #[test]
+    fn a_token_without_an_anchor_is_refused_before_anything_is_read() {
+        let dir = scratch("token");
+        let args = VerifyColdArgs {
+            export: dir.join("no-such-export"),
+            store: None,
+            anchor: None,
+            token: Some(dir.join("no-such-token.tsr")),
+            from_seq: None,
+            trusted_prev_hash: None,
+        };
+        let mut report = Vec::new();
+        let refused = verify(&args, &mut report).expect_err("a token alone is refused");
+        assert!(
+            refused.to_string().starts_with("anchor_invalid: --token"),
+            "the refusal names its code first and the token: {refused}"
+        );
+        assert!(report.is_empty(), "nothing is reported before a refusal");
+        fs::remove_dir_all(&dir).expect("the scratch directory is removed");
+    }
+
+    /// A directory entry whose name is not UTF-8 is refused with `path_unreadable` rather than
+    /// skipped: the command cannot tell whether it is a segment, so it reads nothing of the export
+    /// (DEC-490 item 2).
+    #[test]
+    fn a_name_that_is_not_utf8_is_refused_not_skipped() {
+        let dir = scratch("utf8");
+        fs::write(dir.join(OsStr::from_bytes(b"\xff.jsonl")), b"")
+            .expect("a file with a non-UTF-8 name is written");
+        let refused = match read_export(&dir) {
+            Ok(_) => panic!("an entry whose name is not UTF-8 is refused"),
+            Err(refused) => refused,
+        };
+        assert!(
+            refused.to_string().starts_with("path_unreadable: "),
+            "the refusal names its code first: {refused}"
+        );
+        fs::remove_dir_all(&dir).expect("the scratch directory is removed");
+    }
 }
