@@ -152,6 +152,12 @@ pub enum InvalidReason {
     NonCanonical,
     #[error("a config_refs key required for this event type is missing")]
     MissingConfigRef,
+    #[error("the referenced configuration artifact is not stored")]
+    MissingArtifact,
+    #[error("the referenced configuration artifact has another kind")]
+    ConfigRefKind,
+    #[error("the referenced configuration artifact does not match the event payload")]
+    ConfigRefMismatch,
     #[error("event type not in the catalogue")]
     UnknownEventType,
     #[error("no payload schema registered for this event type and schema version")]
@@ -176,6 +182,8 @@ pub enum InvalidReason {
     PiiRefs,
     #[error("risk_clock is earlier than the stream's last risk_clock")]
     RiskClockRegressed,
+    #[error("Unimplemented {story}")]
+    Unimplemented { story: &'static str },
 }
 
 impl InvalidReason {
@@ -186,6 +194,9 @@ impl InvalidReason {
             Self::Schema => "schema",
             Self::NonCanonical => "non_canonical",
             Self::MissingConfigRef => "missing_config_ref",
+            Self::MissingArtifact => "missing_artifact",
+            Self::ConfigRefKind => "config_ref_kind",
+            Self::ConfigRefMismatch => "config_ref_mismatch",
             Self::UnknownEventType => "unknown_event_type",
             Self::UnknownSchema => "unknown_schema",
             Self::WrongStream => "wrong_stream",
@@ -198,6 +209,7 @@ impl InvalidReason {
             Self::ArtifactRefs => "artifact_refs",
             Self::PiiRefs => "pii_refs",
             Self::RiskClockRegressed => "risk_clock_regressed",
+            Self::Unimplemented { .. } => "unimplemented",
         }
     }
 }
@@ -509,5 +521,25 @@ impl MemoryJournal {
             state.rows.push(row.clone());
         }
         AppendOutcome::Committed(sealed)
+    }
+
+    /// Appends drafts whose versioned configuration references must be checked against the
+    /// content-addressed artifact source before sequencing.
+    pub fn append_with_config_artifacts(
+        &mut self,
+        _stream: &StreamId,
+        _expected_head: u64,
+        _writer_epoch: u64,
+        _recorded_at: UtcNanos,
+        _drafts: &[&[u8]],
+        _artifacts: &dyn ArtifactSource,
+    ) -> AppendOutcome {
+        AppendOutcome::Invalid {
+            draft: 0,
+            error: Invalid::new(
+                InvalidReason::Unimplemented { story: "E7-19" },
+                "config_refs",
+            ),
+        }
     }
 }
