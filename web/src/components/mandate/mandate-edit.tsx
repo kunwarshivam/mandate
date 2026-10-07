@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { FIELD } from "@/components/auth/buttons";
+import { SideRail } from "@/components/screens/side-rail";
 import type { Agent } from "@/fixtures/types";
 import { type EditPath, type EditableField, type Edits, type FieldGroup, type Proposal, editableFields, inputText, propose, readInput, valueAt } from "@/lib/mandate-change";
 import { changeLabel } from "@/lib/mandate-paths";
@@ -113,64 +114,66 @@ export function MandateEdit({ agent }: { agent: Agent }) {
         review comes back there.
       </p>
 
-      <form aria-label={`Edit ${agent.label}'s mandate`} className="grid max-w-2xl gap-6" onSubmit={(e) => e.preventDefault()} noValidate>
-        {GROUPS.filter((g) => fields.some((f) => f.group === g)).map((group) => (
-          <fieldset key={group} className="grid gap-4">
-            <legend className="mb-3 text-h3">{GROUP_TITLE[group]}</legend>
-            {fields
-              .filter((f) => f.group === group)
-              .map((f) => {
-                const inputId = `${id}-${f.path}`;
-                const error = touched.has(f.path) ? errors.get(f.path) : undefined;
-                return (
-                  <div key={f.path} className="grid gap-1.5" data-slot="edit-field" data-path={f.path}>
-                    <label htmlFor={inputId} className="field-label">
-                      {changeLabel(f.path)}
-                    </label>
-                    <input
-                      id={inputId}
-                      value={raw[f.path] ?? ""}
-                      inputMode={INPUT_MODE[f.unit]}
-                      autoComplete="off"
-                      spellCheck={false}
-                      aria-invalid={error ? true : undefined}
-                      aria-describedby={`${inputId}-hint${error ? ` ${inputId}-error` : ""}`}
-                      onChange={(e) => edit(f.path, e.target.value)}
-                      onBlur={() => setTouched((t) => new Set(t).add(f.path))}
-                      className={cn(FIELD, "h-11 max-w-[16rem] font-mono tabular-nums", error ? "border-foreground" : null)}
-                    />
-                    <p id={`${inputId}-hint`} className="text-caption text-pretty text-muted-foreground">
-                      {hintFor(f, agent)}
-                    </p>
-                    {error ? (
-                      <p id={`${inputId}-error`} className="text-sm font-semibold">
-                        {error}
+      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] lg:gap-x-14">
+        <form aria-label={`Edit ${agent.label}'s mandate`} className="grid content-start gap-6" onSubmit={(e) => e.preventDefault()} noValidate>
+          {GROUPS.filter((g) => fields.some((f) => f.group === g)).map((group) => (
+            <fieldset key={group} className="grid gap-4">
+              <legend className="mb-3 text-h3">{GROUP_TITLE[group]}</legend>
+              {fields
+                .filter((f) => f.group === group)
+                .map((f) => {
+                  const inputId = `${id}-${f.path}`;
+                  const error = touched.has(f.path) ? errors.get(f.path) : undefined;
+                  return (
+                    <div key={f.path} className="grid gap-1.5" data-slot="edit-field" data-path={f.path}>
+                      <label htmlFor={inputId} className="field-label">
+                        {changeLabel(f.path)}
+                      </label>
+                      <input
+                        id={inputId}
+                        value={raw[f.path] ?? ""}
+                        inputMode={INPUT_MODE[f.unit]}
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-invalid={error ? true : undefined}
+                        aria-describedby={`${inputId}-hint${error ? ` ${inputId}-error` : ""}`}
+                        onChange={(e) => edit(f.path, e.target.value)}
+                        onBlur={() => setTouched((t) => new Set(t).add(f.path))}
+                        className={cn(FIELD, "h-11 max-w-[16rem] font-mono tabular-nums", error ? "border-foreground" : null)}
+                      />
+                      <p id={`${inputId}-hint`} className="text-caption text-pretty text-muted-foreground">
+                        {hintFor(f, agent)}
                       </p>
-                    ) : null}
-                  </div>
-                );
-              })}
-          </fieldset>
-        ))}
-      </form>
+                      {error ? (
+                        <p id={`${inputId}-error`} className="text-sm font-semibold">
+                          {error}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })}
+            </fieldset>
+          ))}
+        </form>
 
-      <div className="grid gap-3">
-        {shown ? (
-          <ChangeReview
-            key={card.key}
-            proposal={shown}
-            origin={{ kind: "form" }}
-            fixHint="Change a value above to continue."
-            onKeep={card.sent ? undefined : reset}
-            onSent={() => setCard((c) => ({ ...c, sent: shown }))}
-          />
-        ) : errors.size > 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {[...errors.keys()].some((p) => touched.has(p)) ? "Correct the value marked above to see what the change does." : "Finish the value you are writing to see what the change does."}
-          </p>
-        ) : (
-          <p className="text-sm text-muted-foreground">Change a value to see what it does.</p>
-        )}
+        <SideRail>
+          {shown ? (
+            <ChangeReview
+              key={card.key}
+              proposal={shown}
+              origin={{ kind: "form" }}
+              fixHint="Change the value in the form to continue."
+              onKeep={card.sent ? undefined : reset}
+              onSent={() => setCard((c) => ({ ...c, sent: shown }))}
+            />
+          ) : errors.size > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {[...errors.keys()].some((p) => touched.has(p)) ? "Correct the marked value to see what the change does." : "Finish the value you are writing to see what the change does."}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">Change a value to see what it does.</p>
+          )}
+        </SideRail>
       </div>
     </div>
   );

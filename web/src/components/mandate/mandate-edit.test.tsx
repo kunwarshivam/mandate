@@ -154,7 +154,7 @@ describe("Mandate › Edit (A6)", () => {
     const describedBy = field("Largest order").getAttribute("aria-describedby")!.split(" ");
     expect(describedBy.map((id) => document.getElementById(id)?.textContent)).toEqual(["Dollars.", "Write an amount in dollars, in figures, like 1,200."]);
     expect(review()).toBeNull();
-    expect(screen.getByText("Correct the value marked above to see what the change does.")).toBeInTheDocument();
+    expect(screen.getByText("Correct the marked value to see what the change does.")).toBeInTheDocument();
   });
 
   it("names the rule a version breaks and offers no confirm, and Keep as is puts the version in effect back", () => {
@@ -162,7 +162,7 @@ describe("Mandate › Edit (A6)", () => {
     type("Lifetime loss limit", "25");
     const refusals = review()!.querySelector("[data-slot=change-refusals]")!;
     expect(refusals.querySelector("[data-rule]")).toHaveAttribute("data-rule", "§4.3");
-    expect(refusals).toHaveTextContent("Change a value above to continue.");
+    expect(refusals).toHaveTextContent("Change the value in the form to continue.");
     expect(within(review()!).queryByRole("button", { name: /Confirm/ })).toBeNull();
     fireEvent.click(within(review()!).getByRole("button", { name: "Keep as is" }));
     expect(field("Lifetime loss limit").value).toBe("10");
@@ -195,7 +195,7 @@ describe("the change review's progress", () => {
     setPathname(`/agents/${AGENT_IDS.swing}/mandate/edit`);
     renderWithRuntime(
       <>
-        <ChangeReview proposal={proposal} origin={{ kind: "form" }} fixHint="Change a value above to continue." />
+        <ChangeReview proposal={proposal} origin={{ kind: "form" }} fixHint="Change the value in the form to continue." />
         <RuntimeProbe />
       </>,
       scenario,
