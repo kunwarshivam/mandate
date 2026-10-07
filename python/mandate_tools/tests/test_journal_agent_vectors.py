@@ -1,8 +1,9 @@
 """The agent-stream journal vectors are what reference/journal/generate.py generates (DEC-177).
 
-`cargo xtask ci reference` runs only reference/mandate/, so this test is what holds the journal
-generator's checks in CI: the version-3 self-test, the closed-schema validator against every chain
-event and invalid draft, the independent recomputation, and the seeded mutants.
+This test holds the journal generator's checks in the `fast` check: the version-3 self-test, the
+closed-schema validator against every chain event and invalid draft, the independent recomputation,
+and the seeded mutants. `cargo xtask ci reference` runs the same `--check` in the reference
+implementations' pinned environment in `full` (DEC-493).
 """
 
 import subprocess
