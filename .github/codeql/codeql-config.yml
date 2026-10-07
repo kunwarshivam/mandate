@@ -1,0 +1,11 @@
+# CodeQL configuration for the "CodeQL Advanced" workflow (DEC-500).
+name: "mandate CodeQL config"
+
+query-filters:
+  # rust/cleartext-logging classifies data as sensitive by name: anything matching `acc(ou)?nt`
+  # is "account info" and anything matching `trusted` is a "secret". In a brokerage-account
+  # journal those words name the domain, so the rule raised 110 alerts on main, every one a
+  # false positive (DEC-500 lists them). Credentials are kept out of logs by the vault and by
+  # AGENTS.md rules 6 and 7, not by this query.
+  - exclude:
+      id: rust/cleartext-logging
