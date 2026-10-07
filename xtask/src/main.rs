@@ -2196,7 +2196,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// a stub that errs breaks the live grant tests, one that writes puts its report into a journaled
 /// record and fails the MC-E harness, and one that writes nothing is the code as it stands. The
 /// tests see the member missing. The implementation deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 8] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2217,6 +2217,14 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 8] = [
     (
         "crates/mandate-runtime/tests/approvals.rs",
         "the_quorum_is_rebuilt_from_the_journal_on_restart",
+    ),
+    (
+        "crates/mandate-runtime/tests/approvals.rs",
+        "a_grant_counted_short_of_two_approvers_records_the_requirement_it_was_counted_against",
+    ),
+    (
+        "crates/mandate-runtime/tests/approvals.rs",
+        "an_author_s_grant_under_independence_is_refused_with_the_quorum_that_excluded_it",
     ),
     (
         "crates/mandate-runtime/tests/approval_properties.rs",

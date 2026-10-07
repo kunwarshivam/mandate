@@ -695,7 +695,8 @@ quorum property, and the lifecycle harness's `the_quorum_cases_pass_whole_and_th
 and landed in two tests PRs under ES-13 (the stricter-binding cases and their fixtures second); the
 oracle reads the expected member off the journaled request's own `approvers_required` and
 `independent_required`. The implementation PR moves the harness's three "as the runtime stands"
-tests with the member (DEC-489 item 4).
+tests with the member (DEC-489 item 4), and stops the `retailed` and `granted_with` helpers
+striking it from MC-E06 and MC-E01 (DEC-499).
 
 | # | Planted bug | Caught by |
 |---|---|---|

@@ -765,7 +765,8 @@ after U-A1 to U-A5 are recorded.
   two tests PRs under ES-13: the first the one-approver cases, the property and the harness test;
   the second the two stricter-binding cases with their fixtures. The implementation PR writes the
   member, deletes the six markers and rows, moves the ten cases into the lifecycle harness's
-  passing list (DEC-489 item 4), and the status PR flips their rows.
+  passing list (DEC-489 item 4), stops its `retailed` and `granted_with` helpers striking `quorum`
+  (DEC-499), and the status PR flips their rows.
   *Done (the #550 review, minors 1 and 2; in the `quorum` tests PR):*
   `mc_e18_holds_only_as_the_cancellation` pins both plants with `fails_naming` and the review's
   messages, and `apply_now`'s doc comment says it is true whenever it folded a new mode, cancelling
