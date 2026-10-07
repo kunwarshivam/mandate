@@ -4292,6 +4292,409 @@ fn an_unconfirmed_owner_exit_waits_for_the_session() {
     );
 }
 
+/// §5.5 exempts a kill switch's sells from the agent's mode, and DEC-260 (3) binds the slice that
+/// owns the kill switch to narrow the ladder's pause stop and the gate's `mode_failure` together:
+/// a mandate-limit flatten pauses the agent first, and its own sells are still gated `allow`,
+/// laddered, and stepped while the agent is paused, each step's cancel confirmed before the next
+/// rung, and no step ends the sequence (#373 round 1, major 1).
+#[test]
+#[ignore = "pending E7-4"]
+fn a_paused_flattens_ladder_steps_and_its_step_cancel_does_not_end_the_sequence() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+
+    let switched = shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::RiskLimit,
+            confirmation: None,
+        }),
+        &ports,
+    );
+    let sent = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+
+    let to = switched
+        .draft("AgentModeApplied")
+        .and_then(|d| d.payload.get("to"))
+        .and_then(mandate_canon::Value::as_str);
+    assert_eq!(to, Some("paused"), "a mandate limit pauses the agent first");
+    let verdicts: Vec<(&str, &str)> = switched
+        .drafts
+        .iter()
+        .chain(sent.drafts.iter())
+        .filter(|d| d.event_type == "GateDecided")
+        .map(|d| {
+            let field = |name: &str| {
+                d.payload
+                    .get(name)
+                    .and_then(mandate_canon::Value::as_str)
+                    .unwrap_or_default()
+            };
+            (field("verdict"), field("reason_code"))
+        })
+        .collect();
+    assert!(
+        verdicts.iter().any(|(verdict, _)| *verdict == "allow"),
+        "the flatten's sell is allowed under `paused`, which holds every other exit of the agent \
+         (§5.5, DEC-260 (3)): {verdicts:?}"
+    );
+    assert!(
+        !verdicts.iter().any(|(_, reason)| *reason == "agent_paused"),
+        "and `mode_failure` never holds it: {verdicts:?}"
+    );
+    let first =
+        sent.submissions().first().copied().cloned().expect(
+            "the flatten's first rung goes once the OCO's cancel is confirmed, paused or not",
+        );
+    assert_eq!(first.qty, qty("10"), "for the whole sub-ledger");
+    assert_eq!(
+        first.limit_price,
+        Some(price("154.23")),
+        "155 x (1 - 0.005) = 154.225, rounded up to the equity tick (§5.6, DEC-260 (6))"
+    );
+    let resting = first.client_order_id.as_str().to_owned();
+
+    let (stepped, confirmed) = step_rung(&mut shell, &ports, 16, &resting);
+
+    assert!(
+        stepped.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == resting
+        )),
+        "exit_step_s after the rung it is cancelled to step, though the agent is paused: {:?}",
+        stepped.requests
+    );
+    assert!(
+        stepped.submissions().is_empty(),
+        "and nothing is submitted while that cancel is unconfirmed"
+    );
+    let next = confirmed.submissions().first().copied().cloned().expect(
+        "the step's confirmation submits the next rung: the pause does not end the sequence",
+    );
+    assert_eq!(
+        next.limit_price,
+        Some(price("153.45")),
+        "155 x (1 - 0.01), the offset raised by exit_offset_step"
+    );
+    assert_eq!(next.qty, qty("10"));
+    assert!(
+        !confirmed
+            .drafts
+            .iter()
+            .any(|d| d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("placed")),
+        "no protection is re-placed for a flatten whose ladder still climbs: {:?}",
+        confirmed.draft_types()
+    );
+}
+
+/// §5.5: an owner's kill switch outside the session, or an owner's close, sells through the
+/// ladder from the bid the owner confirmed, never below the confirmed floor; the rung the floor
+/// clamps is `at_floor` and rests until the session rather than being cancelled and resubmitted
+/// at the same price every `exit_step_s` (#373 round 1, minor 1). The confirmation here carries
+/// a floor above the tier's own floor, so the clamp is what binds, and no quote is observed, so
+/// the confirmed bid is the only reference.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+
+    shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::Owner,
+            confirmation: Some(OwnerConfirmation {
+                floor: price("153"),
+                ..owner_confirmation()
+            }),
+        }),
+        &ports,
+    );
+    let sent = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let first = sent
+        .submissions()
+        .first()
+        .copied()
+        .cloned()
+        .expect("the owner's flatten goes once the OCO's cancel is confirmed");
+    assert_eq!(
+        first.limit_price,
+        Some(price("154.23")),
+        "155 x (1 - 0.005) from the confirmed bid, rounded up to the tick"
+    );
+    let mut resting = first.client_order_id.as_str().to_owned();
+
+    let mut limits = Vec::new();
+    let mut floored = Vec::new();
+    for at in [16_i64, 21] {
+        let (_, confirmed) = step_rung(&mut shell, &ports, at, &resting);
+        let rung = confirmed
+            .submissions()
+            .first()
+            .copied()
+            .cloned()
+            .unwrap_or_else(|| panic!("a rung follows the confirmation at {at}"));
+        limits.push(rung.limit_price);
+        floored.push(
+            confirmed
+                .draft("OrderRequestRecorded")
+                .and_then(|d| d.payload.get("at_floor"))
+                .cloned(),
+        );
+        resting = rung.client_order_id.as_str().to_owned();
+    }
+    assert_eq!(
+        limits,
+        vec![Some(price("153.45")), Some(price("153"))],
+        "155 x 0.99 = 153.45 is above the floor; 155 x 0.985 = 152.675 is clamped to 153 (§5.5, \
+         §5.6: the ladder never prices below the floor)"
+    );
+    assert_eq!(
+        floored,
+        vec![
+            Some(mandate_canon::Value::Bool(false)),
+            Some(mandate_canon::Value::Bool(true))
+        ],
+        "the clamped rung is journaled at the floor"
+    );
+    for at in [26_i64, 31] {
+        let rested = shell.run(Input::Tick(clock(at)), &ports);
+        assert!(
+            !rested
+                .requests
+                .iter()
+                .any(|r| matches!(r, BrokerRequest::Cancel { .. })),
+            "at the floor the remainder rests: it is not cancelled to step at {at}: {:?}",
+            rested.requests
+        );
+    }
+}
+
+/// §2.3 and §5.5 (DEC-160 (11), (24)): a watchdog exit in a position no single agent holds
+/// belongs to no agent (`*`). An agent-scoped kill switch in an instrument it closes cancels it by
+/// its own `client_order_id`, never by cancel-all, and never treats it as the agent's own: the
+/// switch sells exactly the agent's attributed lots, not the position the exit was sized to.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_agent_kill_switch_cancels_a_watchdog_exit_of_no_agent_and_sells_only_its_own_lots() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let unattributed = event(
+        ACCOUNT_STREAM,
+        2,
+        "FillApplied",
+        with_clock(
+            &[
+                ("fill_id", text("f-0")),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty_gross", text("10")),
+                ("price", text("150")),
+            ],
+            10,
+        ),
+    );
+    shell
+        .fold_one(&unattributed)
+        .expect("ten shares no order of ours accounts for fold");
+    let mine = [
+        event(
+            ACCOUNT_STREAM,
+            3,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-1")),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(AAPL)),
+                    ("side", text("buy")),
+                    ("qty", text("5")),
+                    ("limit", text("150")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            4,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text("f-1")),
+                    ("client_order_id", text("md-held-1")),
+                    ("instrument", text(AAPL)),
+                    ("side", text("buy")),
+                    ("qty_gross", text("5")),
+                    ("price", text("150")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            5,
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-1")),
+                    ("state", text("filled")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            6,
+            "ProtectionChanged",
+            with_clock(
+                &[
+                    ("instrument", text(AAPL)),
+                    ("action", text("placed")),
+                    ("orders", text("md-oco-1")),
+                    ("qty", text("15")),
+                    ("take_profit", text("170")),
+                    ("stop", text("140")),
+                    ("created_on", text("2026-09-22")),
+                ],
+                11,
+            ),
+        ),
+    ];
+    for event in &mine {
+        shell
+            .fold_one(event)
+            .expect("the agent's five and the OCO over all fifteen fold");
+    }
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "139", "139.1", 30)), &ports);
+    let fired = shell.run(Input::Tick(clock(95)), &ports);
+    let watchdog = fired
+        .drafts
+        .iter()
+        .find(|d| {
+            d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("watchdog")
+        })
+        .expect("the stop at 140 under a 139 mark for stop_watchdog_s fires the watchdog");
+    assert_eq!(
+        watchdog
+            .payload
+            .get("agent")
+            .and_then(mandate_canon::Value::as_str),
+        Some("*"),
+        "five of fifteen is no single holder, so the exit belongs to no agent (§2.3)"
+    );
+    let exited = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let exit = exited
+        .submissions()
+        .first()
+        .copied()
+        .cloned()
+        .expect("the watchdog's exit goes once the OCO's cancel is confirmed");
+    assert_eq!(exit.qty, qty("15"), "for the whole covered position");
+    let watchdog_id = exit.client_order_id.as_str().to_owned();
+    assert!(
+        watchdog_id.starts_with("md-w-"),
+        "named as the watchdog's own (§2.3): {watchdog_id}"
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Submitted(broker_order(
+            "b-w",
+            Some(&watchdog_id),
+            AAPL,
+            Side::Sell,
+            "15",
+            "0",
+            "new",
+        )))),
+        &ports,
+    );
+
+    let switched = shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::RiskLimit,
+            confirmation: None,
+        }),
+        &ports,
+    );
+
+    assert!(
+        switched.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == watchdog_id
+        )),
+        "the switch closes AAPL, so it cancels the `*` exit there by its own id (§5.5): {:?}",
+        switched.requests
+    );
+    assert!(
+        !switched.requests.iter().any(common::is_account_wide),
+        "and never through the account-wide endpoints"
+    );
+    assert!(
+        switched.submissions().is_empty(),
+        "nothing is sold while that cancel is unconfirmed"
+    );
+    let after = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: watchdog_id.clone(),
+        })),
+        &ports,
+    );
+    let sell = after
+        .submissions()
+        .into_iter()
+        .find(|o| o.side == Side::Sell)
+        .expect("the agent's own lots are sold once the exit's cancel is confirmed");
+    assert_eq!(
+        sell.qty,
+        qty("5"),
+        "exactly the agent's attributed lots: neither the fifteen the watchdog exit was sized to \
+         nor the ten nobody attributed (§5.5)"
+    );
+    assert_ne!(
+        sell.client_order_id.as_str(),
+        watchdog_id,
+        "under the switch's own id, never the watchdog's"
+    );
+}
+
 #[test]
 fn a_risk_exit_submits_inside_the_close_window() {
     let ids = TestIds;
