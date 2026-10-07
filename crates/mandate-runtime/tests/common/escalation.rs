@@ -10,13 +10,13 @@ use std::cell::RefCell;
 
 use mandate_canon::{Digest, Value};
 use mandate_runtime::{
-    ActorKind, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, FoldedEvent,
-    Input, Ports, Seq,
+    ActorKind, ApprovalSettings, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest,
+    FoldedEvent, Input, MandateView, Ports, Seq,
 };
 
 use super::{
-    ACCOUNT_STREAM, AGENT, CONTROL_STREAM, OWNER, Ran, Shell, clock, event, fresh_output, int,
-    object, text, with_clock,
+    ACCOUNT_STREAM, AGENT, AUTHOR, CONTROL_STREAM, OWNER, Ran, Shell, clock, event, fresh_output,
+    int, key, object, text, universe, with_clock,
 };
 
 /// When the fixture asks, and the deadline its 300 s `timeout_s` gives.
@@ -312,6 +312,80 @@ pub fn next_control_seq(shell: &Shell) -> u64 {
         .state
         .head(CONTROL_STREAM)
         .map_or(1, |Seq(seq)| seq.saturating_add(1))
+}
+
+/// The fixture mandate with both users listed as approvers and the same author, so a grant from the
+/// author reaches check 7 (check 3 admits it) and its independence is judged there.
+pub fn two_approvers() -> MandateView {
+    let view = universe(&["AAPL"]);
+    MandateView {
+        approval: ApprovalSettings {
+            approvers: [OWNER.to_owned(), AUTHOR.to_owned()].into(),
+            ..view.approval
+        },
+        ..view
+    }
+}
+
+/// A started shell holding one delivered request whose journal binds `approvers_required` and
+/// `independent_required` as given: `asking_shell`'s journal with its `ApprovalRequested` reworded,
+/// at the top level and in its content's `approvers`, replayed from seq 1 into a new process. The
+/// runtime binds one approver without independence itself (DEC-278 item 3), so a stricter binding
+/// reaches it only as a journal it folds, which is what check 7 reads (mandate spec §6.4). The
+/// request's stated hash is kept, since a response repeats what the request stated (check 5).
+pub fn rebound_shell(
+    ports: &Ports<'_>,
+    approvers_required: u64,
+    independent_required: bool,
+) -> (Shell, Asked) {
+    let (shell, asked) = asking_shell(ports, Some(BOUND_LIMIT));
+    let mut rebound = Shell::new(shell.epoch.0);
+    rebound.followed = shell.followed.clone();
+    rebound.agent_journal = shell
+        .agent_journal
+        .iter()
+        .map(|event| {
+            if event.event_type != "ApprovalRequested" {
+                return event.clone();
+            }
+            let mut members = event.payload.as_object().cloned().unwrap_or_default();
+            members.insert(key("approvers_required"), int(approvers_required));
+            members.insert(
+                key("independent_required"),
+                Value::Bool(independent_required),
+            );
+            let mut content = members
+                .get(&key("content"))
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            content.insert(
+                key("approvers"),
+                object(&[
+                    ("required", int(approvers_required)),
+                    ("independent", Value::Bool(independent_required)),
+                ]),
+            );
+            members.insert(key("content"), Value::Object(content));
+            FoldedEvent {
+                payload: Value::Object(members),
+                ..event.clone()
+            }
+        })
+        .collect();
+    let (rebound, _) = rebound.restart(ports);
+    let request = rebound
+        .agent_journal
+        .iter()
+        .find(|event| event.event_type == "ApprovalRequested")
+        .map(|event| EventDraft {
+            event_id: event.event_id.clone(),
+            event_type: event.event_type.clone(),
+            causation_id: event.causation_id.clone(),
+            payload: event.payload.clone(),
+        })
+        .unwrap_or_else(|| panic!("the rebound journal holds the request"));
+    (rebound, Asked { request, ..asked })
 }
 
 /// The quorum check 7 applies to `request` with no policy overlay folded, read from the request's

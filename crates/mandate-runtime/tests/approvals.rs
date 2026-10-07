@@ -17,8 +17,8 @@ mod common;
 
 use common::escalation::{
     ASKED_AT, Answer, Asked, BOUND_LIMIT, Command, DEADLINE, RecordingFlatten, asking_shell,
-    evidence, hash_of, mark, mode_applied, next_account_seq, next_control_seq, quorum_of, tail,
-    version_applied,
+    evidence, hash_of, mark, mode_applied, next_account_seq, next_control_seq, quorum_of,
+    rebound_shell, tail, two_approvers, version_applied,
 };
 use common::{
     AUTHOR, AllowGate, DenyGate, FixedPlan, OWNER, Ran, Shell, TestIds, clock, int, object, ports,
@@ -812,6 +812,110 @@ fn the_quorum_is_rebuilt_from_the_journal_on_restart() {
         quorum_recorded(&from_restart),
         Some(&quorum_of(&asked.request)),
         "the restarted process applies the quorum the journaled request binds"
+    );
+}
+
+/// Mandate spec §6.4 check 7, DEC-488 item 2: under a request bound to two approvers, the first
+/// grant is `counted` and records the requirement it was counted against, `{required: 2}`; the same
+/// approver's second grant is refused `duplicate_approver` at check 7 and records that same
+/// requirement; the second approver's grant is admitted with it and acts. Every record of the three
+/// states the quorum, because check 7 judged each.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_grant_counted_short_of_two_approvers_records_the_requirement_it_was_counted_against() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        FixedPlan::opening(Autonomy::Ask),
+        two_approvers(),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let (mut shell, asked) = rebound_shell(&ports, 2, false);
+    let expected = quorum_of(&asked.request);
+    assert_eq!(
+        expected,
+        object(&[("independent", Value::Bool(false)), ("required", int(2))]),
+        "the rebound request binds two approvers"
+    );
+    let first = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 20).event();
+    let ran = tail(&mut shell, &first, &ports);
+    assert_eq!(
+        ran.draft_types(),
+        vec!["ApprovalResponded"],
+        "a counted grant ends nothing and acts on nothing"
+    );
+    assert_eq!(
+        responded(&ran, &asked, &first.event_id),
+        ("counted".to_owned(), None)
+    );
+    assert!(ran.handed.is_empty(), "{:?}", ran.handed);
+    assert_eq!(
+        quorum_recorded(&ran),
+        Some(&expected),
+        "a counted grant records the quorum it fell short of"
+    );
+    let again = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 25).event();
+    let ran = tail(&mut shell, &again, &ports);
+    refused_with(&ran, &asked, &again.event_id, "duplicate_approver");
+    assert_eq!(
+        quorum_recorded(&ran),
+        Some(&expected),
+        "a grant refused at check 7 records the quorum that refused it"
+    );
+    let second = Answer {
+        responder: AUTHOR.to_owned(),
+        ..Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 30)
+    }
+    .event();
+    let ran = tail(&mut shell, &second, &ports);
+    acted(&ran, &asked, &second.event_id);
+    assert_eq!(
+        quorum_recorded(&ran),
+        Some(&expected),
+        "the grant that reaches two approvers records the quorum it reached"
+    );
+}
+
+/// Mandate spec §6.4 check 7, DEC-488 item 2: under a request bound to independent approval, the
+/// author's grant is refused `not_independent` at check 7 and records `{independent: true}`, the
+/// requirement that excluded it; a listed approver who is not the author is admitted with the same
+/// record and acts. Independence is the bound value, not the count of listed approvers.
+#[test]
+#[ignore = "pending E8-3"]
+fn an_author_s_grant_under_independence_is_refused_with_the_quorum_that_excluded_it() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        FixedPlan::opening(Autonomy::Ask),
+        two_approvers(),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let (mut shell, asked) = rebound_shell(&ports, 1, true);
+    let expected = quorum_of(&asked.request);
+    assert_eq!(
+        expected,
+        object(&[("independent", Value::Bool(true)), ("required", int(1))]),
+        "the rebound request binds one independent approver"
+    );
+    let by_author = Answer {
+        responder: AUTHOR.to_owned(),
+        ..Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 20)
+    }
+    .event();
+    let ran = tail(&mut shell, &by_author, &ports);
+    refused_with(&ran, &asked, &by_author.event_id, "not_independent");
+    assert_eq!(
+        quorum_recorded(&ran),
+        Some(&expected),
+        "the author's grant records the independence that excluded it"
+    );
+    let by_owner = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 30).event();
+    let ran = tail(&mut shell, &by_owner, &ports);
+    acted(&ran, &asked, &by_owner.event_id);
+    assert_eq!(
+        quorum_recorded(&ran),
+        Some(&expected),
+        "an independent approver's admitted grant records the same requirement"
     );
 }
 
