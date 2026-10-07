@@ -155,7 +155,6 @@ result: verified, stream {STREAM}, seq 1 to 4, last hash {}
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn journal_verify_cold_prints_its_report_and_exits_on_the_result() {
     let scratch = Scratch::new("verify-cold");
     let rows = sealed_rows();

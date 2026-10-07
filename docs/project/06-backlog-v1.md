@@ -316,8 +316,9 @@ the spec invariants (DP-n) its tests cover.
   progress on claim [#645](https://github.com/kunwarshivam/mandate/issues/645): DEC-490, the
   [task brief](tasks/E5-8-cold-verify-cli.md), and the tests PR
   ([#654](https://github.com/kunwarshivam/mandate/pull/654), merged; it replaced #651, whose
-  description the coordinator could not write the approval line into). The implementation PR is
-  next, and deletes the 38 `#[ignore = "pending E5-8"]` lines.
+  description the coordinator could not write the approval line into). The implementation PR
+  ([#662](https://github.com/kunwarshivam/mandate/pull/662), DEC-77 stage 2) is open; it
+  deletes the 38 `#[ignore = "pending E5-8"]` lines and changes no other test line.
   *Accepted when:* the command runs §11's per-range checks through `mandate-journal-cold` over a
   cold export, reports the first failure with its code and a non-zero exit, never vouches for an
   export it cannot cover, and never answers `Ok` for a timestamp token until DEC-265 item 1's

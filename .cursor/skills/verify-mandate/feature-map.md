@@ -787,15 +787,14 @@ while a reducing purpose passes it.
   `mandate_journal_cold::verify_range`, checks the anchor over the walked rows and the token
   through `verify_tsa`, which never verifies until DEC-265 item 1's crypto half lands, and
   reports the first failure with its code and a non-zero exit); the shared refusals and helpers in
-  `crates/mandate-cli/src/journal.rs`. Stubbed until the implementation PR (DEC-77).
+  `crates/mandate-cli/src/journal.rs`.
 - **Tests:** `crates/mandate-cli/tests/journal_verify_cold.rs` (every tamper vector a cold export
   can express, replayed against `fixtures/refcases/journal.json`, with the three it re-expresses
   asserted; the segment checks at their `seq`, manifest order, the mid-segment entry, the
   trusted start, the anchor over earlier segments and before the start, the token's two answers
   and its order, the incomplete and unreadable refusals with their codes, artifacts, and the
-  exact report), pending E5-8 but for the argument parsing, the pinned codes, the oracle's
-  manifest and the vector file's shape; `crates/mandate-cli/tests/binary.rs` (the `mandate`
-  binary run as a process: `journal verify` live, `journal verify-cold` pending E5-8, each
+  exact report); `crates/mandate-cli/tests/binary.rs` (the `mandate`
+  binary run as a process: `journal verify` and `journal verify-cold`, each
   printing its report and exiting on the outcome). Planted bugs per test: the task brief.
 - **Reference cases:** `journal::tamper::*` in `fixtures/refcases/journal.json`, read directly.
 - **Run:** `cargo nextest run -p mandate-cli --test journal_verify_cold --test binary`;

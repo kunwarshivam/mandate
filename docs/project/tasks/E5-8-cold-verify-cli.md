@@ -43,7 +43,7 @@ story. Fill every section; write "none" rather than deleting one.
 - **New dependencies allowed:** none. `mandate-cli` gains the workspace crate
   `mandate-journal-cold`; no external package, so `docs/dependencies.md` gains no row.
 - **Safety-critical:** yes (`mandate-cli`, `xtask/layers.toml`). This brief covers the **tests
-  PR** of the DEC-77 sequence; the implementation PR follows on `claude/hejxo4-e5-8-impl` and
+  PR** of the DEC-77 sequence; the implementation PR follows on `claude/hejxo4-e5-8-impl-2` ([#662](https://github.com/kunwarshivam/mandate/pull/662)) and
   changes the test file only by deleting its `#[ignore = "pending E5-8"]` lines.
 - **Size budget:** about 330 lines of source (the stubs and types in the tests PR, the
   implementation after) and 2,000 of tests.
@@ -129,7 +129,7 @@ layout and the manifest-order walk; an incomplete directory refused, never repor
 with a code; the checks' order; the token never verified; the seven-line report; the stubs'
 report; and the vector cases a cold export re-expresses.
 
-## Planted bugs (each tried against the implementation on `claude/hejxo4-e5-8-impl`, then removed)
+## Planted bugs (each tried against the implementation on `claude/hejxo4-e5-8-impl`, carried to `claude/hejxo4-e5-8-impl-2` as #662, then removed)
 
 | # | Planted bug | Caught by |
 |---|---|---|
