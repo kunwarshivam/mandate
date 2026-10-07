@@ -4401,12 +4401,13 @@ fn a_paused_flattens_ladder_steps_and_its_step_cancel_does_not_end_the_sequence(
     );
 }
 
-/// §5.5: an owner's kill switch outside the session, or an owner's close, sells through the
-/// ladder from the bid the owner confirmed, never below the confirmed floor; the rung the floor
-/// clamps is `at_floor` and rests until the session rather than being cancelled and resubmitted
-/// at the same price every `exit_step_s` (#373 round 1, minor 1). The confirmation here carries
-/// a floor above the tier's own floor, so the clamp is what binds, and no quote is observed, so
-/// the confirmed bid is the only reference.
+/// §5.5, §5.6: an owner's kill switch sells through the ladder, never below the floor the owner
+/// confirmed; the rung the floor clamps is `at_floor` and rests rather than being cancelled and
+/// resubmitted at the same price every `exit_step_s` (#373 round 1, minor 1). The case runs in
+/// the regular session (the suite's clock, DEC-260 (13)), so the ladder's reference is the
+/// observed quote's bid, as for every exit there; the confirmation carries a floor above the
+/// tier's own, so the clamp is what binds. The confirmed bid as the reference outside the session
+/// is slice 7's session tests'.
 #[test]
 #[ignore = "pending E7-4"]
 fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
@@ -4416,6 +4417,7 @@ fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
 
     shell.run(
         Input::Command(Command::KillSwitch {
@@ -4443,7 +4445,7 @@ fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
     assert_eq!(
         first.limit_price,
         Some(price("154.23")),
-        "155 x (1 - 0.005) from the confirmed bid, rounded up to the tick"
+        "155 x (1 - 0.005) from the quote's bid, rounded up to the tick"
     );
     let mut resting = first.client_order_id.as_str().to_owned();
 
