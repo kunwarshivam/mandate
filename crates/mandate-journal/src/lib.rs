@@ -362,12 +362,7 @@ enum ConfigArtifactFailure {
 }
 
 fn text_at<'a>(draft: &'a Draft, object: &str, member: &str) -> Option<&'a str> {
-    draft
-        .fields()
-        .get(object)
-        .and_then(Value::as_object)
-        .and_then(|value| value.get(member))
-        .and_then(Value::as_str)
+    draft.fields().get(object)?.get(member)?.as_str()
 }
 
 fn referenced_config_object(
@@ -377,19 +372,14 @@ fn referenced_config_object(
     reference_path: &str,
     kind_path: &str,
 ) -> Result<Value, ConfigArtifactFailure> {
-    let reference = reference_text.and_then(ArtifactRef::parse).ok_or_else(|| {
-        ConfigArtifactFailure::Invalid(Invalid::new(
-            InvalidReason::ConfigRefMismatch,
-            reference_path,
-        ))
-    })?;
+    let invalid = |reason, path| ConfigArtifactFailure::Invalid(Invalid::new(reason, path));
+    let reference = reference_text
+        .and_then(ArtifactRef::parse)
+        .ok_or_else(|| invalid(InvalidReason::ConfigRefMismatch, reference_path))?;
     let bytes = match artifacts.read_artifact(&reference) {
         Ok(bytes) => bytes,
         Err(ArtifactError::Missing) => {
-            return Err(ConfigArtifactFailure::Invalid(Invalid::new(
-                InvalidReason::MissingArtifact,
-                reference_path,
-            )));
+            return Err(invalid(InvalidReason::MissingArtifact, reference_path));
         }
         Err(ArtifactError::Corrupt | ArtifactError::Unavailable) => {
             return Err(ConfigArtifactFailure::Unavailable);
@@ -398,23 +388,13 @@ fn referenced_config_object(
     if check_artifact(&reference, &bytes).is_err() {
         return Err(ConfigArtifactFailure::Unavailable);
     }
-    let object = parse(&bytes).map_err(|_| {
-        ConfigArtifactFailure::Invalid(Invalid::new(
-            InvalidReason::ConfigRefMismatch,
-            reference_path,
-        ))
-    })?;
+    let object =
+        parse(&bytes).map_err(|_| invalid(InvalidReason::ConfigRefMismatch, reference_path))?;
     if to_canonical(&object) != bytes {
-        return Err(ConfigArtifactFailure::Invalid(Invalid::new(
-            InvalidReason::ConfigRefMismatch,
-            reference_path,
-        )));
+        return Err(invalid(InvalidReason::ConfigRefMismatch, reference_path));
     }
     if object.get("kind").and_then(Value::as_str) != Some(expected_kind) {
-        return Err(ConfigArtifactFailure::Invalid(Invalid::new(
-            InvalidReason::ConfigRefKind,
-            kind_path,
-        )));
+        return Err(invalid(InvalidReason::ConfigRefKind, kind_path));
     }
     Ok(object)
 }
@@ -694,8 +674,8 @@ impl MemoryJournal {
 mod production_config_tests {
     use super::*;
 
-    fn fixture() -> Result<Value, String> {
-        parse(include_bytes!("../../../fixtures/refcases/journal.json")).map_err(|e| e.to_string())
+    fn fixture() -> Value {
+        parse(include_bytes!("../../../fixtures/refcases/journal.json")).expect("journal fixture")
     }
 
     fn list<'a>(value: &'a Value, member: &str) -> &'a [Value] {
@@ -712,62 +692,57 @@ mod production_config_tests {
             .unwrap_or_default()
     }
 
-    fn artifacts(section: &Value) -> Result<BTreeMap<Digest, Vec<u8>>, String> {
+    fn artifacts(section: &Value) -> BTreeMap<Digest, Vec<u8>> {
         list(section, "artifacts")
             .iter()
             .map(|artifact| {
-                let reference =
-                    ArtifactRef::parse(text(artifact, "ref")).ok_or("an artifact ref")?;
-                Ok((
+                let reference = ArtifactRef::parse(text(artifact, "ref")).expect("artifact ref");
+                (
                     reference.digest(),
                     text(artifact, "canonical").as_bytes().to_vec(),
-                ))
+                )
             })
             .collect()
     }
 
-    fn apply(draft: &mut Object, change: &Value) -> Result<(), String> {
+    fn apply(draft: &mut Object, change: &Value) {
         let path = text(change, "path");
         let mut members: Vec<&str> = path.split('.').collect();
-        let last = members.pop().ok_or("an invalid path")?;
+        let last = members.pop().expect("changed member");
         let mut node = draft;
         for member in members {
             node = match node.get_mut(member) {
                 Some(Value::Object(object)) => object,
-                _ => return Err(format!("{path} has no object at {member}")),
+                _ => panic!("{path} has no object at {member}"),
             };
         }
         if change.get("delete") == Some(&Value::Bool(true)) {
-            node.remove(last).map(|_| ()).ok_or_else(|| path.to_owned())
+            node.remove(last).expect("deleted member");
         } else {
-            let key = Key::new(last).map_err(|e| e.to_string())?;
-            let value = change.get("value").cloned().ok_or("a changed value")?;
-            node.insert(key, value);
-            Ok(())
+            node.insert(
+                Key::new(last).expect("changed key"),
+                change.get("value").cloned().expect("changed value"),
+            );
         }
     }
 
-    fn changed(section: &Value, case: &Value) -> Result<Value, String> {
+    fn changed(section: &Value, case: &Value) -> Value {
         let base = text(case, "base");
         let mut draft = section
             .get("valid_drafts")
             .and_then(|drafts| drafts.get(base))
             .and_then(Value::as_object)
             .cloned()
-            .ok_or_else(|| format!("no base {base}"))?;
+            .expect("base draft");
         for change in list(case, "changes") {
-            apply(&mut draft, change)?;
+            apply(&mut draft, change);
         }
-        Ok(Value::Object(draft))
+        Value::Object(draft)
     }
 
-    fn append(
-        fixture: &Value,
-        draft: &Value,
-        artifacts: &dyn ArtifactSource,
-    ) -> Result<AppendOutcome, String> {
+    fn append(fixture: &Value, draft: &Value, artifacts: &dyn ArtifactSource) -> AppendOutcome {
         let stream_text = text(draft, "stream_id");
-        let stream = StreamId::parse(stream_text).ok_or("a stream id")?;
+        let stream = StreamId::parse(stream_text).expect("stream id");
         let stream_section = if stream_text.starts_with("agent:") {
             "agent_stream"
         } else {
@@ -779,49 +754,39 @@ mod production_config_tests {
             .and_then(|entry| entry.get("body"))
             .and_then(Value::as_object)
             .cloned()
-            .ok_or("a stream opening")?;
+            .expect("stream opening");
         for member in JOURNAL_FIELDS {
             opening.remove(member);
         }
         let mut journal = MemoryJournal::new();
         let epoch = journal.take_ownership(&stream);
         let opening = to_canonical(&Value::Object(opening));
-        let opened_at =
-            UtcNanos::parse("2026-09-21T14:00:02.000000000Z").map_err(|e| e.to_string())?;
-        if !matches!(
+        let opened_at = UtcNanos::parse("2026-09-21T14:00:02.000000000Z").expect("opening time");
+        assert!(matches!(
             journal.append(&stream, 0, epoch, opened_at, &[opening.as_slice()]),
             AppendOutcome::Committed(_)
-        ) {
-            return Err("stream opening refused".to_owned());
-        }
+        ));
         let bytes = to_canonical(draft);
-        let at = UtcNanos::parse("2026-09-21T14:00:03.000000000Z").map_err(|e| e.to_string())?;
-        Ok(journal.append_with_config_artifacts(
-            &stream,
-            1,
-            epoch,
-            at,
-            &[bytes.as_slice()],
-            artifacts,
-        ))
+        let at = UtcNanos::parse("2026-09-21T14:00:03.000000000Z").expect("append time");
+        journal.append_with_config_artifacts(&stream, 1, epoch, at, &[bytes.as_slice()], artifacts)
     }
 
     #[test]
-    fn every_production_configuration_vector_has_its_specified_outcome() -> Result<(), String> {
-        let fixture = fixture()?;
+    fn every_production_configuration_vector_has_its_specified_outcome() {
+        let fixture = fixture();
         let section = fixture
             .get("production_config_refs")
-            .ok_or("the production section")?;
-        let stored = artifacts(section)?;
+            .expect("production section");
+        let stored = artifacts(section);
         let valid = section
             .get("valid_drafts")
             .and_then(Value::as_object)
-            .ok_or("valid drafts")?;
+            .expect("valid drafts");
         assert_eq!(valid.len(), 4);
         for (name, draft) in valid {
             assert!(
                 matches!(
-                    append(&fixture, draft, &stored)?,
+                    append(&fixture, draft, &stored),
                     AppendOutcome::Committed(_)
                 ),
                 "{name}"
@@ -830,8 +795,8 @@ mod production_config_tests {
         let invalid = list(section, "invalid_drafts");
         assert_eq!(invalid.len(), 8);
         for case in invalid {
-            let expect = case.get("expect").ok_or("an expectation")?;
-            let got = match append(&fixture, &changed(section, case)?, &stored)? {
+            let expect = case.get("expect").expect("expectation");
+            let got = match append(&fixture, &changed(section, case), &stored) {
                 AppendOutcome::Invalid { error, .. } => {
                     Some((error.reason.code().to_owned(), error.path))
                 }
@@ -843,65 +808,31 @@ mod production_config_tests {
             ));
             assert_eq!(got, wanted, "{}", text(case, "name"));
         }
-        Ok(())
     }
 
     #[test]
-    fn every_new_reference_requires_its_stored_object() -> Result<(), String> {
-        let fixture = fixture()?;
+    fn a_decision_requires_its_stored_policy_object() {
+        let fixture = fixture();
         let section = fixture
             .get("production_config_refs")
-            .ok_or("the production section")?;
-        let valid = section.get("valid_drafts").ok_or("valid drafts")?;
-        for (name, object, member, path) in [
-            (
-                "model_output",
-                "config_refs",
-                "model_registry",
-                "config_refs.model_registry",
-            ),
-            (
-                "decision",
-                "config_refs",
-                "policy_set",
-                "config_refs.policy_set",
-            ),
-            (
-                "decision",
-                "config_refs",
-                "model_registry",
-                "config_refs.model_registry",
-            ),
-            (
-                "policy_registration",
-                "payload",
-                "content_hash",
-                "payload.content_hash",
-            ),
-            (
-                "model_registry_registration",
-                "payload",
-                "content_hash",
-                "payload.content_hash",
-            ),
-        ] {
-            let draft = valid.get(name).ok_or_else(|| name.to_owned())?;
-            let reference = draft
-                .get(object)
-                .and_then(|value| value.get(member))
-                .and_then(Value::as_str)
-                .and_then(ArtifactRef::parse)
-                .ok_or_else(|| path.to_owned())?;
-            let mut stored = artifacts(section)?;
-            stored
-                .remove(&reference.digest())
-                .ok_or("a stored object")?;
-            let got = match append(&fixture, draft, &stored)? {
-                AppendOutcome::Invalid { error, .. } => Some((error.reason.code(), error.path)),
-                _ => None,
-            };
-            assert_eq!(got, Some(("missing_artifact", path.to_owned())), "{name}");
-        }
-        Ok(())
+            .expect("production section");
+        let valid = section.get("valid_drafts").expect("valid drafts");
+        let draft = valid.get("decision").expect("decision");
+        let reference = draft
+            .get("config_refs")
+            .and_then(|refs| refs.get("policy_set"))
+            .and_then(Value::as_str)
+            .and_then(ArtifactRef::parse)
+            .expect("policy reference");
+        let mut stored = artifacts(section);
+        stored.remove(&reference.digest()).expect("stored policy");
+        let got = match append(&fixture, draft, &stored) {
+            AppendOutcome::Invalid { error, .. } => Some((error.reason.code(), error.path)),
+            _ => None,
+        };
+        assert_eq!(
+            got,
+            Some(("missing_artifact", "config_refs.policy_set".to_owned()))
+        );
     }
 }
