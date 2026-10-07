@@ -571,8 +571,9 @@ while a reducing purpose passes it.
 
 ## Production configuration references (E7-19)
 
-- **Spec:** `docs/specs/journal.md` §9's `config_refs` table and its append-time object-shape
-  check for `policy_set` and `model_registry`; DEC-484.
+- **Spec:** `docs/specs/journal.md` §9's `config_refs` table and its append-time reference check
+  for `policy_set` and `model_registry` — the object is present, canonical, and carries the
+  expected top-level `kind`, and nothing beyond that; DEC-484.
 - **Code:** `crates/mandate-journal/src/lib.rs` (`validate_config_artifacts` and
   `referenced_config_object`, reached by `MemoryJournal::append_with_config_artifacts`),
   `crates/mandate-journal/src/draft.rs` (`Draft::config_artifact_path`, the version-2 records a
