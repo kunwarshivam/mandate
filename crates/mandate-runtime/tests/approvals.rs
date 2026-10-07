@@ -8,18 +8,20 @@
 //! "nothing happened" assertion is paired with the case where the same step does act, so a runtime
 //! that does nothing passes none of them.
 //!
-//! Every test here is pending until the runtime's E8-3 implementation and fails on the fold's
-//! `RuntimeError::Unimplemented` for the control-stream event it tails (DEC-77, DEC-110).
+//! The grant path is live. The tests of `ApprovalResponded.quorum`, the count and independence
+//! check 7 applied (journal spec §9, DEC-488), read the member off the journaled record; before
+//! the runtime wrote it they failed on its absence rather than at a stub, which no stub can report
+//! from a path the live tests exercise (DEC-489).
 
 mod common;
 
 use common::escalation::{
     ASKED_AT, Answer, Asked, BOUND_LIMIT, Command, DEADLINE, RecordingFlatten, asking_shell,
-    evidence, hash_of, mark, mode_applied, next_account_seq, next_control_seq, tail,
+    evidence, hash_of, mark, mode_applied, next_account_seq, next_control_seq, quorum_of, tail,
     version_applied,
 };
 use common::{
-    AUTHOR, AllowGate, DenyGate, FixedPlan, OWNER, Ran, Shell, TestIds, clock, ports,
+    AUTHOR, AllowGate, DenyGate, FixedPlan, OWNER, Ran, Shell, TestIds, clock, int, object, ports,
     ports_with_flatten, universe,
 };
 use mandate_accounting::Side;
@@ -680,6 +682,137 @@ fn drift_beyond_the_band_either_way_or_no_mark_skips() {
     let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 30).event();
     let ran = tail(&mut shell, &grant, &ports);
     skipped_on_revalidation(&ran, &asked, &grant.event_id, "drift");
+}
+
+/// The `quorum` member of the step's one `ApprovalResponded`, as written: `None` when the record
+/// carries no such key.
+fn quorum_recorded(ran: &Ran) -> Option<&Value> {
+    only(ran, "ApprovalResponded").payload.get("quorum")
+}
+
+/// Journal spec §9, mandate spec §6.4 check 7, DEC-488: an admitted grant's `ApprovalResponded`
+/// records exactly the approver count and independence check 7 applied, `{required, independent}`
+/// as the request bound them with no overlay folded; a skip (checks 1 to 5 only) and a grant
+/// refused at any check before 7 (`not_an_approver`, `content_mismatch`, `step_up_missing`, `late`,
+/// and `not_pending` after the act) record no `quorum` member at all, because check 7 applied
+/// nothing to them.
+#[test]
+#[ignore = "pending E8-3"]
+fn an_admitted_grant_records_the_quorum_check_7_applied_and_no_other_response_does() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        FixedPlan::opening(Autonomy::Ask),
+        universe(&["AAPL"]),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let (mut shell, asked) = asking_shell(&ports, Some(BOUND_LIMIT));
+    let expected = quorum_of(&asked.request);
+    assert_eq!(
+        expected,
+        object(&[("independent", Value::Bool(false)), ("required", int(1))]),
+        "the fixture binds one approver without independence (DEC-278 item 3)"
+    );
+    let wrong_hash = format!("sha256:{}", "b".repeat(64));
+    let before_check_7 = [
+        (
+            Answer {
+                responder: AUTHOR.to_owned(),
+                ..Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 20)
+            },
+            "not_an_approver",
+        ),
+        (
+            Answer {
+                content_hash: wrong_hash,
+                ..Answer::grant(next_control_seq(&shell) + 1, &asked, ASKED_AT + 21)
+            },
+            "content_mismatch",
+        ),
+        (
+            Answer {
+                step_up: None,
+                ..Answer::grant(next_control_seq(&shell) + 2, &asked, ASKED_AT + 22)
+            },
+            "step_up_missing",
+        ),
+        (
+            Answer::grant(next_control_seq(&shell) + 3, &asked, DEADLINE),
+            "late",
+        ),
+    ];
+    for (answer, reason) in before_check_7 {
+        let event = answer.event();
+        let ran = tail(&mut shell, &event, &ports);
+        refused_with(&ran, &asked, &event.event_id, reason);
+        assert_eq!(
+            quorum_recorded(&ran),
+            None,
+            "a grant refused `{reason}` never reached check 7, so its record applies no quorum"
+        );
+    }
+    let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 30).event();
+    let ran = tail(&mut shell, &grant, &ports);
+    acted(&ran, &asked, &grant.event_id);
+    assert_eq!(
+        quorum_recorded(&ran),
+        Some(&expected),
+        "an admitted grant records the count and independence check 7 applied: {:?}",
+        only(&ran, "ApprovalResponded").payload
+    );
+    let after_the_act = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 40).event();
+    let ran = tail(&mut shell, &after_the_act, &ports);
+    refused_with(&ran, &asked, &after_the_act.event_id, "not_pending");
+    assert_eq!(
+        quorum_recorded(&ran),
+        None,
+        "a grant to an ended approval is refused at check 1 and applies no quorum"
+    );
+
+    let (mut shell, asked) = asking_shell(&ports, Some(BOUND_LIMIT));
+    let skip = Answer::skip(next_control_seq(&shell), &asked, ASKED_AT + 30).event();
+    let ran = tail(&mut shell, &skip, &ports);
+    assert_eq!(
+        responded(&ran, &asked, &skip.event_id),
+        ("admitted".to_owned(), None)
+    );
+    assert_eq!(
+        quorum_recorded(&ran),
+        None,
+        "a skip runs checks 1 to 5 only, so its record applies no quorum (PX-7)"
+    );
+}
+
+/// Journal spec §8, DEC-488 item 3: the quorum is read from the request the fold holds, so the
+/// record a restarted process writes for the same grant is the record the live process writes,
+/// member for member, `quorum` included.
+#[test]
+#[ignore = "pending E8-3"]
+fn the_quorum_is_rebuilt_from_the_journal_on_restart() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        FixedPlan::opening(Autonomy::Ask),
+        universe(&["AAPL"]),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let (mut live, asked) = asking_shell(&ports, Some(BOUND_LIMIT));
+    let (mut restarted, _) = live.restart(&ports);
+    let grant = Answer::grant(next_control_seq(&live), &asked, ASKED_AT + 30).event();
+    let from_live = tail(&mut live, &grant, &ports);
+    let from_restart = tail(&mut restarted, &grant, &ports);
+    acted(&from_live, &asked, &grant.event_id);
+    acted(&from_restart, &asked, &grant.event_id);
+    assert_eq!(
+        only(&from_restart, "ApprovalResponded").payload,
+        only(&from_live, "ApprovalResponded").payload,
+        "the record is a function of the journal alone"
+    );
+    assert_eq!(
+        quorum_recorded(&from_restart),
+        Some(&quorum_of(&asked.request)),
+        "the restarted process applies the quorum the journaled request binds"
+    );
 }
 
 /// The owner's exit of one instrument and the copy the runtime makes of it.

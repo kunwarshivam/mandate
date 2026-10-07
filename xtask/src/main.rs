@@ -2097,7 +2097,13 @@ const STUB_MARKERS: [&str; 5] = [
 /// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
+///
+/// The `mandate-runtime` and `mandate-refcases` rows are E8-3's `quorum` record (DEC-488,
+/// DEC-489): a member appended to the `ApprovalResponded` the live grant path already writes, where
+/// a stub that errs breaks the live grant tests, one that writes puts its report into a journaled
+/// record and fails the MC-E harness, and one that writes nothing is the code as it stands. The
+/// tests see the member missing. The implementation deletes the rows with their `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 8] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2110,6 +2116,22 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
+    ),
+    (
+        "crates/mandate-runtime/tests/approvals.rs",
+        "an_admitted_grant_records_the_quorum_check_7_applied_and_no_other_response_does",
+    ),
+    (
+        "crates/mandate-runtime/tests/approvals.rs",
+        "the_quorum_is_rebuilt_from_the_journal_on_restart",
+    ),
+    (
+        "crates/mandate-runtime/tests/approval_properties.rs",
+        "the_quorum_is_recorded_exactly_when_check_7_judged_a_grant",
+    ),
+    (
+        "crates/mandate-refcases/tests/mandate_lifecycle_harness.rs",
+        "the_quorum_cases_pass_whole_and_their_quorum_is_compared",
     ),
 ];
 

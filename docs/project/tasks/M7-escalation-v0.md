@@ -686,6 +686,27 @@ results table.
 | PB-21 | Admission reads the pending set before the batch's own cancellations (DEC-131 item 25(j)) | MC-E31; the EI-7 and EI-8 properties, which put a tightening and a grant in one step |
 | PB-22 | A counted first grant is journaled as `admitted` and acts with one approver of two | MC-A10's `approvers_required: 2`; the transition-table oracle |
 
+**The `quorum` record** (DEC-317 item 7; DEC-488, DEC-489): `ApprovalResponded` records the
+approver count and independence check 7 applied, `{required, independent}`, exactly on a grant
+check 7 judged (`admitted`, `counted`, `duplicate_approver`, `not_independent`) and on nothing
+else. Its tests are `tests/approvals.rs`'s four quorum cases, `tests/approval_properties.rs`'s
+quorum property, and the lifecycle harness's `the_quorum_cases_pass_whole_and_their_quorum_is_compared`
+(the ten cases whole, their `quorum` edited and dropped), pending as behaviour-only rows (DEC-489)
+and landed in two tests PRs under ES-13 (the stricter-binding cases and their fixtures second); the
+oracle reads the expected member off the journaled request's own `approvers_required` and
+`independent_required`. The implementation PR moves the harness's three "as the runtime stands"
+tests with the member (DEC-489 item 4).
+
+| # | Planted bug | Caught by |
+|---|---|---|
+| PB-23 | The member is written on every response, a skip and a refusal before check 7 included | `an_admitted_grant_records_the_quorum_check_7_applied_and_no_other_response_does`; the quorum property; MC-E02 to MC-E05 and MC-E07 to MC-E16 (a member the case does not state) |
+| PB-24 | The member is written only on `admitted`, never on `counted` or a check-7 refusal | `a_grant_counted_short_of_two_approvers_records_the_requirement_it_was_counted_against`; `an_author_s_grant_under_independence_is_refused_with_the_quorum_that_excluded_it` (tests PR 2) |
+| PB-25 | A constant `{required: 1, independent: false}` instead of the bound requirement | the two-approver case (`required: 2`); the independence case (`independent: true`) (tests PR 2; every tests PR 1 request binds exactly that) |
+| PB-26 | `required` read from the view's listed approvers rather than the bound requirement | the independence case: two listed approvers, one required (tests PR 2) |
+| PB-27 | The member's keys are the request's (`approvers_required`, `independent_required`) or carry a third member | every quorum test compares the whole object; MC-E01's `quorum` through `the_quorum_cases_pass_whole_and_their_quorum_is_compared` |
+| PB-28 | `independent` written as `required > 1` | the two-approver case (`independent: false` at `required: 2`); the independence case (tests PR 2) |
+| PB-29 | The member is written with the step's `clock` or `effective_at` folded in, or `required` as a decimal text | every quorum test compares the whole object, `required` as a canonical integer |
+
 ## The DEC-77 sequence
 
 | Stage | Branch | Contents |

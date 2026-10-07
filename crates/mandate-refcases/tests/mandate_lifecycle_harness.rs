@@ -147,8 +147,10 @@ fn the_lifecycle_cases_split_as_the_runtime_stands() {
 }
 
 /// MC-E18 as it read before DEC-318 option (a), a grant admitted and then skipped at re-validation
-/// for `mode`, fails: the runtime cancels before it judges. With the response step's mode record
-/// left in the expected drafts, it fails too, because the record is the runtime's, not the case's.
+/// for `mode`, fails on the ordering: the runtime cancels before it judges. With the response
+/// step's mode record left in the expected drafts, it fails on the count, because the record is the
+/// runtime's, not the case's. Each plant is pinned to its message (the #550 review, minor 1), so a
+/// draft that stops being well formed cannot pass either by failing for another reason.
 #[test]
 fn mc_e18_holds_only_as_the_cancellation() {
     let fixture = fixture();
@@ -162,7 +164,11 @@ fn mc_e18_holds_only_as_the_cancellation() {
     let revalidated = json!({"type": "ApprovalRevalidated", "approval": "ap1", "result": "skip",
         "reason": "mode", "clock": admitted["clock"].clone()});
     *drafts = json!([admitted, revalidated]);
-    assert!(run(judged, "MC-E18").is_err(), "the old reading must fail");
+    fails_naming(
+        judged,
+        "MC-E18",
+        "draft 1 (ApprovalCanceled): expected a ApprovalResponded",
+    );
     let mut recorded = fixture.clone();
     let drafts = case_mut(&mut recorded, "MC-E18")["expect"][1]["drafts"]
         .as_array_mut()
@@ -172,9 +178,10 @@ fn mc_e18_holds_only_as_the_cancellation() {
         0,
         json!({"type": "AgentModeChanged", "reason": "restriction_changed", "clock": clock}),
     );
-    assert!(
-        run(recorded, "MC-E18").is_err(),
-        "the mode record is not the case's"
+    fails_naming(
+        recorded,
+        "MC-E18",
+        r#"3 drafts expected, the runtime wrote ["ApprovalCanceled", "ApprovalResponded"]"#,
     );
     run(fixture, "MC-E18").unwrap_or_else(|e| panic!("MC-E18: {e}"));
 }
@@ -219,6 +226,61 @@ fn the_quorum_cases_fail_on_the_quorum_alone() {
         }
         assert!(struck > 0, "{id} states a quorum");
         run(doctored, id).unwrap_or_else(|e| panic!("{id} without its quorum: {e}"));
+    }
+}
+
+/// Journal spec §9, DEC-488: once the runtime records `ApprovalResponded.quorum`, the ten quorum
+/// cases pass whole, and the member is compared as every other is: each of its two leaves edited
+/// fails the case naming `quorum`, and the member dropped fails the case, because the runtime then
+/// writes a member the case does not state. Each case states exactly one quorum, on its admitted
+/// grant. Before the runtime wrote the member this failed on its absence, "the runtime records no
+/// quorum", rather than at a stub, which no stub can report from the live grant path (DEC-489).
+#[test]
+#[ignore = "pending E8-3"]
+fn the_quorum_cases_pass_whole_and_their_quorum_is_compared() {
+    let fixture = fixture();
+    for id in QUORUM {
+        run(fixture.clone(), id).unwrap_or_else(|e| panic!("{id}: {e}"));
+        let case = case_of(&fixture, id);
+        let mut stated = 0;
+        for (step, expect) in case["expect"]
+            .as_array()
+            .expect("expectations")
+            .iter()
+            .enumerate()
+        {
+            for (index, draft) in expect["drafts"]
+                .as_array()
+                .expect("drafts")
+                .iter()
+                .enumerate()
+            {
+                let Some(quorum) = draft.get("quorum").and_then(Json::as_object) else {
+                    continue;
+                };
+                stated += 1;
+                let path = format!("/expect/{step}/drafts/{index}");
+                for (key, leaf) in quorum {
+                    fails_naming(
+                        with(&fixture, id, &format!("{path}/quorum/{key}"), edited(leaf)),
+                        id,
+                        "`quorum`",
+                    );
+                }
+                let mut dropped = fixture.clone();
+                case_mut(&mut dropped, id)
+                    .pointer_mut(&path)
+                    .and_then(Json::as_object_mut)
+                    .expect("a draft")
+                    .remove("quorum");
+                fails_naming(
+                    dropped,
+                    id,
+                    "the runtime wrote `quorum`, which the case does not state",
+                );
+            }
+        }
+        assert_eq!(stated, 1, "{id} states one quorum, on its admitted grant");
     }
 }
 

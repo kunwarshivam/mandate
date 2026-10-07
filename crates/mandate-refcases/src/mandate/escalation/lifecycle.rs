@@ -926,8 +926,10 @@ impl Shell {
 
     /// `now`: the view, the classification and the dry run as stated, the mark folded as the
     /// account stream's latest `MarkUpdated`, and the mode folded where it differs from the
-    /// runtime's, which must then read as stated. True when it folded a mode, which the next step
-    /// records as its first draft, `AgentModeChanged` (`restriction_changed`).
+    /// runtime's, which must then read as stated. True whenever it folded a new mode, cancelling or
+    /// not: the next step then records the fold as its first draft, `AgentModeChanged`
+    /// (`restriction_changed`), which belongs to the fold rather than to any cancellation, so a
+    /// loosening is set aside the same way (the #550 review, minor 2).
     fn apply_now(&mut self, now: &Json) -> Result<bool, String> {
         unknown_members(now, NOW_KEYS)
             .map_err(|unknown| format!("`now` members not interpreted: {unknown}"))?;

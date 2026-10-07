@@ -718,10 +718,27 @@ after U-A1 to U-A5 are recorded.
   aside, so MC-E18 passes (#550, merged), and the status PR moves it to `passing` (in review). Still
   open: a §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
   (DEC-430 item 2). It is a spec PR and changes no rule.
-  *Follow-up (the #550 review, minors 1 and 2):* `mc_e18_holds_only_as_the_cancellation` asserts
-  only that its two plants fail. Pin each with `fails_naming` and the messages the review gives, so
-  a draft that stops being well formed cannot pass it by failing for another reason. `apply_now`'s
-  doc comment should say it is true whenever it folded a new mode, cancelling or not.
+  *Tests in progress (the `quorum` tests PRs, DEC-488, DEC-489): this is the first of two, carrying
+  the two hand cases on the live one-approver binding, the property and the harness test; the
+  second carries the two stricter hand cases, then the implementation follows:* DEC-488
+  fixes the member as `{required, independent}`, written exactly on a grant check 7 judged
+  (`admitted`, `counted`, `duplicate_approver`, `not_independent`) from the bound requirement the
+  fold holds and the overlay admission read, and absent otherwise. Four hand cases in
+  `crates/mandate-runtime/tests/approvals.rs` (the admitted grant records it and a skip and every
+  earlier refusal do not; a restart rebuilds it from the journal; a request bound to two approvers,
+  `counted` then `duplicate_approver` then admitted; independence refusing the author), one
+  property in `tests/approval_properties.rs`, and one harness test in
+  `crates/mandate-refcases/tests/mandate_lifecycle_harness.rs` (the ten cases pass whole and their
+  `quorum` is compared) are pending E8-3 as behaviour-only rows of the pending gate (DEC-489): the
+  member joins a record the live grant path already writes, so no stub can sit on it. They land in
+  two tests PRs under ES-13: the first the one-approver cases, the property and the harness test;
+  the second the two stricter-binding cases with their fixtures. The implementation PR writes the
+  member, deletes the six markers and rows, moves the ten cases into the lifecycle harness's
+  passing list (DEC-489 item 4), and the status PR flips their rows.
+  *Done (the #550 review, minors 1 and 2; in the `quorum` tests PR):*
+  `mc_e18_holds_only_as_the_cancellation` pins both plants with `fails_naming` and the review's
+  messages, and `apply_now`'s doc comment says it is true whenever it folded a new mode, cancelling
+  or not.
   *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
   family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
   own suite does). A future MC-E case should spread its ten asks across instruments. It changes
