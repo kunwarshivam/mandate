@@ -315,7 +315,9 @@ pub fn next_control_seq(shell: &Shell) -> u64 {
 }
 
 /// The fixture mandate with both users listed as approvers and the same author, so a grant from the
-/// author reaches check 7 (check 3 admits it) and its independence is judged there.
+/// author reaches check 7 (check 3 admits it) and its independence is judged there. Listing the
+/// author as an approver is spec-legal: mandate spec §6.4 excludes the author only under
+/// independence.
 pub fn two_approvers() -> MandateView {
     let view = universe(&["AAPL"]);
     MandateView {
@@ -329,10 +331,14 @@ pub fn two_approvers() -> MandateView {
 
 /// A started shell holding one delivered request whose journal binds `approvers_required` and
 /// `independent_required` as given: `asking_shell`'s journal with its `ApprovalRequested` reworded,
-/// at the top level and in its content's `approvers`, replayed from seq 1 into a new process. The
-/// runtime binds one approver without independence itself (DEC-278 item 3), so a stricter binding
-/// reaches it only as a journal it folds, which is what check 7 reads (mandate spec §6.4). The
-/// request's stated hash is kept, since a response repeats what the request stated (check 5).
+/// at the top level and in its content's `approvers`, replayed from seq 1 into a new process.
+///
+/// This is a journal the runtime does not write today: it binds one approver without independence
+/// itself (DEC-278 item 3), so a stricter binding reaches check 7 (mandate spec §6.4) only as a
+/// journal the runtime folds. The rewritten request keeps journal spec §9.6's shape, its hash
+/// included: `content_hash` is restated as the `sha256:` reference of the rewritten canonical
+/// `content` ([`hash_of`]), and the returned [`Asked`] carries that hash, so a response repeats what
+/// the rebound request states (check 5).
 pub fn rebound_shell(
     ports: &Ports<'_>,
     approvers_required: u64,
@@ -366,7 +372,9 @@ pub fn rebound_shell(
                     ("independent", Value::Bool(independent_required)),
                 ]),
             );
-            members.insert(key("content"), Value::Object(content));
+            let content = Value::Object(content);
+            members.insert(key("content_hash"), text(&hash_of(&content)));
+            members.insert(key("content"), content);
             FoldedEvent {
                 payload: Value::Object(members),
                 ..event.clone()
@@ -385,7 +393,24 @@ pub fn rebound_shell(
             payload: event.payload.clone(),
         })
         .unwrap_or_else(|| panic!("the rebound journal holds the request"));
-    (rebound, Asked { request, ..asked })
+    let content_hash = hash_of(request.payload.get("content").unwrap_or(&Value::Null));
+    assert_eq!(
+        request.payload.get("content_hash").and_then(Value::as_str),
+        Some(content_hash.as_str()),
+        "the rebound request states the hash of its own rewritten content (journal spec §9.6)"
+    );
+    assert_ne!(
+        content_hash, asked.content_hash,
+        "the rewritten content is not the content the runtime asked with"
+    );
+    (
+        rebound,
+        Asked {
+            request,
+            content_hash,
+            ..asked
+        },
+    )
 }
 
 /// The quorum check 7 applies to `request` with no policy overlay folded, read from the request's
