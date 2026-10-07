@@ -1228,7 +1228,37 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         .map(|value| MutantShard::parse(&value))
         .transpose()
         .with_context(|| format!("parsing {MUTANT_SHARD_ENV}"))?;
-    let args = mutants_args(&diff_path, shard);
+    let mut test_packages: Vec<&str> = crates
+        .iter()
+        .filter(|krate| {
+            touched
+                .iter()
+                .any(|file| file.starts_with(&krate.src_dir()))
+        })
+        .map(|krate| krate.package.as_str())
+        .collect();
+    let refcase_tests: Vec<&str> = changed
+        .lines()
+        .filter_map(|file| {
+            file.strip_prefix("crates/mandate-refcases/tests/")
+                .and_then(|name| name.strip_suffix(".rs"))
+                .filter(|name| !name.contains('/'))
+        })
+        .collect();
+    let test_filter = if refcase_tests.is_empty() {
+        None
+    } else {
+        let mut terms: Vec<String> = test_packages
+            .iter()
+            .map(|package| format!("package({package})"))
+            .collect();
+        terms.extend(refcase_tests.iter().map(|test| format!("binary({test})")));
+        if !test_packages.contains(&"mandate-refcases") {
+            test_packages.push("mandate-refcases");
+        }
+        Some(terms.join(" | "))
+    };
+    let args = mutants_args(&diff_path, shard, &test_packages, test_filter.as_deref());
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
     let started = fs::metadata(&diff_file)
@@ -1274,7 +1304,12 @@ impl MutantShard {
     }
 }
 
-fn mutants_args(diff_path: &str, shard: Option<MutantShard>) -> Vec<String> {
+fn mutants_args(
+    diff_path: &str,
+    shard: Option<MutantShard>,
+    test_packages: &[&str],
+    test_filter: Option<&str>,
+) -> Vec<String> {
     let mut args = [
         "mutants",
         "--in-diff",
@@ -1289,6 +1324,11 @@ fn mutants_args(diff_path: &str, shard: Option<MutantShard>) -> Vec<String> {
     .into_iter()
     .map(str::to_owned)
     .collect::<Vec<_>>();
+    args.extend(
+        test_packages
+            .iter()
+            .map(|package| format!("--test-package={package}")),
+    );
     if let Some(shard) = shard {
         args.extend([
             "--shard".to_owned(),
@@ -1296,6 +1336,9 @@ fn mutants_args(diff_path: &str, shard: Option<MutantShard>) -> Vec<String> {
             "--sharding".to_owned(),
             "slice".to_owned(),
         ]);
+    }
+    if let Some(filter) = test_filter {
+        args.extend(["--".to_owned(), "-E".to_owned(), filter.to_owned()]);
     }
     args
 }
@@ -2973,11 +3016,15 @@ mod tests {
 
     #[test]
     fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() {
-        let unsharded = mutants_args("change.diff", None);
+        let packages = ["mandate-journal", "mandate-refcases"];
+        let filter = "package(mandate-journal) | binary(production_config_refs)";
+        let unsharded = mutants_args("change.diff", None, &packages, Some(filter));
         assert!(
             !unsharded.iter().any(|arg| arg == "--shard"),
             "a local `cargo xtask check` run must cover the complete diff"
         );
+        assert!(unsharded.contains(&"--test-package=mandate-refcases".to_owned()));
+        assert_eq!(&unsharded[unsharded.len() - 3..], ["--", "-E", filter]);
 
         let sharded = mutants_args(
             "change.diff",
@@ -2985,6 +3032,8 @@ mod tests {
                 index: 6,
                 total: 12,
             }),
+            &packages,
+            Some(filter),
         );
         assert_eq!(
             sharded

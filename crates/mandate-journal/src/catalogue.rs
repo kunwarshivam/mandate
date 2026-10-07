@@ -10,9 +10,11 @@ pub(crate) const INS: &str = "instrument_snapshot";
 pub(crate) const RULE: &str = "rule_set";
 pub(crate) const MAN: &str = "mandate_version";
 pub(crate) const MOD: &str = "model_version";
+pub(crate) const POL: &str = "policy_set";
+pub(crate) const REG: &str = "model_registry";
 
 /// Every `config_refs` key the spec defines.
-pub(crate) const CONFIG_REF_KINDS: &[&str] = &[FEE, CAL, SET, INS, RULE, MAN, MOD];
+pub(crate) const CONFIG_REF_KINDS: &[&str] = &[FEE, CAL, SET, INS, RULE, MAN, MOD, POL, REG];
 
 pub(crate) struct Entry {
     pub(crate) streams: &'static [StreamType],
@@ -121,4 +123,16 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         _ => return None,
     };
     Some(e)
+}
+
+pub(crate) fn required_refs(
+    event_type: &str,
+    schema_version: u64,
+    historical: &'static [&'static str],
+) -> &'static [&'static str] {
+    match (event_type, schema_version) {
+        ("ModelOutputRecorded", 2) => &[MAN, REG],
+        ("DecisionMade", 2) => &[MAN, POL, REG],
+        _ => historical,
+    }
 }

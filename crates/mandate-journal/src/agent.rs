@@ -563,6 +563,13 @@ fn ascending<T: PartialOrd>(items: &[T]) -> bool {
 }
 
 fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
+    if schema_version == 2 {
+        return match event_type {
+            "ModelOutputRecorded" => Some(&MODEL_OUTPUT_RECORDED),
+            "DecisionMade" => Some(&DECISION_MADE),
+            _ => None,
+        };
+    }
     if schema_version != 1 {
         return None;
     }

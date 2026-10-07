@@ -87,7 +87,15 @@ impl Draft {
             return Err(Invalid::new(InvalidReason::Schema, "actor.build"));
         }
 
-        check_config_refs(fields.get("config_refs"), entry.required_refs)?;
+        let schema_version = int("schema_version");
+        let required_refs =
+            catalogue::required_refs(event_type, schema_version, entry.required_refs);
+        check_config_refs(
+            fields.get("config_refs"),
+            required_refs,
+            event_type,
+            schema_version,
+        )?;
 
         let written = fields.get("payload").unwrap_or(&Value::Null);
         let causation_id = fields.get("causation_id");
@@ -160,6 +168,16 @@ impl Draft {
             .unwrap_or_default()
     }
 
+    /// The first configuration object a plain append cannot validate without an artifact source.
+    pub fn config_artifact_path(&self) -> Option<&'static str> {
+        match (self.event_type(), self.schema_version()) {
+            ("ModelOutputRecorded", 2) => Some("config_refs.model_registry"),
+            ("DecisionMade", 2) => Some("config_refs.policy_set"),
+            ("ConfigSnapshotRegistered", 2) => Some("payload.content_hash"),
+            _ => None,
+        }
+    }
+
     pub fn stream_id(&self) -> &StreamId {
         &self.stream_id
     }
@@ -196,7 +214,12 @@ impl Draft {
 
 /// `config_refs` holds only known kinds, each a `sha256:` reference, and every kind the event type
 /// requires (spec §9). It never contains `null` (spec §4.2).
-fn check_config_refs(refs: Option<&Value>, required: &[&str]) -> Result<(), Invalid> {
+fn check_config_refs(
+    refs: Option<&Value>,
+    required: &[&str],
+    event_type: &str,
+    schema_version: u64,
+) -> Result<(), Invalid> {
     let refs = refs
         .and_then(Value::as_object)
         .ok_or_else(|| Invalid::new(InvalidReason::Schema, "config_refs"))?;
@@ -208,6 +231,14 @@ fn check_config_refs(refs: Option<&Value>, required: &[&str]) -> Result<(), Inva
         if value.as_str().and_then(parse_digest_ref).is_none() {
             return Err(Invalid::new(InvalidReason::NonCanonical, path));
         }
+    }
+    if schema_version == 1
+        && matches!(event_type, "ModelOutputRecorded" | "DecisionMade")
+        && [catalogue::POL, catalogue::REG]
+            .iter()
+            .any(|kind| refs.contains_key(*kind))
+    {
+        return Err(Invalid::new(InvalidReason::UnknownSchema, "payload"));
     }
     match required.iter().find(|kind| !refs.contains_key(**kind)) {
         Some(missing) => Err(Invalid::new(

@@ -154,7 +154,6 @@ fn changed(section: &Json, case: &Json) -> Json {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn version_two_agent_records_bind_the_complete_configuration() {
     let fixture = fixture();
     let section = production_section(&fixture);
@@ -164,7 +163,6 @@ fn version_two_agent_records_bind_the_complete_configuration() {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn version_two_registration_records_bind_their_stored_objects() {
     let fixture = fixture();
     let section = production_section(&fixture);
@@ -174,7 +172,6 @@ fn version_two_registration_records_bind_their_stored_objects() {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn every_invalid_production_reference_is_refused_as_specified() {
     let fixture = fixture();
     let section = production_section(&fixture);
@@ -201,7 +198,6 @@ fn every_invalid_production_reference_is_refused_as_specified() {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn every_new_configuration_reference_requires_its_stored_object() {
     let fixture = fixture();
     let section = production_section(&fixture);

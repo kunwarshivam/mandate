@@ -604,6 +604,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("ConnectionRevoked", 1) => Some(&CONNECTION_REVOKED),
         ("DisclosureAccepted", 1) => Some(&DISCLOSURE_ACCEPTED),
         ("ConfigSnapshotRegistered", 1) => Some(&CONFIG_SNAPSHOT_REGISTERED),
+        ("ConfigSnapshotRegistered", 2) => Some(&CONFIG_SNAPSHOT_REGISTERED_V2),
         ("MandateVersionCreated", 1) => Some(&MANDATE_VERSION_CREATED),
         ("MandateConfirmed", 1) => Some(&MANDATE_CONFIRMED),
         ("AgentDeployed", 1) => Some(&AGENT_DEPLOYED),
@@ -1011,6 +1012,28 @@ static CONFIG_SNAPSHOT_REGISTERED: Ty = Ty::Record(&[
             "rule_set",
             "mandate_version",
             "model_version",
+        ]),
+    ),
+    ("content_hash", Ty::DigestRef),
+    ("model_id", Ty::Nullable(&Ty::Str)),
+    ("model_version", Ty::Nullable(&Ty::Str)),
+    ("params", Ty::List(&Ty::Str)),
+    ("admits_instruments", Ty::Nullable(&Ty::Bool)),
+]);
+
+static CONFIG_SNAPSHOT_REGISTERED_V2: Ty = Ty::Record(&[
+    (
+        "kind",
+        Ty::OneOf(&[
+            "fee_config",
+            "trading_calendar",
+            "settlement_calendar",
+            "instrument_snapshot",
+            "rule_set",
+            "mandate_version",
+            "model_version",
+            "policy_set",
+            "model_registry",
         ]),
     ),
     ("content_hash", Ty::DigestRef),
