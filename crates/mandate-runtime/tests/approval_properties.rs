@@ -9,9 +9,10 @@
 //! and keeps its own clock and its own record of what it generated; none reads the runtime's state
 //! or calls `mandate-approval`.
 //!
-//! Both properties are pending until the runtime's E8-3 implementation: every script answers at
-//! least once, and the fold refuses the control-stream answer with `RuntimeError::Unimplemented`
-//! (DEC-77, DEC-110).
+//! The two lifecycle properties are live. The quorum property reads `ApprovalResponded.quorum` off
+//! the journaled record (DEC-488); before the runtime wrote it, it failed on the member's absence
+//! rather than at a stub, which no stub can report from a path the live properties exercise
+//! (DEC-489).
 
 mod common;
 
@@ -731,6 +732,75 @@ fn every_opening_walks_back_to_one_timely_admitted_grant() {
         for (approval, n) in &intents_per_approval {
             prop_assert_eq!(*n, 1, "one approval, at most one intent: {}", approval);
         }
+        Ok(())
+    });
+}
+
+/// Journal spec §9, mandate spec §6.4 check 7, DEC-488: every `ApprovalResponded` carries a
+/// `quorum` member exactly when check 7 judged the grant it copies, which the oracle reads off the
+/// record's own `verdict`, `result` and `reason` (`approved` and `admitted` or `counted`, or refused
+/// `duplicate_approver` or `not_independent`), and that member is exactly `{independent, required}`
+/// as the journaled request bound them, with no overlay folded; a skip and every refusal before
+/// check 7 carry none. The records so judged are exactly the grants the oracle's own record judges
+/// admissible, so a run in which nothing reached check 7 cannot pass by that alone.
+#[test]
+#[ignore = "pending E8-3"]
+fn the_quorum_is_recorded_exactly_when_check_7_judged_a_grant() {
+    check(|script| {
+        let (journal, record, _) = played(&script)?;
+        let by_id: BTreeMap<EventId, &Read> =
+            journal.iter().map(|e| (e.event_id.clone(), e)).collect();
+        let mut judged_at_check_7 = 0usize;
+        for event in journal
+            .iter()
+            .filter(|e| e.event_type == "ApprovalResponded")
+        {
+            let reached_check_7 = event.text("verdict") == Some("approved")
+                && (matches!(event.text("result"), Some("admitted" | "counted"))
+                    || matches!(
+                        event.text("reason"),
+                        Some("duplicate_approver" | "not_independent")
+                    ));
+            let expected = if reached_check_7 {
+                let approval = event.text("approval").unwrap_or_default().to_owned();
+                let request = by_id
+                    .get(&EventId(approval.clone()))
+                    .filter(|r| r.event_type == "ApprovalRequested")
+                    .ok_or_else(|| {
+                        TestCaseError::fail(format!("a judged grant names no request: {approval}"))
+                    })?;
+                let bound =
+                    |name: &str| {
+                        request.payload.get(name).cloned().ok_or_else(|| {
+                            TestCaseError::fail(format!("the request binds `{name}`"))
+                        })
+                    };
+                judged_at_check_7 = judged_at_check_7.saturating_add(1);
+                Some(common::object(&[
+                    ("independent", bound("independent_required")?),
+                    ("required", bound("approvers_required")?),
+                ]))
+            } else {
+                None
+            };
+            prop_assert_eq!(
+                event.payload.get("quorum"),
+                expected.as_ref(),
+                "`quorum` is recorded exactly when check 7 judged the grant, as the request bound \
+                 it: {:?}",
+                event.payload
+            );
+        }
+        let admissible_grants = record
+            .answers
+            .values()
+            .filter(|g| g.approve && g.admissible)
+            .count();
+        prop_assert_eq!(
+            judged_at_check_7,
+            admissible_grants,
+            "every admissible grant the oracle generated was judged at check 7, and no other"
+        );
         Ok(())
     });
 }

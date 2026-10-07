@@ -229,6 +229,61 @@ fn the_quorum_cases_fail_on_the_quorum_alone() {
     }
 }
 
+/// Journal spec §9, DEC-488: once the runtime records `ApprovalResponded.quorum`, the ten quorum
+/// cases pass whole, and the member is compared as every other is: each of its two leaves edited
+/// fails the case naming `quorum`, and the member dropped fails the case, because the runtime then
+/// writes a member the case does not state. Each case states exactly one quorum, on its admitted
+/// grant. Before the runtime wrote the member this failed on its absence, "the runtime records no
+/// quorum", rather than at a stub, which no stub can report from the live grant path (DEC-489).
+#[test]
+#[ignore = "pending E8-3"]
+fn the_quorum_cases_pass_whole_and_their_quorum_is_compared() {
+    let fixture = fixture();
+    for id in QUORUM {
+        run(fixture.clone(), id).unwrap_or_else(|e| panic!("{id}: {e}"));
+        let case = case_of(&fixture, id);
+        let mut stated = 0;
+        for (step, expect) in case["expect"]
+            .as_array()
+            .expect("expectations")
+            .iter()
+            .enumerate()
+        {
+            for (index, draft) in expect["drafts"]
+                .as_array()
+                .expect("drafts")
+                .iter()
+                .enumerate()
+            {
+                let Some(quorum) = draft.get("quorum").and_then(Json::as_object) else {
+                    continue;
+                };
+                stated += 1;
+                let path = format!("/expect/{step}/drafts/{index}");
+                for (key, leaf) in quorum {
+                    fails_naming(
+                        with(&fixture, id, &format!("{path}/quorum/{key}"), edited(leaf)),
+                        id,
+                        "`quorum`",
+                    );
+                }
+                let mut dropped = fixture.clone();
+                case_mut(&mut dropped, id)
+                    .pointer_mut(&path)
+                    .and_then(Json::as_object_mut)
+                    .expect("a draft")
+                    .remove("quorum");
+                fails_naming(
+                    dropped,
+                    id,
+                    "the runtime wrote `quorum`, which the case does not state",
+                );
+            }
+        }
+        assert_eq!(stated, 1, "{id} states one quorum, on its admitted grant");
+    }
+}
+
 /// Every member of every expected draft of every passing case, and of every quorum case with its
 /// quorum struck, is compared: edited, it fails the case, naming the member; dropped, it fails the
 /// case; and the draft count is compared. A content

@@ -314,6 +314,24 @@ pub fn next_control_seq(shell: &Shell) -> u64 {
         .map_or(1, |Seq(seq)| seq.saturating_add(1))
 }
 
+/// The quorum check 7 applies to `request` with no policy overlay folded, read from the request's
+/// own `approvers_required` and `independent_required` members as the record must state it:
+/// `{independent, required}` and nothing else (journal spec §9, mandate spec §6.4, DEC-488). The
+/// oracle's own reading; it never asks `mandate-approval`.
+pub fn quorum_of(request: &EventDraft) -> Value {
+    let member = |name: &str| {
+        request
+            .payload
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| panic!("the request binds `{name}`: {:?}", request.payload))
+    };
+    object(&[
+        ("independent", member("independent_required")),
+        ("required", member("approvers_required")),
+    ])
+}
+
 /// `sha256:` and the hex digest of the canonical bytes of `content`: the oracle's own content hash
 /// (journal spec §4, `ref`), computed from the payload rather than through `mandate-approval`.
 pub fn hash_of(content: &Value) -> String {

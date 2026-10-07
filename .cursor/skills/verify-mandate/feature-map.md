@@ -917,8 +917,14 @@ proves each pending test fails on them (DEC-110).
   principal, step-up, same-step cancellation, re-validation and drift cases, the owner exit whose
   step-up is refused yet still routed, pause, resume and the owner's kill switch) and
   `crates/mandate-runtime/tests/approval_properties.rs` (the transition-table and causation-walker
-  oracles over random scripts), pending E8-3 but for one live case, with fixtures in
-  `crates/mandate-runtime/tests/common/escalation.rs`. The CLI's owner control (M7 tests PR 4 of 4,
+  oracles over random scripts), live since #395, with fixtures in
+  `crates/mandate-runtime/tests/common/escalation.rs`. The `quorum` record (DEC-488): four hand
+  cases in `tests/approvals.rs` and one property in `tests/approval_properties.rs`, whose oracle
+  reads the expected `{required, independent}` off the journaled request, with the `rebound_shell`
+  and `two_approvers` fixtures for a stricter binding (the second tests PR), and one harness test in
+  `crates/mandate-refcases/tests/mandate_lifecycle_harness.rs` (the ten quorum cases whole, their
+  `quorum` compared); pending E8-3 as behaviour-only rows of `cargo xtask ci pending` (DEC-489)
+  until the runtime writes the member. The CLI's owner control (M7 tests PR 4 of 4,
   DEC-257 items 13 to 17): `crates/mandate-cli/src/control.rs` (`ControlJournal`, `Owner`, `Ids`,
   `ControlError`), `crates/mandate-cli/src/approvals.rs` (`list`, `show`, `approve`, `skip`,
   `outcome`, `message`) and `crates/mandate-cli/src/agent.rs` (`code`, `kill_code`, `command`,
