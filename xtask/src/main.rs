@@ -1589,8 +1589,8 @@ const MUTANT_JOBS: &str = "1";
 /// DEC-498's first measurement run met exactly that: nine mutants, nine timeouts, every one at
 /// the twenty-second cap.
 ///
-/// Three minutes against the 83 seconds that was the slowest test phase over four measured runs
-/// at [`MUTANT_JOBS`] workers, so a mutant the harness judges at its ordinary pace is judged
+/// Three minutes against the 83 seconds that was the slowest test phase over the two measured
+/// runs at [`MUTANT_JOBS`] workers, so a mutant the harness judges at its ordinary pace is judged
 /// rather than cut off. The margin is the reason the job count is one: at two workers the same
 /// nine mutants reached 181 seconds, which this timeout would have cut off. A mutation slow
 /// enough to reach the cap anyway is bounded by it, which is what lets DEC-498 size a shard on
@@ -1606,7 +1606,7 @@ const MUTANT_TEST_TIMEOUT: &str = "180";
 /// `1024 + 7` and any `[u8; N]` grows with it. DEC-498's budget needs every per-mutant phase
 /// bounded, and this is the only phase a shard cannot otherwise bound.
 ///
-/// Sixty seconds against the 16 to 27 that mutant builds took over four measured runs at
+/// Sixty seconds against the 16 to 27 that mutant builds took over the two measured runs at
 /// [`MUTANT_JOBS`] workers. The flakiness cargo-mutants warns about is bounded here because the
 /// cap reaches mutants alone: a `--build-timeout` run leaves the unmutated baseline uncapped, so
 /// a cold cache compiling the workspace from scratch is not cut off, and a mutant builds
