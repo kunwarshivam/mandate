@@ -737,12 +737,18 @@ fn every_opening_walks_back_to_one_timely_admitted_grant() {
 }
 
 /// Journal spec §9, mandate spec §6.4 check 7, DEC-488: every `ApprovalResponded` carries a
-/// `quorum` member exactly when check 7 judged the grant it copies, which the oracle reads off the
-/// record's own `verdict`, `result` and `reason` (`approved` and `admitted` or `counted`, or refused
-/// `duplicate_approver` or `not_independent`), and that member is exactly `{independent, required}`
-/// as the journaled request bound them, with no overlay folded; a skip and every refusal before
-/// check 7 carry none. The records so judged are exactly the grants the oracle's own record judges
-/// admissible, so a run in which nothing reached check 7 cannot pass by that alone.
+/// `quorum` member exactly when check 7 judged the grant it copies, and that member is exactly
+/// `{independent, required}` as the journaled request bound them, with no overlay folded; a skip
+/// and every refusal before check 7 carry none.
+///
+/// Whether check 7 judged a response is decided by the oracle's own generated answer, resolved
+/// through the response's `causation` as [`admitted_exactly_the_admissible`] resolves it: check 7
+/// is reached exactly when the generated answer both approves and is admissible. Reading the
+/// runtime's own `verdict`, `result` and `reason` back would let the runtime choose which
+/// responses it is judged on, so a swap of the labels between two responses would pass. The
+/// pairing is asserted per response rather than by a count, for the same reason, and
+/// `record.answers` is asserted non-empty so a script that generated nothing cannot pass by
+/// walking nothing.
 #[test]
 #[ignore = "pending E8-3"]
 fn the_quorum_is_recorded_exactly_when_check_7_judged_a_grant() {
@@ -750,17 +756,21 @@ fn the_quorum_is_recorded_exactly_when_check_7_judged_a_grant() {
         let (journal, record, _) = played(&script)?;
         let by_id: BTreeMap<EventId, &Read> =
             journal.iter().map(|e| (e.event_id.clone(), e)).collect();
-        let mut judged_at_check_7 = 0usize;
+        prop_assert!(
+            !record.answers.is_empty(),
+            "the script answered at least once, so the walk below judges something"
+        );
         for event in journal
             .iter()
             .filter(|e| e.event_type == "ApprovalResponded")
         {
-            let reached_check_7 = event.text("verdict") == Some("approved")
-                && (matches!(event.text("result"), Some("admitted" | "counted"))
-                    || matches!(
-                        event.text("reason"),
-                        Some("duplicate_approver" | "not_independent")
-                    ));
+            let source = event.causation.clone().unwrap_or(EventId(String::new()));
+            let generated = record.answers.get(&source).ok_or_else(|| {
+                TestCaseError::fail(format!(
+                    "ApprovalResponded copies no generated answer: {source:?}"
+                ))
+            })?;
+            let reached_check_7 = generated.approve && generated.admissible;
             let expected = if reached_check_7 {
                 let approval = event.text("approval").unwrap_or_default().to_owned();
                 let request = by_id
@@ -775,7 +785,6 @@ fn the_quorum_is_recorded_exactly_when_check_7_judged_a_grant() {
                             TestCaseError::fail(format!("the request binds `{name}`"))
                         })
                     };
-                judged_at_check_7 = judged_at_check_7.saturating_add(1);
                 Some(common::object(&[
                     ("independent", bound("independent_required")?),
                     ("required", bound("approvers_required")?),
@@ -791,16 +800,6 @@ fn the_quorum_is_recorded_exactly_when_check_7_judged_a_grant() {
                 event.payload
             );
         }
-        let admissible_grants = record
-            .answers
-            .values()
-            .filter(|g| g.approve && g.admissible)
-            .count();
-        prop_assert_eq!(
-            judged_at_check_7,
-            admissible_grants,
-            "every admissible grant the oracle generated was judged at check 7, and no other"
-        );
         Ok(())
     });
 }
