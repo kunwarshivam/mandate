@@ -169,13 +169,34 @@ impl Draft {
     }
 
     /// The first configuration object a plain append cannot validate without an artifact source.
+    ///
+    /// A version-2 `ConfigSnapshotRegistered` registers one of the two new kinds or one of version
+    /// 1's, which DEC-484 item 3 keeps (version 2 adds to that vocabulary rather than replacing
+    /// it). Only the two new kinds carry an object an append must read, so only they are named
+    /// here, which is the same condition [`validate_config_artifacts`] applies when an artifact
+    /// source is given. Refusing an older kind too would refuse a draft no artifact-aware append
+    /// would have checked.
+    ///
+    /// [`validate_config_artifacts`]: crate::validate_config_artifacts
     pub fn config_artifact_path(&self) -> Option<&'static str> {
         match (self.event_type(), self.schema_version()) {
             ("ModelOutputRecorded", 2) => Some("config_refs.model_registry"),
             ("DecisionMade", 2) => Some("config_refs.policy_set"),
-            ("ConfigSnapshotRegistered", 2) => Some("payload.content_hash"),
+            ("ConfigSnapshotRegistered", 2)
+                if matches!(
+                    self.registered_kind(),
+                    Some(catalogue::POL | catalogue::REG)
+                ) =>
+            {
+                Some("payload.content_hash")
+            }
             _ => None,
         }
+    }
+
+    /// The `kind` a `ConfigSnapshotRegistered` draft registers.
+    fn registered_kind(&self) -> Option<&str> {
+        self.fields.get("payload")?.get("kind")?.as_str()
     }
 
     pub fn stream_id(&self) -> &StreamId {

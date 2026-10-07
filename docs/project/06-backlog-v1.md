@@ -88,6 +88,22 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 
   *Accepted when:* each item has a refusal or merge case in `xtask`'s merge-script tests, and each
   fails when its fix is reverted.
+- **E1-6 (Should)** As an engineer, I want the reference-case harness cheaper to run, so that
+  [DEC-498](decisions/DEC-498.md) item 3's 180-second per-mutant cap can come down and the matrix
+  with it. DEC-497 runs the whole of `mandate-refcases` for any mutation of a crate it is built
+  on, which is what puts a core crate's mutant test phase at the 83 seconds DEC-498 measured; the
+  cap is sized on that, and the shard count on the cap. On a shard whose own mutants are in
+  `mandate-refcases` the harness is the unmutated baseline's test phase as well, since
+  cargo-mutants picks the baseline's packages from the slice's mutants — so it shortens that
+  capped phase too, but not DEC-498's remainder, which is the baseline's *build* and the setup
+  around it. It does nothing for a shard with no mutant to test.
+  *Accepted when:* `cargo nextest run -p mandate-refcases` on a warm build takes at most half the
+  time it takes on the same machine before the change, measured as the median of three
+  consecutive runs each way — the baseline for comparison, not a target, is the 31.7, 31.8 and
+  31.9 seconds three such runs took on a development VM when this story was written, and the
+  runner is slower; the same 691 tests run, so the saving comes from the harness and not from
+  running fewer cases; and DEC-498's 180-second cap and its 192 shards are re-derived from a
+  fresh `ubuntu-24.04` measurement, or a successor decision records that they stand.
 
 ### E2 Market data
 
@@ -628,6 +644,15 @@ after U-A1 to U-A5 are recorded.
   effective input is content addressed in the journal; recorded paper tests and the manual Alpaca
   paper run use that same API with no synthetic model or test-only execution branch; and restart
   reconciliation sends no duplicate.
+  *Open (#644 review round 2, major 3):* DEC-484 item 4's object shape — `policy_set_version`,
+  the levels in platform, organization, workspace order with at most one of each, and models and
+  their parameter names strictly sorted and unique — is checked nowhere yet. The journal does not
+  check it at append and will not: the spec's append-time check for these two kinds is only an
+  absent object (`missing_artifact`) and a differing top-level `kind` (`config_ref_kind`), and
+  §5.1 and §11 define no refusal code for a malformed shape. **The validated production input
+  owns it**, beside DEC-484 item 5's second sentence, which already puts the mandate's parameter
+  keys and admission capability there; that slice adds the structural checks and their cases, and
+  a refusal code for them needs an approved reference case first.
 
 ### E8 Escalation and approvals
 

@@ -645,6 +645,38 @@ fn workspace_packages(meta: &Metadata) -> Vec<&Package> {
         .collect()
 }
 
+/// Every workspace package with the workspace packages it is built on, itself included. A test
+/// exercises exactly the code its own package links, so this is what turns the reference
+/// harness's dependency list into the full set of packages its suites can fail on (DEC-497),
+/// without anyone auditing which call reaches which layer.
+fn workspace_closure(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
+    let direct: BTreeMap<&str, Vec<&str>> = workspace_packages(meta)
+        .into_iter()
+        .map(|pkg| {
+            let deps = pkg
+                .dependencies
+                .iter()
+                .filter(|dep| dep.path.is_some())
+                .map(|dep| dep.name.as_str())
+                .collect();
+            (pkg.name.as_str(), deps)
+        })
+        .collect();
+    direct
+        .keys()
+        .map(|package| {
+            let mut reached = BTreeSet::new();
+            let mut pending = vec![*package];
+            while let Some(next) = pending.pop() {
+                if reached.insert(next.to_owned()) {
+                    pending.extend(direct.get(next).into_iter().flatten().copied());
+                }
+            }
+            ((*package).to_owned(), reached)
+        })
+        .collect()
+}
+
 fn workspace_has_library() -> Result<bool> {
     let meta = metadata()?;
     Ok(workspace_packages(&meta)
@@ -1237,28 +1269,8 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         })
         .map(|krate| krate.package.as_str())
         .collect();
-    let refcase_tests: Vec<&str> = changed
-        .lines()
-        .filter_map(|file| {
-            file.strip_prefix("crates/mandate-refcases/tests/")
-                .and_then(|name| name.strip_suffix(".rs"))
-                .filter(|name| !name.contains('/'))
-        })
-        .collect();
-    let test_filter = if refcase_tests.is_empty() {
-        None
-    } else {
-        let mut terms: Vec<String> = test_packages
-            .iter()
-            .map(|package| format!("package({package})"))
-            .collect();
-        terms.extend(refcase_tests.iter().map(|test| format!("binary({test})")));
-        if !test_packages.contains(&"mandate-refcases") {
-            test_packages.push("mandate-refcases");
-        }
-        Some(terms.join(" | "))
-    };
-    let args = mutants_args(&diff_path, shard, &test_packages, test_filter.as_deref());
+    external_oracles(&mut test_packages, &workspace_closure(&metadata_in(root)?));
+    let args = mutants_args(&diff_path, shard, &test_packages);
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
     let started = fs::metadata(&diff_file)
@@ -1304,11 +1316,36 @@ impl MutantShard {
     }
 }
 
+/// Adds [`REFCASES`] to the packages a mutation run tests when any package it mutates is one the
+/// reference suites are built on, and reports whether it did.
+///
+/// A mutant is judged only by the tests cargo-mutants runs, and the oracle for several crates
+/// lives in `mandate-refcases`, a package those crates do not depend on, so cargo-mutants never
+/// discovers it (DEC-497). `closure` is every workspace package `mandate-refcases` is built on,
+/// transitively, from cargo's own graph, so the reach is whatever the suites actually compile
+/// against and nothing has to be written down and kept true. The whole package runs: narrowing to
+/// the suites that cover the mutated crate was tried and withdrawn, because three review rounds
+/// each found another crate a suite exercised and its declaration did not name, and because the
+/// nine narrow suites together cost about a fifth of the three harnesses that every such
+/// declaration reaches anyway (DEC-497).
+fn external_oracles(
+    packages: &mut Vec<&str>,
+    closure: &BTreeMap<String, BTreeSet<String>>,
+) -> bool {
+    let Some(built_on) = closure.get(REFCASES) else {
+        return false;
+    };
+    if packages.contains(&REFCASES) || !packages.iter().any(|package| built_on.contains(*package)) {
+        return false;
+    }
+    packages.push(REFCASES);
+    true
+}
+
 fn mutants_args(
     diff_path: &str,
     shard: Option<MutantShard>,
     test_packages: &[&str],
-    test_filter: Option<&str>,
 ) -> Vec<String> {
     let mut args = [
         "mutants",
@@ -1317,9 +1354,13 @@ fn mutants_args(
         "--test-tool",
         "nextest",
         "--jobs",
-        "2",
+        MUTANT_JOBS,
         "--output",
         "target",
+        "--timeout",
+        MUTANT_TEST_TIMEOUT,
+        "--build-timeout",
+        MUTANT_BUILD_TIMEOUT,
     ]
     .into_iter()
     .map(str::to_owned)
@@ -1336,9 +1377,6 @@ fn mutants_args(
             "--sharding".to_owned(),
             "slice".to_owned(),
         ]);
-    }
-    if let Some(filter) = test_filter {
-        args.extend(["--".to_owned(), "-E".to_owned(), filter.to_owned()]);
     }
     args
 }
@@ -1528,6 +1566,61 @@ fn unjudged_mutants(
 /// previous run or a restored cache left behind can be read as this run's result (DEC-137). The
 /// diff's own timestamp is the reference because a clock read is disallowed here (ADR-0001 ES-05).
 const MUTANTS_OUT: &str = "target/mutants.out";
+const REFCASES: &str = "mandate-refcases";
+
+/// How many mutants cargo-mutants tests at once.
+///
+/// One, not two, so that a single mutant stays short. DEC-498 gives a CI shard at most one mutant,
+/// so there is nothing for a second worker to do there; this setting governs the unsharded local
+/// run, where there is. Measured
+/// on `ubuntu-24.04` over four runs of the same nine mutants, two workers contend: the per-mutant
+/// test phase reaches 181 seconds at two and 83 at one. Those runs show no throughput difference
+/// between the settings — 82 and 99 seconds a mutant at one worker, 83 and 108 at two — but two
+/// runs each are too few to claim one either way, and none is needed.
+const MUTANT_JOBS: &str = "1";
+
+/// How long one mutant's tests may run before cargo-mutants calls it a timeout, in seconds.
+///
+/// Set explicitly because the value cargo-mutants derives is wrong for this gate and wrong in the
+/// direction that fails a green change. It takes five times the unmutated baseline, floored at
+/// twenty seconds, and it runs that baseline over the packages the shard's own mutants are in —
+/// not over whatever `--test-package` names, so the [`REFCASES`] that [`external_oracles`] adds
+/// reaches the baseline only when a mutant of it is in the slice. A shard mutating a core crate
+/// therefore measures a second of that crate's tests, the floor gives twenty seconds, and a
+/// mutant the reference harness catches in its thirtieth second is reported `TIMEOUT`, not caught.
+/// DEC-498's first measurement run met exactly that: nine mutants, nine timeouts, every one at
+/// the twenty-second cap.
+///
+/// Three minutes against the 83 seconds that was the slowest test phase over the two measured
+/// runs at [`MUTANT_JOBS`] workers, so a mutant the harness judges at its ordinary pace is judged
+/// rather than cut off. The margin is the reason the job count is one: at two workers the same
+/// nine mutants reached 181 seconds, which this timeout would have cut off. A mutation slow
+/// enough to reach the cap anyway is bounded by it, which is what lets DEC-498 size a shard on
+/// this number rather than on how fast mutants have happened to run.
+///
+/// Unlike [`MUTANT_BUILD_TIMEOUT`], this one also caps the unmutated baseline's test phase, which
+/// matters because a shard whose mutants are in [`REFCASES`] runs the whole reference harness as
+/// its baseline. Shown by command: the same run at `--timeout 5` kills the baseline mid-suite and
+/// reports `cargo test failed in an unmutated tree, so no mutants were tested`.
+const MUTANT_TEST_TIMEOUT: &str = "180";
+
+/// How long one mutant's build may run before cargo-mutants calls it a timeout, in seconds.
+///
+/// cargo-mutants leaves this off by default, on the reasoning that build times vary and a cap
+/// risks flaky runs. This gate sets it because a mutant can in fact make a build arbitrarily
+/// slow, which [`MUTANT_TEST_TIMEOUT`] does nothing about: operators are mutated wherever they
+/// appear, top-level `const` items included, so `const N: usize = 1024 % 7` becomes
+/// `1024 + 7` and any `[u8; N]` grows with it. DEC-498's budget needs every per-mutant phase
+/// bounded, and this is the only phase a shard cannot otherwise bound.
+///
+/// Sixty seconds against the 16 to 27 that mutant builds took over the two measured runs at
+/// [`MUTANT_JOBS`] workers. The flakiness cargo-mutants warns about is contained here because
+/// this cap, unlike [`MUTANT_TEST_TIMEOUT`], reaches mutants alone: a `--build-timeout` run
+/// leaves the unmutated baseline uncapped, shown by command, so a cold cache compiling the
+/// workspace from scratch is never cut off. A mutant's build is not purely incremental on that
+/// baseline, since it compiles [`REFCASES`] where the baseline may not have, but the measured
+/// range already includes that.
+const MUTANT_BUILD_TIMEOUT: &str = "60";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
 /// this status reads the outcomes and may exempt a stub body: a build failure, a diff that no longer
@@ -2969,11 +3062,11 @@ fn report(problems: Vec<String>, check: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::env;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::time::Duration;
 
@@ -2981,15 +3074,16 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANTS_OUT, MutantShard, MutatedCrate,
-        PendingTest, PendingTestRun, TestOutcome, actionlint_workflows, backticked_paths,
-        base_ref_in, ci, classify, contains_dec_id, contains_word, failure_cause, first_panic_line,
+        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT,
+        MUTANTS_OUT, MutantShard, MutatedCrate, PendingTest, PendingTestRun, REFCASES, TestOutcome,
+        actionlint_workflows, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
+        contains_word, external_oracles, failure_cause, files_by_extension, first_panic_line,
         generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function, lint,
-        listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_args,
-        mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
-        unjudged_mutants, verdicts,
+        listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts, mutants,
+        mutants_args, mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems,
+        pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_outcomes, unjudged_mutants, verdicts, workspace_closure,
     };
 
     #[test]
@@ -3036,17 +3130,185 @@ mod tests {
         Ok(())
     }
 
+    fn declared_closure() -> BTreeMap<String, BTreeSet<String>> {
+        [
+            (
+                REFCASES,
+                vec![
+                    REFCASES,
+                    "mandate-journal",
+                    "mandate-risk",
+                    "mandate-spec",
+                    "mandate-time",
+                ],
+            ),
+            ("mandate-journal", vec!["mandate-journal", "mandate-time"]),
+            (
+                "mandate-spec",
+                vec!["mandate-spec", "mandate-journal", "mandate-time"],
+            ),
+            ("mandate-risk", vec!["mandate-risk"]),
+            ("mandate-time", vec!["mandate-time"]),
+            ("mandate-marketdata", vec!["mandate-marketdata"]),
+        ]
+        .into_iter()
+        .map(|(package, built_on)| {
+            (
+                package.to_owned(),
+                built_on.into_iter().map(str::to_owned).collect(),
+            )
+        })
+        .collect()
+    }
+
+    #[test]
+    fn the_reference_package_runs_whenever_a_crate_it_is_built_on_is_mutated() {
+        let closure = declared_closure();
+
+        let mut journal = vec!["mandate-journal"];
+        assert!(
+            external_oracles(&mut journal, &closure),
+            "the suites are built on the journal, so they judge its mutants whether or not the \
+             change edits a suite: this is the hole #652's review found in keying on the diff"
+        );
+        assert_eq!(
+            journal,
+            ["mandate-journal", REFCASES],
+            "the reference package is named so cargo-mutants builds and runs its suites"
+        );
+
+        let mut underneath = vec!["mandate-time"];
+        assert!(
+            external_oracles(&mut underneath, &closure),
+            "a crate no suite calls directly is still reached through the ones that do, which is \
+             #652 round 2's major and what cargo's graph supplies for free"
+        );
+
+        let mut unreached = vec!["mandate-marketdata"];
+        assert!(
+            !external_oracles(&mut unreached, &closure),
+            "a package the suites are not built on cannot be judged by them"
+        );
+        assert_eq!(
+            unreached,
+            ["mandate-marketdata"],
+            "and costs the run no extra test package"
+        );
+
+        let mut already = vec![REFCASES];
+        assert!(
+            !external_oracles(&mut already, &closure),
+            "a change that mutates the reference package itself already runs it"
+        );
+        assert_eq!(already, [REFCASES], "and names it once");
+    }
+
+    /// Over the real graph: every crate the reference suites are built on is judged by them, with
+    /// no list of crates to keep true. Rounds 2, 3, and 4 of #652's review each found another
+    /// crate a suite exercised and the suite's declaration did not name — `mandate-time` through
+    /// the journal's draft parser, the six crates the mandate harness interprets, `mandate-canon`
+    /// through `DecStr`, and `mandate-spec` through `validated_mandate` — so the gate reads the
+    /// dependency graph instead (DEC-497).
+    #[test]
+    fn the_reference_suites_judge_every_crate_they_are_built_on() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the workspace root above xtask")?;
+        let closure = workspace_closure(&metadata_in(root)?);
+        for exercised in [
+            "mandate-accounting",
+            "mandate-approval",
+            "mandate-builder",
+            "mandate-canon",
+            "mandate-domain",
+            "mandate-executor",
+            "mandate-journal",
+            "mandate-num",
+            "mandate-research",
+            "mandate-risk",
+            "mandate-runtime",
+            "mandate-sim",
+            "mandate-spec",
+            "mandate-time",
+        ] {
+            let mut mutated = vec![exercised];
+            assert!(
+                external_oracles(&mut mutated, &closure),
+                "the reference suites exercise `{exercised}`, so a mutation of it must run them"
+            );
+            assert!(
+                mutated.contains(&REFCASES),
+                "and the run must name the package that holds them: {mutated:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// What makes the dependency closure the suites' exact reach rather than an estimate of it: a
+    /// test can only exercise code its package links, and the reference suites link everything
+    /// in-process. A suite that spawned a binary would reach a crate the closure does not name,
+    /// and DEC-497's whole argument would be an approximation again, so the gate refuses one.
+    #[test]
+    fn no_reference_suite_reaches_a_crate_by_spawning_it() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the workspace root above xtask")?;
+        let mut spawning = Vec::new();
+        for source in files_by_extension(&root.join("crates/mandate-refcases"), &["rs"])? {
+            let text = fs::read_to_string(&source)?;
+            if text.contains("Command::new") || text.contains("CARGO_BIN_EXE") {
+                spawning.push(source.display().to_string());
+            }
+        }
+        assert!(
+            spawning.is_empty(),
+            "the reference suites must reach every crate they judge through their own dependency \
+             graph, which `cargo metadata` can see, and not through a subprocess, which it cannot \
+             (DEC-497): {spawning:?}"
+        );
+        Ok(())
+    }
+
     #[test]
     fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() {
         let packages = ["mandate-journal", "mandate-refcases"];
-        let filter = "package(mandate-journal) | binary(production_config_refs)";
-        let unsharded = mutants_args("change.diff", None, &packages, Some(filter));
+        let unsharded = mutants_args("change.diff", None, &packages);
         assert!(
             !unsharded.iter().any(|arg| arg == "--shard"),
             "a local `cargo xtask check` run must cover the complete diff"
         );
         assert!(unsharded.contains(&"--test-package=mandate-refcases".to_owned()));
-        assert_eq!(&unsharded[unsharded.len() - 3..], ["--", "-E", filter]);
+        assert!(
+            !unsharded.iter().any(|arg| arg == "-E"),
+            "the reference package runs whole, so no nextest filter narrows it"
+        );
+        assert_eq!(
+            unsharded
+                .windows(2)
+                .find(|pair| pair[0] == "--timeout")
+                .map(|pair| pair[1].as_str()),
+            Some(MUTANT_TEST_TIMEOUT),
+            "the per-mutant timeout is set here, not derived from a baseline that does not run \
+             the reference package the mutants do (DEC-498)"
+        );
+        assert_eq!(
+            unsharded
+                .windows(2)
+                .find(|pair| pair[0] == "--build-timeout")
+                .map(|pair| pair[1].as_str()),
+            Some(MUTANT_BUILD_TIMEOUT),
+            "a mutated operator in a top-level `const` can grow an array and so a build; both \
+             per-mutant phases are capped, or DEC-498's shard budget bounds nothing"
+        );
+        assert_eq!(
+            unsharded
+                .windows(2)
+                .find(|pair| pair[0] == "--jobs")
+                .map(|pair| pair[1].as_str()),
+            Some("1"),
+            "one mutant at a time, so a shard's critical path is its mutants in a row and the \
+             timeout keeps the margin DEC-498 measured"
+        );
 
         let sharded = mutants_args(
             "change.diff",
@@ -3055,7 +3317,6 @@ mod tests {
                 total: 12,
             }),
             &packages,
-            Some(filter),
         );
         assert_eq!(
             sharded

@@ -771,6 +771,24 @@ mod production_config_tests {
         }
     }
 
+    /// `draft` with its registered `payload.kind` replaced, so a version-2
+    /// `ConfigSnapshotRegistered` of one of version 1's kinds can be built from a fixture that
+    /// only carries the two new ones.
+    fn registered_as(draft: &Value, kind: &str) -> Value {
+        let mut record = draft.as_object().cloned().expect("a draft object");
+        let mut payload = record
+            .get("payload")
+            .and_then(Value::as_object)
+            .cloned()
+            .expect("a payload object");
+        payload.insert(
+            Key::new("kind").expect("a key"),
+            Value::Str(kind.to_owned()),
+        );
+        record.insert(Key::new("payload").expect("a key"), Value::Object(payload));
+        Value::Object(record)
+    }
+
     #[test]
     fn artifact_aware_append_preserves_plain_and_idempotent_outcomes() {
         let fixture =
@@ -793,6 +811,20 @@ mod production_config_tests {
             let draft = Draft::parse(&bytes).expect("valid configuration draft");
             assert_eq!(draft.config_artifact_path(), Some(path), "{name}");
         }
+        let older_kind = registered_as(
+            valid
+                .get("policy_registration")
+                .expect("policy registration"),
+            catalogue::FEE,
+        );
+        let bytes = to_canonical(&older_kind);
+        let draft = Draft::parse(&bytes).expect("a version-2 registration of a version-1 kind");
+        assert_eq!(
+            draft.config_artifact_path(),
+            None,
+            "a version-2 registration of a kind version 1 already knew carries no new \
+             configuration object, so a plain append has nothing it cannot read"
+        );
         let draft = valid.get("decision").expect("decision");
         assert_eq!(append(&fixture, draft, None, false).name(), "Invalid");
         assert!(matches!(
