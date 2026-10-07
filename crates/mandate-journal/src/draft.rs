@@ -173,17 +173,7 @@ impl Draft {
         match (self.event_type(), self.schema_version()) {
             ("ModelOutputRecorded", 2) => Some("config_refs.model_registry"),
             ("DecisionMade", 2) => Some("config_refs.policy_set"),
-            ("ConfigSnapshotRegistered", 2)
-                if matches!(
-                    self.fields
-                        .get("payload")
-                        .and_then(|value| value.get("kind"))
-                        .and_then(Value::as_str),
-                    Some("policy_set" | "model_registry")
-                ) =>
-            {
-                Some("payload.content_hash")
-            }
+            ("ConfigSnapshotRegistered", 2) => Some("payload.content_hash"),
             _ => None,
         }
     }

@@ -783,6 +783,16 @@ mod production_config_tests {
             .get("valid_drafts")
             .and_then(Value::as_object)
             .expect("valid drafts");
+        for (name, path) in [
+            ("model_output", "config_refs.model_registry"),
+            ("decision", "config_refs.policy_set"),
+            ("policy_registration", "payload.content_hash"),
+            ("model_registry_registration", "payload.content_hash"),
+        ] {
+            let bytes = to_canonical(valid.get(name).expect("configuration draft"));
+            let draft = Draft::parse(&bytes).expect("valid configuration draft");
+            assert_eq!(draft.config_artifact_path(), Some(path), "{name}");
+        }
         let draft = valid.get("decision").expect("decision");
         assert_eq!(append(&fixture, draft, None, false).name(), "Invalid");
         assert!(matches!(
