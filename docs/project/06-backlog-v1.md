@@ -654,6 +654,14 @@ after U-A1 to U-A5 are recorded.
   owns it**, beside DEC-484 item 5's second sentence, which already puts the mandate's parameter
   keys and admission capability there; that slice adds the structural checks and their cases, and
   a refusal code for them needs an approved reference case first.
+- **E7-20 (Must, M7)** As the founder, I want CodeQL to flag a credential written to a log by
+  its type rather than its name, so that excluding the name-keyed `rust/cleartext-logging` query
+  ([DEC-500](decisions/DEC-500.md)) leaves no gap. *Accepted when:* a query under
+  `.github/codeql/queries/`, read by `.github/codeql/codeql-config.yml`, reports any value returned
+  by `expose_secret()` (directly, through a reference, or inside a format argument) reaching one of
+  CodeQL's logging or print sinks; a seeded bug that prints an exposed `SecretString` is caught and
+  the query raises nothing on `main`; the proof is recorded in the change, since the seeded bug is
+  not committed; and the query runs in the existing CodeQL workflow within its time budget.
 
 ### E8 Escalation and approvals
 
