@@ -88,6 +88,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 
   *Accepted when:* each item has a refusal or merge case in `xtask`'s merge-script tests, and each
   fails when its fix is reverted.
+- **E1-6 (Should)** As an engineer, I want the reference-case harness cheap enough that a mutant's
+  test phase and a mutation shard's floor both leave room as the suites grow, so that
+  [DEC-498](decisions/DEC-498.md)'s ten-minute shards hold without adding jobs. DEC-497 runs the
+  whole of `mandate-refcases` for any mutation of a crate it is built on, which is what puts a
+  core-crate mutant's test phase at 83 seconds and what makes the floor grow with the diff; DEC-498
+  item 6 says sharding cannot reduce the floor, so this is the only lever on it.
+  *Accepted when:* `mandate-refcases` completes in measurably less time than the 83 seconds DEC-498
+  measured, with the saving coming from the harness rather than from running fewer cases; every
+  reference case still runs on every mutation DEC-497's closure selects; and DEC-498's shard
+  arithmetic is redone from the new measurement, or a successor decision records that it stands.
 
 ### E2 Market data
 
