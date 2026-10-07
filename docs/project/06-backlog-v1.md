@@ -623,6 +623,15 @@ after U-A1 to U-A5 are recorded.
   effective input is content addressed in the journal; recorded paper tests and the manual Alpaca
   paper run use that same API with no synthetic model or test-only execution branch; and restart
   reconciliation sends no duplicate.
+  *Open (#644 review round 2, major 3):* DEC-484 item 4's object shape — `policy_set_version`,
+  the levels in platform, organization, workspace order with at most one of each, and models and
+  their parameter names strictly sorted and unique — is checked nowhere yet. The journal does not
+  check it at append and will not: the spec's append-time check for these two kinds is only an
+  absent object (`missing_artifact`) and a differing top-level `kind` (`config_ref_kind`), and
+  §5.1 and §11 define no refusal code for a malformed shape. **The validated production input
+  owns it**, beside DEC-484 item 5's second sentence, which already puts the mandate's parameter
+  keys and admission capability there; that slice adds the structural checks and their cases, and
+  a refusal code for them needs an approved reference case first.
 
 ### E8 Escalation and approvals
 
