@@ -422,6 +422,12 @@ record.
    founder.
 5. **ADR-0003's remaining code stories** (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5), each under
    the DEC-77 sequence with its own claim issue.
+6. **The web UI review of 2026-10-07** (`web/design/review-2026-10-07.md`, thirty findings from
+   screenshots of every screen and scenario on fixture data). DEC-502 split `web/DESIGN.md` into
+   principles, a reference and a history, and set the rule that a test pins an invariant, not the
+   look. In order: the test sort DEC-502 item 5 calls for (its own change); the quick fixes (items
+   9, 14, 16, 19, 29); the cutting pass (items 3, 4, 8, 17, 28); then the owls, Needs you and the
+   headroom hero (items 1, 2, 5, 6), each with its DEC.
 
 Streams that touch different crates run in parallel; reviews and merges run one at a time.
 

@@ -150,8 +150,8 @@ A repeat address counts as stored, so the form never says whether someone is alr
 
 The visual system is the calm, consumer-grade redesign of DEC-204: one hero number per screen, a
 scrubbable equity chart at the centre, generous space, few boxes, soft corners, two densities (calm
-and dense), in Ink and Ultramarine (DEC-205), light or dark, and with no gamification. `web/DESIGN.md` holds the rules, the tokens, the state
-treatments, and the do and don't list; `web/PRODUCT.md` holds the audience, voice, and the safety
+and dense), in Ink and Ultramarine (DEC-205), light or dark, and with no gamification. `web/DESIGN.md` holds the rules, the tokens and the do and don't list, and
+`web/design/reference.md` how each surface is drawn (DEC-502); `web/PRODUCT.md` holds the audience, voice, and the safety
 rules that constrain visuals. `/design` (not linked from the navigation) renders the tokens with
 their OKLCH values and computed contrast, the type scale, the spacing in both densities, the radius scale,
  every state treatment, the components, and motion samples.
@@ -175,15 +175,15 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
   (DEC-203), ink on light and off-white on dark (DEC-204), with no tagline. The icons, favicons and
   share image are the ink mark on off-white. `npm run brand` regenerates the favicons, app icons, share image and manifest in
   `public/` from `src/components/brand/owlhead-mark.svg` and `brand/og-image.svg`; commit its output,
-  because `brand-assets.test.ts` fails when a committed file differs. `web/DESIGN.md` ("Brand") has
-  the rules.
+  because `brand-assets.test.ts` fails when a committed file differs. `web/design/reference.md` ("Brand")
+  has the detail.
 - **Motion.** Emil Kowalski's rules: ease-out `cubic-bezier(0.23, 1, 0.32, 1)`, interactions under
   300 ms, press to 0.97 with a faster release, lists rise in once with a 30 ms stagger, changed numbers
   roll whole, and the equity line draws in once on load. Deadlines never move. `prefers-reduced-motion` drops movement and keeps colour changes.
 - **Components.** Kumo components are imported one at a time (`@cloudflare/kumo/components/*`; the
   root barrel is lint-banned) and themed by `src/app/kumo-theme.css`. Blocks added with
   `npx @cloudflare/kumo add` land in `src/components/kumo/` (`kumo.json`). The app's own components
-  are in `src/components/`. `web/DESIGN.md` ("Kumo") lists the token mapping and the parts of Kumo
+  are in `src/components/`. `web/design/reference.md` ("Kumo") lists the token mapping and the parts of Kumo
   the app does not use.
 - **The frame** (DEC-208, DEC-215). The header and the phone tab bar are frosted glass, and
   nothing else is but the bar that joins them on desktop: from 64rem a labelled floating dock
@@ -199,5 +199,5 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
   Search, the account switcher and every other screen. Home leads with what needs you, agents show
   their headroom rather than P&L, an agent page is its state, equity and headroom with its sections
   as links, and a request is one screen with Approve and Skip pinned. Tablet and desktop are
-  unchanged. `web/DESIGN.md` ("Phone") has the rules; `e2e/phone.spec.ts` checks them at 320, 375,
+  unchanged. `web/DESIGN.md` has the rules and `web/design/reference.md` ("Phone") the layout; `e2e/phone.spec.ts` checks them at 320, 375,
   390 and 430px.
