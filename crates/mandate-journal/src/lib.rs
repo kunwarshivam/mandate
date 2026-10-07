@@ -527,6 +527,25 @@ impl MemoryJournal {
         recorded_at: UtcNanos,
         drafts: &[&[u8]],
     ) -> AppendOutcome {
+        self.append_inner(
+            stream,
+            expected_head,
+            writer_epoch,
+            recorded_at,
+            drafts,
+            None,
+        )
+    }
+
+    fn append_inner(
+        &mut self,
+        stream: &StreamId,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[&[u8]],
+        artifacts: Option<&dyn ArtifactSource>,
+    ) -> AppendOutcome {
         let invalid = |draft: usize, reason: InvalidReason, path: &str| AppendOutcome::Invalid {
             draft,
             error: Invalid::new(reason, path),
@@ -572,6 +591,29 @@ impl MemoryJournal {
             return AppendOutcome::AlreadyCommitted(
                 stored.into_iter().flatten().cloned().collect(),
             );
+        }
+
+        for (index, draft) in batch.iter().enumerate() {
+            let checked = match artifacts {
+                Some(source) => validate_config_artifacts(draft, source),
+                None => match draft.config_artifact_path() {
+                    Some(path) => Err(ConfigArtifactFailure::Invalid(Invalid::new(
+                        InvalidReason::MissingArtifact,
+                        path,
+                    ))),
+                    None => Ok(()),
+                },
+            };
+            match checked {
+                Ok(()) => {}
+                Err(ConfigArtifactFailure::Invalid(error)) => {
+                    return AppendOutcome::Invalid {
+                        draft: index,
+                        error,
+                    };
+                }
+                Err(ConfigArtifactFailure::Unavailable) => return AppendOutcome::Unavailable,
+            }
         }
 
         let head = self.head(stream);
@@ -645,28 +687,14 @@ impl MemoryJournal {
         drafts: &[&[u8]],
         artifacts: &dyn ArtifactSource,
     ) -> AppendOutcome {
-        for (index, bytes) in drafts.iter().enumerate() {
-            let draft = match Draft::parse(bytes) {
-                Ok(draft) => draft,
-                Err(error) => {
-                    return AppendOutcome::Invalid {
-                        draft: index,
-                        error,
-                    };
-                }
-            };
-            match validate_config_artifacts(&draft, artifacts) {
-                Ok(()) => {}
-                Err(ConfigArtifactFailure::Invalid(error)) => {
-                    return AppendOutcome::Invalid {
-                        draft: index,
-                        error,
-                    };
-                }
-                Err(ConfigArtifactFailure::Unavailable) => return AppendOutcome::Unavailable,
-            }
-        }
-        self.append(stream, expected_head, writer_epoch, recorded_at, drafts)
+        self.append_inner(
+            stream,
+            expected_head,
+            writer_epoch,
+            recorded_at,
+            drafts,
+            Some(artifacts),
+        )
     }
 }
 
@@ -674,85 +702,40 @@ impl MemoryJournal {
 #[allow(clippy::expect_used, clippy::panic, reason = "test oracle")]
 mod production_config_tests {
     use super::*;
-    use mandate_canon::Object;
-
-    fn fixture() -> Value {
-        parse(include_bytes!("../../../fixtures/refcases/journal.json")).expect("journal fixture")
-    }
-
-    fn list<'a>(value: &'a Value, member: &str) -> &'a [Value] {
-        value
-            .get(member)
-            .and_then(Value::as_array)
-            .unwrap_or_default()
-    }
-
-    fn text<'a>(value: &'a Value, member: &str) -> &'a str {
-        value
-            .get(member)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-    }
 
     fn artifacts(section: &Value) -> BTreeMap<Digest, Vec<u8>> {
-        list(section, "artifacts")
+        section
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .expect("artifacts")
             .iter()
             .map(|artifact| {
-                let reference = ArtifactRef::parse(text(artifact, "ref")).expect("artifact ref");
-                (
-                    reference.digest(),
-                    text(artifact, "canonical").as_bytes().to_vec(),
-                )
+                let reference = artifact
+                    .get("ref")
+                    .and_then(Value::as_str)
+                    .and_then(ArtifactRef::parse)
+                    .expect("artifact ref");
+                let bytes = artifact
+                    .get("canonical")
+                    .and_then(Value::as_str)
+                    .expect("canonical artifact");
+                (reference.digest(), bytes.as_bytes().to_vec())
             })
             .collect()
     }
 
-    fn apply(draft: &mut Object, change: &Value) {
-        let path = text(change, "path");
-        let mut members: Vec<&str> = path.split('.').collect();
-        let last = members.pop().expect("changed member");
-        let mut node = draft;
-        for member in members {
-            node = match node.get_mut(member) {
-                Some(Value::Object(object)) => object,
-                _ => panic!("{path} has no object at {member}"),
-            };
-        }
-        if change.get("delete") == Some(&Value::Bool(true)) {
-            node.remove(last).expect("deleted member");
-        } else {
-            node.insert(
-                Key::new(last).expect("changed key"),
-                change.get("value").cloned().expect("changed value"),
-            );
-        }
-    }
-
-    fn changed(section: &Value, case: &Value) -> Value {
-        let base = text(case, "base");
-        let mut draft = section
-            .get("valid_drafts")
-            .and_then(|drafts| drafts.get(base))
-            .and_then(Value::as_object)
-            .cloned()
-            .expect("base draft");
-        for change in list(case, "changes") {
-            apply(&mut draft, change);
-        }
-        Value::Object(draft)
-    }
-
-    fn append(fixture: &Value, draft: &Value, artifacts: &dyn ArtifactSource) -> AppendOutcome {
-        let stream_text = text(draft, "stream_id");
-        let stream = StreamId::parse(stream_text).expect("stream id");
-        let stream_section = if stream_text.starts_with("agent:") {
-            "agent_stream"
-        } else {
-            "control_stream"
-        };
+    fn append(
+        fixture: &Value,
+        draft: &Value,
+        artifacts: Option<&dyn ArtifactSource>,
+        retry: bool,
+    ) -> AppendOutcome {
+        let stream = StreamId::parse("agent:ws_01J8Z2:agent_a").expect("stream id");
         let mut opening = fixture
-            .get(stream_section)
-            .and_then(|section| list(section, "chain").first())
+            .get("agent_stream")
+            .and_then(|section| section.get("chain"))
+            .and_then(Value::as_array)
+            .and_then(|chain| chain.first())
             .and_then(|entry| entry.get("body"))
             .and_then(Value::as_object)
             .cloned()
@@ -770,12 +753,28 @@ mod production_config_tests {
         ));
         let bytes = to_canonical(draft);
         let at = UtcNanos::parse("2026-09-21T14:00:03.000000000Z").expect("append time");
-        journal.append_with_config_artifacts(&stream, 1, epoch, at, &[bytes.as_slice()], artifacts)
+        let first = match artifacts {
+            Some(source) => journal.append_with_config_artifacts(
+                &stream,
+                1,
+                epoch,
+                at,
+                &[bytes.as_slice()],
+                source,
+            ),
+            None => journal.append(&stream, 1, epoch, at, &[bytes.as_slice()]),
+        };
+        if retry && matches!(first, AppendOutcome::Committed(_)) {
+            journal.append(&stream, 1, epoch, at, &[bytes.as_slice()])
+        } else {
+            first
+        }
     }
 
     #[test]
-    fn every_production_configuration_vector_has_its_specified_outcome() {
-        let fixture = fixture();
+    fn artifact_aware_append_preserves_plain_and_idempotent_outcomes() {
+        let fixture =
+            parse(include_bytes!("../../../fixtures/refcases/journal.json")).expect("fixture");
         let section = fixture
             .get("production_config_refs")
             .expect("production section");
@@ -784,57 +783,11 @@ mod production_config_tests {
             .get("valid_drafts")
             .and_then(Value::as_object)
             .expect("valid drafts");
-        assert_eq!(valid.len(), 4);
-        for (name, draft) in valid {
-            assert!(
-                matches!(
-                    append(&fixture, draft, &stored),
-                    AppendOutcome::Committed(_)
-                ),
-                "{name}"
-            );
-        }
-        let invalid = list(section, "invalid_drafts");
-        assert_eq!(invalid.len(), 8);
-        for case in invalid {
-            let expect = case.get("expect").expect("expectation");
-            let got = match append(&fixture, &changed(section, case), &stored) {
-                AppendOutcome::Invalid { error, .. } => {
-                    Some((error.reason.code().to_owned(), error.path))
-                }
-                _ => None,
-            };
-            let wanted = Some((
-                text(expect, "reason").to_owned(),
-                text(expect, "path").to_owned(),
-            ));
-            assert_eq!(got, wanted, "{}", text(case, "name"));
-        }
-    }
-
-    #[test]
-    fn a_decision_requires_its_stored_policy_object() {
-        let fixture = fixture();
-        let section = fixture
-            .get("production_config_refs")
-            .expect("production section");
-        let valid = section.get("valid_drafts").expect("valid drafts");
         let draft = valid.get("decision").expect("decision");
-        let reference = draft
-            .get("config_refs")
-            .and_then(|refs| refs.get("policy_set"))
-            .and_then(Value::as_str)
-            .and_then(ArtifactRef::parse)
-            .expect("policy reference");
-        let mut stored = artifacts(section);
-        stored.remove(&reference.digest()).expect("stored policy");
-        let got = match append(&fixture, draft, &stored) {
-            AppendOutcome::Invalid { error, .. } => Some((error.reason.code(), error.path)),
-            _ => None,
-        };
-        assert_eq!(
-            got,
-            Some(("missing_artifact", "config_refs.policy_set".to_owned()))
-        );
+        assert_eq!(append(&fixture, draft, None, false).name(), "Invalid");
+        assert!(matches!(
+            append(&fixture, draft, Some(&stored), true),
+            AppendOutcome::AlreadyCommitted(_)
+        ));
     }
 }

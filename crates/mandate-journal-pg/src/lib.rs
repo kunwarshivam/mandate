@@ -424,6 +424,13 @@ fn validate(stream: &StreamId, drafts: &[&[u8]]) -> Result<Vec<Draft>, AppendOut
         batch.push(draft);
     }
     check_batch(&batch).map_err(|(draft, error)| AppendOutcome::Invalid { draft, error })?;
+    if let Some((draft, path)) = batch
+        .iter()
+        .enumerate()
+        .find_map(|(index, draft)| draft.config_artifact_path().map(|path| (index, path)))
+    {
+        return Err(invalid(draft, InvalidReason::MissingArtifact, path));
+    }
     Ok(batch)
 }
 
@@ -655,7 +662,7 @@ fn sql(text: String) -> sqlx::AssertSqlSafe<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PgError, PgJournal};
+    use super::{AppendOutcome, PgError, PgJournal, StreamId, parse, to_canonical, validate};
 
     #[test]
     fn a_postgres_dsn_builds_a_lazy_journal_without_connecting() -> Result<(), String> {
@@ -671,5 +678,21 @@ mod tests {
             PgJournal::from_dsn("not a postgres dsn"),
             Err(PgError::Unavailable(_))
         ));
+    }
+
+    #[test]
+    fn plain_validation_refuses_a_version_two_configuration_draft() -> Result<(), String> {
+        let fixture = parse(include_bytes!("../../../fixtures/refcases/journal.json"))
+            .map_err(|error| error.to_string())?;
+        let draft = fixture
+            .get("production_config_refs")
+            .and_then(|section| section.get("valid_drafts"))
+            .and_then(|drafts| drafts.get("decision"))
+            .ok_or("a decision draft")?;
+        let stream = StreamId::parse("agent:ws_01J8Z2:agent_a").ok_or("a stream id")?;
+        let bytes = to_canonical(draft);
+        let got = validate(&stream, &[bytes.as_slice()]).err();
+        assert!(matches!(got, Some(AppendOutcome::Invalid { .. })));
+        Ok(())
     }
 }

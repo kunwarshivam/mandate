@@ -168,6 +168,26 @@ impl Draft {
             .unwrap_or_default()
     }
 
+    /// The first configuration object a plain append cannot validate without an artifact source.
+    pub fn config_artifact_path(&self) -> Option<&'static str> {
+        match (self.event_type(), self.schema_version()) {
+            ("ModelOutputRecorded", 2) => Some("config_refs.model_registry"),
+            ("DecisionMade", 2) => Some("config_refs.policy_set"),
+            ("ConfigSnapshotRegistered", 2)
+                if matches!(
+                    self.fields
+                        .get("payload")
+                        .and_then(|value| value.get("kind"))
+                        .and_then(Value::as_str),
+                    Some("policy_set" | "model_registry")
+                ) =>
+            {
+                Some("payload.content_hash")
+            }
+            _ => None,
+        }
+    }
+
     pub fn stream_id(&self) -> &StreamId {
         &self.stream_id
     }

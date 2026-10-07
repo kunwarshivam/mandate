@@ -1201,7 +1201,19 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         .map(|value| MutantShard::parse(&value))
         .transpose()
         .with_context(|| format!("parsing {MUTANT_SHARD_ENV}"))?;
-    let args = mutants_args(&diff_path, shard);
+    let mut test_packages: Vec<&str> = crates
+        .iter()
+        .filter(|krate| {
+            touched
+                .iter()
+                .any(|file| file.starts_with(&krate.src_dir()))
+        })
+        .map(|krate| krate.package.as_str())
+        .collect();
+    if !test_packages.contains(&"mandate-refcases") {
+        test_packages.push("mandate-refcases");
+    }
+    let args = mutants_args(&diff_path, shard, &test_packages);
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
     let started = fs::metadata(&diff_file)
@@ -1247,7 +1259,11 @@ impl MutantShard {
     }
 }
 
-fn mutants_args(diff_path: &str, shard: Option<MutantShard>) -> Vec<String> {
+fn mutants_args(
+    diff_path: &str,
+    shard: Option<MutantShard>,
+    test_packages: &[&str],
+) -> Vec<String> {
     let mut args = [
         "mutants",
         "--in-diff",
@@ -1262,6 +1278,11 @@ fn mutants_args(diff_path: &str, shard: Option<MutantShard>) -> Vec<String> {
     .into_iter()
     .map(str::to_owned)
     .collect::<Vec<_>>();
+    args.extend(
+        test_packages
+            .iter()
+            .map(|package| format!("--test-package={package}")),
+    );
     if let Some(shard) = shard {
         args.extend([
             "--shard".to_owned(),
@@ -2946,11 +2967,13 @@ mod tests {
 
     #[test]
     fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() {
-        let unsharded = mutants_args("change.diff", None);
+        let packages = ["mandate-journal", "mandate-refcases"];
+        let unsharded = mutants_args("change.diff", None, &packages);
         assert!(
             !unsharded.iter().any(|arg| arg == "--shard"),
             "a local `cargo xtask check` run must cover the complete diff"
         );
+        assert!(unsharded.contains(&"--test-package=mandate-refcases".to_owned()));
 
         let sharded = mutants_args(
             "change.diff",
@@ -2958,6 +2981,7 @@ mod tests {
                 index: 6,
                 total: 12,
             }),
+            &packages,
         );
         assert_eq!(
             sharded
