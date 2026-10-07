@@ -4407,9 +4407,12 @@ fn a_paused_flattens_ladder_steps_and_its_step_cancel_does_not_end_the_sequence(
 /// the regular session (the suite's clock, DEC-260 (13)), so the ladder's reference is the
 /// observed quote's bid, as for every exit there; the confirmation carries a floor above the
 /// tier's own, so the clamp is what binds. The confirmed bid as the reference outside the session
-/// is slice 7's session tests'. §5.6 (3)'s alert is unconditional, so it is asserted here too:
-/// clamping and resting without it would otherwise pass while the owner is never told, which
-/// [`the_ladder_never_prices_below_the_floor`] catches only for `max_exit_offset`'s own floor.
+/// is slice 7's session tests'. §5.6 (3)'s alert is unconditional, so it is asserted here too,
+/// on the rung the floor clamps rather than anywhere in the run: clamping and resting without it
+/// would otherwise pass while the owner is never told, and an alert raised on the 153.45 rung,
+/// which is above the floor, would not be the one §5.6 (3) requires.
+/// [`the_ladder_never_prices_below_the_floor`] pins the alert only for `max_exit_offset`'s own
+/// floor.
 #[test]
 #[ignore = "pending E7-4"]
 fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
@@ -4453,11 +4456,10 @@ fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
 
     let mut limits = Vec::new();
     let mut floored = Vec::new();
-    let mut alerted = false;
+    let mut alerts = Vec::new();
     for at in [16_i64, 21] {
         let (ticked, confirmed) = step_rung(&mut shell, &ports, at, &resting);
-        alerted =
-            alerted || !ticked.notifications.is_empty() || !confirmed.notifications.is_empty();
+        alerts.push(!ticked.notifications.is_empty() || !confirmed.notifications.is_empty());
         let rung = confirmed
             .submissions()
             .first()
@@ -4487,9 +4489,14 @@ fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
         ],
         "the clamped rung is journaled at the floor"
     );
+    assert_eq!(
+        alerts.get(1).copied(),
+        Some(true),
+        "§5.6 (3): the owner is alerted on the rung the confirmed floor clamps to 153, not on \
+         153.45, which is above it"
+    );
     for at in [26_i64, 31] {
         let rested = shell.run(Input::Tick(clock(at)), &ports);
-        alerted = alerted || !rested.notifications.is_empty();
         assert!(
             !rested
                 .requests
@@ -4499,11 +4506,6 @@ fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
             rested.requests
         );
     }
-    assert!(
-        alerted,
-        "§5.6 (3): at the floor the order rests and the owner is alerted, whether the floor is \
-         max_exit_offset's or the owner's confirmed one"
-    );
 }
 
 /// §2.3 and §5.5 (DEC-160 (11), (24)): a watchdog exit in a position no single agent holds
