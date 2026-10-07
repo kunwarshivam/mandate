@@ -646,9 +646,9 @@ fn workspace_packages(meta: &Metadata) -> Vec<&Package> {
 }
 
 /// Every workspace package with the workspace packages it is built on, itself included. A test
-/// that exercises a crate exercises everything that crate is built on, so this is what turns a
-/// suite's declaration of the crates it drives into the full set of packages it can fail on
-/// (DEC-497), without anyone auditing which call reaches which layer.
+/// exercises exactly the code its own package links, so this is what turns the reference
+/// harness's dependency list into the full set of packages its suites can fail on (DEC-497),
+/// without anyone auditing which call reaches which layer.
 fn workspace_closure(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
     let direct: BTreeMap<&str, Vec<&str>> = workspace_packages(meta)
         .into_iter()
@@ -1570,8 +1570,9 @@ const REFCASES: &str = "mandate-refcases";
 
 /// How many mutants cargo-mutants tests at once.
 ///
-/// One, not two, so that a single mutant stays short and a shard's critical path is its mutants
-/// in a row rather than waves whose length has to be bounded by a worst pair (DEC-498). Measured
+/// One, not two, so that a single mutant stays short. DEC-498 gives a CI shard at most one mutant,
+/// so there is nothing for a second worker to do there; this setting governs the unsharded local
+/// run, where there is. Measured
 /// on `ubuntu-24.04` over four runs of the same nine mutants, two workers contend: the per-mutant
 /// test phase reaches 181 seconds at two and 83 at one. Those runs show no throughput difference
 /// between the settings — 82 and 99 seconds a mutant at one worker, 83 and 108 at two — but two
@@ -1595,6 +1596,11 @@ const MUTANT_JOBS: &str = "1";
 /// nine mutants reached 181 seconds, which this timeout would have cut off. A mutation slow
 /// enough to reach the cap anyway is bounded by it, which is what lets DEC-498 size a shard on
 /// this number rather than on how fast mutants have happened to run.
+///
+/// Unlike [`MUTANT_BUILD_TIMEOUT`], this one also caps the unmutated baseline's test phase, which
+/// matters because a shard whose mutants are in [`REFCASES`] runs the whole reference harness as
+/// its baseline. Shown by command: the same run at `--timeout 5` kills the baseline mid-suite and
+/// reports `cargo test failed in an unmutated tree, so no mutants were tested`.
 const MUTANT_TEST_TIMEOUT: &str = "180";
 
 /// How long one mutant's build may run before cargo-mutants calls it a timeout, in seconds.
@@ -1607,10 +1613,12 @@ const MUTANT_TEST_TIMEOUT: &str = "180";
 /// bounded, and this is the only phase a shard cannot otherwise bound.
 ///
 /// Sixty seconds against the 16 to 27 that mutant builds took over the two measured runs at
-/// [`MUTANT_JOBS`] workers. The flakiness cargo-mutants warns about is bounded here because the
-/// cap reaches mutants alone: a `--build-timeout` run leaves the unmutated baseline uncapped, so
-/// a cold cache compiling the workspace from scratch is not cut off, and a mutant builds
-/// incrementally on what that baseline already produced.
+/// [`MUTANT_JOBS`] workers. The flakiness cargo-mutants warns about is contained here because
+/// this cap, unlike [`MUTANT_TEST_TIMEOUT`], reaches mutants alone: a `--build-timeout` run
+/// leaves the unmutated baseline uncapped, shown by command, so a cold cache compiling the
+/// workspace from scratch is never cut off. A mutant's build is not purely incremental on that
+/// baseline, since it compiles [`REFCASES`] where the baseline may not have, but the measured
+/// range already includes that.
 const MUTANT_BUILD_TIMEOUT: &str = "60";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only

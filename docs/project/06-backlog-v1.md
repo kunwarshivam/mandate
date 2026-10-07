@@ -92,10 +92,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   [DEC-498](decisions/DEC-498.md) item 3's 180-second per-mutant cap can come down and the matrix
   with it. DEC-497 runs the whole of `mandate-refcases` for any mutation of a crate it is built
   on, which is what puts a core crate's mutant test phase at the 83 seconds DEC-498 measured; the
-  cap is sized on that, and the shard count on the cap. This is a lever on the per-mutant term
-  only — DEC-498's floor excludes the harness, because cargo-mutants runs the baseline over the
-  mutated package alone — so it shortens a shard that has mutants to test and not one that has
-  none.
+  cap is sized on that, and the shard count on the cap. On a shard whose own mutants are in
+  `mandate-refcases` the harness is the unmutated baseline as well, since cargo-mutants picks the
+  baseline's packages from the slice's mutants, so there it shortens DEC-498's remainder too. It
+  does nothing for a shard with no mutant to test.
   *Accepted when:* `cargo nextest run -p mandate-refcases` on a warm build takes at most half the
   time it takes on the same machine before the change, measured as the median of three
   consecutive runs each way — the baseline for comparison, not a target, is the 31.7, 31.8 and
