@@ -297,8 +297,11 @@ the spec invariants (DP-n) its tests cover.
   can verify long-lived records without writing code (FR-7.5; E5-4's command over one exported
   stream is the hot-store half; E5-6's checks through the CLI, which the E5-6 brief left to "the
   CLI calls them when its story says"). `mandate-cli` is safety-critical, DEC-77 sequence. In
-  progress on claim [#645](https://github.com/kunwarshivam/mandate/issues/645): DEC-490 and the
-  [task brief](tasks/E5-8-cold-verify-cli.md), the tests PR on `claude/hejxo4-e5-8-tests`.
+  progress on claim [#645](https://github.com/kunwarshivam/mandate/issues/645): DEC-490, the
+  [task brief](tasks/E5-8-cold-verify-cli.md), and the tests PR
+  ([#654](https://github.com/kunwarshivam/mandate/pull/654), merged; it replaced #651, whose
+  description the coordinator could not write the approval line into). The implementation PR is
+  next, and deletes the 38 `#[ignore = "pending E5-8"]` lines.
   *Accepted when:* the command runs §11's per-range checks through `mandate-journal-cold` over a
   cold export, reports the first failure with its code and a non-zero exit, never vouches for an
   export it cannot cover, and never answers `Ok` for a timestamp token until DEC-265 item 1's
@@ -720,8 +723,9 @@ after U-A1 to U-A5 are recorded.
   aside, so MC-E18 passes (#550, merged), and the status PR moves it to `passing` (in review). Still
   open: a §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
   (DEC-430 item 2). It is a spec PR and changes no rule.
-  *Tests in progress (the `quorum` tests PRs, DEC-488, DEC-489): this is the first of two, carrying
-  the two hand cases on the live one-approver binding, the property and the harness test; the
+  *Tests in progress (the `quorum` tests PRs, DEC-488, DEC-489): the first of two is merged
+  ([#653](https://github.com/kunwarshivam/mandate/pull/653), which replaced #650), carrying the
+  two hand cases on the live one-approver binding, the property and the harness test; the
   second carries the two stricter hand cases, then the implementation follows:* DEC-488
   fixes the member as `{required, independent}`, written exactly on a grant check 7 judged
   (`admitted`, `counted`, `duplicate_approver`, `not_independent`) from the bound requirement the
