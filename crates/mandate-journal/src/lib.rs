@@ -673,6 +673,7 @@ impl MemoryJournal {
 #[cfg(test)]
 mod production_config_tests {
     use super::*;
+    use mandate_canon::Object;
 
     fn fixture() -> Value {
         parse(include_bytes!("../../../fixtures/refcases/journal.json")).expect("journal fixture")
