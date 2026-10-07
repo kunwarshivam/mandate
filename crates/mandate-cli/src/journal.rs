@@ -154,14 +154,14 @@ impl Refusal {
 }
 
 /// An input refusal as the command reports it: the stable code, then what was wrong.
-fn refuse(reason: Refusal, detail: impl fmt::Display) -> anyhow::Error {
+pub(crate) fn refuse(reason: Refusal, detail: impl fmt::Display) -> anyhow::Error {
     anyhow!("{}: {detail}", reason.code())
 }
 
 /// Verifies the export `args` names, writing the report to `report`. The returned outcome carries
 /// the exit status: [`Outcome::failed`].
 pub fn verify(args: &VerifyArgs, report: &mut impl Write) -> anyhow::Result<Outcome> {
-    let start = trusted_start(args)?;
+    let start = trusted_start(args.from_seq, args.trusted_prev_hash.as_deref())?;
     let export = fs::read(&args.export)
         .with_context(|| format!("reading the export {}", args.export.display()))?;
     let artifacts = open_source(args.store.as_deref())?;
@@ -183,7 +183,7 @@ pub fn verify(args: &VerifyArgs, report: &mut impl Write) -> anyhow::Result<Outc
 }
 
 /// The path as given, or `none given`, so the report says which inputs the result covers.
-fn shown(path: Option<&Path>) -> String {
+pub(crate) fn shown(path: Option<&Path>) -> String {
     path.map_or_else(|| "none given".to_owned(), |p| p.display().to_string())
 }
 
@@ -337,8 +337,11 @@ fn row(body: Vec<u8>, hash: Digest, expected_seq: u64) -> StoredEvent {
 
 /// Where verification starts (spec §11): the genesis start by default, or the `seq` and hash the
 /// auditor takes from a manifest or anchor. The two are given together or not at all.
-fn trusted_start(args: &VerifyArgs) -> anyhow::Result<TrustedStart> {
-    match (args.from_seq, args.trusted_prev_hash.as_deref()) {
+pub(crate) fn trusted_start(
+    from_seq: Option<u64>,
+    trusted_prev_hash: Option<&str>,
+) -> anyhow::Result<TrustedStart> {
+    match (from_seq, trusted_prev_hash) {
         (None, None) => Ok(TrustedStart::GENESIS),
         (Some(from_seq), Some(hex)) if from_seq >= 1 => Ok(TrustedStart {
             from_seq,
@@ -372,7 +375,7 @@ impl ArtifactSource for NoArtifacts {
 
 /// The store references are checked against. A `--store` that is not a directory is refused rather
 /// than created, so a mistyped path cannot report a verified export it never read.
-fn open_source(dir: Option<&Path>) -> anyhow::Result<Box<dyn ArtifactSource>> {
+pub(crate) fn open_source(dir: Option<&Path>) -> anyhow::Result<Box<dyn ArtifactSource>> {
     match dir {
         None => Ok(Box::new(NoArtifacts)),
         Some(dir) if dir.is_dir() => FsArtifactStore::open(dir)
@@ -393,7 +396,12 @@ fn open_source(dir: Option<&Path>) -> anyhow::Result<Box<dyn ArtifactSource>> {
 /// The anchor in `path`: the leaves and root an `AnchorComputed` event records (spec §10, DEC-115).
 fn read_anchor(path: &Path) -> anyhow::Result<Anchor> {
     let bytes = fs::read(path).with_context(|| format!("reading the anchor {}", path.display()))?;
-    let value = parse(&bytes).map_err(|e| {
+    parse_anchor(path, &bytes)
+}
+
+/// The anchor `bytes` hold, read from `path`, which a refusal names (spec §10, DEC-115 item 6).
+pub(crate) fn parse_anchor(path: &Path, bytes: &[u8]) -> anyhow::Result<Anchor> {
+    let value = parse(bytes).map_err(|e| {
         refuse(
             Refusal::Anchor,
             format_args!(

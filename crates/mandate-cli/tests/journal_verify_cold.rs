@@ -693,7 +693,6 @@ fn a_column_only_tamper_cannot_be_expressed_by_a_cold_export() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn an_untampered_cold_export_verifies_and_the_report_names_every_input() {
     let scratch = Scratch::new("verified");
     let events = chain();
@@ -729,7 +728,6 @@ result: verified, stream {VECTOR_STREAM}, seq 1 to 5, last hash {}
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn segments_are_walked_in_manifest_order_whatever_their_names() {
     let scratch = Scratch::new("names");
     let rows = sealed_rows();
@@ -752,7 +750,6 @@ fn segments_are_walked_in_manifest_order_whatever_their_names() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_modified_payload_is_rehash_mismatch() {
     let scratch = Scratch::new("payload");
     let mut events = chain();
@@ -765,7 +762,6 @@ fn a_modified_payload_is_rehash_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_deleted_event_is_seq_gap() {
     let scratch = Scratch::new("deleted");
     let mut events = chain();
@@ -777,7 +773,6 @@ fn a_deleted_event_is_seq_gap() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_prev_hash_changed_without_rehashing_is_rehash_mismatch() {
     let scratch = Scratch::new("prev-stale");
     let mut events = chain();
@@ -795,7 +790,6 @@ fn a_prev_hash_changed_without_rehashing_is_rehash_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_prev_hash_rewritten_and_rehashed_is_prev_hash_mismatch() {
     let scratch = Scratch::new("prev-rehashed");
     let mut events = chain();
@@ -814,7 +808,6 @@ fn a_prev_hash_rewritten_and_rehashed_is_prev_hash_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn whitespace_inserted_and_rehashed_is_segment_manifest_mismatch_in_a_cold_export() {
     let scratch = Scratch::new("whitespace");
     let mut events = chain();
@@ -845,7 +838,6 @@ fn whitespace_inserted_and_rehashed_is_segment_manifest_mismatch_in_a_cold_expor
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn swapped_seq_members_are_a_seq_gap_because_an_export_carries_no_columns() {
     let scratch = Scratch::new("seq-swap");
     let mut events = chain();
@@ -870,7 +862,6 @@ fn swapped_seq_members_are_a_seq_gap_because_an_export_carries_no_columns() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_tail_truncated_after_an_anchor_passes_every_check_and_fails_the_anchor() {
     let scratch = Scratch::new("truncated");
     let mut events = chain();
@@ -905,7 +896,6 @@ fn a_tail_truncated_after_an_anchor_passes_every_check_and_fails_the_anchor() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_chain_rewritten_from_seq_3_passes_every_check_and_fails_the_anchor() {
     let scratch = Scratch::new("rewritten");
     let original = chain();
@@ -944,7 +934,6 @@ fn a_chain_rewritten_from_seq_3_passes_every_check_and_fails_the_anchor() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn an_untampered_export_passes_the_anchor_it_is_covered_by() {
     let scratch = Scratch::new("anchored");
     let events = chain();
@@ -968,7 +957,6 @@ fn an_untampered_export_passes_the_anchor_it_is_covered_by() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn an_anchor_whose_head_sits_in_an_earlier_segment_is_checked_there() {
     let scratch = Scratch::new("anchor-earlier-segment");
     let rows = sealed_rows();
@@ -1000,7 +988,6 @@ fn an_anchor_whose_head_sits_in_an_earlier_segment_is_checked_there() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn an_anchor_whose_root_does_not_match_its_leaves_is_anchor_root_mismatch() {
     let scratch = Scratch::new("bad-root");
     let export_dir = vector_export(&scratch, "cold", &chain());
@@ -1020,7 +1007,6 @@ fn an_anchor_whose_root_does_not_match_its_leaves_is_anchor_root_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn an_anchor_whose_head_lies_before_the_trusted_start_is_anchor_head_mismatch() {
     let scratch = Scratch::new("anchor-early");
     let rows = sealed_rows();
@@ -1070,7 +1056,6 @@ fn an_anchor_whose_head_lies_before_the_trusted_start_is_anchor_head_mismatch() 
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn an_anchor_that_names_no_leaf_for_the_exports_stream_is_refused() {
     let scratch = Scratch::new("anchor-elsewhere");
     let export_dir = vector_export(&scratch, "cold", &chain());
@@ -1089,7 +1074,6 @@ fn an_anchor_that_names_no_leaf_for_the_exports_stream_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_flipped_byte_in_a_segment_file_is_segment_manifest_mismatch_at_its_first_seq() {
     let scratch = Scratch::new("flipped");
     let rows = sealed_rows();
@@ -1113,7 +1097,6 @@ fn a_flipped_byte_in_a_segment_file_is_segment_manifest_mismatch_at_its_first_se
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_final_line_without_its_line_feed_is_segment_manifest_mismatch() {
     let scratch = Scratch::new("no-lf");
     let rows = sealed_rows();
@@ -1133,7 +1116,6 @@ fn a_final_line_without_its_line_feed_is_segment_manifest_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_manifest_whose_edges_lie_is_segment_manifest_mismatch() {
     let scratch = Scratch::new("edges");
     let rows = sealed_rows();
@@ -1158,7 +1140,6 @@ fn a_manifest_whose_edges_lie_is_segment_manifest_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_manifest_that_names_another_stream_than_its_file_is_segment_manifest_mismatch() {
     let scratch = Scratch::new("stream-lie");
     let rows = sealed_rows();
@@ -1189,7 +1170,6 @@ fn a_manifest_that_names_another_stream_than_its_file_is_segment_manifest_mismat
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_manifest_that_is_not_one_is_segment_manifest_mismatch_at_the_seq_the_range_expected() {
     let scratch = Scratch::new("not-manifest");
     let rows = sealed_rows();
@@ -1214,7 +1194,6 @@ fn a_manifest_that_is_not_one_is_segment_manifest_mismatch_at_the_seq_the_range_
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_gap_between_segments_fails_segment_gap_at_the_expected_seq() {
     let scratch = Scratch::new("gap");
     let rows = sealed_rows();
@@ -1235,7 +1214,6 @@ fn a_gap_between_segments_fails_segment_gap_at_the_expected_seq() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_stale_or_overlapping_copy_beside_verified_segments_fails_segment_gap() {
     let scratch = Scratch::new("stale");
     let rows = sealed_rows();
@@ -1260,7 +1238,6 @@ fn a_stale_or_overlapping_copy_beside_verified_segments_fails_segment_gap() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_first_segment_that_does_not_carry_the_trusted_start_fails_segment_gap() {
     let scratch = Scratch::new("start-gap");
     let rows = sealed_rows();
@@ -1283,7 +1260,6 @@ fn a_first_segment_that_does_not_carry_the_trusted_start_fails_segment_gap() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_range_may_enter_mid_segment_from_its_trusted_start() {
     let scratch = Scratch::new("mid");
     let rows = sealed_rows();
@@ -1319,7 +1295,6 @@ fn a_range_may_enter_mid_segment_from_its_trusted_start() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn an_event_before_the_trusted_start_is_not_checked() {
     let scratch = Scratch::new("before-start");
     let rows = sealed_rows();
@@ -1355,7 +1330,6 @@ fn an_event_before_the_trusted_start_is_not_checked() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn the_first_failure_in_range_order_is_the_one_reported() {
     let scratch = Scratch::new("first");
     let rows = sealed_rows();
@@ -1389,7 +1363,6 @@ fn the_first_failure_in_range_order_is_the_one_reported() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_cold_export_that_mixes_streams_is_refused() {
     let scratch = Scratch::new("mixed");
     let rows = sealed_rows();
@@ -1431,7 +1404,6 @@ fn a_cold_export_that_mixes_streams_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_token_whose_imprint_matches_is_reported_incomplete_never_verified() {
     let scratch = Scratch::new("token-incomplete");
     let rows = sealed_rows();
@@ -1467,7 +1439,6 @@ fn a_token_whose_imprint_matches_is_reported_incomplete_never_verified() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_token_without_the_anchor_s_imprint_is_tsa_token_invalid() {
     let scratch = Scratch::new("token-invalid");
     let rows = sealed_rows();
@@ -1500,7 +1471,6 @@ fn a_token_without_the_anchor_s_imprint_is_tsa_token_invalid() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_token_is_checked_only_after_the_range_and_the_anchor_pass() {
     let scratch = Scratch::new("token-order");
     let rows = sealed_rows();
@@ -1529,7 +1499,6 @@ fn a_token_is_checked_only_after_the_range_and_the_anchor_pass() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn a_directory_with_no_segment_is_refused() {
     let scratch = Scratch::new("empty");
     let export_dir = scratch.export("cold");
@@ -1541,7 +1510,6 @@ fn a_directory_with_no_segment_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn an_unpaired_segment_or_manifest_is_refused() {
     let scratch = Scratch::new("unpaired");
     let rows = sealed_rows();
@@ -1570,7 +1538,6 @@ fn an_unpaired_segment_or_manifest_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn an_unreadable_export_anchor_or_token_path_is_refused_with_a_code() {
     let scratch = Scratch::new("unreadable");
     let rows = sealed_rows();
@@ -1623,7 +1590,6 @@ fn an_unreadable_export_anchor_or_token_path_is_refused_with_a_code() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn every_cold_refusal_reports_its_stable_code_first() {
     let scratch = Scratch::new("codes");
     let export_dir = vector_export(&scratch, "cold", &chain());
@@ -1690,7 +1656,6 @@ fn every_cold_refusal_reports_its_stable_code_first() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn without_a_store_an_event_that_names_an_artifact_is_artifact_missing() {
     let scratch = Scratch::new("artifact-nostore");
     let events = chain();
@@ -1721,7 +1686,6 @@ fn without_a_store_an_event_that_names_an_artifact_is_artifact_missing() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn an_altered_artifact_is_artifact_mismatch() {
     let scratch = Scratch::new("artifact-altered");
     let events = chain();
@@ -1753,7 +1717,6 @@ fn an_altered_artifact_is_artifact_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E5-8"]
 fn identical_inputs_give_identical_output() {
     let scratch = Scratch::new("deterministic");
     let events = chain();

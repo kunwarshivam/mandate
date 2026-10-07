@@ -12,16 +12,22 @@
 //! token is never reported verified until DEC-265 item 1's crypto half lands — a token holding
 //! the anchor's imprint is [`ColdFailure::TsaVerificationIncomplete`], a non-zero exit.
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use clap::Args;
-use mandate_journal::RangeCheck;
-use mandate_journal_cold::{ColdCheck, ColdFailure};
+use mandate_journal::{
+    Anchor, ArtifactSource, RangeCheck, StoredEvent, StreamId, TrustedStart, verify_anchor,
+};
+use mandate_journal_cold::{
+    ColdCheck, ColdFailure, SegmentFile, SegmentManifest, import_line, verify_range, verify_tsa,
+};
 
-use crate::control::ControlError;
-use crate::journal::Span;
+use crate::journal::{Refusal, Span, open_source, parse_anchor, refuse, shown, trusted_start};
 
 #[derive(Debug, Args)]
 pub struct VerifyColdArgs {
@@ -128,6 +134,260 @@ impl fmt::Display for ColdOutcome {
 /// # Errors
 /// Returns the input refusal, code first, when the export cannot be covered.
 pub fn verify(args: &VerifyColdArgs, report: &mut impl Write) -> anyhow::Result<ColdOutcome> {
-    let _ = (args, report);
-    Err(ControlError::Unimplemented { story: "E5-8" }.into())
+    let start = trusted_start(args.from_seq, args.trusted_prev_hash.as_deref())?;
+    let segments = read_export(&args.export)?;
+    let artifacts = open_source(args.store.as_deref())?;
+    let anchor = args
+        .anchor
+        .as_deref()
+        .map(|path| parse_anchor(path, &readable(path)?))
+        .transpose()?;
+    let token = args.token.as_deref().map(readable).transpose()?;
+    let outcome = check(
+        start,
+        &segments,
+        artifacts.as_ref(),
+        anchor.as_ref(),
+        token.as_deref(),
+    )?;
+    let lines = [
+        format!("export: {}", args.export.display()),
+        format!("segments: {}", segments.len()),
+        format!(
+            "trusted start: seq {}, prev_hash {}",
+            start.from_seq, start.prev_hash
+        ),
+        format!("artifact store: {}", shown(args.store.as_deref())),
+        format!("anchor: {}", shown(args.anchor.as_deref())),
+        format!("token: {}", shown(args.token.as_deref())),
+        format!("result: {outcome}"),
+    ];
+    writeln!(report, "{}", lines.join("\n")).context("writing the report")?;
+    Ok(outcome)
+}
+
+/// One segment of the export as read from the directory: its name, the manifest's bytes and the
+/// file's bytes. The walk order is the manifests' (DEC-490 item 2), so the manifest is parsed
+/// once here to sort by, and again by the walk, which reports what it cannot parse.
+struct Segment {
+    name: String,
+    manifest: Vec<u8>,
+    file: Vec<u8>,
+}
+
+impl Segment {
+    /// Where the segment sorts in the walk: by its manifest's `(first_seq, last_seq)`, then its
+    /// name; a manifest that does not parse claims no place and sorts after every one that does.
+    fn walk_key(&self) -> (bool, u64, u64, &str) {
+        match SegmentManifest::parse(&self.manifest) {
+            Ok(manifest) => (false, manifest.first_seq, manifest.last_seq, &self.name),
+            Err(_) => (true, 0, 0, &self.name),
+        }
+    }
+}
+
+/// The suffix of a segment file's name, after the segment's own name.
+const FILE_SUFFIX: &str = ".jsonl";
+/// The suffix of a manifest's name, after the segment's own name.
+const MANIFEST_SUFFIX: &str = ".manifest.json";
+
+/// The export's segments, paired by name and in walk order, or the refusal: an unreadable path
+/// (DEC-490 item 4), or a directory that is not a whole export (item 3).
+fn read_export(dir: &Path) -> anyhow::Result<Vec<Segment>> {
+    let entries = fs::read_dir(dir).map_err(|e| unreadable(dir, &e))?;
+    let mut files: BTreeMap<String, PathBuf> = BTreeMap::new();
+    let mut manifests: BTreeMap<String, PathBuf> = BTreeMap::new();
+    for entry in entries {
+        let path = entry.map_err(|e| unreadable(dir, &e))?.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if let Some(name) = file_name.strip_suffix(MANIFEST_SUFFIX) {
+            manifests.insert(name.to_owned(), path);
+        } else if let Some(name) = file_name.strip_suffix(FILE_SUFFIX) {
+            files.insert(name.to_owned(), path);
+        }
+    }
+    let incomplete = |name: &str, what: &str| {
+        refuse(
+            Refusal::ColdExportIncomplete,
+            format_args!(
+                "segment `{name}` in {} has no {what}, so the export is not a whole cold store \
+                 (journal spec §6.2) and no range in it is vouched for",
+                dir.display()
+            ),
+        )
+    };
+    if let Some(name) = files.keys().find(|name| !manifests.contains_key(*name)) {
+        return Err(incomplete(name, "manifest"));
+    }
+    if let Some(name) = manifests.keys().find(|name| !files.contains_key(*name)) {
+        return Err(incomplete(name, "segment file"));
+    }
+    if files.is_empty() {
+        return Err(refuse(
+            Refusal::ColdExportIncomplete,
+            format_args!(
+                "{} holds no segment (`<name>{FILE_SUFFIX}` beside `<name>{MANIFEST_SUFFIX}`), \
+                 so there is no range to verify",
+                dir.display()
+            ),
+        ));
+    }
+    let mut segments = Vec::new();
+    for (name, file_path) in files {
+        let manifest_path = manifests
+            .get(&name)
+            .ok_or_else(|| incomplete(&name, "manifest"))?;
+        segments.push(Segment {
+            manifest: readable(manifest_path)?,
+            file: readable(&file_path)?,
+            name,
+        });
+    }
+    segments.sort_by(|a, b| a.walk_key().cmp(&b.walk_key()));
+    Ok(segments)
+}
+
+/// The bytes at `path`, or the `path_unreadable` refusal naming it (DEC-490 item 4).
+fn readable(path: &Path) -> anyhow::Result<Vec<u8>> {
+    fs::read(path).map_err(|e| unreadable(path, &e))
+}
+
+/// The refusal for a path the command could not read: the code first, then the path and why.
+fn unreadable(path: &Path, error: &std::io::Error) -> anyhow::Error {
+    refuse(
+        Refusal::Unreadable,
+        format_args!("{} could not be read ({error})", path.display()),
+    )
+}
+
+/// Runs the checks in DEC-490 item 5's order: the cold walk over the segments from the trusted
+/// start, the export's one stream, the anchor's head and root over the rows the walk verified,
+/// then the token, which never verifies.
+fn check(
+    start: TrustedStart,
+    segments: &[Segment],
+    artifacts: &dyn ArtifactSource,
+    anchor: Option<&Anchor>,
+    token: Option<&[u8]>,
+) -> anyhow::Result<ColdOutcome> {
+    let files = segments
+        .iter()
+        .map(|segment| SegmentFile {
+            manifest: &segment.manifest,
+            file: &segment.file,
+        })
+        .collect::<Vec<_>>();
+    let verified = match verify_range(start, &files, artifacts) {
+        Ok(verified) => verified,
+        Err(failure) => return Ok(ColdOutcome::Cold(failure)),
+    };
+    let stream = one_stream(segments)?;
+    let rows = walked_rows(segments, start.from_seq)?;
+    let last_seq = verified
+        .next_seq
+        .checked_sub(1)
+        .filter(|last| *last >= start.from_seq)
+        .ok_or_else(|| {
+            refuse(
+                Refusal::ColdExportIncomplete,
+                format_args!(
+                    "no event at or after seq {} was walked, so there is no range to vouch for",
+                    start.from_seq
+                ),
+            )
+        })?;
+    if let Some(anchor) = anchor {
+        if !anchor
+            .leaves
+            .iter()
+            .any(|leaf| leaf.stream_id == stream.as_str())
+        {
+            return Err(refuse(
+                Refusal::AnchorStream,
+                format_args!(
+                    "the anchor names no leaf for `{}`, the stream this export holds, so it \
+                     vouches for nothing here (journal spec §10)",
+                    stream.as_str()
+                ),
+            ));
+        }
+        if let Err(failure) = verify_anchor(anchor, &stream, &rows) {
+            return Ok(ColdOutcome::Range(failure));
+        }
+        if let Some(token) = token
+            && let Err(failure) = verify_tsa(anchor, token)
+        {
+            return Ok(ColdOutcome::Cold(failure));
+        }
+    }
+    Ok(ColdOutcome::Verified(Span {
+        stream_id: stream.as_str().to_owned(),
+        first_seq: start.from_seq,
+        last_seq,
+        last_hash: verified.last_hash,
+    }))
+}
+
+/// The one stream every manifest names (DEC-490 item 3), once the walk has pinned each segment's
+/// rows to its own manifest's stream, or the `export_mixes_streams` refusal naming two.
+fn one_stream(segments: &[Segment]) -> anyhow::Result<StreamId> {
+    let mut first: Option<(StreamId, u64)> = None;
+    for segment in segments {
+        let manifest = SegmentManifest::parse(&segment.manifest).map_err(|e| {
+            refuse(
+                Refusal::ColdExportIncomplete,
+                format_args!(
+                    "segment `{}`'s manifest cannot be read after it verified ({e})",
+                    segment.name
+                ),
+            )
+        })?;
+        match &first {
+            None => first = Some((manifest.stream, manifest.first_seq)),
+            Some((stream, first_seq)) if *stream != manifest.stream => {
+                return Err(refuse(
+                    Refusal::ExportStreams,
+                    format_args!(
+                        "the export mixes streams (`{}` at seq {first_seq}, `{}` at seq {}); a \
+                         cold export is one stream's range (journal spec §6.2)",
+                        stream.as_str(),
+                        manifest.stream.as_str(),
+                        manifest.first_seq
+                    ),
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    first
+        .map(|(stream, _)| stream)
+        .ok_or_else(|| refuse(Refusal::ColdExportIncomplete, "the export holds no segment"))
+}
+
+/// The events the walk verified — every line at or after `from_seq`, read back through
+/// `import_line` — for the anchor's checks, which cover verified events only (DEC-490 item 5).
+fn walked_rows(segments: &[Segment], from_seq: u64) -> anyhow::Result<Vec<StoredEvent>> {
+    let mut rows = Vec::new();
+    for segment in segments {
+        for line in segment.file.split(|byte| *byte == b'\n') {
+            if line.is_empty() {
+                continue;
+            }
+            let row = import_line(line).map_err(|e| {
+                refuse(
+                    Refusal::ColdExportIncomplete,
+                    format_args!(
+                        "segment `{}` holds a line that cannot be read after it verified ({e})",
+                        segment.name
+                    ),
+                )
+            })?;
+            if row.seq >= from_seq {
+                rows.push(row);
+            }
+        }
+    }
+    Ok(rows)
 }
