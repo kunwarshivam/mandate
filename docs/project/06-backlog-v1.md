@@ -88,16 +88,21 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 
   *Accepted when:* each item has a refusal or merge case in `xtask`'s merge-script tests, and each
   fails when its fix is reverted.
-- **E1-6 (Should)** As an engineer, I want the reference-case harness cheap enough that a mutant's
-  test phase and a mutation shard's floor both leave room as the suites grow, so that
-  [DEC-498](decisions/DEC-498.md)'s ten-minute shards hold without adding jobs. DEC-497 runs the
-  whole of `mandate-refcases` for any mutation of a crate it is built on, which is what puts a
-  core-crate mutant's test phase at 83 seconds and what makes the floor grow with the diff; DEC-498
-  item 6 says sharding cannot reduce the floor, so this is the only lever on it.
-  *Accepted when:* `mandate-refcases` completes in measurably less time than the 83 seconds DEC-498
-  measured, with the saving coming from the harness rather than from running fewer cases; every
-  reference case still runs on every mutation DEC-497's closure selects; and DEC-498's shard
-  arithmetic is redone from the new measurement, or a successor decision records that it stands.
+- **E1-6 (Should)** As an engineer, I want the reference-case harness cheaper to run, so that
+  [DEC-498](decisions/DEC-498.md) item 3's 180-second per-mutant cap can come down and the matrix
+  with it. DEC-497 runs the whole of `mandate-refcases` for any mutation of a crate it is built
+  on, which is what puts a core crate's mutant test phase at the 83 seconds DEC-498 measured; the
+  cap is sized on that, and the shard count on the cap. This is a lever on the per-mutant term
+  only — DEC-498's floor excludes the harness, because cargo-mutants runs the baseline over the
+  mutated package alone — so it shortens a shard that has mutants to test and not one that has
+  none.
+  *Accepted when:* `cargo nextest run -p mandate-refcases` on a warm build takes at most half the
+  time it takes on the same machine before the change, measured as the median of three
+  consecutive runs each way — the baseline for comparison, not a target, is the 31.7, 31.8 and
+  31.9 seconds three such runs took on a development VM when this story was written, and the
+  runner is slower; the same 691 tests run, so the saving comes from the harness and not from
+  running fewer cases; and DEC-498's 180-second cap and 96 shards are re-derived from a fresh
+  `ubuntu-24.04` measurement, or a successor decision records that they stand.
 
 ### E2 Market data
 
