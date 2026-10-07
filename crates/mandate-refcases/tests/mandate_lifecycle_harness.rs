@@ -147,8 +147,10 @@ fn the_lifecycle_cases_split_as_the_runtime_stands() {
 }
 
 /// MC-E18 as it read before DEC-318 option (a), a grant admitted and then skipped at re-validation
-/// for `mode`, fails: the runtime cancels before it judges. With the response step's mode record
-/// left in the expected drafts, it fails too, because the record is the runtime's, not the case's.
+/// for `mode`, fails on the ordering: the runtime cancels before it judges. With the response
+/// step's mode record left in the expected drafts, it fails on the count, because the record is the
+/// runtime's, not the case's. Each plant is pinned to its message (the #550 review, minor 1), so a
+/// draft that stops being well formed cannot pass either by failing for another reason.
 #[test]
 fn mc_e18_holds_only_as_the_cancellation() {
     let fixture = fixture();
@@ -162,7 +164,11 @@ fn mc_e18_holds_only_as_the_cancellation() {
     let revalidated = json!({"type": "ApprovalRevalidated", "approval": "ap1", "result": "skip",
         "reason": "mode", "clock": admitted["clock"].clone()});
     *drafts = json!([admitted, revalidated]);
-    assert!(run(judged, "MC-E18").is_err(), "the old reading must fail");
+    fails_naming(
+        judged,
+        "MC-E18",
+        "draft 1 (ApprovalCanceled): expected a ApprovalResponded",
+    );
     let mut recorded = fixture.clone();
     let drafts = case_mut(&mut recorded, "MC-E18")["expect"][1]["drafts"]
         .as_array_mut()
@@ -172,9 +178,10 @@ fn mc_e18_holds_only_as_the_cancellation() {
         0,
         json!({"type": "AgentModeChanged", "reason": "restriction_changed", "clock": clock}),
     );
-    assert!(
-        run(recorded, "MC-E18").is_err(),
-        "the mode record is not the case's"
+    fails_naming(
+        recorded,
+        "MC-E18",
+        r#"3 drafts expected, the runtime wrote ["ApprovalCanceled", "ApprovalResponded"]"#,
     );
     run(fixture, "MC-E18").unwrap_or_else(|e| panic!("MC-E18: {e}"));
 }
