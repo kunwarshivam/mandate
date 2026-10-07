@@ -1,9 +1,9 @@
 //! Family E's `lifecycle` op drives `mandate-runtime` itself, reads every member of every case, and
 //! compares every member of every expected draft (DEC-85, DEC-292 item 3, DEC-317).
 //!
-//! DEC-317's three slices interpret every step, so every case is exercised through its first step,
-//! sixteen pass whole, and the rest fail naming the story or the decision that owes what they stop
-//! at. Each test has two halves that need each other: a case passes as the
+//! DEC-317's three slices interpret every step, so every case is exercised through its first step
+//! and every case passes whole, the ten whose admitted grant states the quorum it reached included
+//! (E8-3, DEC-488). Each test has two halves that need each other: a case passes as the
 //! fixture states it, which an arm that failed everything could not do, and fails, naming what
 //! changed, when a member is edited, dropped, or added, which an arm that compared nothing could not.
 
@@ -108,28 +108,26 @@ fn every_case_asks_as_its_first_step_states() {
     }
 }
 
-/// The lifecycle cases the runtime reproduces today.
-const PASSING: [&str; 16] = [
-    "MC-E02", "MC-E03", "MC-E04", "MC-E05", "MC-E07", "MC-E08", "MC-E09", "MC-E10", "MC-E11",
-    "MC-E12", "MC-E13", "MC-E14", "MC-E15", "MC-E16", "MC-E18", "MC-E31",
+/// The twenty-six lifecycle cases, every one of which the runtime reproduces.
+const PASSING: [&str; 26] = [
+    "MC-E01", "MC-E02", "MC-E03", "MC-E04", "MC-E05", "MC-E06", "MC-E07", "MC-E08", "MC-E09",
+    "MC-E10", "MC-E11", "MC-E12", "MC-E13", "MC-E14", "MC-E15", "MC-E16", "MC-E17", "MC-E18",
+    "MC-E19", "MC-E20", "MC-E21", "MC-E22", "MC-E23", "MC-E24", "MC-E29", "MC-E31",
 ];
 
 /// The lifecycle cases whose admitted grant reaches check 7, so their `ApprovalResponded` states
-/// the quorum it applied, which the runtime does not record yet (journal spec §9; E8-3).
+/// the quorum it applied (journal spec §9, DEC-488).
 const QUORUM: [&str; 10] = [
     "MC-E01", "MC-E06", "MC-E17", "MC-E19", "MC-E20", "MC-E21", "MC-E22", "MC-E23", "MC-E24",
     "MC-E29",
 ];
 
-/// The twenty-six cases split exactly as the runtime stands: sixteen pass, and ten fail on the
-/// quorum record alone. MC-E18 passes as DEC-318 option (a) restated it: the response's step,
-/// whose mode is exits-only, records the mode, cancels as `mode_tightened`, then refuses the grant
-/// as `not_pending` (mandate spec §6.4 "Cancellation").
+/// Every one of the twenty-six cases passes whole. MC-E18 passes as DEC-318 option (a) restated
+/// it: the response's step, whose mode is exits-only, records the mode, cancels as
+/// `mode_tightened`, then refuses the grant as `not_pending` (mandate spec §6.4 "Cancellation").
 #[test]
-fn the_lifecycle_cases_split_as_the_runtime_stands() {
+fn every_lifecycle_case_passes_whole() {
     let fixture = fixture();
-    let mut all: Vec<&str> = PASSING.iter().chain(&QUORUM).copied().collect();
-    all.sort_unstable();
     let lifecycle: Vec<String> = fixture["cases"]
         .as_array()
         .expect("a case list")
@@ -137,12 +135,9 @@ fn the_lifecycle_cases_split_as_the_runtime_stands() {
         .filter(|c| c["op"] == "lifecycle")
         .map(|c| c["id"].as_str().expect("an id").to_owned())
         .collect();
-    assert_eq!(lifecycle, all);
+    assert_eq!(lifecycle, PASSING);
     for id in PASSING {
         run(fixture.clone(), id).unwrap_or_else(|e| panic!("{id}: {e}"));
-    }
-    for id in QUORUM {
-        fails_naming(fixture.clone(), id, "the runtime records no quorum");
     }
 }
 
@@ -186,49 +181,6 @@ fn mc_e18_holds_only_as_the_cancellation() {
     run(fixture, "MC-E18").unwrap_or_else(|e| panic!("MC-E18: {e}"));
 }
 
-/// `fixture` with `quorum` struck from every expected draft of the ten [`QUORUM`] cases.
-fn without_quorum(fixture: &Json) -> Json {
-    let mut doctored = fixture.clone();
-    for id in QUORUM {
-        for expect in case_mut(&mut doctored, id)["expect"]
-            .as_array_mut()
-            .expect("an expect list")
-        {
-            for draft in expect["drafts"].as_array_mut().expect("a draft list") {
-                draft.as_object_mut().expect("a draft").remove("quorum");
-            }
-        }
-    }
-    doctored
-}
-
-/// The quorum is all these ten miss: with it struck from every expected draft, each passes, so
-/// every other member of every draft already matches the runtime's.
-#[test]
-fn the_quorum_cases_fail_on_the_quorum_alone() {
-    let fixture = fixture();
-    for id in QUORUM {
-        let mut doctored = fixture.clone();
-        let mut struck = 0;
-        for expect in case_mut(&mut doctored, id)["expect"]
-            .as_array_mut()
-            .expect("an expect list")
-        {
-            for draft in expect["drafts"].as_array_mut().expect("a draft list") {
-                struck += usize::from(
-                    draft
-                        .as_object_mut()
-                        .expect("a draft")
-                        .remove("quorum")
-                        .is_some(),
-                );
-            }
-        }
-        assert!(struck > 0, "{id} states a quorum");
-        run(doctored, id).unwrap_or_else(|e| panic!("{id} without its quorum: {e}"));
-    }
-}
-
 /// Journal spec §9, DEC-488: once the runtime records `ApprovalResponded.quorum`, the ten quorum
 /// cases pass whole, and the member is compared as every other is: each of its two leaves edited
 /// fails the case naming `quorum`, and the member dropped fails the case, because the runtime then
@@ -236,7 +188,6 @@ fn the_quorum_cases_fail_on_the_quorum_alone() {
 /// grant. Before the runtime wrote the member this failed on its absence, "the runtime records no
 /// quorum", rather than at a stub, which no stub can report from the live grant path (DEC-489).
 #[test]
-#[ignore = "pending E8-3"]
 fn the_quorum_cases_pass_whole_and_their_quorum_is_compared() {
     let fixture = fixture();
     for id in QUORUM {
@@ -284,15 +235,15 @@ fn the_quorum_cases_pass_whole_and_their_quorum_is_compared() {
     }
 }
 
-/// Every member of every expected draft of every passing case, and of every quorum case with its
-/// quorum struck, is compared: edited, it fails the case, naming the member; dropped, it fails the
-/// case; and the draft count is compared. A content
-/// hash is a name, which `a_content_hash_is_a_name_bound_at_the_request` covers.
+/// Every member of every expected draft of every case, the quorum included, is compared: edited,
+/// it fails the case, naming the member; dropped, it fails the case; and the draft count is
+/// compared. A content hash is a name, which `a_content_hash_is_a_name_bound_at_the_request`
+/// covers.
 #[test]
 fn every_expected_member_of_a_lifecycle_case_is_compared() {
-    let fixture = without_quorum(&fixture());
+    let fixture = fixture();
     let mut edits = 0;
-    for id in PASSING.iter().chain(&QUORUM).copied() {
+    for id in PASSING {
         let case = case_of(&fixture, id);
         for (step, expect) in case["expect"]
             .as_array()
@@ -800,21 +751,11 @@ fn each_cancellation_reason_cancels_through_its_own_input() {
     }
 }
 
-/// MC-E06 with its quorum struck, which is all it misses today.
-fn retailed(fixture: &Json) -> Json {
-    let mut doctored = fixture.clone();
-    case_mut(&mut doctored, "MC-E06")["expect"][1]["drafts"][0]
-        .as_object_mut()
-        .expect("a draft")
-        .remove("quorum");
-    doctored
-}
-
 /// A re-tailed `source` hands the event already folded again, and the runtime copies it once; a
 /// re-tail that is not the same response fails loudly.
 #[test]
 fn a_retailed_source_is_the_same_event() {
-    let fixture = retailed(&fixture());
+    let fixture = fixture();
     run(fixture.clone(), "MC-E06").unwrap_or_else(|e| panic!("MC-E06: {e}"));
     let edited = with(
         &fixture,
@@ -829,14 +770,9 @@ fn a_retailed_source_is_the_same_event() {
     fails_naming(acted_twice, "MC-E06", "drafts expected");
 }
 
-/// MC-E01 with its quorum struck, its grant re-validated against `now` edited at `pointer`.
+/// MC-E01 as written, its grant re-validated against `now` edited at `pointer`.
 fn granted_with(fixture: &Json, pointer: &str, value: Json) -> Json {
-    let mut doctored = with(fixture, "MC-E01", pointer, value);
-    case_mut(&mut doctored, "MC-E01")["expect"][1]["drafts"][0]
-        .as_object_mut()
-        .expect("a draft")
-        .remove("quorum");
-    doctored
+    with(fixture, "MC-E01", pointer, value)
 }
 
 /// The view, the classification and the dry run are the runtime's ports. An instrument out of the
