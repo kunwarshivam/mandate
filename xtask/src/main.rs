@@ -1354,7 +1354,7 @@ fn mutants_args(
         "--test-tool",
         "nextest",
         "--jobs",
-        "2",
+        MUTANT_JOBS,
         "--output",
         "target",
         "--timeout",
@@ -1566,6 +1566,18 @@ fn unjudged_mutants(
 const MUTANTS_OUT: &str = "target/mutants.out";
 const REFCASES: &str = "mandate-refcases";
 
+/// How many mutants cargo-mutants tests at once.
+///
+/// One, not two, because two buys no throughput and costs the predictability a timeout needs
+/// (DEC-498). Measured on `ubuntu-24.04` over four runs of the same nine mutants: two concurrent
+/// workers finish a mutant in 83 to 108 seconds of wall clock and one finishes it in 82 to 99, so
+/// the second worker returns nothing — the runner's cores are already saturated by one nextest
+/// process. What it does change is how long any single mutant takes, because the two contend:
+/// 133–181 seconds of test phase at two workers against 63–83 at one. The shard's critical path
+/// is then `k` mutants in a row rather than waves whose length has to be bounded by a worst pair,
+/// and [`MUTANT_TEST_TIMEOUT`] sits well above the slowest run instead of under it.
+const MUTANT_JOBS: &str = "1";
+
 /// How long one mutant's tests may run before cargo-mutants calls it a timeout, in seconds.
 ///
 /// Set explicitly because the value cargo-mutants derives is wrong for this gate and wrong in the
@@ -1574,10 +1586,13 @@ const REFCASES: &str = "mandate-refcases";
 /// [`REFCASES`], which [`external_oracles`] adds to the mutants but not to the baseline. So the
 /// baseline measures a second of journal tests, the floor gives twenty seconds, and a mutant that
 /// the reference harness catches in its thirtieth second is reported `TIMEOUT` instead of caught.
-/// DEC-498's measurement run met exactly that: nine mutants, nine timeouts, every one at the
-/// twenty-second cap. Three minutes is about three times the whole reference package, so only a
-/// mutation that actually hangs reaches it, and the number does not move with what a baseline
-/// happens to cover.
+/// DEC-498's first measurement run met exactly that: nine mutants, nine timeouts, every one at
+/// the twenty-second cap.
+///
+/// Three minutes against the 83 seconds that was the slowest test phase over four measured runs
+/// at [`MUTANT_JOBS`] workers, so a mutant the harness judges at all is judged, and only a
+/// mutation that hangs reaches the cap. The margin is the reason the job count is one: at two
+/// workers the same nine mutants reached 181 seconds, which this timeout would have cut off.
 const MUTANT_TEST_TIMEOUT: &str = "180";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
@@ -3226,6 +3241,15 @@ mod tests {
             Some(MUTANT_TEST_TIMEOUT),
             "the per-mutant timeout is set here, not derived from a baseline that does not run \
              the reference package the mutants do (DEC-498)"
+        );
+        assert_eq!(
+            unsharded
+                .windows(2)
+                .find(|pair| pair[0] == "--jobs")
+                .map(|pair| pair[1].as_str()),
+            Some("1"),
+            "one mutant at a time, so a shard's critical path is its mutants in a row and the \
+             timeout keeps the margin DEC-498 measured"
         );
 
         let sharded = mutants_args(
