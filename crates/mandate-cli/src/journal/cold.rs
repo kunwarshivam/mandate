@@ -1,0 +1,133 @@
+//! `mandate journal verify-cold`: journal spec §11's per-range checks over a cold-store export —
+//! a directory holding each segment's file (§6.2's JSON Lines) beside its manifest — against a
+//! trusted start and, when they are given, an artifact store (§6.3), an anchor (§10) and the
+//! anchor's timestamp token, through `mandate-journal-cold`'s own checks (backlog E5-8, DEC-490;
+//! E5-4's `verify` is the hot-store half over one segment file).
+//!
+//! The command owes the auditor one thing above all: it never vouches for an export it cannot
+//! cover. A path it cannot read, a segment without its manifest, a manifest without its file, or
+//! no segment at all is refused with a stable code before anything is reported; the segment
+//! checks fail closed in DEC-264's order and surface as the cold crate's own failure; an anchor
+//! whose head the verified range does not hold fails `anchor_head_mismatch`; and a timestamp
+//! token is never reported verified until DEC-265 item 1's crypto half lands — a token holding
+//! the anchor's imprint is [`ColdFailure::TsaVerificationIncomplete`], a non-zero exit.
+
+use std::fmt;
+use std::io::Write;
+use std::path::PathBuf;
+
+use clap::Args;
+use mandate_journal::RangeCheck;
+use mandate_journal_cold::{ColdCheck, ColdFailure};
+
+use crate::control::ControlError;
+use crate::journal::Span;
+
+#[derive(Debug, Args)]
+pub struct VerifyColdArgs {
+    /// The cold export directory (DEC-490): each segment is `<name>.jsonl`, one §6.2 export line
+    /// per event in `seq` order, beside its manifest `<name>.manifest.json`, the canonical bytes
+    /// of DEC-263's six fields. Segments are walked in the order of their manifests' `first_seq`,
+    /// whatever their names; a manifest that is not one is walked last.
+    pub export: PathBuf,
+    /// The artifact store directory holding every artifact the export's events reference. Without
+    /// it, an event that names one fails `artifact_missing`.
+    #[arg(long)]
+    pub store: Option<PathBuf>,
+    /// An anchor file to check the verified range against once every segment check has passed:
+    /// canonical JSON `{"leaves":[{"hash":…,"seq":…,"stream_id":…}],"root":…}`, as
+    /// `AnchorComputed` records it. Its head must be an event the range verified.
+    #[arg(long)]
+    pub anchor: Option<PathBuf>,
+    /// The anchor's RFC 3161 timestamp token, as stored. It must contain the anchor's imprint
+    /// (`tsa_token_invalid` otherwise), and it is never reported verified until DEC-265 item 1's
+    /// crypto half lands: the result is `tsa_verification_incomplete`, a non-zero exit.
+    #[arg(long, requires = "anchor")]
+    pub token: Option<PathBuf>,
+    /// The `seq` the range starts at, from the manifest or anchor the start is trusted from.
+    /// Default 1: the whole stream from its start. The first segment may begin before it.
+    #[arg(long, requires = "trusted_prev_hash")]
+    pub from_seq: Option<u64>,
+    /// The trusted hash the event at `--from-seq` chains from, from the same manifest or anchor.
+    /// Default 64 zeros, the genesis start.
+    #[arg(long, requires = "from_seq")]
+    pub trusted_prev_hash: Option<String>,
+}
+
+/// The result word a run with a token ends on until DEC-265 item 1's crypto half lands: the
+/// token holds the anchor's imprint, and nothing more was proven (DEC-490 item 6).
+pub const TSA_VERIFICATION_INCOMPLETE: &str = "tsa_verification_incomplete";
+
+/// The run's result: everything verified, or the one failure reported first. The segment checks
+/// and the per-event checks run in range order first (DEC-264), then the anchor's two checks,
+/// then the token's, so a failing export is described by its first failing check alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColdOutcome {
+    /// Every check passed over the span the trusted start and the segments cover. Never the
+    /// answer when a token was given (DEC-265 item 1).
+    Verified(Span),
+    /// The cold crate's own failure, unchanged: a per-event check inside a segment, a segment
+    /// check at the `seq` the range expected, or the token's two answers.
+    Cold(ColdFailure),
+    /// An anchor check failed although every segment and per-event check passed.
+    Range(RangeCheck),
+}
+
+impl ColdOutcome {
+    /// The check code that failed — spec §11's word, or [`TSA_VERIFICATION_INCOMPLETE`] — or
+    /// `None` when everything verified.
+    #[must_use]
+    pub fn code(&self) -> Option<&'static str> {
+        match self {
+            Self::Verified(_) => None,
+            Self::Cold(ColdFailure::Event(failure)) => Some(failure.check.code()),
+            Self::Cold(ColdFailure::Segment { check, .. }) => Some(check.code()),
+            Self::Cold(ColdFailure::TsaTokenInvalid) => Some(ColdCheck::TsaTokenInvalid.code()),
+            Self::Cold(ColdFailure::TsaVerificationIncomplete) => Some(TSA_VERIFICATION_INCOMPLETE),
+            Self::Range(check) => Some(check.code()),
+        }
+    }
+
+    /// Whether the command must exit with a non-zero status: anything but a verified span.
+    #[must_use]
+    pub fn failed(&self) -> bool {
+        self.code().is_some()
+    }
+}
+
+impl fmt::Display for ColdOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Verified(span) => write!(
+                f,
+                "verified, stream {}, seq {} to {}, last hash {}",
+                span.stream_id, span.first_seq, span.last_seq, span.last_hash
+            ),
+            Self::Cold(ColdFailure::Event(failure)) => {
+                write!(f, "failed, seq {}, {}", failure.seq, failure.check.code())
+            }
+            Self::Cold(ColdFailure::Segment { at_seq, check }) => {
+                write!(f, "failed, seq {at_seq}, {}", check.code())
+            }
+            Self::Cold(ColdFailure::TsaTokenInvalid) => {
+                write!(f, "failed, {}", ColdCheck::TsaTokenInvalid.code())
+            }
+            Self::Cold(ColdFailure::TsaVerificationIncomplete) => {
+                write!(f, "failed, {TSA_VERIFICATION_INCOMPLETE}")
+            }
+            Self::Range(check) => write!(f, "failed, {}", check.code()),
+        }
+    }
+}
+
+/// Verifies the cold export `args` names, writing the report to `report`. The returned outcome
+/// carries the exit status: [`ColdOutcome::failed`]. An input the command cannot cover is
+/// refused through the error with its [`crate::journal::Refusal`] code first, and nothing is
+/// reported.
+///
+/// # Errors
+/// Returns the input refusal, code first, when the export cannot be covered.
+pub fn verify(args: &VerifyColdArgs, report: &mut impl Write) -> anyhow::Result<ColdOutcome> {
+    let _ = (args, report);
+    Err(ControlError::Unimplemented { story: "E5-8" }.into())
+}

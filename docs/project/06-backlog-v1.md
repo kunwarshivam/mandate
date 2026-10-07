@@ -296,7 +296,9 @@ the spec invariants (DP-n) its tests cover.
   a directory of segment files and manifests against an anchor and a trusted start — so that I
   can verify long-lived records without writing code (FR-7.5; E5-4's command over one exported
   stream is the hot-store half; E5-6's checks through the CLI, which the E5-6 brief left to "the
-  CLI calls them when its story says"). `mandate-cli` is safety-critical, DEC-77 sequence.
+  CLI calls them when its story says"). `mandate-cli` is safety-critical, DEC-77 sequence. In
+  progress on claim [#645](https://github.com/kunwarshivam/mandate/issues/645): DEC-490 and the
+  [task brief](tasks/E5-8-cold-verify-cli.md), the tests PR on `claude/hejxo4-e5-8-tests`.
   *Accepted when:* the command runs §11's per-range checks through `mandate-journal-cold` over a
   cold export, reports the first failure with its code and a non-zero exit, never vouches for an
   export it cannot cover, and never answers `Ok` for a timestamp token until DEC-265 item 1's

@@ -11,7 +11,9 @@
 //! The `mandate` command line. `download` fetches Alpaca historical bars and trades into Parquet
 //! datasets (backlog E2-1); `inspect` reports what a stored dataset covers and whether to trust
 //! it (E2-2); `journal verify` runs journal spec §11 over an exported journal and its artifact
-//! store, and `artifact put` and `get` supply and fetch those artifacts (E5-4). `approvals` and
+//! store, and `artifact put` and `get` supply and fetch those artifacts (E5-4); `journal
+//! verify-cold` runs the cold store's per-range checks over a directory of segments and
+//! manifests (E5-8). `approvals` and
 //! `agent` are M7's owner control: the inbox, the owner's answers, and the owner's commands, each
 //! committed to the workspace control stream (E8-1 to E8-3). Their `clap` commands land once
 //! `mandate-journal` registers the control stream's schemas, without which a real journal refuses

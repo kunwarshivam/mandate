@@ -46,6 +46,13 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Command::Journal(JournalCommand::VerifyCold(args)) => {
+            let outcome = journal::cold::verify(&args, &mut io::stdout().lock())?;
+            if outcome.failed() {
+                bail!("{outcome}");
+            }
+            Ok(())
+        }
         Command::Artifact(ArtifactCommand::Put(args)) => {
             artifact::put(&args, &mut io::stdout().lock())?;
             Ok(())
