@@ -406,21 +406,21 @@ Lessons from this wave:
 
 ## Next, in order
 
-As of 2026-10-05, while #598 is in final verification. Open PRs and claims on GitHub are the live
-record.
+As of 2026-10-07, after the founder's DEC-502. Open PRs and claims on GitHub are the live record.
 
-1. **The tracer (E7-7).** Finish #598's full local check, green CI, and independent review. After
-   those gates pass, run the one external order only with explicit founder confirmation,
-   paper-only credentials, and a founder-selected instrument, as DEC-450 requires. PR #603's paper
-   assembly reads the trailing minute bars from the data host and computes its figures in their
-   owning crates under accepted DEC-471, including pure safety-critical `mandate-liquidity`.
-2. **Tripwires (E6-13).** The MC-W01 to MC-W57 implementation in the DEC-77 sequence.
-3. **M7's remainder:** the CLI's `clap` wiring of the inbox and owner commands, email, one chat
-   channel, and the pending MC-E cases.
-4. **Journal (M4):** E5-5 (the personal-data vault) and E5-7 to E5-9 (the cold store's operational
-   half, its CLI wiring, the examination bundle), all safety-critical; DEC-265 item 1 waits on the
-   founder.
-5. **ADR-0003's remaining code stories** (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5), each under
+1. **E7-4 slice 7, the agent-scoped kill switch (DEC-485).** Nearly done; it finishes first.
+2. **The first real paper trade (DEC-502, DEC-450).** One BTC/USD order on the founder's Alpaca
+   paper account through the production cycle API, with the deployment built from a confirmed
+   mandate version and the model output from the registered `quant.ma_crossover` through the model
+   registry (E15-7) and a model gateway (E15-6). E7-19 slice 5 makes the paper adapter call that
+   API and deletes E7-7's AAPL assembly, which is not run. The path's brief sets the slices and
+   what the connector still needs for crypto (its minute bars for the liquidity facts).
+3. **Tripwires (E6-13).** The MC-W01 to MC-W57 implementation in the DEC-77 sequence.
+4. **M7's remainder:** the CLI's `clap` wiring of the inbox and owner commands, email, one chat
+   channel, and the full agent process (E19-1) the soak needs.
+5. **Journal (M4):** E5-5 (the personal-data vault), E5-7 and E5-9 (the cold store's operational
+   half, the examination bundle), all safety-critical; DEC-265 item 1 waits on the founder.
+6. **ADR-0003's remaining code stories** (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5), each under
    the DEC-77 sequence with its own claim issue.
 
 Streams that touch different crates run in parallel; reviews and merges run one at a time.
