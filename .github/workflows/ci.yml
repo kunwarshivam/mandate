@@ -67,7 +67,7 @@ jobs:
       - name: Install actionlint (checksum-verified)
         if: steps.change.outputs.docs_only != 'true'
         run: |
-          curl -sSfL -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum --check
           tar xzf actionlint.tgz actionlint && sudo install actionlint /usr/local/bin/ && rm actionlint actionlint.tgz
       # `test` runs xtask's own tests, and one of them drives the whole mutation gate over a fixture
@@ -75,7 +75,7 @@ jobs:
       - name: Install cargo-mutants (checksum-verified)
         if: steps.change.outputs.docs_only != 'true'
         run: |
-          curl -sSfL -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
           echo "${CARGO_MUTANTS_SHA256}  cargo-mutants.tgz" | sha256sum --check
           tar xzf cargo-mutants.tgz cargo-mutants && sudo install cargo-mutants /usr/local/bin/ && rm cargo-mutants cargo-mutants.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
@@ -128,7 +128,7 @@ jobs:
       - name: Install gitleaks (checksum-verified)
         if: steps.change.outputs.docs_only != 'true'
         run: |
-          curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
           tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
@@ -174,7 +174,7 @@ jobs:
       - name: Install cargo-mutants (checksum-verified)
         if: steps.change.outputs.docs_only != 'true'
         run: |
-          curl -sSfL -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
           echo "${CARGO_MUTANTS_SHA256}  cargo-mutants.tgz" | sha256sum --check
           tar xzf cargo-mutants.tgz cargo-mutants && sudo install cargo-mutants /usr/local/bin/ && rm cargo-mutants cargo-mutants.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
