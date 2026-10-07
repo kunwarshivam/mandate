@@ -3013,13 +3013,13 @@ mod tests {
         BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, MutantShard,
         MutatedCrate, PendingTest, PendingTestRun, REFCASES, TestOutcome, actionlint_workflows,
         backticked_paths, base_ref_in, ci, classify, contains_dec_id, contains_word,
-        external_oracles, failure_cause, first_panic_line, generated_pending_markers,
-        has_pending_tests, is_pending_marker, is_stub_function, lint, listed_mutant_counts,
-        live_test_counts, metadata_in, mutant_verdicts, mutants, mutants_args, mutants_outcome,
-        mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
-        unjudged_mutants, verdicts, workspace_closure,
+        external_oracles, failure_cause, files_by_extension, first_panic_line,
+        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function, lint,
+        listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts, mutants,
+        mutants_args, mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems,
+        pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_outcomes, unjudged_mutants, verdicts, workspace_closure,
     };
 
     #[test]
@@ -3156,8 +3156,10 @@ mod tests {
             "mandate-approval",
             "mandate-builder",
             "mandate-canon",
+            "mandate-domain",
             "mandate-executor",
             "mandate-journal",
+            "mandate-num",
             "mandate-research",
             "mandate-risk",
             "mandate-runtime",
@@ -3175,6 +3177,31 @@ mod tests {
                 "and the run must name the package that holds them: {mutated:?}"
             );
         }
+        Ok(())
+    }
+
+    /// What makes the dependency closure the suites' exact reach rather than an estimate of it: a
+    /// test can only exercise code its package links, and the reference suites link everything
+    /// in-process. A suite that spawned a binary would reach a crate the closure does not name,
+    /// and DEC-497's whole argument would be an approximation again, so the gate refuses one.
+    #[test]
+    fn no_reference_suite_reaches_a_crate_by_spawning_it() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the workspace root above xtask")?;
+        let mut spawning = Vec::new();
+        for source in files_by_extension(&root.join("crates/mandate-refcases"), &["rs"])? {
+            let text = fs::read_to_string(&source)?;
+            if text.contains("Command::new") || text.contains("CARGO_BIN_EXE") {
+                spawning.push(source.display().to_string());
+            }
+        }
+        assert!(
+            spawning.is_empty(),
+            "the reference suites must reach every crate they judge through their own dependency \
+             graph, which `cargo metadata` can see, and not through a subprocess, which it cannot \
+             (DEC-497): {spawning:?}"
+        );
         Ok(())
     }
 
