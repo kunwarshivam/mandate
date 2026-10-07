@@ -23,6 +23,7 @@ import argparse
 import calendar
 import copy
 import functools
+import json
 import math
 import re
 import sys
@@ -36,25 +37,32 @@ import research
 import risk_state
 import yaml
 from common import (
-    apply_change,
-    artifact_ref,
-    ascending,
     BOOL,
-    canon,
-    canon_bytes,
-    change,
     CONFIG_REF_KINDS,
     DEC,
-    delete,
     DIGEST,
-    digest_strings,
-    draft_of,
     ENVELOPE,
-    epoch_seconds,
-    hash_chain,
     ID,
     IDENT,
     INT,
+    REF,
+    STEP_UP,
+    STR,
+    TS,
+    ULID,
+    T,
+    Violation,
+    apply_change,
+    artifact_ref,
+    ascending,
+    canon,
+    canon_bytes,
+    change,
+    delete,
+    digest_strings,
+    draft_of,
+    epoch_seconds,
+    hash_chain,
     is_ulid,
     list_of,
     normalize_decimal,
@@ -63,15 +71,8 @@ from common import (
     parse_instant,
     rec,
     rechain,
-    REF,
     sha256_hex,
-    STEP_UP,
-    STR,
-    T,
-    TS,
     type_violations,
-    ULID,
-    Violation,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -146,7 +147,9 @@ ASK_SUPPRESSED = one_of("budget", "skipped_today", "recent_timeout")
 REQUESTED_BY = one_of("agent", "owner", "client")
 BUILTIN_LABEL = "builtin_risk_reducing"
 DELEGATION_PREFIX = "delegation:"
-DECIDED_BY = re.compile(r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|(rule|delegation):[A-Za-z0-9_-]+)\Z")
+DECIDED_BY = re.compile(
+    r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|(rule|delegation):[A-Za-z0-9_-]+)\Z"
+)
 
 SCHEMAS: dict[tuple[str, str], T] = {
     ("agent", "StreamOpened"): rec(("stream_type", one_of("agent")), ("workspace_id", ID), ("agent_id", ID)),
@@ -251,7 +254,6 @@ def schema_for(event_type: str, skip: frozenset[str]) -> T:
     return schema
 
 
-
 def strictness(mode: str) -> int:
     return MODES.index(mode)
 
@@ -279,26 +281,63 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         by, classified = p["decided_by"], p["autonomy"] is not None
         labelled = (by is not None) == classified and (not classified or (by == BUILTIN_LABEL) != adds_risk)
         rule("5.decided_by", labelled, "schema", "payload.decided_by")
-        rule("5.decided_by_label", by is None or bool(DECIDED_BY.match(by)), "non_canonical", "payload.decided_by")
-        rule(6, p["dry_run"] != "defer" or p["purpose"] == "discretionary_exit", "schema", "payload.dry_run")
-        rule(7, p["autonomy"] in (None, "auto") or p["purpose"] in RISK_ADDING, "schema", "payload.autonomy")
+        rule(
+            "5.decided_by_label",
+            by is None or bool(DECIDED_BY.match(by)),
+            "non_canonical",
+            "payload.decided_by",
+        )
+        rule(
+            6,
+            p["dry_run"] != "defer" or p["purpose"] == "discretionary_exit",
+            "schema",
+            "payload.dry_run",
+        )
+        rule(
+            7,
+            p["autonomy"] in (None, "auto") or p["purpose"] in RISK_ADDING,
+            "schema",
+            "payload.autonomy",
+        )
         asked = p["autonomy"] == "ask"
-        rule("7.ask_suppressed", p["ask_suppressed"] is None or asked, "schema", "payload.ask_suppressed")
+        rule(
+            "7.ask_suppressed",
+            p["ask_suppressed"] is None or asked,
+            "schema",
+            "payload.ask_suppressed",
+        )
         lifted = by[len(DELEGATION_PREFIX) :] if by is not None and by.startswith(DELEGATION_PREFIX) else None
         delegated = p["delegation_id"] == lifted and (lifted is None or p["autonomy"] == "auto")
         rule("7.delegation", delegated, "schema", "payload.delegation_id")
         client = p["requested_by"] == "client"
-        rule("7.client_id", (p["client_id"] is not None) == client, "schema", "payload.client_id")
-        rule("7.client_ceiling", not (client and adds_risk and p["autonomy"] == "auto"), "schema", "payload.autonomy")
+        rule(
+            "7.client_id",
+            (p["client_id"] is not None) == client,
+            "schema",
+            "payload.client_id",
+        )
+        rule(
+            "7.client_ceiling",
+            not (client and adds_risk and p["autonomy"] == "auto"),
+            "schema",
+            "payload.autonomy",
+        )
         ceiling_label = by != "client_ceiling" or (client and asked)
         rule("7.client_ceiling_label", ceiling_label, "schema", "payload.decided_by")
         discretionary = p["purpose"] == "discretionary_exit"
-        rule("8.exit_origin", (p["exit_origin"] is not None) == discretionary, "schema", "payload.exit_origin")
+        rule(
+            "8.exit_origin",
+            (p["exit_origin"] is not None) == discretionary,
+            "schema",
+            "payload.exit_origin",
+        )
         evaluated = adds_risk or p["exit_origin"] == "signal"
         if "regress.rule_8_numbers_on_every_exit_but_risk" in skip:
             evaluated = p["purpose"] != "risk_exit"
         wrong = [
-            m for m in ("exit_conviction", "buy_conviction", "combined_score") if (p[m] is not None) != evaluated
+            m
+            for m in ("exit_conviction", "buy_conviction", "combined_score")
+            if (p[m] is not None) != evaluated
         ]
         if not evaluated and "regress.rule_8_numbers_on_every_exit_but_risk" not in skip:
             wrong += [m for m in ("outputs_used", "model_weights", "clips_applied") if p[m]]
@@ -322,9 +361,19 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         wrong = [m for m in members if (p[m] is not None) != p["confirmed"]]
         rule(12, not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
         valid = p["step_up_status"] == "valid"
-        rule("12.step_up", (p["step_up"] is not None) == valid, "schema", "payload.step_up")
+        rule(
+            "12.step_up",
+            (p["step_up"] is not None) == valid,
+            "schema",
+            "payload.step_up",
+        )
     if event_type == "ModelOutputRecorded" and (p["thesis_id"] is None) != (p["lineage_id"] is None):
-        rule(13, False, "schema", "payload.thesis_id" if p["thesis_id"] is None else "payload.lineage_id")
+        rule(
+            13,
+            False,
+            "schema",
+            "payload.thesis_id" if p["thesis_id"] is None else "payload.lineage_id",
+        )
     return out
 
 
@@ -399,7 +448,10 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     schema = schema_for(event_type, skip)
     payload_types = type_violations(schema, draft["payload"], "payload", skip)
     out += payload_types
-    as_read = {**draft, "payload": {name: draft["payload"].get(name) for name, _ in schema.fields}}
+    as_read = {
+        **draft,
+        "payload": {name: draft["payload"].get(name) for name, _ in schema.fields},
+    }
     if not payload_types:
         out += consistency_violations(event_type, as_read, skip)
     if "artifact_refs" not in skip and draft["artifact_refs"] != sorted(digest_strings(draft["payload"])):
@@ -442,7 +494,9 @@ def batch_violations(drafts: list[dict], skip: frozenset[str] = frozenset()) -> 
     return out
 
 
-def verify_range(entries: list[dict], from_seq: int, skip: frozenset[str] = frozenset()) -> list[tuple[int, str]]:
+def verify_range(
+    entries: list[dict], from_seq: int, skip: frozenset[str] = frozenset()
+) -> list[tuple[int, str]]:
     """§11's per-range checks that span agent-stream events, over a range whose earlier events are
     not in hand: a reference to an event before `from_seq` is not checked."""
     seen: dict[str, dict] = {}
@@ -452,7 +506,11 @@ def verify_range(entries: list[dict], from_seq: int, skip: frozenset[str] = froz
         p = body["payload"]
         if body["event_type"] == "IntentProposed" and "verify.intent_action_mismatch" not in skip:
             cause = seen.get(body["causation_id"])
-            if cause is not None and cause["event_type"] == "DecisionMade" and action_of(cause["payload"]) != action_of(p):
+            if (
+                cause is not None
+                and cause["event_type"] == "DecisionMade"
+                and action_of(cause["payload"]) != action_of(p)
+            ):
                 out.append((body["seq"], "intent_action_mismatch"))
         if body["event_type"] == "KillSwitchActivated" and p["mode_event"] is not None:
             named = seen.get(p["mode_event"])
@@ -475,10 +533,13 @@ AGENT = "agent_a"
 STREAM = f"agent:{WORKSPACE}:{AGENT}"
 INSTRUMENT = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
 HELD_INSTRUMENT = "5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f"
-MANDATE = {
-    "mandate_version": artifact_ref({"kind": "mandate_version", "version": "fixture-v1"})
+MANDATE = {"mandate_version": artifact_ref({"kind": "mandate_version", "version": "fixture-v1"})}
+ACTOR = {
+    "kind": "agent",
+    "id": AGENT,
+    "version": "0.1.0",
+    "build": "sha256:" + "c" * 64,
 }
-ACTOR = {"kind": "agent", "id": AGENT, "version": "0.1.0", "build": "sha256:" + "c" * 64}
 INTENT_ID = "01J8Z3M1P0000000000000000X"
 CHAIN = (
     ("opened", "01J8Z3JYA000000000000000G1"),
@@ -529,6 +590,33 @@ MODEL_CONTENT = {
     "code": "reference fixture: stands for the model code, prompt, and parameter schema (mandate spec §8.1)",
     "parameter_schema": {"lookback_days": "integer"},
 }
+POLICY_SET = {
+    "kind": "policy_set",
+    "policy_set_version": 1,
+    "levels": [
+        {
+            "policy_schema_version": 1,
+            "level": "platform",
+            "profile": "retail",
+            "values": {"auto_allowed": True, "max_order_usd": "1500"},
+        }
+    ],
+}
+MODEL_REGISTRY = {
+    "kind": "model_registry",
+    "model_registry_version": 1,
+    "models": [
+        {
+            "admits_instruments": False,
+            "content_hash": artifact_ref(MODEL_CONTENT),
+            "model_id": "quant.mean_reversion",
+            "model_version": "1.0.0",
+            "params": ["lookback_days"],
+        },
+    ],
+}
+POLICY_SET_REF = artifact_ref(POLICY_SET)
+MODEL_REGISTRY_REF = artifact_ref(MODEL_REGISTRY)
 ARTIFACTS = {"quote_snapshot": QUOTE_SNAPSHOT, "model_content": MODEL_CONTENT}
 
 DERIVATION = {
@@ -577,7 +665,10 @@ DERIVATION = {
     "max_exit_offset": "0.03",
     "step_up_max_age_s": 300,
     "goal": "profit_stop",
-    "regular_session_utc": {"open": "2026-09-21T13:30:00.000000000Z", "close": "2026-09-21T20:00:00.000000000Z"},
+    "regular_session_utc": {
+        "open": "2026-09-21T13:30:00.000000000Z",
+        "close": "2026-09-21T20:00:00.000000000Z",
+    },
     "held": {"instrument_id": HELD_INSTRUMENT, "qty": "5", "mark": "100"},
     "now": "2026-09-21T14:00:00.000000000Z",
     "models": [
@@ -613,7 +704,6 @@ def first_rung_sell_limit(d: dict) -> str:
     """Trading spec §5.6 step 1 for a sell, rounded up to the tick as §2.1 rounds a sell limit."""
     raw = Decimal(d["goal_exit_reference_bid"]) * (1 - Decimal(d["exit_offset"]))
     return normalize_decimal(str(raw.quantize(Decimal(d["equity_tick"]), rounding=ROUND_CEILING)))
-
 
 
 def event(name: str, event_type: str, at: str, recorded: str, payload: dict, **envelope) -> dict:
@@ -848,7 +938,12 @@ def chain_bodies() -> list[dict]:
             "AgentModeChanged",
             f"{day}20:30:00.000000000Z",
             f"{day}20:30:00.000100000Z",
-            {"from": "normal", "to": "stopped", "reason": "kill_switch", "lifecycle": "normal"},
+            {
+                "from": "normal",
+                "to": "stopped",
+                "reason": "kill_switch",
+                "lifecycle": "normal",
+            },
         ),
         event(
             "owner_kill_switch",
@@ -873,13 +968,17 @@ def chain_bodies() -> list[dict]:
             "KillSwitchActivated",
             f"{day}20:30:00.000000000Z",
             f"{day}20:30:00.000300000Z",
-            {"scope": "agent", "subject": AGENT, "initiator": "owner", "mode_event": ID["kill_switch_mode"]},
+            {
+                "scope": "agent",
+                "subject": AGENT,
+                "initiator": "owner",
+                "mode_event": ID["kill_switch_mode"],
+            },
             causation_id=COMMAND["kill_switch"],
         ),
     ]
     assert [b["seq"] for b in bodies] == list(range(1, len(CHAIN) + 1)), "bodies follow CHAIN's order"
     return bodies
-
 
 
 def invalid(name, clause, base, changes, reason, path):
@@ -1085,7 +1184,10 @@ def invalid_drafts() -> list[dict]:
             "decision_deny_with_autonomy",
             "§9.1 rule 5",
             "decision",
-            [change("payload.dry_run", "deny"), change("payload.reason_code", "insufficient_buying_power")],
+            [
+                change("payload.dry_run", "deny"),
+                change("payload.reason_code", "insufficient_buying_power"),
+            ],
             "schema",
             "payload.autonomy",
         ),
@@ -1128,7 +1230,10 @@ def invalid_drafts() -> list[dict]:
             "decision_ask_suppressed_unknown_reason",
             "§9.1 DecisionMade",
             "decision",
-            [change("payload.autonomy", "ask"), change("payload.ask_suppressed", "quiet_hours")],
+            [
+                change("payload.autonomy", "ask"),
+                change("payload.ask_suppressed", "quiet_hours"),
+            ],
             "non_canonical",
             "payload.ask_suppressed",
         ),
@@ -1200,7 +1305,10 @@ def invalid_drafts() -> list[dict]:
             "decision_delegation_names_another_id",
             "§9.1 rule 7",
             "decision",
-            [change("payload.decided_by", "delegation:d1"), change("payload.delegation_id", "d2")],
+            [
+                change("payload.decided_by", "delegation:d1"),
+                change("payload.delegation_id", "d2"),
+            ],
             "schema",
             "payload.delegation_id",
         ),
@@ -1272,7 +1380,10 @@ def invalid_drafts() -> list[dict]:
             "decision_client_ceiling_on_agent_request",
             "§9.1 rule 7",
             "decision",
-            [change("payload.autonomy", "ask"), change("payload.decided_by", "client_ceiling")],
+            [
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "client_ceiling"),
+            ],
             "schema",
             "payload.decided_by",
         ),
@@ -1436,7 +1547,10 @@ def invalid_drafts() -> list[dict]:
             "kill_switch_other_workspace",
             "§9.1 rule 15",
             "kill_switch",
-            [change("payload.scope", "workspace"), change("payload.subject", "ws_01J8Z9")],
+            [
+                change("payload.scope", "workspace"),
+                change("payload.subject", "ws_01J8Z9"),
+            ],
             "stream_mismatch",
             "payload.subject",
         ),
@@ -1565,19 +1679,28 @@ def valid_drafts() -> list[dict]:
             "decision_ask_suppressed_by_budget",
             "§9.1 rule 7",
             "decision",
-            [change("payload.autonomy", "ask"), change("payload.ask_suppressed", "budget")],
+            [
+                change("payload.autonomy", "ask"),
+                change("payload.ask_suppressed", "budget"),
+            ],
         ),
         valid(
             "decision_lifted_by_delegation",
             "§9.1 rule 7",
             "decision",
-            [change("payload.decided_by", "delegation:d1"), change("payload.delegation_id", "d1")],
+            [
+                change("payload.decided_by", "delegation:d1"),
+                change("payload.delegation_id", "d1"),
+            ],
         ),
         valid(
             "decision_asked_by_admission_ceiling",
             "§9.1 rule 5",
             "decision",
-            [change("payload.autonomy", "ask"), change("payload.decided_by", "admission_ceiling")],
+            [
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "admission_ceiling"),
+            ],
         ),
         valid(
             "decision_owner_request_auto",
@@ -1646,7 +1769,10 @@ def valid_drafts() -> list[dict]:
             "owner_close_confirmed_bid_stale_step_up",
             "§9.1 OwnerExitRequested",
             "owner_close_confirmed",
-            [change("payload.step_up_status", "stale"), change("payload.step_up", None)],
+            [
+                change("payload.step_up_status", "stale"),
+                change("payload.step_up", None),
+            ],
         ),
         valid(
             "owner_kill_switch_confirmed_bid_without_step_up",
@@ -1681,9 +1807,21 @@ def batches() -> tuple[list[dict], list[dict]]:
     """Rule 10's second clause: a `DecisionMade` and its `IntentProposed` in one `append` batch."""
 
     def refused(path: str) -> dict:
-        return {"outcome": "Invalid", "reason": "schema", "path": path, "draft_index": 1}
+        return {
+            "outcome": "Invalid",
+            "reason": "schema",
+            "path": path,
+            "draft_index": 1,
+        }
 
-    accepted = [batch("decision_and_its_intent", "§9.1 rule 10", [("decision", []), ("intent", [])], {"outcome": "Valid"})]
+    accepted = [
+        batch(
+            "decision_and_its_intent",
+            "§9.1 rule 10",
+            [("decision", []), ("intent", [])],
+            {"outcome": "Valid"},
+        )
+    ]
     rejected = [
         batch(
             "intent_quantity_differs_from_its_decision",
@@ -1956,24 +2094,61 @@ def check_goal_exit(chain: list[dict], d: dict, decision: dict, goal: dict) -> l
     p = goal["payload"]
     whole = (decision["payload"]["instrument_id"], "sell", decision["payload"]["qty"])
     if d["goal"] != "profit_stop" or (p["instrument_id"], p["side"], p["qty"]) != whole:
-        problems.append(found("goal_exit.whole", "the profit_stop completion does not exit the whole position"))
+        problems.append(
+            found(
+                "goal_exit.whole",
+                "the profit_stop completion does not exit the whole position",
+            )
+        )
     if (p["purpose"], p["exit_origin"]) != ("discretionary_exit", "goal_completion"):
-        problems.append(found("goal_exit.origin", "a goal completion's exit is a discretionary exit of origin goal_completion"))
+        problems.append(
+            found(
+                "goal_exit.origin",
+                "a goal completion's exit is a discretionary exit of origin goal_completion",
+            )
+        )
     close = nanos(d["regular_session_utc"]["close"])
     if nanos(goal["event_time"]) >= close:
         code = outside_session_exit_defer_code()
         if (p["dry_run"], p["reason_code"]) != ("defer", code):
-            problems.append(found("goal_exit.defer", f"after the session a discretionary equity exit is deferred ({code})"))
+            problems.append(
+                found(
+                    "goal_exit.defer",
+                    f"after the session a discretionary equity exit is deferred ({code})",
+                )
+            )
         tick = Fraction(d["equity_tick"])
         rung = Fraction(d["goal_exit_reference_bid"]) * (1 - Fraction(d["exit_offset"]))
         limit = math.ceil(rung / tick) * tick
         if p["type"] != "limit" or p["limit_price"] is None or Fraction(p["limit_price"]) != limit:
-            problems.append(found("goal_exit.rung", "outside the session the exit is a limit at the ladder's first rung (§9.4, §5.6)"))
+            problems.append(
+                found(
+                    "goal_exit.rung",
+                    "outside the session the exit is a limit at the ladder's first rung (§9.4, §5.6)",
+                )
+            )
     if any(e["body"]["causation_id"] == goal["event_id"] for e in chain):
-        problems.append(found("goal_exit.proposes", "a deferred decision proposes nothing (mandate spec §6.2)"))
-    evaluated = ("exit_conviction", "buy_conviction", "combined_score", "outputs_used", "model_weights", "clips_applied")
+        problems.append(
+            found(
+                "goal_exit.proposes",
+                "a deferred decision proposes nothing (mandate spec §6.2)",
+            )
+        )
+    evaluated = (
+        "exit_conviction",
+        "buy_conviction",
+        "combined_score",
+        "outputs_used",
+        "model_weights",
+        "clips_applied",
+    )
     if any(p[m] not in (None, []) for m in evaluated):
-        problems.append(found("goal_exit.evaluated", "no order-builder evaluation produced the goal exit, so it carries none of its results"))
+        problems.append(
+            found(
+                "goal_exit.evaluated",
+                "no order-builder evaluation produced the goal exit, so it carries none of its results",
+            )
+        )
     return problems
 
 
@@ -1982,8 +2157,14 @@ def check_owner_exits(chain: list[dict], d: dict, decision: dict) -> list[str]:
     asked, with which step-up, and what each owner exit may and may not do."""
     problems = []
     bodies = [e["body"] for e in chain]
-    positions = {d["held"]["instrument_id"]: d["held"]["qty"], decision["payload"]["instrument_id"]: decision["payload"]["qty"]}
-    session = nanos(d["regular_session_utc"]["open"]), nanos(d["regular_session_utc"]["close"])
+    positions = {
+        d["held"]["instrument_id"]: d["held"]["qty"],
+        decision["payload"]["instrument_id"]: decision["payload"]["qty"],
+    }
+    session = (
+        nanos(d["regular_session_utc"]["open"]),
+        nanos(d["regular_session_utc"]["close"]),
+    )
     for owner in (b for b in bodies if b["event_type"] == "OwnerExitRequested"):
         p, at = owner["payload"], nanos(owner["event_time"])
         label = f"OwnerExitRequested seq {owner['seq']}"
@@ -1991,33 +2172,94 @@ def check_owner_exits(chain: list[dict], d: dict, decision: dict) -> list[str]:
             problems.append(found("owner_exits.user", f"{label}: the owner who asked is not recorded"))
         evidence = p["step_up"]
         if (evidence is not None) != (p["step_up_status"] == "valid"):
-            problems.append(found("owner_exits.step_up", f"{label}: step_up does not match step_up_status"))
-        if evidence is not None and not 0 <= at - nanos(evidence["authenticated_at"]) <= d["step_up_max_age_s"] * 10**9:
-            problems.append(found("owner_exits.fresh", f"{label}: step-up recorded as valid is not fresh at the command (DEC-156 item 8)"))
-        caused = [b for b in bodies if b["event_type"] == "IntentProposed" and b["causation_id"] == owner["event_id"]]
+            problems.append(
+                found(
+                    "owner_exits.step_up",
+                    f"{label}: step_up does not match step_up_status",
+                )
+            )
+        if (
+            evidence is not None
+            and not 0 <= at - nanos(evidence["authenticated_at"]) <= d["step_up_max_age_s"] * 10**9
+        ):
+            problems.append(
+                found(
+                    "owner_exits.fresh",
+                    f"{label}: step-up recorded as valid is not fresh at the command (DEC-156 item 8)",
+                )
+            )
+        caused = [
+            b
+            for b in bodies
+            if b["event_type"] == "IntentProposed" and b["causation_id"] == owner["event_id"]
+        ]
         in_session = session[0] <= at < session[1]
         if p["scope"] != "instrument":
             if caused:
-                problems.append(found("owner_exits.flatten", f"{label}: a kill switch's flatten is never a proposed intent (§9.1)"))
+                problems.append(
+                    found(
+                        "owner_exits.flatten",
+                        f"{label}: a kill switch's flatten is never a proposed intent (§9.1)",
+                    )
+                )
             continue
         if len(caused) != 1:
-            problems.append(found("owner_exits.one_intent", f"{label}: an owner close of one instrument proposes exactly one intent"))
+            problems.append(
+                found(
+                    "owner_exits.one_intent",
+                    f"{label}: an owner close of one instrument proposes exactly one intent",
+                )
+            )
             continue
         close = caused[0]["payload"]
-        if (close["instrument_id"], close["side"], close["purpose"]) != (p["subject"], "sell", "owner_exit"):
-            problems.append(found("owner_exits.sell", f"{label}: its intent is not an owner_exit sell of the named instrument"))
+        if (close["instrument_id"], close["side"], close["purpose"]) != (
+            p["subject"],
+            "sell",
+            "owner_exit",
+        ):
+            problems.append(
+                found(
+                    "owner_exits.sell",
+                    f"{label}: its intent is not an owner_exit sell of the named instrument",
+                )
+            )
         if close["qty"] != positions.get(p["subject"]):
-            problems.append(found("owner_exits.whole", f"{label}: its intent does not close the whole position"))
+            problems.append(
+                found(
+                    "owner_exits.whole",
+                    f"{label}: its intent does not close the whole position",
+                )
+            )
         if p["confirmed"]:
             floor = dec(d["owner_bid"]) * (1 - dec(d["max_exit_offset"]))
             if p["bid"] != d["owner_bid"] or dec(p["floor"]) != floor:
-                problems.append(found("owner_exits.floor", f"{label}: the floor is not the default floor of its confirmed bid"))
+                problems.append(
+                    found(
+                        "owner_exits.floor",
+                        f"{label}: the floor is not the default floor of its confirmed bid",
+                    )
+                )
             if close["type"] != "limit" or close["limit_price"] is None or dec(close["limit_price"]) < floor:
-                problems.append(found("owner_exits.priced", f"{label}: its intent may price below the confirmed floor"))
+                problems.append(
+                    found(
+                        "owner_exits.priced",
+                        f"{label}: its intent may price below the confirmed floor",
+                    )
+                )
             if in_session:
-                problems.append(found("owner_exits.confirmed_outside", f"{label}: the vector's confirmed close is meant to be outside the session"))
+                problems.append(
+                    found(
+                        "owner_exits.confirmed_outside",
+                        f"{label}: the vector's confirmed close is meant to be outside the session",
+                    )
+                )
         elif not in_session:
-            problems.append(found("owner_exits.session", f"{label}: without a confirmed bid an equity owner close sells only in the session"))
+            problems.append(
+                found(
+                    "owner_exits.session",
+                    f"{label}: without a confirmed bid an equity owner close sells only in the session",
+                )
+            )
     return problems
 
 
@@ -2031,7 +2273,11 @@ def copied_command(body: dict) -> str | None:
         case "KillSwitchActivated" if p["initiator"] == "owner":
             return "kill_switch"
         case "AgentModeChanged":
-            return {"owner_pause": "pause", "owner_resume": "resume", "owner_stop": "stop"}.get(p["reason"])
+            return {
+                "owner_pause": "pause",
+                "owner_resume": "resume",
+                "owner_stop": "stop",
+            }.get(p["reason"])
     return None
 
 
@@ -2052,23 +2298,53 @@ def check_owner_copies(chain: list[dict], valid_drafts: list[dict], d: dict) -> 
         label = f"{body['event_type']} {where}"
         command = commands.get(body["causation_id"])
         if command is None:
-            problems.append(found("owner_copies.cause", f"{label}: its cause is no control-stream OwnerCommandIssued"))
+            problems.append(
+                found(
+                    "owner_copies.cause",
+                    f"{label}: its cause is no control-stream OwnerCommandIssued",
+                )
+            )
             continue
         _, workspace, agent = body["stream_id"].split(":")
         p = body["payload"]
         subject = ("agent", agent) if body["event_type"] == "AgentModeChanged" else (p["scope"], p["subject"])
         if command["stream_id"] != f"ctl:{workspace}":
-            problems.append(found("owner_copies.stream", f"{label}: its command is not on its workspace's control stream"))
+            problems.append(
+                found(
+                    "owner_copies.stream",
+                    f"{label}: its command is not on its workspace's control stream",
+                )
+            )
         if command["command"] != kind:
-            problems.append(found("owner_copies.kind", f"{label}: copies the command {command['command']}, not {kind}"))
+            problems.append(
+                found(
+                    "owner_copies.kind",
+                    f"{label}: copies the command {command['command']}, not {kind}",
+                )
+            )
         if (command["scope"], command["subject"]) != subject:
-            problems.append(found("owner_copies.subject", f"{label}: its command addresses another subject"))
+            problems.append(
+                found(
+                    "owner_copies.subject",
+                    f"{label}: its command addresses another subject",
+                )
+            )
         if nanos(command["submitted_at"]) > nanos(body["event_time"]):
-            problems.append(found("owner_copies.submitted", f"{label}: copied before its command was submitted"))
+            problems.append(
+                found(
+                    "owner_copies.submitted",
+                    f"{label}: copied before its command was submitted",
+                )
+            )
         if on_chain:
             key = (body["event_type"], command["event_id"])
             if key in copied:
-                problems.append(found("owner_copies.at_most_once", f"{label}: its command is already copied into a {body['event_type']}"))
+                problems.append(
+                    found(
+                        "owner_copies.at_most_once",
+                        f"{label}: its command is already copied into a {body['event_type']}",
+                    )
+                )
             copied.add(key)
     return problems
 
@@ -2102,7 +2378,12 @@ def check_chain(section: dict, v3: dict) -> list[str]:
     for entry in chain:
         for ref in entry["body"]["artifact_refs"]:
             if ref not in stored:
-                problems.append(found("artifacts.missing", f"seq {entry['seq']}: artifact {ref} missing"))
+                problems.append(
+                    found(
+                        "artifacts.missing",
+                        f"seq {entry['seq']}: artifact {ref} missing",
+                    )
+                )
         for ref in entry["body"]["config_refs"].values():
             if ref not in stored:
                 problems.append(
@@ -2118,39 +2399,87 @@ def check_chain(section: dict, v3: dict) -> list[str]:
     expected = recompute_decision(chain, section["artifacts"], section["derivation"])
     for member, value in expected.items():
         if decision["payload"][member] != value:
-            problems.append(found("decision.recompute", f"DecisionMade.{member}: {decision['payload'][member]!r} != recomputed {value!r}"))
+            problems.append(
+                found(
+                    "decision.recompute",
+                    f"DecisionMade.{member}: {decision['payload'][member]!r} != recomputed {value!r}",
+                )
+            )
     intent = named["intent"]
     if intent["causation_id"] != decision["event_id"]:
         problems.append(found("intent.cause", "IntentProposed.causation_id is not the DecisionMade"))
     action = {k: decision["payload"][k] for k in intent["payload"]}
     if intent["payload"] != action:
-        problems.append(found("intent.action", "IntentProposed does not repeat the DecisionMade's action"))
+        problems.append(
+            found(
+                "intent.action",
+                "IntentProposed does not repeat the DecisionMade's action",
+            )
+        )
     received = next(e["body"] for e in v3["chain"] if e["event_type"] == "IntentReceived")
     copied = {k: v for k, v in received["payload"].items() if k not in ("intent_id", "agent_id")}
     if intent["payload"] != copied:
-        problems.append(found("received.intent", "IntentProposed differs from the IntentReceived vector less intent_id and agent_id"))
+        problems.append(
+            found(
+                "received.intent",
+                "IntentProposed differs from the IntentReceived vector less intent_id and agent_id",
+            )
+        )
     if (
         received["payload"]["intent_id"] != intent["event_id"]
         or received["causation_id"] != intent["event_id"]
     ):
-        problems.append(found("received.intent", "IntentReceived does not name the IntentProposed as its intent"))
+        problems.append(
+            found(
+                "received.intent",
+                "IntentReceived does not name the IntentProposed as its intent",
+            )
+        )
     if received["payload"]["agent_id"] != intent["stream_id"].split(":")[2]:
-        problems.append(found("received.intent", "IntentReceived.agent_id is not the agent stream's agent"))
+        problems.append(
+            found(
+                "received.intent",
+                "IntentReceived.agent_id is not the agent stream's agent",
+            )
+        )
     if not intent["recorded_at"] < received["recorded_at"]:
-        problems.append(found("received.intent", "IntentProposed must be recorded before the account stream copies it"))
+        problems.append(
+            found(
+                "received.intent",
+                "IntentProposed must be recorded before the account stream copies it",
+            )
+        )
     mode, switch = named["kill_switch_mode"], named["kill_switch"]
     if switch["payload"]["mode_event"] != mode["event_id"] or mode["payload"]["reason"] != "kill_switch":
-        problems.append(found("kill_switch.mode_event", "KillSwitchActivated.mode_event does not name its AgentModeChanged"))
+        problems.append(
+            found(
+                "kill_switch.mode_event",
+                "KillSwitchActivated.mode_event does not name its AgentModeChanged",
+            )
+        )
     if mode["payload"]["to"] != "stopped":
-        problems.append(found("kill_switch.stopped", "an owner kill switch's final mode is stopped (trading spec §5.5)"))
+        problems.append(
+            found(
+                "kill_switch.stopped",
+                "an owner kill switch's final mode is stopped (trading spec §5.5)",
+            )
+        )
     problems += check_goal_exit(chain, section["derivation"], decision, named["goal_exit"])
     problems += check_owner_exits(chain, section["derivation"], decision)
     problems += check_owner_copies(chain, section["valid_drafts"], section["derivation"])
     for case in section["invalid_drafts"]:
         got = violations(apply_changes(chain, case))
         want = case["expect"]
-        if len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"]):
-            problems.append(found("invalid_drafts", f"{case['name']}: expected exactly {want['reason']} at {want['path']}, got {got}"))
+        if len(got) != 1 or (got[0].reason, got[0].path) != (
+            want["reason"],
+            want["path"],
+        ):
+            problems.append(
+                found(
+                    "invalid_drafts",
+                    f"{case['name']}: expected exactly {want['reason']} at {want['path']}, got {got}",
+                )
+            )
     for case in section["valid_drafts"]:
         got = violations(apply_changes(chain, case))
         if got:
@@ -2158,18 +2487,38 @@ def check_chain(section: dict, v3: dict) -> list[str]:
     for case in section["valid_batches"] + section["invalid_batches"]:
         got = batch_violations(batch_drafts(chain, case))
         if not batch_matches(got, case["expect"]):
-            problems.append(found("batches", f"batch {case['name']}: expected {case['expect']}, got {got}"))
+            problems.append(
+                found(
+                    "batches",
+                    f"batch {case['name']}: expected {case['expect']}, got {got}",
+                )
+            )
     if verify_range(chain, 1):
-        problems.append(found("range.chain", f"the chain fails §11's range checks: {verify_range(chain, 1)}"))
+        problems.append(
+            found(
+                "range.chain",
+                f"the chain fails §11's range checks: {verify_range(chain, 1)}",
+            )
+        )
     for case in section["range_verification"]:
         want = [(case["expect"]["seq"], case["expect"]["code"])]
         tampered = tampered_chain(chain, case)
         got = verify_range(tampered, case["from_seq"])
         if got != want:
-            problems.append(found("range.case", f"range case {case['name']}: expected {want}, got {got}"))
+            problems.append(
+                found(
+                    "range.case",
+                    f"range case {case['name']}: expected {want}, got {got}",
+                )
+            )
         for entry in tampered:
             if violations(draft_of(entry["body"])):
-                problems.append(found("range.valid", f"range case {case['name']}: seq {entry['seq']} is not a valid draft"))
+                problems.append(
+                    found(
+                        "range.valid",
+                        f"range case {case['name']}: seq {entry['seq']} is not a valid draft",
+                    )
+                )
     for entry in chain:
         got = violations(draft_of(entry["body"]))
         if got:
@@ -2302,39 +2651,75 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             "decision.recompute",
             lambda s: decision(s).update(buy_conviction=decision(s)["exit_conviction"]),
         ),
-        ("combined score from conviction", "decision.recompute", lambda s: decision(s).update(combined_score="0.8536")),
-        ("decision labelled by a rule it was not decided by", "decision.recompute", lambda s: decision(s).update(decided_by="rule:large_orders")),
-        ("decision recorded as the owner's request", "decision.recompute", lambda s: decision(s).update(requested_by="owner")),
+        (
+            "combined score from conviction",
+            "decision.recompute",
+            lambda s: decision(s).update(combined_score="0.8536"),
+        ),
+        (
+            "decision labelled by a rule it was not decided by",
+            "decision.recompute",
+            lambda s: decision(s).update(decided_by="rule:large_orders"),
+        ),
+        (
+            "decision recorded as the owner's request",
+            "decision.recompute",
+            lambda s: decision(s).update(requested_by="owner"),
+        ),
         (
             "every bound listed as a clip",
             "decision.recompute",
-            lambda s: decision(s).update(clips_applied=["max_order_usd", "position_cap", "gross_exposure_cap"]),
+            lambda s: decision(s).update(
+                clips_applied=["max_order_usd", "position_cap", "gross_exposure_cap"]
+            ),
         ),
-        ("quantity not truncated", "decision.recompute", lambda s: decision(s).update(qty="10.07")),
+        (
+            "quantity not truncated",
+            "decision.recompute",
+            lambda s: decision(s).update(qty="10.07"),
+        ),
         (
             "weights of fresh models only",
             "decision.recompute",
             lambda s: decision(s).update(model_weights=[{"key": "quant.mean_reversion", "value": "0.9"}]),
         ),
-        ("intent differs from its decision", "intent.action", lambda s: payload_named(s, "intent").update(qty="11")),
+        (
+            "intent differs from its decision",
+            "intent.action",
+            lambda s: payload_named(s, "intent").update(qty="11"),
+        ),
         (
             "intent caused by the model output",
             "intent.cause",
             lambda s: body_named(s, "intent").update(causation_id=ID["model_output"]),
         ),
         ("prev_hash not chained", "chain.prev_hash", unchain),
-        ("artifact content changed", "artifacts.rehash", lambda s: s["artifacts"][0]["object"].update(ask="150.02")),
-        ("floor not the default", "owner_exits.floor", lambda s: payload_named(s, "owner_close_confirmed").update(floor="146.46")),
+        (
+            "artifact content changed",
+            "artifacts.rehash",
+            lambda s: s["artifacts"][0]["object"].update(ask="150.02"),
+        ),
+        (
+            "floor not the default",
+            "owner_exits.floor",
+            lambda s: payload_named(s, "owner_close_confirmed").update(floor="146.46"),
+        ),
         (
             "mode_event names another event",
             "kill_switch.mode_event",
             lambda s: payload_named(s, "kill_switch").update(mode_event=ID["owner_kill_switch"]),
         ),
-        ("goal exit of part of the position", "goal_exit.whole", lambda s: payload_named(s, "goal_exit").update(qty="4")),
+        (
+            "goal exit of part of the position",
+            "goal_exit.whole",
+            lambda s: payload_named(s, "goal_exit").update(qty="4"),
+        ),
         (
             "goal exit allowed after the session",
             "goal_exit.defer",
-            lambda s: payload_named(s, "goal_exit").update(dry_run="allow", reason_code=None, autonomy="auto"),
+            lambda s: payload_named(s, "goal_exit").update(
+                dry_run="allow", reason_code=None, autonomy="auto"
+            ),
         ),
         (
             "goal exit deferred with the opening's deny code",
@@ -2374,9 +2759,11 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         (
             "unconfirmed close after the session closes",
             "owner_exits.session",
-            lambda s: body_named(s, "owner_close_in_session").update(event_time="2026-09-21T20:05:00.000000000Z")
-            or payload_named(s, "owner_close_in_session")["step_up"].update(
-                authenticated_at="2026-09-21T20:04:52.000000000Z"
+            lambda s: (
+                body_named(s, "owner_close_in_session").update(event_time="2026-09-21T20:05:00.000000000Z")
+                or payload_named(s, "owner_close_in_session")["step_up"].update(
+                    authenticated_at="2026-09-21T20:04:52.000000000Z"
+                )
             ),
         ),
         (
@@ -2386,14 +2773,26 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
                 authenticated_at="2026-09-21T20:04:59.000000000Z"
             ),
         ),
-        ("kill switch flatten proposed as an intent", "owner_exits.flatten", propose_flatten),
+        (
+            "kill switch flatten proposed as an intent",
+            "owner_exits.flatten",
+            propose_flatten,
+        ),
         (
             "owner copy caused by an agent-stream event",
             "owner_copies.cause",
             lambda s: body_named(s, "kill_switch").update(causation_id=ID["kill_switch_mode"]),
         ),
-        ("kill switch command copied twice", "owner_copies.at_most_once", copy_kill_switch_again),
-        ("owner kill switch copied twice as its owner exit", "owner_copies.at_most_once", copy_owner_exit_again),
+        (
+            "kill switch command copied twice",
+            "owner_copies.at_most_once",
+            copy_kill_switch_again,
+        ),
+        (
+            "owner kill switch copied twice as its owner exit",
+            "owner_copies.at_most_once",
+            copy_owner_exit_again,
+        ),
         (
             "owner close copies a kill switch command",
             "owner_copies.kind",
@@ -2438,7 +2837,9 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
     cases = [(draft_of(e["body"]), None) for e in chain]
     cases += [(apply_changes(chain, c), None) for c in section["valid_drafts"]]
     cases += [(apply_changes(chain, c), c["expect"]) for c in section["invalid_drafts"]]
-    batch_cases = [(batch_drafts(chain, c), c["expect"]) for c in section["valid_batches"] + section["invalid_batches"]]
+    batch_cases = [
+        (batch_drafts(chain, c), c["expect"]) for c in section["valid_batches"] + section["invalid_batches"]
+    ]
     range_cases = [(tampered_chain(chain, c), c) for c in section["range_verification"]]
     for mutant in VALIDATOR_MUTANTS:
         skip = frozenset([mutant])
@@ -2448,7 +2849,10 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
             if want is None:
                 caught |= bool(got)
             else:
-                caught |= len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"])
+                caught |= len(got) != 1 or (got[0].reason, got[0].path) != (
+                    want["reason"],
+                    want["path"],
+                )
         for drafts, want in batch_cases:
             caught |= not batch_matches(batch_violations(drafts, skip), want)
         for entries, case in range_cases:
@@ -2475,6 +2879,444 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
 
 
 # --------------------------------------------------------------------------- output
+
+
+PRODUCTION_REQUIRED_REFS = {
+    "ModelOutputRecorded": ("mandate_version", "model_registry"),
+    "DecisionMade": ("mandate_version", "policy_set", "model_registry"),
+}
+PRODUCTION_CONFIG_KINDS = (*CONFIG_REF_KINDS, "policy_set", "model_registry")
+CONFIG_REGISTRATION_SCHEMA = rec(
+    ("kind", one_of(*PRODUCTION_CONFIG_KINDS)),
+    ("content_hash", REF),
+    ("model_id", opt(STR)),
+    ("model_version", opt(STR)),
+    ("params", list_of(STR)),
+    ("admits_instruments", opt(BOOL)),
+)
+LEGACY_CONFIG_REGISTRATION_SCHEMA = rec(
+    ("kind", one_of(*CONFIG_REF_KINDS)),
+    ("content_hash", REF),
+    ("model_id", opt(STR)),
+    ("model_version", opt(STR)),
+    ("params", list_of(STR)),
+    ("admits_instruments", opt(BOOL)),
+)
+POLICY_SCHEMA = json.loads((ROOT / "schemas/policy.schema.json").read_text(encoding="utf-8"))
+
+
+def matches_json_schema(value, schema: dict, root: dict) -> bool:
+    reference = schema.get("$ref")
+    if reference is not None:
+        target = root
+        for member in reference.removeprefix("#/").split("/"):
+            target = target[member]
+        if not matches_json_schema(value, target, root):
+            return False
+    if "oneOf" in schema and sum(matches_json_schema(value, option, root) for option in schema["oneOf"]) != 1:
+        return False
+    if "const" in schema and value != schema["const"]:
+        return False
+    if "enum" in schema and value not in schema["enum"]:
+        return False
+    expected_type = schema.get("type")
+    if expected_type == "null" and value is not None:
+        return False
+    if expected_type == "boolean" and not isinstance(value, bool):
+        return False
+    if expected_type == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+        return False
+    if expected_type == "string" and not isinstance(value, str):
+        return False
+    if expected_type == "array" and not isinstance(value, list):
+        return False
+    if expected_type == "object" and not isinstance(value, dict):
+        return False
+    if isinstance(value, int) and not isinstance(value, bool):
+        if "minimum" in schema and value < schema["minimum"]:
+            return False
+        if "maximum" in schema and value > schema["maximum"]:
+            return False
+    if isinstance(value, str) and "pattern" in schema and re.fullmatch(schema["pattern"], value) is None:
+        return False
+    if isinstance(value, list):
+        if schema.get("uniqueItems") and len({canon(item) for item in value}) != len(value):
+            return False
+        if "items" in schema and any(not matches_json_schema(item, schema["items"], root) for item in value):
+            return False
+    if isinstance(value, dict):
+        required = schema.get("required", ())
+        if any(member not in value for member in required):
+            return False
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False and any(member not in properties for member in value):
+            return False
+        if any(
+            member in properties and not matches_json_schema(member_value, properties[member], root)
+            for member, member_value in value.items()
+        ):
+            return False
+    return True
+
+
+def production_artifact_problems(artifact: dict) -> list[str]:
+    obj = artifact["object"]
+    name = artifact["name"]
+    out = []
+    if artifact["canonical"] != canon(obj) or artifact["ref"] != artifact_ref(obj):
+        out.append(f"artifact.rehash {name}")
+    if name == "policy_set":
+        if set(obj) != {"kind", "policy_set_version", "levels"}:
+            out.append("artifact.policy_shape members")
+            return out
+        if obj["kind"] != name or obj["policy_set_version"] != 1 or not isinstance(obj["levels"], list):
+            out.append("artifact.policy_shape header")
+            return out
+        levels = []
+        for index, policy in enumerate(obj["levels"]):
+            if not matches_json_schema(policy, POLICY_SCHEMA, POLICY_SCHEMA):
+                out.append(f"artifact.policy_shape levels[{index}]")
+            elif policy["level"] in levels:
+                out.append("artifact.policy_shape duplicate_level")
+            else:
+                levels.append(policy["level"])
+        expected_order = ["platform", "organization", "workspace"]
+        if levels != sorted(levels, key=expected_order.index):
+            out.append("artifact.policy_shape level_order")
+    if name == "model_registry":
+        if set(obj) != {"kind", "model_registry_version", "models"}:
+            out.append("artifact.registry_shape members")
+            return out
+        if obj["kind"] != name or obj["model_registry_version"] != 1 or not isinstance(obj["models"], list):
+            out.append("artifact.registry_shape header")
+            return out
+        model_ids = []
+        members = {
+            "model_id",
+            "model_version",
+            "content_hash",
+            "params",
+            "admits_instruments",
+        }
+        for index, model in enumerate(obj["models"]):
+            if not isinstance(model, dict) or set(model) != members:
+                out.append(f"artifact.registry_shape models[{index}].members")
+                continue
+            scalar_types_hold = (
+                isinstance(model["model_id"], str)
+                and bool(model["model_id"])
+                and isinstance(model["model_version"], str)
+                and bool(model["model_version"])
+                and isinstance(model["content_hash"], str)
+                and bool(DIGEST.match(model["content_hash"]))
+                and isinstance(model["admits_instruments"], bool)
+                and isinstance(model["params"], list)
+                and all(isinstance(param, str) and param for param in model["params"])
+            )
+            if not scalar_types_hold:
+                out.append(f"artifact.registry_shape models[{index}].types")
+                continue
+            if not ascending([param.encode() for param in model["params"]]):
+                out.append(f"artifact.registry_shape models[{index}].params")
+            model_ids.append(model["model_id"])
+        if not ascending([model_id.encode() for model_id in model_ids]):
+            out.append("artifact.registry_shape model_order")
+    return out
+
+
+def production_registration_violations(draft: dict, stored: dict[str, dict]) -> list[Violation]:
+    out = type_violations(ENVELOPE, draft, "", frozenset())
+    if out:
+        return out
+    if draft["schema_version"] not in (1, 2):
+        return [Violation("catalogue", "unknown_schema", "payload")]
+    if draft["event_type"] != "ConfigSnapshotRegistered":
+        return [Violation("catalogue", "unknown_event_type", "event_type")]
+    stream = draft["stream_id"].split(":")
+    if len(stream) != 2 or stream[0] != "ctl" or not all(IDENT.match(part) for part in stream):
+        return [Violation("stream", "wrong_stream", "event_type")]
+    schema = CONFIG_REGISTRATION_SCHEMA if draft["schema_version"] == 2 else LEGACY_CONFIG_REGISTRATION_SCHEMA
+    payload_types = type_violations(schema, draft["payload"], "payload", frozenset())
+    if payload_types:
+        return payload_types
+    payload = draft["payload"]
+    if not ascending([param.encode() for param in payload["params"]]):
+        return [Violation("rule.20", "non_canonical", "payload.params")]
+    model = payload["kind"] == "model_version"
+    wrong = [
+        member
+        for member in ("model_id", "model_version", "admits_instruments")
+        if (payload[member] is not None) != model
+    ]
+    if not model and payload["params"]:
+        wrong.append("params")
+    if wrong:
+        return [Violation("rule.21", "schema", f"payload.{wrong[0]}")]
+    if draft["artifact_refs"] != sorted(digest_strings(payload)):
+        return [Violation("artifact_refs", "artifact_refs", "artifact_refs")]
+    artifact = stored.get(payload["content_hash"])
+    if artifact is None:
+        return [Violation("registration.stored", "missing_artifact", "payload.content_hash")]
+    if artifact["object"].get("kind") != payload["kind"]:
+        return [Violation("registration.binding", "config_ref_kind", "payload.kind")]
+    return []
+
+
+def production_ref_violations(
+    draft: dict, stored: dict[str, dict], skip: frozenset[str] = frozenset()
+) -> list[Violation]:
+    """The v0.16 requirements, preserving the historical version-1 validator unchanged."""
+    if draft["event_type"] == "ConfigSnapshotRegistered":
+        return production_registration_violations(draft, stored)
+    if draft["event_type"] not in PRODUCTION_REQUIRED_REFS:
+        return [Violation("catalogue", "unknown_event_type", "event_type")]
+    if draft["schema_version"] != 2:
+        return [Violation("catalogue", "unknown_schema", "payload")]
+    historical = copy.deepcopy(draft)
+    historical["schema_version"] = 1
+    historical["config_refs"] = {
+        kind: value for kind, value in historical["config_refs"].items() if kind in CONFIG_REF_KINDS
+    }
+    out = violations(historical, frozenset({"config_refs.required"}))
+    if out:
+        return out
+    required = PRODUCTION_REQUIRED_REFS[draft["event_type"]]
+    for kind in required:
+        mutant = f"required.{draft['event_type']}.{kind}"
+        if kind not in draft["config_refs"] and mutant not in skip:
+            return [Violation(mutant, "missing_config_ref", f"config_refs.{kind}")]
+    for kind, reference in sorted(draft["config_refs"].items()):
+        if kind not in PRODUCTION_CONFIG_KINDS:
+            return [Violation("config_refs", "schema", f"config_refs.{kind}")]
+        if not isinstance(reference, str) or not DIGEST.match(reference):
+            return [Violation("config_refs", "non_canonical", f"config_refs.{kind}")]
+        if kind in ("policy_set", "model_registry"):
+            artifact = stored.get(reference)
+            if artifact is None:
+                return [Violation("refs.stored", "missing_artifact", f"config_refs.{kind}")]
+            if artifact["object"].get("kind") != kind:
+                return [Violation("refs.kind", "config_ref_kind", f"config_refs.{kind}")]
+    if draft["event_type"] == "ModelOutputRecorded" and "model_registry" in draft["config_refs"]:
+        registry = stored[draft["config_refs"]["model_registry"]]["object"]
+        payload = draft["payload"]
+        matches = [
+            model
+            for model in registry["models"]
+            if (
+                model["model_id"],
+                model["model_version"],
+                model["content_hash"],
+            )
+            == (
+                payload["model_id"],
+                payload["model_version"],
+                payload["content_hash"],
+            )
+        ]
+        if len(matches) != 1:
+            return [Violation("rule.13a", "config_ref_mismatch", "payload.model_version")]
+    return []
+
+
+def build_production_config_refs_section(control_section: dict) -> dict:
+    historical = {body["event_type"]: draft_of(body) for body in chain_bodies()}
+    model_output = copy.deepcopy(historical["ModelOutputRecorded"])
+    model_output["schema_version"] = 2
+    model_output["config_refs"]["model_registry"] = MODEL_REGISTRY_REF
+    decision = copy.deepcopy(historical["DecisionMade"])
+    decision["schema_version"] = 2
+    decision["config_refs"]["policy_set"] = POLICY_SET_REF
+    decision["config_refs"]["model_registry"] = MODEL_REGISTRY_REF
+    registrations = [
+        draft_of(entry["body"])
+        for entry in control_section["chain"]
+        if entry["event_type"] == "ConfigSnapshotRegistered"
+    ]
+    policy_registration = copy.deepcopy(
+        next(draft for draft in registrations if draft["payload"]["kind"] == "fee_config")
+    )
+    policy_registration["schema_version"] = 2
+    policy_registration["payload"] = {
+        "kind": "policy_set",
+        "content_hash": POLICY_SET_REF,
+        "model_id": None,
+        "model_version": None,
+        "params": [],
+        "admits_instruments": None,
+    }
+    policy_registration["artifact_refs"] = [POLICY_SET_REF]
+    registry_registration = copy.deepcopy(
+        next(draft for draft in registrations if draft["payload"]["kind"] == "model_version")
+    )
+    registry_registration["schema_version"] = 2
+    registry_registration["payload"] = {
+        "kind": "model_registry",
+        "content_hash": MODEL_REGISTRY_REF,
+        "model_id": None,
+        "model_version": None,
+        "params": [],
+        "admits_instruments": None,
+    }
+    registry_registration["artifact_refs"] = [MODEL_REGISTRY_REF]
+    artifacts = [
+        {"name": name, "ref": artifact_ref(obj), "object": obj, "canonical": canon(obj)}
+        for name, obj in (
+            ("policy_set", POLICY_SET),
+            ("model_registry", MODEL_REGISTRY),
+        )
+    ]
+    return {
+        "spec": "docs/specs/journal.md v0.16 §9 (DEC-484)",
+        "artifacts": artifacts,
+        "valid_drafts": {
+            "model_output": model_output,
+            "decision": decision,
+            "policy_registration": policy_registration,
+            "model_registry_registration": registry_registration,
+        },
+        "invalid_drafts": [
+            {
+                "name": "model_output_version_1_with_new_ref",
+                "base": "model_output",
+                "changes": [change("schema_version", 1)],
+                "expect": {"reason": "unknown_schema", "path": "payload"},
+            },
+            {
+                "name": "model_output_without_model_registry",
+                "base": "model_output",
+                "changes": [delete("config_refs.model_registry")],
+                "expect": {
+                    "reason": "missing_config_ref",
+                    "path": "config_refs.model_registry",
+                },
+            },
+            {
+                "name": "decision_without_policy_set",
+                "base": "decision",
+                "changes": [delete("config_refs.policy_set")],
+                "expect": {
+                    "reason": "missing_config_ref",
+                    "path": "config_refs.policy_set",
+                },
+            },
+            {
+                "name": "decision_without_model_registry",
+                "base": "decision",
+                "changes": [delete("config_refs.model_registry")],
+                "expect": {
+                    "reason": "missing_config_ref",
+                    "path": "config_refs.model_registry",
+                },
+            },
+            {
+                "name": "model_output_with_policy_artifact_as_registry",
+                "base": "model_output",
+                "changes": [change("config_refs.model_registry", POLICY_SET_REF)],
+                "expect": {
+                    "reason": "config_ref_kind",
+                    "path": "config_refs.model_registry",
+                },
+            },
+            {
+                "name": "model_output_registry_model_mismatch",
+                "base": "model_output",
+                "changes": [change("payload.model_version", "2.0.0")],
+                "expect": {
+                    "reason": "config_ref_mismatch",
+                    "path": "payload.model_version",
+                },
+            },
+            {
+                "name": "policy_registration_wrong_kind",
+                "base": "policy_registration",
+                "changes": [change("payload.kind", "model_registry")],
+                "expect": {"reason": "config_ref_kind", "path": "payload.kind"},
+            },
+            {
+                "name": "policy_registration_version_1",
+                "base": "policy_registration",
+                "changes": [change("schema_version", 1)],
+                "expect": {"reason": "non_canonical", "path": "payload.kind"},
+            },
+        ],
+    }
+
+
+def changed_production_draft(section: dict, case: dict) -> dict:
+    draft = copy.deepcopy(section["valid_drafts"][case["base"]])
+    for item in case["changes"]:
+        apply_change(draft, item)
+    return draft
+
+
+def check_production_config_refs(section: dict) -> list[str]:
+    problems = []
+    stored = {}
+    for artifact in section["artifacts"]:
+        problems += [
+            f"production_config_refs {problem}" for problem in production_artifact_problems(artifact)
+        ]
+        stored[artifact["ref"]] = artifact
+    for name, draft in section["valid_drafts"].items():
+        found = production_ref_violations(draft, stored)
+        if found:
+            problems.append(f"production_config_refs valid {name}: {found}")
+    for case in section["invalid_drafts"]:
+        found = production_ref_violations(changed_production_draft(section, case), stored)
+        want = case["expect"]
+        if len(found) != 1 or (found[0].reason, found[0].path) != (
+            want["reason"],
+            want["path"],
+        ):
+            problems.append(f"production_config_refs invalid {case['name']}: {found}")
+    return problems
+
+
+def run_production_config_ref_mutants(section: dict) -> list[str]:
+    escaped = []
+    stored = {artifact["ref"]: artifact for artifact in section["artifacts"]}
+    cases = {case["name"]: case for case in section["invalid_drafts"]}
+    for name, event_type, kind in (
+        (
+            "model_output_without_model_registry",
+            "ModelOutputRecorded",
+            "model_registry",
+        ),
+        ("decision_without_policy_set", "DecisionMade", "policy_set"),
+        ("decision_without_model_registry", "DecisionMade", "model_registry"),
+    ):
+        draft = changed_production_draft(section, cases[name])
+        mutant = frozenset({f"required.{event_type}.{kind}"})
+        if production_ref_violations(draft, stored, mutant):
+            escaped.append(f"production_config_refs validator mutant {event_type}.{kind}")
+    broken_hash = copy.deepcopy(section)
+    broken_hash["artifacts"][0]["canonical"] += " "
+    if not any("artifact.rehash" in problem for problem in check_production_config_refs(broken_hash)):
+        escaped.append("production_config_refs vector mutant artifact rehash")
+    missing = copy.deepcopy(section)
+    missing["artifacts"] = missing["artifacts"][1:]
+    if not any("missing_artifact" in problem for problem in check_production_config_refs(missing)):
+        escaped.append("production_config_refs vector mutant missing artifact")
+    malformed_policy = copy.deepcopy(section)
+    malformed_policy["artifacts"][0]["object"]["levels"][0]["level"] = "tenant"
+    if not any(
+        "artifact.policy_shape" in problem for problem in check_production_config_refs(malformed_policy)
+    ):
+        escaped.append("production_config_refs vector mutant malformed policy")
+    unsorted_models = copy.deepcopy(section)
+    model = copy.deepcopy(unsorted_models["artifacts"][1]["object"]["models"][0])
+    model["model_id"] = "zeta"
+    unsorted_models["artifacts"][1]["object"]["models"].insert(0, model)
+    if not any(
+        "artifact.registry_shape model_order" in problem
+        for problem in check_production_config_refs(unsorted_models)
+    ):
+        escaped.append("production_config_refs vector mutant unsorted models")
+    unsorted_params = copy.deepcopy(section)
+    unsorted_params["artifacts"][1]["object"]["models"][0]["params"] = ["zeta", "alpha"]
+    if not any(".params" in problem for problem in check_production_config_refs(unsorted_params)):
+        escaped.append("production_config_refs vector mutant unsorted params")
+    return escaped
 
 
 def build_section(v3: dict) -> dict:
@@ -2506,11 +3348,20 @@ def split_file(text: str) -> tuple[str, str | None]:
     return (head, tail) if found else (text, None)
 
 
-def render(v3_text: str, section: dict, control_section: dict, risk_section: dict, research_section: dict, account_section: dict) -> str:
+def render(
+    v3_text: str,
+    section: dict,
+    production_config_refs: dict,
+    control_section: dict,
+    risk_section: dict,
+    research_section: dict,
+    account_section: dict,
+) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
         {
             "agent_stream": section,
+            "production_config_refs": production_config_refs,
             "control_stream": control_section,
             "risk_state": risk_section,
             "research": research_section,
@@ -2528,9 +3379,22 @@ def render(v3_text: str, section: dict, control_section: dict, risk_section: dic
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--check", action="store_true", help="fail if journal.yaml is not what this generates")
-    mode.add_argument("--write", action="store_true", help="rewrite the generated sections (the default)")
-    parser.add_argument("--vectors", type=Path, default=VECTORS, help="the journal.yaml to read or write")
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="fail if journal.yaml is not what this generates",
+    )
+    mode.add_argument(
+        "--write",
+        action="store_true",
+        help="rewrite the generated sections (the default)",
+    )
+    parser.add_argument(
+        "--vectors",
+        type=Path,
+        default=VECTORS,
+        help="the journal.yaml to read or write",
+    )
     args = parser.parse_args(argv)
     vectors: Path = args.vectors
 
@@ -2539,12 +3403,15 @@ def main(argv: list[str] | None = None) -> int:
     self_test(v3)
     section = build_section(v3)
     control_section = control.build_section(v3)
+    production_config_refs = build_production_config_refs_section(control_section)
     risk_section = risk_state.build_section()
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
+    problems += check_production_config_refs(production_config_refs)
+    problems += run_production_config_ref_mutants(production_config_refs)
     problems += control.check_section(control_section)
     problems += control.run_mutants(control_section)
     problems += risk_state.check_section(risk_section)
@@ -2558,20 +3425,35 @@ def main(argv: list[str] | None = None) -> int:
     if problems:
         return 1
 
-    rendered = render(text, section, control_section, risk_section, research_section, account_section)
+    rendered = render(
+        text,
+        section,
+        production_config_refs,
+        control_section,
+        risk_section,
+        research_section,
+        account_section,
+    )
     reread = yaml.safe_load(rendered)
     if (
         check_chain(reread["agent_stream"], v3)
+        or check_production_config_refs(reread["production_config_refs"])
         or control.check_section(reread["control_stream"])
         or risk_state.check_section(reread["risk_state"])
         or research.check_section(reread["research"])
         or account.check_section(reread["account_stream"])
     ):
-        print("FAIL the rendered YAML does not read back to the same vectors", file=sys.stderr)
+        print(
+            "FAIL the rendered YAML does not read back to the same vectors",
+            file=sys.stderr,
+        )
         return 1
     if args.check:
         if rendered != text:
-            print(f"FAIL {vectors} differs; run reference/journal/generate.py", file=sys.stderr)
+            print(
+                f"FAIL {vectors} differs; run reference/journal/generate.py",
+                file=sys.stderr,
+            )
             return 1
     else:
         vectors.write_text(rendered, encoding="utf-8")
@@ -2581,6 +3463,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(section['invalid_batches']) + len(section['valid_batches'])} batches, "
         f"{len(section['range_verification'])} range cases; {len(VALIDATOR_MUTANTS)} validator and "
         f"{len(vector_mutants(section))} vector mutants caught; "
+        f"{len(production_config_refs['valid_drafts'])} production config-ref drafts, "
+        f"{len(production_config_refs['invalid_drafts'])} invalid, 3 validator and 5 vector mutants caught; "
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
         f"and {len(control_section['valid_drafts'])} valid drafts; {len(control.VALIDATOR_MUTANTS)} validator and "

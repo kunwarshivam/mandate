@@ -3244,6 +3244,324 @@
    }
   ]
  },
+ "production_config_refs": {
+  "spec": "docs/specs/journal.md v0.16 §9 (DEC-484)",
+  "artifacts": [
+   {
+    "name": "policy_set",
+    "ref": "sha256:41e70aae8ec57235d03979673ca9dacb6c747a071b82a66953e8e6ba3ef1888c",
+    "object": {
+     "kind": "policy_set",
+     "policy_set_version": 1,
+     "levels": [
+      {
+       "policy_schema_version": 1,
+       "level": "platform",
+       "profile": "retail",
+       "values": {
+        "auto_allowed": true,
+        "max_order_usd": "1500"
+       }
+      }
+     ]
+    },
+    "canonical": "{\"kind\":\"policy_set\",\"levels\":[{\"level\":\"platform\",\"policy_schema_version\":1,\"profile\":\"retail\",\"values\":{\"auto_allowed\":true,\"max_order_usd\":\"1500\"}}],\"policy_set_version\":1}"
+   },
+   {
+    "name": "model_registry",
+    "ref": "sha256:90f06e9760b4bfcc978f12efe989b3700779d8f5dfe87386a7640357f566ac2b",
+    "object": {
+     "kind": "model_registry",
+     "model_registry_version": 1,
+     "models": [
+      {
+       "admits_instruments": false,
+       "content_hash": "sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513",
+       "model_id": "quant.mean_reversion",
+       "model_version": "1.0.0",
+       "params": [
+        "lookback_days"
+       ]
+      }
+     ]
+    },
+    "canonical": "{\"kind\":\"model_registry\",\"model_registry_version\":1,\"models\":[{\"admits_instruments\":false,\"content_hash\":\"sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513\",\"model_id\":\"quant.mean_reversion\",\"model_version\":\"1.0.0\",\"params\":[\"lookback_days\"]}]}"
+   }
+  ],
+  "valid_drafts": {
+   "model_output": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3M0R000000000000000G3",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "ModelOutputRecorded",
+    "schema_version": 2,
+    "event_time": "2026-09-21T13:59:59.000000000Z",
+    "clock_source": "scheduler",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0",
+     "model_registry": "sha256:90f06e9760b4bfcc978f12efe989b3700779d8f5dfe87386a7640357f566ac2b"
+    },
+    "payload": {
+     "model_id": "quant.mean_reversion",
+     "model_version": "1.0.0",
+     "content_hash": "sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513",
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "as_of": "2026-09-21T13:59:58.000000000Z",
+     "expires_at": "2026-09-22T13:59:58.000000000Z",
+     "direction": "long",
+     "conviction": "0.97",
+     "confidence": "0.98",
+     "horizon_s": 86400,
+     "thesis_ref": null,
+     "evidence": [
+      "01J8Z3M0A000000000000000G2"
+     ],
+     "invalidation": null,
+     "thesis_id": null,
+     "lineage_id": null,
+     "ignored": null
+    },
+    "artifact_refs": [
+     "sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513"
+    ],
+    "pii_refs": []
+   },
+   "decision": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZMA0A000000000000000D2",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "DecisionMade",
+    "schema_version": 2,
+    "event_time": "2026-09-21T20:05:00.000000000Z",
+    "clock_source": "scheduler",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0",
+     "policy_set": "sha256:41e70aae8ec57235d03979673ca9dacb6c747a071b82a66953e8e6ba3ef1888c",
+     "model_registry": "sha256:90f06e9760b4bfcc978f12efe989b3700779d8f5dfe87386a7640357f566ac2b"
+    },
+    "payload": {
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "side": "sell",
+     "type": "limit",
+     "tif": "day",
+     "qty": "10",
+     "limit_price": "150.25",
+     "purpose": "discretionary_exit",
+     "exit_origin": "goal_completion",
+     "exit_conviction": null,
+     "buy_conviction": null,
+     "combined_score": null,
+     "outputs_used": [],
+     "model_weights": [],
+     "clips_applied": [],
+     "dry_run": "defer",
+     "reason_code": "discretionary_exit_regular_session_only",
+     "autonomy": null,
+     "ask_suppressed": null,
+     "decided_by": null,
+     "delegation_id": null,
+     "requested_by": "agent",
+     "client_id": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "policy_registration": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Y0A2B000000000000000S4",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConfigSnapshotRegistered",
+    "schema_version": 2,
+    "event_time": "2026-09-20T13:06:30.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "kind": "policy_set",
+     "content_hash": "sha256:41e70aae8ec57235d03979673ca9dacb6c747a071b82a66953e8e6ba3ef1888c",
+     "model_id": null,
+     "model_version": null,
+     "params": [],
+     "admits_instruments": null
+    },
+    "artifact_refs": [
+     "sha256:41e70aae8ec57235d03979673ca9dacb6c747a071b82a66953e8e6ba3ef1888c"
+    ],
+    "pii_refs": []
+   },
+   "model_registry_registration": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Y0A2A000000000000000S3",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConfigSnapshotRegistered",
+    "schema_version": 2,
+    "event_time": "2026-09-20T13:06:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "kind": "model_registry",
+     "content_hash": "sha256:90f06e9760b4bfcc978f12efe989b3700779d8f5dfe87386a7640357f566ac2b",
+     "model_id": null,
+     "model_version": null,
+     "params": [],
+     "admits_instruments": null
+    },
+    "artifact_refs": [
+     "sha256:90f06e9760b4bfcc978f12efe989b3700779d8f5dfe87386a7640357f566ac2b"
+    ],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "model_output_version_1_with_new_ref",
+    "base": "model_output",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "model_output_without_model_registry",
+    "base": "model_output",
+    "changes": [
+     {
+      "path": "config_refs.model_registry",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "reason": "missing_config_ref",
+     "path": "config_refs.model_registry"
+    }
+   },
+   {
+    "name": "decision_without_policy_set",
+    "base": "decision",
+    "changes": [
+     {
+      "path": "config_refs.policy_set",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "reason": "missing_config_ref",
+     "path": "config_refs.policy_set"
+    }
+   },
+   {
+    "name": "decision_without_model_registry",
+    "base": "decision",
+    "changes": [
+     {
+      "path": "config_refs.model_registry",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "reason": "missing_config_ref",
+     "path": "config_refs.model_registry"
+    }
+   },
+   {
+    "name": "model_output_with_policy_artifact_as_registry",
+    "base": "model_output",
+    "changes": [
+     {
+      "path": "config_refs.model_registry",
+      "value": "sha256:41e70aae8ec57235d03979673ca9dacb6c747a071b82a66953e8e6ba3ef1888c"
+     }
+    ],
+    "expect": {
+     "reason": "config_ref_kind",
+     "path": "config_refs.model_registry"
+    }
+   },
+   {
+    "name": "model_output_registry_model_mismatch",
+    "base": "model_output",
+    "changes": [
+     {
+      "path": "payload.model_version",
+      "value": "2.0.0"
+     }
+    ],
+    "expect": {
+     "reason": "config_ref_mismatch",
+     "path": "payload.model_version"
+    }
+   },
+   {
+    "name": "policy_registration_wrong_kind",
+    "base": "policy_registration",
+    "changes": [
+     {
+      "path": "payload.kind",
+      "value": "model_registry"
+     }
+    ],
+    "expect": {
+     "reason": "config_ref_kind",
+     "path": "payload.kind"
+    }
+   },
+   {
+    "name": "policy_registration_version_1",
+    "base": "policy_registration",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "reason": "non_canonical",
+     "path": "payload.kind"
+    }
+   }
+  ]
+ },
  "control_stream": {
   "spec": "docs/specs/journal.md v0.7 §9.2 (DEC-261)",
   "stream_id": "ctl:ws_01J8Z2",
