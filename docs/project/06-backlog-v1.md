@@ -654,10 +654,11 @@ after U-A1 to U-A5 are recorded.
   owns it**, beside DEC-484 item 5's second sentence, which already puts the mandate's parameter
   keys and admission capability there; that slice adds the structural checks and their cases, and
   a refusal code for them needs an approved reference case first.
-  *Remaining slices* ([first paper trade brief](tasks/first-paper-trade.md)): slice 4's shell half
-  (the agent records at version 2 with `policy_set` and `model_registry`, DEC-484), and slice 5
-  as the new `mandate-paper` adapter, its bounded wait for a terminal opening, and the deletion of
-  E7-7's AAPL assembly.
+  *Remaining slices* ([first paper trade brief](tasks/first-paper-trade.md)): slice 2's
+  remainder (the liquidity facts still read `SYMBOL`, AAPL), slice 3's (the account-rule
+  constants in the gate template), slice 4's shell half (the agent records at version 2 with
+  `policy_set` and `model_registry`, DEC-484), and slice 5 as the new `mandate-paper` adapter,
+  its bounded wait for a terminal entry, and the deletion of E7-7's AAPL assembly.
 - **E7-20 (Must, M7)** As the founder, I want CodeQL to flag a credential written to a log by
   its type rather than its name, so that excluding the name-keyed `rust/cleartext-logging` query
   ([DEC-500](decisions/DEC-500.md)) leaves no gap. *Accepted when:* a query under
@@ -666,19 +667,19 @@ after U-A1 to U-A5 are recorded.
   CodeQL's logging or print sinks; a seeded bug that prints an exposed `SecretString` is caught and
   the query raises nothing on `main`; the proof is recorded in the change, since the seeded bug is
   not committed; and the query runs in the existing CodeQL workflow within its time budget.
-- **E7-21 (Must, M6, before the first paper trade; SC)** As the founder, I want the connector to
-  read a crypto pair's recent one-minute bars, so that the order-size participation cap has a
-  trailing volume for BTC/USD ([first paper trade brief](tasks/first-paper-trade.md)).
+- **E7-21 (Must, M6, before the BTC/USD paper trade, DEC-509; SC)** As the founder, I want the
+  connector to read a crypto pair's recent one-minute bars, so that the order-size participation
+  cap has a trailing volume for BTC/USD ([first paper trade brief](tasks/first-paper-trade.md)).
   *Accepted when:* `BarsRequest` builds the crypto bars read on the data host
   (`/v1beta3/crypto/us/bars`, the pair percent-encoded in `symbols`, `timeframe=1Min`, the window,
   `limit`, `sort=asc`) and reads the answer keyed by the pair; a crypto window is bounded in UTC,
   not by a New York date; the equity read is unchanged; and an answer for another pair, a second
   page, a bar off the minute grid, outside the window or still open, or no bar at all is a typed
   refusal, tested against recorded fixtures with no network.
-- **E7-22 (Must, M6, before the first paper trade; SC)** As the founder, I want the production
-  assembly to read a crypto pair as the trading-domain spec defines it, so that a BTC/USD
-  deployment is gated by the crypto rules and not refused by equity-only ones
-  ([first paper trade brief](tasks/first-paper-trade.md), "BTC/USD specifics"). *Accepted when:*
+- **E7-22 (Must, M6, before the BTC/USD paper trade, DEC-509; SC)** As the founder, I want the
+  production assembly to read a crypto pair as the trading-domain spec defines it, so that a
+  BTC/USD deployment is gated by the crypto rules and not refused by equity-only ones
+  ([first paper trade brief](tasks/first-paper-trade.md), "BTC/USD follow-up"). *Accepted when:*
   `mandate-liquidity` computes the 30-day median daily dollar volume (§3.2 item 7); the shell
   trusts daily bars over UTC days for a pair (§2.2); the judge, gate template, and run and
   executor contexts take the session, feed and quote age (`crypto_quote_max_age_s`),
