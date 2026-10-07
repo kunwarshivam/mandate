@@ -2922,12 +2922,10 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
     each minimal script has no kill switch in it, so the oracle or the behaviour needs a ruling;
   - `an_owner_exit_outside_the_session_prices_from_the_confirmed_bid`: the clock-0 row above; the suite's clock is the
     regular session, so the confirmed bid and `extended_hours` cannot be reached.
-- **E7-4 (stream K), from slice 7 ([DEC-485](decisions/DEC-485.md) items 13, 15 and 18):** raise a kill switch's close again
-  after `max_unprotected_s` ended its sell; refuse a handed-over intent whose id starts `k-` or `w-` at `Input::Intent`;
-  register the executor's own intent ids (`w-<record>`, `k-<switch>-<n>`) in journal spec §9.5's `IntentReceived`; and,
-  with the account scope, add `KillSwitchActivated` to `properties::every_catalogue_event_is_interpreted_or_named`'s
-  `INTERPRETED`; and have a second switch for the same agent adopt the close the first has in flight rather
-  than raise its own, which the gate then denies.
+- **E7-4 (stream K), from slice 7 ([DEC-485](decisions/DEC-485.md) items 13 and 15):** raise a kill switch's close again
+  after `max_unprotected_s` ended its sell; register the executor's own intent ids (`w-<record>`, `k-<switch>-<n>`)
+  in journal spec §9.5's `IntentReceived`; and, with the account scope, add `KillSwitchActivated` to
+  `properties::every_catalogue_event_is_interpreted_or_named`'s `INTERPRETED`.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on

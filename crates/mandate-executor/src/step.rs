@@ -2,6 +2,7 @@
 
 use crate::batch::Batch;
 use crate::error::ExecutorError;
+use crate::ids::{FLATTEN, WATCHDOG};
 use crate::intent::{received, release_held, resume};
 use crate::kill::kill_switch;
 use crate::orders::{
@@ -164,6 +165,15 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             bound(batch)?;
             ladder_steps(batch)?;
             watchdog(batch)
+        }
+        Input::Intent(handoff)
+            if [WATCHDOG, FLATTEN]
+                .iter()
+                .any(|own| handoff.intent_id.0.0.starts_with(own)) =>
+        {
+            Err(ExecutorError::MalformedClientOrderId {
+                raw: handoff.intent_id.0.0,
+            })
         }
         Input::Intent(handoff) => received(batch, handoff),
         Input::Broker(Err(_)) => silence(batch),

@@ -17,7 +17,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::kill::{flatten_closes, floor_of, mode_holds};
+use crate::kill::{flatten_closes, floor_of, is_flatten, mode_holds};
 use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
 use crate::ports::Ports;
@@ -176,11 +176,11 @@ fn untouched(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     })
 }
 
-/// Whether a watchdog intent in `instrument` is still waiting: received, and not yet submitted,
-/// denied or abandoned.
+/// Whether a watchdog intent or a kill switch's flatten in `instrument` is still waiting:
+/// received, and not yet submitted, denied or abandoned (#668 round 1, minor 3).
 fn watching(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     view.intents.iter().any(|(intent, record)| {
-        intent.0.0.starts_with(WATCHDOG)
+        (intent.0.0.starts_with(WATCHDOG) || is_flatten(view, intent))
             && record.outcome == IntentOutcome::Received
             && view.bodies.get(intent).is_some_and(
                 |body| matches!(body, IntentBody::Order { instrument: of, .. } if of == instrument),

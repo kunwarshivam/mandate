@@ -16,7 +16,7 @@ use crate::intent::{order_tif, received};
 use crate::payload::text;
 use crate::protection::{ask_cancel, lowest_sane};
 use crate::session::{Venue, venue};
-use crate::state::{EVERY_AGENT, ExecutorState, Switch};
+use crate::state::{EVERY_AGENT, ExecutorState, IntentOutcome, Switch};
 use crate::types::{
     AgentId, BrokerRequest, EventId, Initiator, IntentBody, IntentHandoff, KillScope, Mode, Order,
     OrderState, OwnerConfirmation, Purpose,
@@ -147,12 +147,20 @@ fn unplaced(view: &ExecutorState, order: &Order) -> bool {
             })
 }
 
-/// Whether an order is the agent's own, or, in an instrument the switch closes, a `*` watchdog
-/// exit's (§2.3, §5.5), which every scope covering the instrument cancels by its own id.
-fn reached(order: &Order, agent: &AgentId, closing: &[InstrumentId]) -> bool {
-    order.agent.as_ref() == Some(agent)
-        || order.agent.as_ref().is_some_and(|of| of.0 == EVERY_AGENT)
-            && closing.contains(&order.instrument)
+/// Whether an order is, in an instrument the switch closes, the agent's own or a `*` watchdog
+/// exit's (§2.3, §5.5), which every scope covering the instrument cancels by its own id. A
+/// switch's own flatten is never reached: it is what the switch sells through (#668 round 1,
+/// blocker 1; DEC-485 item 5).
+fn reached(view: &ExecutorState, order: &Order, agent: &AgentId, closing: &[InstrumentId]) -> bool {
+    closing.contains(&order.instrument)
+        && !order
+            .intent_id
+            .as_ref()
+            .is_some_and(|intent| is_flatten(view, intent))
+        && order
+            .agent
+            .as_ref()
+            .is_some_and(|of| of == agent || of.0 == EVERY_AGENT)
 }
 
 /// §5.5: the non-protective orders the switch reaches that the broker holds accepted and no
@@ -169,7 +177,7 @@ fn cancels(view: &ExecutorState, agent: &AgentId, closing: &[InstrumentId]) -> V
                 OrderState::Accepted | OrderState::PartiallyFilled
             ) && !order.cancel_unconfirmed
                 && order.purpose != Purpose::Protective
-                && reached(order, agent, closing)
+                && reached(view, order, agent, closing)
         })
         .map(|order| order.client_order_id.clone())
         .collect()
@@ -202,15 +210,20 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
         .map(|(id, switch)| (id.clone(), switch.clone()))
         .collect();
     for (id, switch) in switches {
-        cancel_each(
-            batch,
-            cancels(&batch.view, &switch.agent, &switch.instruments),
-        )?;
+        let pending: Vec<InstrumentId> = switch.pending.iter().cloned().collect();
+        cancel_each(batch, cancels(&batch.view, &switch.agent, &pending))?;
         for (ordinal, instrument) in switch.instruments.iter().enumerate() {
             let working = batch.view.orders.values().any(|order| {
                 &order.instrument == instrument
-                    && reached(order, &switch.agent, &switch.instruments)
+                    && (order.agent.as_ref() == Some(&switch.agent)
+                        || reached(&batch.view, order, &switch.agent, &switch.instruments))
                     && (live(order) || unplaced(&batch.view, order))
+            }) || batch.view.intents.iter().any(|(intent, record)| {
+                record.outcome == IntentOutcome::Received
+                    && is_flatten(&batch.view, intent)
+                    && record.agent == switch.agent
+                    && matches!(batch.view.bodies.get(intent),
+                        Some(IntentBody::Order { instrument: of, .. }) if of == instrument)
             });
             let qty = sub_ledger(&batch.view, &switch.agent, instrument)?;
             let stop = batch
@@ -279,22 +292,44 @@ fn sub_ledger(
     Ok(lots.min(open).max(SignedQty::ZERO).abs())
 }
 
-/// The switch a flatten intent's id names, `k-<switch>-<n>`, or `None` for any other intent.
-pub(crate) fn switch_named(intent: &IntentId) -> Option<EventId> {
-    let (switch, _) = intent.0.0.strip_prefix(FLATTEN)?.rsplit_once('-')?;
-    Some(EventId(switch.to_owned()))
+/// The switch and close a flatten intent's id names, `k-<switch>-<n>`, or `None` for any other.
+pub(crate) fn close_named(intent: &IntentId) -> Option<(EventId, usize)> {
+    let (switch, ordinal) = intent.0.0.strip_prefix(FLATTEN)?.rsplit_once('-')?;
+    Some((EventId(switch.to_owned()), ordinal.parse().ok()?))
+}
+
+/// Whether `switch`'s close `ordinal` is `agent`'s sell of `instrument`: what makes an intent
+/// under a switch's id that close's flatten (#668 round 1, major 1; DEC-485 item 15).
+pub(crate) fn closes_with(
+    switch: &Switch,
+    ordinal: usize,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+) -> bool {
+    &switch.agent == agent && switch.instruments.get(ordinal) == Some(instrument)
+}
+
+/// The switch whose close `intent` is: its id names a journaled switch, and it is that close's
+/// agent's sell of that close's instrument.
+fn switch_of<'s>(view: &'s ExecutorState, intent: &IntentId) -> Option<&'s Switch> {
+    let (id, ordinal) = close_named(intent)?;
+    let switch = view.switches.get(&id)?;
+    let record = view.intents.get(intent)?;
+    let Some(IntentBody::Order { instrument, .. }) = view.bodies.get(intent) else {
+        return None;
+    };
+    closes_with(switch, ordinal, &record.agent, instrument).then_some(switch)
 }
 
 /// The floor an exit's ladder never prices below (§5.5, §5.6): the owner's confirmed floor for a
 /// flatten raised by a confirmed switch, nothing for any other exit.
 pub(crate) fn floor_of(view: &ExecutorState, intent: &IntentId) -> Option<Price> {
-    view.switches.get(&switch_named(intent)?)?.floor
+    switch_of(view, intent)?.floor
 }
 
-/// Whether an intent is a journaled switch's own flatten, which the agent's mode never holds: an
-/// id with the `k-` prefix that names no switch the fold carries is an ordinary intent.
+/// Whether an intent is a journaled switch's own flatten, which the agent's mode never holds.
 pub(crate) fn is_flatten(view: &ExecutorState, intent: &IntentId) -> bool {
-    switch_named(intent).is_some_and(|switch| view.switches.contains_key(&switch))
+    switch_of(view, intent).is_some()
 }
 
 /// Whether the agent's mode holds an exit (§7.4: `paused` or `stopped`). A switch's flatten is
@@ -329,7 +364,8 @@ mod tests {
         AccountRef, AccountScope, AccountState, AgentId, BrokerFill, BrokerOrder, BrokerOutcome,
         BrokerRequest, BrokerUpdate, Command, Effect, EventDraft, EventId, ExitTier, FillId,
         Initiator, Input, IntentBody, IntentHandoff, KillScope, MarketObservation, Mode,
-        OwnerConfirmation, ProtectionPrices, Purpose, RiskClock, TimeInForce, WorkspaceId,
+        OwnerConfirmation, ProtectionPrices, Purpose, RiskClock, SubmitOrder, TimeInForce,
+        WorkspaceId,
     };
 
     /// Saturday 2026-09-26, 12:00 New York: no v1 session is open.
@@ -966,6 +1002,331 @@ mod tests {
         assert!(derived("k-").is_err());
         assert!(derived("w-").is_err());
         assert_eq!(derived("w-e1h2o3")?.as_str(), "md-w-e1h2o3");
+        Ok(())
+    }
+
+    /// Every instrument an equity but `BTCUSD`, which is crypto.
+    struct Mixed;
+
+    impl InstrumentSnapshot for Mixed {
+        fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+            Some(if instrument.as_str() == "BTCUSD" {
+                AssetClass::Crypto
+            } else {
+                AssetClass::UsEquity
+            })
+        }
+
+        fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Some(ShareIncrement::Whole)
+        }
+
+        fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+            None
+        }
+    }
+
+    fn quote_of(name: &str, price: &str, at: i64) -> Result<Input, ExecutorError> {
+        let price = Price::parse(price)?;
+        Ok(Input::Market(MarketObservation {
+            instrument: InstrumentId::new(name)?,
+            bid: Some(price),
+            bid_size: Some(Qty::parse("100")?),
+            ask: Some(price),
+            last_trade: Some(price),
+            mark: Some(price),
+            sane: true,
+            observed_at: RiskClock::from_secs(at),
+        }))
+    }
+
+    /// The non-protective sells `effects` submitted.
+    fn sold(effects: &[Effect]) -> Vec<SubmitOrder> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Broker(BrokerRequest::Submit(order))
+                    if order.side == Side::Sell && order.purpose != Purpose::Protective =>
+                {
+                    Some(order.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The broker's acknowledgment of `order`, nothing filled.
+    fn accepted(order: &SubmitOrder) -> Input {
+        Input::Broker(Ok(BrokerOutcome::Submitted(BrokerOrder {
+            broker_order_id: format!("b-{}", order.client_order_id.as_str()),
+            client_order_id: Some(order.client_order_id.as_str().to_owned()),
+            instrument: order.instrument.clone(),
+            side: order.side,
+            qty: order.qty,
+            filled_qty: Qty::ZERO,
+            limit_price: order.limit_price,
+            stop_price: order.stop_price,
+            status: "accepted".to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            legs: Vec::new(),
+            created_on: None,
+        })))
+    }
+
+    fn cancel_accepted(id: &str) -> Input {
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: id.to_owned(),
+        }))
+    }
+
+    /// One order of agent-a's, journaled `state`, with `filled` of it applied.
+    fn order_of_a(
+        executor: &mut Executor,
+        id: &str,
+        instrument: &str,
+        side: &str,
+        filled: Option<&str>,
+        state: &str,
+    ) -> Result<(), ExecutorError> {
+        commit(
+            executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(id)),
+                ("agent", text("agent-a")),
+                ("instrument", text(instrument)),
+                ("side", text(side)),
+                ("qty", text("1")),
+                ("limit", text("100")),
+                ("purpose", text("open")),
+            ],
+        )?;
+        if let Some(qty) = filled {
+            commit(
+                executor,
+                "FillApplied",
+                vec![
+                    ("fill_id", text(format!("f-{id}"))),
+                    ("client_order_id", text(id)),
+                    ("instrument", text(instrument)),
+                    ("side", text(side)),
+                    ("qty_gross", text(qty)),
+                    ("price", text("100")),
+                ],
+            )?;
+        }
+        commit(
+            executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(id)), ("state", text(state))],
+        )
+    }
+
+    /// #668 round 1, blocker 1: once the switch's own sell is acknowledged, no later step cancels
+    /// it, while another close of the same switch still waits on an opening of the agent's.
+    #[test]
+    fn a_switch_never_cancels_its_own_flatten_beside_a_waiting_close() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        order_of_a(
+            &mut executor,
+            "md-msft-buy",
+            "MSFT",
+            "buy",
+            None,
+            "accepted",
+        )?;
+        executor.run(Input::Tick(RiskClock::from_secs(MONDAY)), &ports)?;
+        executor.run(quote_of("AAPL", "150", MONDAY)?, &ports)?;
+        executor.run(switch(Initiator::RiskLimit, false)?, &ports)?;
+        let confirmed = executor.run(cancel_accepted("md-oco-1"), &ports)?;
+        let [sell] = sold(&confirmed)
+            .try_into()
+            .map_err(|_| missing("one flatten sell"))?;
+        let mut later = executor.run(accepted(&sell), &ports)?;
+        later.extend(executor.run(Input::Tick(RiskClock::from_secs(MONDAY + 1)), &ports)?);
+        later.extend(executor.run(Input::Tick(RiskClock::from_secs(MONDAY + 2)), &ports)?);
+        assert!(
+            !cancels(&later).contains(&sell.client_order_id.as_str()),
+            "the flatten is never the switch's to cancel: {:?}",
+            cancels(&later)
+        );
+        Ok(())
+    }
+
+    /// #668 round 1, blocker 1: a crypto close raised beside an equity close deferred to the
+    /// session is not cancelled at the steps the deferred one waits through.
+    #[test]
+    fn a_crypto_flatten_survives_a_deferred_equity_close() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Mixed,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        order_of_a(
+            &mut executor,
+            "md-btc",
+            "BTCUSD",
+            "buy",
+            Some("1"),
+            "filled",
+        )?;
+        executor.run(Input::Tick(RiskClock::from_secs(SATURDAY)), &ports)?;
+        executor.run(quote_of("BTCUSD", "100", SATURDAY)?, &ports)?;
+        let switched = executor.run(switch(Initiator::RiskLimit, false)?, &ports)?;
+        assert_eq!(names(the_switch(&switched)?, "deferred"), vec!["AAPL"]);
+        let [sell] = sold(&switched)
+            .try_into()
+            .map_err(|_| missing("the crypto sell"))?;
+        let mut later = executor.run(accepted(&sell), &ports)?;
+        later.extend(executor.run(Input::Tick(RiskClock::from_secs(SATURDAY + 1)), &ports)?);
+        assert!(
+            !cancels(&later).contains(&sell.client_order_id.as_str()),
+            "{:?}",
+            cancels(&later)
+        );
+        Ok(())
+    }
+
+    /// #668 round 1, blocker 1 and minor 2: a second switch while the first's sell works cancels
+    /// none of it and raises no second close beside it.
+    #[test]
+    fn a_second_switch_leaves_the_first_flatten_working() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(MONDAY)), &ports)?;
+        executor.run(quote_of("AAPL", "150", MONDAY)?, &ports)?;
+        executor.run(switch(Initiator::RiskLimit, false)?, &ports)?;
+        let confirmed = executor.run(cancel_accepted("md-oco-1"), &ports)?;
+        let [sell] = sold(&confirmed)
+            .try_into()
+            .map_err(|_| missing("one flatten sell"))?;
+        executor.run(accepted(&sell), &ports)?;
+        let mut second = executor.run(switch(Initiator::Owner, false)?, &ports)?;
+        assert_eq!(names(the_switch(&second)?, "cancels"), Vec::<String>::new());
+        second.extend(executor.run(Input::Tick(RiskClock::from_secs(MONDAY + 1)), &ports)?);
+        assert!(
+            !cancels(&second).contains(&sell.client_order_id.as_str()),
+            "{:?}",
+            cancels(&second)
+        );
+        assert!(raised(&second).is_empty(), "{:?}", raised(&second));
+        Ok(())
+    }
+
+    /// #668 round 1, major 1 (DEC-485 item 15): an intent handed over under a `k-` or `w-` id is
+    /// refused before anything is journaled, so it neither takes a switch's mode exemption nor its
+    /// pending close, which is still raised at the session.
+    #[test]
+    fn a_handed_over_intent_cannot_pose_as_the_executors_own() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(SATURDAY)), &ports)?;
+        let switched = executor.run(switch(Initiator::RiskLimit, false)?, &ports)?;
+        let own = format!("k-{}-0", the_switch(&switched)?.event_id.0);
+        for id in [own.as_str(), "w-e1h2o3"] {
+            let before = executor.state.clone();
+            let posed = executor.run(
+                Input::Intent(IntentHandoff {
+                    intent_id: IntentId(EventId(id.to_owned())),
+                    agent: AgentId("agent-a".to_owned()),
+                    tif: Some(TimeInForce::Day),
+                    body: IntentBody::Order {
+                        instrument: aapl()?,
+                        side: Side::Sell,
+                        qty: Qty::parse("1")?,
+                        limit: Price::parse("150")?,
+                        purpose: Purpose::DiscretionaryExit,
+                        protection: None,
+                    },
+                }),
+                &ports,
+            );
+            assert!(posed.is_err(), "{id}: {posed:?}");
+            assert_eq!(
+                executor.state, before,
+                "{id}: a refused intent changes nothing"
+            );
+        }
+        let opened = executor.run(Input::Tick(RiskClock::from_secs(MONDAY)), &ports)?;
+        assert_eq!(raised(&opened), vec![own]);
+        Ok(())
+    }
+
+    /// #668 round 1, major 1: a journaled `IntentReceived` under a switch's id whose agent or
+    /// instrument is not that close's is no flatten, and leaves the close pending.
+    #[test]
+    fn only_the_close_the_id_names_is_a_flatten() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        for (agent, instrument) in [("agent-b", "AAPL"), ("agent-a", "MSFT")] {
+            let mut executor = protected(&ports)?;
+            executor.run(Input::Tick(RiskClock::from_secs(SATURDAY)), &ports)?;
+            let switched = executor.run(switch(Initiator::RiskLimit, false)?, &ports)?;
+            let switch_id = the_switch(&switched)?.event_id.clone();
+            let held = aapl()?;
+            let own = IntentId(EventId(format!("k-{}-0", switch_id.0)));
+            commit(
+                &mut executor,
+                "IntentReceived",
+                vec![
+                    ("intent_id", text(own.0.0.clone())),
+                    ("agent_id", text(agent)),
+                    ("instrument_id", text(instrument)),
+                    ("side", text("sell")),
+                    ("type", text("limit")),
+                    ("tif", text("day")),
+                    ("qty", text("1")),
+                    ("limit_price", text("150")),
+                    ("purpose", text("discretionary_exit")),
+                ],
+            )?;
+            assert!(
+                !super::is_flatten(&executor.state, &own),
+                "{agent} {instrument}"
+            );
+            assert!(
+                executor
+                    .state
+                    .switches
+                    .get(&switch_id)
+                    .is_some_and(|switch| switch.pending.contains(&held)),
+                "{agent} {instrument}"
+            );
+        }
         Ok(())
     }
 }

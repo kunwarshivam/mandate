@@ -10,7 +10,7 @@ use mandate_time::Date;
 use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of};
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
-use crate::kill::switch_named;
+use crate::kill::{close_named, closes_with};
 use crate::payload::{
     clock_of, flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
     required_text, usd,
@@ -363,22 +363,24 @@ fn intent_received(
         purpose: purpose_of(required_text(payload, "purpose")?)?,
         protection: prices_of(payload)?,
     };
+    let agent = agent_of(payload)?;
+    if let (IntentBody::Order { instrument, .. }, Some((switch, ordinal))) =
+        (&body, close_named(&id))
+        && let Some(switch) = state.switches.get_mut(&switch)
+        && closes_with(switch, ordinal, &agent, instrument)
+    {
+        switch.pending.remove(instrument);
+    }
     state.intents.insert(
         id.clone(),
         IntentRecord {
             intent_id: id.clone(),
-            agent: agent_of(payload)?,
+            agent,
             received_at: at,
             outcome: IntentOutcome::Received,
             allowed_at: None,
         },
     );
-    if let (IntentBody::Order { instrument, .. }, Some(switch)) = (
-        &body,
-        switch_named(&id).and_then(|named| state.switches.get_mut(&named)),
-    ) {
-        switch.pending.remove(instrument);
-    }
     state.bodies.insert(id, body);
     Ok(())
 }
