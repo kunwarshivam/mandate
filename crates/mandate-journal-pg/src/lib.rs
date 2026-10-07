@@ -285,6 +285,9 @@ impl Request<'_> {
         if !found.is_empty() {
             return Ok(Step::Done(idempotent(self.batch, &found)));
         }
+        if let Some(refusal) = missing_config_artifact(self.batch) {
+            return Ok(Step::Done(Ok(refusal)));
+        }
 
         if self.writer_epoch != head.writer_epoch {
             return Ok(Step::Done(Ok(AppendOutcome::Fenced {
@@ -424,14 +427,19 @@ fn validate(stream: &StreamId, drafts: &[&[u8]]) -> Result<Vec<Draft>, AppendOut
         batch.push(draft);
     }
     check_batch(&batch).map_err(|(draft, error)| AppendOutcome::Invalid { draft, error })?;
-    if let Some((draft, path)) = batch
+    Ok(batch)
+}
+
+/// The refusal a plain append owes a configuration draft whose references it cannot check without
+/// an artifact source. Journal spec §5.1 resolves idempotency first, so this runs only once the
+/// batch is known to be new, and an identical retry of a stored draft still answers
+/// `AlreadyCommitted`, as `MemoryJournal::append` does.
+fn missing_config_artifact(batch: &[Draft]) -> Option<AppendOutcome> {
+    batch
         .iter()
         .enumerate()
         .find_map(|(index, draft)| draft.config_artifact_path().map(|path| (index, path)))
-    {
-        return Err(invalid(draft, InvalidReason::MissingArtifact, path));
-    }
-    Ok(batch)
+        .map(|(draft, path)| invalid(draft, InvalidReason::MissingArtifact, path))
 }
 
 fn invalid(draft: usize, reason: InvalidReason, path: &str) -> AppendOutcome {
@@ -662,7 +670,10 @@ fn sql(text: String) -> sqlx::AssertSqlSafe<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppendOutcome, PgError, PgJournal, StreamId, parse, to_canonical, validate};
+    use super::{
+        AppendOutcome, InvalidReason, PgError, PgJournal, StreamId, missing_config_artifact, parse,
+        to_canonical, validate,
+    };
 
     #[test]
     fn a_postgres_dsn_builds_a_lazy_journal_without_connecting() -> Result<(), String> {
@@ -680,19 +691,47 @@ mod tests {
         ));
     }
 
+    /// Journal spec §5.1 resolves idempotency before anything a plain append cannot check, so the
+    /// stateless batch checks must pass a version-two configuration draft through. The refusal is
+    /// `missing_config_artifact`'s, and it names the reason and the path, so a refusal that drifts
+    /// to another reason or another member is a failure rather than any `Invalid`.
     #[test]
-    fn plain_validation_refuses_a_version_two_configuration_draft() -> Result<(), String> {
+    fn a_version_two_configuration_draft_passes_validation_and_is_refused_after_idempotency()
+    -> Result<(), String> {
         let fixture = parse(include_bytes!("../../../fixtures/refcases/journal.json"))
             .map_err(|error| error.to_string())?;
-        let draft = fixture
+        let drafts = fixture
             .get("production_config_refs")
             .and_then(|section| section.get("valid_drafts"))
-            .and_then(|drafts| drafts.get("decision"))
-            .ok_or("a decision draft")?;
-        let stream = StreamId::parse("agent:ws_01J8Z2:agent_a").ok_or("a stream id")?;
-        let bytes = to_canonical(draft);
-        let got = validate(&stream, &[bytes.as_slice()]).err();
-        assert!(matches!(got, Some(AppendOutcome::Invalid { .. })));
+            .ok_or("the valid drafts")?;
+        let expected = [
+            ("model_output", "config_refs.model_registry"),
+            ("decision", "config_refs.policy_set"),
+            ("policy_registration", "payload.content_hash"),
+            ("model_registry_registration", "payload.content_hash"),
+        ];
+        for (name, path) in expected {
+            let draft = drafts.get(name).ok_or(name)?;
+            let stream = draft
+                .get("stream_id")
+                .and_then(|id| id.as_str())
+                .and_then(StreamId::parse)
+                .ok_or(name)?;
+            let bytes = to_canonical(draft);
+            let batch = validate(&stream, &[bytes.as_slice()])
+                .map_err(|outcome| format!("{name} failed the stateless checks: {outcome:?}"))?;
+            let refusal = missing_config_artifact(&batch).ok_or(name)?;
+            let AppendOutcome::Invalid { draft, error } = refusal else {
+                return Err(format!("{name} was not refused Invalid"));
+            };
+            assert_eq!(draft, 0, "{name} names the draft that is missing an artifact");
+            assert_eq!(
+                error.reason,
+                InvalidReason::MissingArtifact,
+                "{name} is refused for the artifact a plain append cannot read"
+            );
+            assert_eq!(error.path, path, "{name} names the member it could not check");
+        }
         Ok(())
     }
 }
