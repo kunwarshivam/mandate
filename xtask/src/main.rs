@@ -1583,10 +1583,11 @@ const MUTANT_JOBS: &str = "1";
 ///
 /// Set explicitly because the value cargo-mutants derives is wrong for this gate and wrong in the
 /// direction that fails a green change. It takes five times the unmutated baseline, floored at
-/// twenty seconds, and it runs that baseline over the mutated package alone — not over
-/// [`REFCASES`], which [`external_oracles`] adds to the mutants but not to the baseline. So the
-/// baseline measures a second of journal tests, the floor gives twenty seconds, and a mutant that
-/// the reference harness catches in its thirtieth second is reported `TIMEOUT` instead of caught.
+/// twenty seconds, and it runs that baseline over the packages the shard's own mutants are in —
+/// not over whatever `--test-package` names, so the [`REFCASES`] that [`external_oracles`] adds
+/// reaches the baseline only when a mutant of it is in the slice. A shard mutating a core crate
+/// therefore measures a second of that crate's tests, the floor gives twenty seconds, and a
+/// mutant the reference harness catches in its thirtieth second is reported `TIMEOUT`, not caught.
 /// DEC-498's first measurement run met exactly that: nine mutants, nine timeouts, every one at
 /// the twenty-second cap.
 ///

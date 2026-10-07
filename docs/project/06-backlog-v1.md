@@ -93,16 +93,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   with it. DEC-497 runs the whole of `mandate-refcases` for any mutation of a crate it is built
   on, which is what puts a core crate's mutant test phase at the 83 seconds DEC-498 measured; the
   cap is sized on that, and the shard count on the cap. On a shard whose own mutants are in
-  `mandate-refcases` the harness is the unmutated baseline as well, since cargo-mutants picks the
-  baseline's packages from the slice's mutants, so there it shortens DEC-498's remainder too. It
-  does nothing for a shard with no mutant to test.
+  `mandate-refcases` the harness is the unmutated baseline's test phase as well, since
+  cargo-mutants picks the baseline's packages from the slice's mutants — so it shortens that
+  capped phase too, but not DEC-498's remainder, which is the baseline's *build* and the setup
+  around it. It does nothing for a shard with no mutant to test.
   *Accepted when:* `cargo nextest run -p mandate-refcases` on a warm build takes at most half the
   time it takes on the same machine before the change, measured as the median of three
   consecutive runs each way — the baseline for comparison, not a target, is the 31.7, 31.8 and
   31.9 seconds three such runs took on a development VM when this story was written, and the
   runner is slower; the same 691 tests run, so the saving comes from the harness and not from
-  running fewer cases; and DEC-498's 180-second cap and 96 shards are re-derived from a fresh
-  `ubuntu-24.04` measurement, or a successor decision records that they stand.
+  running fewer cases; and DEC-498's 180-second cap and its 192 shards are re-derived from a
+  fresh `ubuntu-24.04` measurement, or a successor decision records that they stand.
 
 ### E2 Market data
 
