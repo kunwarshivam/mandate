@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use mandate_canon::Digest;
+use mandate_canon::{Digest, parse, to_canonical};
 use mandate_journal::{AppendOutcome, ArtifactRef, MemoryJournal, StreamId};
 use mandate_refcases::{Json, read_fixture};
 use mandate_time::UtcNanos;
@@ -35,7 +35,21 @@ fn config_artifacts(section: &Json) -> BTreeMap<Digest, Vec<u8>> {
                 .expect("canonical artifact bytes")
                 .as_bytes()
                 .to_vec();
-            (reference.digest(), bytes)
+            let object_bytes = serde_json::to_vec(&artifact["object"]).expect("artifact object");
+            let object = parse(&object_bytes).expect("canonicalizable artifact object");
+            assert_eq!(
+                to_canonical(&object),
+                bytes,
+                "{} canonical bytes",
+                artifact["name"].as_str().expect("artifact name")
+            );
+            let digest = Digest::of(&bytes);
+            assert_eq!(
+                digest,
+                reference.digest(),
+                "artifact ref must hash its bytes"
+            );
+            (digest, bytes)
         })
         .collect()
 }
@@ -72,13 +86,49 @@ fn opened_journal(fixture: &Json, draft: &Json) -> (MemoryJournal, StreamId, u64
     (journal, stream, epoch)
 }
 
-fn append(fixture: &Json, draft: &Json) -> AppendOutcome {
-    let section = production_section(fixture);
-    let artifacts = config_artifacts(section);
+fn append(
+    fixture: &Json,
+    draft: &Json,
+    artifacts: &BTreeMap<Digest, Vec<u8>>,
+) -> (AppendOutcome, MemoryJournal, StreamId) {
     let (mut journal, stream, epoch) = opened_journal(fixture, draft);
     let bytes = serde_json::to_vec(draft).expect("production draft");
     let at = UtcNanos::parse("2026-09-21T14:00:03.000000000Z").expect("append time");
-    journal.append_with_config_artifacts(&stream, 1, epoch, at, &[bytes.as_slice()], &artifacts)
+    let outcome =
+        journal.append_with_config_artifacts(&stream, 1, epoch, at, &[bytes.as_slice()], artifacts);
+    (outcome, journal, stream)
+}
+
+fn assert_committed(fixture: &Json, name: &str, draft: &Json) {
+    let artifacts = config_artifacts(production_section(fixture));
+    let (outcome, journal, stream) = append(fixture, draft, &artifacts);
+    let AppendOutcome::Committed(rows) = outcome else {
+        panic!("{name} gave {outcome:?}");
+    };
+    let [row] = rows.as_slice() else {
+        panic!("{name} committed {} rows", rows.len());
+    };
+    assert_eq!(journal.rows(&stream).len(), 2, "{name}: journal row count");
+    assert_eq!(row.seq, 2, "{name}: sequence");
+    assert_eq!(
+        row.event_id,
+        draft["event_id"].as_str().expect("draft event id"),
+        "{name}: event id"
+    );
+    assert_eq!(
+        row.event_type,
+        draft["event_type"].as_str().expect("draft event type"),
+        "{name}: event type"
+    );
+    let body: Json = serde_json::from_slice(&row.body).expect("stored event body");
+    assert_eq!(
+        body["config_refs"], draft["config_refs"],
+        "{name}: config refs"
+    );
+    assert_eq!(
+        body["artifact_refs"], draft["artifact_refs"],
+        "{name}: artifact refs"
+    );
 }
 
 fn changed(section: &Json, case: &Json) -> Json {
@@ -109,11 +159,7 @@ fn version_two_agent_records_bind_the_complete_configuration() {
     let fixture = fixture();
     let section = production_section(&fixture);
     for name in ["model_output", "decision"] {
-        let outcome = append(&fixture, &section["valid_drafts"][name]);
-        assert!(
-            matches!(outcome, AppendOutcome::Committed(_)),
-            "{name} gave {outcome:?}"
-        );
+        assert_committed(&fixture, name, &section["valid_drafts"][name]);
     }
 }
 
@@ -123,11 +169,7 @@ fn version_two_registration_records_bind_their_stored_objects() {
     let fixture = fixture();
     let section = production_section(&fixture);
     for name in ["policy_registration", "model_registry_registration"] {
-        let outcome = append(&fixture, &section["valid_drafts"][name]);
-        assert!(
-            matches!(outcome, AppendOutcome::Committed(_)),
-            "{name} gave {outcome:?}"
-        );
+        assert_committed(&fixture, name, &section["valid_drafts"][name]);
     }
 }
 
@@ -143,16 +185,66 @@ fn every_invalid_production_reference_is_refused_as_specified() {
         !cases.is_empty(),
         "invalid production drafts must be non-empty"
     );
+    let artifacts = config_artifacts(section);
     for case in cases {
         let name = case["name"].as_str().expect("invalid draft name");
         let expected_reason = case["expect"]["reason"].as_str().expect("expected reason");
         let expected_path = case["expect"]["path"].as_str().expect("expected path");
-        let outcome = append(&fixture, &changed(section, case));
+        let (outcome, _, _) = append(&fixture, &changed(section, case), &artifacts);
         let AppendOutcome::Invalid { draft, error } = outcome else {
             panic!("{name} gave {outcome:?}");
         };
         assert_eq!(draft, 0, "{name}: draft index");
         assert_eq!(error.reason.code(), expected_reason, "{name}: reason");
+        assert_eq!(error.path, expected_path, "{name}: path");
+    }
+}
+
+#[test]
+#[ignore = "pending E7-19"]
+fn every_new_configuration_reference_requires_its_stored_object() {
+    let fixture = fixture();
+    let section = production_section(&fixture);
+    for (name, reference_path, expected_path) in [
+        (
+            "model_output",
+            "config_refs.model_registry",
+            "config_refs.model_registry",
+        ),
+        (
+            "decision",
+            "config_refs.policy_set",
+            "config_refs.policy_set",
+        ),
+        (
+            "policy_registration",
+            "payload.content_hash",
+            "payload.content_hash",
+        ),
+        (
+            "model_registry_registration",
+            "payload.content_hash",
+            "payload.content_hash",
+        ),
+    ] {
+        let draft = &section["valid_drafts"][name];
+        let reference = reference_path
+            .split('.')
+            .fold(draft, |value, member| &value[member])
+            .as_str()
+            .and_then(ArtifactRef::parse)
+            .expect("configuration artifact ref");
+        let mut artifacts = config_artifacts(section);
+        assert!(
+            artifacts.remove(&reference.digest()).is_some(),
+            "{name}: artifact is stored"
+        );
+        let (outcome, _, _) = append(&fixture, draft, &artifacts);
+        let AppendOutcome::Invalid { draft, error } = outcome else {
+            panic!("{name} gave {outcome:?}");
+        };
+        assert_eq!(draft, 0, "{name}: draft index");
+        assert_eq!(error.reason.code(), "missing_artifact", "{name}: reason");
         assert_eq!(error.path, expected_path, "{name}: path");
     }
 }
