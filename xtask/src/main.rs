@@ -3329,6 +3329,24 @@ mod tests {
                 "`{suite}` parses journal drafts, so it judges a `mandate-time` mutant: {filter}"
             );
         }
+        for driven in [
+            "mandate-approval",
+            "mandate-builder",
+            "mandate-executor",
+            "mandate-research",
+            "mandate-risk",
+            "mandate-runtime",
+            "mandate-spec",
+        ] {
+            let mut mutated = vec![driven];
+            let filter = external_oracles("", &mut mutated, |_| true, &declared, &closure)
+                .with_context(|| format!("a `{driven}` mutation must reach the mandate harness"))?;
+            assert!(
+                filter.contains("binary(mandate_harness)"),
+                "`mandate_harness` runs every interpreted kind, so every arm of `src/mandate.rs` \
+                 is its oracle, `{driven}`'s included (#652 round 3's major): {filter}"
+            );
+        }
         Ok(())
     }
 

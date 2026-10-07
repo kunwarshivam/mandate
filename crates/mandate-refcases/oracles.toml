@@ -22,7 +22,17 @@ control_stream = ["mandate-journal", "mandate-spec"]
 harness = ["mandate-accounting", "mandate-risk", "mandate-sim"]
 mandate_escalation_harness = ["mandate-approval", "mandate-runtime"]
 mandate_gate_harness = ["mandate-risk"]
-mandate_harness = ["mandate-builder", "mandate-spec"]
+# Every interpreted kind, so every arm of `src/mandate.rs`: escalation (approval, runtime),
+# tripwire (executor), gate and agent_flatten (risk), admission and lineage (research), builder.
+mandate_harness = [
+    "mandate-approval",
+    "mandate-builder",
+    "mandate-executor",
+    "mandate-research",
+    "mandate-risk",
+    "mandate-runtime",
+    "mandate-spec",
+]
 mandate_lifecycle_harness = ["mandate-approval", "mandate-journal", "mandate-runtime"]
 production_config_refs = ["mandate-journal"]
 refcases = [
