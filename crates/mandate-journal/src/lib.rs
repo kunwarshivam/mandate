@@ -671,6 +671,7 @@ impl MemoryJournal {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, reason = "test oracle")]
 mod production_config_tests {
     use super::*;
     use mandate_canon::Object;
