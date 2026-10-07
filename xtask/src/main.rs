@@ -1588,9 +1588,11 @@ const MUTANT_JOBS: &str = "1";
 /// the twenty-second cap.
 ///
 /// Three minutes against the 83 seconds that was the slowest test phase over four measured runs
-/// at [`MUTANT_JOBS`] workers, so a mutant the harness judges at all is judged, and only a
-/// mutation that hangs reaches the cap. The margin is the reason the job count is one: at two
-/// workers the same nine mutants reached 181 seconds, which this timeout would have cut off.
+/// at [`MUTANT_JOBS`] workers, so a mutant the harness judges at its ordinary pace is judged
+/// rather than cut off. The margin is the reason the job count is one: at two workers the same
+/// nine mutants reached 181 seconds, which this timeout would have cut off. A mutation slow
+/// enough to reach the cap anyway is bounded by it, which is what lets DEC-498 size a shard on
+/// this number rather than on how fast mutants have happened to run.
 const MUTANT_TEST_TIMEOUT: &str = "180";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
