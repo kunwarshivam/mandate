@@ -713,7 +713,9 @@ after U-A1 to U-A5 are recorded.
   aside, so MC-E18 passes (#550, merged), and the status PR moves it to `passing` (in review). Still
   open: a §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
   (DEC-430 item 2). It is a spec PR and changes no rule.
-  *Tests done (the `quorum` tests PR, DEC-488, DEC-489); the implementation follows:* DEC-488
+  *Tests in progress (the `quorum` tests PRs, DEC-488, DEC-489): this is the first of two, carrying
+  the two hand cases on the live one-approver binding, the property and the harness test; the
+  second carries the two stricter hand cases, then the implementation follows:* DEC-488
   fixes the member as `{required, independent}`, written exactly on a grant check 7 judged
   (`admitted`, `counted`, `duplicate_approver`, `not_independent`) from the bound requirement the
   fold holds and the overlay admission read, and absent otherwise. Four hand cases in

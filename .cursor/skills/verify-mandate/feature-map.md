@@ -919,9 +919,11 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-runtime/tests/approval_properties.rs` (the transition-table and causation-walker
   oracles over random scripts), live since #395, with fixtures in
   `crates/mandate-runtime/tests/common/escalation.rs`. The `quorum` record (DEC-488): four hand
-  cases in `tests/approvals.rs` and one property in `tests/approval_properties.rs`, whose oracle
-  reads the expected `{required, independent}` off the journaled request, with the `rebound_shell`
-  and `two_approvers` fixtures for a stricter binding (the second tests PR), and one harness test in
+  cases in `tests/approvals.rs`, of which the first tests PR carries the two on the live
+  one-approver binding and the second carries the two stricter ones with the `rebound_shell` and
+  `two_approvers` fixtures, and one property in `tests/approval_properties.rs`, whose oracle
+  reads the expected `{required, independent}` off the journaled request and decides which
+  responses check 7 judged from the generated answer its `causation` names, and one harness test in
   `crates/mandate-refcases/tests/mandate_lifecycle_harness.rs` (the ten quorum cases whole, their
   `quorum` compared); pending E8-3 as behaviour-only rows of `cargo xtask ci pending` (DEC-489)
   until the runtime writes the member. The CLI's owner control (M7 tests PR 4 of 4,
