@@ -1380,6 +1380,7 @@ dependencies = [
  "mandate-artifacts-fs",
  "mandate-canon",
  "mandate-journal",
+ "mandate-journal-cold",
  "mandate-marketdata",
  "mandate-num",
  "mandate-time",

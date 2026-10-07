@@ -46,7 +46,7 @@ story. Fill every section; write "none" rather than deleting one.
   PR** of the DEC-77 sequence; the implementation PR follows on `claude/hejxo4-e5-8-impl` and
   changes the test file only by deleting its `#[ignore = "pending E5-8"]` lines.
 - **Size budget:** about 330 lines of source (the stubs and types in the tests PR, the
-  implementation after) and 1,800 of tests.
+  implementation after) and 2,000 of tests.
 
 ## Data shapes
 
@@ -120,6 +120,7 @@ through the error, code first, and writes no report line.
 | §11 check 6 `artifact_missing`, `artifact_mismatch` through the cold walk | `without_a_store_an_event_that_names_an_artifact_is_artifact_missing`, `an_altered_artifact_is_artifact_mismatch` |
 | Replay: identical inputs give identical output | `identical_inputs_give_identical_output` |
 | Exit status: any failure is non-zero | `ColdOutcome::failed` asserted in `assert_tamper`, the pinned codes, and every failure test |
+| The binary's edge: `main` dispatches, prints the report and exits on the outcome (the mutation gate's `main` mutant) | `journal_verify_prints_its_report_and_exits_on_the_result` (live, E5-4's command) and `journal_verify_cold_prints_its_report_and_exits_on_the_result` in `crates/mandate-cli/tests/binary.rs` |
 
 ## Interpretations (recorded as DEC-490)
 
@@ -153,7 +154,7 @@ report; and the vector cases a cold export re-expresses.
 | B19 | Read the token lazily, after the walk, with an empty default | `an_unreadable_export_anchor_or_token_path_is_refused_with_a_code` |
 
 The do-nothing check: a stub that writes a seven-line report and returns `Verified` over an empty
-span passes 0 of the 37 pending tests (`cargo nextest run -p mandate-cli --test journal_verify_cold
+span passes 0 of the 37 pending library tests (the binary's pending test fails on its exit status) (`cargo nextest run -p mandate-cli --test journal_verify_cold
 --run-ignored only --no-fail-fast`: 37 run, 0 passed).
 
 ## What the tests cannot catch
@@ -216,9 +217,10 @@ failure (DEC-490 item 9), which tightens: the export still fails, earlier, with 
 
 - [ ] The cited reference cases pass, and none that passed before now fails (none move; the
       tamper vectors are replayed through the command against the same fixture file).
-- [x] Tests came first: 44 tests, 37 pending and failing on the stub with its own report, 7 live
-      (argument parsing, the pinned codes, the oracle's manifest, the vector file's shape); the
-      do-nothing check passes 0; 19 planted bugs each caught by the named test.
+- [x] Tests came first: 46 tests, 38 pending and failing on the stub with its own report, 8 live
+      (argument parsing, the pinned codes, the oracle's manifest, the vector file's shape, and the
+      binary's `journal verify` edge); the do-nothing check passes 0; 19 planted bugs each caught
+      by the named test.
 - [x] New state changes emit journal events (none: the command only reads).
 - [x] Docs updated: this brief, DEC-490, the feature map, the work tracker's E5-8 rows, the
       backlog's E5-8 row.

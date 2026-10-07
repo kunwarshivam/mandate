@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "The `mandate` command line: `download` fetches Alpaca historical data into Parquet (backlog E2-1); `inspect` reports coverage, gaps, duplicates, and statistics (E2-2); `journal verify` and `artifact put`/`get` check an exported journal and its artifact store (E5-4); `approvals` and `agent` are M7's owner control (E8-1 to E8-3)"
+description = "The `mandate` command line: `download` fetches Alpaca historical data into Parquet (backlog E2-1); `inspect` reports coverage, gaps, duplicates, and statistics (E2-2); `journal verify` and `artifact put`/`get` check an exported journal and its artifact store (E5-4); `journal verify-cold` checks a cold-store export through `mandate-journal-cold` (E5-8); `approvals` and `agent` are M7's owner control (E8-1 to E8-3)"
 
 [lints]
 workspace = true
@@ -20,6 +20,7 @@ mandate-approval.workspace = true
 mandate-artifacts-fs.workspace = true
 mandate-canon.workspace = true
 mandate-journal.workspace = true
+mandate-journal-cold.workspace = true
 mandate-marketdata.workspace = true
 mandate-time.workspace = true
 serde.workspace = true

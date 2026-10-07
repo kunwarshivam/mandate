@@ -5,7 +5,8 @@
 //! The checks themselves are `mandate_journal::verify_events` and `verify_anchor`; this module
 //! reads the export back into the stored rows they take, and prints the first failure with the
 //! spec's check code. An export carries only each event's body and hash, so the columns check 2
-//! compares are read from the body itself (see [`row`]).
+//! compares are read from the body itself (see [`row`]). The cold-store half, `verify-cold` over a
+//! directory of segments and manifests, is [`cold`] (E5-8).
 
 use std::fmt;
 use std::fs;
@@ -21,11 +22,17 @@ use mandate_journal::{
     RangeCheck, StoredEvent, StreamId, TrustedStart, verify_anchor, verify_events,
 };
 
+pub mod cold;
+
 #[derive(Debug, Subcommand)]
 pub enum JournalCommand {
     /// Verify an exported journal segment against its hash chain, the artifact store its events
     /// reference, and an anchor when one is given. Exits with an error on any failure.
     Verify(VerifyArgs),
+    /// Verify a cold-store export: a directory of segment files and their manifests, walked in
+    /// order from a trusted start, then an anchor and its timestamp token when they are given.
+    /// Exits with an error on any failure, and on a token until its signature can be checked.
+    VerifyCold(cold::VerifyColdArgs),
 }
 
 #[derive(Debug, Args)]
@@ -122,6 +129,12 @@ pub enum Refusal {
     ExportStreams,
     /// The export's `stream_id` is not one of journal spec §2.
     ExportStreamId,
+    /// A path the cold command was given, or a file inside its export, could not be read: the
+    /// export is not a directory, or an I/O failure (DEC-490 item 4).
+    Unreadable,
+    /// The cold export holds no segment, a segment file without its manifest, or a manifest
+    /// without its file, so no range can be covered (DEC-490 item 3).
+    ColdExportIncomplete,
 }
 
 impl Refusal {
@@ -134,6 +147,8 @@ impl Refusal {
             Self::AnchorStream => "anchor_covers_another_stream",
             Self::ExportStreams => "export_mixes_streams",
             Self::ExportStreamId => "export_stream_id_invalid",
+            Self::Unreadable => "path_unreadable",
+            Self::ColdExportIncomplete => "cold_export_incomplete",
         }
     }
 }
