@@ -322,6 +322,7 @@ fn workspace_lint() -> Result<()> {
     markers()?;
     proptest_seeds()?;
     feature_map()?;
+    oracles()?;
     sh("typos", &[])?;
     uv_tools(&["ruff", "check", "."])?;
     uv_tools(&["ruff", "format", "--check", "."])
@@ -1162,6 +1163,68 @@ fn feature_map() -> Result<()> {
     report(problems, "feature-map")
 }
 
+/// Every reference suite declares the packages it judges, and every declaration names a suite that
+/// exists and packages that do, so a suite cannot join the harness without saying what a mutation
+/// run must use it for (DEC-497).
+fn oracles() -> Result<()> {
+    eprintln!("    oracles: checking {ORACLES} against the reference suites");
+    let declared = oracle_table(Path::new("."))?;
+    let members: BTreeSet<String> = workspace_packages(&metadata()?)
+        .into_iter()
+        .map(|pkg| pkg.name.clone())
+        .collect();
+    let mut problems = Vec::new();
+    for entry in fs::read_dir(REFCASE_SUITES)? {
+        let file = entry?.file_name().to_string_lossy().into_owned();
+        let Some(suite) = file.strip_suffix(".rs") else {
+            continue;
+        };
+        if !declared.contains_key(suite) {
+            problems.push(format!("suite `{suite}` has no entry"));
+        }
+    }
+    for (suite, judged) in &declared {
+        if !Path::new(&suite_path(suite)).is_file() {
+            problems.push(format!("`{suite}` names no suite in {REFCASE_SUITES}"));
+        }
+        if judged.is_empty() {
+            problems.push(format!("`{suite}` judges no package"));
+        }
+        for package in judged {
+            if !members.contains(package) {
+                problems.push(format!(
+                    "`{suite}` names `{package}`, which is not a workspace member"
+                ));
+            }
+        }
+    }
+    report(problems, "oracles")
+}
+
+/// The suites of [`ORACLES`] with the packages each judges. A tree with no reference suites to
+/// declare — the fixture workspaces the gate's own tests build — has no table and declares
+/// nothing; a tree that has the suites and not the table is an error, so the gate can never lose
+/// its external oracles by the file going missing.
+fn oracle_table(root: &Path) -> Result<BTreeMap<String, Vec<String>>> {
+    if !root.join(REFCASE_SUITES).is_dir() {
+        return Ok(BTreeMap::new());
+    }
+    let path = root.join(ORACLES);
+    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let table: Oracles =
+        toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    Ok(table.suites)
+}
+
+fn suite_path(suite: &str) -> String {
+    format!("{REFCASE_SUITES}{suite}.rs")
+}
+
+#[derive(Deserialize)]
+struct Oracles {
+    suites: BTreeMap<String, Vec<String>>,
+}
+
 /// Code spans that look like repository paths: no spaces or globs, starting at a known root.
 fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
     text.split('`').skip(1).step_by(2).filter(|span| {
@@ -1237,9 +1300,13 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         })
         .map(|krate| krate.package.as_str())
         .collect();
-    let test_filter = external_oracles(&changed, &mut test_packages, |file| {
-        root.join(file).is_file()
-    });
+    let declared = oracle_table(root)?;
+    let test_filter = external_oracles(
+        &changed,
+        &mut test_packages,
+        |file| root.join(file).is_file(),
+        &declared,
+    );
     let args = mutants_args(&diff_path, shard, &test_packages, test_filter.as_deref());
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
@@ -1292,25 +1359,38 @@ impl MutantShard {
 ///
 /// A mutant is judged only by the tests cargo-mutants runs, and the oracle for several crates
 /// lives in `mandate-refcases`, a package those crates do not depend on, so cargo-mutants never
-/// discovers it (DEC-497). Naming `mandate-refcases` on every run would make each mutant of every
-/// PR pay that whole suite, which timed the CI shards out, so it is named only when the PR changes
-/// one of those suites, and the filter then runs the mutated packages' own tests plus only the
-/// changed suites. A suite the PR deleted is no longer `present` and names no binary, which would
-/// otherwise filter every test out.
+/// discovers it (DEC-497). Which suites a run needs follows from what it mutates, not from what
+/// the change happens to edit: `declared` is [`ORACLES`], where each suite names the packages it
+/// judges, and a mutated package pulls in every suite that names it. A change that edits a suite
+/// adds it too, so a new or reworked suite judges the mutants of the change that writes it before
+/// its entry can be trusted. Naming the whole of `mandate-refcases` instead would make every
+/// mutant of every PR pay the three harness suites that are most of its run time and none of most
+/// changes' oracle. A suite the change deleted is no longer `present` and names no binary, which
+/// would otherwise filter every test out.
 fn external_oracles<'a>(
     changed: &'a str,
     packages: &mut Vec<&'a str>,
     present: impl Fn(&str) -> bool,
+    declared: &'a BTreeMap<String, Vec<String>>,
 ) -> Option<String> {
-    let suites: Vec<&str> = changed
-        .lines()
-        .filter(|file| present(file))
-        .filter_map(|file| {
-            file.strip_prefix(REFCASE_SUITES)
-                .and_then(|name| name.strip_suffix(".rs"))
-                .filter(|name| !name.contains('/'))
+    let mutated: BTreeSet<&str> = packages.iter().copied().collect();
+    let mut suites: BTreeSet<&str> = declared
+        .iter()
+        .filter(|(suite, judged)| {
+            present(&suite_path(suite)) && judged.iter().any(|p| mutated.contains(p.as_str()))
         })
+        .map(|(suite, _)| suite.as_str())
         .collect();
+    suites.extend(
+        changed
+            .lines()
+            .filter(|file| present(file))
+            .filter_map(|file| {
+                file.strip_prefix(REFCASE_SUITES)
+                    .and_then(|name| name.strip_suffix(".rs"))
+                    .filter(|name| !name.contains('/'))
+            }),
+    );
     if suites.is_empty() {
         return None;
     }
@@ -1551,6 +1631,9 @@ fn unjudged_mutants(
 const MUTANTS_OUT: &str = "target/mutants.out";
 const REFCASES: &str = "mandate-refcases";
 const REFCASE_SUITES: &str = "crates/mandate-refcases/tests/";
+/// Which reference suite judges which package, so a mutation run can find the oracles that live
+/// outside the package it mutates (DEC-497).
+const ORACLES: &str = "crates/mandate-refcases/oracles.toml";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
 /// this status reads the outcomes and may exempt a stub body: a build failure, a diff that no longer
@@ -2974,7 +3057,7 @@ mod tests {
     use std::env;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::time::Duration;
 
@@ -2983,14 +3066,15 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANTS_OUT, MutantShard, MutatedCrate,
-        PendingTest, PendingTestRun, REFCASES, TestOutcome, actionlint_workflows, backticked_paths,
-        base_ref_in, ci, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
-        first_panic_line, generated_pending_markers, has_pending_tests, is_pending_marker,
-        is_stub_function, lint, listed_mutant_counts, live_test_counts, mutant_verdicts, mutants,
-        mutants_args, mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems,
-        pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_outcomes, unjudged_mutants, verdicts,
+        PendingTest, PendingTestRun, REFCASE_SUITES, REFCASES, TestOutcome, actionlint_workflows,
+        backticked_paths, base_ref_in, ci, classify, contains_dec_id, contains_word,
+        external_oracles, failure_cause, first_panic_line, generated_pending_markers,
+        has_pending_tests, is_pending_marker, is_stub_function, lint, listed_mutant_counts,
+        live_test_counts, mutant_verdicts, mutants, mutants_args, mutants_outcome, mutated_crates,
+        names_a_stub, oracle_table, output_in, pending_problems, pending_tests,
+        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
+        unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -3037,41 +3121,75 @@ mod tests {
         Ok(())
     }
 
+    fn declared_oracles() -> BTreeMap<String, Vec<String>> {
+        [
+            ("production_config_refs", vec!["mandate-journal"]),
+            ("risk_state", vec!["mandate-journal", "mandate-spec"]),
+            ("mandate_gate_harness", vec!["mandate-risk"]),
+        ]
+        .into_iter()
+        .map(|(suite, judged)| {
+            (
+                suite.to_owned(),
+                judged.into_iter().map(str::to_owned).collect(),
+            )
+        })
+        .collect()
+    }
+
     #[test]
-    fn the_external_oracle_runs_only_for_the_reference_suites_a_change_touches() {
-        let mut untouched = vec!["mandate-journal"];
+    fn the_external_oracle_runs_for_the_suites_that_judge_the_mutated_packages() {
+        let declared = declared_oracles();
+
+        let mut journal = vec!["mandate-journal"];
         assert_eq!(
             external_oracles(
                 "crates/mandate-journal/src/lib.rs\ndocs/HLD.md\n",
-                &mut untouched,
-                |_| true
-            ),
-            None,
-            "a change that touches no reference suite leaves the run to the mutated packages"
+                &mut journal,
+                |_| true,
+                &declared,
+            )
+            .as_deref(),
+            Some("package(mandate-journal) | binary(production_config_refs) | binary(risk_state)"),
+            "a change that edits no suite still runs every suite that judges what it mutates: \
+             this is the hole #652's review found in keying on the diff"
         );
         assert_eq!(
-            untouched,
-            ["mandate-journal"],
+            journal,
+            ["mandate-journal", REFCASES],
+            "the reference package is named so cargo-mutants builds its suites"
+        );
+
+        let mut unjudged = vec!["mandate-marketdata"];
+        assert_eq!(
+            external_oracles(
+                "crates/mandate-marketdata/src/lib.rs\n",
+                &mut unjudged,
+                |_| true,
+                &declared
+            ),
+            None,
+            "a package no suite judges leaves the run to the mutated packages' own tests"
+        );
+        assert_eq!(
+            unjudged,
+            ["mandate-marketdata"],
             "and names no extra test package"
         );
 
-        let mut touched = vec!["mandate-journal"];
-        let filter = external_oracles(
-            "crates/mandate-journal/src/lib.rs\n\
-             crates/mandate-refcases/tests/production_config_refs.rs\n\
-             crates/mandate-refcases/tests/common/mod.rs\n",
-            &mut touched,
-            |_| true,
-        );
+        let mut edited = vec!["mandate-marketdata"];
         assert_eq!(
-            filter.as_deref(),
-            Some("package(mandate-journal) | binary(production_config_refs)"),
-            "the mutated package's own tests run, and of the reference suites only the changed one"
-        );
-        assert_eq!(
-            touched,
-            ["mandate-journal", REFCASES],
-            "the reference package is named so cargo-mutants builds its suites"
+            external_oracles(
+                "crates/mandate-refcases/tests/mandate_gate_harness.rs\n\
+                 crates/mandate-refcases/tests/common/mod.rs\n",
+                &mut edited,
+                |_| true,
+                &declared,
+            )
+            .as_deref(),
+            Some("package(mandate-marketdata) | binary(mandate_gate_harness)"),
+            "a suite the change edits runs whatever it declares, so a reworked suite judges the \
+             mutants of the change that writes it"
         );
 
         let mut already = vec![REFCASES];
@@ -3079,6 +3197,7 @@ mod tests {
             "crates/mandate-refcases/tests/production_config_refs.rs\n",
             &mut already,
             |_| true,
+            &declared,
         );
         assert_eq!(
             already,
@@ -3089,14 +3208,43 @@ mod tests {
         let mut deleted = vec!["mandate-journal"];
         assert_eq!(
             external_oracles(
-                "crates/mandate-refcases/tests/gone.rs\n",
+                "crates/mandate-refcases/tests/production_config_refs.rs\n",
                 &mut deleted,
-                |file| file != "crates/mandate-refcases/tests/gone.rs"
-            ),
-            None,
+                |file| file != "crates/mandate-refcases/tests/production_config_refs.rs",
+                &declared,
+            )
+            .as_deref(),
+            Some("package(mandate-journal) | binary(risk_state)"),
             "a suite the change deleted names no binary, which would filter every test out"
         );
-        assert_eq!(deleted, ["mandate-journal"]);
+    }
+
+    #[test]
+    fn every_reference_suite_declares_the_packages_it_judges() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the workspace root above xtask")?;
+        let declared = oracle_table(root)?;
+        let mut undeclared = Vec::new();
+        for entry in fs::read_dir(root.join(REFCASE_SUITES))? {
+            let file = entry?.file_name().to_string_lossy().into_owned();
+            if let Some(suite) = file.strip_suffix(".rs")
+                && !declared.contains_key(suite)
+            {
+                undeclared.push(suite.to_owned());
+            }
+        }
+        assert!(
+            undeclared.is_empty(),
+            "every suite must say what it judges, or a mutation run cannot find it: {undeclared:?}"
+        );
+        assert!(
+            declared
+                .get("production_config_refs")
+                .is_some_and(|judged| judged.iter().any(|p| p == "mandate-journal")),
+            "the suite #644 added is the oracle for the journal's configuration references"
+        );
+        Ok(())
     }
 
     #[test]
