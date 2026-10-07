@@ -1,44 +1,41 @@
-# Which workspace packages each reference suite is the external oracle for (DEC-497).
+# Which workspace crates each reference suite drives (DEC-497).
 #
 # `cargo xtask ci mutants` mutates a crate and runs that crate's own tests. Several crates' oracles
 # are not there: they are reference-case suites in this package, which the mutated crate does not
-# depend on, so nothing discovers them. This table is how the gate finds them. A mutation run that
-# mutates a package named here also runs the suites that name it, and only those.
+# depend on, so nothing discovers them. This table is how the gate finds them. A mutation run also
+# runs every suite that reaches a package it mutates.
+#
+# Name only the crates a suite calls. The gate adds what those crates are built on, from cargo's
+# own graph: a suite that drives `mandate-journal` judges mutants of `mandate-canon`,
+# `mandate-time` and `mandate-num` too, because a test that exercises a crate exercises everything
+# under it. So no entry has to say which call reaches which layer, and the one way to lose
+# coverage is to leave out a crate the suite calls directly.
 #
 # Every `tests/<name>.rs` must have an entry and every entry must name an existing suite and
-# workspace packages this package depends on; `cargo xtask oracles` fails otherwise, so a new suite
-# cannot join without saying what it judges.
-#
-# An entry is a claim that the suite can fail on a change to that package. Under-naming a package
-# is how a missed mutant hides, so name a package whenever the suite reaches it, even indirectly;
-# the cost of naming one more is the suite's own run time per mutant, and `refcases`, the case
-# runner, names every package the corpus exercises.
+# workspace packages; `cargo xtask oracles` fails otherwise, so a new suite cannot join without
+# saying what it drives.
 
 [suites]
 agent_stream = ["mandate-journal"]
 asset_id = ["mandate-domain", "mandate-journal"]
-control_stream = ["mandate-canon", "mandate-journal", "mandate-spec", "mandate-time"]
-harness = ["mandate-accounting", "mandate-num", "mandate-risk", "mandate-sim", "mandate-time"]
-mandate_escalation_harness = ["mandate-approval", "mandate-num", "mandate-runtime", "mandate-time"]
-mandate_gate_harness = ["mandate-num", "mandate-risk", "mandate-time"]
-mandate_harness = ["mandate-builder", "mandate-canon", "mandate-num", "mandate-spec"]
-mandate_lifecycle_harness = ["mandate-approval", "mandate-journal", "mandate-num", "mandate-runtime", "mandate-time"]
-production_config_refs = ["mandate-canon", "mandate-journal", "mandate-time"]
+control_stream = ["mandate-journal", "mandate-spec"]
+harness = ["mandate-accounting", "mandate-risk", "mandate-sim"]
+mandate_escalation_harness = ["mandate-approval", "mandate-runtime"]
+mandate_gate_harness = ["mandate-risk"]
+mandate_harness = ["mandate-builder", "mandate-spec"]
+mandate_lifecycle_harness = ["mandate-approval", "mandate-journal", "mandate-runtime"]
+production_config_refs = ["mandate-journal"]
 refcases = [
     "mandate-accounting",
     "mandate-approval",
     "mandate-builder",
-    "mandate-canon",
-    "mandate-domain",
     "mandate-executor",
     "mandate-journal",
-    "mandate-num",
     "mandate-research",
     "mandate-risk",
     "mandate-runtime",
-    "mandate-spec",
     "mandate-sim",
-    "mandate-time",
+    "mandate-spec",
 ]
-risk_state = ["mandate-canon", "mandate-journal", "mandate-spec", "mandate-time"]
-trading_domain_gate_harness = ["mandate-num", "mandate-risk", "mandate-time"]
+risk_state = ["mandate-journal", "mandate-spec"]
+trading_domain_gate_harness = ["mandate-risk"]

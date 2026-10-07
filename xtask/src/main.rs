@@ -22,6 +22,7 @@ commands:
   layers                check crate layering and safety-critical policy (xtask/layers.toml)
   markers               check for debt markers and #[ignore] without a pending story
   feature-map           check the verification skill's feature map against the workspace
+  oracles               check the reference suites' oracle table (crates/mandate-refcases/oracles.toml)
   deps                  check every direct dependency against docs/dependencies.md
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
 ";
@@ -123,6 +124,7 @@ fn run() -> Result<()> {
         ["layers"] => layers(),
         ["markers"] => markers(),
         ["feature-map"] => feature_map(),
+        ["oracles"] => oracles(),
         ["deps"] => deps(),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
@@ -643,6 +645,38 @@ fn workspace_packages(meta: &Metadata) -> Vec<&Package> {
     meta.packages
         .iter()
         .filter(|p| members.contains(p.id.as_str()))
+        .collect()
+}
+
+/// Every workspace package with the workspace packages it is built on, itself included. A test
+/// that exercises a crate exercises everything that crate is built on, so this is what turns a
+/// suite's declaration of the crates it drives into the full set of packages it can fail on
+/// (DEC-497), without anyone auditing which call reaches which layer.
+fn workspace_closure(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
+    let direct: BTreeMap<&str, Vec<&str>> = workspace_packages(meta)
+        .into_iter()
+        .map(|pkg| {
+            let deps = pkg
+                .dependencies
+                .iter()
+                .filter(|dep| dep.path.is_some())
+                .map(|dep| dep.name.as_str())
+                .collect();
+            (pkg.name.as_str(), deps)
+        })
+        .collect();
+    direct
+        .keys()
+        .map(|package| {
+            let mut reached = BTreeSet::new();
+            let mut pending = vec![*package];
+            while let Some(next) = pending.pop() {
+                if reached.insert(next.to_owned()) {
+                    pending.extend(direct.get(next).into_iter().flatten().copied());
+                }
+            }
+            ((*package).to_owned(), reached)
+        })
         .collect()
 }
 
@@ -1301,11 +1335,13 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         .map(|krate| krate.package.as_str())
         .collect();
     let declared = oracle_table(root)?;
+    let closure = workspace_closure(&metadata_in(root)?);
     let test_filter = external_oracles(
         &changed,
         &mut test_packages,
         |file| root.join(file).is_file(),
         &declared,
+        &closure,
     );
     let args = mutants_args(&diff_path, shard, &test_packages, test_filter.as_deref());
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
@@ -1360,24 +1396,32 @@ impl MutantShard {
 /// A mutant is judged only by the tests cargo-mutants runs, and the oracle for several crates
 /// lives in `mandate-refcases`, a package those crates do not depend on, so cargo-mutants never
 /// discovers it (DEC-497). Which suites a run needs follows from what it mutates, not from what
-/// the change happens to edit: `declared` is [`ORACLES`], where each suite names the packages it
-/// judges, and a mutated package pulls in every suite that names it. A change that edits a suite
-/// adds it too, so a new or reworked suite judges the mutants of the change that writes it before
-/// its entry can be trusted. Naming the whole of `mandate-refcases` instead would make every
-/// mutant of every PR pay the three harness suites that are most of its run time and none of most
-/// changes' oracle. A suite the change deleted is no longer `present` and names no binary, which
-/// would otherwise filter every test out.
+/// the change happens to edit: `declared` is [`ORACLES`], where each suite names the crates it
+/// drives, and a suite judges those crates and, through `closure`, everything they are built on,
+/// so a suite that parses a draft judges the timestamp crate the parser calls without anyone
+/// writing that down. A change that edits a suite adds it too, so a new or reworked suite judges
+/// the mutants of the change that writes it before its entry can be trusted. Naming the whole of
+/// `mandate-refcases` instead would make every mutant of every PR pay the three harness suites
+/// that are most of its run time and none of most changes' oracle. A suite the change deleted is
+/// no longer `present` and names no binary, which would otherwise filter every test out.
 fn external_oracles<'a>(
     changed: &'a str,
     packages: &mut Vec<&'a str>,
     present: impl Fn(&str) -> bool,
     declared: &'a BTreeMap<String, Vec<String>>,
+    closure: &BTreeMap<String, BTreeSet<String>>,
 ) -> Option<String> {
     let mutated: BTreeSet<&str> = packages.iter().copied().collect();
+    let reaches = |drives: &str| {
+        closure.get(drives).map_or_else(
+            || mutated.contains(drives),
+            |built_on| built_on.iter().any(|p| mutated.contains(p.as_str())),
+        )
+    };
     let mut suites: BTreeSet<&str> = declared
         .iter()
         .filter(|(suite, judged)| {
-            present(&suite_path(suite)) && judged.iter().any(|p| mutated.contains(p.as_str()))
+            present(&suite_path(suite)) && judged.iter().any(|drives| reaches(drives))
         })
         .map(|(suite, _)| suite.as_str())
         .collect();
@@ -3053,7 +3097,7 @@ fn report(problems: Vec<String>, check: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::env;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -3070,11 +3114,11 @@ mod tests {
         backticked_paths, base_ref_in, ci, classify, contains_dec_id, contains_word,
         external_oracles, failure_cause, first_panic_line, generated_pending_markers,
         has_pending_tests, is_pending_marker, is_stub_function, lint, listed_mutant_counts,
-        live_test_counts, mutant_verdicts, mutants, mutants_args, mutants_outcome, mutated_crates,
-        names_a_stub, oracle_table, output_in, pending_problems, pending_tests,
+        live_test_counts, metadata_in, mutant_verdicts, mutants, mutants_args, mutants_outcome,
+        mutated_crates, names_a_stub, oracle_table, output_in, pending_problems, pending_tests,
         plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
         spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
-        unjudged_mutants, verdicts,
+        unjudged_mutants, verdicts, workspace_closure,
     };
 
     #[test]
@@ -3137,9 +3181,31 @@ mod tests {
         .collect()
     }
 
+    fn declared_closure() -> BTreeMap<String, BTreeSet<String>> {
+        [
+            ("mandate-journal", vec!["mandate-journal", "mandate-time"]),
+            (
+                "mandate-spec",
+                vec!["mandate-spec", "mandate-journal", "mandate-time"],
+            ),
+            ("mandate-risk", vec!["mandate-risk"]),
+            ("mandate-time", vec!["mandate-time"]),
+            ("mandate-marketdata", vec!["mandate-marketdata"]),
+        ]
+        .into_iter()
+        .map(|(package, built_on)| {
+            (
+                package.to_owned(),
+                built_on.into_iter().map(str::to_owned).collect(),
+            )
+        })
+        .collect()
+    }
+
     #[test]
     fn the_external_oracle_runs_for_the_suites_that_judge_the_mutated_packages() {
         let declared = declared_oracles();
+        let closure = declared_closure();
 
         let mut journal = vec!["mandate-journal"];
         assert_eq!(
@@ -3148,6 +3214,7 @@ mod tests {
                 &mut journal,
                 |_| true,
                 &declared,
+                &closure,
             )
             .as_deref(),
             Some("package(mandate-journal) | binary(production_config_refs) | binary(risk_state)"),
@@ -3166,7 +3233,8 @@ mod tests {
                 "crates/mandate-marketdata/src/lib.rs\n",
                 &mut unjudged,
                 |_| true,
-                &declared
+                &declared,
+                &closure,
             ),
             None,
             "a package no suite judges leaves the run to the mutated packages' own tests"
@@ -3185,6 +3253,7 @@ mod tests {
                 &mut edited,
                 |_| true,
                 &declared,
+                &closure,
             )
             .as_deref(),
             Some("package(mandate-marketdata) | binary(mandate_gate_harness)"),
@@ -3198,6 +3267,7 @@ mod tests {
             &mut already,
             |_| true,
             &declared,
+            &closure,
         );
         assert_eq!(
             already,
@@ -3212,11 +3282,54 @@ mod tests {
                 &mut deleted,
                 |file| file != "crates/mandate-refcases/tests/production_config_refs.rs",
                 &declared,
+                &closure,
             )
             .as_deref(),
             Some("package(mandate-journal) | binary(risk_state)"),
             "a suite the change deleted names no binary, which would filter every test out"
         );
+
+        let mut underneath = vec!["mandate-time"];
+        assert_eq!(
+            external_oracles(
+                "crates/mandate-time/src/lib.rs\n",
+                &mut underneath,
+                |_| true,
+                &declared,
+                &closure,
+            )
+            .as_deref(),
+            Some("package(mandate-time) | binary(production_config_refs) | binary(risk_state)"),
+            "a suite judges the crates under the ones it drives: no entry names `mandate-time`, \
+             and the journal's parser calls it, which is #652 round 2's major"
+        );
+    }
+
+    /// The reach the table leaves to cargo's graph, over the real table and the real graph: the
+    /// suites that drive the journal judge a `mandate-time` mutation, which no entry names.
+    #[test]
+    fn a_suite_judges_the_crates_under_the_ones_it_drives() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the workspace root above xtask")?;
+        let declared = oracle_table(root)?;
+        let closure = workspace_closure(&metadata_in(root)?);
+        assert!(
+            closure
+                .get("mandate-journal")
+                .is_some_and(|built_on| built_on.contains("mandate-time")),
+            "the journal is built on the timestamp crate its draft parser calls"
+        );
+        let mut mutated = vec!["mandate-time"];
+        let filter = external_oracles("", &mut mutated, |_| true, &declared, &closure)
+            .context("a `mandate-time` mutation must reach the suites that parse drafts")?;
+        for suite in ["agent_stream", "asset_id", "production_config_refs"] {
+            assert!(
+                filter.contains(&format!("binary({suite})")),
+                "`{suite}` parses journal drafts, so it judges a `mandate-time` mutant: {filter}"
+            );
+        }
+        Ok(())
     }
 
     #[test]
