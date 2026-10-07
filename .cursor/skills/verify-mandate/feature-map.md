@@ -391,7 +391,11 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-executor/src/ids.rs` (`ClientOrderId`, three derivations and one validating
   parser, no free constructor), `crates/mandate-executor/src/types.rs` (the vocabulary, including
   `BrokerRequest` and `AccountWideScope`), `crates/mandate-executor/src/reconcile.rs`,
-  `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/gate.rs` (the binding
+  `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/kill.rs` (the
+  agent-scoped kill switch of section 5.5: the final mode first, the agent's orders cancelled by
+  id, and its sub-ledger sold through the executor's own `k-<switch>-<n>` flatten intents once the
+  cancels confirm; the account and workspace scopes answer their stub; DEC-485),
+  `crates/mandate-executor/src/gate.rs` (the binding
   gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`,
   `crates/mandate-executor/src/opening.rs` (`equity_bracket_prices`, the bracket's stop and
   take-profit rounded up onto the Reg NMS grid, and `BrokerAccount::one_x_buying_power`, with

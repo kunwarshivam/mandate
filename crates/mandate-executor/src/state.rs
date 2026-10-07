@@ -121,7 +121,22 @@ pub struct ExecutorState {
     /// event id, consumed by the submission that names it as its `causation_id` (rule 45). The
     /// exact request the fold rebuilds a resubmission from (§5.7).
     pub(crate) pending_requests: BTreeMap<EventId, PendingRequest>,
+    /// Each agent-scoped kill switch as its `KillSwitchActivated` journaled it, by that record's
+    /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
+    pub(crate) switches: BTreeMap<EventId, Switch>,
     pub(crate) now: Option<RiskClock>,
+}
+
+/// One agent-scoped kill switch (trading-domain spec §5.5): whose sub-ledger it sells, as what
+/// purpose, the owner's confirmed floor if any, and the instruments it closes, in the
+/// order the record named them, which is what a flatten's ordinal is derived from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Switch {
+    pub(crate) agent: AgentId,
+    pub(crate) purpose: Purpose,
+    pub(crate) floor: Option<Price>,
+    pub(crate) instruments: Vec<InstrumentId>,
+    pub(crate) pending: BTreeSet<InstrumentId>,
 }
 
 /// What one `OrderRequestRecorded` carries (§9.5): the executor-only members of the order that
@@ -285,6 +300,7 @@ impl ExecutorState {
             restrictions: BTreeMap::new(),
             uncompensated: BTreeMap::new(),
             pending_requests: BTreeMap::new(),
+            switches: BTreeMap::new(),
             now: None,
         }
     }
@@ -384,11 +400,7 @@ impl ExecutorState {
     /// agent of the account, and its own mode (trading-domain spec §7.3 evaluates account state
     /// **before** agent mode).
     pub fn effective_mode(&self, agent: &AgentId) -> Mode {
-        let account = match self.account_state {
-            AccountState::Active => Mode::Normal,
-            AccountState::ClosingOnly => Mode::ExitsOnly,
-            AccountState::Blocked => Mode::Paused,
-        };
+        let account = self.account_mode();
         let every = self
             .modes
             .get(&AgentId(EVERY_AGENT.to_owned()))
@@ -396,6 +408,16 @@ impl ExecutorState {
             .unwrap_or_default();
         let own = self.modes.get(agent).copied().unwrap_or_default();
         account.max(every).max(own)
+    }
+
+    /// The mode the account's own state imposes on every agent (§7.3): the one part of the
+    /// effective mode a kill switch's flatten is not exempt from (§5.5, DEC-485).
+    pub(crate) fn account_mode(&self) -> Mode {
+        match self.account_state {
+            AccountState::Active => Mode::Normal,
+            AccountState::ClosingOnly => Mode::ExitsOnly,
+            AccountState::Blocked => Mode::Paused,
+        }
     }
 
     /// The account state detected from statuses and rejects (§7.3).

@@ -1284,7 +1284,6 @@ proptest! {
     /// next attempt, so ids — not `(id, attempt)` pairs — are what the two sides share; the
     /// duplicate guarantee is the separate `accepted_for(id) <= 1`.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_submit_effect_follows_the_order_submitted_draft_that_names_it(script in scripted()) {
         let run = play(&script);
         let accepted: BTreeSet<String> = run
@@ -1379,7 +1378,6 @@ proptest! {
     /// intent a submission carries rides its `OrderRequestRecorded` companion (§9.5, rule 45), so
     /// the loop reads the merged view, the way the fold does.
     #[test]
-    #[ignore = "pending E7-2"]
     fn distinct_intents_never_share_a_client_order_id(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -1439,7 +1437,6 @@ proptest! {
     /// crash at any point of any step, and a restart with the broker carried across, leaves every
     /// client order id accepted at most once — and the prefix's order still exactly once.
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_crash_point_makes_the_broker_see_two_orders_for_one_intent(
         script in scripted(),
         point in prop::sample::select(&CrashPoint::ALL[..]),
@@ -1545,7 +1542,6 @@ proptest! {
     /// §5.7: filled quantity is non-decreasing, at most the order quantity, and equals the sum of
     /// unique fills.
     #[test]
-    #[ignore = "pending E7-2"]
     fn filled_quantity_equals_the_sum_of_unique_fills(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -1592,7 +1588,6 @@ proptest! {
     /// read as a terminal one (DEC-133's ruling on absences: `unknown` with `lookup: "absent"` is a
     /// lookup result, not a state change).
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_terminal_order_leaves_its_terminal_state(script in scripted()) {
         let run = play(&script);
         let mut terminal: BTreeMap<String, String> = BTreeMap::new();
@@ -1657,7 +1652,6 @@ proptest! {
 
     /// §5.7 and interpretation 26: every one of the six terminal states releases the reservation.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_terminal_state_releases_its_reservation(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -1707,7 +1701,6 @@ proptest! {
 
     /// ES-21, journal §8: a replay emits nothing.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_replay_emits_no_draft_and_no_broker_effect(script in scripted()) {
         let run = play(&script);
         prop_assume!(!run.shell.account_journal.is_empty());
@@ -1729,7 +1722,6 @@ proptest! {
 
     /// ES-21: two runs of the same inputs give equal effect lists.
     #[test]
-    #[ignore = "pending E7-2"]
     fn two_runs_of_the_same_inputs_give_equal_effects(script in scripted()) {
         let first = play(&script);
         let second = play(&script);
@@ -1751,7 +1743,6 @@ proptest! {
     /// `AGENTS.md` rule 13, made unrepresentable: no agent-scoped effect names the account-wide
     /// endpoints. The script only ever fires an agent-scoped switch.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_agent_scoped_effect_can_name_the_account_wide_endpoints(script in scripted()) {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
@@ -1774,7 +1765,6 @@ proptest! {
 
     /// §5.5: the final mode is journaled before any cancel and any sell of the same switch.
     #[test]
-    #[ignore = "pending E7-4"]
     fn the_mode_draft_precedes_every_cancel_and_every_sell(script in scripted()) {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
@@ -2128,7 +2118,6 @@ proptest! {
 
     /// `AGENTS.md` rule 13: no risk-reducing submission is ever denied by a pacing control.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_risk_reducing_submission_is_ever_denied_by_a_pacing_control(script in scripted()) {
         let run = play(&script);
         let pacing = [
@@ -2170,7 +2159,6 @@ proptest! {
 
     /// `AGENTS.md` rule 13: the only holds on an exit are the four the rule names.
     #[test]
-    #[ignore = "pending E7-4"]
     fn the_only_holds_on_an_exit_are_the_four_the_rule_names(script in scripted()) {
         let run = play(&script);
         let allowed = ["agent_paused", "agent_stopped", "unknown_order_in_flight", "broker"];
@@ -2257,7 +2245,6 @@ proptest! {
     /// not from the crate — differs, and each must be adopted with exactly one
     /// `CompensatingEvent`.
     #[test]
-    #[ignore = "pending E7-3"]
     fn every_order_difference_adopts_the_broker_with_a_compensating_event(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -2318,7 +2305,6 @@ proptest! {
     /// position — which would make the ledger agree with the broker and destroy the evidence —
     /// is caught (interpretation 13, planted bug 18).
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_position_cash_or_fee_difference_is_ever_adopted(script in scripted()) {
         let run = play(&script);
         let ids = TestIds;
@@ -2383,7 +2369,6 @@ proptest! {
     /// `AAPL` share than the shadow ledger, a quantity no script reaches, so there is always a
     /// position difference to pause on (planted bug 9).
     #[test]
-    #[ignore = "pending E7-3"]
     fn a_reconciliation_leaves_nothing_unexplained_and_unpaused(script in scripted()) {
         let run = play(&script);
         let ids = TestIds;
@@ -2432,7 +2417,6 @@ proptest! {
     /// the journal lacks and the position that fill explains, so the fill must be ingested before
     /// the position is compared (planted bug 10), and the run closes the batch.
     #[test]
-    #[ignore = "pending E7-3"]
     fn the_reconciliation_order_is_orders_then_fills_then_positions_then_cash_then_fees(
         script in scripted(),
     ) {
@@ -2562,7 +2546,6 @@ proptest! {
     /// the run's expected head must be that older head — never the current one, which would let
     /// the append land after submissions the snapshot never saw (planted bug 17).
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_reconciliation_run_is_appended_after_a_submission_it_did_not_cover(
         script in scripted(),
     ) {
@@ -2680,7 +2663,6 @@ proptest! {
 
     /// Journal §2: every copied fact cites its origin.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_copied_draft_cites_its_origin(script in scripted()) {
         let run = play(&script);
         let copied = [
@@ -2710,7 +2692,6 @@ proptest! {
 
     /// DEC-131 item 6: an event id is a function of `(epoch, head, ordinal)` and nothing else.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_derived_event_id_is_a_function_of_epoch_head_and_ordinal(script in scripted()) {
         let first = play(&script);
         let second = play(&script);
@@ -2883,7 +2864,6 @@ proptest! {
 
     /// `AGENTS.md` rules 6 and 7, journal §6.4: nothing sensitive reaches a draft or an alert.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_draft_payload_holds_a_credential_or_an_account_number(script in scripted()) {
         let run = play(&script);
         prop_assume!(!run.drafts.is_empty());
@@ -2903,7 +2883,6 @@ proptest! {
 
     /// `AGENTS.md` rule 6, DEC-11: an alert carries an opaque id and a message key only.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_alert_payload_holds_an_instrument_a_price_or_a_quantity(script in scripted()) {
         let run = play(&script);
         let alerts: Vec<_> = run

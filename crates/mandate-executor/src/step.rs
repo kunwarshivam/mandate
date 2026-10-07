@@ -3,6 +3,7 @@
 use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::intent::{received, release_held, resume};
+use crate::kill::kill_switch;
 use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
 };
@@ -182,7 +183,11 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             batch.request_reconciliation();
             Ok(())
         }
-        Input::Command(Command::KillSwitch { .. }) => later_slice(),
+        Input::Command(Command::KillSwitch {
+            scope,
+            initiator,
+            confirmation,
+        }) => kill_switch(batch, scope, initiator, confirmation),
     }
 }
 
@@ -228,8 +233,8 @@ fn copied(batch: &mut Batch<'_, '_>, event: &FoldedEvent) -> Result<(), Executor
     cancel_openings(batch, agent.as_ref(), None)
 }
 
-/// Reconciliation's broker reads and the kill switch (trading-domain spec §5.5, §11): the later
-/// slices of this stack.
+/// Reconciliation's broker reads and the account-wide endpoints' answer (trading-domain spec
+/// §5.5, §11): the later slices of this stack, the kill switch's account scope included.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }

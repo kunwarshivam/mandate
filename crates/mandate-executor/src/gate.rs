@@ -266,6 +266,8 @@ pub(crate) struct Proposal<'s> {
     pub(crate) protection: Option<ProtectionPrices>,
     pub(crate) limit: Price,
     pub(crate) tif: TimeInForce,
+    /// Whether the order is a kill switch's own flatten (§5.5), which the agent's mode never holds.
+    pub(crate) flatten: bool,
 }
 
 /// Runs the checks in trading-domain spec §9.1's evaluation order against fresh folded state.
@@ -692,13 +694,19 @@ fn account_failure(state: AccountState, adds: bool) -> Option<(&'static str, boo
 }
 
 /// The agent's mode (§7.4). A risk-increasing order is denied by any mode stricter than `normal`;
-/// a risk-reducing one is only ever held, and only by `paused` or `stopped`.
+/// a risk-reducing one is only ever held, and only by `paused` or `stopped`. A kill switch's
+/// flatten is exempt from the agent's mode (§5.5, DEC-260 (3)): only the account's own state
+/// can hold it, for the broker.
 fn mode_failure(
     state: &ExecutorState,
     proposal: &Proposal<'_>,
     adds: bool,
 ) -> Option<(&'static str, bool)> {
-    let mode = state.effective_mode(proposal.agent);
+    let mode = if proposal.flatten && !adds {
+        state.account_mode()
+    } else {
+        state.effective_mode(proposal.agent)
+    };
     let reason = match mode {
         Mode::Normal => return None,
         Mode::ExitsOnly => "agent_exits_only",
@@ -864,6 +872,7 @@ mod attribution_tests {
                     protection: None,
                     limit: mandate_num::Price::parse("150")?,
                     tif: crate::types::TimeInForce::Day,
+                    flatten: false,
                 },
                 &ports,
             )
@@ -1005,6 +1014,7 @@ mod remainder_tests {
                 protection: None,
                 limit: mandate_num::Price::parse("150")?,
                 tif: crate::types::TimeInForce::Day,
+                flatten: false,
             },
             &ports,
         )
