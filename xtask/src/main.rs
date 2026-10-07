@@ -1210,10 +1210,28 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         })
         .map(|krate| krate.package.as_str())
         .collect();
-    if !test_packages.contains(&"mandate-refcases") {
-        test_packages.push("mandate-refcases");
-    }
-    let args = mutants_args(&diff_path, shard, &test_packages);
+    let refcase_tests: Vec<&str> = changed
+        .lines()
+        .filter_map(|file| {
+            file.strip_prefix("crates/mandate-refcases/tests/")
+                .and_then(|name| name.strip_suffix(".rs"))
+                .filter(|name| !name.contains('/'))
+        })
+        .collect();
+    let test_filter = if refcase_tests.is_empty() {
+        None
+    } else {
+        let mut terms: Vec<String> = test_packages
+            .iter()
+            .map(|package| format!("package({package})"))
+            .collect();
+        terms.extend(refcase_tests.iter().map(|test| format!("binary({test})")));
+        if !test_packages.contains(&"mandate-refcases") {
+            test_packages.push("mandate-refcases");
+        }
+        Some(terms.join(" | "))
+    };
+    let args = mutants_args(&diff_path, shard, &test_packages, test_filter.as_deref());
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
     let started = fs::metadata(&diff_file)
@@ -1263,6 +1281,7 @@ fn mutants_args(
     diff_path: &str,
     shard: Option<MutantShard>,
     test_packages: &[&str],
+    test_filter: Option<&str>,
 ) -> Vec<String> {
     let mut args = [
         "mutants",
@@ -1272,8 +1291,6 @@ fn mutants_args(
         "nextest",
         "--jobs",
         "2",
-        "--minimum-test-timeout",
-        "120",
         "--output",
         "target",
     ]
@@ -1292,6 +1309,9 @@ fn mutants_args(
             "--sharding".to_owned(),
             "slice".to_owned(),
         ]);
+    }
+    if let Some(filter) = test_filter {
+        args.extend(["--".to_owned(), "-E".to_owned(), filter.to_owned()]);
     }
     args
 }
@@ -2970,18 +2990,14 @@ mod tests {
     #[test]
     fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() {
         let packages = ["mandate-journal", "mandate-refcases"];
-        let unsharded = mutants_args("change.diff", None, &packages);
+        let filter = "package(mandate-journal) | binary(production_config_refs)";
+        let unsharded = mutants_args("change.diff", None, &packages, Some(filter));
         assert!(
             !unsharded.iter().any(|arg| arg == "--shard"),
             "a local `cargo xtask check` run must cover the complete diff"
         );
         assert!(unsharded.contains(&"--test-package=mandate-refcases".to_owned()));
-        assert!(
-            unsharded
-                .windows(2)
-                .any(|pair| pair[0] == "--minimum-test-timeout" && pair[1] == "120"),
-            "the external reference suite must have enough time to reach its focused tests"
-        );
+        assert_eq!(&unsharded[unsharded.len() - 3..], ["--", "-E", filter]);
 
         let sharded = mutants_args(
             "change.diff",
@@ -2990,6 +3006,7 @@ mod tests {
                 total: 12,
             }),
             &packages,
+            Some(filter),
         );
         assert_eq!(
             sharded
