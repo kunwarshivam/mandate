@@ -1357,6 +1357,8 @@ fn mutants_args(
         "2",
         "--output",
         "target",
+        "--timeout",
+        MUTANT_TEST_TIMEOUT,
     ]
     .into_iter()
     .map(str::to_owned)
@@ -1563,6 +1565,20 @@ fn unjudged_mutants(
 /// diff's own timestamp is the reference because a clock read is disallowed here (ADR-0001 ES-05).
 const MUTANTS_OUT: &str = "target/mutants.out";
 const REFCASES: &str = "mandate-refcases";
+
+/// How long one mutant's tests may run before cargo-mutants calls it a timeout, in seconds.
+///
+/// Set explicitly because the value cargo-mutants derives is wrong for this gate and wrong in the
+/// direction that fails a green change. It takes five times the unmutated baseline, floored at
+/// twenty seconds, and it runs that baseline over the mutated package alone — not over
+/// [`REFCASES`], which [`external_oracles`] adds to the mutants but not to the baseline. So the
+/// baseline measures a second of journal tests, the floor gives twenty seconds, and a mutant that
+/// the reference harness catches in its thirtieth second is reported `TIMEOUT` instead of caught.
+/// DEC-498's measurement run met exactly that: nine mutants, nine timeouts, every one at the
+/// twenty-second cap. Three minutes is about three times the whole reference package, so only a
+/// mutation that actually hangs reaches it, and the number does not move with what a baseline
+/// happens to cover.
+const MUTANT_TEST_TIMEOUT: &str = "180";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
 /// this status reads the outcomes and may exempt a stub body: a build failure, a diff that no longer
@@ -2994,16 +3010,16 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANTS_OUT, MutantShard, MutatedCrate,
-        PendingTest, PendingTestRun, REFCASES, TestOutcome, actionlint_workflows, backticked_paths,
-        base_ref_in, ci, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
-        first_panic_line, generated_pending_markers, has_pending_tests, is_pending_marker,
-        is_stub_function, lint, listed_mutant_counts, live_test_counts, metadata_in,
-        mutant_verdicts, mutants, mutants_args, mutants_outcome, mutated_crates, names_a_stub,
-        output_in, pending_problems, pending_tests, plain_comment_lines, proptest_seeds_in,
-        repo_root, shellcheck_scripts, spec_guard_problems, spec_guard_problems_for_pr,
-        status_flip_problems, test_binary, test_outcomes, unjudged_mutants, verdicts,
-        workspace_closure,
+        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, MutantShard,
+        MutatedCrate, PendingTest, PendingTestRun, REFCASES, TestOutcome, actionlint_workflows,
+        backticked_paths, base_ref_in, ci, classify, contains_dec_id, contains_word,
+        external_oracles, failure_cause, first_panic_line, generated_pending_markers,
+        has_pending_tests, is_pending_marker, is_stub_function, lint, listed_mutant_counts,
+        live_test_counts, metadata_in, mutant_verdicts, mutants, mutants_args, mutants_outcome,
+        mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
+        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
+        unjudged_mutants, verdicts, workspace_closure,
     };
 
     #[test]
@@ -3174,6 +3190,15 @@ mod tests {
         assert!(
             !unsharded.iter().any(|arg| arg == "-E"),
             "the reference package runs whole, so no nextest filter narrows it"
+        );
+        assert_eq!(
+            unsharded
+                .windows(2)
+                .find(|pair| pair[0] == "--timeout")
+                .map(|pair| pair[1].as_str()),
+            Some(MUTANT_TEST_TIMEOUT),
+            "the per-mutant timeout is set here, not derived from a baseline that does not run \
+             the reference package the mutants do (DEC-498)"
         );
 
         let sharded = mutants_args(
