@@ -292,3 +292,19 @@ fn hex_value(c: u8) -> Option<u8> {
         _ => None,
     }
 }
+
+/// Throwaway, untested functions that exist only so one mutation shard holds a worst-case
+/// number of surviving mutants. This branch is a measurement for DEC-498 and never merges.
+pub fn measurement_one(x: i64) -> i64 {
+    x.saturating_add(1)
+}
+
+/// See [`measurement_one`].
+pub fn measurement_two(x: i64) -> i64 {
+    x.saturating_mul(2)
+}
+
+/// See [`measurement_one`].
+pub fn measurement_three(x: i64) -> i64 {
+    x.saturating_sub(3)
+}

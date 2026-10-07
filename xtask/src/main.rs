@@ -1358,11 +1358,16 @@ fn mutants_args(
         "--output",
         "target",
         "--timeout",
-        MUTANT_TEST_TIMEOUT,
+        "600",
     ]
     .into_iter()
     .map(str::to_owned)
     .collect::<Vec<_>>();
+    if let Ok(jobs) = std::env::var("MANDATE_MUTANT_JOBS") {
+        if let Some(slot) = args.iter().position(|a| a == "--jobs") {
+            args[slot + 1] = jobs;
+        }
+    }
     args.extend(
         test_packages
             .iter()
