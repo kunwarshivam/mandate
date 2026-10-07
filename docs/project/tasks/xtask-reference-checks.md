@@ -12,11 +12,11 @@ Agent task brief ([ADR-0001](../../adr/0001-engineering-setup.md) ES-15). Claim
   and an anchor-only check of `reference/mandate/mutants.py` that fails when an anchor is missing
   or stale, without the mutant sweep; the nightly's full `mutants.py` run stays; each check is
   shown passing on `main`'s state and failing on a planted drift; the job stays well inside the
-  ten-minute budget (DEC-464).
+  ten-minute budget (DEC-464, kept by DEC-473).
 - **PRD / HLD / spec anchors:** ADR-0001 ES-10 (the frozen reference implementations and their
   pinned environment), ES-12 (every CI job is one `cargo xtask ci <job>`), ES-22 (protected
   paths); the quality and release process ([07](../07-quality-and-release.md)).
-- **Decisions that apply:** DEC-79, DEC-464. Taken here: [DEC-493](../decisions/DEC-493.md).
+- **Decisions that apply:** DEC-79, DEC-464 and DEC-473. Taken here: [DEC-493](../decisions/DEC-493.md).
 
 ## Scope
 
