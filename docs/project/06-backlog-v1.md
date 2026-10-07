@@ -768,6 +768,11 @@ after U-A1 to U-A5 are recorded.
   member, deletes the six markers and rows, moves the ten cases into the lifecycle harness's
   passing list (DEC-489 item 4), stops its `retailed` and `granted_with` helpers striking `quorum`
   (DEC-499), and the status PR flips their rows.
+  *Done (the `quorum` implementation, DEC-488, DEC-489 items 3 and 4, DEC-499):*
+  `escalation::answered` writes the member through `quorum_applied` on exactly the grants check 7
+  judged, the six tests and their `BEHAVIOUR_ONLY_TESTS` rows are live, and the lifecycle harness
+  passes all twenty-six cases whole. Next: the status PR flipping MC-E01, MC-E06, MC-E17, MC-E19
+  to MC-E24 and MC-E29.
   *Done (the #550 review, minors 1 and 2; in the `quorum` tests PR):*
   `mc_e18_holds_only_as_the_cancellation` pins both plants with `fails_naming` and the review's
   messages, and `apply_now`'s doc comment says it is true whenever it folded a new mode, cancelling

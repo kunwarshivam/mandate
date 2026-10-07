@@ -750,7 +750,6 @@ fn every_opening_walks_back_to_one_timely_admitted_grant() {
 /// `record.answers` is asserted non-empty so a script that generated nothing cannot pass by
 /// walking nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_quorum_is_recorded_exactly_when_check_7_judged_a_grant() {
     check(|script| {
         let (journal, record, _) = played(&script)?;

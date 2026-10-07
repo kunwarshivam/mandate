@@ -697,7 +697,6 @@ fn quorum_recorded(ran: &Ran) -> Option<&Value> {
 /// and `not_pending` after the act) record no `quorum` member at all, because check 7 applied
 /// nothing to them.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_admitted_grant_records_the_quorum_check_7_applied_and_no_other_response_does() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -787,7 +786,6 @@ fn an_admitted_grant_records_the_quorum_check_7_applied_and_no_other_response_do
 /// record a restarted process writes for the same grant is the record the live process writes,
 /// member for member, `quorum` included.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_quorum_is_rebuilt_from_the_journal_on_restart() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -821,7 +819,6 @@ fn the_quorum_is_rebuilt_from_the_journal_on_restart() {
 /// requirement; the second approver's grant is admitted with it and acts. Every record of the three
 /// states the quorum, because check 7 judged each.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_grant_counted_short_of_two_approvers_records_the_requirement_it_was_counted_against() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -881,7 +878,6 @@ fn a_grant_counted_short_of_two_approvers_records_the_requirement_it_was_counted
 /// requirement that excluded it; a listed approver who is not the author is admitted with the same
 /// record and acts. Independence is the bound value, not the count of listed approvers.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_author_s_grant_under_independence_is_refused_with_the_quorum_that_excluded_it() {
     let (ids, gate, plan, view) = (
         TestIds,

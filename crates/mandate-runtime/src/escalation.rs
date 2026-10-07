@@ -9,7 +9,8 @@
 //! **Answering.** The owner's answer arrives only as a control-stream `ApprovalResponseSubmitted`,
 //! tailed and handed in as `Input::Journal`. `mandate_approval::admit` judges it against the request
 //! the fold holds after this step's own cancellations, and the copy, `ApprovalResponded`, records
-//! the result whatever it is. An admitted grant is re-validated in the same step by
+//! the result whatever it is, and for a grant check 7 judged the quorum it applied (journal spec
+//! §9, DEC-488). An admitted grant is re-validated in the same step by
 //! `mandate_approval::revalidate`, and only its `act` journals and hands an intent, which is the
 //! bound order and nothing else (EI-4). Nothing here can act on a timeout, a refusal, or a skip
 //! (`AGENTS.md` rule 3).
@@ -29,7 +30,7 @@ use mandate_approval::{
     CommandAuthority, ContentHash, Current, DryRun, EvidenceAuthor, EvidenceRef, GenericText,
     KillSwitchAuthority, ModeNow, Notification, OpaqueUser, OwnerCommandKind, PolicyOverlay,
     Refusal, Request, RequestContent, Response, Revalidation, SkipReason, StepUp, StepUpRefusal,
-    Verdict, admit, content_hash, content_object, revalidate,
+    Verdict, admit, content_hash, content_object, quorum, revalidate,
 };
 use mandate_canon::{Digest, Value};
 use mandate_num::{Price, Qty, Signed};
@@ -331,8 +332,44 @@ fn response_of(
     })
 }
 
+/// The quorum check 7 applied, recorded on exactly the grants it judged: `admitted`, `counted`, or
+/// refused `duplicate_approver` or `not_independent` (journal spec §9, DEC-488 item 2). It is
+/// [`quorum`] of the request the fold holds and the overlay admission read, the call check 7
+/// makes (DEC-488 item 3). A skip, which runs checks 1 to 5 only, and a grant refused at checks 1
+/// to 6 applied no quorum, so their records carry no member rather than a null one. `granted` says
+/// whether the answer is a grant: an admitted skip reads `Admitted` too, and check 7 never judged it.
+///
+/// # Errors
+/// [`quorum`]'s, which admission already returned for the same request and overlay.
+fn quorum_applied(
+    pending: Option<&Request>,
+    granted: bool,
+    admission: Admission,
+    policy: &PolicyOverlay,
+) -> Result<Option<Value>, RuntimeError> {
+    let judged = granted
+        && matches!(
+            admission,
+            Admission::Admitted
+                | Admission::Counted
+                | Admission::Refused(Refusal::DuplicateApprover | Refusal::NotIndependent)
+        );
+    let (true, Some(request)) = (judged, pending) else {
+        return Ok(None);
+    };
+    let applied = quorum(&request.content.bound, policy)?;
+    Ok(Some(payload::object(vec![
+        ("independent", Value::Bool(applied.independent_required)),
+        (
+            "required",
+            payload::count(u64::from(applied.approvers_required.get()), "required")?,
+        ),
+    ])?))
+}
+
 /// An `ApprovalResponseSubmitted`: judged, copied once as `ApprovalResponded` with the result
-/// whatever it is, and, for an admitted grant, re-validated in the same step (checks 1 to 12).
+/// whatever it is and the quorum check 7 applied where it did, and, for an admitted grant,
+/// re-validated in the same step (checks 1 to 12).
 fn answered(
     state: &RuntimeState,
     event: &FoldedEvent,
@@ -358,8 +395,8 @@ fn answered(
         .get(&approval_id)
         .filter(|_| !batch.resolved.contains(&approval_id))
         .map(|pending| &pending.request);
-    let admission = match ApprovalRef::of_requested_event(approval) {
-        Err(_) => Admission::Refused(Refusal::NotPending),
+    let (admission, applied) = match ApprovalRef::of_requested_event(approval) {
+        Err(_) => (Admission::Refused(Refusal::NotPending), None),
         Ok(reference) => {
             let response = response_of(event, reference, verdict, submitted)?;
             let settings = &ports.view.approval;
@@ -375,7 +412,14 @@ fn answered(
                 used_assertions: state.used_assertions(&event.event_id),
                 policy: PolicyOverlay::NONE,
             };
-            admit(pending, &response, &context)?
+            let admission = admit(pending, &response, &context)?;
+            let applied = quorum_applied(
+                pending,
+                verdict_name == "approved",
+                admission,
+                &context.policy,
+            )?;
+            (admission, applied)
         }
     };
     let (result, reason) = match admission {
@@ -384,7 +428,7 @@ fn answered(
         Admission::Refused(refusal) => ("refused", payload::text(refusal_code(refusal))),
     };
     let responder = payload::str_of(&event.payload, "responder").unwrap_or_default();
-    let body = payload::object(vec![
+    let mut members = vec![
         ("approval", payload::text(approval)),
         ("verdict", payload::text(verdict_name)),
         ("responder", payload::text(responder)),
@@ -399,7 +443,11 @@ fn answered(
                 None => Value::Null,
             },
         ),
-    ])?;
+    ];
+    if let Some(applied) = applied {
+        members.push(("quorum", applied));
+    }
+    let body = payload::object(members)?;
     let copy = batch.journal("ApprovalResponded", Some(event.event_id.clone()), body)?;
     let (Admission::Admitted, Some(request)) = (admission, pending) else {
         return Ok(());
