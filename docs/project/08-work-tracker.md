@@ -427,7 +427,9 @@ record.
    principles, a reference and a history, and set the rule that a test pins an invariant, not the
    look. In order: the test sort DEC-502 item 5 calls for (its own change); the quick fixes (items
    9, 14, 16, 19, 29); the cutting pass (items 3, 4, 8, 17, 28); then the owls, Needs you and the
-   headroom hero (items 1, 2, 5, 6), each with its DEC.
+   headroom hero (items 1, 2, 5, 6), each with its DEC. The founder's direction for the product
+   and the website beyond the review (the premise, the craft standard, the three moments, the
+   process) is in `web/design/direction-2026-10-07.md`.
 
 Streams that touch different crates run in parallel; reviews and merges run one at a time.
 
