@@ -1359,6 +1359,8 @@ fn mutants_args(
         "target",
         "--timeout",
         MUTANT_TEST_TIMEOUT,
+        "--build-timeout",
+        MUTANT_BUILD_TIMEOUT,
     ]
     .into_iter()
     .map(str::to_owned)
@@ -1594,6 +1596,22 @@ const MUTANT_JOBS: &str = "1";
 /// enough to reach the cap anyway is bounded by it, which is what lets DEC-498 size a shard on
 /// this number rather than on how fast mutants have happened to run.
 const MUTANT_TEST_TIMEOUT: &str = "180";
+
+/// How long one mutant's build may run before cargo-mutants calls it a timeout, in seconds.
+///
+/// cargo-mutants leaves this off by default, on the reasoning that build times vary and a cap
+/// risks flaky runs. This gate sets it because a mutant can in fact make a build arbitrarily
+/// slow, which [`MUTANT_TEST_TIMEOUT`] does nothing about: operators are mutated wherever they
+/// appear, top-level `const` items included, so `const N: usize = 1024 % 7` becomes
+/// `1024 + 7` and any `[u8; N]` grows with it. DEC-498's budget needs every per-mutant phase
+/// bounded, and this is the only phase a shard cannot otherwise bound.
+///
+/// Sixty seconds against the 16 to 27 that mutant builds took over four measured runs at
+/// [`MUTANT_JOBS`] workers. The flakiness cargo-mutants warns about is bounded here because the
+/// cap reaches mutants alone: a `--build-timeout` run leaves the unmutated baseline uncapped, so
+/// a cold cache compiling the workspace from scratch is not cut off, and a mutant builds
+/// incrementally on what that baseline already produced.
+const MUTANT_BUILD_TIMEOUT: &str = "60";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
 /// this status reads the outcomes and may exempt a stub body: a build failure, a diff that no longer
@@ -3025,10 +3043,10 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, MutantShard,
-        MutatedCrate, PendingTest, PendingTestRun, REFCASES, TestOutcome, actionlint_workflows,
-        backticked_paths, base_ref_in, ci, classify, contains_dec_id, contains_word,
-        external_oracles, failure_cause, files_by_extension, first_panic_line,
+        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT,
+        MUTANTS_OUT, MutantShard, MutatedCrate, PendingTest, PendingTestRun, REFCASES, TestOutcome,
+        actionlint_workflows, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
+        contains_word, external_oracles, failure_cause, files_by_extension, first_panic_line,
         generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function, lint,
         listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts, mutants,
         mutants_args, mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems,
@@ -3241,6 +3259,15 @@ mod tests {
             Some(MUTANT_TEST_TIMEOUT),
             "the per-mutant timeout is set here, not derived from a baseline that does not run \
              the reference package the mutants do (DEC-498)"
+        );
+        assert_eq!(
+            unsharded
+                .windows(2)
+                .find(|pair| pair[0] == "--build-timeout")
+                .map(|pair| pair[1].as_str()),
+            Some(MUTANT_BUILD_TIMEOUT),
+            "a mutated operator in a top-level `const` can grow an array and so a build; both \
+             per-mutant phases are capped, or DEC-498's shard budget bounds nothing"
         );
         assert_eq!(
             unsharded
