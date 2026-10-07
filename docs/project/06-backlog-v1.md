@@ -390,9 +390,11 @@ the spec invariants (DP-n) its tests cover.
   Owed after it: `mandate-spec` parsing the field, V-044, and the §9.2 row (DEC-77 tests then implementation), the executor's
   fold of §6.7, and the `kind: tripwire` harness arm. Also owed, from #443's round 1 (m4): run ruff over `reference/` in
   `cargo xtask ci lint`, so a duplicated definition such as a second `main()` in `reference/mandate/mutants.py` (F811) fails
-  the lint rather than reaching review. Also (#443 round 3): the per-PR `cargo xtask ci reference` runs `fuzz.py` but not
+  the lint rather than reaching review. ~~Also (#443 round 3): the per-PR `cargo xtask ci reference` runs `fuzz.py` but not
   `reference/mandate/mutants.py`, which only the nightly job runs, so a stale mutation anchor passed `full` on #443's round-2
-  head. Make a missing anchor fail per-PR CI, for example with an anchor-only check that runs in seconds.
+  head. Make a missing anchor fail per-PR CI, for example with an anchor-only check that runs in seconds.~~ Done
+  ([#PRNUM](https://github.com/kunwarshivam/mandate/pull/PRNUM), DEC-493: `cargo xtask ci reference` runs
+  `mandate_tools.mutation_anchors`, every `old` text of every mutant table against `ref.py`, in under a second).
   ~~Also owed (#443 round 3): journal spec rule 28 and `OwnerCommandRefused.reason`'s `not_independent`~~ Done in two PRs:
   the code ([#474](https://github.com/kunwarshivam/mandate/pull/474): `mandate-journal`'s schema and rule 28), then the
   reference (the validator check in `reference/journal/control.py`, its two vectors, and its seeded bug). Also owed (#474
@@ -402,9 +404,12 @@ the spec invariants (DP-n) its tests cover.
   bare `OneOf` checks nothing against widening ([#476](https://github.com/kunwarshivam/mandate/pull/476) round 1, m3).
   Also owed (#476 round 1, m2), in the next `mandate-journal` code PR: raise `control::tests`' two draft-count floors
   (`parsed >= 6`, `checked >= 49`) to the measured counts, so dropping a vector fails them as their messages say.
-  Also owed (#443 round 3, m14; #476 round 1, m4): no CI job runs `reference/journal/generate.py` or its seeded bugs, since
+  ~~Also owed (#443 round 3, m14; #476 round 1, m4): no CI job runs `reference/journal/generate.py` or its seeded bugs, since
   `cargo xtask ci reference` runs only `reference/mandate/`. Its first cost: rule 28's report order went unpinned on
-  the reference side until #476 round 1. Run `generate.py --check` per PR.
+  the reference side until #476 round 1. Run `generate.py --check` per PR.~~ Done
+  ([#PRNUM](https://github.com/kunwarshivam/mandate/pull/PRNUM), DEC-493: `cargo xtask ci reference` runs
+  `reference/journal/generate.py --check` in the reference environment, beside
+  `python/mandate_tools/tests/test_journal_agent_vectors.py`, which runs it in `fast`).
   ~~Also owed (#444, DEC-353; E6-13's code half, tests first)~~ Done ([#516](https://github.com/kunwarshivam/mandate/pull/516),
   [#523](https://github.com/kunwarshivam/mandate/pull/523), [#527](https://github.com/kunwarshivam/mandate/pull/527);
   [DEC-420](decisions/DEC-420.md)). Owed from #523's review: ~~the next stream H tests PR pins that the delegations row

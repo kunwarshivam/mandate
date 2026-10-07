@@ -156,7 +156,7 @@ fn ci(job: &str) -> Result<()> {
         "pending" => pending(),
         "refcases" => refcases(false),
         "reference" => {
-            reference(&["generate.py"])?;
+            reference(&["mandate/generate.py"])?;
             sh(
                 "git",
                 &[
@@ -169,11 +169,14 @@ fn ci(job: &str) -> Result<()> {
             .context(
                 "reference/mandate/generate.py changed mandate.yaml; regenerate and commit it",
             )?;
-            reference(&["check_cases.py"])?;
+            reference(&["mandate/check_cases.py"])?;
             for seed in ["1", "2", "3"] {
-                reference(&["fuzz.py", seed])?;
+                reference(&["mandate/fuzz.py", seed])?;
             }
-            Ok(())
+            reference(&["journal/generate.py", "--check"]).context(
+                "reference/journal/generate.py --check failed: a validator or seeded bug check failed, or journal.yaml is not what it generates; run it without --check and commit the result",
+            )?;
+            mutation_anchors()
         }
         "supply-chain" => {
             sh("cargo", &["deny", "--locked", "check"])?;
@@ -215,9 +218,9 @@ fn ci(job: &str) -> Result<()> {
                 ci(part)?;
             }
             for seed in 1..=10 {
-                reference(&["fuzz.py", &seed.to_string()])?;
+                reference(&["mandate/fuzz.py", &seed.to_string()])?;
             }
-            reference(&["mutants.py"])?;
+            reference(&["mandate/mutants.py"])?;
             sh("gitleaks", &["git", "--no-banner", "--redact"])
         }
         other => bail!("unknown CI job: {other}"),
@@ -542,12 +545,19 @@ fn uv_tools(args: &[&str]) -> Result<()> {
     sh("uv", &full)
 }
 
-/// Runs a frozen reference script in its own pinned environment (ADR-0001 ES-10).
+/// Runs a frozen reference script, named relative to `reference/`, in the reference
+/// implementations' own pinned environment (ADR-0001 ES-10): `reference/mandate/requirements.txt`
+/// pins the PyYAML and jsonschema that `reference/journal/` needs too, so one environment serves
+/// both. The per-PR `reference` job runs the mandate reference's generator, case check and three
+/// fuzz seeds, the journal generator's `--check` (its self-test, validators, independent
+/// recomputation and seeded bugs, then the committed `journal.yaml` must match what it generates;
+/// #443 round 3, #476 round 1), and [`mutation_anchors`]; the nightly adds seven fuzz seeds and the
+/// mutant sweep.
 fn reference(script_and_args: &[&str]) -> Result<()> {
     let Some((script, rest)) = script_and_args.split_first() else {
         bail!("no reference script given");
     };
-    let path = format!("reference/mandate/{script}");
+    let path = format!("reference/{script}");
     let mut full = vec![
         "run",
         "--no-project",
@@ -560,6 +570,23 @@ fn reference(script_and_args: &[&str]) -> Result<()> {
     ];
     full.extend_from_slice(rest);
     sh("uv", &full)
+}
+
+/// The anchor-only check of `reference/mandate/mutants.py` (#443 round 3): every mutant's `old`
+/// text must still occur in `ref.py`, which the sweep asserts before its first run. Only the
+/// nightly runs the sweep, so an anchor an edit to `ref.py` left behind passed every per-PR job
+/// until this check; it runs in well under a second from the `python/` workspace, which lints and
+/// tests it (`python/mandate_tools/tests/test_mutation_anchors.py`).
+fn mutation_anchors() -> Result<()> {
+    uv_tools(&[
+        "python",
+        "-m",
+        "mandate_tools.mutation_anchors",
+        "../reference/mandate",
+    ])
+    .context(
+        "a mutation anchor in reference/mandate/mutants.py no longer matches ref.py; re-anchor it, or the nightly's mutants.py fails before its first run",
+    )
 }
 
 fn repo_root() -> Result<PathBuf> {
