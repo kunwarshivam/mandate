@@ -724,13 +724,19 @@ mod tests {
             let AppendOutcome::Invalid { draft, error } = refusal else {
                 return Err(format!("{name} was not refused Invalid"));
             };
-            assert_eq!(draft, 0, "{name} names the draft that is missing an artifact");
+            assert_eq!(
+                draft, 0,
+                "{name} names the draft that is missing an artifact"
+            );
             assert_eq!(
                 error.reason,
                 InvalidReason::MissingArtifact,
                 "{name} is refused for the artifact a plain append cannot read"
             );
-            assert_eq!(error.path, path, "{name} names the member it could not check");
+            assert_eq!(
+                error.path, path,
+                "{name} names the member it could not check"
+            );
         }
         Ok(())
     }
