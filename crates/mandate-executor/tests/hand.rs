@@ -4710,12 +4710,10 @@ fn an_agent_kill_switch_cancels_a_watchdog_exit_of_no_agent_and_sells_only_its_o
     );
     let sold = sell.client_order_id.as_str().to_owned();
     let filled = shell.run(
-        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
-            "f-2",
-            Some(&sold),
-            "5",
-            "139",
-        ))),
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            side: Side::Sell,
+            ..broker_fill("f-2", Some(&sold), "5", "139")
+        })),
         &ports,
     );
     let re_placed = filled
