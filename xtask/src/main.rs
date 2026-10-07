@@ -3288,8 +3288,8 @@ mod tests {
                 .find(|pair| pair[0] == "--timeout")
                 .map(|pair| pair[1].as_str()),
             Some(MUTANT_TEST_TIMEOUT),
-            "the per-mutant timeout is set here, not derived from a baseline that does not run \
-             the reference package the mutants do (DEC-498)"
+            "the per-mutant timeout is set here, not derived from a baseline whose packages are \
+             the slice's own mutants and so need not include the reference package (DEC-498)"
         );
         assert_eq!(
             unsharded
@@ -3297,8 +3297,9 @@ mod tests {
                 .find(|pair| pair[0] == "--build-timeout")
                 .map(|pair| pair[1].as_str()),
             Some(MUTANT_BUILD_TIMEOUT),
-            "a mutated operator in a top-level `const` can grow an array and so a build; both \
-             per-mutant phases are capped, or DEC-498's shard budget bounds nothing"
+            "a mutated operator in a top-level `const` can grow an array and so a build; this is \
+             the third of the three phases DEC-498's shard budget caps, the other two being both \
+             test phases under `--timeout`"
         );
         assert_eq!(
             unsharded
