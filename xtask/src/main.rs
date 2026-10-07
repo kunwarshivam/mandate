@@ -1272,6 +1272,8 @@ fn mutants_args(
         "nextest",
         "--jobs",
         "2",
+        "--minimum-test-timeout",
+        "120",
         "--output",
         "target",
     ]
@@ -2974,6 +2976,12 @@ mod tests {
             "a local `cargo xtask check` run must cover the complete diff"
         );
         assert!(unsharded.contains(&"--test-package=mandate-refcases".to_owned()));
+        assert!(
+            unsharded
+                .windows(2)
+                .any(|pair| pair[0] == "--minimum-test-timeout" && pair[1] == "120"),
+            "the external reference suite must have enough time to reach its focused tests"
+        );
 
         let sharded = mutants_args(
             "change.diff",
