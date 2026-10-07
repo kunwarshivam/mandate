@@ -1568,14 +1568,14 @@ const REFCASES: &str = "mandate-refcases";
 
 /// How many mutants cargo-mutants tests at once.
 ///
-/// One, not two, because two buys no throughput and costs the predictability a timeout needs
-/// (DEC-498). Measured on `ubuntu-24.04` over four runs of the same nine mutants: two concurrent
-/// workers finish a mutant in 83 to 108 seconds of wall clock and one finishes it in 82 to 99, so
-/// the second worker returns nothing — the runner's cores are already saturated by one nextest
-/// process. What it does change is how long any single mutant takes, because the two contend:
-/// 133–181 seconds of test phase at two workers against 63–83 at one. The shard's critical path
-/// is then `k` mutants in a row rather than waves whose length has to be bounded by a worst pair,
-/// and [`MUTANT_TEST_TIMEOUT`] sits well above the slowest run instead of under it.
+/// One, not two, because two returns no measurable throughput and costs the predictability a
+/// timeout needs (DEC-498). Measured on `ubuntu-24.04` over four runs of the same nine mutants:
+/// two concurrent workers finish a mutant in 83 to 108 seconds of wall clock and one finishes it
+/// in 82 to 99, ranges that overlap by more than they differ. What two workers do change, well
+/// outside that spread, is how long any single mutant takes, because they contend: 133–181
+/// seconds of test phase against 63–83. The shard's critical path is then `k` mutants in a row
+/// rather than waves whose length has to be bounded by a worst pair, and [`MUTANT_TEST_TIMEOUT`]
+/// sits well above the slowest run instead of under it.
 const MUTANT_JOBS: &str = "1";
 
 /// How long one mutant's tests may run before cargo-mutants calls it a timeout, in seconds.
