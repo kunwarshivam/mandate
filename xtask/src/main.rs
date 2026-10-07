@@ -1237,27 +1237,9 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         })
         .map(|krate| krate.package.as_str())
         .collect();
-    let refcase_tests: Vec<&str> = changed
-        .lines()
-        .filter_map(|file| {
-            file.strip_prefix("crates/mandate-refcases/tests/")
-                .and_then(|name| name.strip_suffix(".rs"))
-                .filter(|name| !name.contains('/'))
-        })
-        .collect();
-    let test_filter = if refcase_tests.is_empty() {
-        None
-    } else {
-        let mut terms: Vec<String> = test_packages
-            .iter()
-            .map(|package| format!("package({package})"))
-            .collect();
-        terms.extend(refcase_tests.iter().map(|test| format!("binary({test})")));
-        if !test_packages.contains(&"mandate-refcases") {
-            test_packages.push("mandate-refcases");
-        }
-        Some(terms.join(" | "))
-    };
+    let test_filter = external_oracles(&changed, &mut test_packages, |file| {
+        root.join(file).is_file()
+    });
     let args = mutants_args(&diff_path, shard, &test_packages, test_filter.as_deref());
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
@@ -1302,6 +1284,45 @@ impl MutantShard {
     fn argument(self) -> String {
         format!("{}/{}", self.index, self.total)
     }
+}
+
+/// The external reference-case suites a mutation run must also execute, named in `packages`, and
+/// the nextest filter that holds the run to them. `None` leaves the run to the mutated packages'
+/// own tests.
+///
+/// A mutant is judged only by the tests cargo-mutants runs, and the oracle for several crates
+/// lives in `mandate-refcases`, a package those crates do not depend on, so cargo-mutants never
+/// discovers it (DEC-497). Naming `mandate-refcases` on every run would make each mutant of every
+/// PR pay that whole suite, which timed the CI shards out, so it is named only when the PR changes
+/// one of those suites, and the filter then runs the mutated packages' own tests plus only the
+/// changed suites. A suite the PR deleted is no longer `present` and names no binary, which would
+/// otherwise filter every test out.
+fn external_oracles<'a>(
+    changed: &'a str,
+    packages: &mut Vec<&'a str>,
+    present: impl Fn(&str) -> bool,
+) -> Option<String> {
+    let suites: Vec<&str> = changed
+        .lines()
+        .filter(|file| present(file))
+        .filter_map(|file| {
+            file.strip_prefix(REFCASE_SUITES)
+                .and_then(|name| name.strip_suffix(".rs"))
+                .filter(|name| !name.contains('/'))
+        })
+        .collect();
+    if suites.is_empty() {
+        return None;
+    }
+    let mut terms: Vec<String> = packages
+        .iter()
+        .map(|package| format!("package({package})"))
+        .collect();
+    terms.extend(suites.iter().map(|suite| format!("binary({suite})")));
+    if !packages.contains(&REFCASES) {
+        packages.push(REFCASES);
+    }
+    Some(terms.join(" | "))
 }
 
 fn mutants_args(
@@ -1528,6 +1549,8 @@ fn unjudged_mutants(
 /// previous run or a restored cache left behind can be read as this run's result (DEC-137). The
 /// diff's own timestamp is the reference because a clock read is disallowed here (ADR-0001 ES-05).
 const MUTANTS_OUT: &str = "target/mutants.out";
+const REFCASES: &str = "mandate-refcases";
+const REFCASE_SUITES: &str = "crates/mandate-refcases/tests/";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
 /// this status reads the outcomes and may exempt a stub body: a build failure, a diff that no longer
@@ -2960,14 +2983,14 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANTS_OUT, MutantShard, MutatedCrate,
-        PendingTest, PendingTestRun, TestOutcome, actionlint_workflows, backticked_paths,
-        base_ref_in, ci, classify, contains_dec_id, contains_word, failure_cause, first_panic_line,
-        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function, lint,
-        listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_args,
-        mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
-        unjudged_mutants, verdicts,
+        PendingTest, PendingTestRun, REFCASES, TestOutcome, actionlint_workflows, backticked_paths,
+        base_ref_in, ci, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
+        first_panic_line, generated_pending_markers, has_pending_tests, is_pending_marker,
+        is_stub_function, lint, listed_mutant_counts, live_test_counts, mutant_verdicts, mutants,
+        mutants_args, mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems,
+        pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_outcomes, unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -3012,6 +3035,68 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    #[test]
+    fn the_external_oracle_runs_only_for_the_reference_suites_a_change_touches() {
+        let mut untouched = vec!["mandate-journal"];
+        assert_eq!(
+            external_oracles(
+                "crates/mandate-journal/src/lib.rs\ndocs/HLD.md\n",
+                &mut untouched,
+                |_| true
+            ),
+            None,
+            "a change that touches no reference suite leaves the run to the mutated packages"
+        );
+        assert_eq!(
+            untouched,
+            ["mandate-journal"],
+            "and names no extra test package"
+        );
+
+        let mut touched = vec!["mandate-journal"];
+        let filter = external_oracles(
+            "crates/mandate-journal/src/lib.rs\n\
+             crates/mandate-refcases/tests/production_config_refs.rs\n\
+             crates/mandate-refcases/tests/common/mod.rs\n",
+            &mut touched,
+            |_| true,
+        );
+        assert_eq!(
+            filter.as_deref(),
+            Some("package(mandate-journal) | binary(production_config_refs)"),
+            "the mutated package's own tests run, and of the reference suites only the changed one"
+        );
+        assert_eq!(
+            touched,
+            ["mandate-journal", REFCASES],
+            "the reference package is named so cargo-mutants builds its suites"
+        );
+
+        let mut already = vec![REFCASES];
+        external_oracles(
+            "crates/mandate-refcases/tests/production_config_refs.rs\n",
+            &mut already,
+            |_| true,
+        );
+        assert_eq!(
+            already,
+            [REFCASES],
+            "a change that mutates the reference package itself names it once"
+        );
+
+        let mut deleted = vec!["mandate-journal"];
+        assert_eq!(
+            external_oracles(
+                "crates/mandate-refcases/tests/gone.rs\n",
+                &mut deleted,
+                |file| file != "crates/mandate-refcases/tests/gone.rs"
+            ),
+            None,
+            "a suite the change deleted names no binary, which would filter every test out"
+        );
+        assert_eq!(deleted, ["mandate-journal"]);
     }
 
     #[test]
