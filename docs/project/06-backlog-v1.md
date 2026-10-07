@@ -654,6 +654,10 @@ after U-A1 to U-A5 are recorded.
   owns it**, beside DEC-484 item 5's second sentence, which already puts the mandate's parameter
   keys and admission capability there; that slice adds the structural checks and their cases, and
   a refusal code for them needs an approved reference case first.
+  *Remaining slices* ([first paper trade brief](tasks/first-paper-trade.md)): slice 4's shell half
+  (the agent records at version 2 with `policy_set` and `model_registry`, DEC-484), and slice 5
+  as the new `mandate-paper` adapter, its bounded wait for a terminal opening, and the deletion of
+  E7-7's AAPL assembly.
 - **E7-20 (Must, M7)** As the founder, I want CodeQL to flag a credential written to a log by
   its type rather than its name, so that excluding the name-keyed `rust/cleartext-logging` query
   ([DEC-500](decisions/DEC-500.md)) leaves no gap. *Accepted when:* a query under
@@ -662,6 +666,28 @@ after U-A1 to U-A5 are recorded.
   CodeQL's logging or print sinks; a seeded bug that prints an exposed `SecretString` is caught and
   the query raises nothing on `main`; the proof is recorded in the change, since the seeded bug is
   not committed; and the query runs in the existing CodeQL workflow within its time budget.
+- **E7-21 (Must, M6, before the first paper trade; SC)** As the founder, I want the connector to
+  read a crypto pair's recent one-minute bars, so that the order-size participation cap has a
+  trailing volume for BTC/USD ([first paper trade brief](tasks/first-paper-trade.md)).
+  *Accepted when:* `BarsRequest` builds the crypto bars read on the data host
+  (`/v1beta3/crypto/us/bars`, the pair percent-encoded in `symbols`, `timeframe=1Min`, the window,
+  `limit`, `sort=asc`) and reads the answer keyed by the pair; a crypto window is bounded in UTC,
+  not by a New York date; the equity read is unchanged; and an answer for another pair, a second
+  page, a bar off the minute grid, outside the window or still open, or no bar at all is a typed
+  refusal, tested against recorded fixtures with no network.
+- **E7-22 (Must, M6, before the first paper trade; SC)** As the founder, I want the production
+  assembly to read a crypto pair as the trading-domain spec defines it, so that a BTC/USD
+  deployment is gated by the crypto rules and not refused by equity-only ones
+  ([first paper trade brief](tasks/first-paper-trade.md), "BTC/USD specifics"). *Accepted when:*
+  `mandate-liquidity` computes the 30-day median daily dollar volume (§3.2 item 7); the shell
+  trusts daily bars over UTC days for a pair (§2.2); the judge, gate template, and run and
+  executor contexts take the session, feed and quote age (`crypto_quote_max_age_s`),
+  `crypto_status`, quantity increments, quote currency, fee reservation and asset-fee rate, TIF,
+  and `crypto_stop_limit_offset` from the asset class and the confirmed inputs; a crypto limit is
+  put on the asset record's `price_increment` against the order (§2.1); a crypto deployment whose
+  `max_order_usd` exceeds §5.2's 200,000 USD is refused; every existing equity test still passes;
+  and no crypto rule is relaxed (DEC-450 item 3). A gate check of the 200,000 USD cap is a later
+  row.
 
 ### E8 Escalation and approvals
 
@@ -1290,6 +1316,17 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   and `ClientConnected` and `ClientRevoked` (with the identity spec's §12.1; `ScopeHalted` and
   `ScopeReenabled` only if DEC-437 item 21 is accepted), each
   with test vectors and an invalid draft per rule.
+- **E10-16 (Must, M6, before the first paper trade; SC)** As the founder, I want to register,
+  confirm and deploy a paper mandate version from the CLI, so that a paper deployment rests on a
+  confirmed version before the workspace API exists ([first paper trade brief](tasks/first-paper-trade.md),
+  [DEC-505](decisions/DEC-505.md)). *Accepted when:* `config register`, `model register`,
+  `version create`, `version confirm` and `agent deploy` each commit exactly one control-stream
+  event (DEC-155 item 5) with journal spec §9.2's payload, after storing every object a `ref`
+  names; `version confirm` and `agent deploy` take fresh `cli_confirm` evidence and record it in
+  the event's record; every command refuses a `live` mandate or connection; no command writes
+  `ConnectionEstablished` (its permission check is E7-12's); a re-run of a committed command
+  commits nothing (DEC-290); and the records fold, through `JournaledFact::from_record`, to a
+  context in which the mandate validates.
 
 ### E11 Web app: dashboard and controls
 
@@ -1525,6 +1562,21 @@ follows the founder's decision on DEC-432 item 13: a hosted fast model in v1, th
   - Minor 10: no longer a scope change. The founder chose a hosted fast model for v1 (DEC-432
     item 13), so FR-3.7's P1 stands; update OD-02 to that decision.
   - Nit: spec §11 places the spike's 60 s timeout in the client; it is in `http.py`.
+- **E15-13 (Must, M6, before the first paper trade; SC)** As an owner, I want my pinned quant
+  model run by a model host outside the production cycle and the shell, so that its output is the
+  pinned code's and nothing else's ([first paper trade brief](tasks/first-paper-trade.md),
+  [DEC-503](decisions/DEC-503.md), [DEC-504](decisions/DEC-504.md)). Quant models make no model
+  call and do not go through the gateway (inference spec §1.3); E15-6 and E15-7 stay with the LLM
+  model. *Accepted when:* a new `mandate-modelhost` crate (layer 8, pure; its `xtask/layers.toml`
+  and `CODEOWNERS` lines in the same change) computes each model's content object from its
+  source bytes and a test pins the hash per registered version, so changed code under an old
+  version fails the build; `evaluate` returns an output only when the mandate's pin, the one
+  matching `model_registry` entry and the host's hash agree, every parameter is set and in bounds,
+  and the closes are the pinned instrument's, complete, and end at the last completed trading day;
+  every refusal is no output; `as_of` is the last close's end and `expires_at` is `as_of` plus
+  `max_output_age_s`; a property test with an independent oracle shows the same inputs always give
+  the same output; and the crate depends on no crate that sizes, gates, journals, executes or
+  connects.
 
 ### E17 Research agent and dynamic universe
 
@@ -1805,6 +1857,21 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   commits; a missing or late output is missing (rule 3, MI-10); HI-21 holds with a gateway double
   that stalls for ever: the decide step stays within ES-24's budget and every exit, protective-order,
   and kill-switch draft is unchanged. Beside E15-2, which defines the model.
+- **E19-11 (Must, M6, before the first paper trade; SC)** As the founder, I want a paper
+  deployment's input built from the confirmed mandate version on the control stream, so that the
+  first trade runs what I confirmed and nothing a file says
+  ([first paper trade brief](tasks/first-paper-trade.md), [DEC-505](decisions/DEC-505.md)). The
+  subset of E19-1 the first trade needs: spec §5.1 steps 1, 2, 4 and 6, with no process states.
+  *Accepted when:* the input comes only from the latest `AgentDeployed` with no `AgentStopped`
+  after it, a stored document that re-hashes to its version, that version's
+  `MandateVersionCreated` and `MandateConfirmed`, and the registered configuration objects, folded
+  by `ValidationContext::from_journal` with the registry present; a test per failure (no
+  deployment, a stopped agent, a document missing or not re-hashing, an unconfirmed path, an
+  unregistered or mismatched model, a configuration object that does not re-hash, a `live`
+  mandate) refuses before any credential is read; the account equity is the run's broker read and
+  the connection's environment is `paper` only when the stream holds no fact about the connection,
+  so a `ConnectionRevoked` still refuses (DEC-505 item 3); and the paper path reads no mandate or
+  configuration file.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 

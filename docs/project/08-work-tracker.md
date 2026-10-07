@@ -414,9 +414,9 @@ As of 2026-10-07, after the founder's DEC-502. Open PRs and claims on GitHub are
    mandate version and the model output from the pinned quant model `quant.ma_crossover`, which
    makes no model call (inference spec §1.3), so neither the gateway (E15-6) nor the inference
    registry (E15-7) is on this path. E7-19 slice 5 makes the paper adapter call that API and
-   deletes E7-7's AAPL assembly, which is not run. A brief for the path, to follow, will set the
-   slices and what the connector still needs for crypto (its minute bars, which
-   `recent_minute_bars` refuses for a pair today).
+   deletes E7-7's AAPL assembly, which is not run. The path's
+   [brief](tasks/first-paper-trade.md) sets the slices (DEC-503 to DEC-505; new rows E7-21, E7-22,
+   E10-16, E15-13, E19-11).
 3. **Tripwires (E6-13).** The MC-W01 to MC-W57 implementation in the DEC-77 sequence.
 4. **M7's remainder:** the CLI's `clap` wiring of the inbox and owner commands, email, and one chat
    channel; the soak that is M7's exit also needs the full agent process (E19-1, an M5 story).
