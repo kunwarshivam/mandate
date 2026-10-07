@@ -217,6 +217,11 @@ fn every_new_configuration_reference_requires_its_stored_object() {
             "config_refs.policy_set",
         ),
         (
+            "decision",
+            "config_refs.model_registry",
+            "config_refs.model_registry",
+        ),
+        (
             "policy_registration",
             "payload.content_hash",
             "payload.content_hash",
