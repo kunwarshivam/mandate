@@ -689,3 +689,219 @@ impl MemoryJournal {
         self.append(stream, expected_head, writer_epoch, recorded_at, drafts)
     }
 }
+
+#[cfg(test)]
+mod production_config_tests {
+    use super::*;
+
+    fn fixture() -> Result<Value, String> {
+        parse(include_bytes!("../../../fixtures/refcases/journal.json")).map_err(|e| e.to_string())
+    }
+
+    fn list<'a>(value: &'a Value, member: &str) -> &'a [Value] {
+        value
+            .get(member)
+            .and_then(Value::as_array)
+            .unwrap_or_default()
+    }
+
+    fn text<'a>(value: &'a Value, member: &str) -> &'a str {
+        value
+            .get(member)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    }
+
+    fn artifacts(section: &Value) -> Result<BTreeMap<Digest, Vec<u8>>, String> {
+        list(section, "artifacts")
+            .iter()
+            .map(|artifact| {
+                let reference =
+                    ArtifactRef::parse(text(artifact, "ref")).ok_or("an artifact ref")?;
+                Ok((
+                    reference.digest(),
+                    text(artifact, "canonical").as_bytes().to_vec(),
+                ))
+            })
+            .collect()
+    }
+
+    fn apply(draft: &mut Object, change: &Value) -> Result<(), String> {
+        let path = text(change, "path");
+        let mut members: Vec<&str> = path.split('.').collect();
+        let last = members.pop().ok_or("an invalid path")?;
+        let mut node = draft;
+        for member in members {
+            node = match node.get_mut(member) {
+                Some(Value::Object(object)) => object,
+                _ => return Err(format!("{path} has no object at {member}")),
+            };
+        }
+        if change.get("delete") == Some(&Value::Bool(true)) {
+            node.remove(last).map(|_| ()).ok_or_else(|| path.to_owned())
+        } else {
+            let key = Key::new(last).map_err(|e| e.to_string())?;
+            let value = change.get("value").cloned().ok_or("a changed value")?;
+            node.insert(key, value);
+            Ok(())
+        }
+    }
+
+    fn changed(section: &Value, case: &Value) -> Result<Value, String> {
+        let base = text(case, "base");
+        let mut draft = section
+            .get("valid_drafts")
+            .and_then(|drafts| drafts.get(base))
+            .and_then(Value::as_object)
+            .cloned()
+            .ok_or_else(|| format!("no base {base}"))?;
+        for change in list(case, "changes") {
+            apply(&mut draft, change)?;
+        }
+        Ok(Value::Object(draft))
+    }
+
+    fn append(
+        fixture: &Value,
+        draft: &Value,
+        artifacts: &dyn ArtifactSource,
+    ) -> Result<AppendOutcome, String> {
+        let stream_text = text(draft, "stream_id");
+        let stream = StreamId::parse(stream_text).ok_or("a stream id")?;
+        let stream_section = if stream_text.starts_with("agent:") {
+            "agent_stream"
+        } else {
+            "control_stream"
+        };
+        let mut opening = fixture
+            .get(stream_section)
+            .and_then(|section| list(section, "chain").first())
+            .and_then(|entry| entry.get("body"))
+            .and_then(Value::as_object)
+            .cloned()
+            .ok_or("a stream opening")?;
+        for member in JOURNAL_FIELDS {
+            opening.remove(member);
+        }
+        let mut journal = MemoryJournal::new();
+        let epoch = journal.take_ownership(&stream);
+        let opening = to_canonical(&Value::Object(opening));
+        let opened_at =
+            UtcNanos::parse("2026-09-21T14:00:02.000000000Z").map_err(|e| e.to_string())?;
+        if !matches!(
+            journal.append(&stream, 0, epoch, opened_at, &[opening.as_slice()]),
+            AppendOutcome::Committed(_)
+        ) {
+            return Err("stream opening refused".to_owned());
+        }
+        let bytes = to_canonical(draft);
+        let at = UtcNanos::parse("2026-09-21T14:00:03.000000000Z").map_err(|e| e.to_string())?;
+        Ok(journal.append_with_config_artifacts(
+            &stream,
+            1,
+            epoch,
+            at,
+            &[bytes.as_slice()],
+            artifacts,
+        ))
+    }
+
+    #[test]
+    fn every_production_configuration_vector_has_its_specified_outcome() -> Result<(), String> {
+        let fixture = fixture()?;
+        let section = fixture
+            .get("production_config_refs")
+            .ok_or("the production section")?;
+        let stored = artifacts(section)?;
+        let valid = section
+            .get("valid_drafts")
+            .and_then(Value::as_object)
+            .ok_or("valid drafts")?;
+        assert_eq!(valid.len(), 4);
+        for (name, draft) in valid {
+            assert!(
+                matches!(
+                    append(&fixture, draft, &stored)?,
+                    AppendOutcome::Committed(_)
+                ),
+                "{name}"
+            );
+        }
+        let invalid = list(section, "invalid_drafts");
+        assert_eq!(invalid.len(), 8);
+        for case in invalid {
+            let expect = case.get("expect").ok_or("an expectation")?;
+            let got = match append(&fixture, &changed(section, case)?, &stored)? {
+                AppendOutcome::Invalid { error, .. } => {
+                    Some((error.reason.code().to_owned(), error.path))
+                }
+                _ => None,
+            };
+            let wanted = Some((
+                text(expect, "reason").to_owned(),
+                text(expect, "path").to_owned(),
+            ));
+            assert_eq!(got, wanted, "{}", text(case, "name"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn every_new_reference_requires_its_stored_object() -> Result<(), String> {
+        let fixture = fixture()?;
+        let section = fixture
+            .get("production_config_refs")
+            .ok_or("the production section")?;
+        let valid = section.get("valid_drafts").ok_or("valid drafts")?;
+        for (name, object, member, path) in [
+            (
+                "model_output",
+                "config_refs",
+                "model_registry",
+                "config_refs.model_registry",
+            ),
+            (
+                "decision",
+                "config_refs",
+                "policy_set",
+                "config_refs.policy_set",
+            ),
+            (
+                "decision",
+                "config_refs",
+                "model_registry",
+                "config_refs.model_registry",
+            ),
+            (
+                "policy_registration",
+                "payload",
+                "content_hash",
+                "payload.content_hash",
+            ),
+            (
+                "model_registry_registration",
+                "payload",
+                "content_hash",
+                "payload.content_hash",
+            ),
+        ] {
+            let draft = valid.get(name).ok_or_else(|| name.to_owned())?;
+            let reference = draft
+                .get(object)
+                .and_then(|value| value.get(member))
+                .and_then(Value::as_str)
+                .and_then(ArtifactRef::parse)
+                .ok_or_else(|| path.to_owned())?;
+            let mut stored = artifacts(section)?;
+            stored
+                .remove(&reference.digest())
+                .ok_or("a stored object")?;
+            let got = match append(&fixture, draft, &stored)? {
+                AppendOutcome::Invalid { error, .. } => Some((error.reason.code(), error.path)),
+                _ => None,
+            };
+            assert_eq!(got, Some(("missing_artifact", path.to_owned())), "{name}");
+        }
+        Ok(())
+    }
+}
