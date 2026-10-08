@@ -119,6 +119,7 @@ describe("the push service worker", () => {
       JSON.stringify({ notice: HEX, text: "toString" }),
       JSON.stringify({ notice: HEX, text: "__proto__" }),
       JSON.stringify({ notice: HEX.toUpperCase(), text: "brief_ready" }),
+      JSON.stringify({ notice: "g".repeat(32), text: "brief_ready" }),
       JSON.stringify({ notice: HEX.slice(1), text: "brief_ready" }),
       JSON.stringify({ notice: `${HEX}0`, text: "brief_ready" }),
       JSON.stringify({ notice: `../${HEX.slice(3)}`, text: "brief_ready" }),
@@ -176,6 +177,7 @@ describe("the push service worker", () => {
       { notice: `${HEX}?t=1` },
       { notice: 1 },
       { notice: HEX.toUpperCase() },
+      { notice: "g".repeat(32) },
       { notice: "01J9ZQ8V3W5X7Y9A1B3C5D7E9F" },
       { url: `/n/${HEX}` },
     ]) {

@@ -100,6 +100,8 @@ describe("subscribing to push", () => {
       "https://android.googleapis.com/x",
       "http://fcm.googleapis.com/x",
       "https://FCM.googleapis.com/x",
+      "https://WEB.push.apple.com/x",
+      "https://wns2-X.notify.windows.com/x",
       "https://fcm.googleapis.com./x",
       "https://xn--fcm-0na.googleapis.com/x",
       "https://fcm%2Egoogleapis.com/x",
