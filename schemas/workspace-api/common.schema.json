@@ -24,6 +24,11 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]{1,64}$"
     },
+    "AssetId": {
+      "description": "An instrument's asset id: the mandate schema's `uuid`, lowercase only (mandate spec §3, journal spec §9.3's `asset_id`).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
     "EventId": {
       "description": "A journal event id: a ULID in Crockford base32 (journal spec §3). Its time component carries no meaning.",
       "type": "string",
