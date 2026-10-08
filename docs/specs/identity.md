@@ -75,7 +75,7 @@ is trusted (§14, E9-11).
 | ID | Invariant | Source | Test |
 |---|---|---|---|
 | **ID-1** | **Every action is attributed.** Every mutation workspace services accept, and every event they commit to the control stream, carries the authenticated principal (`actor.kind`, opaque `actor.id`) and the session it came through. The principal comes from the authenticated channel, never from the request body. Nothing anonymous is committed | Journal §3; HLD §8 "Agent identity" | A fuzz of API calls with forged `actor`, `user`, `responder`, and `workspace_id` fields in bodies asserts every committed event's actor equals the oracle's record of who authenticated |
-| **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some effective role the principal holds through a membership in that scope that reaches it (one that reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows) has the permission in §4.2's matrix, or, for a principal that holds no membership (a client, a service account, the host CLI, a platform operator in break-glass), when its own column has it within that column's stated scope. Everything else is denied, including a permission the matrix leaves blank. It covers exactly the rows the matrix names (DEC-641 item 5) | §4 | An exhaustive test over every (role set or non-member principal kind, permission, scope) triple against a table parsed from §4.2 itself, by the grammar of §4.2, not from the code |
+| **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some effective role the principal holds through a membership in that scope that reaches it (one that reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows) has the permission in §4.2's matrix, or, for a principal that holds no membership (a client, a service account, the host CLI, a platform operator in break-glass), when its own column has it within that column's stated scope. Everything else is denied, including a permission the matrix leaves blank. It covers exactly the rows the matrix names (DEC-641 item 6) | §4 | An exhaustive test over every (role set or non-member principal kind, permission, scope) triple against a table parsed from §4.2 itself, by the grammar of §4.2, not from the code |
 | **ID-3** | **Only a member reaches a workspace.** A membership reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows (§5.1); a principal with no membership in workspace W that reaches it can neither read nor write W. A deactivation applies to every request authorized after it commits, and open streams (server-sent events, websockets) of that principal in W close within 60 s | §5 | A fuzz interleaving requests with membership changes; the oracle replays `Member*` events and asserts no request authorized after a deactivation succeeded, and every stream closed within the bound |
 | **ID-4** | **Step-up where risk can grow.** These need valid step-up (§7): confirming a risk-increasing mandate version, deploying (going live or paper), approving under policy (mandate §6.4 check 6), granting a delegation, connecting or changing a connection, revoking a connection, re-enabling a halted scope if DEC-437 item 21 creates one (§4.4), resume, Stop, acknowledgments (mandate §6.1), owner exits, accepting a disclosure (V-005), loosening a policy, granting a role, connecting a client, enrolling a step-up credential, and break-glass | FR-1.4; mandate §6.1 | A table test per command: with each failure mode (missing, stale, reused, wrong method, wrong action digest, wrong principal) the command is refused and nothing else is committed |
 | **ID-5** | **Never for risk reduction.** No step-up, session freshness, or identity-provider round trip is required to pause, to engage a kill switch at any scope (its stop and flatten; only its extra privileges need step-up, mandate §6.1), to skip an approval, to tighten a policy, to remove or narrow a delegation, or to revoke a client. Automated exits, protective orders, and risk exits involve no principal at all | `AGENTS.md` rules 2, 3, 13; MI-23 | With step-up absent, stale, and with the identity provider unreachable, each of these commits, and the kill switch stops and flattens |
@@ -299,15 +299,21 @@ inactive.
 
 ### 4.5 The authorization step
 
-`authorize(principal, session, memberships, scope, permission)` applies §4.2 by its grammar and
-nothing else. The memberships are those read, uncached, for this request (§6.2); for a client
-they are its user's.
+`authorize(lookup, principal, session, scope, permission)` applies §4.2 by its grammar and nothing
+else.
 
 **The membership read** ([DEC-642](../project/decisions/DEC-642.md) item 4). Authorizing needs a
-read before any context exists. That read goes through one narrow path: a membership lookup that
-returns memberships only, keyed by a `MembershipQuery` (the principal, or a client's user, and the
-scope named by the route). No data API accepts a `MembershipQuery`, and the lookup accepts nothing
-else, so it reaches no workspace data.
+read before any context exists. `authorize` builds the `MembershipQuery` itself (the principal, or
+a client's user, and the scope) and reads, uncached, through the membership lookup it is given
+(§6.2), which takes only that query and returns memberships only. No data API accepts a
+`MembershipQuery`, and the caller passes no membership list, so it can neither reach workspace
+data through the read nor hand the step a forged list. A lookup that cannot answer refuses
+(`membership_unavailable`); nothing is granted on a failed read.
+
+**The session.** It contributes the `session_ref` every committed event names (ID-1, §12.2) and its
+kind: a reduction-only session (§6.4: route 1 after the provider became unreachable, route 2)
+authorizes only the pause and kill-switch engage rows, and any other row is refused
+`reduction_only`.
 
 **`TenantContext`** ([DEC-642](../project/decisions/DEC-642.md)). Only the authorization step
 constructs one, and only when it authorizes a permission at a workspace's scope; an org-scope
@@ -317,15 +323,23 @@ principal (ID and kind), and the one permission authorized. Every store, cache, 
 and vault API over a workspace's data takes a context and reads the workspace from it; none takes
 a bare workspace ID (ID-8). A context lives for one request and is never stored or serialized.
 
-**`SystemContext`** (DEC-642 item 5). The deployment's own processes (runtime, executor,
-scheduler) act with no request and no principal behind them (ID-5), yet nothing they commit is
-anonymous (ID-1). They hold a `SystemContext`: one workspace and the process's workload identity
-(§3.1, Process), recorded as `actor.kind` `system`. It is not an output of `authorize`: only a
-process's bootstrap builds it, from its workload identity, never from a request, and no
-request-serving crate constructs one (the E9-8 tests check it). Data APIs accept either context
-through one sealed trait that only these two types implement. It never gates risk reduction:
-automated exits, protective orders, and kill switches proceed without any check it could fail
-(`AGENTS.md` rule 13).
+**`SystemContext`** (DEC-642 item 5). The deployment's own background processes act with no
+request and no principal behind them (ID-5), yet nothing they commit is anonymous (ID-1). They hold
+a `SystemContext`: one workspace and the process's workload identity (§3.1), recorded as
+`actor.kind` `agent` for an agent's runtime and `system` for the executor and the scheduler. It is
+not an output of `authorize`, and it is unrepresentable from a request by crate boundary: its
+fields are private, and its one constructor is reachable only through the small crate
+`mandate-identity-system`, which alone switches on that constructor in `mandate-identity`. Every
+request-serving crate (`mandate-api`, `mandate-api-server`, and the workspace services' identity
+crate) lists `mandate-identity-system` in `forbidden_internal` in `xtask/layers.toml`, a
+mechanical check (DEC-525); the crate and those entries land with the E9-8 code. Workspace
+services' request path never holds a `SystemContext`: every write it makes is attributed to the
+authenticated principal, including revoking a deactivated member's sessions and client tokens
+(§5.2 step 2), which carry the deactivating admin as actor. System-attributed control writes
+(refresh-family revocation on expiry, deprovision signals, scheduled expiry) come only from a
+separate process. Data APIs accept either context through one sealed trait that only these two
+types implement. It never gates risk reduction: automated exits, protective orders, and kill
+switches proceed without any check it could fail (`AGENTS.md` rule 13).
 
 **Role changes.** A grant or removal of roles, and a deactivation, pass the same step for their
 row (deactivating one's own membership is the leave row), then: no change grants or removes a
@@ -342,6 +356,8 @@ deactivating another member who holds it counts as removing it; and the last-own
 | `own_roles` | A change grants or removes a role of its own author (ID-13) | 403, code `own_roles` |
 | `owner_role_reserved` | A principal other than an org owner grants or removes the org owner role | 403, code `owner_role_reserved` |
 | `last_owner`, `last_admin` | The change leaves no `active` org owner, or no `active` workspace admin (§5.2) | 409, the code itself |
+| `reduction_only` | A reduction-only session asks for a row other than pause or a kill switch's engage (§6.4) | 403, code `reduction_only` |
+| `membership_unavailable` | The membership lookup cannot answer | 503, `retryable` |
 
 Step-up is not judged here: an authorization carries the row's step-up requirement, and §7
 verifies the evidence.
