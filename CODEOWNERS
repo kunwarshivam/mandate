@@ -30,6 +30,8 @@
 /crates/mandate-domain/     @kunwarshivam
 /crates/mandate-approval/   @kunwarshivam
 /crates/mandate-identity/   @kunwarshivam
+/crates/mandate-identity-seal/ @kunwarshivam
+/crates/mandate-identity-testkit/ @kunwarshivam
 /crates/mandate-cli/        @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
 /crates/mandate-accounting/ @kunwarshivam
