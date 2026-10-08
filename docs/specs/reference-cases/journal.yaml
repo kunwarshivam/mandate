@@ -15384,6 +15384,30 @@ hold:
       outcome: Invalid
       reason: schema
       path: causation_id
+  - name: lift_copied_without_its_command
+    clause: 'rule 80: a lift''s copy names its command'
+    base_draft: lifted
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: copy_with_a_null_hold
+    clause: '§9.10 types: `held` is a boolean on every version-2 copy'
+    base_draft: held
+    changes:
+    - path: payload.reason
+      value: restriction_changed
+    - path: causation_id
+      value: null
+    - path: payload.held
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.held
   - name: resume_copied_without_its_command
     clause: 'rule 80: every owner copy at version 2'
     base_draft: lifted
@@ -15574,7 +15598,7 @@ hold:
     - event_type: IntentProposed
       schema_version: 1
       payload: {}
-    - &id012
+    - &id015
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -15583,7 +15607,8 @@ hold:
         reason: owner_resume
         lifecycle: normal
         held: true
-    - event_type: AgentModeChanged
+    - &id010
+      event_type: AgentModeChanged
       schema_version: 2
       payload:
         from: exits_only
@@ -15600,7 +15625,7 @@ hold:
     - event_type: IntentProposed
       schema_version: 1
       payload: {}
-    - &id009
+    - &id011
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -15666,7 +15691,8 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - event_type: AgentModeChanged
+    - &id009
+      event_type: AgentModeChanged
       schema_version: 2
       payload:
         from: normal
@@ -15675,13 +15701,46 @@ hold:
         lifecycle: normal
         held: false
     expect: []
-  - name: two_violations_and_only_the_first_reported
+  - name: a_version_1_record_after_a_first_copy
+    from_seq: 1
+    anchor: null
+    events:
+    - *id009
+    - *id008
+    expect:
+    - 1
+  - name: a_lift_then_a_copy_that_holds_nothing
     from_seq: 1
     anchor: null
     events:
     - *id007
+    - *id010
     - *id009
+    expect: []
+  - name: a_lift_then_a_copy_that_keeps_the_hold
+    from_seq: 1
+    anchor: null
+    events:
+    - *id007
+    - *id010
     - event_type: AgentModeChanged
+      schema_version: 2
+      payload:
+        from: normal
+        to: paused
+        reason: owner_pause
+        lifecycle: paused
+        held: true
+    expect:
+    - 2
+  - name: the_carried_hold_is_the_expected_one_not_the_written_one
+    from_seq: 1
+    anchor: null
+    events:
+    - *id007
+    - *id011
+    - &id012
+      event_type: AgentModeChanged
       schema_version: 2
       payload:
         from: exits_only
@@ -15691,28 +15750,52 @@ hold:
         held: true
     expect:
     - 1
+  - name: two_violations_and_only_the_first_reported
+    from_seq: 1
+    anchor: null
+    events:
+    - *id007
+    - *id011
+    - *id011
+    expect:
+    - 1
     - 2
+  - name: a_hold_whose_held_contradicts_its_reason
+    from_seq: 1
+    anchor: null
+    events:
+    - event_type: AgentModeChanged
+      schema_version: 2
+      payload:
+        from: normal
+        to: exits_only
+        reason: owner_hold
+        lifecycle: normal
+        held: false
+    - *id012
+    expect:
+    - 0
   - name: a_later_range_launders_a_dropped_hold
     from_seq: 40
-    anchor: &id011
-      held: true
+    anchor: &id014
       v2_before: true
+      held: true
     events:
-    - *id009
+    - *id011
     expect:
     - 0
   - name: a_later_range_starts_with_version_1_after_a_version_2
     from_seq: 40
-    anchor: &id010
-      held: false
+    anchor: &id013
       v2_before: true
+      held: false
     events:
     - *id008
     expect:
     - 0
   - name: a_later_range_whose_predecessor_was_not_held
     from_seq: 40
-    anchor: *id010
+    anchor: *id013
     events:
     - event_type: AgentModeChanged
       schema_version: 2
@@ -15723,34 +15806,34 @@ hold:
         lifecycle: normal
         held: false
     expect: []
-  - name: a_later_range_carries_its_anchor
+  - name: a_later_range_carries_the_hold_of_a_copy
     from_seq: 40
-    anchor: *id011
+    anchor: *id014
     events:
-    - &id013
-      event_type: AgentModeChanged
-      schema_version: 2
-      payload:
-        from: exits_only
-        to: exits_only
-        reason: restriction_changed
-        lifecycle: normal
-        held: true
     - *id012
+    - *id015
+    expect: []
+  - name: a_later_range_with_no_version_2_before
+    from_seq: 40
+    anchor:
+      v2_before: false
+    events:
+    - *id008
+    - *id009
     expect: []
   - name: an_unanchored_range_opens_with_a_hold
     from_seq: 40
     anchor: null
     events:
     - *id007
-    - *id013
+    - *id012
     expect: []
   - name: an_unanchored_range_anchors_on_its_own_hold_then_drops_it
     from_seq: 40
     anchor: null
     events:
     - *id007
-    - *id009
+    - *id011
     expect:
     - 1
   - name: an_unanchored_range_opens_with_version_1
@@ -15760,11 +15843,18 @@ hold:
     - *id008
     - *id007
     expect: []
-  - name: an_unanchored_range_opens_with_a_copy_and_fails_closed
+  - name: an_unanchored_range_opens_with_a_held_copy_and_fails_closed
     from_seq: 40
     anchor: null
     events:
-    - *id013
+    - *id012
+    expect:
+    - 0
+  - name: an_unanchored_range_opens_with_a_clear_copy_and_fails_closed
+    from_seq: 40
+    anchor: null
+    events:
+    - *id011
     expect:
     - 0
   - name: an_unanchored_range_with_version_1_after_its_hold

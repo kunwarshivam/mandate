@@ -30,7 +30,10 @@ mod schema;
 mod verify;
 mod workspace;
 
-pub use agent::{AgentStreamCheck, AgentStreamFailure, verify_agent_stream};
+pub use agent::{
+    AgentStreamCheck, AgentStreamFailure, HeldAnchor, verify_agent_stream,
+    verify_agent_stream_anchored,
+};
 
 /// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, §9.5's rule 45 on the
 /// account stream (DEC-446 item 3), then §9.9's rule 69 clause on the control stream (DEC-671).

@@ -203,6 +203,29 @@ pub fn verify_agent_stream(
     rows: &[StoredEvent],
     start: TrustedStart,
 ) -> Result<(), AgentStreamFailure> {
+    verify_agent_stream_anchored(rows, start, HeldAnchor::Unknown)
+}
+
+/// The stored chain's hold before a range, which the caller of [`verify_agent_stream_anchored`]
+/// derives (§11's `held_mismatch`, DEC-673).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldAnchor {
+    /// The caller cannot read the chain before the range.
+    Unknown,
+    /// No version-2 `AgentModeChanged` precedes the range.
+    NoVersionTwo,
+    /// The `held` the last version-2 `AgentModeChanged` before the range carried, at its `seq`.
+    Carried { seq: u64, held: bool },
+}
+
+/// [`verify_agent_stream`] with §11's `held_mismatch` anchored on `anchor`, the stored chain's
+/// hold before the range, which the caller derives (DEC-673). A full chain is anchored on nothing
+/// before it, whatever `anchor` says.
+pub fn verify_agent_stream_anchored(
+    rows: &[StoredEvent],
+    start: TrustedStart,
+    anchor: HeldAnchor,
+) -> Result<(), AgentStreamFailure> {
     let events: Vec<(&StoredEvent, Value)> = rows
         .iter()
         .filter(|row| {
@@ -221,7 +244,7 @@ pub fn verify_agent_stream(
         })
         .collect();
     let mut earlier: BTreeSet<&str> = BTreeSet::new();
-    let mut held = Held::at(start.from_seq);
+    let mut held = Held::at(start.from_seq, anchor);
     for (row, body) in &events {
         let fail = |check| {
             Err(AgentStreamFailure {
@@ -279,27 +302,41 @@ struct Held {
 }
 
 impl Held {
-    fn at(from_seq: u64) -> Self {
-        Self {
-            last: (from_seq == 1).then_some(false),
-            versioned: false,
+    fn at(from_seq: u64, anchor: HeldAnchor) -> Self {
+        match (from_seq, anchor) {
+            (1, _) | (_, HeldAnchor::NoVersionTwo) => Self {
+                last: Some(false),
+                versioned: false,
+            },
+            (_, HeldAnchor::Carried { held, .. }) => Self {
+                last: Some(held),
+                versioned: true,
+            },
+            (_, HeldAnchor::Unknown) => Self {
+                last: None,
+                versioned: false,
+            },
         }
     }
 
-    /// Whether the next record keeps the hold: a version-1 record only before any version-2 one,
-    /// and a version-2 record that is not a hold or a lift with the `held` last carried.
+    /// Whether the next record keeps the hold. The hold carried is the expected one: a hold sets
+    /// it, a lift clears it, and every other record keeps it whatever it wrote (DEC-673). A hold
+    /// or lift must write what its reason says; any other version-2 record must write the carried
+    /// hold, and with none known it fails closed; a version-1 record fails after a version-2 one.
     fn carries(&mut self, schema_version: u64, payload: &Value) -> bool {
         if schema_version != 2 {
             return !self.versioned;
         }
         self.versioned = true;
-        let now = payload.get("held") == Some(&Value::Bool(true));
-        let reason = Payload(payload).text("reason");
-        let kept = reason == "owner_hold"
-            || reason == "owner_lift_hold"
-            || self.last.is_some_and(|last| last == now);
-        self.last = Some(now);
-        kept
+        let written = payload.get("held") == Some(&Value::Bool(true));
+        match Payload(payload).text("reason") {
+            reason @ ("owner_hold" | "owner_lift_hold") => {
+                let expected = reason == "owner_hold";
+                self.last = Some(expected);
+                written == expected
+            }
+            _ => self.last == Some(written),
+        }
     }
 }
 
