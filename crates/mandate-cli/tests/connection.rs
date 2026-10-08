@@ -1,5 +1,5 @@
 //! K1b (E7-11's first slice; DEC-529 items 3 and 11, DEC-800): `mandate connection record` commits
-//! `ConnectionEstablished` version 2 (journal spec §9.12) from the CLI, naming the connect
+//! `ConnectionEstablished` version 2 (journal spec §9.8) from the CLI, naming the connect
 //! sequence's passing `ConnectionChecked` as its cause, and reaches no broker. Every account
 //! stream event here is a fixture written as the executor would write it; Robinhood is fixtures
 //! only (connections spec §12, `AGENTS.md` rule 8). Cases are written as words, one case a line.
@@ -52,7 +52,7 @@ fn request() -> Request {
         .to_vec(),
         account_ref: ACCOUNT.to_owned(),
         checked: CHECK.to_owned(),
-        attest_no_margin: true,
+        margin_attestation: Some("cash_account".to_owned()),
     }
 }
 
@@ -72,7 +72,7 @@ fn with(member: &str, value: &str) -> Request {
                 .map(str::to_owned)
                 .collect()
         }
-        "attest" => r.attest_no_margin = false,
+        "attest" => r.margin_attestation = Some(value).filter(|v| v != "-"),
         _ => {}
     }
     r
@@ -263,7 +263,7 @@ fn records_a_checked_live_robinhood_connection_as_version_2() {
     assert_eq!(member_text(&event, "actor.id"), Some(OWNER));
     assert_eq!(member(&event, "pii_refs"), Some(&Value::Array(Vec::new())));
     let expected = format!(
-        r#"{{"account_ref":"{ACCOUNT}","broker":"robinhood","connection_id":"{CONN}","environment":"live","scopes":["get_accounts","place_equity_order","review_equity_order"],"step_up":{{"assertion_id":"cli-assertion-1","authenticated_at":"{}","method":"cli_confirm"}},"user":"{OWNER}"}}"#,
+        r#"{{"account_ref":"{ACCOUNT}","broker":"robinhood","connection_id":"{CONN}","environment":"live","margin_attestation":"cash_account","scopes":["get_accounts","place_equity_order","review_equity_order"],"step_up":{{"assertion_id":"cli-assertion-1","authenticated_at":"{}","method":"cli_confirm"}},"user":"{OWNER}"}}"#,
         at(NOW).at
     );
     let payload = member(&event, "payload").map(to_canonical);
@@ -334,7 +334,9 @@ fn refusals_on_the_request_touch_nothing() {
                  none - paper environment_refused
                  none - backtest environment_refused
                  scopes - live scopes_missing
-                 attest - live attestation_missing";
+                 attest - live attestation_missing
+                 attest cash live attestation_invalid
+                 broker alpaca paper attestation_not_live";
     for case in cases.lines() {
         let [member, value, env, reason] = case.split_whitespace().collect::<Vec<_>>()[..] else {
             panic!("{case}");
@@ -504,7 +506,7 @@ fn the_command_line_takes_each_scope_and_the_attestation() {
     let line = "mandate connection record --workspace ws1 --user user-owner --environment live \
                 --connection conn_rh_live_01 --broker robinhood --scope get_accounts --scope \
                 place_equity_order --account-ref 01J0ACC0VNT000000000000000 --checked \
-                10000000000000000000000001 --attest-no-margin --journal postgresql://h/db \
+                10000000000000000000000001 --margin-attestation margin_disabled --journal postgresql://h/db \
                 --store /tmp/s";
     let cli = Cli::try_parse_from(line.split_whitespace()).unwrap();
     let Command::Connection(ConnectionCommand::Record(parsed)) = cli.command else {
@@ -514,6 +516,10 @@ fn the_command_line_takes_each_scope_and_the_attestation() {
         parsed.connection.scopes,
         ["get_accounts", "place_equity_order"]
     );
-    assert!(parsed.connection.attest_no_margin && parsed.code.is_none());
+    assert_eq!(
+        parsed.connection.margin_attestation.as_deref(),
+        Some("margin_disabled")
+    );
+    assert!(parsed.code.is_none());
     assert_eq!(parsed.environment, "live");
 }

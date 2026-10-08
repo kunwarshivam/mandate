@@ -1,5 +1,5 @@
 //! `mandate connection record` (first live trade brief, K1b; E7-11's first slice; DEC-529 items 3
-//! and 11): commits a connection's `ConnectionEstablished` version 2 (journal spec §9.12, DEC-800)
+//! and 11): commits a connection's `ConnectionEstablished` version 2 (journal spec §9.8, DEC-800)
 //! on the workspace control stream, from the CLI, without reaching any broker.
 //!
 //! The command reaches no broker and reads no credential. The connect sequence's executor has
@@ -64,10 +64,11 @@ pub struct Request {
     /// The event id of the connect sequence's passing `ConnectionChecked` on that stream.
     #[arg(long, value_name = "EVENT_ID")]
     pub checked: String,
-    /// The owner attests the account is a cash account or has margin disabled (DEC-529 item 11);
-    /// required for `live`.
-    #[arg(long)]
-    pub attest_no_margin: bool,
+    /// The owner's attestation that the account is a cash account (`cash_account`) or has margin
+    /// disabled (`margin_disabled`), DEC-529 item 11: required for `live` and refused for `paper`,
+    /// as journal spec §9.8 rule 64 requires of the record.
+    #[arg(long, value_name = "ATTESTATION")]
+    pub margin_attestation: Option<String>,
 }
 
 /// What `record` did.
@@ -89,7 +90,9 @@ pub enum Recorded {
 ///   identifier and ULID); `broker_unsupported` for any broker but `alpaca` and `robinhood` (no
 ///   crypto in this slice); `environment_refused` for Alpaca outside `paper` (DEC-441 item 3),
 ///   Robinhood outside `live` (it has no paper environment), or `backtest`; `scopes_missing`;
-///   `attestation_missing` for `live` without the no-margin attestation;
+///   `attestation_missing` for `live` without the attestation, `attestation_invalid` for one that
+///   is not `cash_account` or `margin_disabled`, and `attestation_not_live` for one on `paper`
+///   (rule 64);
 /// - from the account stream `acct:{workspace}:{account_ref}`: `check_missing` unless `checked`
 ///   names a `ConnectionChecked` there of occasion `connect`, or `reconnect` for a reconnect;
 ///   `check_other_connection` when it is for another `connection_id`; `check_failed` unless every
@@ -120,11 +123,13 @@ pub fn record(
 }
 
 /// Every refusal `record` gives, by code.
-pub const CODES: [&str; 15] = [
+pub const CODES: [&str; 17] = [
     "account_maybe_connected",
     "account_ref_bound",
     "account_ref_invalid",
+    "attestation_invalid",
     "attestation_missing",
+    "attestation_not_live",
     "broker_unsupported",
     "check_failed",
     "check_missing",
