@@ -25,8 +25,9 @@
 //!   those, and its egress contains no live host (DEC-821 item 4).
 //!
 //! The `state` and authorization URL (API process), and the code exchange and its vault write
-//! (`exchange`, the token-exchange process, never the executor), follow in the next D2 slices. Modules for the connection record and fingerprint
-//! (E7-11) and the permission checks (E7-12) are added beside these.
+//! (`exchange`, the token-exchange process, never the executor), follow in the next D2 slices.
+//! Modules for the connection record and fingerprint (E7-11) and the permission checks (E7-12)
+//! are added beside these.
 
 pub mod error;
 pub mod grant;
