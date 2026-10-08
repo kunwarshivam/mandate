@@ -1242,8 +1242,11 @@ proves each pending test fails on them (DEC-110).
   a dev-dependency only; safety-critical, pure):
   `src/lib.rs` (`Sim`, its scripted `Event`s and `Fault`s, the order and request types,
   `SimError`).
-- **Tests:** `crates/mandate-rh-sim/tests/rules.rs` (only an agentic account reviews or places;
-  account numbers are unique), with fixtures in `tests/common/mod.rs`. Pending E7-25.
+- **Tests:** `crates/mandate-rh-sim/tests/rules.rs` (quantity forms, sessions and text against
+  the contract; only an agentic account reviews or places; each pre-trade alert refuses) and
+  `crates/mandate-rh-sim/tests/lifecycle.rs` (fills and positions, `ref_id` after a lost answer,
+  `gfd` and `gtc`, sessions, scripted answers, and the refusals of cancel and fill), with fixtures
+  in `tests/common/mod.rs`. Pending E7-25.
 - **Run:** `cargo nextest run -p mandate-rh-sim`.
 
 ## Research-agent spike (E17-0)
