@@ -8,8 +8,9 @@
 
 use std::path::Path;
 
+use mandate_canon::Digest;
 use mandate_canon::{Key, Object, Value, parse, to_canonical};
-use mandate_journal::{Draft, check_batch};
+use mandate_journal::{Draft, StoredEvent, TrustedStart, check_batch, verify_agent_stream};
 
 fn section(name: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
@@ -238,4 +239,59 @@ fn every_invalid_hold_draft_is_refused_with_its_reason_at_its_path() {
         clauses.len()
     );
     assert_rules_cited(&clauses, 75..=80);
+}
+
+/// §11's `held_mismatch` (§9.10, DEC-672): over each of the `hold` section's ranges of
+/// `AgentModeChanged` records, the first record whose `held` drops or sets a hold without a hold's
+/// or a lift's reason, or a version-1 record after a version-2 one, fails at its `seq`; a range with
+/// none passes.
+#[test]
+#[ignore = "pending E10-15"]
+fn the_owners_hold_is_carried_through_every_range() {
+    let section = section("hold");
+    let mut failed = Vec::new();
+    for case in list(&section, "range_verification") {
+        let from = case.get("from_seq").and_then(Value::as_int).unwrap();
+        let rows: Vec<StoredEvent> = list(case, "events")
+            .iter()
+            .zip(from..)
+            .map(|(event, seq)| {
+                let version = event.get("schema_version").and_then(Value::as_int).unwrap();
+                let body = format!(
+                    r#"{{"event_type":"AgentModeChanged","schema_version":{version},"payload":{}}}"#,
+                    String::from_utf8(to_canonical(event.get("payload").unwrap())).unwrap()
+                );
+                StoredEvent {
+                    stream_id: "agent:ws_01J8Z2:agent_a".to_owned(),
+                    seq,
+                    event_id: format!("01J8Z6R0A{seq:017}"),
+                    event_type: "AgentModeChanged".to_owned(),
+                    schema_version: version,
+                    environment: "paper".to_owned(),
+                    recorded_at: "2026-10-08T16:00:00.000000000Z".to_owned(),
+                    prev_hash: Digest::of(b""),
+                    hash: Digest::of(b""),
+                    body: body.into_bytes(),
+                }
+            })
+            .collect();
+        let start = TrustedStart {
+            from_seq: from,
+            prev_hash: Digest::of(b""),
+        };
+        let want = list(case, "expect")
+            .first()
+            .and_then(Value::as_int)
+            .map(|i| (from + i, "held_mismatch"));
+        let got = verify_agent_stream(&rows, start)
+            .err()
+            .map(|f| (f.seq, f.check.code()));
+        if got != want {
+            failed.push(format!(
+                "{}: expected {want:?}, got {got:?}",
+                text(case, "name")
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
