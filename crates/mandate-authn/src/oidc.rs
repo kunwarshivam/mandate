@@ -286,11 +286,16 @@ fn subject(
     };
     let exp = claims.exp.ok_or(Refusal::MissingClaim { claim: "exp" })?;
     let expires_at = UtcNanos::from_parts(exp, 0).map_err(|_| payload.clone())?;
-    if now.secs() >= exp.checked_add(CLOCK_SKEW_S).ok_or(payload.clone())? {
+    let not_before = claims
+        .nbf
+        .map(|nbf| UtcNanos::from_parts(nbf, 0))
+        .transpose()
+        .map_err(|_| payload)?;
+    if now.secs().saturating_sub(CLOCK_SKEW_S) >= expires_at.secs() {
         return Err(Refusal::Expired);
     }
-    if let Some(nbf) = claims.nbf
-        && now.secs() < nbf.checked_sub(CLOCK_SKEW_S).ok_or(payload)?
+    if let Some(not_before) = not_before
+        && now.secs().saturating_add(CLOCK_SKEW_S) < not_before.secs()
     {
         return Err(Refusal::NotYetValid);
     }
