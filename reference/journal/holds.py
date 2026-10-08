@@ -378,6 +378,22 @@ def invalid_drafts() -> list[dict]:
             "causation_id",
         ),
         invalid(
+            "lift_copied_without_its_command",
+            "rule 80: a lift's copy names its command",
+            "lifted",
+            [change("causation_id", None)],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "copy_with_a_null_hold",
+            "§9.10 types: `held` is a boolean on every version-2 copy",
+            "held",
+            [change("payload.reason", "restriction_changed"), change("causation_id", None), change("payload.held", None)],
+            "schema",
+            "payload.held",
+        ),
+        invalid(
             "resume_copied_without_its_command",
             "rule 80: every owner copy at version 2",
             "lifted",
@@ -494,23 +510,29 @@ def held_mismatches(
     of every record that breaks it. Only `AgentModeChanged` records are read; any other event in
     between leaves the hold as it was.
 
-    The check anchors on the stored chain before the range, never on the range's own first
-    record: `anchor` is `{held, v2_before}`, the `held` of the nearest version-2 `AgentModeChanged`
-    before the range and whether any exists, or `None` when the verifier cannot see before the
-    range. A range from seq 1 is anchored on nothing: no hold, no version-2 record. Then:
+    The check anchors on the stored chain before the range, which the caller derives and supplies:
+    `anchor` is `{"v2_before": false}` when no version-2 `AgentModeChanged` precedes the range,
+    `{"v2_before": true, "held": h}` for the `held` the last one carried, or `None` when the
+    caller cannot tell. A range from seq 1 is anchored on nothing before it. The `held` carried is
+    the expected one, derived from the reasons: a hold sets it, a lift clears it, and every other
+    record keeps it whatever it wrote. So:
 
-    - a version-2 record whose reason is not a hold's or a lift's carries the last `held`; with no
-      anchor and no earlier version-2 record in the range it fails closed;
-    - a version-2 hold or lift sets `held` and needs no anchor;
-    - a version-1 record after any version-2 one, before the range or in it, fails."""
+    - a hold or lift whose `held` contradicts its reason fails;
+    - any other version-2 record whose `held` differs from the carried one fails, and with no
+      anchor and no hold or lift yet in the range it fails closed, as having no anchor;
+    - a version-1 record after any version-2 one, before the range or in it, fails. With no anchor
+      a version-1 record before the range's first version-2 one passes: legacy streams are all
+      version 1, and a full chain or an anchored range catches the rest."""
     if from_seq == 1 and "held.anchor_ignored" not in skip:
-        anchor = {"held": False, "v2_before": False}
-    last = None if anchor is None or not anchor["v2_before"] else anchor["held"]
-    if anchor is not None and not anchor["v2_before"]:
-        last = False
-    versioned = bool(anchor and anchor["v2_before"])
+        anchor = {"v2_before": False}
     if "held.trust_first" in skip and from_seq != 1:
+        anchor = None
+    if anchor is None:
         last, versioned = None, False
+    elif anchor["v2_before"]:
+        last, versioned = anchor["held"], True
+    else:
+        last, versioned = False, False
     out = []
     for i, event in enumerate(events):
         if event["event_type"] != "AgentModeChanged":
@@ -523,12 +545,21 @@ def held_mismatches(
             continue
         versioned = True
         p = event["payload"]
-        owner = p["reason"] in HOLD_REASONS or "held.carry" in skip
-        if not owner:
-            unanchored = last is None and "held.unanchored_passes" not in skip
-            if unanchored or (last is not None and p["held"] != last):
+        reason = p["reason"]
+        if reason in HOLD_REASONS and "held.carry" not in skip:
+            expected = reason == "owner_hold"
+            if p["held"] != expected and "held.reason_ignored" not in skip:
                 out.append(i)
-        last = p["held"]
+            last = p["held"] if "held.written_on_hold" in skip else expected
+            continue
+        if last is None:
+            if "held.unanchored_passes" not in skip:
+                out.append(i)
+            continue
+        if p["held"] != last:
+            out.append(i)
+            if "held.written_carried" in skip:
+                last = p["held"]
         if "held.forget" in skip:
             last = None
     return out
@@ -553,9 +584,11 @@ def range_cases() -> list[dict]:
     lift = range_event(2, "exits_only", "normal", "owner_lift_hold", "normal", False)
     dropped = range_event(2, "exits_only", "exits_only", "restriction_changed", "normal", False)
     kept = range_event(2, "exits_only", "exits_only", "restriction_changed", "normal", True)
+    clear_copy = range_event(2, "normal", "exits_only", "restriction_changed", "normal", False)
     v1_pause = range_event(1, "normal", "paused", "owner_pause", "paused")
-    held_before = {"held": True, "v2_before": True}
-    clear_before = {"held": False, "v2_before": True}
+    held_before = {"v2_before": True, "held": True}
+    clear_before = {"v2_before": True, "held": False}
+    none_before = {"v2_before": False}
 
     def case(name, events, expect, from_seq=1, anchor=None):
         return {"name": name, "from_seq": from_seq, "anchor": anchor, "events": events, "expect": expect}
@@ -579,15 +612,24 @@ def range_cases() -> list[dict]:
         ),
         case("a_version_1_record_after_a_version_2_one", [hold, v1_pause], [1]),
         case("version_1_records_before_the_first_hold", [v1_pause, hold], []),
+        case("a_full_chain_opens_with_a_copy_that_holds_nothing", [clear_copy], []),
+        case("a_version_1_record_after_a_first_copy", [clear_copy, v1_pause], [1]),
+        case("a_lift_then_a_copy_that_holds_nothing", [hold, lift, clear_copy], []),
         case(
-            "a_full_chain_opens_with_a_copy_that_holds_nothing",
-            [range_event(2, "normal", "exits_only", "restriction_changed", "normal", False)],
-            [],
+            "a_lift_then_a_copy_that_keeps_the_hold",
+            [hold, lift, range_event(2, "normal", "paused", "owner_pause", "paused", True)],
+            [2],
         ),
         case(
-            "two_violations_and_only_the_first_reported",
-            [hold, dropped, range_event(2, "exits_only", "exits_only", "restriction_changed", "normal", True)],
-            [1, 2],
+            "the_carried_hold_is_the_expected_one_not_the_written_one",
+            [hold, dropped, kept],
+            [1],
+        ),
+        case("two_violations_and_only_the_first_reported", [hold, dropped, dropped], [1, 2]),
+        case(
+            "a_hold_whose_held_contradicts_its_reason",
+            [range_event(2, "normal", "exits_only", "owner_hold", "normal", False), kept],
+            [0],
         ),
         case("a_later_range_launders_a_dropped_hold", [dropped], [0], 40, held_before),
         case("a_later_range_starts_with_version_1_after_a_version_2", [v1_pause], [0], 40, clear_before),
@@ -598,11 +640,13 @@ def range_cases() -> list[dict]:
             40,
             clear_before,
         ),
-        case("a_later_range_carries_its_anchor", [kept, resume], [], 40, held_before),
+        case("a_later_range_carries_a_copys_hold", [kept, resume], [], 40, held_before),
+        case("a_later_range_with_no_version_2_before", [v1_pause, clear_copy], [], 40, none_before),
         case("an_unanchored_range_opens_with_a_hold", [hold, kept], [], 40),
         case("an_unanchored_range_anchors_on_its_own_hold_then_drops_it", [hold, dropped], [1], 40),
         case("an_unanchored_range_opens_with_version_1", [v1_pause, hold], [], 40),
-        case("an_unanchored_range_opens_with_a_copy_and_fails_closed", [kept], [0], 40),
+        case("an_unanchored_range_opens_with_a_held_copy_and_fails_closed", [kept], [0], 40),
+        case("an_unanchored_range_opens_with_a_clear_copy_and_fails_closed", [dropped], [0], 40),
         case("an_unanchored_range_with_version_1_after_its_hold", [hold, v1_pause], [1], 40),
     ]
 
@@ -615,6 +659,9 @@ RANGE_MUTANTS = (
     "held.trust_first",
     "held.reset_on_other",
     "held.unanchored_passes",
+    "held.reason_ignored",
+    "held.written_on_hold",
+    "held.written_carried",
 )
 
 

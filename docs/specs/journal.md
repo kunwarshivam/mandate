@@ -1845,7 +1845,9 @@ a runtime that records a hold writes version 2 for every mode change after it.
 | `held` | `boolean` | Whether the owner's hold stands after the change: rule 78 |
 
 **`OwnerCommandRefused`** version 2: version 1's members, with the command `lift_hold`, on the agent
-stream only (rule 26). A lift whose step-up does not count is refused like a resume (rule 28 keeps
+stream only (rule 26). Version 2 is registered on the agent stream alone, so a version-2 refusal on
+the account stream is `unknown_schema` at `payload`, and rule 26's `stream_mismatch` judges version
+1's commands. A lift whose step-up does not count is refused like a resume (rule 28 keeps
 `not_independent` off it).
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
@@ -1923,16 +1925,21 @@ anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_m
 - `mode_event_mismatch` — a `KillSwitchActivated` whose `mode_event` is non-null names an earlier
   `AgentModeChanged` on this stream with reason `kill_switch`, reported at the
   `KillSwitchActivated`;
-- `held_mismatch` — the owner's hold is carried, never dropped (§9.10, [DEC-672](../project/decisions/DEC-672.md)).
-  Only `AgentModeChanged` records are read; any other event between them leaves the hold as it
-  was. A version-2 one whose reason is not `owner_hold` or `owner_lift_hold` has the `held` of the
-  last version-2 `AgentModeChanged` before it, and no version-1 `AgentModeChanged` follows a
-  version-2 one. **The check anchors on the stored chain, not on the range:** "before it" includes
-  the records before the range's trusted start, so a range can never adopt a dropped hold as its
-  first record. The range only limits what is reported. A full chain is anchored on nothing (no
-  hold, no version-2 record). A verifier that cannot read the chain before a later range fails
-  closed: the range's first version-2 record, unless it is a hold or a lift, is reported as having
-  no anchor. Reported at the first record that breaks it.
+- `held_mismatch` — the owner's hold is carried, never dropped (§9.10, [DEC-672](../project/decisions/DEC-672.md),
+  [DEC-673](../project/decisions/DEC-673.md)). Only `AgentModeChanged` records are read; any other
+  event between them leaves the hold as it was. The hold carried is the **expected** one, derived
+  from the reasons: `owner_hold` sets it, `owner_lift_hold` clears it, and every other record keeps
+  it whatever it wrote. A hold or lift whose `held` contradicts its reason fails; any other
+  version-2 `AgentModeChanged` whose `held` differs from the carried one fails; and no version-1
+  `AgentModeChanged` follows a version-2 one. **The check anchors on the stored chain, not on the
+  range:** the verifier is given an anchor that its caller derives from the stored chain before
+  the range's trusted start, one of no version-2 `AgentModeChanged` before it, or the `held` the
+  last one before it carried (from a hold, a lift, or a carried copy), or none when the caller
+  cannot read that chain. A full chain is anchored on nothing before it. With no anchor, the
+  range's first version-2 record that is not a hold or a lift fails closed, reported as having no
+  anchor, and a version-1 record before it is not judged: every stream written before §9.10 is all
+  version 1, and the full-chain run or an anchored range catches a version 1 after an unseen
+  version 2. Reported at the first record that breaks it.
 
 A reference to an event before the range's trusted start is not checked by that range; the weekly
 full-chain run checks every one, and there a `mode_event` that names no earlier event fails. The
