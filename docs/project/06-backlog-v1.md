@@ -1944,6 +1944,21 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   holds (agent harness spec §6.3). Still open: add `mandate-research`'s drift doc comment ("the shell
   records") to E19-9's scope with the same reading.
 
+*Follow-up (#690 review, the E15-13 slice R0 tests PR; for E19-1):*
+
+- **A journal `Invalid` wedges the runtime until restart.** `handle` remembers every batch it
+  emits as an `UnresolvedAppend` before the append answers (`mandate-runtime` `step.rs`
+  `remember`), and while one is remembered it answers `AppendUnresolved` to every other input,
+  commands and the kill switch included. That is right for an append in doubt (journal spec §5.1),
+  but an append the journal refuses as `Invalid` is not in doubt: nothing committed, so retrying the
+  same input gets the same refusal, and the runtime refuses everything else until a restart folds
+  the journal again. Any `AgentModeChanged` or `ApprovalCanceled` drafts in that batch are dropped
+  with it. Nothing reaches the journal, so rule 5 holds, but a runtime that refuses a kill switch is
+  a rule 13 problem. R0 closes the one path it found by refusing an empty `source` in the step; the
+  general rule belongs to E19-1's process states (agent harness spec §5.2): say what the process does
+  when an append answers `Invalid` (exit to a restart, or a typed input that clears the remembered
+  batch), with a test that a kill switch after an `Invalid` append is honoured.
+
 ### E20 Global control plane (proposed, DEC-440)
 
 From the [control-plane design](../design/control-plane.md) (v0.1 draft). The epic joins the

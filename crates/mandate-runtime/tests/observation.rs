@@ -133,7 +133,6 @@ fn parse_as_journal_draft(draft: &EventDraft, listed: &[String]) -> Result<Draft
 }
 
 #[test]
-#[ignore = "pending E15-13"]
 fn an_observation_is_drafted_as_the_closed_section_9_1_payload() {
     let mut shell = started();
     let draft = only_draft(&mut shell, observation(Some("AAPL"), AS_OF_SECS));
@@ -155,7 +154,6 @@ fn an_observation_is_drafted_as_the_closed_section_9_1_payload() {
 }
 
 #[test]
-#[ignore = "pending E15-13"]
 fn an_observation_about_no_single_instrument_drafts_a_null_instrument_id() {
     let mut shell = started();
     let draft = only_draft(&mut shell, observation(None, AS_OF_SECS));
@@ -173,7 +171,6 @@ fn an_observation_about_no_single_instrument_drafts_a_null_instrument_id() {
 }
 
 #[test]
-#[ignore = "pending E15-13"]
 fn the_observation_draft_passes_the_registered_schema_with_its_data_listed_as_an_artifact() {
     let mut shell = started();
     for instrument_id in [Some("AAPL"), None] {
@@ -196,7 +193,6 @@ fn the_observation_draft_passes_the_registered_schema_with_its_data_listed_as_an
 }
 
 #[test]
-#[ignore = "pending E15-13"]
 fn the_first_and_last_seconds_a_timestamp_holds_are_drafted_as_timestamps() {
     let mut shell = started();
     for (secs, written) in [
@@ -213,7 +209,6 @@ fn the_first_and_last_seconds_a_timestamp_holds_are_drafted_as_timestamps() {
 }
 
 #[test]
-#[ignore = "pending E15-13"]
 fn an_as_of_no_timestamp_can_hold_is_refused_and_journals_nothing() {
     for secs in [-1, LAST_TIMESTAMP_SECS + 1, i64::MIN, i64::MAX] {
         let mut shell = started();
@@ -242,7 +237,6 @@ fn an_as_of_no_timestamp_can_hold_is_refused_and_journals_nothing() {
 /// it at append, it would put the batch in doubt, and the runtime answers `append_unresolved` to
 /// every input until restart, the kill switch included (#690 review, major 1).
 #[test]
-#[ignore = "pending E15-13"]
 fn an_empty_source_is_refused_and_journals_nothing() {
     let mut shell = started();
     let before = shell.agent_journal.len();
@@ -293,7 +287,6 @@ where
 /// plain canonical values, parses the timestamp with `mandate_time`'s reader, and compares the
 /// digest with the hex it generated, so it shares nothing with the runtime's writer.
 #[test]
-#[ignore = "pending E15-13"]
 fn every_observation_draft_is_the_registered_schema_and_reads_back_to_its_observation() {
     let source = "[a-z][a-z0-9._-]{0,24}";
     let instrument_id = proptest::option::of("[A-Z][A-Z0-9.]{0,7}");
