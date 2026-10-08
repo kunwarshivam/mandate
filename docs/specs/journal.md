@@ -497,6 +497,14 @@ with exactly `kind: "broker_profile"`, `profile_version` (an integer, at least 1
 
 Every comparison is by the bytes of the spelling. The profile is a canonical configuration artifact
 registered on the control stream before use. No record names it in `config_refs` yet.
+The producer enforces this shape: `mandate-domain`'s profile constructor refuses a profile that
+breaks it (DEC-630 item 7), and the vectors' `invalid_artifacts` use its refusal codes
+(`profile_version_zero`, `profile_no_rows`, `profile_empty_row`, `profile_duplicate_row`,
+`profile_duplicate_cell`, `profile_no_time_in_force`, `profile_claim_without_client_id`). Two codes
+are the vectors' own, for stored bytes the constructor cannot produce: `schema` for a member or
+spelling outside the contract, and `non_canonical` for an array that is not strictly sorted, since
+the constructor sorts what it is given. Append binds only the object's kind, its presence and its
+hash (rule 21b), as rule 21a does for the version-2 kinds.
 
 **Account stream** (owner: executor). Risk inputs also carry `risk_clock` (§2).
 

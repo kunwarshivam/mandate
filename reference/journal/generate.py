@@ -3576,9 +3576,11 @@ ALPACA_PROFILE_CANONICAL = (
 
 
 def profile_shape_problem(obj) -> str | None:
-    """The first way `obj` breaks §9's `broker_profile` contract, as a reason code: `schema` for a
-    member, type or spelling outside it, `non_canonical` for an order that is not strictly ascending,
-    and DEC-630 item 7's codes for its refusals. `None` when it holds."""
+    """The first way `obj` breaks §9's `broker_profile` contract, as a reason code: DEC-630 item 7's
+    codes (`ProfileError::code()` in `mandate-domain`) for the constructor's refusals, and the vectors'
+    own `schema` (a member, type or spelling outside the contract) and `non_canonical` (an array not
+    strictly ascending) for stored bytes the constructor, which sorts its input, cannot produce.
+    `None` when it holds."""
     if not isinstance(obj, dict) or set(obj) != PROFILE_MEMBERS or obj["kind"] != "broker_profile":
         return "schema"
     version, rows, idem = obj["profile_version"], obj["rows"], obj["idempotency"]
@@ -3714,6 +3716,21 @@ def build_broker_profile_section(control_section: dict) -> dict:
                 "schema",
             ),
             invalid_artifact("a_gtc_expiry_member", [change("gtc_expiry_days", 90)], "schema"),
+            invalid_artifact("an_unknown_row_member", [change("rows", [dict(rows[0], venue="xnys")])], "schema"),
+            invalid_artifact(
+                "an_unknown_cell_member", [change("rows", with_cells([dict(cells[0], min_qty="1"), *cells[1:]]))], "schema"
+            ),
+            invalid_artifact("a_wrong_kind", [change("kind", "policy_set")], "schema"),
+            invalid_artifact(
+                "protection_forms_duplicated",
+                [change("rows", with_cells([*cells[:2], dict(cells[2], protection_forms=["oco", "oco"]), *cells[3:]]))],
+                "non_canonical",
+            ),
+            invalid_artifact(
+                "protection_forms_out_of_order",
+                [change("rows", with_cells([*cells[:2], dict(cells[2], protection_forms=["oco", "bracket"]), *cells[3:]]))],
+                "non_canonical",
+            ),
         ],
     }
 

@@ -10345,11 +10345,11 @@ broker_profile:
       - &id005
         asset_class: us_equity
         session: regular
-        cells:
+        cells: &id022
         - &id006
           order_type: limit
           quantity_form: fractional
-          times_in_force:
+          times_in_force: &id023
           - day
           protection_forms: &id018 []
         - &id007
@@ -10361,7 +10361,7 @@ broker_profile:
         - &id008
           order_type: limit
           quantity_form: whole
-          times_in_force:
+          times_in_force: &id024
           - day
           - gtc
           protection_forms: &id019
@@ -10682,3 +10682,101 @@ broker_profile:
       value: 90
     expect:
       reason: schema
+  - name: an_unknown_row_member
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells: *id022
+        venue: xnys
+    expect:
+      reason: schema
+  - name: an_unknown_cell_member
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - order_type: limit
+          quantity_form: fractional
+          times_in_force: *id023
+          protection_forms: *id018
+          min_qty: '1'
+        - *id007
+        - *id008
+        - *id009
+        - *id010
+        - *id011
+        - *id012
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: schema
+  - name: a_wrong_kind
+    base: alpaca
+    changes:
+    - path: kind
+      value: policy_set
+    expect:
+      reason: schema
+  - name: protection_forms_duplicated
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - *id006
+        - *id007
+        - order_type: limit
+          quantity_form: whole
+          times_in_force: *id024
+          protection_forms:
+          - oco
+          - oco
+        - *id009
+        - *id010
+        - *id011
+        - *id012
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: non_canonical
+  - name: protection_forms_out_of_order
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - *id006
+        - *id007
+        - order_type: limit
+          quantity_form: whole
+          times_in_force: *id024
+          protection_forms:
+          - oco
+          - bracket
+        - *id009
+        - *id010
+        - *id011
+        - *id012
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: non_canonical
