@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/acknowledge-request.schema.json",
+  "type": "object",
+  "required": [
+    "acknowledged",
+    "record",
+    "step_up"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "acknowledged": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /agents/{agent_id}/acknowledgments (\u00a74.2): names the event acknowledged; independence is the executor's."
+}

@@ -352,7 +352,7 @@ token's record: its user's, in its one workspace). It is written when the sessio
 request to any of its workspaces during an outage still finds a snapshot; cool-off is evaluated at use (§8.3), so a stale snapshot is only
 ever narrower. A route-2 session takes its snapshot from the passkey's row in the credential table
 (§3.3), which carries a roles snapshot per (credential, workspace): enrolment writes it, and
-reactivation un-suspends the credential and rewrites it in the same transaction. A session is the
+reactivation re-adds the credential's row for that workspace, with its snapshot, in the same transaction. A session is the
 deployment's, not one workspace's (§6.2), so a membership's end acts on that workspace only:
 `MemberDeactivated` and `MemberRemoved` remove that workspace from every session snapshot and
 every credential row of the member, revoke the member's client tokens in that workspace (a token
@@ -793,10 +793,16 @@ enough:
    non-discoverable key whose credential ID the client supplies with it, so every key the
    workspace holds can use this route, as before v0.3. Nothing
    workspace-specific is read or returned before the assertion verifies (owed to E9-1:
-   `reduction_session_challenge_reads_and_returns_nothing_workspace_specific`). Whether this route
+   `reduction_session_challenge_reads_and_returns_nothing_workspace_specific`). **No membership
+   oracle:** every failure of `POST /v1/reduction-sessions` (an unknown credential ID; a known one
+   whose row was removed or suspended; a bad signature; an expired or used challenge; a refused
+   subject) returns one identical answer, 401 `unauthenticated` with the same status, body and
+   headers, and no distinguishing timing, so the route does not reveal whether a credential exists
+   or its member was deactivated. It is rate-limited per address and per device, like the challenge
+   route (owed to E9-1: `reduction_session_failures_are_indistinguishable`). Whether this route
    should serve discoverable credentials only is [DEC-833](../project/decisions/DEC-833.md), Proposed;
    until the founder decides, it serves both. The session covers every
-   workspace in which the verified credential has an unsuspended row (§4.5), each with that row's
+   workspace in which the verified credential has a row (§4.5), each with that row's
    roles snapshot, so no workspace is chosen, and its answer names them as `{workspace_id, label}`
    ([DEC-816](../project/decisions/DEC-816.md) item 6). No identity provider, global control plane, or model is
    involved. It is refused to a principal whose identity-provider subject the workspace has seen
