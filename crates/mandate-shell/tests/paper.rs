@@ -369,11 +369,16 @@ fn assemble(
             cause,
         }
     })?;
-    let liquidity =
-        liquidity_facts(daily, &facts.minute_bars, now()).map_err(|cause| ShellError::Refused {
-            stage: Stage::MarketData,
-            cause,
-        })?;
+    let liquidity = liquidity_facts(
+        artifacts.production_identity().symbol,
+        daily,
+        &facts.minute_bars,
+        now(),
+    )
+    .map_err(|cause| ShellError::Refused {
+        stage: Stage::MarketData,
+        cause,
+    })?;
     let agent = AgentId(TEST_AGENT.to_owned());
     let contexts = load_contexts(
         &artifacts,
@@ -398,6 +403,7 @@ fn assemble(
         account_ref: TEST_ACCOUNT_REF.to_owned(),
         executor: Some(contexts.executor),
         run: Some(contexts.run),
+        artifacts: None,
         transport: broker.clone(),
     });
     let inner = match journal {
