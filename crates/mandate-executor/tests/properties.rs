@@ -47,6 +47,11 @@ use proptest::prelude::*;
 const AAPL: &str = FixedInstruments::LIQUID_EQUITY;
 const CPHC: &str = FixedInstruments::THIN_EQUITY;
 
+/// The one quote every script shows, in both instruments: a sell limit at or below the bid, or a
+/// buy limit at or above the ask, is marketable against it.
+const BID: &str = "150";
+const ASK: &str = "150.2";
+
 /// Trading-domain spec §5.7's state names, transcribed here rather than read from the crate, so
 /// that the two agreeing means something.
 fn shadow_state(name: &str) -> Option<&'static str> {
@@ -94,8 +99,10 @@ struct ShadowBook {
     /// `OrderSubmitted` per attempt" is read off.
     submissions: BTreeSet<(String, u64)>,
     event_ids: Vec<String>,
-    /// Protective orders the journal names only through `ProtectionChanged`: an executor may
-    /// carry them in its order book or beside it, so the comparison allows them either way.
+    /// Every protective order a `ProtectionChanged placed` names. One no `OrderSubmitted` recorded
+    /// (a bracket's or OCO's leg, which the broker creates) also joins `orders` as a live sell of
+    /// the covered quantity, `accepted`, holding a zero reservation until a terminal state:
+    /// trading-domain spec §5.4 ("Ownership of broker-created legs") and DEC-160 (3).
     protective: BTreeSet<String>,
 }
 
@@ -228,8 +235,18 @@ impl ShadowBook {
                     }
                 }
                 "ProtectionChanged" if field(draft, "action") == Some("placed") => {
+                    let covered = field(draft, "qty").and_then(units).unwrap_or(0);
                     for id in field(draft, "orders").unwrap_or_default().split(',') {
                         book.protective.insert(id.to_owned());
+                        book.orders
+                            .entry(id.to_owned())
+                            .or_insert_with(|| ShadowOrder {
+                                state: "accepted".to_owned(),
+                                fills: BTreeSet::new(),
+                                filled_units: 0,
+                                qty_units: covered,
+                                reserved: true,
+                            });
                     }
                 }
                 "FillApplied" | "LateFillApplied" => {
@@ -417,12 +434,27 @@ struct Interval {
     instrument: String,
     started_at: i64,
     ended_at: Option<i64>,
-    alerted: bool,
+    /// Whether a bracket's partial fill opened it (its `unprotected_start` names the `bracket`):
+    /// its legs are held, not cancelled (§5.4). Every other interval opens where protection is
+    /// cancelled for an exit or a re-placement.
+    bracket: bool,
+}
+
+/// One `ProtectionChanged placed`: the orders it names, in one instrument, and the quantity they
+/// still cover, which their fills reduce.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Placement {
+    instrument: String,
+    orders: BTreeSet<String>,
+    remaining: i128,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ProtectionAccountant {
     intervals: Vec<Interval>,
+    /// Per instrument ever placed, the protective sell quantity still resting: every placement
+    /// not yet cancelled, abandoned or terminal, less its fills (§5.4's tranche model), and zero
+    /// where none rests any more.
     covered: BTreeMap<String, i128>,
     /// The latest `risk_clock` any draft carried, the end an interval still open is measured to.
     last_clock: i64,
@@ -431,58 +463,97 @@ struct ProtectionAccountant {
 impl ProtectionAccountant {
     /// Builds the interval set from the drafts alone: a `ProtectionChanged` whose action opens an
     /// interval starts one, and one whose action closes it ends it. An interval that never ends
-    /// is exactly what "journaled from start to end" forbids. Each is timed on the drafts'
-    /// `risk_clock` timestamps (journal spec §4.7).
+    /// is exactly what "journaled from start to end" forbids. The resting protective quantity is
+    /// kept the same way: a placement covers its quantity until its orders are recorded
+    /// cancelled, abandoned or terminal (§5.7: a terminal order rests no more), and each fill of
+    /// one of its orders takes the fill's quantity off it.
     fn of(drafts: &[EventDraft]) -> Self {
         let mut accountant = Self::default();
-        let mut alerted_at: BTreeSet<String> = BTreeSet::new();
+        let mut placements: Vec<Placement> = Vec::new();
         for draft in drafts {
             let at = risk_seconds(draft);
             if let Some(at) = at {
                 accountant.last_clock = accountant.last_clock.max(at);
             }
             let at = at.unwrap_or(accountant.last_clock);
-            if draft.event_type == "OwnerAlertSent"
-                && let Some(name) = field(draft, "instrument")
-            {
-                alerted_at.insert(name.to_owned());
-            }
-            if draft.event_type != "ProtectionChanged" {
-                continue;
-            }
-            let (Some(name), Some(action)) = (field(draft, "instrument"), field(draft, "action"))
-            else {
-                continue;
-            };
-            match action {
-                "unprotected_start" => accountant.intervals.push(Interval {
-                    instrument: name.to_owned(),
-                    started_at: at,
-                    ended_at: None,
-                    alerted: false,
-                }),
-                "unprotected_end" => {
-                    if let Some(open) = accountant
-                        .intervals
-                        .iter_mut()
-                        .rev()
-                        .find(|i| i.instrument == name && i.ended_at.is_none())
-                    {
-                        open.ended_at = Some(at);
+            match draft.event_type.as_str() {
+                "FillApplied" | "LateFillApplied" => {
+                    let (Some(id), Some(quantity)) = (
+                        field(draft, "client_order_id"),
+                        field(draft, "qty_gross").and_then(units),
+                    ) else {
+                        continue;
+                    };
+                    for placement in placements.iter_mut().filter(|p| p.orders.contains(id)) {
+                        placement.remaining = placement.remaining.saturating_sub(quantity);
                     }
                 }
-                "placed" => {
-                    let covered = field(draft, "qty").and_then(units).unwrap_or(0);
-                    accountant.covered.insert(name.to_owned(), covered);
+                "OrderStateChanged" => {
+                    if let Some(id) = field(draft, "client_order_id")
+                        && field(draft, "state")
+                            .and_then(shadow_state)
+                            .is_some_and(|state| TERMINAL.contains(&state))
+                    {
+                        placements.retain(|p| !p.orders.contains(id));
+                    }
                 }
-                "cancelled" => {
-                    accountant.covered.insert(name.to_owned(), 0);
+                "OrderAbandoned" => {
+                    if let Some(id) = field(draft, "client_order_id") {
+                        placements.retain(|p| !p.orders.contains(id));
+                    }
+                }
+                "ProtectionChanged" => {
+                    let (Some(name), Some(action)) =
+                        (field(draft, "instrument"), field(draft, "action"))
+                    else {
+                        continue;
+                    };
+                    let named: BTreeSet<String> = field(draft, "orders")
+                        .unwrap_or_default()
+                        .split(',')
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_owned)
+                        .collect();
+                    match action {
+                        "unprotected_start" => accountant.intervals.push(Interval {
+                            instrument: name.to_owned(),
+                            started_at: at,
+                            ended_at: None,
+                            bracket: field(draft, "bracket").is_some(),
+                        }),
+                        "unprotected_end" => {
+                            if let Some(open) = accountant
+                                .intervals
+                                .iter_mut()
+                                .rev()
+                                .find(|i| i.instrument == name && i.ended_at.is_none())
+                            {
+                                open.ended_at = Some(at);
+                            }
+                        }
+                        "placed" => {
+                            accountant.covered.entry(name.to_owned()).or_insert(0);
+                            placements.push(Placement {
+                                instrument: name.to_owned(),
+                                orders: named,
+                                remaining: field(draft, "qty").and_then(units).unwrap_or(0),
+                            });
+                        }
+                        "cancelled" => {
+                            placements.retain(|p| p.orders.is_disjoint(&named));
+                        }
+                        _ => {}
+                    }
                 }
                 _ => {}
             }
         }
-        for interval in &mut accountant.intervals {
-            interval.alerted = alerted_at.contains(&interval.instrument);
+        for placement in &placements {
+            let covered = accountant
+                .covered
+                .entry(placement.instrument.clone())
+                .or_insert(0);
+            *covered = covered.saturating_add(placement.remaining.max(0));
         }
         accountant
     }
@@ -672,6 +743,26 @@ fn scripted_stale() -> impl Strategy<Value = Vec<Step>> {
     prop::collection::vec(step(), 1..14).prop_map(|random| {
         let mut script = PREFIX.to_vec();
         script.extend(STALE_LEAD);
+        script.extend(random);
+        script
+    })
+}
+
+/// Every script with the protected lead completed and then a risk exit of one `CPHC` share whose
+/// protection's cancel the broker confirms, so the exit is submitted while protection is
+/// cancelled (§5.4's marketable exit sequence) before the random steps begin.
+fn scripted_exiting() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(PROTECTED_LEAD);
+        script.push(Step::Fill);
+        script.push(Step::Intent {
+            which: 2,
+            exiting: true,
+            other: true,
+            protected: false,
+        });
+        script.push(Step::Cancelled);
         script.extend(random);
         script
     })
@@ -912,7 +1003,7 @@ fn play(script: &[Step]) -> Run {
             } => {
                 let name = if *other { CPHC } else { AAPL };
                 record(
-                    shell.run(Input::Market(quote(name, "150", "150.2", at)), &ports),
+                    shell.run(Input::Market(quote(name, BID, ASK, at)), &ports),
                     &mut drafts,
                     &mut effects,
                     &mut broker,
@@ -1866,6 +1957,14 @@ proptest! {
     /// §5.4: nothing is submitted in an instrument while a cancel in it is unconfirmed. A cancel is
     /// resolved by the order's own terminal state on the journal, or, for a protective order, by
     /// the `ProtectionChanged` that records it cancelled — never by the request being accepted.
+    /// Two rulings bound the wait. Rule 5's wait ends when the cancel is journaled overdue
+    /// (`cancel_overdue`, DEC-160 (7), (13), (18)). And the OCO for a partly filled entry's filled
+    /// quantity is placed once that entry is terminal, whatever else is pending (DEC-346 item 6),
+    /// so a protective submission does not wait on a plain buy's cancel: a plain buy that fills
+    /// only adds to the position the protection covers, while a bracket entry's fill activates
+    /// sell legs, so its cancel still holds protection back. The sells are what §5.4's sequences
+    /// order after a confirmation; an opening may be accepted while an exit waits, and the exit
+    /// then asks its cancel too (DEC-160 (13)), so a buy is not judged here.
     #[test]
     #[ignore = "pending E7-4"]
     fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {
@@ -1882,7 +1981,15 @@ proptest! {
         }
         let mut instrument_of: BTreeMap<String, String> = BTreeMap::new();
         let mut outstanding: BTreeMap<String, String> = BTreeMap::new();
+        let mut plain_buys: BTreeSet<String> = BTreeSet::new();
         for effect in &run.effects {
+            if let Effect::Broker(BrokerRequest::Submit(order)) = effect
+                && order.side == mandate_accounting::Side::Buy
+                && order.bracket.is_none()
+                && order.oco.is_none()
+            {
+                plain_buys.insert(order.client_order_id.as_str().to_owned());
+            }
             match effect {
                 Effect::Journal(draft) if draft.event_type == "OrderSubmitted" => {
                     let name = field(draft, "instrument_id").or(field(draft, "instrument"));
@@ -1905,9 +2012,11 @@ proptest! {
                     outstanding.insert(id, name);
                 }
                 Effect::Journal(draft) if draft.event_type == "OrderStateChanged" => {
-                    if field(draft, "state")
-                        .and_then(shadow_state)
-                        .is_some_and(|state| TERMINAL.contains(&state))
+                    let overdue = draft.payload.get("cancel_overdue") == Some(&Value::Bool(true));
+                    if (overdue
+                        || field(draft, "state")
+                            .and_then(shadow_state)
+                            .is_some_and(|state| TERMINAL.contains(&state)))
                         && let Some(id) = field(draft, "client_order_id")
                     {
                         outstanding.remove(id);
@@ -1926,10 +2035,14 @@ proptest! {
                         outstanding.remove(id);
                     }
                 }
-                Effect::Broker(BrokerRequest::Submit(order)) => {
+                Effect::Broker(BrokerRequest::Submit(order))
+                    if order.side == mandate_accounting::Side::Sell =>
+                {
+                    let protective = order.purpose == Purpose::Protective;
                     let blocking: Vec<&String> = outstanding
                         .iter()
                         .filter(|(_, name)| name.as_str() == order.instrument.as_str())
+                        .filter(|(id, _)| !(protective && plain_buys.contains(*id)))
                         .map(|(id, _)| id)
                         .collect();
                     prop_assert!(
@@ -1945,20 +2058,23 @@ proptest! {
         }
     }
 
-    /// §5.4: an order submitted inside an unprotected interval is marketable, never resting.
+    /// §5.4: "orders submitted while protection is canceled must be marketable at submission"
+    /// (§5.6: the exit price ladder prices them). Protection is cancelled from an interval that
+    /// an exit sequence or a re-placement opens (an `unprotected_start` that names no `bracket`;
+    /// a partly filled bracket's interval has its legs held, not cancelled) until protection is
+    /// placed again or the interval ends. Inside, every order but the protection itself is
+    /// marketable against the script's one quote: a sell at or below the bid, a buy at or above
+    /// the ask, or a market order. The exiting lead submits its exit inside such an interval in
+    /// every script, so one is always judged.
     #[test]
     #[ignore = "pending E7-4"]
-    fn no_resting_order_is_submitted_inside_an_unprotected_interval(script in scripted()) {
+    fn no_resting_order_is_submitted_inside_an_unprotected_interval(script in scripted_exiting()) {
         let run = play(&script);
-        prop_assert!(
-            !leads(&script)
-                || run.drafts.iter().any(|d| d.event_type == "ProtectionChanged"
-                    && field(d, "action") == Some("unprotected_start")),
-            "the protected lead's partly filled bracket opens an unprotected interval (§5.4), so \
-             there is an interval for this property to judge"
-        );
-        let mut unprotected: BTreeSet<String> = BTreeSet::new();
-        let mut submissions = 0usize;
+        let (Some(bid), Some(ask)) = (units(BID), units(ASK)) else {
+            return Err(TestCaseError::fail("the script's quote parses"));
+        };
+        let mut cancelled: BTreeSet<String> = BTreeSet::new();
+        let mut judged = 0usize;
         for effect in &run.effects {
             match effect {
                 Effect::Journal(draft) if draft.event_type == "ProtectionChanged" => {
@@ -1968,34 +2084,45 @@ proptest! {
                         continue;
                     };
                     match action {
-                        "unprotected_start" => {
-                            unprotected.insert(name.to_owned());
+                        "unprotected_start" if field(draft, "bracket").is_none() => {
+                            cancelled.insert(name.to_owned());
                         }
-                        "unprotected_end" => {
-                            unprotected.remove(name);
+                        "placed" | "unprotected_end" => {
+                            cancelled.remove(name);
                         }
                         _ => {}
                     }
                 }
-                Effect::Broker(BrokerRequest::Submit(order)) => {
-                    submissions = submissions.saturating_add(1);
-                    if unprotected.contains(order.instrument.as_str()) {
-                        prop_assert!(
-                            order.purpose != Purpose::Open && order.purpose != Purpose::Increase,
-                            "{} opened a position inside an unprotected interval",
-                            order.client_order_id.as_str()
-                        );
-                    }
+                Effect::Broker(BrokerRequest::Submit(order))
+                    if order.purpose != Purpose::Protective
+                        && cancelled.contains(order.instrument.as_str()) =>
+                {
+                    judged = judged.saturating_add(1);
+                    let limit = order.limit_price.map(|price| units(&price.to_string()));
+                    let marketable = match (order.side, limit) {
+                        (_, None) => true,
+                        (mandate_accounting::Side::Sell, Some(Some(limit))) => limit <= bid,
+                        (mandate_accounting::Side::Buy, Some(Some(limit))) => limit >= ask,
+                        (_, Some(None)) => false,
+                    };
+                    prop_assert!(
+                        marketable,
+                        "{} ({:?} {:?} at {:?}) rests while protection in {} is cancelled \
+                         (§5.4, §5.6)",
+                        order.client_order_id.as_str(),
+                        order.purpose,
+                        order.side,
+                        order.limit_price,
+                        order.instrument.as_str()
+                    );
                 }
                 _ => {}
             }
         }
-        prop_assert_eq!(
-            submissions,
-            run.effects
-                .iter()
-                .filter(|e| matches!(e, Effect::Broker(BrokerRequest::Submit(_))))
-                .count()
+        prop_assert!(
+            judged > 0,
+            "the exiting lead's exit is submitted once its protection's cancel is confirmed, inside \
+             the interval, so there is an order for this property to judge"
         );
     }
 
