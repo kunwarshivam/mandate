@@ -656,9 +656,11 @@ after U-A1 to U-A5 are recorded.
   a refusal code for them needs an approved reference case first.
   *Remaining slices* ([first paper trade brief](tasks/first-paper-trade.md)): slice 2's
   remainder (the liquidity facts still read `SYMBOL`, AAPL), slice 3's (the account-rule
-  constants in the gate template), slice 4's shell half (the agent records at version 2 with
-  `policy_set` and `model_registry`, DEC-484), and slice 5 as the new `mandate-paper` adapter,
-  its bounded wait for a terminal entry, and the deletion of E7-7's AAPL assembly.
+  constants in the gate template, and the `last_equity` and `maintenance_margin` fields no read
+  carries yet), slice 4's shell half (the agent records at version 2 with `policy_set` and
+  `model_registry`, DEC-484, which needs an artifact-aware append in `mandate-journal-pg`), and
+  slice 5 as the new `mandate-paper` adapter, its bounded wait for a terminal entry, and the
+  deletion of E7-7's AAPL assembly.
 - **E7-20 (Must, M7)** As the founder, I want CodeQL to flag a credential written to a log by
   its type rather than its name, so that excluding the name-keyed `rust/cleartext-logging` query
   ([DEC-500](decisions/DEC-500.md)) leaves no gap. *Accepted when:* a query under
@@ -1320,7 +1322,12 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 - **E10-16 (Must, M6, before the first paper trade; SC)** As the founder, I want to register,
   confirm and deploy a paper mandate version from the CLI, so that a paper deployment rests on a
   confirmed version before the workspace API exists ([first paper trade brief](tasks/first-paper-trade.md),
-  [DEC-505](decisions/DEC-505.md)). *Accepted when:* `config register`, `model register`,
+  [DEC-505](decisions/DEC-505.md)). The CLI has no production control-stream writer today: its
+  `ControlJournal` has only test implementations. *Accepted when:* a `mandate-journal-pg`
+  implementation of `ControlJournal` appends through Postgres's artifact-aware append with the
+  `mandate-artifacts-fs` store, with `--journal` and `--store` options, tested against Postgres
+  under `MANDATE_PG_URL`; `journal export` writes one Postgres stream as the segment file
+  `journal verify` reads; `config register`, `model register`,
   `version create`, `version confirm` and `agent deploy` each commit exactly one control-stream
   event (DEC-155 item 5) with journal spec §9.2's payload, after storing every object a `ref`
   names; `version confirm` and `agent deploy` take fresh `cli_confirm` evidence and record it in
@@ -1573,7 +1580,8 @@ follows the founder's decision on DEC-432 item 13: a hosted fast model in v1, th
   source bytes and a test pins the hash per registered version, so changed code under an old
   version fails the build; `evaluate` returns an output only when the mandate's pin, the one
   matching `model_registry` entry and the host's hash agree, every parameter is set and in bounds,
-  and the closes are the pinned instrument's, complete, and end at the last completed trading day;
+  and the closes are the pinned instrument's, complete, and end at the last completed session of
+  the trading calendar passed in;
   every refusal is no output; `as_of` is the last close's end and `expires_at` is `as_of` plus
   `max_output_age_s`; a property test with an independent oracle shows the same inputs always give
   the same output; and the crate depends on no crate that sizes, gates, journals, executes or
@@ -1866,7 +1874,9 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   *Accepted when:* the input comes only from the latest `AgentDeployed` with no `AgentStopped`
   after it, a stored document that re-hashes to its version, that version's
   `MandateVersionCreated` and `MandateConfirmed`, and the registered configuration objects, folded
-  by `ValidationContext::from_journal` with the registry present; a test per failure (no
+  by `ValidationContext::from_journal` with the registry present; the effective registration of
+  each kind is the latest by `seq`, narrowed by the pinned asset id and model triple, and a fee
+  schedule not yet effective refuses (DEC-505 item 1), each with a test; a test per failure (no
   deployment, a stopped agent, a document missing or not re-hashing, an unconfirmed path, an
   unregistered or mismatched model, a configuration object that does not re-hash, a `live`
   mandate) refuses before any credential is read; the account equity is the run's broker read and
