@@ -67,7 +67,7 @@ fn op() -> impl Strategy<Value = Op> {
             .prop_map(|(n, sell, quantity, extended, fault)| Op::Place { n, sell, quantity, extended, fault }),
         6 => (0..4usize, 1..4u8, prop::bool::weighted(0.2)).prop_map(|(order, quantity, through)| Op::Fill { order, quantity, through }),
         1 => (0..4usize).prop_map(|order| Op::Cancel { order }),
-        1 => (0..4usize, proptest::sample::select(STATES.to_vec())).prop_map(|(order, to)| Op::Advance { order, to }),
+        3 => (0..4usize, proptest::sample::select(STATES.to_vec())).prop_map(|(order, to)| Op::Advance { order, to }),
         2 => session.prop_map(Op::Session),
         1 => Just(Op::EndOfDay),
     ]
@@ -233,7 +233,7 @@ fn scripts() -> impl Strategy<Value = Vec<Op>> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(256))]
+    #![proptest_config(ProptestConfig::with_cases(512))]
 
     #[test]
     #[ignore = "pending E7-25"]
