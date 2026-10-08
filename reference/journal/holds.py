@@ -640,7 +640,7 @@ def range_cases() -> list[dict]:
             40,
             clear_before,
         ),
-        case("a_later_range_carries_a_copys_hold", [kept, resume], [], 40, held_before),
+        case("a_later_range_carries_the_hold_of_a_copy", [kept, resume], [], 40, held_before),
         case("a_later_range_with_no_version_2_before", [v1_pause, clear_copy], [], 40, none_before),
         case("an_unanchored_range_opens_with_a_hold", [hold, kept], [], 40),
         case("an_unanchored_range_anchors_on_its_own_hold_then_drops_it", [hold, dropped], [1], 40),
