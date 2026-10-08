@@ -822,13 +822,12 @@ enough:
    subject) returns one identical answer, 401 `unauthenticated` with the same status, body and
    headers, and no distinguishing timing, so the route does not reveal whether a credential exists
    or its member was deactivated. It is rate-limited per address and per device, like the challenge
-   route (owed to E9-1: `reduction_session_failures_are_indistinguishable`). **Neither limit shuts
-   out a member who holds a valid key** ([DEC-834](../project/decisions/DEC-834.md)): the assertion
-   route's limit counts failed assertions only, and an assertion that verifies is never refused for
-   a limit; the challenge route's limit counts a challenge only until it is redeemed or expires.
-   Over a limit, a failed assertion still gets the same 401. A flood from the member's own address
-   and device can delay a new challenge by at most the 300 s a challenge lives (owed to E9-1:
-   `a_verified_assertion_is_never_refused_for_a_rate_limit`). Whether this route
+   route (owed to E9-1: `reduction_session_failures_are_indistinguishable`). **Residual of the
+   limits:** a sustained flood from the member's own address and device can hold both limits and deny the member route 2 for as long as it lasts;
+   another network or device, and, on hybrid and on-prem deployments, the host CLI (route 3)
+   remain, and route 1 once the identity provider is back. How to close it is
+   [DEC-834](../project/decisions/DEC-834.md), Proposed for the founder; until then the limits
+   stay as written here. Whether this route
    should serve discoverable credentials only is [DEC-833](../project/decisions/DEC-833.md), Proposed;
    until the founder decides, it serves both. The session covers every
    workspace in which the verified credential has a row (§4.5), each with that row's
