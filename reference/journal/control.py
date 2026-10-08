@@ -329,6 +329,76 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
     ("band_bp", INT),
 )
 
+# §9.8 (DEC-437 item 9, DEC-648): the membership records. Instants are timestamps and step-up evidence
+# is §9.2's `STEP_UP`; a member is a user principal's ULID.
+ROLE = one_of("approver", "auditor", "operator", "viewer", "workspace_admin")
+COOLING_ROLES = ("approver", "operator")
+COOL_OFF_SECONDS = 86400
+WRITERS = {
+    "MemberInvited": "invited_by",
+    "MemberInvitationRevoked": "revoked_by",
+    "MemberRoleChanged": "changed_by",
+    "MemberDeactivated": "by",
+    "MemberReactivated": "by",
+    "MemberRemoved": "by",
+}
+STEP_UP_WINDOW_SECONDS = 300
+INVITATION_DAYS = 7
+STEP_UP_AT = {"MemberInvited": "invited_at", "MemberRoleChanged": "changed_at", "MemberReactivated": "reactivated_at"}
+SYSTEM_REASONS = ("founding", "deprovisioned", "group_removed", "org_deleted")
+SELF_REASONS = ("admin",)
+SCHEMAS[("ctl", "MemberInvited")] = rec(
+    ("invitation", ULID),
+    ("roles", list_of(ROLE)),
+    ("invited_by", STR),
+    ("step_up", STEP_UP),
+    ("invited_at", TS),
+    ("expires_at", TS),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberInvitationRevoked")] = rec(
+    ("invitation", ULID), ("revoked_by", STR), ("session_ref", opt(STR))
+)
+SCHEMAS[("ctl", "MemberActivated")] = rec(
+    ("member", ULID),
+    ("invitation", opt(ULID)),
+    ("reason", one_of("invitation_accepted", "founding")),
+    ("roles", list_of(ROLE)),
+    ("method", one_of("passkey", "oidc", "email_link")),
+    ("activated_at", TS),
+    ("cool_off_ends_at", TS),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberRoleChanged")] = rec(
+    ("member", ULID),
+    ("changed_by", STR),
+    ("added", list_of(rec(("role", ROLE), ("cool_off_ends_at", TS)))),
+    ("removed", list_of(ROLE)),
+    ("changed_at", TS),
+    ("step_up", opt(STEP_UP)),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberDeactivated")] = rec(
+    ("member", ULID),
+    ("by", STR),
+    ("reason", one_of("admin", "left", "deprovisioned", "group_removed")),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberReactivated")] = rec(
+    ("member", ULID),
+    ("by", STR),
+    ("step_up", STEP_UP),
+    ("reactivated_at", TS),
+    ("cool_off_ends_at", TS),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberRemoved")] = rec(
+    ("member", ULID),
+    ("by", STR),
+    ("reason", one_of("admin", "org_deleted")),
+    ("session_ref", opt(STR)),
+)
+
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
 ACCOUNT_STREAM_REF_ALT = "01J8Z2ACCT00000000000000A2"
@@ -724,6 +794,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         if p["acknowledged"] is not None and action != "unprotected_end":
             rule("44.acknowledged", False, "schema", "payload.acknowledged")
     out += answer_violations(event_type, draft, skip)
+    out += membership_violations(event_type, draft, skip)
     return out
 
 
@@ -759,6 +830,129 @@ def answer_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
             if failed:
                 rule(f"53.{failed}", False, f"payload.{failed}")
     return out
+
+
+def membership_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.8's rules 54 to 61, on a well-typed payload, in number order and each rule's clauses in
+    the order the spec gives them."""
+    if event_type not in WRITERS and event_type != "MemberActivated":
+        return []
+    p = draft["payload"]
+    actor = draft["actor"]
+    reason = p.get("reason")
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str, why: str = "schema") -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", why, path))
+
+    for member in ("roles", "removed"):
+        if member in p:
+            rule(f"54.{member}", ascending(encoded(listed(p[member]))), f"payload.{member}", "non_canonical")
+    if "added" in p:
+        added_roles = encoded([a.get("role") for a in record_items(p["added"])])
+        rule("54.added", ascending(added_roles), "payload.added", "non_canonical")
+    writer = WRITERS.get(event_type)
+    if writer:
+        rule("55", p[writer] == actor["id"], f"payload.{writer}")
+    system = reason in SYSTEM_REASONS
+    rule("56", actor["kind"] == ("system" if system else "user"), "actor.kind")
+    if event_type == "MemberRoleChanged":
+        rule("57.self", p["changed_by"] != p["member"], "payload.changed_by")
+    if event_type == "MemberReactivated" or (
+        event_type in ("MemberDeactivated", "MemberRemoved") and reason in SELF_REASONS
+    ):
+        rule("57.self", p["by"] != p["member"], "payload.by")
+    if event_type == "MemberDeactivated" and reason == "left":
+        rule("57.left", p["by"] == p["member"], "payload.by")
+    if event_type == "MemberActivated":
+        rule("57.invitation", (p["invitation"] is None) == (reason == "founding"), "payload.invitation")
+        if reason == "invitation_accepted":
+            rule("57.invitee", p["member"] == actor["id"], "payload.member")
+    if event_type in ("MemberInvited", "MemberActivated"):
+        rule("58.empty", bool(listed(p["roles"])), "payload.roles")
+    if event_type == "MemberActivated" and reason == "founding" and listed(p["roles"]):
+        rule("58.founding_admin", "workspace_admin" in listed(p["roles"]), "payload.roles")
+    if event_type == "MemberRoleChanged":
+        rule("58.no_change", bool(listed(p["added"])) or bool(listed(p["removed"])), "payload.added")
+        added = {a.get("role") for a in record_items(p["added"])}
+        removed = {r for r in listed(p["removed"]) if isinstance(r, str)}
+        rule("58.disjoint", not added & removed, "payload.removed")
+        rule("59", (p["step_up"] is not None) == bool(listed(p["added"])), "payload.step_up")
+    step_up = p.get("step_up")
+    if isinstance(step_up, dict):
+        allowed = ("passkey",) if draft["environment"] == "live" else ("passkey", "cli_confirm")
+        rule("60.method", step_up.get("method") in allowed, "payload.step_up.method")
+        at = p[STEP_UP_AT[event_type]]
+        rule("60.window", step_up_fresh(step_up.get("authenticated_at"), at, skip), "payload.step_up.authenticated_at")
+    for start, end, cooling, path in cool_offs(event_type, p):
+        rule(f"61.{event_type}", cool_off_allowed(start, end, cooling, skip), path)
+    if event_type == "MemberInvited":
+        days = gap_nanos(p["invited_at"], p["expires_at"])
+        rule("62", days == INVITATION_DAYS * 86400 * 10**9, "payload.expires_at")
+    rule("63", (p["session_ref"] is not None) == (actor["kind"] == "user"), "payload.session_ref")
+    return out
+
+
+def gap_nanos(start, end) -> int | None:
+    """`end` − `start` in nanoseconds, or `None` for an instant a seeded type bug let through."""
+    if not all(isinstance(v, str) and is_timestamp(v) for v in (start, end)):
+        return None
+    return instant_nanos(end) - instant_nanos(start)
+
+
+def step_up_fresh(authenticated_at, at, skip: frozenset[str]) -> bool:
+    """Mandate spec §6.1: valid at `at` when 0 ≤ `at` − `authenticated_at` ≤ 300 s."""
+    gap = gap_nanos(authenticated_at, at)
+    if gap is None:
+        return False
+    if "boundary.rule_60_after" in skip:
+        gap = abs(gap)
+    limit = STEP_UP_WINDOW_SECONDS * 10**9 + (1 if "boundary.rule_60_window" in skip else 0)
+    return 0 <= gap <= limit
+
+
+def listed(value) -> list:
+    """A list as rules read it: anything else, which only a seeded type bug lets through, is empty."""
+    return value if isinstance(value, list) else []
+
+
+def record_items(value) -> list[dict]:
+    """A list of records as rules read it, so a seeded `loose` bug that lets another kind through
+    leaves the rule nothing to check rather than failing."""
+    return [v for v in listed(value) if isinstance(v, dict)]
+
+
+END = ".cool_off_ends_at"
+
+
+def cool_offs(event_type: str, p: dict) -> list[tuple[str, str, bool, str]]:
+    """Each cool-off a record states: its start, its end, whether the 24 hours may apply, and its
+    path (rule 61)."""
+    if event_type == "MemberActivated":
+        cooling = p["reason"] != "founding" and any(r in COOLING_ROLES for r in listed(p["roles"]))
+        return [(p["activated_at"], p["cool_off_ends_at"], cooling, "payload.cool_off_ends_at")]
+    if event_type == "MemberReactivated":
+        return [(p["reactivated_at"], p["cool_off_ends_at"], True, "payload.cool_off_ends_at")]
+    if event_type == "MemberRoleChanged":
+        return [
+            (p["changed_at"], a.get(END[1:]), a.get("role") in COOLING_ROLES, f"payload.added[{i}]{END}")
+            for i, a in enumerate(record_items(p["added"]))
+        ]
+    return []
+
+
+def cool_off_allowed(start: str, end: str, cooling: bool, skip: frozenset[str]) -> bool:
+    """Rule 61: the end is the start, or, where the 24 hours may apply, exactly a day after it. An
+    instant a seeded `loose` bug let through untyped is never allowed."""
+    if not all(isinstance(v, str) and is_timestamp(v) for v in (start, end)):
+        return False
+    gap = instant_nanos(end) - instant_nanos(start)
+    if "boundary.rule_61_any_later" in skip:
+        return gap >= 0
+    if "boundary.rule_61_every_role" in skip:
+        cooling = True
+    return gap == 0 or (cooling and gap == COOL_OFF_SECONDS * 10**9)
 
 
 def act_failure(p: dict, skip: frozenset[str]) -> str | None:

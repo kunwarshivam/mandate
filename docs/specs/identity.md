@@ -691,17 +691,22 @@ remains, and step-up still works through locally verified passkeys. New sign-ins
 
 ## 12. Journal records
 
-### 12.1 Events (proposed additions to journal §9, control stream)
+### 12.1 Events (journal §9, control stream)
 
-The journal spec does not yet have membership events. These are owed by E9-7's tests PR, which adds
-them to journal §9 with schemas (DEC-437 item 9):
+These are journal §9's control-stream identity records (DEC-437 item 9). The membership records are
+closed in [journal §9.8](journal.md#98-membership-records-dec-437-item-9-dec-648), which adds
+`MemberInvitationRevoked` (§5.1's `invited` to `revoked`), the accepted `invitation` on
+`MemberActivated`, the cool-off end on `MemberReactivated`, `invited_at` on `MemberInvited`, and a
+payload `session_ref` on each until §12.2's envelope field lands ([DEC-648](../project/decisions/DEC-648.md));
+the others are catalogued in journal §9 and close in their own change:
 
 | Event | Key payload fields |
 |---|---|
 | `MemberInvited` | invitation (opaque), roles, inviting user, step-up evidence, expiry |
-| `MemberActivated` | member (opaque), roles, cool-off end, method used |
+| `MemberInvitationRevoked` | invitation, revoking admin |
+| `MemberActivated` | member (opaque), the invitation accepted (or none for the founding grant), roles, cool-off end, method used |
 | `MemberRoleChanged` | member, roles added and removed, granting user, step-up evidence for a grant, cool-off end per added role |
-| `MemberDeactivated`, `MemberReactivated`, `MemberRemoved` | member, by whom, reason code |
+| `MemberDeactivated`, `MemberReactivated`, `MemberRemoved` | member, by whom, reason code; for `MemberReactivated`, step-up evidence and the cool-off end instead of a reason |
 | `CredentialEnrolled`, `CredentialRemoved` | member, credential (opaque reference, never the key), kind, enrolment cool-off end |
 | `SessionOpened` | member, session (opaque), method, device (opaque), `first_seen_device` (true when the principal has not used the device before); the subject event of the notifications spec's `new_device` kind |
 | `SessionRevoked` | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `admin`); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
