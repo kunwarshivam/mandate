@@ -15,6 +15,11 @@ pub const PREFIX: &str = "md-";
 /// The prefix of the triggered-stop watchdog's own intent id, `w-<event>` (§2.3, DEC-160 (11)).
 pub(crate) const WATCHDOG: &str = "w-";
 
+/// The prefix of a kill switch's own flatten intent ids, `k-<switch>-<n>`: the journaled
+/// `KillSwitchActivated` record and the ordinal of the instrument among the closes it named, so
+/// a restart derives the same id (§5.5, DEC-485).
+pub(crate) const FLATTEN: &str = "k-";
+
 /// The longest `client_order_id` Alpaca accepts.
 const MAX_LEN: usize = 128;
 
@@ -40,10 +45,11 @@ impl ClientOrderId {
     /// journaled record (trading-domain spec §2.3, DEC-160 (11)), so `md-w-<event>`. An event id
     /// is a ULID in production, and the `md-w-` prefix keeps it apart from every intent's id
     /// whatever its event id's hyphens (DEC-260 (10)); one that would read back as a protective
-    /// order's is refused, as [`Self::for_replacement`] refuses.
+    /// order's is refused, as [`Self::for_replacement`] refuses. A kill switch's flatten,
+    /// `k-<switch>-<n>` (DEC-485), is derived the same way, so `md-k-<switch>-<n>`.
     pub fn for_intent(intent: &IntentId) -> Result<Self, ExecutorError> {
         let raw = intent.0.0.as_str();
-        let derived = match raw.strip_prefix(WATCHDOG) {
+        let derived = match raw.strip_prefix(WATCHDOG).or(raw.strip_prefix(FLATTEN)) {
             Some(record) => {
                 !record.starts_with('-')
                     && !record.ends_with('-')
@@ -53,7 +59,7 @@ impl ClientOrderId {
             }
             None => raw.bytes().all(|b| b.is_ascii_alphanumeric()),
         };
-        if raw.is_empty() || raw == WATCHDOG || !derived {
+        if raw.is_empty() || raw == WATCHDOG || raw == FLATTEN || !derived {
             return Err(malformed(raw));
         }
         let id = Self::parse(&format!("{PREFIX}{raw}"))?;
