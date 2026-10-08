@@ -4205,7 +4205,7 @@ mod tests {
     /// The rows the `BEHAVIOUR_ONLY_TESTS` array held when it moved to one file a row. Each is
     /// still loaded unless its test is no longer pending in its file, the one way a row may go;
     /// at the migration every one was pending, so the loaded set was exactly this one.
-    const ROWS_BEFORE_THE_DIRECTORY: [(&str, &str); 10] = [
+    const ROWS_BEFORE_THE_DIRECTORY: [(&str, &str); 13] = [
         (
             "crates/mandate-executor/tests/hand.rs",
             "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -4242,6 +4242,18 @@ mod tests {
         (
             "crates/mandate-executor/tests/hand.rs",
             "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
+        ),
+        (
+            "crates/mandate-runtime/tests/answer_records.rs",
+            "every_answer_record_the_runtime_writes_passes_the_journals_check",
+        ),
+        (
+            "crates/mandate-runtime/tests/answer_records.rs",
+            "a_responded_record_carries_its_quorum_only_where_check_7_was_judged",
+        ),
+        (
+            "crates/mandate-runtime/tests/answer_records.rs",
+            "decided_by_now_is_null_unless_the_reclassification_asks",
         ),
     ];
 

@@ -16,6 +16,7 @@ use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, SYMBOL, absent, usd};
+use crate::control::{Configuration, ConfirmedVersion};
 use crate::error::Cause;
 
 /// The largest quote-age bound the rule-set artifact may name: a minute-old quote is already older
@@ -103,6 +104,24 @@ impl Artifacts {
     /// [`Cause::Absent`] for an incomplete, mismatched, or unsupported reviewed input.
     pub fn load_production(mandate_path: &Path, config_dir: &Path) -> Result<Self, Cause> {
         Self::load_inputs(mandate_path, config_dir)
+    }
+
+    /// The run's artifacts from the confirmed version and the effective registrations on the
+    /// control stream (E19-11, DEC-505), never from a file: the mandate and its one pinned model,
+    /// the registered fee schedule, calendar and rule set, each judged as `load_production` judges
+    /// its file, and the instrument from the DEC-523 snapshot, which must be the mandate's pinned
+    /// asset and symbol. The config references hash the registered bytes, so the executor journals
+    /// the objects the stream names (E7-19 slice 2 remainder, the brief's Q1, X-8). It needs no
+    /// credential, so it runs before the preflight.
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] for a registered object the run cannot use, as for its file.
+    pub fn from_registered(
+        confirmed: &ConfirmedVersion,
+        configuration: &Configuration,
+    ) -> Result<Self, Cause> {
+        let _ = (confirmed, configuration);
+        Err(Cause::Unimplemented { story: "E7-19" })
     }
 
     /// Loads the temporary E7-7 AAPL adapter's reviewed artifacts.
