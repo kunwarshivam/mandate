@@ -806,9 +806,10 @@ Items 17 and 18 stay **Proposed** for the founder:
 - **Item 18:** whether the API is offered to third parties (DEC-149, E18). Recommended: first-party
   only in v1 (the web app, the CLI, the Owlhead MCP server). Until decided: first-party only.
 
-[DEC-690](../project/decisions/DEC-690.md) item 1 (Accepted; its client-secret grant adds a custody path under DEC-821
-item 2) settles where connect reaches the broker: never in the API process; the code exchange and permission checks run in the
-connection's executor (§1.4). Alpaca OAuth stays refused in every environment until the founder
+[DEC-690](../project/decisions/DEC-690.md) item 1 (agent-accepted under DEC-79; its client-secret
+grant applies only once DEC-821, pending on PR #762, is in force) settles where connect reaches the
+broker: never in the API process. The code exchange and permission checks run in the connection's
+executor (§1.4). Alpaca OAuth stays refused in every environment until the founder
 decides DEC-690 items 6 and 7.
 
 ---

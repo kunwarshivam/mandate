@@ -205,37 +205,54 @@ reaches that connection's broker hosts.
    It sends nothing to Alpaca. If the vault write fails, nothing is started. If the executor
    start fails after the vault write, the API deletes the vault entry and the record stays
    `connecting` until the teardown in step 6.
-4. **Exchange and checks (executor, `connecting`).** The executor exchanges the code at once at
-   Alpaca's token endpoint; a code lives 10 minutes (§5.5). It authenticates with the platform's
-   client secret, which it reads through a single-use grant valid only while its connection is
-   `connecting` (infrastructure §5.2). The token goes to the vault and the code is deleted. The
-   executor then runs checks 1 to 3 and 5 to 7 of §8.1 against the grant and the account, using
-   only reads (`hosts::PaperRequest`). It asks the vault to compute the account fingerprint (§3.1)
-   and writes it to the pending record.
+4. **Exchange and checks (executor, `connecting`).** The executor opens the pending connection's
+   account stream, `acct:{workspace_id}:{account_ref}`, with `StreamOpened`. It then exchanges the
+   code at once at Alpaca's token endpoint; a code lives 10 minutes (§5.5). It authenticates with
+   the platform's client secret, read through a single-use grant valid only while its connection
+   is `connecting` (infrastructure §5.2). The token goes to the vault and the code is deleted.
+
+   The executor then runs checks 1 to 3 and 5 to 7 of §8.1 against the grant and the account,
+   using only reads, through the paper-host request type that `mandate-connections` will provide
+   (to be built, E10-13). It stores the broker's account id in the personal-data vault (§3.1,
+   journal §6.4).
 
    While `connecting`, the executor does **nothing else**:
    - no order, cancel, or other write to the broker;
    - no reconciliation;
+   - no write to the connection record;
    - no lease beyond its own vault entry and the client-secret grant;
-   - no append other than the check results below.
-5. **Record the results.** The executor appends each check's result, pass or refusal, without the
-   token, on the pending connection's account stream (`acct:{workspace_id}:{account_ref}`). The
-   event is the check-result event the journal spec change E7-17 adds (CN-10). The API reads the
-   results from the journal. It runs check 4 itself, because only the connection manager sees
-   every connection's fingerprint (CN-5). Then:
-   - **if all pass**, the API appends `ConnectionEstablished` on the control stream (journal
-     §9.2), with its causation pointing at the passing results. The executor leaves `connecting`
-     only when it reads that event from the control stream; from then on it runs as the account's
-     executor.
-   - **if any check refuses**, the API appends nothing and the teardown in step 6 runs at once.
+   - no append other than `StreamOpened` and the check results below.
+5. **Record the results.** The executor appends `ConnectionChecked` (journal spec change E7-17,
+   PR #786) on that account stream. It carries every check's result, pass or refusal, and the
+   personal-data reference of the account id, never the id or the token (CN-10). The API then
+   acts on it as the connection manager:
+   - It reads the results from the journal.
+   - It asks the vault to compute the account fingerprint from that reference, receiving only the
+     result (§3.1), and writes the fingerprint to the pending connection record.
+   - It runs check 4 against every other record, because only the connection manager sees them all
+     (CN-5).
 
-   **Until E7-17 adds the check-result event, steps 4 to 6 cannot be built.**
+   Then:
+   - **if all pass**, the API appends `ConnectionEstablished` (version 2, E7-17) on the control
+     stream, with `causation_id` set to the passing `ConnectionChecked`. That cross-stream
+     causation is permitted by E7-17 (#786). The executor leaves `connecting` only when it reads
+     that event from the control stream; from then on it runs as the account's executor.
+   - **if any check refuses**, the API appends `ConnectionRefused` on the control stream (E7-17).
+     Its causation is the failed `ConnectionChecked` when the executor's check failed. The
+     teardown in step 6 runs at once.
+
+   **Until E7-17 lands, steps 4 to 6 cannot be built.**
 6. **Teardown, the only exit from `connecting` other than step 5.** The connection manager tears a
    pending connection down when any check refuses, or when no passing results arrive within the
    code's lifetime plus one minute (Proposed: 11 minutes). Teardown:
-   - deletes the vault entry (code or token);
+   - deletes the vault entry (code or token) and the personal-data entry;
    - revokes the client-secret grant and stops the executor;
-   - journals the refusal or timeout on the control stream, without the token (CN-10, E7-17).
+   - journals `ConnectionRefused` (refusal or timeout) on the control stream, without the token
+     (CN-10).
+
+   A refused connection leaves its account stream behind: `StreamOpened` and the failed
+   `ConnectionChecked`, if any. That `account_ref` is never bound to a connection and never used
+   again (E7-17).
 
    **Restarts.**
    - *API restart:* the connection manager re-reads every `connecting` record. It appends
@@ -447,9 +464,10 @@ Kraken now.
 Each check's result is journaled without the credential (CN-10; infrastructure §5.3). Checks 1 to 3
 and 5 to 7 run in the connection's account executor, never in the API process, which holds no
 credential and reaches no broker (workspace API spec §1.4; DEC-690 item 1). The executor appends
-their results on its account stream (E7-17). Check 4 runs in the connection manager, the only
-component that sees every connection's fingerprint. At connect, the API reads the results from the
-journal and only then appends `ConnectionEstablished` or tears the pending connection down (§5.2).
+their results on its account stream as `ConnectionChecked` (E7-17). Check 4 runs in the connection
+manager, the only component that sees every connection's fingerprint. At connect, the API reads the
+results from the journal and only then appends `ConnectionEstablished` or tears the pending
+connection down (§5.2).
 
 | # | Check | Failure at connect | Failure later |
 |---|---|---|---|
@@ -578,13 +596,14 @@ backlog rows (item 13); health defaults (item 14); trading §7.3's connection ro
 refused until U-A4 is answered (item 21).
 
 [DEC-690](../project/decisions/DEC-690.md) records what Alpaca's documentation answers (§5.5).
-Accepted (agent): the API never calls a broker, and the code exchange and checks run in the
-executor (item 1, whose client-secret grant adds a custody path under DEC-821 item 2, not a
-tightening); U-A1 and U-A5 answered (items 2 and 8); `env` always set (item 3); U-A2 and U-A3
-open, with live Alpaca OAuth refused under CN-2 and no refresh assumed (items 4 and 5); PKCE never
-relied on (item 9). **Proposed for the founder:** whether an `env`-scoped grant satisfies U-A4
-(item 6), and whether a non-production build may reach the live host's token endpoint (item 7).
-Until then no Alpaca OAuth grant is accepted in any environment.
+Accepted (agent): the API never calls a broker, and the code exchange and checks run in the executor
+(item 1, agent-accepted under DEC-79 as a reversible engineering decision; its client-secret grant
+applies only once DEC-821, pending on PR #762, is in force); U-A1 and U-A5 answered (items 2 and 8);
+`env` always set (item 3); U-A2 and U-A3 open, with live Alpaca OAuth refused under CN-2 and no
+refresh assumed (items 4 and 5); PKCE never relied on (item 9). **Proposed for the founder:**
+whether an `env`-scoped grant satisfies U-A4 (item 6), and whether a non-production build may reach
+the live host's token endpoint (item 7). Until then no Alpaca OAuth grant is accepted in any
+environment.
 
 **Proposed for the founder** (vendor terms, live accounts, legal text; DEC-79):
 
