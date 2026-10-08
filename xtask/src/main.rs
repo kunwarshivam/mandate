@@ -7370,7 +7370,9 @@ jq -r "$filter" "$src"
     /// review, finding 1): a second command after `&&`, `||`, `;` or `|` is judged on its own; a
     /// `<crate>/live` or `<crate>?/live` feature; a list split on spaces; `-Flive`; a feature list
     /// the shell expands (`$` or a backtick), which cannot be read; and `--cfg feature="live"`,
-    /// which sets the feature without `--features`.
+    /// which sets the feature without `--features`. A flag right after a list, a lone opening
+    /// quote, `--all` and `--workspace` are read too, and a quoted list ends at its closing quote,
+    /// so a flag inside it and a `$` after it are not read as features (#738's mutants).
     #[test]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
         let policy = live_policy();
@@ -7379,6 +7381,8 @@ jq -r "$filter" "$src"
             "cargo check -p the-runner -Flive",
             "cargo check -p the-runner --features the-runner/live",
             "cargo check -p the-runner --features 'other live'",
+            "cargo check -p the-runner --features \"other\" --target $TARGET",
+            "cargo build -p a-lib --features \"other --features=live\"",
         ];
         for line in allowed {
             let files = [ci_file(".github/workflows/ci.yml", line)];
@@ -7403,6 +7407,10 @@ jq -r "$filter" "$src"
             "cargo rustc -p the-runner -- --cfg 'feature=\"live\"'",
             "rustflags = [\"--cfg\", 'feature=\"live\"']",
             "ship = \"run -p the-runner --features live\"",
+            "cargo build -p the-runner --features other -F live",
+            "cargo build -p the-runner --features \" live\"",
+            "cargo check -p the-runner --all --features live",
+            "cargo check -p the-runner --workspace --features live",
         ];
         for line in refused {
             let files = [ci_file(".cargo/config.toml", &format!("[alias]\n{line}\n"))];
