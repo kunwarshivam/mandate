@@ -223,6 +223,7 @@ it names; outside such a window a platform operator has no permission at all (ID
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
 | Add or remove one's own notification address (a push subscription; later an email or chat address) | S | self | self | self | self | self | self | self | self | | | | |
+| List one's own notification addresses (opaque references only) | | self | self | self | self | self | self | self | self | | | | |
 | List one's own workspace memberships | | self | self | self | self | self | self | self | self | | | | |
 | Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
@@ -391,8 +392,10 @@ API's audit read model (§4.8) and the web audit trail display it (owed by those
 **Principal-scope rows** ([DEC-816](../project/decisions/DEC-816.md) items 1, 2, and 5). The two
 `self` rows of §4.2 are authorized at principal scope: `authorize` is given the principal scope,
 reads no membership, yields no `TenantContext`, and grants the row to a user principal whose
-session is a full session (§6.2), and to no one else (a reduction-only session, a client, a
-service account, the host CLI, and a platform operator are refused). What the row reaches is the
+session is a full session (§6.2), and to no one else: a reduction-only session is refused
+`reduction_only`; a client, a service account, the host CLI, and a platform operator, whose
+columns are blank on a `self` row, are refused `forbidden`; and an agent or a process, which has
+no column, is refused `no_membership` (§4.5 refusals, DEC-643). What the row reaches is the
 caller's own data, and the store enforces that as well as the step: every principal-scope table
 carries the principal's ID, with row-level security keyed on a per-transaction setting that only
 the authenticated session sets (§9.1), so a query can return only the caller's rows.

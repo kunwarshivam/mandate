@@ -315,6 +315,7 @@ break-glass. Their columns are printed so the copy stays exact. The cells read b
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
 | Add or remove one's own notification address (a push subscription; later an email or chat address) | S | self | self | self | self | self | self | self | self | | | | |
+| List one's own notification addresses (opaque references only) | | self | self | self | self | self | self | self | self | | | | |
 | List one's own workspace memberships | | self | self | self | self | self | self | self | self | | | | |
 | Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
@@ -343,7 +344,8 @@ How the API's operations map onto those rows:
 | Connect, revoke, revoke on compromise (§4.5) | Connect, change, or revoke a broker connection |
 | Policies, members, clients (§4.5) | The rows of the same names; a member deactivating their own membership is the leave row |
 | One's own workspaces, `GET /v1/me/workspaces` (identity spec §4.5) | List one's own workspace memberships |
-| One's own notification channels (a push subscription) | Add or remove one's own notification address |
+| One's own notification channels (a push subscription): set, remove | Add or remove one's own notification address |
+| One's own notification channels: list | List one's own notification addresses |
 | Owner request, dry run, chat (§4.6) | Make an owner request; dry run of a request; chat thread with the agent. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
 
 Separation of duties is enforced where the specs already enforce it: by the runtime at approval
