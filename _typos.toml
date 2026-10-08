@@ -12,3 +12,4 @@ extend-ignore-re = [
 marginable = "marginable"           # Alpaca's term (non_marginable_buying_power)
 caf = "caf"                         # "café" split by an escaped byte in journal vectors
 fpr = "fpr"                         # gpg --with-colons record type (fingerprint), deploy/
+cose = "cose"                       # CBOR Object Signing and Encryption (RFC 9052), WebAuthn's key format
