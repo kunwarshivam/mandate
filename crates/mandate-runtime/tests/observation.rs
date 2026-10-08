@@ -238,6 +238,40 @@ fn an_as_of_no_timestamp_can_hold_is_refused_and_journals_nothing() {
     }
 }
 
+/// An empty `source` is refused by the step itself. Left to the journal, whose §9.1 `text` refuses
+/// it at append, it would put the batch in doubt, and the runtime answers `append_unresolved` to
+/// every input until restart, the kill switch included (#690 review, major 1).
+#[test]
+#[ignore = "pending E15-13"]
+fn an_empty_source_is_refused_and_journals_nothing() {
+    let mut shell = started();
+    let before = shell.agent_journal.len();
+    let mut nameless = observation(Some("AAPL"), AS_OF_SECS);
+    nameless.source = String::new();
+    match step(&mut shell, nameless) {
+        Err(RuntimeError::NonCanonicalPayload { field }) => assert_eq!(
+            field, "source",
+            "the refusal names the member an empty string cannot be written to"
+        ),
+        other => panic!(
+            "journal spec §9.1 types `source` as non-empty `text`, so the step must refuse an \
+             empty one as a non-canonical `source` rather than draft it (AGENTS.md rule 3); it \
+             answered {other:?}"
+        ),
+    }
+    assert_eq!(
+        shell.agent_journal.len(),
+        before,
+        "a refused observation leaves nothing on the agent stream"
+    );
+    let draft = only_draft(&mut shell, observation(Some("AAPL"), AS_OF_SECS));
+    assert_eq!(
+        draft.payload.get("source"),
+        Some(&text("alpaca.iex.quotes")),
+        "the refusal leaves the runtime answering the next observation"
+    );
+}
+
 fn check<S>(strategy: S, body: impl Fn(S::Value) -> Result<(), TestCaseError>)
 where
     S: Strategy,
