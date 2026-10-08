@@ -268,6 +268,13 @@ table, so its cells follow a closed grammar, and any other text is a spec defect
   organization's. The last-owner and last-admin rules (§5.2) still apply to it.
 - **Rows, not routes:** ID-2 covers exactly these rows (E9-12 item 2). An operation with no row
   and no mapping in workspace API §3.7 has no route until a row is added.
+- **The authentication plane:** outside the matrix, and outside ID-2, are only the routes that
+  create, read, or end the caller's own session and authorize nothing else: sign-in and its
+  callback (§6.1), refresh and sign-out (§6.2), opening a reduction-only session
+  (`POST /v1/reduction-sessions/challenges` and `POST /v1/reduction-sessions`, §6.4 route 2), and
+  reading one's own session record (`GET /v1/me/session`, §4.5). Each reads or writes only the
+  caller's own session or credential record, and none yields a context or reaches workspace data
+  ([DEC-816](../project/decisions/DEC-816.md) item 7). Every other route needs a row.
 
 Notes:
 
@@ -323,16 +330,21 @@ test doubles live only behind `cfg(test)` or in `mandate-identity`'s dev-only te
 §6's code (`mandate-authn`), from the session record it reads for this request, and by test
 support; if that read fails there is no `Session`, and the request is refused before authorizing.
 It contributes the `session_ref` every committed event names (ID-1, §12.2), its kind, and its
-**roles snapshot**: for each workspace of the principal's membership index (below) and each
-such workspace's organization, the principal's roles there, each with its cool-off end (a client
+**roles snapshot**: for each workspace whose row in the principal's membership index (below)
+reaches its scope (`active` or `cooling_off`, §5.1), and each such workspace's organization, the
+principal's roles there, each with its cool-off end (a client
 token's record: its user's, in its one workspace). It is written when the session opens, and
 `MemberActivated` and `MemberReactivated` add to it in the same transaction, so a session's first
 request to any of its workspaces during an outage still finds a snapshot; cool-off is evaluated at use (§8.3), so a stale snapshot is only
 ever narrower. A route-2 session takes its snapshot from the passkey's row in the credential table
 (§3.3), which carries a roles snapshot per (credential, workspace): enrolment writes it, and
-reactivation un-suspends the credential and rewrites it in the same transaction. `MemberDeactivated` revokes every session and
-client token of the member, and suspends the member's passkey credentials, in the same
-transaction (§5.2 step 2), and `MemberRoleChanged` rewrites the member's session, token, and
+reactivation un-suspends the credential and rewrites it in the same transaction. A session is the
+deployment's, not one workspace's (§6.2), so a membership's end acts on that workspace only:
+`MemberDeactivated` and `MemberRemoved` remove that workspace from every session snapshot and
+every credential row of the member, revoke the member's client tokens in that workspace (a token
+names one workspace), and close the member's open streams in that workspace, in the same
+transaction (§5.2 step 2); the member's sessions keep serving their other workspaces. And
+`MemberRoleChanged` rewrites the member's session, token, and
 credential snapshots in the same transaction (§5.2), so a snapshot is never wider than the
 committed membership in that workspace's store. Organization events are rewritten into each
 workspace's store as they arrive there (§12.1); in hybrid and on-prem deployments the snapshot and
@@ -368,10 +380,11 @@ outage, that `membership_unavailable` never
 occurs, that each such operation commits with `membership_unverified: true`, and that no
 operation outside the set commits during the outage. **A deactivation always wins over the
 snapshot:** the E9-7 and E9-8 tests owe `a_deactivated_member_is_refused_through_an_outage`, which
-deactivates a member and then injects a membership-store outage and asserts that the member's
-sessions and client tokens are refused, and that a route-2 attempt with the member's passkey is
-refused too, because their revocation, like a role change's snapshot
-rewrite, shares one transaction with `MemberDeactivated` or `MemberRoleChanged`. **The audit view
+deactivates a member in workspace W1 only and then injects a membership-store outage, and asserts
+that in W1 the member's sessions, client tokens, and a route-2 attempt with the member's passkey
+are all refused, while in W2, where the member is still active, the same session is still
+served, because removing W1 from the snapshots, like a role change's snapshot rewrite, shares one
+transaction with `MemberDeactivated` or `MemberRoleChanged`. **The audit view
 shows the gap:** `membership_unverified: true` stays in the journaled record, and the workspace
 API's audit read model (§4.8) and the web audit trail display it (owed by those lanes).
 
@@ -384,12 +397,18 @@ caller's own data, and the store enforces that as well as the step: every princi
 carries the principal's ID, with row-level security keyed on a per-transaction setting that only
 the authenticated session sets (§9.1), so a query can return only the caller's rows.
 
+A reduction-only session covering several workspaces (§6.4 route 2) authorizes in each only from
+that workspace's credential row: its four rows, and only where that row's roles grant them, so a
+passkey whose member is a viewer in a workspace obtains nothing there.
+
 **One's own memberships.** After sign-in the web app must learn which workspaces it may name in a
 path. `GET /v1/me/workspaces` is authorized by the "List one's own workspace memberships" row and
 reads one table only: the **membership index**, a per-principal table in the workspace
 deployment's store, one row per (principal, workspace) with `{workspace_id, label, state, roles
 with each role's effective-from instant}`, written in the same transaction as each `Member*` event
-of that workspace (§12.1) and as each change of the workspace's display label. It answers with the
+of that workspace (§12.1) and as each change of the workspace's display label. The writer for
+workspace W writes only rows whose `workspace_id` is W; reads are limited to the caller's rows by
+row-level security on the principal. It answers with the
 rows whose state is `active`, each as `{workspace_id, label, roles}`, where `roles` are those whose
 effective-from instant is at or before the read (§8.3); a member whose roles are all still cooling
 off gets the workspace with no roles. The global directory is not read (ID-15: it holds no label
@@ -397,12 +416,15 @@ or cool-off state). The answer lists the memberships held in this deployment onl
 deployment's workspaces are not reachable from it (HLD §4). A workspace the caller is not an
 active member of, an absent one, and a foreign one are equally absent (ID-8). The E9-8 tests owe
 `no_principal_reads_the_membership_index_of_another`: user A's request returns none of user B's
-rows, whatever B's workspaces, with RLS on and with the query's own filter removed. If the index
+rows, whatever B's workspaces, with RLS on and with the query's own filter removed; and workspace
+W's writer cannot write a row of workspace V. If the index
 cannot be read, the route is refused `membership_unavailable` (503); it is not a risk-reducing
-operation. The web app then names a workspace it already knows (the last list it read, or the
-workspaces of a reduction-only session, below), so pause and the kill switch never wait on it.
+operation. Pause and the kill switch never wait on it: the specified fallback is route 2 (§6.4),
+whose answer and `GET /v1/me/session` name the workspaces it covers. A list the web app kept
+from an earlier read is only a convenience.
 
-**One's own session.** `GET /v1/me/session`, authorized by any session for itself and reading
+**One's own session.** `GET /v1/me/session`, on the authentication plane (§4.2), answered for
+any session about itself only and reading
 only that session's record, answers `{kind, expires_at}` and, for a reduction-only session, the
 workspaces it covers (§6.4 route 2), each as `{workspace_id, label}`.
 
@@ -526,8 +548,10 @@ the effect it has on V-047 or on any mandate's approvers (DEC-437 item 17, Propo
 below). In order, workspace services:
 
 1. commit `MemberDeactivated`;
-2. revoke every session and client token of that principal in the workspace, in the same
-   transaction as step 1, and close its open streams within 60 s (ID-3);
+2. in the same transaction as step 1, remove the workspace from every session snapshot and
+   credential row of that principal, and revoke its client tokens in the workspace (§4.5); close
+   its open streams in the workspace within 60 s (ID-3). Its sessions keep serving its other
+   workspaces;
 3. leave every committed event as it was. A response or command committed before step 1 was
    authorized when committed and is judged by the runtime as usual. One arriving after step 1 is
    refused at the API and never committed;
@@ -672,7 +696,10 @@ enough:
 2. **Workspace-local passkey.** The workspace deployment verifies a fresh passkey assertion
    against the public keys it holds (§6.1) and opens a *reduction-only session*: pause and kill
    switch, nothing else, 15 minutes. `POST /v1/reduction-sessions/challenges` takes nothing and
-   returns a WebAuthn challenge; `POST /v1/reduction-sessions` takes the assertion. Nothing
+   returns a WebAuthn challenge for a discoverable (resident) credential; it is unauthenticated,
+   so it is rate-limited per address and device, and its challenges expire after 300 s and are
+   kept only that long. A non-discoverable security key cannot use this route; its owner uses the
+   host CLI or the broker (OPS-4); `POST /v1/reduction-sessions` takes the assertion. Nothing
    workspace-specific is read or returned before the assertion verifies. The session covers every
    workspace in which the verified credential has an unsuspended row (§4.5), each with that row's
    roles snapshot, so no workspace is chosen, and its answer names them as `{workspace_id, label}`
@@ -898,7 +925,7 @@ As infrastructure §5.5 and journal §7 set it, and made exact here:
   sign-in.
 - Deprovisioning: the customer's IdP is the source of truth for who still works there. A
   **deprovision signal** (the IdP answers a refresh with `invalid_grant` or a disabled or revoked
-  subject, or sends a back-channel logout) ends every session of that subject in the workspace at
+  subject, or sends a back-channel logout) ends every session of that subject in the deployment at
   once, each journaled as `SessionRevoked` with reason `deprovisioned` (§12.1), with every permission,
   blocks §6.4 route 2 for it, and from that event alerts the workspace admins to
   deactivate the membership (opaque). An **unreachable** IdP is an outage, not a deprovision (§6.4
