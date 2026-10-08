@@ -110,7 +110,6 @@ fn a_figure_sent_as_a_json_number_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn a_recorded_flat_accounts_maintenance_excess_is_its_whole_equity() {
     for name in ["account_active", "account_blocked"] {
         let account =
@@ -124,7 +123,6 @@ fn a_recorded_flat_accounts_maintenance_excess_is_its_whole_equity() {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn the_parsed_accounts_maintenance_excess_is_equity_less_its_maintenance_margin() {
     let account = wire::account(&distinct()).unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(
