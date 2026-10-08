@@ -2289,18 +2289,11 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The three rows for journal spec v0.17 §9.7's records are J2's (DEC-533). They check
-/// `Draft::parse`, the journal's existing draft check, against §9.7's vectors and its catalogue.
-/// There is no stub to stop at: until J2's implementation catalogues and closes the three records,
-/// the journal answers `unknown_event_type` or `unknown_schema`, which is the behaviour they fail
-/// on. J2's implementation deletes the three rows with the `#[ignore]` lines.
-///
 /// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
 /// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
 /// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
-/// report; until J2's implementation lands, the journal also refuses both records as unknown. The
-/// runtime writer change deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
+/// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2313,18 +2306,6 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
-    ),
-    (
-        "crates/mandate-journal/tests/approval_answers.rs",
-        "every_approval_answer_base_and_valid_draft_parses",
-    ),
-    (
-        "crates/mandate-journal/tests/approval_answers.rs",
-        "every_invalid_approval_answer_is_refused_with_its_reason_at_its_path",
-    ),
-    (
-        "crates/mandate-journal/tests/catalogue.rs",
-        "the_approval_answers_are_catalogued_and_closed_on_their_streams",
     ),
     (
         "crates/mandate-runtime/tests/answer_records.rs",

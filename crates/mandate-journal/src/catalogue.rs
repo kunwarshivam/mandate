@@ -91,6 +91,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "ApprovalResponded"
         | "ApprovalTimedOut"
         | "ApprovalCanceled"
+        | "ApprovalRevalidated"
         | "OwnerExitRequested" => entry(AGENT, &[MAN]),
         "ObservationRecorded" | "AgentModeChanged" => entry(AGENT, NONE),
 
@@ -105,6 +106,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "DisclosureAccepted"
         | "OwnerAlertSent"
         | "ConfigSnapshotRegistered"
+        | "ApprovalResponseSubmitted"
         | "PlatformOperatorAction"
         | "AnchorComputed"
         | "VerificationRun"

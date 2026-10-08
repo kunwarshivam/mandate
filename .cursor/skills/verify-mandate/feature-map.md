@@ -488,6 +488,20 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `RC-24` green.
 - **Run:** `cargo nextest run -p mandate-executor -p mandate-alpaca`.
 
+## MCP transport for broker connectors (E7-16)
+
+- **Spec:** `docs/specs/connections.md` §6.2 rules 1 and 4, CN-9; DEC-441 item 8; slice M1 of the
+  first-live-trade brief (#706).
+- **Code:** `mandate-mcp`: `crates/mandate-mcp/src/endpoint.rs` (`PinnedEndpoint`: `https` on the
+  pinned host only, plain `http` only to a loopback literal in the crate's own test build),
+  `crates/mandate-mcp/src/error.rs` (`McpError`, and `ServerText`, which has no `Display` and whose
+  `Debug` withholds what the server sent).
+- **Tests:** in-crate where a loopback server is needed, since loopback is accepted only in the
+  crate's own test build: `crates/mandate-mcp/src/tests/endpoint.rs`,
+  `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
+  loopback), `crates/mandate-mcp/src/tests/errors.rs`.
+- **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
+
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
@@ -1068,6 +1082,13 @@ proves each pending test fails on them (DEC-110).
   every refusal code, each writing nothing; a failing store committing nothing. The SPY mandate is
   `crates/mandate-cli/tests/fixtures/spy_mandate.json`.
 - **Run:** `cargo nextest run -p mandate-cli --test version`; `cargo xtask ci pending`.
+- **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
+  takes the stream's latest confirmed version and a code bound to the agent and the version, and
+  commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
+  stubbed; `crates/mandate-cli/tests/deploy.rs`, pending E10-16, over a control stream seeded in
+  §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
+  force; every refusal code, each writing nothing; a failing store committing nothing.
+  `cargo nextest run -p mandate-cli --test deploy`.
 
 ## Reference-case harness
 

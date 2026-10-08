@@ -106,7 +106,6 @@ fn at(path: &str) -> Pointer {
 /// Every key the schema lists reads as its value, in one document, and the level is named; every
 /// `PolicyKey` is among them.
 #[test]
-#[ignore = "pending E7-19"]
 fn every_key_the_schema_lists_reads_as_its_value() {
     let rows = every_key();
     let members: Vec<String> = rows
@@ -128,7 +127,6 @@ fn every_key_the_schema_lists_reads_as_its_value() {
 /// The document's own members: `policy_schema_version` is 1, `level` one of the three ancestors,
 /// `profile` one of two or `null`, and nothing else.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_documents_own_members_are_exactly_the_schemas() {
     let base = document("");
     let rows = [
@@ -180,7 +178,6 @@ fn the_documents_own_members_are_exactly_the_schemas() {
 /// or off its grammar, an integer as a string or out of bounds, a flag of another type, a set item
 /// off its enum, repeated, or a set that is not an array.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_value_outside_its_schema_is_refused_at_its_pointer() {
     let path = |key: &str| at(&format!("/values/{key}"));
     let grammar = |key: &str, grammar| ParseError::OffGrammar {
@@ -274,7 +271,6 @@ fn a_value_outside_its_schema_is_refused_at_its_pointer() {
 /// A `policy_set` object is exactly its three members; its levels read outermost first, in the
 /// platform, organization, workspace order with at most one of each, and an empty set holds none.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_policy_set_reads_its_levels_in_order() {
     let level = |name: &str, values: &str| {
         format!(r#"{{"level":"{name}","policy_schema_version":1,"values":{{{values}}}}}"#)
@@ -324,7 +320,6 @@ fn a_policy_set_reads_its_levels_in_order() {
 /// The object's own members, and a level that breaks the schema, refuse with the pointer from the
 /// object's root.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_policy_set_outside_its_shape_is_refused() {
     let good = r#"{"kind":"policy_set","levels":[],"policy_set_version":1}"#;
     let bad_level =
@@ -465,7 +460,6 @@ fn grammar_of(pattern: &str, policy: &Value, mandate: &Value) -> DecGrammar {
 /// string; a decimal as a JSON number or off its pattern; a set with an item off its enum, a
 /// repeated item, a non-string item, or not an array. The schema is read here, not retyped.
 #[test]
-#[ignore = "pending E7-19"]
 fn every_keys_schema_type_is_enforced() {
     let policy = schema(POLICY_SCHEMA);
     let mandate = schema(MANDATE_SCHEMA);
@@ -556,7 +550,6 @@ fn every_keys_schema_type_is_enforced() {
 
 /// A document that is not an object is refused at the root.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_document_that_is_not_an_object_is_refused() {
     for text in ["[]", r#""workspace""#, "7"] {
         let wrong = ParseError::WrongType { path: at("") };
