@@ -111,3 +111,83 @@ fn a_refused_record_builds_no_session() {
     let late = fresh.admit(Request::Other, at(300), REFERENCE, snapshot());
     assert_eq!(late, Err(SessionRefusal::AccessExpired));
 }
+
+/// Four entries in the order the store read them: an org membership, two workspaces with
+/// different roles, one of them with a role still cooling off, and a third workspace.
+fn wide_snapshot() -> Vec<Membership> {
+    let member = PrincipalId(1);
+    let org = OrgId(2);
+    let entry = |scope, roles: &[(Role, i64)]| {
+        let roles = roles
+            .iter()
+            .map(|(role, from)| (*role, at(*from)))
+            .collect();
+        Membership::new(Seal::grant(), member, scope, MembershipState::Active, roles)
+    };
+    vec![
+        entry(Scope::Org(org), &[(Role::OrgAdmin, -DAY_S)]),
+        entry(
+            Scope::Workspace {
+                org,
+                workspace: WorkspaceId(7),
+            },
+            &[(Role::Operator, -60)],
+        ),
+        entry(
+            Scope::Workspace {
+                org,
+                workspace: WorkspaceId(5),
+            },
+            &[(Role::Viewer, -60), (Role::Approver, 3_600)],
+        ),
+        entry(
+            Scope::Workspace {
+                org,
+                workspace: WorkspaceId(9),
+            },
+            &[(Role::WorkspaceAdmin, -60)],
+        ),
+    ]
+}
+
+const DAY_S: i64 = 86_400;
+
+#[test]
+#[ignore = "pending E9-1"]
+fn every_reach_passes_a_wide_snapshot_through_whole_and_in_order() {
+    let mut full = open();
+    let mut outage = open();
+    let answer = ProviderAnswer::Unreachable;
+    assert!(
+        outage
+            .refresh(
+                &RefreshSecret([1; 32]),
+                answer,
+                &RefreshSecret([2; 32]),
+                at(300)
+            )
+            .is_ok()
+    );
+    let standing = SubjectStanding {
+        last_sign_in: Some(at(-60)),
+        last_deprovision: None,
+    };
+    let mut local = SessionRecord::open_reduction_only(standing, at(0)).unwrap();
+    for (name, record, kind) in [
+        ("full", &mut full, SessionKind::Full),
+        ("route 1", &mut outage, SessionKind::ReductionOnly),
+        ("route 2", &mut local, SessionKind::ReductionOnly),
+    ] {
+        let session = record.admit(Request::Pause, at(299), REFERENCE, wide_snapshot());
+        let expected = Session::new(Seal::grant(), REFERENCE, kind, wide_snapshot());
+        assert_eq!(session, Ok(expected), "{name}");
+        let mut reordered = wide_snapshot();
+        reordered.reverse();
+        let other = Session::new(Seal::grant(), REFERENCE, kind, reordered);
+        assert_ne!(
+            record.admit(Request::Pause, at(299), REFERENCE, wide_snapshot()),
+            Ok(other),
+            "{name}"
+        );
+    }
+}
