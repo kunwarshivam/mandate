@@ -34,8 +34,9 @@ use crate::schema::{GATE_CHECK_IDS, Ty};
 use crate::{Draft, Invalid, InvalidReason, StreamId, StreamType};
 
 /// The event types §9.2 closes on the control stream.
-const CONTROL: [&str; 9] = [
+const CONTROL: [&str; 10] = [
     "StreamOpened",
+    "ApprovalResponseSubmitted",
     "ConnectionEstablished",
     "ConnectionRevoked",
     "DisclosureAccepted",
@@ -102,6 +103,7 @@ pub(crate) fn payload(
     schema_version: u64,
     payload: &Value,
     config_refs: Option<&Value>,
+    actor: Option<&Value>,
 ) -> Result<Value, Invalid> {
     let schema = schema(event_type, schema_version)
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
@@ -123,6 +125,14 @@ pub(crate) fn payload(
         }
         "MandateConfirmed" => ascending(&p.texts("confirmed_paths"), "payload.confirmed_paths")?,
         "ConnectionEstablished" => ascending(&p.texts("scopes"), "payload.scopes")?,
+        "ApprovalResponseSubmitted" => {
+            let writer = actor.and_then(|a| a.get("id")).and_then(Value::as_str);
+            ensure(
+                writer == Some(p.text("responder")),
+                InvalidReason::Schema,
+                "payload.responder",
+            )?;
+        }
         "ConfigSnapshotRegistered" => {
             ascending(&p.texts("params"), "payload.params")?;
             let model = p.text("kind") == MODEL_KIND;
@@ -604,6 +614,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("ConnectionRevoked", 1) => Some(&CONNECTION_REVOKED),
         ("DisclosureAccepted", 1) => Some(&DISCLOSURE_ACCEPTED),
         ("ConfigSnapshotRegistered", 1) => Some(&CONFIG_SNAPSHOT_REGISTERED),
+        ("ApprovalResponseSubmitted", 1) => Some(&APPROVAL_RESPONSE_SUBMITTED),
         ("ConfigSnapshotRegistered", 2) => Some(&CONFIG_SNAPSHOT_REGISTERED_V2),
         ("MandateVersionCreated", 1) => Some(&MANDATE_VERSION_CREATED),
         ("MandateConfirmed", 1) => Some(&MANDATE_CONFIRMED),
@@ -664,6 +675,24 @@ pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     }
     Ok(())
 }
+
+/// §9.7's step-up evidence: `authenticated_at` in integer risk-clock seconds (DEC-533 item 2).
+pub(crate) static ANSWER_STEP_UP: Ty = Ty::Record(&[
+    ("assertion_id", Ty::Str),
+    ("authenticated_at", Ty::Int),
+    ("method", Ty::Str),
+]);
+
+static APPROVAL_RESPONSE_SUBMITTED: Ty = Ty::Record(&[
+    ("agent", Ty::Ident),
+    ("approval", Ty::Ulid),
+    ("verdict", Ty::OneOf(&["approved", "skipped"])),
+    ("content_hash", Ty::DigestRef),
+    ("submitted_at", Ty::Int),
+    ("step_up", Ty::Nullable(&ANSWER_STEP_UP)),
+    ("responder", Ty::Str),
+    ("role", Ty::OneOf(&["approver"])),
+]);
 
 static MANDATE_VERSION_APPLIED: Ty = Ty::Record(&[
     ("agent_id", Ty::Ident),

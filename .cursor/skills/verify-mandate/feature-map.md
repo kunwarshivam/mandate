@@ -488,6 +488,20 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `RC-24` green.
 - **Run:** `cargo nextest run -p mandate-executor -p mandate-alpaca`.
 
+## MCP transport for broker connectors (E7-16)
+
+- **Spec:** `docs/specs/connections.md` §6.2 rules 1 and 4, CN-9; DEC-441 item 8; slice M1 of the
+  first-live-trade brief (#706).
+- **Code:** `mandate-mcp`: `crates/mandate-mcp/src/endpoint.rs` (`PinnedEndpoint`: `https` on the
+  pinned host only, plain `http` only to a loopback literal in the crate's own test build),
+  `crates/mandate-mcp/src/error.rs` (`McpError`, and `ServerText`, which has no `Display` and whose
+  `Debug` withholds what the server sent).
+- **Tests:** in-crate where a loopback server is needed, since loopback is accepted only in the
+  crate's own test build: `crates/mandate-mcp/src/tests/endpoint.rs`,
+  `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
+  loopback), `crates/mandate-mcp/src/tests/errors.rs`.
+- **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
+
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
@@ -859,7 +873,8 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   identity the version hash rests on), `crates/mandate-spec/tests/document.rs` (the code and pointer
   each rejection carries), `crates/mandate-spec/tests/validate.rs` (the closed §7 list, the provenance
   rules, the confirmation screen's four figures), `crates/mandate-spec/tests/policy.rs` (the nearest
-  broken ancestor, each key kind, the absence asymmetry),
+  broken ancestor, each key kind, the absence asymmetry), `crates/mandate-spec/tests/policy_document.rs`
+  (a `policy.schema.json` document and a `policy_set` object read strictly, DEC-484 item 4),
   `crates/mandate-spec/tests/risk_day.rs` (the year tiled without gap or overlap),
   `crates/mandate-spec/tests/goal.rs` (each §3.1 "done when" row, and a `profit_stop` left to the risk
   state), `crates/mandate-spec/tests/risk.rs` (the §5 fold: the ladder and its hysteresis boundary,
@@ -1050,8 +1065,34 @@ proves each pending test fails on them (DEC-110).
   required `--workspace` and `--user`, always in paper; `run` and `run_model` over P0's
   `--journal` and `--store`), stubbed, and `main`; `crates/mandate-cli/tests/register_commands.rs`,
   pending E10-16: the flags, the refusals without a database, and the binary against Postgres.
+- **`workspace open` (D1c, DEC-527 items 7 and 8):** `crates/mandate-cli/src/workspace.rs` (`open`,
+  the control stream's one `StreamOpened` as the `control_services` opener, in paper), stubbed;
+  `crates/mandate-cli/tests/workspace_open.rs`, pending E10-16 but for the live flags test.
 - **Run:** `cargo nextest run -p mandate-cli --test config_register --test register_commands`;
   `cargo xtask ci pending`; `cargo xtask ci postgres` for the binary test.
+
+## The CLI's mandate version and confirmation (E10-16, D2a)
+
+- **Spec:** `docs/specs/journal.md` §9.2 (`MandateVersionCreated`, `MandateConfirmed`);
+  `docs/specs/mandate.md` §2.1, §4.1, §6.1 (`cli_confirm`), §9.1, §10; the first paper trade brief
+  (D2a); DEC-505, DEC-523, DEC-530.
+- **Code:** `crates/mandate-cli/src/version.rs` (`create`, which stores the canonical document and
+  its record and commits `MandateVersionCreated`, every envelope path `user_entered`; `confirm`,
+  which takes the code bound to the version, checks every V-rule but V-002 and the registered
+  instrument snapshots, and commits `MandateConfirmed`; both paper only), stubbed.
+- **Tests:** `crates/mandate-cli/tests/version.rs`, pending E10-16: payloads and records written
+  out from the vectors' shapes and read back through `Draft::parse`; the stream folded with
+  `JournaledFact::from_record` and `ValidationContext::from_journal`, leaving only V-001 and V-002;
+  every refusal code, each writing nothing; a failing store committing nothing. The SPY mandate is
+  `crates/mandate-cli/tests/fixtures/spy_mandate.json`.
+- **Run:** `cargo nextest run -p mandate-cli --test version`; `cargo xtask ci pending`.
+- **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
+  takes the stream's latest confirmed version and a code bound to the agent and the version, and
+  commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
+  stubbed; `crates/mandate-cli/tests/deploy.rs`, pending E10-16, over a control stream seeded in
+  §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
+  force; every refusal code, each writing nothing; a failing store committing nothing.
+  `cargo nextest run -p mandate-cli --test deploy`.
 
 ## Reference-case harness
 

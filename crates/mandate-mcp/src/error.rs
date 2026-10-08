@@ -1,0 +1,100 @@
+//! The one error type of the transport. No variant carries text the server sent except inside a
+//! [`ServerText`], whose `Debug` withholds it and which has no `Display` (CN-9).
+
+use std::fmt;
+
+use serde_json::value::RawValue;
+
+/// JSON the server sent, held whole and never printed: a result, or an error's message and data.
+/// The connector reads it with [`ServerText::as_json`] and decides what, if anything, leaves.
+pub struct ServerText(Box<RawValue>);
+
+impl ServerText {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "called by E7-16's implementation, which reads every answer"
+        )
+    )]
+    pub(crate) fn new(raw: Box<RawValue>) -> Self {
+        Self(raw)
+    }
+
+    /// The JSON exactly as the server sent it.
+    pub fn as_json(&self) -> &str {
+        self.0.get()
+    }
+}
+
+impl fmt::Debug for ServerText {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ServerText(withheld)")
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum McpError {
+    #[error("the endpoint is not a plain URL without credentials, query, or fragment")]
+    EndpointShape,
+    #[error("the endpoint is not https")]
+    NotHttps,
+    #[error("the endpoint's host is not the pinned host")]
+    HostNotPinned,
+    #[error("a timeout, size cap, or budget in the configuration is zero")]
+    BadConfig,
+    #[error("the HTTP client could not be built")]
+    ClientSetup,
+    #[error("the call budget for this class is spent; nothing was sent")]
+    Throttled,
+    #[error("the server answered with a redirect, which is never followed")]
+    Redirected,
+    #[error("the request timed out")]
+    Timeout,
+    #[error("the connection failed")]
+    Network,
+    #[error("the server answered HTTP {status}")]
+    HttpStatus { status: u16 },
+    #[error("the server no longer knows the session")]
+    SessionExpired,
+    #[error("the session id is not visible ASCII")]
+    BadSessionId,
+    #[error("the answer is neither JSON nor an event stream")]
+    ContentType,
+    #[error("the answer exceeds the size cap")]
+    TooLarge,
+    #[error("the answer is not a well-formed JSON-RPC 2.0 response to this request")]
+    Malformed,
+    #[error("the event stream ended without a response to this request")]
+    NoResponse,
+    #[error("the server answered JSON-RPC error {code}")]
+    Rpc { code: i64, detail: ServerText },
+    #[error("{story} has not been implemented yet")]
+    Unimplemented { story: &'static str },
+}
+
+impl McpError {
+    /// The stable reason code (ADR-0001 ES-09).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::EndpointShape => "endpoint_shape",
+            Self::NotHttps => "not_https",
+            Self::HostNotPinned => "host_not_pinned",
+            Self::BadConfig => "bad_config",
+            Self::ClientSetup => "client_setup",
+            Self::Throttled => "throttled",
+            Self::Redirected => "redirected",
+            Self::Timeout => "timeout",
+            Self::Network => "network",
+            Self::HttpStatus { .. } => "http_status",
+            Self::SessionExpired => "session_expired",
+            Self::BadSessionId => "bad_session_id",
+            Self::ContentType => "content_type",
+            Self::TooLarge => "too_large",
+            Self::Malformed => "malformed",
+            Self::NoResponse => "no_response",
+            Self::Rpc { .. } => "rpc_error",
+            Self::Unimplemented { .. } => "unimplemented",
+        }
+    }
+}
