@@ -359,6 +359,7 @@ into hybrid or on-prem deployments (HLD §8).
 | Secret | Used by | Custody |
 |---|---|---|
 | Broker credentials (API keys, OAuth tokens) | The account executor for that connection | Workspace vault; write-only after entry: no person reads them back |
+| Broker OAuth client secrets (the platform's registered app, e.g. Alpaca) | An account executor in `connecting`, for the code exchange only ([connections spec](../specs/connections.md) §5.2, DEC-690 item 1) | The cell's vault; never the API process. Custody in hybrid and on-prem is open |
 | Model provider keys | The model gateway | Workspace vault (customer-supplied keys) or the cell's vault (platform keys) |
 | Database credentials | Each process type's role | Short-lived, issued by the vault per process |
 | Object-storage write credentials | Cold exporter, artifact writer | Vault, per workspace prefix |

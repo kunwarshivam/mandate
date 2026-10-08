@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft v0.1, not yet reviewed |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-441](../project/decisions/DEC-441.md) (items 1 to 14, 21, and 23 Accepted by the agent; items 15 to 20 and 22 Proposed for the founder) |
+| **Decisions** | [DEC-441](../project/decisions/DEC-441.md) (items 1 to 14, 21, and 23 Accepted by the agent; items 15 to 20 and 22 Proposed for the founder); [DEC-690](../project/decisions/DEC-690.md) (Alpaca's documentation read for U-A1 to U-A5; items 1 to 5 and 8 to 10 Accepted, items 6 and 7 Proposed) |
 | **Backlog** | E7-1, E7-6, E7-11 to E7-18 ([backlog](../project/06-backlog-v1.md#e7-alpaca-connector-and-recovery)); E16-1 for Kraken |
 | **Safety-critical** | Yes: broker connectors, OAuth scopes, key-permission checks, and credential handling (`AGENTS.md`, "Safety-critical paths") |
 
@@ -141,7 +141,7 @@ connection lacks is not deployable.
 
 | Capability | Alpaca paper (keys, Phase 1) | Alpaca live and paper (OAuth, M8) | Robinhood Agentic (MCP, M8) | Kraken Derivatives US (E16) |
 |---|---|---|---|---|
-| Authentication | API key and secret, local config outside the repo (ES-19) | OAuth 2 authorization code, PKCE, single-use `state` | OAuth through Robinhood login at its MCP server (OD-12) | API key; permissions queried from the venue |
+| Authentication | API key and secret, local config outside the repo (ES-19) | OAuth 2 authorization code with the platform's client secret, single-use `state`, `env` always set; PKCE not documented by Alpaca, so sent but never relied on (§5.5) | OAuth through Robinhood login at its MCP server (OD-12) | API key; permissions queried from the venue |
 | Paper environment | Yes | Yes | **No.** Paper stage is the simulated broker with Robinhood's rules (DEC-124) | Demo environment |
 | Asset classes in v1 | US equities, ETFs, crypto spot (DEC-24) | Same | US equities and crypto spot; options excluded (DEC-24) | Perpetuals (Phase 3) |
 | Client order id, idempotent | Yes (`client_order_id`) | Yes | **Unknown (U-R1)** | To confirm |
@@ -149,9 +149,9 @@ connection lacks is not deployable.
 | Limit, stop-limit, GTC | Yes (trading §5.2) | Yes | **Unknown (U-R3)** | To confirm |
 | OCO or bracket | Yes | Yes | **Unknown (U-R4)** | Not applicable |
 | Account restriction signal | Status flags and rejects (trading §7.3) | Same | **Unknown (U-R6)** | To confirm |
-| 1× check (FR-2.6) | `multiplier` | Same; whether OAuth may read the setting is trading §15 q3 | **Unknown (U-R7)** | Margin by design; E16 |
+| 1× check (FR-2.6) | `multiplier` | Same: `multiplier` is readable with no extra scope (U-A5, answered, §5.5); changing it needs `account:write`, never requested | **Unknown (U-R7)** | Margin by design; E16 |
 | Activities for reconciliation | `/v2/account/activities` | Same | **Unknown (U-R8)** | To confirm |
-| Fund-movement permission | None used; the crate has no such endpoint | Must be shown absent from the scopes (U-A2) | Must be absent from the tool list (CN-2) | Queried per key |
+| Fund-movement permission | None used; the crate has no such endpoint | **Not shown absent (U-A2 open, §5.5)**: live is refused (CN-2); paper records and discloses it | Must be absent from the tool list (CN-2) | Queried per key |
 | Rate limits | Broker-published | Same | **Unknown (U-R9)** | To confirm |
 
 A capability marked **Unknown** is treated as **absent** until it is confirmed in writing and
@@ -173,21 +173,38 @@ describes key checks for venues that can report permissions; Alpaca keys cannot.
 
 ### 5.2 M8: OAuth
 
-The flow, with the workspace API's routes (#560 §4.5):
+The flow, with the workspace API's routes (#560 §4.5). **The API process never calls Alpaca**
+(workspace API spec §1.4; DEC-690 item 1): it has no broker host in its egress (infrastructure
+§3.1). It takes the owner's input, journals it, and reports. The code exchange and every §8.1
+check run in the account executor started for the pending connection, the one process type that
+holds a vault lease for one connection and that connection's broker hosts.
 
 1. A workspace admin presents step-up (identity spec #556, ID-4) and starts the connect. The server
    creates a single-use `state` bound to the user, workspace, intended environment, and a PKCE
    verifier, with a short expiry (Proposed default: 10 minutes).
 2. The browser goes to Alpaca's authorization page with the platform's client id, the redirect
-   URI registered for that environment, the `state`, the PKCE challenge, and **only the scopes in
-   §5.3**.
-3. The callback checks `state` (exists, unexpired, unused, same user), then exchanges the code
-   server-side. The token response goes **straight to the vault** in the same request; the API
-   process holds it only in a `secrecy` value until the vault write commits (CN-1).
-4. The permission checks of §8.1 run against the granted scopes and the account. Any failure
-   deletes the vault entry, journals the refusal without the token (CN-10), and shows the reason.
-5. On success, `ConnectionEstablished` is journaled (journal §9.2) and the executor for the account
-   is started (infrastructure §3.5).
+   URI registered for the deployment, the `state`, the PKCE challenge, **only the scopes in §5.3**,
+   and `env` set to the connection's environment, always (DEC-690 item 3: without `env`, Alpaca
+   prompts for a live and a paper account together).
+3. The callback checks `state` (exists, unexpired, unused, same user). It writes the authorization
+   code and the PKCE verifier **straight to the vault**, write-only, under the pending connection's
+   path, in the same request; the API process holds them only in a `secrecy` value until the
+   vault write commits (CN-1). It then asks for the pending connection's executor to start
+   (infrastructure §3.5) and reports `connecting`. It sends nothing to Alpaca.
+4. The executor reads the code from its lease and exchanges it at once at Alpaca's token endpoint
+   (an authorization code lives 10 minutes, §5.5), authenticating with the platform's client
+   secret, which only an executor in `connecting` may read. The token goes to the vault and the
+   code is deleted. The executor then runs the §8.1 checks against the granted scopes and the
+   account. Any failure deletes the vault entry, journals the refusal without the token (CN-10),
+   and stops the executor; the API shows the reason it reads from the journal.
+5. On success the executor journals the passing check results (CN-10, E7-17), and the API, as the
+   control stream's writer, appends `ConnectionEstablished` (journal §9.2) once it reads them.
+   The executor then runs as the account's executor.
+
+**Not buildable yet.** U-A4 is open (§5.5), so DEC-441 item 21 refuses every Alpaca OAuth grant,
+paper included. And Alpaca's token endpoint is on its live host (`api.alpaca.markets`), which no
+non-production build compiles in (ES-23), so even a paper grant cannot be exchanged outside
+production. Both readings that would lift these are the founder's (DEC-690 items 6 and 7).
 
 ### 5.3 Scopes
 
@@ -198,9 +215,10 @@ The flow, with the workspace API's routes (#560 §4.5):
 | `account:write` | **Never** | A write scope over account settings; FR-2.2 allows trading and account read only |
 | Anything else | Never | |
 
-A grant whose scopes differ from the request, by addition or removal, is refused (CN-2). Before
-M8 builds, these must be confirmed against Alpaca's current OAuth documentation and recorded in the
-capability table:
+Alpaca's scope names are `account:write`, `trading`, and `data`; reads need no scope (§5.5, U-A1).
+The token response carries the granted `scope`. A grant whose scopes differ from the request, by
+addition or removal, is refused (CN-2). The questions below were read against Alpaca's public
+documentation on 2026-10-08; §5.5 has each answer, its source, and what stays open:
 
 - **U-A1:** the exact scope names, and which scope reading the account needs.
 - **U-A2:** whether the `trading` scope reaches any fund-movement endpoint, crypto transfers
@@ -218,6 +236,10 @@ capability table:
 
 ### 5.4 Refresh, rotation, and revocation
 
+Alpaca documents no token lifetime, no refresh token, and no revoke call (U-A3, open, §5.5). Until
+it does, the executor treats a token as valid until a call fails authorization, never assumes a
+refresh exists, and the rules below apply as written.
+
 - If tokens refresh, the executor refreshes ahead of expiry (Proposed: at 80% of lifetime) through
   the vault, never through the API process. A failed refresh is retried with back-off until the
   token expires; at expiry the connection is `suspended` (§9) and CN-6 applies.
@@ -228,8 +250,34 @@ capability table:
   One is treated as a possible transient: the request's outcome is `Unknown` if it was a submit, and
   is resolved by query once a credential works again (trading §5.7).
 - **Revocation through the platform** revokes the token at Alpaca where Alpaca offers a revoke
-  call, deletes the vault entry, and journals `ConnectionRevoked`. It is refused while an agent on
+  call; none is documented (§5.5), so the confirmation tells the owner to remove the app at Alpaca
+  too. It deletes the vault entry, and journals `ConnectionRevoked`. It is refused while an agent on
   the connection holds positions or is not stopped (#560 §4.5).
+
+### 5.5 What Alpaca's documentation says (DEC-690)
+
+Read on 2026-10-08 from Alpaca's public documentation only. Nothing here comes from signing in,
+calling an Alpaca API, or a credential. Sources:
+
+- **[O]** "Using OAuth2 and Trading API",
+  <https://docs.alpaca.markets/docs/using-oauth2-and-trading-api> (page `updatedAt` 2026-03-02).
+- **[A]** Trading API reference, "Get Account" (`/v2/account`) and "Get Account Configurations"
+  (`/v2/account/configurations`), <https://docs.alpaca.markets/us/reference/getaccount-1> and
+  <https://docs.alpaca.markets/us/reference/getaccountconfig-1>.
+- **[W]** Trading API reference, "Request a New Withdrawal" (`POST /v2/wallets/transfers`),
+  <https://docs.alpaca.markets/us/reference/createcryptotransferforaccount>.
+- **[F]** Alpaca community forum, staff replies of 2020-02-18 and 2020-02-19,
+  <https://forum.alpaca.markets/t/using-oauth2-with-both-live-and-paper-accounts/807>. A forum post
+  is not documentation: it is recorded as evidence and never settles a question.
+
+| Question | What the documentation says | Status |
+|---|---|---|
+| **U-A1** scope names; which reads the account | [O] "Allowed Scopes": `account:write` "Write access for account configurations and watchlists."; `trading` "Place, cancel or modify orders."; `data` "Access to the Data API." For `scope`: "Read-only endpoint access is assumed by default." The token response carries `"scope"`. No scope is needed to read the account | **Answered.** Request `trading data`; compare the response's `scope` with the request (§8.1 check 1) |
+| **U-A2** does `trading` reach fund movement, crypto transfers included | [O] maps no scope to endpoints and does not mention transfers. The Trading API, on the same hosts, has `POST /v2/wallets/transfers` and `POST /v2/wallets/whitelists` [W]; the reference lists only API-key security, not OAuth scopes. [W] marks the withdrawal endpoint deprecated: "Use the Alpaca web application to initiate withdrawals." Since 2026-07-09, sunset 2026-10-09. Nothing says the whitelist endpoint or a later replacement is out of an OAuth token's reach | **Open.** Fund movement cannot be shown absent, so CN-2 refuses every **live** Alpaca OAuth grant, every asset class; a paper grant records and discloses it (infrastructure §5.3) |
+| **U-A3** expiry, refresh, revocation signal | [O]'s token response is `access_token`, `token_type`, `scope`: no `expires_in`, no `refresh_token`. No lifetime, refresh, or revoke call is documented. [F] (staff, 2020): "The token also currently does not expire"; "Authorization codes actually expire in 10 minutes" | **Open.** §5.4's reading holds: valid until an authorization failure; exchange the code at once |
+| **U-A4** does one token reach both paper and live | [O]: "An single Alpaca OAuth token may authorize access to either: One live account; One paper account; One live account and one paper account". `env`: "If provided, must be one of `live` or `paper`. If not specified, the user will be prompted to authorized both a live and a paper account." And: "If you specify a value for the `env` parameter when redirecting to us, we will ask the user to authorize only a live or a paper account". [O] does **not** say a host refuses a token not authorized for its environment, and the token response names no environment. [F] (staff, 2020) says the opposite of binding: the token "belongs to the user instead of a specific account and can be used for both paper and live accounts (using api.alpaca.markets vs paper-api.alpaca.markets)". [O]'s token endpoint is `POST https://api.alpaca.markets/oauth/token`, the live host, for either environment | **Open.** The documentation describes what the owner authorizes, not what a host enforces, so it does not show a token reaches only its own environment. DEC-441 item 21 keeps refusing every Alpaca OAuth grant. Whether an `env`-scoped grant is enough is the founder's (DEC-690 item 6); so is reaching the live host's token endpoint from a non-production build (item 7) |
+| **U-A5** may an OAuth app read the 1× setting | [A]: `GET /v2/account` returns `multiplier` ("valid values 1 ... 2 ... 4"); `GET /v2/account/configurations` returns `max_margin_multiplier`. Both are reads, and [O] says "Read-only endpoint access is assumed by default"; no page names these two endpoints for OAuth, so this is that general rule applied. Writing the configuration needs `account:write` | **Answered**, by the general rule; a refused read fails §8.1 check 5 closed (agents not deployable). FR-2.6 is checked by reading `multiplier`; the platform never sets it, and the owner changes it at Alpaca (trading §15 q3) |
+| PKCE (not a U-A question) | [O] documents no `code_challenge`; the exchange authenticates with `client_secret` from "your backend server" | **Open.** PKCE is sent but never relied on; the client secret and the single-use `state` are the controls |
 
 ## 6. Robinhood Agentic Trading over MCP
 
@@ -346,7 +394,10 @@ Kraken now.
 
 ### 8.1 At connect, at every executor start, and daily
 
-Each check's result is journaled without the credential (CN-10; infrastructure §5.3).
+Each check's result is journaled without the credential (CN-10; infrastructure §5.3). The checks
+run in the connection's account executor, never in the API process, which holds no credential and
+reaches no broker (workspace API spec §1.4; DEC-690 item 1). At connect, the API learns the results
+from the journal and only then appends `ConnectionEstablished` or shows the refusal.
 
 | # | Check | Failure at connect | Failure later |
 |---|---|---|---|
@@ -405,7 +456,7 @@ transient. A restriction that lifts with no acknowledgment would be a separate s
 
 | Step | What happens | Invariants |
 |---|---|---|
-| **Connect** | Step-up; OAuth or key entry; token to vault; §8.1 checks; `ConnectionEstablished`; executor started; first reconciliation | CN-1, CN-2, CN-3, CN-5, CN-10 |
+| **Connect** | Step-up; OAuth or key entry; code or key to vault (API); executor started; code exchanged and token to vault, §8.1 checks (executor); `ConnectionEstablished` (API, after the checks' results are journaled); first reconciliation | CN-1, CN-2, CN-3, CN-5, CN-10 |
 | **Verify permissions** | §8.1 at every executor start and daily | CN-2, CN-3 |
 | **Healthy** | `active`; health probe; daily 1× and permission checks | — |
 | **Degraded** | `closing_only`, so agents are `exits_only`; exits continue. The owner is alerted after a configured period (Proposed: 5 minutes) for network errors and low headroom, and **at once** for contract drift, which is not transient | CN-6, rule 13 |
@@ -474,6 +525,14 @@ backlog rows (item 13); health defaults (item 14); trading §7.3's connection ro
 `AccountRestrictionChanged` (item 23); a token that reaches both environments is
 refused until U-A4 is answered (item 21).
 
+[DEC-690](../project/decisions/DEC-690.md) records what Alpaca's documentation answers (§5.5).
+Accepted (agent, DEC-176): the API never calls a broker, and the code exchange and checks run in the
+executor (item 1); U-A1 and U-A5 answered (items 2 and 8); `env` always set (item 3); U-A2 and U-A3
+open, with live Alpaca OAuth refused under CN-2 and no refresh assumed (items 4 and 5); PKCE never
+relied on (item 9). **Proposed for the founder:** whether an `env`-scoped grant satisfies U-A4
+(item 6), and whether a non-production build may reach the live host's token endpoint (item 7).
+Until then no Alpaca OAuth grant is accepted in any environment.
+
 **Proposed for the founder** (vendor terms, live accounts, legal text; DEC-79):
 
 | Item | Decision | Recommendation |
@@ -488,7 +547,8 @@ refused until U-A4 is answered (item 21).
 
 ## 13. Open questions
 
-1. U-A1 to U-A5 (Alpaca) and U-R1 to U-R12 (Robinhood), above.
+1. U-A2, U-A3, U-A4, and PKCE (Alpaca; U-A1 and U-A5 answered, §5.5) and U-R1 to U-R12
+   (Robinhood), above. The Alpaca ones need Alpaca's written answer (DEC-690 item 10).
 2. Answered in §3: a reconnect is a second `ConnectionEstablished` for the same `connection_id`,
    valid only after its `ConnectionRevoked`; the rule is a journal spec change (E7-17).
 3. Whether cross-deployment duplicate detection (CN-5) is worth a fingerprint registry in the
