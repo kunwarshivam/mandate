@@ -1987,7 +1987,6 @@ proptest! {
     /// last clock, and an alert counts for it when the draft the notification names is in the
     /// interval's instrument and inside the interval.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_interval_exceeds_the_limit_without_an_alert(
         script in prop_oneof![scripted_awaited(), scripted_protected()],
     ) {

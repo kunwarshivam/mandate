@@ -3142,7 +3142,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `BEHAVIOUR_ONLY_TESTS` row and `#[ignore]` line. Minors from the same review, for the same PR or
   the backlog: `interval_limit` marks the first open interval alerted, which can re-alert a later
   one each tick; the fold's doc for these arms; and `awaiting.insert` replaces an instrument's
-  awaited set rather than adding to it.
+  awaited set rather than adding to it. Done by E4b's fix: that arm ends the open interval of a
+  bracket whose OCO's acknowledgment was awaited (or an unbracketed one), never another bracket's;
+  `no_interval_exceeds_the_limit_without_an_alert` is live again. The three minors stay open.
 - **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
   ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
   while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on

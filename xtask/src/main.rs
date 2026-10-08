@@ -2305,22 +2305,13 @@ const STUB_MARKERS: [&str; 5] = [
 ///   is always available), or the step confirming the protection's cancel, leaving the position
 ///   unprotected and unsold. The session slice deletes this row with the extended-hours path.
 ///
-/// Two more `properties` rows went back to pending in #668's round 2, failing on executor defects
-/// at random seeds the pinned one missed; each property's scripts now lead with its defect's shape
-/// (`STEP_BESIDE_LEAD`, `AWAITED_LEAD`), so it fails at every seed until the fix lands:
+/// One more `properties` row went back to pending in #668's round 2, failing on an executor defect
+/// at random seeds the pinned one missed; its scripts now lead with the defect's shape
+/// (`STEP_BESIDE_LEAD`), so it fails at every seed until the fix lands:
 /// - `no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` (defect E5b): the exit
 ///   ladder steps a rung the broker has not yet acknowledged, asking its cancel, and another exit
 ///   goes beside that cancel (backlog: "E7-4 (stream K), E5b from #668's round-2 review").
-/// - `no_interval_exceeds_the_limit_without_an_alert` (defect E4b): while a bracket's OCO awaits
-///   its acknowledgment, a new interval's start ends the first open interval rather than the
-///   awaited one, so the bound alerts late (backlog: "E7-4 (stream K), E4b from E4's fix"). Its
-///   scripts are now either that lead or the wide protected search, so the search stays reachable.
-///
-/// One more `hand` row is defect E4b (backlog: "E7-4 (stream K), E4b from E4's fix"; DEC-521 item
-/// 3): while a second bracket's OCO awaits its acknowledgment, a third bracket's start ends the
-/// first open interval in the instrument rather than the awaited one. It reaches no stub and fails
-/// on that behaviour until E4b's fix deletes the row with its `#[ignore]` line.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 8] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2349,14 +2340,6 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "no_interval_exceeds_the_limit_without_an_alert",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
     ),
 ];
 
