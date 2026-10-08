@@ -9,8 +9,8 @@ use mandate_canon::{Digest, Value, to_canonical};
 use mandate_shell::control::{
     ConfigRefusal as Refusal, ControlRecord, Governance, Pinned, governance,
 };
-use mandate_spec::Mandate;
-use mandate_spec::policy::{LevelName, PolicyKey, values_of};
+use mandate_spec::policy::{LevelName, PolicyKey, PolicyValue, values_of};
+use mandate_spec::{Mandate, SchemaDec};
 
 const MANDATE: &str = include_str!("fixtures/tracer/mandate.json");
 const MODEL: &str = r#"{"kind":"quant_model_content","model_id":"quant.ma_crossover"}"#;
@@ -119,7 +119,9 @@ fn the_latest_policy_set_and_registry_govern() {
     let lookalike = RECORD
         .replace("@K", "policy_set")
         .replace("@H", &hash(&early));
-    let stream = Stream::governed(&early, &entries).register("policy_set", &late);
+    let stream = Stream::governed(&early, &registry(&[OTHER]));
+    let stream = stream.register("policy_set", &late);
+    let stream = stream.register("model_registry", &entries);
     let mut stream = stream.then("MandateConfirmed", &lookalike);
     let other = r#"{"kind":"quant_model_content","model_id":"quant.other"}"#;
     let narrower = MODEL_RECORD.replace(r#""fast_periods","slow_periods""#, r#""lookback_bars""#);
@@ -136,9 +138,12 @@ fn the_latest_policy_set_and_registry_govern() {
         let policy = (read.policy_set.content_hash, read.policy_set.seq);
         assert_eq!(policy, (digest(&late), 5), "swapped: {swapped}");
         let models = (read.model_registry.content_hash, read.model_registry.seq);
-        assert_eq!(models, (digest(&entries), 3), "swapped: {swapped}");
+        assert_eq!(models, (digest(&entries), 6), "swapped: {swapped}");
+        let bytes = &read.model_registry.bytes;
+        assert_eq!(bytes, &to_canonical(&json(&entries)), "swapped: {swapped}");
         assert_eq!(read.policy_set.bytes, to_canonical(&json(&late)));
         stream.records.swap(1, 4);
+        stream.records.swap(2, 5);
     }
 }
 
@@ -195,6 +200,15 @@ fn a_mandate_beyond_a_later_policy_is_nonconforming_not_refused() {
         "{broken:?}"
     );
     assert!(!read.overlay.auto_allowed());
+    let mandate = Mandate::parse(&json(MANDATE)).unwrap();
+    let stated = values_of(&mandate).unwrap();
+    let own = &stated[&PolicyKey::MaxDailyLoss];
+    let PolicyValue::Decimal(own_loss) = own else {
+        panic!("the mandate states max_daily_loss as a decimal: {own:?}");
+    };
+    let ceiling = SchemaDec::parse("0.01", own_loss.grammar()).unwrap();
+    let effective = read.overlay.effective(PolicyKey::MaxDailyLoss, own);
+    assert_eq!(effective, Ok(PolicyValue::Decimal(ceiling)));
 }
 
 /// Each kind must be registered and its object stored intact; the policy set must read as
@@ -280,4 +294,45 @@ fn an_unregistered_unreadable_or_mismatched_policy_or_registry_refuses() {
         let refused = Stream::governed(&policy, &bad).refused();
         assert_eq!(refused, Some(Refusal::RegistryMismatch), "{bad}");
     }
+    let beside = registry(&[ENTRY, OTHER]);
+    let read = Stream::governed(&policy, &beside).read();
+    let read = read.map(|governance| governance.model_registry.content_hash);
+    assert_eq!(
+        read,
+        Ok(digest(&beside)),
+        "one pinned entry beside another model's"
+    );
+}
+
+/// A later `policy_set` or `model_registry` registration that cannot be used refuses the run: the
+/// earlier, valid registration of the same kind never governs in its place (DEC-505 item 1, no
+/// silent fallback). Each later object is missing from the store, corrupt, off its schema, or, for
+/// the registry, without the pinned model's entry.
+#[test]
+#[ignore = "pending E7-19"]
+fn a_later_unusable_policy_or_registry_never_falls_back_to_an_earlier_one() {
+    let policy = policy_set(&[&level("workspace", r#""max_orders_per_day":100"#)]);
+    let entries = registry(&[ENTRY]);
+    let later_policy = policy_set(&[&level("workspace", r#""max_orders_per_day":60"#)]);
+    let off_schema = policy_set(&[&level("workspace", r#""max_instruments":0"#)]);
+    let later_registry = registry(&[ENTRY, OTHER]);
+    let extra = entries.replace(r#""models""#, r#""extra":1,"models""#);
+    let later = [
+        ("policy_set", later_policy.as_str(), off_schema.as_str()),
+        ("model_registry", later_registry.as_str(), extra.as_str()),
+    ];
+    for (kind, usable, malformed) in later {
+        let stream = || Stream::governed(&policy, &entries).register(kind, usable);
+        let mut missing = stream();
+        missing.store.remove(&digest(usable));
+        assert_eq!(missing.refused(), Some(Refusal::ObjectMissing { kind }));
+        let mut corrupt = stream();
+        corrupt.store.get_mut(&digest(usable)).unwrap().push(b' ');
+        assert_eq!(corrupt.refused(), Some(Refusal::ObjectCorrupt { kind }));
+        let off = Stream::governed(&policy, &entries).register(kind, malformed);
+        assert_eq!(off.refused(), Some(Refusal::Malformed { kind }));
+    }
+    let other = registry(&[OTHER]);
+    let unpinned = Stream::governed(&policy, &entries).register("model_registry", &other);
+    assert_eq!(unpinned.refused(), Some(Refusal::RegistryMismatch));
 }
