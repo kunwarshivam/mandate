@@ -271,7 +271,7 @@ describe("the strategy, the owner's choice", () => {
     await send("1.5");
     expect(lastReply()).toEqual(["Got it: entry z-score of 1.5.", READY]);
     expect(row("Its settings")).toHaveTextContent("Lookback, in bars: 20; Entry z-score: 1.5");
-    expect(within(row("Its settings")).queryByText("proposed")).toBeNull();
+    expect(within(row("Its settings")).queryByText("Proposed")).toBeNull();
   });
 
   it("explains a model and refuses to choose for the owner, in plain text with no buttons", async () => {
@@ -308,10 +308,10 @@ describe("the agent, shown once and created in one step", () => {
     expect(summary().querySelector("[data-slot=mandate-version]")!.textContent).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(row("Money it may use")).toHaveTextContent("$3,000.00");
     expect(row("Money it may use").querySelector("[data-slot=tag]")).toBeNull();
-    expect(row("Where it runs").querySelector("[data-slot=tag]")).toHaveTextContent("default");
+    expect(row("Where it runs").querySelector("[data-slot=tag]")).toHaveTextContent("Default");
     const limits = sectionRows("limits");
     expect(limits.length).toBeGreaterThan(5);
-    for (const r of limits) expect(r.querySelector("[data-slot=tag]")).toHaveTextContent("proposed");
+    for (const r of limits) expect(r.querySelector("[data-slot=tag]")).toHaveTextContent("Proposed");
     expect(summary().querySelector("details, [aria-expanded=false]")).toBeNull();
     expect(screen.queryByRole("button", { name: /confirm section|accept all/i })).toBeNull();
     expect(button("Create agent")).toBeEnabled();
@@ -322,7 +322,7 @@ describe("the agent, shown once and created in one step", () => {
     renderFlow();
     await toSummary();
     expect(row("Most it may lose, in total")).toHaveTextContent("$300.00");
-    expect(row("Fall at which it closes everything").querySelector("[data-slot=tag]")).toHaveTextContent("proposed");
+    expect(row("Fall at which it closes everything").querySelector("[data-slot=tag]")).toHaveTextContent("Proposed");
     expect(row("Could buy without asking you")).toHaveTextContent("$0.00");
     expect(summary()).toHaveTextContent(GAP_NOTE);
     expect(summary()).toHaveTextContent("It asks you before every buy.");
@@ -589,7 +589,7 @@ describe("the fixture compiler's draft", () => {
     expect(lines.slice(0, 2)).toEqual(["Your agent", "PAPER: simulated funds"]);
     expect(lines.at(-1)).toBe("Version 1: sha256:abc");
     expect(lines).toContain("Money it may use: $5,000.00");
-    expect(lines).toContain("Where it runs: Paper: simulated funds, no real money. (default)");
+    expect(lines).toContain("Where it runs: Paper: simulated funds, no real money. (Default)");
     expect(lines).toContain("Model: Momentum (quant.momentum 1.0.0)");
     expect(lines).toContain("Could buy without asking you: $0.00");
   });

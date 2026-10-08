@@ -29,7 +29,7 @@ export type ThreadView = "chat" | "desk";
  * the open thread, and the agent beside it, divided by hairlines. On a phone: one of the first two.
  */
 const MESSAGES_GRID =
-  "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[19rem_minmax(0,1fr)_17rem] lg:divide-x lg:divide-border/70 xl:grid-cols-[21rem_minmax(0,1fr)_19rem]";
+  "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[19rem_minmax(0,1fr)] lg:divide-x lg:divide-border/70 xl:grid-cols-[21rem_minmax(0,1fr)_19rem]";
 
 /** A side pane scrolls on its own, and its end clears the dock. A pane is the containing block of what it scrolls, so nothing inside, such as a screen reader's label, lengthens the page. */
 const SIDE_PANE = "relative min-h-0 min-w-0 overflow-y-auto overscroll-contain lg:pb-[calc(var(--dock-clearance)+1rem)]";
@@ -145,7 +145,7 @@ function Messages({ agentId, view }: { agentId: string | null; view: ThreadView 
       </div>
       {agent ? <Thread agent={agent} view={view} /> : <NoThreadOpen />}
       {agent ? (
-        <div data-slot="rail-pane" className={cn(SIDE_PANE, "px-5 pt-5 max-lg:hidden")}>
+        <div data-slot="rail-pane" className={cn(SIDE_PANE, "px-5 pt-5 max-xl:hidden")}>
           <ThreadRail agent={agent} />
         </div>
       ) : null}

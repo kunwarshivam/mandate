@@ -76,10 +76,9 @@ function Alerts() {
 }
 
 export function AlertsScreen() {
-  const { ws } = useRuntime();
   return (
     <div className="grid">
-      <PageHeader title="Alerts" environment={ws.environment} description="Conditions that change what agents may do, each with the time it was last true." />
+      <PageHeader title="Alerts" description="Conditions that change what agents may do, each with the time it was last true." />
       <WorkspaceGate>
         <Alerts />
       </WorkspaceGate>
@@ -123,7 +122,6 @@ function AllTimeline() {
 
 /** A screen from the registry: built ones render their content, the rest say what they will hold. */
 export function RegistryScreen({ screen }: { screen: Screen }) {
-  const { ws } = useRuntime();
   const session = useSession();
   const body = (() => {
     switch (screen.key) {
@@ -154,7 +152,7 @@ export function RegistryScreen({ screen }: { screen: Screen }) {
   })();
   return (
     <div className="grid">
-      <PageHeader title={screen.label} environment={ws.environment} description={screen.built ? screen.purpose : undefined} />
+      <PageHeader title={screen.label} description={screen.built ? screen.purpose : undefined} />
       {body}
     </div>
   );
@@ -162,10 +160,9 @@ export function RegistryScreen({ screen }: { screen: Screen }) {
 
 /** The Audit and Workspace index pages: each child screen with what it is for. */
 export function SectionIndexScreen({ title, purpose, prefix }: { title: string; purpose: string; prefix: string }) {
-  const { ws } = useRuntime();
   return (
     <div className="grid">
-      <PageHeader title={title} environment={ws.environment} description={purpose} />
+      <PageHeader title={title} description={purpose} />
       <ul className="grid max-w-3xl divide-y divide-border/70">
         {screensIn(prefix)
           .filter((s) => s.built)

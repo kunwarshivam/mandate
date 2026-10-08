@@ -5,7 +5,7 @@ import type { UTCTimestamp } from "lightweight-charts";
 import { ChevronDown } from "pixelarticons/react/ChevronDown.js";
 import { AsOf } from "@/components/domain/as-of";
 import { HeroFigure, SignedMoney } from "@/components/domain/money";
-import { FixtureTag, Placeholder } from "@/components/domain/placeholders";
+import { Placeholder } from "@/components/domain/placeholders";
 import type { Point } from "@/fixtures/market";
 import type { Agent, Workspace } from "@/fixtures/types";
 import { add, dec, sub, toFixed } from "@/lib/decimal";
@@ -244,7 +244,6 @@ export function AccountEquityChart() {
             Includes <span className="font-mono tabular">{usd(unmanaged)}</span> no agent manages.
           </span>
           <AsOf at={asOf} now={now} stale={stale} />
-          <FixtureTag className="max-lg:hidden" />
           <ChartCredit className="mt-1" />
         </>
       }
