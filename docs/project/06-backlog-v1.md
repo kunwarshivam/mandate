@@ -2900,6 +2900,44 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   rule 5's ruled carve-out: an exit that goes once its opening's cancel is overdue, answered or not,
   with the opening still resting ([DEC-160](04-decision-log.md#decisions) (7), (13), (18)).
   Carve that case out through a DEC-77 tests correction before slice 5 or 6 lets the property run.
+  Done by E7-4 slice 7's tests correction ([DEC-506](decisions/DEC-506.md) item 7, stack 2 of 3).
+- **E7-4 (stream K), E1 from E7-4 slice 7's tests correction ([DEC-506](decisions/DEC-506.md)):
+  an exit is submitted beside a just-activated bracket's legs, leaving protection above the
+  position.** Minimal script (`properties::protective_sell_quantity_never_exceeds_the_position_in_any_script`):
+  `Intent 0 (AAPL open), Acknowledge, Fill, Intent 1 (CPHC protected open), Acknowledge, Fill,
+  Intent 2 (CPHC risk exit), Fill, Fill` (a CPHC bracket of 2 partly filled at 1; a risk exit of 1; the
+  entry's remainder fills before its cancel confirms). In that step the executor journals
+  `OrderSubmitted` for the exit and then `ProtectionChanged placed` for the legs (qty 2); once the
+  exit fills, the position is 1 and the resting protection 2, and nothing later corrects it, so a
+  triggered stop would sell short. Trading spec §5.4 (the tranche model's Σ protective sell
+  quantity ≤ position, and the marketable exit sequence: cancel every protective order, confirm,
+  re-gate, submit) and `AGENTS.md` rule 12. Fix tests-first: a bracket entry with fills whose legs
+  are not yet recorded `placed` counts as live protection for any exit sequence in the instrument,
+  so the exit waits a step and cancels the legs through §5.4 before it submits, as DEC-485 item 16
+  does for the flatten. Until then that property fails on #668's code.
+- **E7-4 (stream K), E2 from E7-4 slice 7's tests correction ([DEC-506](decisions/DEC-506.md)
+  item 8): an opening rests inside an unprotected interval.** Minimal script
+  (`properties::no_resting_order_is_submitted_inside_an_unprotected_interval`):
+  `Intent 0 (AAPL open), Acknowledge, Fill, Intent 1 (CPHC protected open), Acknowledge, Fill, Fill,
+  Intent 2 (CPHC risk exit), Cancelled, Intent 3 (CPHC open)` (a completed CPHC bracket, a risk exit whose protection's
+  cancel is confirmed, then a plain opening of 1 at 150 against a 150.2 ask, submitted while the
+  protection is cancelled). Trading spec §5.4: "Orders submitted while protection is canceled must
+  be marketable at submission"; §5.6. The coordinator's ruling on this item's scope: the sentence
+  covers every order submitted in the instrument while its protection is cancelled for a sequence,
+  not only the sequence's own orders, which tightens the rule and adds no risk (DEC-176). Fix
+  tests-first: the gate holds such an opening until protection is placed again, never repricing
+  it, with a hold reason a DEC names (§9.1); exits are untouched. Until then that property fails on
+  #668's code.
+- **E7-4 (stream K), from E7-4 slice 7's tests correction: an unconfirmed owner exit pre-market
+  cancels protection for a sell that cannot fill before 09:30 (open question for the
+  coordinator).** At 2026-09-22 08:00 ET an owner kill switch without confirmation cancels the
+  resting OCO and, once that is confirmed, submits its close as a regular-session limit the broker
+  queues to the open (DEC-260 (13)). The position is then unprotected until the open, and §5.4's
+  `max_unprotected_s` bound would end the queued close well before 09:30. Trading spec §5.5
+  ("Without confirmation, equity sells wait for the session") says nothing about protection here,
+  where it says protection stays in place for an automated switch. Decide whether an unconfirmed
+  owner close outside the session leaves protection resting until the session, as the automated
+  one does.
 - **Trading-domain spec §5.7's missing `PendingCancel` edges (stream K), from #286 round 2
   (minor 3):** a spec PR that adds `PendingCancel → Expired` and `PendingCancel → Rejected` to
   §5.7's transition table, with reference cases, and then the executor change that follows it.
