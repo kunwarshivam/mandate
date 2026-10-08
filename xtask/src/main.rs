@@ -2313,14 +2313,19 @@ const STUB_MARKERS: [&str; 5] = [
 ///   goes beside that cancel (backlog: "E7-4 (stream K), E5b from #668's round-2 review").
 /// - `no_interval_exceeds_the_limit_without_an_alert` (defect E4b): while a bracket's OCO awaits
 ///   its acknowledgment, a new interval's start ends the first open interval rather than the
-///   awaited one, so the bound alerts late (E4b, from #698's review; its backlog row comes with
-///   E4b's tests PR).
+///   awaited one, so the bound alerts late (backlog: "E7-4 (stream K), E4b from E4's fix"). Its
+///   scripts are now either that lead or the wide protected search, so the search stays reachable.
+///
+/// One more `hand` row is defect E4b (backlog: "E7-4 (stream K), E4b from E4's fix"; DEC-521 item
+/// 3): while a second bracket's OCO awaits its acknowledgment, a third bracket's start ends the
+/// first open interval in the instrument rather than the awaited one. It reaches no stub and fails
+/// on that behaviour until E4b's fix deletes the row with its `#[ignore]` line.
 ///
 /// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
 /// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
 /// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
 /// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2353,6 +2358,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "no_interval_exceeds_the_limit_without_an_alert",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
     ),
     (
         "crates/mandate-runtime/tests/answer_records.rs",
