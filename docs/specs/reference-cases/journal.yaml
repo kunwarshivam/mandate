@@ -15148,6 +15148,103 @@ hold:
       outcome: Invalid
       reason: schema
       path: payload.command
+  - name: lift_by_the_system
+    clause: 'rule 75: only a user lifts a hold'
+    base_draft: lift
+    changes:
+    - path: actor
+      value:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: lift_by_an_agent
+    clause: 'rule 75: only a user lifts a hold'
+    base_draft: lift
+    changes:
+    - path: actor
+      value:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: lift_by_a_broker
+    clause: 'rule 75: only a user lifts a hold'
+    base_draft: lift
+    changes:
+    - path: actor
+      value:
+        kind: broker
+        id: broker_01
+        version: '1'
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: hold_by_an_agent
+    clause: 'rule 75: a hold is a user''s or a client''s'
+    base_draft: hold
+    changes:
+    - path: actor
+      value:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: hold_by_a_broker
+    clause: 'rule 75: a hold is a user''s or a client''s'
+    base_draft: hold
+    changes:
+    - path: actor
+      value:
+        kind: broker
+        id: broker_01
+        version: '1'
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: client_hold_with_a_build
+    clause: 'rule 67: a client is external, so it has no build digest'
+    base_draft: hold
+    changes:
+    - path: actor
+      value:
+        kind: client
+        id: client_01
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        on_behalf_of: user_owner_01
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.build
+  - name: version_1_mode_change_with_a_hold
+    clause: '§9.10: version 1''s reasons stay closed; a hold is version 2''s'
+    base_draft: held
+    changes:
+    - path: schema_version
+      value: 1
+    - path: payload.held
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
   - name: hold_by_the_system
     clause: 'rule 75: a hold is a person''s command'
     base_draft: hold
@@ -15300,6 +15397,22 @@ hold:
       reason: schema
       path: causation_id
   valid_drafts:
+  - name: version_1_mode_change_unchanged
+    clause: '§9.10: version 1 stays registered'
+    base_draft: held
+    changes:
+    - path: schema_version
+      value: 1
+    - path: payload.held
+      delete: true
+    - path: payload.reason
+      value: owner_pause
+    - path: payload.to
+      value: paused
+    - path: payload.lifecycle
+      value: paused
+    expect:
+      outcome: Valid
   - name: kill_switch_stays_open
     clause: '§9.10: other commands are not closed here, and a kill switch is always recorded'
     base_draft: hold
@@ -15434,10 +15547,12 @@ hold:
     expect:
       outcome: Valid
   range_verification:
-  - name: the_hold_carried_through_a_pause_and_a_resume
+  - name: the_hold_carried_through_a_pause_a_resume_and_other_events
     from_seq: 1
+    anchor: null
     events:
     - &id007
+      event_type: AgentModeChanged
       schema_version: 2
       payload:
         from: normal
@@ -15445,14 +15560,22 @@ hold:
         reason: owner_hold
         lifecycle: normal
         held: true
-    - schema_version: 2
+    - event_type: KillSwitchActivated
+      schema_version: 1
+      payload: {}
+    - event_type: AgentModeChanged
+      schema_version: 2
       payload:
         from: exits_only
         to: paused
         reason: owner_pause
         lifecycle: paused
         held: true
-    - &id008
+    - event_type: IntentProposed
+      schema_version: 1
+      payload: {}
+    - &id012
+      event_type: AgentModeChanged
       schema_version: 2
       payload:
         from: paused
@@ -15460,7 +15583,8 @@ hold:
         reason: owner_resume
         lifecycle: normal
         held: true
-    - schema_version: 2
+    - event_type: AgentModeChanged
+      schema_version: 2
       payload:
         from: exits_only
         to: normal
@@ -15470,9 +15594,15 @@ hold:
     expect: []
   - name: a_restriction_drops_the_hold
     from_seq: 1
+    anchor: null
     events:
     - *id007
-    - schema_version: 2
+    - event_type: IntentProposed
+      schema_version: 1
+      payload: {}
+    - &id009
+      event_type: AgentModeChanged
+      schema_version: 2
       payload:
         from: exits_only
         to: exits_only
@@ -15480,12 +15610,14 @@ hold:
         lifecycle: normal
         held: false
     expect:
-    - 1
+    - 2
   - name: a_kill_switch_drops_the_hold
     from_seq: 1
+    anchor: null
     events:
     - *id007
-    - schema_version: 2
+    - event_type: AgentModeChanged
+      schema_version: 2
       payload:
         from: exits_only
         to: stopped
@@ -15496,8 +15628,10 @@ hold:
     - 1
   - name: a_reconciliation_sets_a_hold_nobody_asked_for
     from_seq: 1
+    anchor: null
     events:
-    - schema_version: 2
+    - event_type: AgentModeChanged
+      schema_version: 2
       payload:
         from: normal
         to: exits_only
@@ -15508,11 +15642,14 @@ hold:
     - 0
   - name: a_version_1_record_after_a_version_2_one
     from_seq: 1
+    anchor: null
     events:
     - *id007
-    - schema_version: 1
+    - &id008
+      event_type: AgentModeChanged
+      schema_version: 1
       payload:
-        from: exits_only
+        from: normal
         to: paused
         reason: owner_pause
         lifecycle: paused
@@ -15520,24 +15657,121 @@ hold:
     - 1
   - name: version_1_records_before_the_first_hold
     from_seq: 1
+    anchor: null
     events:
-    - schema_version: 1
-      payload:
-        from: normal
-        to: paused
-        reason: owner_pause
-        lifecycle: paused
+    - *id008
     - *id007
     expect: []
-  - name: a_later_range_trusts_its_first_record
-    from_seq: 40
+  - name: a_full_chain_opens_with_a_copy_that_holds_nothing
+    from_seq: 1
+    anchor: null
     events:
-    - schema_version: 2
+    - event_type: AgentModeChanged
+      schema_version: 2
+      payload:
+        from: normal
+        to: exits_only
+        reason: restriction_changed
+        lifecycle: normal
+        held: false
+    expect: []
+  - name: two_violations_and_only_the_first_reported
+    from_seq: 1
+    anchor: null
+    events:
+    - *id007
+    - *id009
+    - event_type: AgentModeChanged
+      schema_version: 2
       payload:
         from: exits_only
-        to: paused
-        reason: owner_pause
-        lifecycle: paused
+        to: exits_only
+        reason: restriction_changed
+        lifecycle: normal
         held: true
+    expect:
+    - 1
+    - 2
+  - name: a_later_range_launders_a_dropped_hold
+    from_seq: 40
+    anchor: &id011
+      held: true
+      v2_before: true
+    events:
+    - *id009
+    expect:
+    - 0
+  - name: a_later_range_starts_with_version_1_after_a_version_2
+    from_seq: 40
+    anchor: &id010
+      held: false
+      v2_before: true
+    events:
     - *id008
+    expect:
+    - 0
+  - name: a_later_range_whose_predecessor_was_not_held
+    from_seq: 40
+    anchor: *id010
+    events:
+    - event_type: AgentModeChanged
+      schema_version: 2
+      payload:
+        from: normal
+        to: normal
+        reason: restriction_changed
+        lifecycle: normal
+        held: false
     expect: []
+  - name: a_later_range_carries_its_anchor
+    from_seq: 40
+    anchor: *id011
+    events:
+    - &id013
+      event_type: AgentModeChanged
+      schema_version: 2
+      payload:
+        from: exits_only
+        to: exits_only
+        reason: restriction_changed
+        lifecycle: normal
+        held: true
+    - *id012
+    expect: []
+  - name: an_unanchored_range_opens_with_a_hold
+    from_seq: 40
+    anchor: null
+    events:
+    - *id007
+    - *id013
+    expect: []
+  - name: an_unanchored_range_anchors_on_its_own_hold_then_drops_it
+    from_seq: 40
+    anchor: null
+    events:
+    - *id007
+    - *id009
+    expect:
+    - 1
+  - name: an_unanchored_range_opens_with_version_1
+    from_seq: 40
+    anchor: null
+    events:
+    - *id008
+    - *id007
+    expect: []
+  - name: an_unanchored_range_opens_with_a_copy_and_fails_closed
+    from_seq: 40
+    anchor: null
+    events:
+    - *id013
+    expect:
+    - 0
+  - name: an_unanchored_range_with_version_1_after_its_hold
+    from_seq: 40
+    anchor: null
+    events:
+    - *id007
+    - *id008
+    expect:
+    - 1

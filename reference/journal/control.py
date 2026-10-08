@@ -550,7 +550,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "ProtectionChanged"): (1,),
     ("ctl", "MandateConfirmed"): (1, 2),
     ("ctl", "ConnectionRevoked"): (1, 2),
-    ("agent", "AgentModeChanged"): (2,),
+    ("agent", "AgentModeChanged"): (1, 2),
     ("agent", "OwnerCommandRefused"): (1, 2),
 }
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
@@ -570,6 +570,12 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
     ("ctl", "MandateConfirmed", 2): CONFIRMED_V2,
     ("ctl", "ConnectionRevoked", 2): REVOKED_V2,
+    ("agent", "AgentModeChanged", 1): rec(
+        ("from", one_of(*MODE_ORDER)),
+        ("to", one_of(*MODE_ORDER)),
+        ("reason", one_of("restriction_changed", "awaiting_reconciliation", "kill_switch", *OWNER_MODE_REASONS[:3])),
+        ("lifecycle", one_of("normal", "paused", "stopped")),
+    ),
     ("agent", "AgentModeChanged", 2): MODE_CHANGED_V2,
     ("agent", "OwnerCommandRefused", 2): REFUSAL_V2,
 }
@@ -1025,11 +1031,12 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
         rule("76.subject", p["subject"] == p["agent"], "payload.subject")
         if hold:
             rule("77", p["step_up"] is None, "payload.step_up")
-    if event_type == "AgentModeChanged" and draft["schema_version"] == 2:
+    if event_type == "AgentModeChanged":
         reason = p["reason"]
+        held = p.get("held") is True
         if reason in ("owner_hold", "owner_lift_hold"):
-            rule("78", p["held"] == (reason == "owner_hold"), "payload.held")
-        floor = max(MODE_ORDER.index(p["lifecycle"]), 1 if p["held"] and "rule.79.held" not in skip else 0)
+            rule("78", held == (reason == "owner_hold"), "payload.held")
+        floor = max(MODE_ORDER.index(p["lifecycle"]), 1 if held and "rule.79.held" not in skip else 0)
         rule("79", MODE_ORDER.index(p["to"]) >= floor, "payload.to")
 
 
