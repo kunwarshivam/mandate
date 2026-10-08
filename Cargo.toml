@@ -22,6 +22,7 @@ mandate-modelhost = { path = "crates/mandate-modelhost", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-risk = { path = "crates/mandate-risk", version = "0.0.0" }
 mandate-runtime = { path = "crates/mandate-runtime", version = "0.0.0" }
+mandate-rh-sim = { path = "crates/mandate-rh-sim", version = "0.0.0" }
 mandate-research = { path = "crates/mandate-research", version = "0.0.0" }
 mandate-sim = { path = "crates/mandate-sim", version = "0.0.0" }
 mandate-spec = { path = "crates/mandate-spec", version = "0.0.0" }
