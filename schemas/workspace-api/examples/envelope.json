@@ -33,9 +33,51 @@
   ],
   "Violation": [
     {
+      "kind": "schema",
       "path": "/owner_exit/0/bid",
-      "code": "invalid",
-      "message": "a decimal is a string"
+      "code": "non_canonical",
+      "message": "A decimal is a canonical string."
+    },
+    {
+      "kind": "rule",
+      "path": "/autonomy/delegations/0",
+      "code": "V-022",
+      "message": "A delegation needs a confirmed grant."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/autonomy",
+      "key": "auto_allowed",
+      "level": "workspace",
+      "value": true,
+      "ancestor_level": "platform",
+      "ancestor_value": false,
+      "message": "Not allowed above."
+    },
+    {
+      "kind": "policy",
+      "path": "/universe/asset_classes",
+      "key": "asset_classes",
+      "level": "mandate",
+      "value": [
+        "crypto",
+        "us_equity"
+      ],
+      "ancestor_level": "organization",
+      "ancestor_value": [
+        "us_equity"
+      ],
+      "message": "Not a subset of the organization's."
     }
   ],
   "Problem": [
@@ -47,7 +89,14 @@
       "effect": "none",
       "event_id": null,
       "retryable": false,
-      "violations": []
+      "violations": [
+        {
+          "kind": "schema",
+          "path": "/owner_exit/0/bid",
+          "code": "non_canonical",
+          "message": "A decimal is a canonical string."
+        }
+      ]
     },
     {
       "type": "about:blank",
@@ -88,5 +137,16 @@
       "artifact": "sha256:abababababababababababababababababababababababababababababababab",
       "ui_build": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
     }
+  ],
+  "PolicyLevel": [
+    "platform",
+    "mandate"
+  ],
+  "PolicyValue": [
+    "0.25",
+    true,
+    [
+      "paper"
+    ]
   ]
 }

@@ -99,5 +99,72 @@
     {
       "artifact": "sha256:abababababababababababababababababababababababababababababababab"
     }
+  ],
+  "Violation": [
+    {
+      "path": "/x",
+      "code": "invalid",
+      "message": "untagged"
+    },
+    {
+      "kind": "rule",
+      "path": "/x",
+      "code": "invalid",
+      "message": "not a V-code"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": 5000,
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "a number value"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "platform",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "platform has no ancestor"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "mandate",
+      "ancestor_value": "2500",
+      "message": "a mandate is no ancestor"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "message": "no ancestor value"
+    },
+    {
+      "kind": "schema",
+      "path": "risk",
+      "code": "type",
+      "message": "not a pointer"
+    }
+  ],
+  "PolicyLevel": [
+    "global"
+  ],
+  "PolicyValue": [
+    1.5,
+    {
+      "min": 1
+    }
   ]
 }

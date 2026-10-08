@@ -56,25 +56,111 @@
       ]
     },
     "Violation": {
-      "type": "object",
-      "required": [
-        "path",
-        "code",
-        "message"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "path": {
-          "type": "string"
+      "description": "One finding of a 422 or of validation (\u00a73.5, \u00a74.1 validate), shared with the validate read model. kind schema: the body's shape or canonical form; rule: a mandate V-rule; policy: a value looser than the nearest ancestor that sets it (mandate spec \u00a74.3, FR-1.5).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "path",
+            "code",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "schema"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(/([^/~]|~[01])*)*$"
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
         },
-        "code": {
-          "type": "string",
-          "minLength": 1
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "path",
+            "code",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "rule"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(/([^/~]|~[01])*)*$"
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^V-[0-9]{3}$"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
         },
-        "message": {
-          "type": "string"
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "path",
+            "key",
+            "level",
+            "value",
+            "ancestor_level",
+            "ancestor_value",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "policy"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(/([^/~]|~[01])*)*$"
+            },
+            "key": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "level": {
+              "enum": [
+                "organization",
+                "workspace",
+                "mandate"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PolicyValue"
+            },
+            "ancestor_level": {
+              "enum": [
+                "platform",
+                "organization",
+                "workspace"
+              ]
+            },
+            "ancestor_value": {
+              "$ref": "#/$defs/PolicyValue"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
         }
-      }
+      ]
     },
     "Problem": {
       "description": "RFC 9457 problem document (\u00a73.5). event_id is present exactly when effect is recorded or unknown; each code carries the status \u00a73.5's table gives it.",
@@ -439,6 +525,34 @@
           "$ref": "common.schema.json#/$defs/ContentRef"
         }
       }
+    },
+    "PolicyLevel": {
+      "description": "Mandate spec \u00a74.3's hierarchy, top to bottom.",
+      "enum": [
+        "platform",
+        "organization",
+        "workspace",
+        "mandate"
+      ]
+    },
+    "PolicyValue": {
+      "description": "A policy or mandate value as \u00a74.3 compares it: a number as a Decimal string, a permission or requirement as a boolean, a set as its sorted members.",
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        }
+      ]
     }
   }
 }
