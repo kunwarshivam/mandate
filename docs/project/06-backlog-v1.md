@@ -3098,6 +3098,18 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   OCO is 1; the first completes (Q1 = 2) and its legs activate, so sells are 11 + 1 + 2 = 14 against
   a position of 13. The fix counts held legs, sized to their entry, in every cap and sizing,
   re-placement included, and pins the arithmetic with a hand case.
+  Two more paths size the same way (#689's round-2 review): `passive_exit`'s rest OCO, reachable
+  without E5 whenever another agent's bracket is working, and `re_cover` → `re_place`. The
+  re-placement alone oversells by f1 once the bracket completes, with no second entry: it covers
+  B + f1, and the bracket's legs then sell Q1 against a position of B + Q1. E1's tests
+  ([DEC-532](decisions/DEC-532.md)) pin all four paths as pending hand cases under
+  `BEHAVIOUR_ONLY_TESTS` rows, each with the protected 10 and a bracket holding 4 of 10:
+  `an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs` (8, not 12),
+  `a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs` (10, not 14),
+  `a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs` (7, not 11) and
+  `a_re_cover_leaves_a_held_brackets_shares_to_its_legs` (2, not 6). The fix sizes each path on
+  the position less every working bracket entry's filled quantity whose legs are held, deletes
+  the rows and the `#[ignore]` lines, and covers the original exit-beside-activated-legs case above.
 - **E7-4 (stream K), E2 from E7-4 slice 7's tests correction ([DEC-506](decisions/DEC-506.md)
   item 8): an opening rests inside an unprotected interval.** Minimal script
   (`properties::no_resting_order_is_submitted_inside_an_unprotected_interval`):

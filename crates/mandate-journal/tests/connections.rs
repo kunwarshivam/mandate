@@ -1,4 +1,4 @@
-//! E7-17 (DEC-800; journal spec v0.19 §9.8): the connection's records on the control and account
+//! E7-17 (DEC-800; journal spec v0.20 §9.8): the connection's records on the control and account
 //! streams, through the journal's own draft check against the vectors' `connections` section.
 //! Every base and valid draft parses to its event type and version, and every invalid draft is
 //! refused with its reason at its path: the closed members, their types, and rules 19 and 54 to

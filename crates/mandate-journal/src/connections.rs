@@ -1,4 +1,4 @@
-//! The connection records journal spec v0.19 §9.8 closes (E7-17, DEC-800): on the control stream,
+//! The connection records journal spec v0.20 §9.8 closes (E7-17, DEC-800): on the control stream,
 //! `ConnectionEstablished` at version 2, `ConnectionRefused`, and `ConnectionCredentialRotated`; on
 //! the account stream, the executor's `ConnectionChecked`, `ConnectionStateChanged`, and
 //! `ConnectionCredentialRefreshed`, and its copies of the establishment (version 2 only) and of
