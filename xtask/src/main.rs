@@ -311,12 +311,13 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
 }
 
 /// The lint job over the repository at `root` (ADR-0001 ES-12): ShellCheck over its
-/// `.github/scripts/` (DEC-329), actionlint over its `.github/workflows/` (DEC-330), then
+/// `.github/scripts/` (DEC-329) and `deploy/` (the demo host's runbook, DEC-822), actionlint over its `.github/workflows/` (DEC-330), then
 /// `workspace_checks`, the checks that need the Cargo and uv workspaces, which `ci lint` passes as
 /// [`workspace_lint`]. The job takes the repository it runs in, so a fixture repository drives it
 /// and neither tool's result can be dropped without a test failing (DEC-331, the DEC-139 pattern).
 fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()> {
     shellcheck_scripts(&root.join(".github/scripts"))?;
+    shellcheck_scripts(&root.join("deploy"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
     workspace_checks()
 }
@@ -448,7 +449,8 @@ struct Finding {
 /// so that this source matches no rule. The palette rows prove the "Web palette ramp references"
 /// exception (the `lapis` token names contain "api"): the ramp row is allowed in the design-source
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
-/// reported too.
+/// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
+/// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -464,6 +466,11 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let palette = "web/src/lib/palette.ts";
     let ramp = "  \"lapis-soft\": \"ultramarine-100\",";
     let palette_key = format!("  \"api-key\": \"{page}\",");
+    let hex = "CC94B39C77AE7342A68B89628A682D308D4E5E73";
+    let bootstrap = "deploy/bootstrap.sh";
+    let fingerprint = format!("CLOUDFLARE_FINGERPRINT={hex}");
+    let not_fingerprint = format!("CLOUDFLARE_KEY={hex}");
+    let cloudflare = Some("cloudflare-api-key");
     vec![
         (fixture("page-1.json"), json.clone(), None),
         (fixture("requests.txt"), query.clone(), None),
@@ -486,6 +493,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (palette.to_owned(), ramp.to_owned(), None),
         ("stray-palette.ts".to_owned(), ramp.to_owned(), generic),
         (palette.to_owned(), palette_key, generic),
+        (bootstrap.to_owned(), fingerprint.clone(), None),
+        ("stray-fingerprint.sh".to_owned(), fingerprint, cloudflare),
+        (bootstrap.to_owned(), not_fingerprint, cloudflare),
     ]
 }
 
@@ -7576,12 +7586,16 @@ jq -r "$filter" "$src"
         fixture_workspace(&root)?;
         let scripts = root.join(".github/scripts");
         let workflows = root.join(".github/workflows");
+        let deploy = root.join("deploy");
         fs::create_dir_all(&scripts)?;
         fs::create_dir_all(&workflows)?;
-        fs::write(
-            scripts.join("clean.sh"),
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\"\n",
-        )?;
+        fs::create_dir_all(&deploy)?;
+        for dir in [&scripts, &deploy] {
+            fs::write(
+                dir.join("clean.sh"),
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\"\n",
+            )?;
+        }
         fs::write(
             workflows.join("clean.yml"),
             concat!(
@@ -7610,6 +7624,12 @@ jq -r "$filter" "$src"
             .err();
         fs::remove_file(scripts.join("planted.sh"))?;
 
+        fs::write(deploy.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
+        let deploy_shellcheck = lint(&root, || Ok(()))
+            .map_err(|err| format!("{err:#}"))
+            .err();
+        fs::remove_file(deploy.join("planted.sh"))?;
+
         fs::write(
             workflows.join("planted.yml"),
             concat!(
@@ -7630,6 +7650,12 @@ jq -r "$filter" "$src"
                 .as_deref()
                 .is_some_and(|err| err.contains("SC2086")),
             "a planted SC2086 fails the lint job naming the code, got {shellcheck:?}"
+        );
+        assert!(
+            deploy_shellcheck
+                .as_deref()
+                .is_some_and(|err| err.contains("SC2086")),
+            "a planted SC2086 under deploy/ fails the lint job too, got {deploy_shellcheck:?}"
         );
         assert!(
             actionlint
