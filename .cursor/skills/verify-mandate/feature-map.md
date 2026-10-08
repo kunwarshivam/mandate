@@ -321,8 +321,9 @@ crates.
   registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`),
   and the policy set and model registry that govern the run, DEC-534 (tests in
   `crates/mandate-shell/tests/governance.rs`);
-  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed E7-7 AAPL artifacts and
-  binds the bytes it checked, reads the GET-only broker preflight (including the trailing window's
+  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed artifacts and binds the
+  bytes it checked (`Artifacts::from_registered` takes them from the confirmed version and the
+  registered objects instead of files, Q1; tests in `crates/mandate-shell/tests/registered.rs`), reads the GET-only broker preflight (including the trailing window's
   IEX minute bars, DEC-471) and the liquidity facts into one `PaperFacts` snapshot, refuses any
   missing, stale, or ambiguous fact or a non-clean account, and assembles the trusted run and
   executor contexts from that snapshot alone (DEC-470); `src/adapters.rs` the production adapters:
@@ -501,13 +502,16 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 - **Code:** `mandate-mcp`: `crates/mandate-mcp/src/endpoint.rs` (`PinnedEndpoint`: `https` on the
   pinned host only, plain `http` only to a loopback literal in the crate's own test build),
   `crates/mandate-mcp/src/budget.rs` (`RateBudget`: the ordinary bucket and the reserved one only
-  risk-reducing calls draw on), `crates/mandate-mcp/src/error.rs` (`McpError`, and `ServerText`,
-  which has no `Display` and whose `Debug` withholds what the server sent).
+  risk-reducing calls draw on), `crates/mandate-mcp/src/transport.rs` (`McpTransport`: one `POST`
+  per message, the `Mcp-Session-Id` carried, no redirect followed, bounded timeouts and answer size,
+  and the injected `Monotonic` clock), `crates/mandate-mcp/src/error.rs` (`McpError`, and
+  `ServerText`, which has no `Display` and whose `Debug` withholds what the server sent).
 - **Tests:** in-crate where a loopback server is needed, since loopback is accepted only in the
   crate's own test build: `crates/mandate-mcp/src/tests/endpoint.rs`,
   `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
   loopback), `crates/mandate-mcp/src/tests/budget.rs` (an oracle that steps one refill period at a
-  time), `crates/mandate-mcp/src/tests/errors.rs`.
+  time), `crates/mandate-mcp/src/tests/server.rs` (the scripted loopback server),
+  `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/errors.rs`.
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
 
 ## Risk gate
@@ -1316,6 +1320,32 @@ proves each pending test fails on them (DEC-110).
   clock's range, a numeric `sub`, an empty `kid`, and the key set's exact `Debug`),
   all live.
 - **Run:** `cargo nextest run -p mandate-authn`.
+## Identity: roles, the permission matrix, and the authorization step (E9-2)
+
+- **Spec:** identity spec §3 to §5, §4.2's matrix and its grammar (DEC-641), §4.5's authorization
+  step, the context contract (DEC-642), and the refusal codes (DEC-643); ID-2, ID-8, ID-13.
+- **Code:** `mandate-identity`, `crates/mandate-identity/` (layer 1, safety-critical, pure):
+  `src/lib.rs` (`authorize`, `change_roles`, `Authorized`, `TenantContext`, the sealed `Tenant`
+  and `MembershipLookup`, `MembershipQuery`, `Session`, `Membership`, `Refusal`, `ClientScope`,
+  `StepUpActionKind`, `StepUpEvidence`) and `src/permission.rs` (one `Permission` per §4.2 row).
+  Tests PR: `authorize` and `change_roles` are stubs.
+- **Tests:** in the crate, because its session, membership, and lookup types are sealed to it:
+  `crates/mandate-identity/src/tests/matrix.rs` (ID-2 and the failed membership read, pending
+  E9-2: every role set, membership state, cool-off, session kind, principal kind, permission, and
+  scope against §4.2 parsed from `docs/specs/identity.md` at test time by the grammar its doc
+  states; the grammar check is live), with the hand-written row map in
+  `crates/mandate-identity/src/tests/rows.rs` and the test doubles in
+  `crates/mandate-identity/src/tests/mod.rs`; `crates/mandate-identity/src/tests/wire.rs` (each
+  refusal's code, and the step-up kinds and client scopes read from workspace API §3.6 and §3.8,
+  live); and the `compile_fail` doctests in `src/lib.rs` (a `TenantContext` cannot be built,
+  defaulted, or cloned, nor `Tenant` implemented, outside the crate), with their in-crate control.
+- **Run:** `cargo nextest run -p mandate-identity --run-ignored all` and
+  `cargo test -p mandate-identity --doc`.
+- **Seal and test support:** `mandate-identity-seal` (layer 0, safety-critical; the `Seal` token
+  and `LookupSeal`, closed by its `allowed_dependents` list in `xtask/layers.toml`, which
+  `cargo xtask layers` checks, DEC-642 item 7) and `mandate-identity-testkit` (layer 11, so only
+  dev-dependencies reach it, and `dev_only` in `xtask/layers.toml`; `StaticLookup`, `FailingLookup`, `session`, `membership`; DEC-645).
+  The ULID text codecs are pending in `crates/mandate-identity/src/tests/ulid.rs`.
 
 ## Simulated Robinhood broker (E7-25)
 

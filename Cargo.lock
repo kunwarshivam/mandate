@@ -1434,6 +1434,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-identity"
+version = "0.0.0"
+dependencies = [
+ "mandate-identity-seal",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-identity-seal"
+version = "0.0.0"
+
+[[package]]
+name = "mandate-identity-testkit"
+version = "0.0.0"
+dependencies = [
+ "mandate-identity",
+ "mandate-identity-seal",
+ "mandate-time",
+]
+
+[[package]]
 name = "mandate-journal"
 version = "0.0.0"
 dependencies = [
