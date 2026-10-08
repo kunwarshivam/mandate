@@ -1,13 +1,16 @@
 //! The deployment input from the control stream (E19-11, DEC-505; the brief's slice D3, part a):
-//! each refusal E19-11 lists, the model registry present for V-007 (X-7), and the two facts the run
-//! supplies. The stream is built here, record by record, in the shapes of journal spec §9.2's
-//! vectors, around the E7-7 paper mandate; every expected value is read from those records.
+//! each refusal E19-11 lists, the model registry present for V-007 (X-7), the connection fact the
+//! run supplies, and V-002 left to the second phase, on the preflight's equity. The stream is built
+//! here, record by record, in the shapes of journal spec §9.2's vectors, around the E7-7 paper
+//! mandate; every expected value is read from those records.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, to_canonical};
 use mandate_num::Usd;
-use mandate_shell::control::{ControlRecord, DeploymentRefusal, RunFacts, confirmed_version};
+use mandate_shell::control::{
+    ConfirmedVersion, ControlRecord, DeploymentRefusal as Refusal, RunFacts, confirmed_version,
+};
 use mandate_spec::context::{AgentId, Membership};
 use mandate_spec::{Mandate, Violation};
 use mandate_time::Date;
@@ -90,14 +93,30 @@ impl Stream {
         Self::of(&json(MANDATE), &envelope())
     }
 
+    /// Record `index`'s payload as canonical text.
+    fn text(&self, index: usize) -> String {
+        String::from_utf8(to_canonical(&self.records[index].payload)).unwrap()
+    }
+
+    /// The stream with `from` replaced by `to` in record `index`'s payload.
+    fn edit(mut self, index: usize, from: &str, to: &str) -> Self {
+        self.records[index].payload = json(&self.text(index).replace(from, to));
+        self
+    }
+
     fn then(mut self, event_type: &str, payload: &str) -> Self {
         let seq = self.records.last().map_or(1, |r| r.seq + 1);
         self.records.push(record(seq, event_type, payload));
         self
     }
 
-    fn read(&self) -> Result<mandate_shell::control::ConfirmedVersion, DeploymentRefusal> {
+    /// Phase 1, which takes no equity.
+    fn read(&self) -> Result<ConfirmedVersion, Refusal> {
         confirmed_version(&self.records, &self.store, &run())
+    }
+
+    fn refused(&self) -> Option<Refusal> {
+        self.read().err()
     }
 }
 
@@ -105,7 +124,6 @@ fn run() -> RunFacts {
     RunFacts {
         agent: AgentId::new(AGENT),
         validation_date: Date::parse("2026-10-07").unwrap(),
-        account_equity_usd: Usd::parse("100000").unwrap(),
         membership: Membership {
             workspace_users: 1,
             approver_users: 1,
@@ -113,15 +131,13 @@ fn run() -> RunFacts {
     }
 }
 
-fn violations(rules: &[Violation]) -> Result<(), DeploymentRefusal> {
-    Err(DeploymentRefusal::Violations(
-        rules.iter().copied().collect(),
-    ))
+fn violations(rules: &[Violation]) -> Option<Refusal> {
+    Some(Refusal::Violations(rules.iter().copied().collect()))
 }
 
-/// The input is the deployed version: its digest, the stored document parsed, and a context with
-/// the registry present (X-7), every envelope path confirmed, the run's equity, and `paper` for a
-/// connection the stream says nothing about (DEC-505 items 1 and 3).
+/// The input is the deployed version, with no equity given: its digest, the stored document
+/// parsed, and a context with the registry present (X-7), every envelope path confirmed, and `paper`
+/// for a connection the stream says nothing about (DEC-505 items 1 and 3).
 #[test]
 #[ignore = "pending E19-11"]
 fn the_input_is_the_deployed_confirmed_version() {
@@ -133,7 +149,6 @@ fn the_input_is_the_deployed_confirmed_version() {
     assert_eq!(input.mandate, Mandate::parse(&json(MANDATE)).unwrap());
     let registered = input.context.registry.as_ref().map(BTreeMap::len);
     assert_eq!(registered, Some(1), "the one model_version registration");
-    assert_eq!(input.context.account_equity_usd, run().account_equity_usd);
     let paper = Some(mandate_domain::Environment::Paper);
     assert_eq!(input.context.connection_environment, paper);
 }
@@ -141,26 +156,15 @@ fn the_input_is_the_deployed_confirmed_version() {
 #[test]
 #[ignore = "pending E19-11"]
 fn without_a_deployment_of_this_agent_there_is_no_input() {
-    let deployed = Stream::deployed();
-    let version = Ok(deployed.version);
-    assert_eq!(deployed.read().map(|i| i.version), version, "with it");
+    assert_eq!(Stream::deployed().refused(), None, "with it");
     let mut stream = Stream::deployed();
     stream.records.retain(|r| r.event_type != "AgentDeployed");
+    assert_eq!(stream.refused(), Some(Refusal::NotDeployed));
+    let only_other = Stream::deployed().edit(3, AGENT, "agent_other");
     assert_eq!(
-        stream.read().map(|_| ()),
-        Err(DeploymentRefusal::NotDeployed)
-    );
-    let other = Stream::deployed();
-    let other = other.records[3].payload.clone();
-    let text = String::from_utf8(to_canonical(&other))
-        .unwrap()
-        .replace(AGENT, "agent_other");
-    let stream = Stream::deployed().then("AgentDeployed", &text);
-    let mut only_other = stream;
-    only_other.records.remove(3);
-    assert_eq!(
-        only_other.read().map(|_| ()),
-        Err(DeploymentRefusal::NotDeployed)
+        only_other.refused(),
+        Some(Refusal::NotDeployed),
+        "another's"
     );
 }
 
@@ -174,16 +178,11 @@ fn a_stopped_agent_refuses_until_it_is_deployed_again() {
     );
     let other = stop.replace(AGENT, "agent_other");
     let others = Stream::deployed().then("AgentStopped", &other);
-    let deployed = Ok(others.version);
-    assert_eq!(
-        others.read().map(|i| i.version),
-        deployed,
-        "another agent's stop"
-    );
+    assert_eq!(others.refused(), None, "another agent's stop");
     let stopped = Stream::deployed().then("AgentStopped", &stop);
-    assert_eq!(stopped.read().map(|_| ()), Err(DeploymentRefusal::Stopped));
-    let deploy = to_canonical(&stopped.records[3].payload);
-    let again = stopped.then("AgentDeployed", &String::from_utf8(deploy).unwrap());
+    assert_eq!(stopped.refused(), Some(Refusal::Stopped));
+    let deploy = stopped.text(3);
+    let again = stopped.then("AgentDeployed", &deploy);
     assert_eq!(again.read().map(|i| i.version), Ok(again.version));
 }
 
@@ -198,57 +197,42 @@ fn the_latest_deployment_counts_and_its_document_must_be_stored_intact() {
         "6".repeat(64),
     );
     let missing = Stream::deployed().then("AgentDeployed", &later);
-    assert_eq!(
-        missing.read().map(|_| ()),
-        Err(DeploymentRefusal::DocumentMissing)
-    );
+    assert_eq!(missing.refused(), Some(Refusal::DocumentMissing));
     let mut corrupt = Stream::deployed();
-    corrupt
-        .store
-        .values_mut()
-        .for_each(|bytes| bytes.push(b' '));
-    assert_eq!(
-        corrupt.read().map(|_| ()),
-        Err(DeploymentRefusal::DocumentCorrupt)
-    );
+    corrupt.store.values_mut().for_each(|b| b.push(b' '));
+    assert_eq!(corrupt.refused(), Some(Refusal::DocumentCorrupt));
 }
 
-/// A path the owner did not confirm (V-020; `/name`, which no other rule reads), a model
-/// registered under another hash or not at all (V-007), and a connection revoked or established as
-/// `live` (V-001) each refuse.
+/// A path the owner did not confirm (V-020; `/name`, which no other rule reads), a confirmation of
+/// another version or none (V-020 and V-022), a model registered under another hash or not at all
+/// (V-007), and a connection revoked or established as `live` (V-001) each refuse.
 #[test]
 #[ignore = "pending E19-11"]
 fn every_v_rule_the_stream_decides_refuses() {
     let but_name: Vec<&str> = envelope().into_iter().filter(|p| *p != "name").collect();
     let unconfirmed = Stream::of(&json(MANDATE), &but_name);
-    assert_eq!(
-        unconfirmed.read().map(|_| ()),
-        violations(&[Violation::V020])
-    );
+    assert_eq!(unconfirmed.refused(), violations(&[Violation::V020]));
+    let version = Stream::deployed().version.to_string();
+    let elsewhere = Stream::deployed().edit(2, &version, &"9".repeat(64));
+    let unconfirmed = violations(&[Violation::V020, Violation::V022]);
+    assert_eq!(elsewhere.refused(), unconfirmed, "another version's");
+    let mut never = Stream::deployed();
+    never.records.remove(2);
+    assert_eq!(never.refused(), unconfirmed, "no confirmation");
     let mut unregistered = Stream::deployed();
     unregistered.records.remove(0);
-    assert_eq!(
-        unregistered.read().map(|_| ()),
-        violations(&[Violation::V007])
-    );
-    let mut mismatched = Stream::deployed();
-    let other = to_canonical(&mismatched.records[0].payload);
-    let other = String::from_utf8(other)
-        .unwrap()
-        .replace("4f3559", "000000");
-    mismatched.records[0].payload = json(&other);
-    assert_eq!(
-        mismatched.read().map(|_| ()),
-        violations(&[Violation::V007])
-    );
+    let v007 = violations(&[Violation::V007]);
+    assert_eq!(unregistered.refused(), v007, "unregistered");
+    let mismatched = Stream::deployed().edit(0, "4f3559", "000000");
+    assert_eq!(mismatched.refused(), v007, "another hash");
     let revoked = format!(r#"{{"connection_id":"{CONNECTION}"}}"#);
     let revoked = Stream::deployed().then("ConnectionRevoked", &revoked);
-    assert_eq!(revoked.read().map(|_| ()), violations(&[Violation::V001]));
+    assert_eq!(revoked.refused(), violations(&[Violation::V001]));
     let live = format!(
         r#"{{"broker":"alpaca","connection_id":"{CONNECTION}","environment":"live","scopes":["trading"]}}"#
     );
     let live = Stream::deployed().then("ConnectionEstablished", &live);
-    assert_eq!(live.read().map(|_| ()), violations(&[Violation::V001]));
+    assert_eq!(live.refused(), violations(&[Violation::V001]));
 }
 
 /// A `live` mandate is refused before anything else is read about it.
@@ -256,38 +240,40 @@ fn every_v_rule_the_stream_decides_refuses() {
 #[ignore = "pending E19-11"]
 fn a_live_mandate_is_refused() {
     let paper = Stream::deployed();
-    assert_eq!(
-        paper.read().map(|i| i.version),
-        Ok(paper.version),
-        "the paper document"
-    );
+    assert_eq!(paper.refused(), None, "the paper document");
     let live = json(&MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#));
     let stream = Stream::of(&live, &envelope());
-    assert_ne!(
-        stream.version,
-        Stream::deployed().version,
-        "the edit changed the document"
-    );
-    assert_eq!(stream.read().map(|_| ()), Err(DeploymentRefusal::Live));
+    assert_ne!(stream.version, paper.version, "the edit changed it");
+    assert_eq!(stream.refused(), Some(Refusal::Live));
+}
+
+/// V-002 is phase 2's (DEC-505 item 3): the version phase 1 confirmed with no equity is refused on
+/// a preflight equity below the allocation, and carries an equity that covers it.
+#[test]
+#[ignore = "pending E19-11"]
+fn v_002_refuses_only_on_the_preflight_equity() {
+    let input = Stream::deployed().read().unwrap();
+    let usd = |text| Usd::parse(text).unwrap();
+    let short = input.clone().with_equity(usd("999.99")).err();
+    assert_eq!(short, violations(&[Violation::V002]), "below 1000");
+    let input = input.with_equity(usd("1000")).unwrap();
+    assert_eq!(input.context.account_equity_usd, usd("1000"));
 }
 
 /// Each refusal has its own stable code (ADR-0001 ES-09); a live test for the mutation gate.
 #[test]
 fn every_deployment_refusal_has_its_own_code() {
     let rows = [
-        (
-            DeploymentRefusal::Unimplemented { story: "E19-11" },
-            "unimplemented",
-        ),
-        (DeploymentRefusal::NotDeployed, "not_deployed"),
-        (DeploymentRefusal::Stopped, "stopped"),
-        (DeploymentRefusal::DocumentMissing, "document_missing"),
-        (DeploymentRefusal::DocumentCorrupt, "document_corrupt"),
-        (DeploymentRefusal::StoreUnavailable, "store_unavailable"),
-        (DeploymentRefusal::DocumentUnreadable, "document_unreadable"),
-        (DeploymentRefusal::Live, "live"),
-        (DeploymentRefusal::Fold, "fold"),
-        (DeploymentRefusal::Violations(BTreeSet::new()), "violations"),
+        (Refusal::Unimplemented { story: "E19-11" }, "unimplemented"),
+        (Refusal::NotDeployed, "not_deployed"),
+        (Refusal::Stopped, "stopped"),
+        (Refusal::DocumentMissing, "document_missing"),
+        (Refusal::DocumentCorrupt, "document_corrupt"),
+        (Refusal::StoreUnavailable, "store_unavailable"),
+        (Refusal::DocumentUnreadable, "document_unreadable"),
+        (Refusal::Live, "live"),
+        (Refusal::Fold, "fold"),
+        (Refusal::Violations(BTreeSet::new()), "violations"),
     ];
     for (refusal, code) in rows {
         assert_eq!(refusal.code(), code, "{refusal:?}");

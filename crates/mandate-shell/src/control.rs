@@ -2,8 +2,10 @@
 //! read once, and the artifact store, never from a file (E19-11, slice D3, [DEC-505](../../../docs/project/decisions/DEC-505.md)).
 //! The latest `AgentDeployed` for the agent with no `AgentStopped` after it names the version;
 //! the stored document must re-hash to it; `ValidationContext::from_journal` folds the facts, so
-//! the model registry is present and V-007 is checked (X-7). The run supplies the equity V-002
-//! reads, and the connection is `paper` only when the stream holds no fact about it (DEC-505 item 3).
+//! the model registry is present and V-007 is checked (X-7). The connection is `paper` only when
+//! the stream holds no fact about it (DEC-505 item 3). Two phases, as the brief orders them: every
+//! check but V-002 before any credential is read, then V-002 on the equity the GET-only preflight
+//! read.
 
 use std::collections::BTreeSet;
 
@@ -29,14 +31,12 @@ pub struct ControlRecord {
 pub struct RunFacts {
     pub agent: AgentId,
     pub validation_date: Date,
-    /// The account equity the run's GET-only preflight read from the broker (V-002).
-    pub account_equity_usd: Usd,
     /// One user and one approver, the founder (DEC-505 item 3).
     pub membership: Membership,
 }
 
 /// The version a paper run deploys: its digest, the stored document that re-hashes to it, and the
-/// context every V-rule passed in.
+/// context every V-rule but V-002 passed in. Its equity is zero until [`Self::with_equity`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmedVersion {
     pub version: Digest,
@@ -44,7 +44,8 @@ pub struct ConfirmedVersion {
     pub context: ValidationContext,
 }
 
-/// Why no deployment input could be built. Each is a refusal before any credential is read.
+/// Why no deployment input could be built. Each but V-002's is a refusal before any credential
+/// is read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DeploymentRefusal {
     /// The body of every stub in the tests PR (DEC-77).
@@ -88,8 +89,8 @@ impl DeploymentRefusal {
     }
 }
 
-/// The confirmed version `run.agent` is deployed with, from `records` and the documents in
-/// `store`, or why there is none.
+/// Phase 1: the confirmed version `run.agent` is deployed with, from `records` and the documents
+/// in `store`, or why there is none. It needs no credential.
 pub fn confirmed_version(
     records: &[ControlRecord],
     store: &dyn ArtifactSource,
@@ -97,4 +98,13 @@ pub fn confirmed_version(
 ) -> Result<ConfirmedVersion, DeploymentRefusal> {
     let _ = (records, store, run);
     Err(DeploymentRefusal::Unimplemented { story: "E19-11" })
+}
+
+impl ConfirmedVersion {
+    /// Phase 2: V-002 on the account equity the run's GET-only preflight read from the broker,
+    /// which the returned context carries.
+    pub fn with_equity(self, account_equity_usd: Usd) -> Result<Self, DeploymentRefusal> {
+        let _ = (self, account_equity_usd);
+        Err(DeploymentRefusal::Unimplemented { story: "E19-11" })
+    }
 }
