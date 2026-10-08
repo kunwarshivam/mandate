@@ -1386,6 +1386,7 @@ dependencies = [
  "mandate-num",
  "mandate-time",
  "proptest",
+ "secrecy",
  "serde",
  "serde_json",
  "sqlx",

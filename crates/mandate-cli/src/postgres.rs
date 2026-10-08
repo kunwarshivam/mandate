@@ -2,7 +2,6 @@
 //! DEC-520). Every append is J0's artifact-aware one (DEC-510), and the commands D1, D2 and V0 add
 //! flatten [`JournalArgs`].
 
-use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -10,30 +9,22 @@ use mandate_artifacts_fs::FsArtifactStore;
 use mandate_journal::{AppendOutcome, Head, StoredEvent, StreamId};
 use mandate_journal_pg::PgJournal;
 use mandate_time::UtcNanos;
+use secrecy::SecretString;
 use tokio::runtime::Runtime;
 
 use crate::control::{ControlError, ControlJournal};
 
 /// Where a control command reads and appends. The DSN carries no password: sqlx reads one from
-/// `PGPASSWORD` or `~/.pgpass`, and neither [`Debug`](fmt::Debug) nor any error prints the DSN
-/// (`AGENTS.md` rule 7; DEC-520).
-#[derive(Clone, clap::Args)]
+/// `PGPASSWORD` or `~/.pgpass`. The DSN is a [`SecretString`], so `Debug` cannot print it, and it
+/// is exposed only to open the journal; no error prints it (`AGENTS.md` rule 7; DEC-520).
+#[derive(Clone, Debug, clap::Args)]
 pub struct JournalArgs {
     /// The workspace journal's Postgres DSN, without a password (set PGPASSWORD or ~/.pgpass).
     #[arg(long, value_name = "DSN")]
-    pub journal: String,
+    pub journal: SecretString,
     /// The root directory of the artifact store the journal's records name.
     #[arg(long, value_name = "DIR")]
     pub store: PathBuf,
-}
-
-impl fmt::Debug for JournalArgs {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("JournalArgs")
-            .field("journal", &"<not shown>")
-            .field("store", &self.store)
-            .finish()
-    }
 }
 
 /// The workspace's Postgres journal and its artifact store as a [`ControlJournal`]. It owns a

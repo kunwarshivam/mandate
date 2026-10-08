@@ -31,6 +31,7 @@ use mandate_journal::AppendOutcome::{self, AlreadyCommitted, Committed, HeadMism
 use mandate_journal::{ArtifactRef, ArtifactStore, InvalidReason, MemoryJournal, StreamId};
 use mandate_journal_pg::APP_ROLE;
 use mandate_time::UtcNanos;
+use secrecy::ExposeSecret;
 use support::{TestDb, URL_VAR};
 
 const CONTROL: &str = "ctl:ws_01J8Z2";
@@ -40,7 +41,7 @@ type Objects = std::collections::BTreeMap<mandate_canon::Digest, Vec<u8>>;
 
 fn args(journal: &str, store: &Path) -> JournalArgs {
     JournalArgs {
-        journal: journal.to_owned(),
+        journal: journal.into(),
         store: store.to_owned(),
     }
 }
@@ -249,10 +250,8 @@ fn journal_and_store_are_both_required() {
         .map_err(|e| e.to_string())
         .unwrap()
         .target;
-    assert_eq!(
-        (target.journal, target.store),
-        ("postgres://h/j".into(), "s".into())
-    );
+    let journal = target.journal.expose_secret();
+    assert_eq!((journal, target.store), ("postgres://h/j", "s".into()));
     for given in [["--store", "s"], ["--journal", "postgres://h/j"]] {
         let missing = Command::try_parse_from(["mandate"].into_iter().chain(given));
         let kind = missing.err().map(|e| e.kind());
