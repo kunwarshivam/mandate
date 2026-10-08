@@ -4460,3 +4460,16 @@ From the round-6 review of the flatten adapter's implementation PR ([#596](https
   `StoredEvent::draft()` that also checks the columns) is private, so the flatten adapter holds a
   second copy of the three assigned-field names, the digest form, and the re-seal, the exact
   things that must not drift from `seal`.
+
+From lane L4's read-model shapes (workspace API §4.10; [DEC-740](decisions/DEC-740.md), [DEC-741](decisions/DEC-741.md)):
+
+- **Chat quoting gap** (owner: inference / E10 chat). Chat replies (workspace API spec §4.6) have
+  no model-registry entry or purpose in the inference spec (§3's purposes are `research`,
+  `llm_signal`, `fast_signal`, and `compiler`). `QuotedContent` requires `model_id` and
+  `model_version` (DEC-740 item 8), so no chat text can be quoted until the inference spec adds a
+  `chat` purpose and registry entry. Until then the web app shows no quoted chat text.
+- **Account equity series read model** (owner: L4, E11-9). The account equity chart needs a series
+  read model. Until it exists, S3 shows the single figure from `GET /connections/{id}`
+  (DEC-737 item 8).
+- **`stop_all` and `close_all` over the API** (owner: L4, E11-2). The connection-scope record
+  screens still use the fixture runtime after S5.
