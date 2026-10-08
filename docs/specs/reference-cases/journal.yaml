@@ -10334,10 +10334,10 @@ approval_answers:
     expect:
       outcome: Valid
 broker_profile:
-  spec: docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)
+  spec: docs/specs/journal.md v0.20 §9 and rule 21b (DEC-531 item 4, DEC-630)
   artifacts:
   - name: alpaca
-    ref: sha256:0a63e3ec2cb40d38bb159d0b9f528510a2acf06d1d0f56fe08011d8380bbea73
+    ref: sha256:6408fbbc116a3cd591c9a0377079a6cac0104766974b60a93ab7b1f0b8b8315c
     object:
       kind: broker_profile
       profile_version: 1
@@ -10405,9 +10405,7 @@ broker_profile:
           times_in_force:
           - day
           - gtc
-          protection_forms:
-          - bracket
-          - oco
+          protection_forms: []
         - &id015
           order_type: stop_limit
           quantity_form: fractional
@@ -10426,15 +10424,12 @@ broker_profile:
           times_in_force:
           - day
           - gtc
-          protection_forms:
-          - bracket
-          - oco
-          - stop_limit
+          protection_forms: []
       idempotency:
         client_order_id: true
         retry: idempotent
         query_by_client_order_id: true
-    canonical: '{"idempotency":{"client_order_id":true,"query_by_client_order_id":true,"retry":"idempotent"},"kind":"broker_profile","profile_version":1,"rows":[{"asset_class":"us_equity","cells":[{"order_type":"limit","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"limit","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"limit","protection_forms":["bracket","oco"],"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"market","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"market","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"market","protection_forms":["bracket"],"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"stop","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"stop","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"stop","protection_forms":["bracket","oco"],"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"stop_limit","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"stop_limit","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"stop_limit","protection_forms":["bracket","oco","stop_limit"],"quantity_form":"whole","times_in_force":["day","gtc"]}],"session":"regular"}]}'
+    canonical: '{"idempotency":{"client_order_id":true,"query_by_client_order_id":true,"retry":"idempotent"},"kind":"broker_profile","profile_version":1,"rows":[{"asset_class":"us_equity","cells":[{"order_type":"limit","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"limit","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"limit","protection_forms":["bracket","oco"],"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"market","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"market","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"market","protection_forms":["bracket"],"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"stop","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"stop","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"stop","protection_forms":[],"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"stop_limit","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"stop_limit","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"stop_limit","protection_forms":[],"quantity_form":"whole","times_in_force":["day","gtc"]}],"session":"regular"}]}'
   valid_drafts:
     profile_registration:
       envelope_version: 1
@@ -10455,13 +10450,13 @@ broker_profile:
       config_refs: {}
       payload:
         kind: broker_profile
-        content_hash: sha256:0a63e3ec2cb40d38bb159d0b9f528510a2acf06d1d0f56fe08011d8380bbea73
+        content_hash: sha256:6408fbbc116a3cd591c9a0377079a6cac0104766974b60a93ab7b1f0b8b8315c
         model_id: null
         model_version: null
         params: []
         admits_instruments: null
       artifact_refs:
-      - sha256:0a63e3ec2cb40d38bb159d0b9f528510a2acf06d1d0f56fe08011d8380bbea73
+      - sha256:6408fbbc116a3cd591c9a0377079a6cac0104766974b60a93ab7b1f0b8b8315c
       pii_refs: []
   invalid_drafts:
   - name: profile_registration_version_2

@@ -3046,7 +3046,7 @@ def production_artifact_problems(artifact: dict) -> list[str]:
 def production_registration_violations(
     draft: dict, stored: dict[str, dict], skip: frozenset[str] = frozenset()
 ) -> list[Violation]:
-    """Rules 20, 21, 21a and (v0.19) 21b. `skip` seeds the broker-profile section's validator bugs."""
+    """Rules 20, 21, 21a and (v0.20) 21b. `skip` seeds the broker-profile section's validator bugs."""
     out = type_violations(ENVELOPE, draft, "", frozenset())
     if out:
         return out
@@ -3505,7 +3505,7 @@ def run_policy_overlay_mutants(section: dict, agent_section: dict) -> list[str]:
     return escaped
 
 
-# --------------------------------------------------------------------------- broker_profile (v0.19)
+# --------------------------------------------------------------------------- broker_profile (v0.20)
 
 PROFILE_MEMBERS = {"kind", "profile_version", "rows", "idempotency"}
 PROFILE_ROW_ENUMS = {
@@ -3523,14 +3523,16 @@ RETRY = ("idempotent", "not_idempotent", "unknown")
 
 def alpaca_profile() -> dict:
     """Trading spec §5.2's Alpaca rows as DEC-630 item 6's object: US equities in the regular session;
-    whole shares take `day` and `gtc` and every protective form an order of that type may sit in;
-    fractional and notional are `day` only and never in an OCO or bracket. Written here from the
-    rule, then compared with the bytes B1's own test pins (`crates/mandate-alpaca/tests/profile.rs`)."""
+    whole shares take `day` and `gtc`, and a cell lists the protective forms an order of that type
+    may be sent as (DEC-630 item 1): a market or limit entry as a bracket, a limit as an OCO; stop and
+    stop-limit orders as none. Fractional and notional are `day` only and never in an OCO or bracket.
+    Written here from the rule, then compared with the bytes B1's own test pins
+    (`crates/mandate-alpaca/tests/profile.rs`, #802)."""
     whole_protection = {
         "limit": ["bracket", "oco"],
         "market": ["bracket"],
-        "stop": ["bracket", "oco"],
-        "stop_limit": ["bracket", "oco", "stop_limit"],
+        "stop": [],
+        "stop_limit": [],
     }
     cells = []
     for order_type in PROFILE_CELL_ENUMS["order_type"]:
@@ -3554,24 +3556,23 @@ def alpaca_profile() -> dict:
 
 ALPACA_PROFILE_CANONICAL = (
     '{"idempotency":{"client_order_id":true,"query_by_client_order_id":true,"retry":"idempotent"},'
-    '"kind":"broker_profile","profile_version":1,"rows":[{"asset_class":"us_equity","cells":['
-    '{"order_type":"limit","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},'
-    '{"order_type":"limit","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},'
-    '{"order_type":"limit","protection_forms":["bracket","oco"],"quantity_form":"whole",'
-    '"times_in_force":["day","gtc"]},'
-    '{"order_type":"market","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},'
-    '{"order_type":"market","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},'
-    '{"order_type":"market","protection_forms":["bracket"],"quantity_form":"whole",'
-    '"times_in_force":["day","gtc"]},'
-    '{"order_type":"stop","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},'
+    '"kind":"broker_profile","profile_version":1,"rows":[{"asset_class":"us_equity",'
+    '"cells":[{"order_type":"limit","protection_forms":[],"quantity_form":"fractional",'
+    '"times_in_force":["day"]},{"order_type":"limit","protection_forms":[],"quantity_form":"notional",'
+    '"times_in_force":["day"]},{"order_type":"limit","protection_forms":["bracket","oco"],'
+    '"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"market",'
+    '"protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},'
+    '{"order_type":"market","protection_forms":[],"quantity_form":"notional",'
+    '"times_in_force":["day"]},{"order_type":"market","protection_forms":["bracket"],'
+    '"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"stop",'
+    '"protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},'
     '{"order_type":"stop","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},'
-    '{"order_type":"stop","protection_forms":["bracket","oco"],"quantity_form":"whole",'
-    '"times_in_force":["day","gtc"]},'
-    '{"order_type":"stop_limit","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},'
-    '{"order_type":"stop_limit","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},'
-    '{"order_type":"stop_limit","protection_forms":["bracket","oco","stop_limit"],"quantity_form":"whole",'
-    '"times_in_force":["day","gtc"]}'
-    '],"session":"regular"}]}'
+    '{"order_type":"stop","protection_forms":[],"quantity_form":"whole","times_in_force":["day",'
+    '"gtc"]},{"order_type":"stop_limit","protection_forms":[],"quantity_form":"fractional",'
+    '"times_in_force":["day"]},{"order_type":"stop_limit","protection_forms":[],'
+    '"quantity_form":"notional","times_in_force":["day"]},{"order_type":"stop_limit",'
+    '"protection_forms":[],"quantity_form":"whole","times_in_force":["day","gtc"]}],'
+    '"session":"regular"}]}'
 )
 
 
@@ -3642,7 +3643,7 @@ def profile_shape_problem(obj) -> str | None:
 
 
 def build_broker_profile_section(control_section: dict) -> dict:
-    """Journal spec v0.19 (DEC-531 item 4, DEC-630): a version-3 `ConfigSnapshotRegistered` of a
+    """Journal spec v0.20 (DEC-531 item 4, DEC-630): a version-3 `ConfigSnapshotRegistered` of a
     broker's capability profile, with the profile stored under its hash. Additive, so the
     `production_config_refs` cases and their counts stay as they are."""
     profile = alpaca_profile()
@@ -3679,7 +3680,7 @@ def build_broker_profile_section(control_section: dict) -> dict:
         return {"name": name, "base": "profile_registration", "changes": changes, "expect": {"reason": reason, "path": path}}
 
     return {
-        "spec": "docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)",
+        "spec": "docs/specs/journal.md v0.20 §9 and rule 21b (DEC-531 item 4, DEC-630)",
         "artifacts": [{"name": "alpaca", "ref": ref, "object": profile, "canonical": canon(profile)}],
         "valid_drafts": {"profile_registration": registration},
         "invalid_drafts": [
