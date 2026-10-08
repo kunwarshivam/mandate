@@ -1,7 +1,7 @@
 //! Every error has a stable code.
 
 use crate::ConnectError;
-use crate::record::ConnectionId;
+use crate::record::{ConnectionId, ConnectionState};
 
 #[test]
 fn every_error_has_its_stable_code() {
@@ -32,6 +32,14 @@ fn every_error_has_its_stable_code() {
             "invalid_record",
         ),
         (ConnectError::CheckRefused, "check_refused"),
+        (ConnectError::UnknownConnection, "unknown_connection"),
+        (
+            ConnectError::InvalidTransition {
+                from: ConnectionState::Revoked,
+                to: ConnectionState::Active,
+            },
+            "invalid_transition",
+        ),
         (
             ConnectError::Unimplemented { story: "E10-13" },
             "unimplemented",
@@ -40,4 +48,17 @@ fn every_error_has_its_stable_code() {
     for (error, code) in cases {
         assert_eq!(error.code(), code, "{error:?}");
     }
+}
+
+/// An error reaches an API response (API-11): it names a connection by its id as the journal
+/// writes it, never by a type's debug form.
+#[test]
+fn already_connected_names_the_connection_plainly() {
+    let error = ConnectError::AlreadyConnected {
+        existing: ConnectionId("conn_a".to_owned()),
+    };
+    assert_eq!(
+        error.to_string(),
+        "the account is already connected as conn_a"
+    );
 }

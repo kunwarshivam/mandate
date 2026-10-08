@@ -1,7 +1,7 @@
 //! Why a connect step refused. No variant carries a credential, a code, or broker text (CN-1),
 //! and none carries an account fingerprint: errors reach API responses (API-11).
 
-use crate::record::ConnectionId;
+use crate::record::{ConnectionId, ConnectionState};
 
 /// A refusal from the connect core.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -26,7 +26,7 @@ pub enum ConnectError {
     VaultUnavailable,
     #[error("the token endpoint failed")]
     EndpointFailed,
-    #[error("the account is already connected as {existing:?}")]
+    #[error("the account is already connected as {}", existing.as_str())]
     AlreadyConnected { existing: ConnectionId },
     #[error("a reconnect must keep its connection's broker and environment")]
     ReconnectMismatch,
@@ -42,6 +42,13 @@ pub enum ConnectError {
     InvalidRecord { member: &'static str },
     #[error("a permission check refused the credential")]
     CheckRefused,
+    #[error("no connection record has this id")]
+    UnknownConnection,
+    #[error("a connection does not move from {from:?} to {to:?} (connections spec §9.1)")]
+    InvalidTransition {
+        from: ConnectionState,
+        to: ConnectionState,
+    },
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -68,6 +75,8 @@ impl ConnectError {
             Self::InvalidPiiRef => "invalid_pii_ref",
             Self::InvalidRecord { .. } => "invalid_record",
             Self::CheckRefused => "check_refused",
+            Self::UnknownConnection => "unknown_connection",
+            Self::InvalidTransition { .. } => "invalid_transition",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }

@@ -139,12 +139,34 @@ impl AccountPiiRef {
 }
 
 /// The keyed hash of (broker, broker account id) the vault computes and returns (connections
-/// spec §3.1). It has no `Display` and its bytes stay in this crate; `Debug` prints no byte.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// spec §3.1). Its bytes stay in this crate: only the crate's vault boundary makes one, it is
+/// compared for equality and nothing else, `Debug` prints no byte, and it has no `Display`. The
+/// crate may depend on `thiserror` alone (`xtask/layers.toml`), so it cannot derive `serde`.
+///
+/// ```compile_fail
+/// let _ = mandate_connections::record::AccountFingerprint::from_vault_hash([0; 32]);
+/// ```
+///
+/// ```compile_fail
+/// fn shown(fingerprint: &mandate_connections::record::AccountFingerprint) -> String {
+///     format!("{fingerprint}")
+/// }
+/// ```
+///
+/// ```compile_fail
+/// fn ordered(a: &mandate_connections::record::AccountFingerprint, b: &mandate_connections::record::AccountFingerprint) -> bool {
+///     a < b
+/// }
+/// ```
+#[derive(Clone, PartialEq, Eq)]
 pub struct AccountFingerprint([u8; 32]);
 
 impl AccountFingerprint {
-    pub fn from_vault_hash(hash: [u8; 32]) -> Self {
+    #[allow(
+        dead_code,
+        reason = "the vault boundary (V1, DEC-692) is its first caller outside the tests"
+    )]
+    pub(crate) fn from_vault_hash(hash: [u8; 32]) -> Self {
         Self(hash)
     }
 }
@@ -170,28 +192,35 @@ pub struct NewRecord {
     pub terms_version: Option<String>,
 }
 
-/// One connection's record (connections spec §3). Its members are private: the fingerprint and
-/// the personal-data reference leave it only for the uniqueness check.
+/// One connection's record (connections spec §3). Its members are private: the fingerprint leaves
+/// it only for the uniqueness check, inside this crate, and the personal-data reference never
+/// leaves it but through the journal writer's [`AccountPiiRef::as_str`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionRecord {
-    connection_id: ConnectionId,
-    broker: Broker,
-    environment: Environment,
-    auth_kind: AuthKind,
-    scopes: BTreeSet<String>,
-    account_ref: AccountRef,
-    account_pii_ref: AccountPiiRef,
-    fingerprint: AccountFingerprint,
-    state: ConnectionState,
-    contract_hash: Option<String>,
-    terms_version: Option<String>,
+    pub(crate) connection_id: ConnectionId,
+    pub(crate) broker: Broker,
+    pub(crate) environment: Environment,
+    pub(crate) auth_kind: AuthKind,
+    pub(crate) scopes: BTreeSet<String>,
+    pub(crate) account_ref: AccountRef,
+    pub(crate) account_pii_ref: AccountPiiRef,
+    pub(crate) fingerprint: AccountFingerprint,
+    pub(crate) state: ConnectionState,
+    pub(crate) contract_hash: Option<String>,
+    pub(crate) terms_version: Option<String>,
 }
 
 impl ConnectionRecord {
     /// A new record, `Active`. Refused when it breaks connections spec §3 to §6:
     /// - an Alpaca API key that is not paper (`EnvironmentRefused`; DEC-441 item 3);
-    /// - an `auth_kind` the broker does not use, no scopes, or a `contract_hash` present exactly
-    ///   when the credential is not MCP (`InvalidRecord`).
+    /// - an `auth_kind` the broker does not use (`InvalidRecord { member: "auth_kind" }`): Alpaca
+    ///   an API key or OAuth, Robinhood MCP OAuth only, Kraken an API key only;
+    /// - `scopes` empty, or one that is empty or holds a character outside printable ASCII or a
+    ///   space (`scopes`): a scope is a broker's name for a grant or, for MCP, a tool;
+    /// - a `contract_hash` present exactly when the credential is not MCP, or not `sha256:` and 64
+    ///   lowercase hex digits (`contract_hash`; §6.2 rule 3);
+    /// - a `terms_version` on a broker without platform terms (any but Robinhood), or not
+    ///   `sha256:` and 64 lowercase hex digits (`terms_version`).
     pub fn new(new: NewRecord) -> Result<Self, ConnectError> {
         let _ = new;
         Err(ConnectError::Unimplemented { story: "E7-11" })
@@ -265,21 +294,32 @@ pub enum Admission {
     },
 }
 
-/// The deployment's connection records (CN-5).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The deployment's connection records (CN-5). It is not `Clone`: one registry is the one place a
+/// connect is admitted, and a copy would admit against a stale view.
+///
+/// ```compile_fail
+/// fn copied(registry: mandate_connections::record::Registry) -> (mandate_connections::record::Registry, mandate_connections::record::Registry) {
+///     (registry.clone(), registry)
+/// }
+/// ```
+#[derive(Debug, PartialEq, Eq)]
 pub struct Registry {
     pub(crate) records: Vec<ConnectionRecord>,
     fingerprint_key_rotating: bool,
 }
 
 impl Registry {
-    /// `fingerprint_key_rotating` is true while every fingerprint is being recomputed under a
-    /// new key (connections spec §3.1).
-    pub fn new(records: Vec<ConnectionRecord>, fingerprint_key_rotating: bool) -> Self {
-        Self {
-            records,
-            fingerprint_key_rotating,
-        }
+    /// The registry over stored records. `fingerprint_key_rotating` is true while every
+    /// fingerprint is being recomputed under a new key (connections spec §3.1). Refused when the
+    /// records already break CN-5: two with one `connection_id` (`InvalidConnectionId`), or two
+    /// with one fingerprint (`AlreadyConnected`, naming the first) or one `account_ref`
+    /// (`InvalidAccountRef`).
+    pub fn new(
+        records: Vec<ConnectionRecord>,
+        fingerprint_key_rotating: bool,
+    ) -> Result<Self, ConnectError> {
+        let _ = (records, fingerprint_key_rotating);
+        Err(ConnectError::Unimplemented { story: "E7-11" })
     }
 
     /// Check 4 (connections spec §8.1): refuses an account a record that is not revoked holds
@@ -292,13 +332,22 @@ impl Registry {
     }
 
     /// Adds a record, or replaces the revoked record a reconnect reuses, re-checking what
-    /// [`Registry::admit`] checks; a record whose id another holds is `InvalidConnectionId`.
+    /// [`Registry::admit`] checks. A record whose id another record holds, revoked or not, is
+    /// `InvalidConnectionId`; one whose fingerprint a revoked record holds must be that record's
+    /// reconnect (its id and `account_ref`, else `AlreadyConnected`; its broker and environment,
+    /// else `ReconnectMismatch`).
     pub fn insert(&mut self, record: ConnectionRecord) -> Result<(), ConnectError> {
         let _ = record;
         Err(ConnectError::Unimplemented { story: "E7-11" })
     }
 
-    /// Moves a record to `state`; `Revoked` frees its account for a reconnect only.
+    /// Moves a record to `state` (connections spec §9.1, journal spec §9.8 rule 60): `degraded`
+    /// and `suspended` from `active`; `active` and `suspended` from `degraded`; `active` from
+    /// `suspended` (after the owner's acknowledgment); and `revoked` from any of those three.
+    /// Every other move is `InvalidTransition`: `revoked` is terminal, since only a reconnect's
+    /// [`Registry::insert`] reuses the record, and a move to the state a record already holds
+    /// changes nothing, so a caller never journals a change that did not happen. An id no record
+    /// holds is `UnknownConnection`. `Revoked` frees its account for a reconnect only.
     pub fn set_state(
         &mut self,
         connection_id: &ConnectionId,
@@ -313,6 +362,16 @@ impl Registry {
         &self,
         connection_id: &ConnectionId,
     ) -> Result<Option<ConnectionView>, ConnectError> {
+        let _ = connection_id;
+        Err(ConnectError::Unimplemented { story: "E7-11" })
+    }
+
+    /// The `ConnectionEstablished` members of one record, if the deployment has it: after a
+    /// reconnect, the replacing record's.
+    pub fn established(
+        &self,
+        connection_id: &ConnectionId,
+    ) -> Result<Option<EstablishedMembers>, ConnectError> {
         let _ = connection_id;
         Err(ConnectError::Unimplemented { story: "E7-11" })
     }
