@@ -2,16 +2,27 @@
 
 | | |
 |---|---|
-| **Status** | v0.20 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.20 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.21 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.20 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.21 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `workspace_api` section of §9.8, and `client_actor` section of §3 and §9.9; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `workspace_api` section of §9.8, `client_actor` section of §3 and §9.9, and `hold` section of §9.10; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.21 ([DEC-672](../project/decisions/DEC-672.md)):** §9.10 closes the hold on new openings
+  ([DEC-191](../project/04-decision-log.md#decisions), [workspace API spec §4.2](workspace-api.md#42-deployments-and-the-agent-lifecycle-deployment-manager)).
+  `OwnerCommandIssued` is closed for its two new commands, `hold_openings` and `lift_hold`, and only
+  for them. The agent runtime's copies gain the hold at schema version 2: `AgentModeChanged` adds
+  `held` and the reasons `owner_hold` and `owner_lift_hold`, and `OwnerCommandRefused` adds the
+  command `lift_hold`. Rules 75 to 80: a client may hold and only a user lifts, a hold carries no
+  step-up, and the mode a copy leaves is never looser than the owner's pause or hold, so a resume
+  never clears a hold and a lift never clears a pause or a latched limit. Rule 68 admits a client's
+  `OwnerCommandIssued`, which rule 75 confines to `hold_openings`. Version 1 of both agent-stream
+  records stays registered and unchanged. The vectors gain a generated `hold` section and stay
+  version 3.
 - **v0.20 ([DEC-671](../project/decisions/DEC-671.md)):** §3's closed `actor.kind` set gains
   `client`, an owner-connected agent ([workspace API spec §3.3](workspace-api.md#33-authentication-and-sessions)
   item 4, [identity spec §12.2](identity.md)), whose actor alone carries `on_behalf_of`, the user it
@@ -281,8 +292,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `causation_id`, with the request's `requested_by` and `client_id`. The link crosses streams, so
   `append` does not check it, as for the other copies. The agent runtime copies each
   event addressed to its agent at most once, with `causation_id` pointing to it (`ApprovalResponded`,
-  `AgentModeChanged`, `OwnerExitRequested`, `KillSwitchActivated`, or, for a resume or Stop its
-step-up does not count, `OwnerCommandRefused`); the control stream's `event_id`
+  `AgentModeChanged`, `OwnerExitRequested`, `KillSwitchActivated`, or, for a resume, Stop, or lift
+of a hold its step-up does not count, `OwnerCommandRefused`; a hold and a lift are copied at
+schema version 2, §9.10); the control stream's `event_id`
   is the idempotency key. A user's kill switch is therefore a **command**
   to the stream owners, which journal `KillSwitchActivated` in their own streams.
 - A stream begins with `StreamOpened` (seq 1), which records the stream type, subject, and
@@ -330,12 +342,13 @@ their second party. Checked at append, after the envelope's types (reason `schem
     actor is exactly as before. The host CLI's `system` actor with `on_behalf_of` (identity spec
     §6.4) is not admitted by this version; the change that adds `HostCliRegistered` widens this rule.
 67. A `client` actor's `build` is `null` (`actor.build`): a client is external.
-68. A `client` actor is on the control stream, on `MandateDraftSaved`, `OwnerRequestSubmitted`, or
-    `RecordsAccessed` only (`actor.kind`), reported before the payload is read. These are its
-    `propose`, `request`, and `read` and `dry_run` scopes (workspace API §3.8). Whatever identity
-    spec ID-11 forbids a client (confirming, approving, acknowledging, owner commands, connections,
-    membership) is refused at append, and check 3 refuses an approval again at the runtime. A
-    client's `hold` command joins the list with the `hold_openings` command (DEC-672).
+68. A `client` actor is on the control stream, on `MandateDraftSaved`, `OwnerRequestSubmitted`,
+    `RecordsAccessed`, or `OwnerCommandIssued` only (`actor.kind`), reported before the payload is
+    read. These are its `propose`, `request`, `read` and `dry_run`, and `hold` scopes (workspace API
+    §3.8); rule 75 confines its `OwnerCommandIssued` to `hold_openings`. Whatever else identity spec
+    ID-11 forbids a client (confirming, approving, acknowledging, pausing and every other owner
+    command, connections, membership) is refused at append, and check 3 refuses an approval again
+    at the runtime.
 
 ## 4. Canonical serialization
 
@@ -564,7 +577,7 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 | `ApprovalResponded` | man | approval, verdict (`approved`, `skipped`; a legacy `denied` reads as `skipped`), responder (opaque) and role, result (`admitted`, `counted`, `refused`; a legacy `recorded` or `refused` reads as terminal), reason, effective time, step-up evidence (assertion ID, authentication time, method), separation-of-duties result, and for a grant that reaches check 7 the approver count and independence it applied (the stricter of the bound values and the policy overlay, [mandate spec §6.4](mandate.md#64-approvals)); `causation_id` is the `ApprovalResponseSubmitted`, copied at most once; the delegation shape chosen, if any, with the new mandate version and delegation id (mandate §6.4, §6.5) |
 | `ApprovalRevalidated` | man | approval, result (`act`, `skip`), reason, and every value compared: bound and current mandate version, mode, instrument restriction, `decided_by` then and now, dry-run verdict and reason, `m_req`, `m_now`, `band_bp` |
 | `ApprovalTimedOut`, `ApprovalCanceled` | man | approval, `on_timeout: skip`; approval, cancel reason (`version_applied`, `mode_tightened`, `owner_pause`, `owner_stop`, `kill_switch`; a legacy `rebound` is a cancellation for either of the first two) |
-| `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator |
+| `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator; `AgentModeChanged` version 2 also records the owner's hold (§9.10) |
 | `OwnerExitRequested` | man | instrument or scope, bid shown and confirmed, user (opaque), step-up evidence |
 | `OwnerCommandRefused` | — | A resume or Stop the runtime refused for its step-up ([mandate spec §6.1](mandate.md#61-purposes)): the command (`resume`, `stop`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`), and the effective time it was judged at; `causation_id` is the `OwnerCommandIssued`, copied at most once. The executor records a refused acknowledgment the same way on the account stream |
 
@@ -584,7 +597,7 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 | `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
 | `ApprovalResponseSubmitted` | — | The owner's answer to an approval ([mandate spec §6.4](mandate.md#64-approvals)): agent, approval, verdict (`approved`, `skipped`), content hash, `submitted_at`, step-up evidence (assertion ID, authentication time, method) or null, responder (opaque) and role |
 | `OwnerRequestSubmitted` | — | An owner's request for an order (workspace API §4.6): agent, instrument, side, optional size, who asked; closed in §9.8 |
-| `OwnerCommandIssued` | — | The owner's command ([mandate spec §6.1](mandate.md#61-purposes)): agent or kill-switch scope, command (`pause`, `resume`, `stop`, `kill_switch`, `owner_exit`), the release choice and warning shown for a Stop with release, the bid, bid size, and floor confirmed for an owner exit, `submitted_at`, step-up evidence or null, user (opaque) |
+| `OwnerCommandIssued` | — | The owner's command ([mandate spec §6.1](mandate.md#61-purposes)): agent or kill-switch scope, command (`pause`, `resume`, `stop`, `kill_switch`, `owner_exit`, and `hold_openings` and `lift_hold`, closed in §9.10), the release choice and warning shown for a Stop with release, the bid, bid size, and floor confirmed for an owner exit, `submitted_at`, step-up evidence or null, user (opaque) |
 | `ConfigSnapshotRegistered` | — | configuration kind (fee, calendar, instrument snapshot, rule set, mandate), content hash |
 | `SurveillanceReportGenerated`, `BacktestRunRecorded` | rule | period, report (artifact), breaches; data snapshot, code build, configuration, results, paper/live/backtest marker |
 | `PlatformOperatorAction` | — | action (stop, global kill switch, acceptable-use action, `model_withdrawn` with model and reason, `research_thesis_halt` with the instrument and optionally the research agent's pinned content hash, [DEC-100](../project/04-decision-log.md#decisions)), operator (opaque), approval |
@@ -1044,7 +1057,8 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 
 25. Control-stream `StreamOpened`: `stream_id` equals `ctl:{workspace_id}` (`stream_id`).
 26. `OwnerCommandRefused`: `command` is `acknowledge` on the account stream, and `resume` or `stop` on
-    the agent stream (`payload.command`). The executor refuses acknowledgments, and the runtime
+    the agent stream (`payload.command`), or at version 2 also `lift_hold`, which is registered on the
+    agent stream only (§9.10). The executor refuses acknowledgments, and the runtime
     refuses resumes and Stops (§2).
 28. `OwnerCommandRefused` with reason `not_independent` is on the account stream (`payload.reason`):
     only an acknowledgment is judged for independence, and only under `independent_approval_required`
@@ -1776,6 +1790,63 @@ stays registered and unchanged (§8); the workspace API writes version 2.
 
 `ConnectionRevoked` version 2 maps to the `ConnectionRevoked` fact as version 1 does (§9.2). The
 client records map to no `JournaledFact`.
+
+### 9.10 The hold on new openings ([DEC-672](../project/decisions/DEC-672.md))
+
+An owner, or a client the owner connected with the `hold` scope, may hold an agent's new openings:
+the agent goes to `exits_only` and keeps every exit running. Only the owner lifts it, with step-up
+([DEC-191](../project/04-decision-log.md#decisions), [mandate spec §6.1](mandate.md#61-purposes)).
+The hold is owner state beside the lifecycle of §9.1's `AgentModeChanged`: it survives a pause, a
+resume, and a restriction lifting, so the agent stream records it on every mode change. Closed as
+§9.7's records are; times are integer risk-clock seconds as §9.7's are (DEC-533 item 2).
+
+**`OwnerCommandIssued`**, for `hold_openings` and `lift_hold` only. The other commands' members are
+not closed here (M7's agent-commands slice closes them); rules 68 and 75 apply to every command.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `agent_id` | `id` | |
+| `command` | `hold_openings` \| `lift_hold` | |
+| `submitted_at` | `integer` | The risk-clock second it was committed at |
+| `step_up` | `{assertion_id: text, authenticated_at: integer, method: text}?` | A lift's evidence, judged by the runtime; `null` for a hold: rule 77 |
+| `user` | `text` | The human who asked (opaque): rule 76 |
+
+**`AgentModeChanged`** version 2 on the agent stream: version 1's members, with the reasons
+`owner_hold` and `owner_lift_hold`, then `held`. Version 1 stays registered and unchanged (§8), and
+a runtime that records a hold writes version 2 for every mode change after it.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `from`, `to`, `lifecycle` | As version 1's | `to` obeys rule 79, which replaces rule 11 at this version |
+| `reason` | version 1's reasons \| `owner_hold` \| `owner_lift_hold` | |
+| `held` | `boolean` | Whether the owner's hold stands after the change: rule 78 |
+
+**`OwnerCommandRefused`** version 2: version 1's members, with the command `lift_hold`, on the agent
+stream only (rule 26). A lift whose step-up does not count is refused like a resume (rule 28 keeps
+`not_independent` off it).
+
+**Consistency rules** (reason `schema` unless stated; the path is the member named):
+
+75. `OwnerCommandIssued`: the actor is a `user` or, for `hold_openings` only, a `client`
+    (`actor.kind`). A client never lifts a hold, pauses, resumes, or stops (identity spec ID-11).
+76. `OwnerCommandIssued`: `user` is the actor's human (§3) (`payload.user`).
+77. `OwnerCommandIssued`: a `hold_openings` has a `null` `step_up` (`payload.step_up`). A hold only
+    reduces risk, so it needs none (`AGENTS.md` rule 2), and a client never presents one.
+78. `AgentModeChanged` version 2: `held` is true when `reason` is `owner_hold` and false when it is
+    `owner_lift_hold` (`payload.held`).
+79. `AgentModeChanged` version 2: `to` is at least as strict as `lifecycle`, and at least
+    `exits_only` while `held` (`payload.to`; `normal` < `exits_only` < `paused` < `stopped`). So a
+    resume never clears a hold, and a lift never clears a pause. A lift that leaves `to` at
+    `exits_only` is valid: a latched limit or a restriction may still hold the agent (MI-3).
+80. `AgentModeChanged` version 2: a copy of an owner command, whose `reason` is `owner_pause`,
+    `owner_resume`, `owner_stop`, `owner_hold`, or `owner_lift_hold`, has a non-null
+    `causation_id`: its `OwnerCommandIssued` (`causation_id`). As rule 16 does at version 1, each
+    command has one copy: its `AgentModeChanged`, or, for a lift, its `OwnerCommandRefused`.
+
+**Lifecycle.** A hold is copied whatever the mode: on a paused or stopped agent the copy records
+`held` with `to` unchanged, so command status reaches `applied`. A second hold, or a lift with no
+hold standing, is copied too, with `held` as it already stood. A latched limit, a restriction, or a
+version change never sets or clears the hold, and a restart folds it from the last copy.
 
 ## 10. Anchoring
 

@@ -409,7 +409,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Deploy to paper | `POST /agents` | `AgentDeployed` or `DeploymentRejected` | Confirmed version, backtest id shown, rendered go-live record, step-up. V-032, V-006, V-002 rejections in words (B3) |
 | Go live | `POST /agents/{id}/go-live` | — | Always `live_unavailable` until counsel signs off (B5, DEC-98). The route exists so the refusal is tested |
 | Pause, resume | `POST /agents/{id}/pause`, `.../resume` | `OwnerCommandIssued` | Pause: no step-up, API-7. Resume: step-up, judged by the runtime |
-| Hold new openings | `POST /agents/{id}/hold` | `OwnerCommandIssued` with command `hold_openings` (journal change) | DEC-191. Sets `exits_only` and nothing else. Lifting it is the owner's alone, with step-up, as a `lift_hold` command (journal change); it lifts only the hold, never a latched limit (MI-3) |
+| Hold new openings | `POST /agents/{id}/hold` | `OwnerCommandIssued` with command `hold_openings` (journal spec §9.10) | DEC-191. Sets `exits_only` and nothing else. Lifting it is the owner's alone, with step-up, as a `lift_hold` command (journal spec §9.10); it lifts only the hold, never a latched limit (MI-3) |
 | Stop | `POST /agents/{id}/stop` | `OwnerCommandIssued` | Step-up; `release` and the warning digest per DEC-290 item 2; the flat-or-release precondition is the runtime's (DEC-136) |
 | Owner exit | `POST /agents/{id}/exits` | `OwnerCommandIssued` (`owner_exit`) | §5.4. Never refused for step-up (mandate spec §6.1) |
 | Acknowledge | `POST /agents/{id}/acknowledgments` | `OwnerAcknowledged` | Names the event acknowledged; step-up; independence judged by the executor |
@@ -781,7 +781,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Journal queries, trace, exports over the API | **Planned** (E12-6) |
 | Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.19 §9.8, DEC-670); `mandate-journal` registration planned (E10-15) |
 | The `client` actor, `ConnectionRevoked`'s reason, and the client events | **Specified** (journal spec v0.20 §3 and §9.9, DEC-671); `mandate-journal` registration planned (E10-15) |
-| `hold_openings` and `lift_hold` | **Planned** (E10-15, journal spec change first) |
+| `hold_openings` and `lift_hold` | **Specified** (journal spec v0.21 §9.10, DEC-672); `mandate-journal` registration planned (E10-15) |
 | Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
 
 ---

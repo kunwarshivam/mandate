@@ -35,6 +35,7 @@ import account
 import approval
 import clients
 import control
+import holds
 import research
 import risk_state
 import workspace
@@ -3511,6 +3512,7 @@ def render(
     approval_section: dict,
     workspace_section: dict,
     client_section: dict,
+    hold_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3525,6 +3527,7 @@ def render(
             "approval_answers": approval_section,
             "workspace_api": workspace_section,
             "client_actor": client_section,
+            "hold": hold_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3570,6 +3573,7 @@ def main(argv: list[str] | None = None) -> int:
     approval_section = approval.build_section()
     workspace_section = workspace.build_section()
     client_section = clients.build_section()
+    hold_section = holds.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3591,6 +3595,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += workspace.run_mutants(workspace_section)
     problems += clients.check_section(client_section)
     problems += clients.run_mutants(client_section)
+    problems += holds.check_section(hold_section)
+    problems += holds.run_mutants(hold_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3608,6 +3614,7 @@ def main(argv: list[str] | None = None) -> int:
         approval_section,
         workspace_section,
         client_section,
+        hold_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -3621,6 +3628,7 @@ def main(argv: list[str] | None = None) -> int:
         or approval.check_section(reread["approval_answers"])
         or workspace.check_section(reread["workspace_api"])
         or clients.check_section(reread["client_actor"])
+        or holds.check_section(reread["hold"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -3669,7 +3677,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(workspace.vector_mutants(workspace_section))} vector mutants caught; "
         f"{len(client_section['drafts'])} client drafts, {len(client_section['invalid_drafts'])} invalid and "
         f"{len(client_section['valid_drafts'])} valid; {len(clients.VALIDATOR_MUTANTS)} validator and "
-        f"{len(clients.vector_mutants(client_section))} vector mutants caught"
+        f"{len(clients.vector_mutants(client_section))} vector mutants caught; "
+        f"{len(hold_section['drafts'])} hold drafts, {len(hold_section['invalid_drafts'])} invalid and "
+        f"{len(hold_section['valid_drafts'])} valid; {len(holds.VALIDATOR_MUTANTS)} validator and "
+        f"{len(holds.vector_mutants(hold_section))} vector mutants caught"
     )
     return 0
 
