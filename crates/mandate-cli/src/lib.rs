@@ -25,6 +25,7 @@ pub mod agent;
 pub mod approvals;
 pub mod artifact;
 pub mod config;
+pub mod connection;
 pub mod control;
 pub mod deploy;
 pub mod download;
@@ -71,4 +72,7 @@ pub enum Command {
     /// Open the workspace control stream, once, in paper.
     #[command(subcommand)]
     Workspace(workspace::WorkspaceCommand),
+    /// Record a checked broker connection on the workspace control stream.
+    #[command(subcommand)]
+    Connection(connection::ConnectionCommand),
 }
