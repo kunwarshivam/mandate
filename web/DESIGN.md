@@ -141,9 +141,13 @@ One line each; the reference has the rest.
 - **Stop control and sheet** (DEC-206). The octagon pill, quiet or loud; one sheet for every opener,
   Pause before Stop before Close everything.
 - **Kill-switch button.** The only thing that draws crimson.
-- **Mode pill, source tag, provenance.** Running on the well; exits only ringed in ink; paused and
-  stopped solid ink. Who imposed a restriction names its tag. What the platform authored has a dashed
-  border, so it reads as not yet yours by shape.
+- **Mode chip, verdict chip, source tag, provenance** (DEC-503). A mode is named by what the agent
+  may do (Trading, Selling only, Paused, Stopped) and drawn as a dot and a word, never a glyph that
+  reads as a control: Trading on the well, Selling only ringed in ink, Paused and Stopped solid ink.
+  A gate's verdict is one chip in one width, first in its row; "Asked you" is distinct from
+  "Allowed". On a list a restriction is one line; the agent page carries its detail. Who imposed a
+  restriction names its tag. What the platform authored has a dashed border, so it reads as not yet
+  yours by shape.
 - **Limit rail.** Every limit is a rail in dollars on the mandate field, the point where it stops
   the agent marked, the headroom in words. Never a progress bar.
 - **Performance disclosure** (DEC-210). An info symbol beside every P&L; the full tag inline in print

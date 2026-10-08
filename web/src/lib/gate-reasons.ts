@@ -13,7 +13,7 @@ export function gateRule(code: ReasonCode, mandate: Mandate): string {
     case "account_trading_blocked":
       return "Trading is blocked on the account at the broker.";
     case "agent_exits_only":
-      return "The agent is exits-only, so it opens and adds to nothing.";
+      return "The agent is selling only, so it opens and adds to nothing.";
     case "agent_paused":
       return "The agent is paused, so it sends no new orders except protection.";
     case "agent_stopped":
@@ -65,7 +65,7 @@ export function isExit(purpose: Purpose): boolean {
   return EXIT_PURPOSES.has(purpose);
 }
 
-/** Exits are "held" or "waiting", never "denied" (brief §5, rule 13). */
+/** Exits are "held" or "waiting", never "denied" (brief §5, rule 13). The gate's own word, for a sentence about the gate. */
 export function verdictLabel(decision: GateDecision): string {
   switch (decision.verdict) {
     case "allow":
@@ -79,6 +79,14 @@ export function verdictLabel(decision: GateDecision): string {
       throw new Error(`unhandled verdict ${String(unhandled)}`);
     }
   }
+}
+
+/**
+ * The word a decision wears in a list (DEC-503): an allow the mandate turned into a request reads
+ * "Asked you", so "Allowed" beside an action only ever means the gate passed it and it went out.
+ */
+export function verdictBadge(decision: GateDecision): string {
+  return decision.verdict === "allow" && decision.approval_id ? "Asked you" : verdictLabel(decision);
 }
 
 export function actionSentence(action: GateDecision["action"]): string {

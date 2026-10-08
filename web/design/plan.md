@@ -55,8 +55,8 @@ the owl, the rules and the record.
 
 ## C. The cutting pass (one PR, no new rules)
 
-- [ ] **One status badge system.** One style, a fixed column, and "Waiting for you" distinct from
-      "Allowed", so "Allowed" only ever means the gate passed it. (R-3)
+- [x] **One status badge system.** One chip, one width, first in its row, and "Asked you" distinct
+      from "Allowed", so "Allowed" only ever means the gate passed it. (R-3, DEC-503)
 - [ ] **One provenance tag style.** "You said", "You entered", "From template", "Proposed by the
       platform", "Platform default" are one idea in four styles. (R-22)
 - [ ] **Less fine print.** One status line per screen for the as-of time, the simulated note and
@@ -85,10 +85,10 @@ the owl, the rules and the record.
 
 ## D. The state system (DEC)
 
-- [ ] **Modes named by what the agent may do:** Trading, Selling only, Paused, Stopped.
-- [ ] **The mode chip is a dot and a word**, never a checkbox glyph. (R-8)
-- [ ] **Restrictions live in the chip**, with detail on hover and on the agent page, not as
-      full-sentence pills that triple the row. (R-10)
+- [x] **Modes named by what the agent may do:** Trading, Selling only, Paused, Stopped. (DEC-503)
+- [x] **The mode chip is a dot and a word**, never a checkbox glyph. (R-8, DEC-503)
+- [x] **Restrictions on a row are one line**, with detail on hover and on the agent page, not
+      full-sentence pills that triple the row. (R-10, DEC-503)
 - [ ] **Three nouns on the owner's screens:** agent, rules, account. Deployment, workspace,
       connection, environment stay in audit and settings.
 

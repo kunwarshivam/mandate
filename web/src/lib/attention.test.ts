@@ -68,7 +68,7 @@ describe("the Stop control turns loud", () => {
   it("for an agent in exits only, even without a restriction listed", () => {
     const ws = buildWorkspace("normal");
     agentIn(ws, AGENT_IDS.lmn).mode = "exits_only";
-    expect(stopAttention(ws)).toEqual(["Agent 3: exits only"]);
+    expect(stopAttention(ws)).toEqual(["Agent 3: selling only"]);
   });
 
   it("for a restriction from the mandate, the account or market data", () => {

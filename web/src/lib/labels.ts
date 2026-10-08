@@ -1,8 +1,9 @@
 import type { AgentMode, ApprovalStatus, CancelReason, ChangeClass, OrderState, Provenance, Purpose, RiskFigure } from "@/fixtures/types";
 
+/** A mode is named by what the agent may do (DEC-503), so "Trading" needs no "Selling only" beside it to be understood. */
 export const MODE_LABEL: Record<AgentMode, string> = {
-  normal: "Normal",
-  exits_only: "Exits only",
+  normal: "Trading",
+  exits_only: "Selling only",
   paused: "Paused",
   stopped: "Stopped",
 };

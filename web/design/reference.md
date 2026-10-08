@@ -201,7 +201,7 @@ Controls and panels are flat. In light mode only what floats above the page cast
   - `KEY_SM`, the same key with tighter padding and smaller type, still 44px, for a row of small actions (the passkeys section's Add, Rename, Delete, Save and Cancel).
   - `DECISION_KEY` ([DEC-467](../../docs/project/decisions/DEC-467.md)), for Approve and Skip: the same key at 48px and full width, the two identical in every class.
   - Stop, the Stop sheet's choices, Pause and the kill switch keep their own shapes, as do the dock, the tab bar, menus, header icons, list rows, choice tiles and the chart's range control. `screens.test.tsx` and `new-agent.test.tsx` fail on a Kumo button without the key's classes or a key on Stop.
-- **Mode pill.** A 24px pill with an icon and the mode in sentence case: running is the well with muted text; exits only is outlined in ink; paused and stopped are solid ink.
+- **Mode chip** (DEC-503). A 24px chip with a dot and the mode in sentence case, named by what the agent may do: Trading is the well with muted text; Selling only is outlined in ink, its dot a ring; Paused and Stopped are solid ink. Until DEC-503 the chip carried a glyph (a ticked box for Normal) and the modes read Normal and Exits only.
 - **Source tag.** Who imposed a restriction, as a pill: "Your mandate" (volt tint, deep volt text, volt ring), "The account" (volt tint, ink text), "You" (solid ink), "Market data" (outlined).
 - **Limit rail.** On the mandate field: the label, the dollar value against its cap, an 8px rounded track with a volt fill and a thin deep volt post at the limit, and the headroom and consequence in words.
 - **Provenance.** "You said", "You entered" and "From template" are hairline pills; anything the platform authored ("Proposed by the platform", "Platform default") has a dashed border, so it reads as not yet yours by shape, not colour.
@@ -294,8 +294,8 @@ Every state has one flat treatment. Agent modes and restrictions use meaning col
 
 | State | Treatment |
 |---|---|
-| Running | Mode pill on the well, muted text |
-| Exits only | Card-colour pill with a 1px ink ring: the agent is partly stopped |
+| Trading | Mode chip on the well, muted text |
+| Selling only | Card-colour chip with a 1px ink ring: the agent is partly stopped |
 | Paused | Solid ink pill |
 | Stopped | Solid ink pill, "Stopped" |
 | Restriction from your mandate (drawdown, daily loss, floor, goal, hard breach, removed instrument) | A pale volt note with a "Your mandate" tag in deep volt |

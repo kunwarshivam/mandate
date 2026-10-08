@@ -31,7 +31,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     whoActs: "Automatic",
   },
   drawdown_exits_only: {
-    label: "Drawdown: exits only",
+    label: "Drawdown: selling only",
     source: "mandate",
     mode: "exits_only",
     blocks: "Openings and increases",

@@ -59,7 +59,7 @@ export function MandateSummary({ agent }: { agent: Agent }) {
     { label: "Instruments", value: m.universe.pinned_instruments.map((i) => i.symbol).join(", "), path: "/universe/pinned_instruments" },
     { label: "Largest order", value: usd(r.max_order_usd), path: "/risk/max_order_usd" },
     { label: "Largest position", value: `${usd(r.max_position_usd)} or ${percent(r.max_position_fraction, 0)} of equity`, path: "/risk/max_position_usd" },
-    { label: "Daily loss limit", value: `${percent(r.max_daily_loss, 0)} of the day's starting equity, then exits only`, path: "/risk/max_daily_loss" },
+    { label: "Daily loss limit", value: `${percent(r.max_daily_loss, 0)} of the day's starting equity, then selling only`, path: "/risk/max_daily_loss" },
     {
       label: "Drawdown ladder",
       value: r.drawdown_ladder.map((rung) => `${percent(rung.at, 0)}: ${rung.action === "scale_sizes" ? `sizes to ${percent(rung.factor ?? "1", 0)}` : rung.action === "exits_only" ? "exits only" : "close and pause"}`).join("; "),

@@ -150,7 +150,8 @@ describe("Home on a phone", () => {
       expect(within(row).getByRole("link")).toHaveAttribute("href", `/agents/${agent.agent_id}`);
       expect(within(row).getByText(agent.label)).toHaveClass("font-semibold");
       expect(row.querySelector("[data-slot=mode-badge]")).toHaveTextContent(/\w/);
-      expect(row.querySelector("[data-slot=mode-badge] svg")).not.toBeNull();
+      expect(row.querySelector("[data-slot=mode-badge] [data-slot=mode-dot]")).not.toBeNull();
+      expect(row.querySelector("[data-slot=mode-badge] svg")).toBeNull();
       expect(row.querySelector("[data-slot=headroom]")).toHaveTextContent(/^\$[\d,]+\.\d{2} (above|below) its [a-z0-9%\- ]+$/);
       expect(row.querySelector("[data-direction], [data-placeholder=performance]")).toBeNull();
       expect(row).not.toHaveTextContent(/P&L|profit|today|since deployed|[+−]\$/);
@@ -215,7 +216,7 @@ describe("an agent on a phone", () => {
     expect(title.parentElement!.contains(badge)).toBe(true);
     expect(shownOnPhone(badge)).toBe(true);
     expect(shownOnDesktop(badge)).toBe(false);
-    expect(badge.querySelector("svg")).not.toBeNull();
+    expect(badge.querySelector("[data-slot=mode-dot]")).not.toBeNull();
     expect(onPhone(within(header()).getAllByRole("button", { name: "Stop this agent…" }))).toHaveLength(1);
     const order = onPhone(main().querySelectorAll("h2")).map((h) => h.textContent);
     expect(order).toEqual(["Waiting for you", "Equity against your mandate", "Headroom", "This agent"]);

@@ -524,7 +524,7 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
         {
           path: "/risk/max_daily_loss",
           label: "Loss in one day",
-          value: `${usd(figures.dailyLossBudget)}, ${percent(t.maxDailyLoss, 2)} of the day's starting equity. Past it, exits only until the next day.`,
+          value: `${usd(figures.dailyLossBudget)}, ${percent(t.maxDailyLoss, 2)} of the day's starting equity. Past it, selling only until the next day.`,
           provenance: "platform_proposed",
         },
         {

@@ -531,7 +531,7 @@ export const SCENARIOS: Array<{ id: Scenario; label: string }> = [
   { id: "loading", label: "Loading" },
   { id: "stale", label: "Stale data" },
   { id: "paused", label: "Agent paused" },
-  { id: "drawdown", label: "Drawdown exits-only" },
+  { id: "drawdown", label: "Drawdown selling-only" },
   { id: "reconciliation", label: "Reconciliation hold" },
   { id: "unknown-order", label: "Unknown order" },
   { id: "unreachable", label: "Deployment unreachable" },
@@ -606,7 +606,7 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
       const canceled = b.orders.filter((o) => o.purpose !== "protective");
       b.orders = b.orders.filter((o) => o.purpose === "protective");
       b.past_orders.unshift(
-        ...canceled.map((o) => ({ ...o, limit_price: DRAWDOWN_RESTING_LIMIT, state: "Canceled" as const, closed_at: t("14:01:12"), note: "Canceled on entering exits-only." })),
+        ...canceled.map((o) => ({ ...o, limit_price: DRAWDOWN_RESTING_LIMIT, state: "Canceled" as const, closed_at: t("14:01:12"), note: "Canceled on entering selling only." })),
       );
       for (const d of ws.decisions) {
         if (d.agent_id === AGENT_IDS.btc && d.client_order_id && canceled.some((o) => o.client_order_id === d.client_order_id)) d.action = { ...d.action, limit_price: DRAWDOWN_RESTING_LIMIT };
@@ -623,8 +623,8 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
       b.versions = [...b.versions, BTC_RAISE_REJECTED];
       ws.timeline[AGENT_IDS.btc].unshift(
         { event_id: "01JBF6P2M8XKQ4D7N9R3T5W1YC", at: t("14:03:34"), kind: "version", text: "Mandate version rejected: an allocation increase is refused while a limit is latched." },
-        { event_id: "01JBBX2KRQNWA605H5PT7DRPKV", at: t("14:01:12"), kind: "mode", text: "Mode changed from normal to exits-only: drawdown reached 6% of the high-water mark." },
-        { event_id: "01JB53YCQWCMQY1TFS2R2X43GC", at: t("14:01:12"), kind: "order", text: "Buy 0.01 BTC/USD canceled on entering exits-only." },
+        { event_id: "01JBBX2KRQNWA605H5PT7DRPKV", at: t("14:01:12"), kind: "mode", text: "Mode changed from trading to selling only: drawdown reached 6% of the high-water mark." },
+        { event_id: "01JB53YCQWCMQY1TFS2R2X43GC", at: t("14:01:12"), kind: "order", text: "Buy 0.01 BTC/USD canceled on entering selling only." },
       );
       return ws;
     }
