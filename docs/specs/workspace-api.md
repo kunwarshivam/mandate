@@ -233,6 +233,9 @@ Errors are RFC 9457 problem documents with these members:
 | `control_stream_frozen` | 503 | Journal spec §11 froze mandate and deployment changes; never sent for a risk-reducing call (API-7) |
 | `journal_unavailable` | 503 | Postgres cannot take the append; `effect: none`, `retryable: true` |
 | `rate_limited` | 429 | Over the principal's limit; never for an API-7 operation |
+| `own_roles` | 403 | A role change grants or removes a role of its own author (identity spec ID-13, §4.5) |
+| `owner_role_reserved` | 403 | Someone other than an org owner grants or removes the org owner role (identity spec §4.5) |
+| `last_owner`, `last_admin` | 409 | The change leaves no `active` org owner or workspace admin (identity spec §5.2) |
 
 ### 3.6 Step-up
 
@@ -309,6 +312,7 @@ break-glass. Their columns are printed so the copy stays exact. The cells read b
 | Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
+| Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
 | Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | | | |
 | SSO configuration | S | ✓ | ✓ | | | | | | | | | | |
@@ -333,7 +337,7 @@ How the API's operations map onto those rows:
 | Re-enable a halted scope | **Inactive.** No route exists until DEC-437 item 21 is accepted (§4.2) |
 | Approve, Skip (§5.2) | Answer an approval, and listed in `autonomy.approval.approvers` (identity spec §4.1) |
 | Connect, revoke, revoke on compromise (§4.5) | Connect, change, or revoke a broker connection |
-| Policies, members, clients (§4.5) | The rows of the same names |
+| Policies, members, clients (§4.5) | The rows of the same names; a member deactivating their own membership is the leave row |
 | Owner request, dry run, chat (§4.6) | Make an owner request; dry run of a request; chat thread with the agent. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
 
 Separation of duties is enforced where the specs already enforce it: by the runtime at approval

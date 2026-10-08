@@ -75,8 +75,8 @@ is trusted (§14, E9-11).
 | ID | Invariant | Source | Test |
 |---|---|---|---|
 | **ID-1** | **Every action is attributed.** Every mutation workspace services accept, and every event they commit to the control stream, carries the authenticated principal (`actor.kind`, opaque `actor.id`) and the session it came through. The principal comes from the authenticated channel, never from the request body. Nothing anonymous is committed | Journal §3; HLD §8 "Agent identity" | A fuzz of API calls with forged `actor`, `user`, `responder`, and `workspace_id` fields in bodies asserts every committed event's actor equals the oracle's record of who authenticated |
-| **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some role the principal holds through an `active` membership in that scope has the permission in §4.2's matrix, or, for a principal that holds no membership (a client, a service account, the host CLI, a platform operator in break-glass), when its own column has it within that column's stated scope. Everything else is denied, including a permission the matrix leaves blank. It covers exactly the rows the matrix names (DEC-641 item 5) | §4 | An exhaustive test over every (role set or non-member principal kind, permission, scope) triple against a table parsed from §4.2 itself, by the grammar of §4.2, not from the code |
-| **ID-3** | **Only an active member reaches a workspace.** A principal with no `active` membership in workspace W can neither read nor write W. A deactivation applies to every request authorized after it commits, and open streams (server-sent events, websockets) of that principal in W close within 60 s | §5 | A fuzz interleaving requests with membership changes; the oracle replays `Member*` events and asserts no request authorized after a deactivation succeeded, and every stream closed within the bound |
+| **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some effective role the principal holds through a membership in that scope that reaches it (one that reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows) has the permission in §4.2's matrix, or, for a principal that holds no membership (a client, a service account, the host CLI, a platform operator in break-glass), when its own column has it within that column's stated scope. Everything else is denied, including a permission the matrix leaves blank. It covers exactly the rows the matrix names (DEC-641 item 5) | §4 | An exhaustive test over every (role set or non-member principal kind, permission, scope) triple against a table parsed from §4.2 itself, by the grammar of §4.2, not from the code |
+| **ID-3** | **Only a member reaches a workspace.** A membership reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows (§5.1); a principal with no membership in workspace W that reaches it can neither read nor write W. A deactivation applies to every request authorized after it commits, and open streams (server-sent events, websockets) of that principal in W close within 60 s | §5 | A fuzz interleaving requests with membership changes; the oracle replays `Member*` events and asserts no request authorized after a deactivation succeeded, and every stream closed within the bound |
 | **ID-4** | **Step-up where risk can grow.** These need valid step-up (§7): confirming a risk-increasing mandate version, deploying (going live or paper), approving under policy (mandate §6.4 check 6), granting a delegation, connecting or changing a connection, revoking a connection, re-enabling a halted scope if DEC-437 item 21 creates one (§4.4), resume, Stop, acknowledgments (mandate §6.1), owner exits, accepting a disclosure (V-005), loosening a policy, granting a role, connecting a client, enrolling a step-up credential, and break-glass | FR-1.4; mandate §6.1 | A table test per command: with each failure mode (missing, stale, reused, wrong method, wrong action digest, wrong principal) the command is refused and nothing else is committed |
 | **ID-5** | **Never for risk reduction.** No step-up, session freshness, or identity-provider round trip is required to pause, to engage a kill switch at any scope (its stop and flatten; only its extra privileges need step-up, mandate §6.1), to skip an approval, to tighten a policy, to remove or narrow a delegation, or to revoke a client. Automated exits, protective orders, and risk exits involve no principal at all | `AGENTS.md` rules 2, 3, 13; MI-23 | With step-up absent, stale, and with the identity provider unreachable, each of these commits, and the kill switch stops and flattens |
 | **ID-6** | **Approver is not the requester.** Under the effective `independent_approval_required`, the user who grants, acknowledges, or approves (deployment, a risk-increasing change, a high-water-mark reset, loosening a latched floor, lifting a tripwire, an approval) is a different `user` principal from the requester and, for approvals, from the mandate's author. A client counts as the user named in its `on_behalf_of` (§12.2) and a service account as its issuing admin, so neither is ever the other party | Mandate §4.3, §6.4 check 7, §5.8, §6.7; E9-5 | A fuzz over principals, clients, and service accounts; the oracle maps each to its human and asserts no grant counted where the two humans match |
@@ -86,7 +86,7 @@ is trusted (§14, E9-11).
 | **ID-10** | **An identity-provider outage never blocks risk reduction.** With the identity provider (ours or the customer's) and the global control plane unreachable, a member can still pause and engage a kill switch, through a session the outage interrupted, workspace-local passkey verification, or the host CLI's registered principal (§6.4). The workspace-held passkey verifier is not part of what DEC-437 item 15 leaves open | Rules 3, 13; OPS-4, OPS-12 | The kill-switch drill with the identity provider, the global control plane, and the model gateway all unreachable |
 | **ID-11** | **A client is never the human.** A client principal (DEC-141) is recorded as `actor.kind` `client` with `on_behalf_of` its user, never as a `user` (§12.2); it is scoped to one user in one workspace, holds a revocable sender-constrained token, and never approves, confirms a version, presents step-up, pauses (DEC-191), resumes, stops, releases, makes an owner exit, changes a connection, or changes a membership. Revoking it takes effect for every request authorized after the revocation commits | DEC-141 items 1 to 5; DEC-191; E10-6 | The ID-2 table run for the `client` principal; a test that a `client` actor's approval response is refused by mandate §6.4 check 3 from the record alone; a revocation race test as in ID-3 |
 | **ID-12** | **Platform staff never decide for a customer.** No platform operator approves, confirms, acknowledges, or holds a workspace role. Break-glass is time-bound, approved by the customer with no other route (§10.3), limited to operational actions, and journaled to a stream the customer reads | Journal §7; infrastructure §5.5; mandate §6.4 check 3 | A test that a `platform_operator` actor is refused by every permission except the PO column of §4.2, and only inside an approved window in the workspace it names |
-| **ID-13** | **Roles change only by journaled membership events, and never by their holder.** No principal grants a role to itself, raises its own roles, or lifts its own cool-off; every grant is a committed `MemberRoleChanged` with step-up. The one exception is the founding grant when an organization or workspace is created (§3.2), which the system issues and journals as `MemberActivated` with reason `founding` | §5, §8.3 | A fuzz of membership commands asserting the oracle's role state equals the fold of `Member*` events and no grant names its own author as subject |
+| **ID-13** | **Roles change only by journaled membership events, and never by their holder.** No principal grants a role to itself, removes or raises its own roles, or lifts its own cool-off; every grant is a committed `MemberRoleChanged` with step-up. The one exception is the founding grant when an organization or workspace is created (§3.2), which the system issues and journals as `MemberActivated` with reason `founding` | §5, §8.3 | A fuzz of membership commands asserting the oracle's role state equals the fold of `Member*` events and no grant or removal names its own author as subject |
 | **ID-14** | **Identity notices are opaque.** The identity and account-security notice kinds (a new device or passkey, a role grant, a member deactivated, a recovery started, a break-glass) carry only an opaque ID and generic text, and go to the recipients of §4.1's receive column; their kinds are those the notifications spec adds to its catalogue (DEC-438) | Rule 6; OPS-10 | Payload capture tests (07, Privacy) on each notice |
 | **ID-15** | **The global directory holds IDs and roles only.** The global control plane holds organization, workspace, and user IDs and role names for seats and routing. It never holds sessions, tokens, credential material, recovery codes, step-up evidence, or approval content, and it is never in the path of a sign-in to a hybrid or on-prem deployment | HLD §4 "Where data lives" | A schema test on the directory's tables and the outbound sync payload; the drill with the outbound link cut |
 
@@ -222,6 +222,7 @@ it names; outside such a window a platform operator has no permission at all (ID
 | Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
+| Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
 | Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | | | |
 | SSO configuration | S | ✓ | ✓ | | | | | | | | | | |
@@ -240,21 +241,24 @@ table, so its cells follow a closed grammar, and any other text is a spec defect
   needs it; deactivating or removing a member does not), or `S for grant` (only a grant needs it;
   removing a role does not).
 - **Principal cells:** blank (denied); `✓` (granted); `own` (granted for the principal's own
-  credential only); `✓ (propose only)` (granted; confirming is its own row); `✓ (org)` (granted
+  credential only, at the scope of any membership it holds that reaches that scope); `✓ (propose only)` (granted; confirming is its own row); `✓ (org)` (granted
   at org scope only); `✓ (not owner)` (granted, except that granting or removing the org owner
   role is refused `owner_role_reserved`).
 - **Column scopes:** OO, OA, and Bill apply only at an organization's scope, through an org
   membership; WA, Op, Ap, Vi, and Au only at a workspace's scope, through that workspace's
   membership (§4.1: no inheritance either way). Cl applies only in the one workspace its token
-  names, and only while its user holds an active membership there whose effective roles grant
-  the same row. SA applies only in the workspaces it names, HC only in its own deployment's
+  names, and only while its user holds a membership there that reaches it and whose effective
+  roles grant the same row. SA applies only in the workspaces it names, HC only in its own deployment's
   workspace, and PO only in the workspace of a break-glass window in force; none of the four
   applies at org scope.
-- **Effective roles:** only `active` and `cooling_off` memberships reach a scope (§5.1), and a
-  role still in its cool-off (§8.3) grants nothing.
+- **Effective roles:** a membership reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows (§5.1): a role still in its cool-off grants
+  nothing.
 - **Inactive rows:** a row whose permission applies only if a Proposed decision creates its state
   (re-enabling a halted scope, DEC-437 item 21) is refused to everyone, `inactive_permission`,
   until that decision is accepted and the row's text edited.
+- **Leaving:** the leave row is the member's own membership only, at the scope of that
+  membership: a workspace membership at the workspace's scope, an org membership at the
+  organization's. The last-owner and last-admin rules (§5.2) still apply to it.
 - **Rows, not routes:** ID-2 covers exactly these rows (E9-12 item 2). An operation with no row
   and no mapping in workspace API §3.7 has no route until a row is added.
 
@@ -295,23 +299,38 @@ inactive.
 
 ### 4.5 The authorization step
 
-`authorize(principal, memberships, scope, permission)` applies §4.2 by its grammar and nothing
-else. The memberships are those read, uncached, from the workspace's own store for this request
-(§6.2); for a client they are its user's.
+`authorize(principal, session, memberships, scope, permission)` applies §4.2 by its grammar and
+nothing else. The memberships are those read, uncached, for this request (§6.2); for a client
+they are its user's.
+
+**The membership read** ([DEC-642](../project/decisions/DEC-642.md) item 4). Authorizing needs a
+read before any context exists. That read goes through one narrow path: a membership lookup that
+returns memberships only, keyed by a `MembershipQuery` (the principal, or a client's user, and the
+scope named by the route). No data API accepts a `MembershipQuery`, and the lookup accepts nothing
+else, so it reaches no workspace data.
 
 **`TenantContext`** ([DEC-642](../project/decisions/DEC-642.md)). Only the authorization step
 constructs one, and only when it authorizes a permission at a workspace's scope; an org-scope
 authorization yields none. Its fields are private, and it has no public constructor, no `Default`,
 no deserializer, and no `Clone`. It carries the workspace and its organization, the authenticated
 principal (ID and kind), and the one permission authorized. Every store, cache, queue, journal,
-and vault API over a workspace's data takes a `&TenantContext` and reads the workspace from it;
-none takes a bare workspace ID (ID-8). A context lives for one request and is never stored or
-serialized.
+and vault API over a workspace's data takes a context and reads the workspace from it; none takes
+a bare workspace ID (ID-8). A context lives for one request and is never stored or serialized.
+
+**`SystemContext`** (DEC-642 item 5). The deployment's own processes (runtime, executor,
+scheduler) act with no request and no principal behind them (ID-5), yet nothing they commit is
+anonymous (ID-1). They hold a `SystemContext`: one workspace and the process's workload identity
+(§3.1, Process), recorded as `actor.kind` `system`. It is not an output of `authorize`: only a
+process's bootstrap builds it, from its workload identity, never from a request, and no
+request-serving crate constructs one (the E9-8 tests check it). Data APIs accept either context
+through one sealed trait that only these two types implement. It never gates risk reduction:
+automated exits, protective orders, and kill switches proceed without any check it could fail
+(`AGENTS.md` rule 13).
 
 **Role changes.** A grant or removal of roles, and a deactivation, pass the same step for their
-row, then: no change grants or removes a role of its own author (ID-13; a member leaves by
-deactivating their own membership, which needs no row); only an org owner grants or removes the
-org owner role; and the last-owner and last-admin rules of §5.2 hold on the state after the change.
+row (deactivating one's own membership is the leave row), then: no change grants or removes a
+role of its own author (ID-13); only an org owner grants or removes the org owner role, and
+deactivating another member who holds it counts as removing it; and the last-owner and last-admin rules of §5.2 hold on the state after the change.
 
 **Refusals** ([DEC-643](../project/decisions/DEC-643.md)), each with a stable code:
 
