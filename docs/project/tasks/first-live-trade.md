@@ -22,10 +22,20 @@ So this path builds only things the product keeps:
   mandate says `ask` for openings, and the order waits for the founder's grant in the CLI inbox,
   bound to the order's content hash (mandate spec §6.1, `mandate-approval`).
 
-[DEC-529](../decisions/DEC-529.md) (Proposed, founder-reserved) holds only what is the founder's:
-the live order itself and the few narrowings it needs. **Until the founder accepts DEC-529,
-every slice except the live run is still built, because each is product work; nothing live is
-run.**
+[DEC-529](../decisions/DEC-529.md) holds only what is the founder's: the live order itself and
+the few narrowings it needs. The coordinator reports the founder accepted every recommendation
+on 2026-10-08; the status reads Accepted once the founder confirms on #706 or the coordinator
+records it at merge. The founder's answers, as relayed:
+
+- **Instrument and cap:** `max_order_usd` 100 USD, on a cheap broad ETF priced under about
+  90 USD a share. The founder chose the cap and the class of instrument; the ticker is the
+  founder's in the confirmed mandate, and this brief names none.
+- **Counsel:** not required before this order on the founder's own account; counsel still
+  gates any customer use. The founder's call, not a legal conclusion.
+- **SP1:** approved as DEC-529 states it.
+
+Every slice is product work and is built either way; implementations that DEC-529 item 4
+governs (B2b, C1) and the live run wait until it reads Accepted.
 
 This path needs the [first paper trade](first-paper-trade.md)'s runner (E1a, E1b, built
 generic) and its manual run (E2).
@@ -59,11 +69,11 @@ oracle is shown to fail on a seeded bug before it is trusted.
 | # | Invariant |
 |---|---|
 | LT-1 | **No agent reaches Robinhood.** No test, CI job or agent run opens a connection to any Robinhood host. The default build contains no Robinhood host; only the runner's `live` feature adds the published MCP host. Every test runs against the simulated server on loopback |
-| LT-2 | **No broker branch in shared code** (DEC-531). The builder, executor, gate and reconciliation never name a broker, and never read the asset class to learn a broker rule; a property test runs them against generated profiles and checks every order sent is one the profile allows |
+| LT-2 | **No broker branch in shared code** (DEC-531). The builder, executor, gate and reconciliation never name a broker, and never read the asset class to learn a broker rule; a property test runs them against generated profiles and checks every order sent is one the profile allows. Reads of the asset class for **market** rules stay: the builder's closing-window check (`builder.rs`, US equities in the close window are marketable, a session rule) and the autonomy rule language's `asset_class` condition (`autonomy.rs`, the owner's policy). The executor's `asset_class == Crypto` choice of one stop-limit (`protection.rs`) is a **broker** rule and moves to the profile (B2a) |
 | LT-3 | **Policy and profile intersect, never override.** An order is sent only if both the platform policy (limit openings in the regular session, no short sale) and the profile allow it; an empty intersection is a refusal before the intent, never a fallback to another order type |
 | LT-4 | **One door, one grant.** An order reaches Robinhood only through `ProductionCycle::run`; with `ask` it is sent only after a grant whose content hash equals the hash of the request sent; any difference is a refusal with nothing sent |
 | LT-5 | **Journal before acting.** `OrderSubmitted`, carrying the deterministic `ref_id`, commits before `place_equity_order`; `review_equity_order` runs first and any pre-trade alert refuses |
-| LT-6 | **No re-send.** After a lost answer the order is `Unknown`; no second `place_equity_order` for that intent; recovery follows the profile (DEC-529 item 4); zero or several matches stay `Unknown` and block the instrument |
+| LT-6 | **No re-send.** After a lost answer the order is `Unknown`; no second `place_equity_order` for that intent; recovery follows the profile (DEC-529 item 4); zero or several matches stay `Unknown` and block the instrument. The response shapes are assumed from the contract, so an unparseable or unexpected answer to a place call is `Unknown`, never treated as rejected and never re-sent |
 | LT-7 | **Only the agentic account** (CN-8). Every request names the recorded account; data about any other account is dropped in the connector before redaction, hashing or storage |
 | LT-8 | **Allowlist, pinned contract, pinned profile** (CN-2, CN-9). The connector calls only the nine allowlisted tools; a contract or profile hash that differs halts openings; a fund-movement tool refuses the connection |
 | LT-9 | **Credentials stay in the process** (CN-1, rule 7). The OAuth token exists only in the connector process's memory, never on disk, in a log, the journal, an artifact or an error; a canary-token test scans every output |
@@ -76,32 +86,38 @@ oracle is shown to fail on a seeded bug before it is trusted.
 ## Scope
 
 - **Reference cases:** none move; every passing case stays passing.
-- **Crates in scope:** `mandate-executor` (the profile type, protection and reconciliation read
-  it), `mandate-builder` (quantity form from the profile), `mandate-alpaca` (declares its
-  profile), `mandate-paper` (the runner, generic from the paper path's E1a; renamed after the
-  live run), `mandate-cli` (connection record, inbox wiring, `live` acceptance), and three new
-  crates: `mandate-mcp` (E7-16), `mandate-robinhood` (E7-6) and `mandate-rh-sim` (E7-25).
+- **Crates in scope:** `mandate-domain` (the profile type and its hash), `mandate-executor`
+  (`BrokerConnector::profile`; protection and reconciliation read it), `mandate-builder`
+  (quantity form from the profile), `xtask` (the `live-feature` check), `mandate-alpaca`
+  (declares its profile), `mandate-paper` (the runner, generic from the paper path's E1a;
+  renamed after the live run), `mandate-cli` (connection record, inbox wiring, `live`
+  acceptance), and three new crates: `mandate-mcp` (E7-16), `mandate-robinhood` (E7-6) and
+  `mandate-rh-sim` (E7-25).
 - **Out of scope:** `mandate-risk` and `mandate-runtime` (used, not changed), the vault, E9-4,
   the full connection manager, crypto, options, extended hours, `web/`.
 - **New dependencies:** none external except `getrandom` 0.2 for the OAuth PKCE verifier and
-  `state` (already built through `ring` under `rustls`; needs a `docs/dependencies.md` row), and
-  `tokio`'s `net` feature for the loopback redirect. `mandate-mcp` and `mandate-robinhood` use what
+  `state` (already built through `ring` under `rustls`; needs a `docs/dependencies.md` row).
+  One feature change: `tokio`'s `net` feature in `mandate-mcp` for the loopback redirect, named
+  in O1b's dependency section. `mandate-mcp` and `mandate-robinhood` use what
   `mandate-alpaca` uses (`reqwest`, `serde_json` with `raw_value`, `tokio`, `secrecy`,
   `thiserror`); JSON-RPC and server-sent events are written by hand; base64url is written by hand
   against RFC 7636 appendix B; URLs use `reqwest::Url`.
 - **Safety-critical:** yes, every code slice. DEC-77 tests PR then implementation PR.
-- **Size budget:** under 400 non-generated changed lines in safety-critical crates per PR.
+- **Size budget:** under 400 non-generated changed lines per PR, tests included, unless the PR
+  body says why.
 
 ## Where each piece lives
 
 | Piece | Crate | Layer | Why there |
 |---|---|---|---|
-| `CapabilityProfile` type and its canonical hash | `mandate-executor` (`types.rs`) | 6 | Beside `BrokerConnector`, which gains `fn profile()`; the builder reads it through the executor's existing ports |
+| `CapabilityProfile` type and its canonical hash | `mandate-domain` (hash through `mandate-canon`) | 1 | Pure, and below both readers: `mandate-builder` is layer 5 and cannot depend on `mandate-executor` (6) |
+| `BrokerConnector::profile` | `mandate-executor` (`ports.rs`) | 6 | Each connector hands its profile to the executor |
 | Alpaca's profile | `mandate-alpaca` | 7 | Trading spec §5.2's table as data |
 | Robinhood's profile, order mapping, `ref_id`, CN-8 filter, state mapping | **new** `mandate-robinhood` | 7 | Beside `mandate-alpaca` |
 | MCP client, allowlist, contract hash, OAuth (`auth` module) | **new** `mandate-mcp` | 6 | Knows nothing of brokers or orders (connections spec §6.2) |
-| Simulated Robinhood: the published contract over loopback MCP, with Robinhood's rules | **new** `mandate-rh-sim` | tool | DEC-124's paper stage and E7-16's fixture server |
-| Connection record, inbox and grant commands | `mandate-cli` | 7 | The founder's CLI plays the connection and deployment manager in Phase 1 |
+| Simulated Robinhood: the published contract over loopback MCP, with Robinhood's rules | **new** `mandate-rh-sim` | tool | DEC-124's paper stage and E7-16's fixture server; no production crate depends on it (a `tool` crate, checked by `cargo xtask layers`) |
+| The `live`-feature check | `xtask` | tool | ES-23 states the ban; X1 enforces it |
+| Connection record, inbox and grant commands | `mandate-cli` | 9 | The founder's CLI plays the connection and deployment manager in Phase 1; its `forbidden_internal` list (`mandate-alpaca`, `mandate-paper`, `mandate-shell`) keeps it off the connectors and the runner, so it records the connection without reaching Robinhood |
 | The runner for any environment and broker | `mandate-paper` (renamed after the live run) | 9 | One runner; the `live` feature holds the live hosts |
 
 **Founder review.** New crates add `xtask/layers.toml`, `CODEOWNERS` and `Cargo.toml` entries;
@@ -115,7 +131,8 @@ the OAuth slice adds a `docs/dependencies.md` row; each PR names it under "Decis
 | Quantity forms | `market`: whole, fractional, notional; every other type: whole | `quantity`, `dollar_amount` |
 | Times in force | `gfd`, `gtc` | `time_in_force` |
 | Protection forms | one resting stop-limit (`gtc`); no OCO, no bracket | Tool list |
-| Idempotency | client id `ref_id`, deduplicated; query by it: no | `ref_id`; `get_equity_orders` filters |
+| Idempotency | client id `ref_id`; the upstream deduplicates by it; retry behaviour unknown; query by it: no | `ref_id`; `get_equity_orders` filters |
+| GTC expiry | unknown | Not published |
 | Pre-trade check | `review_equity_order` | Tool list |
 
 With the platform policy (limit openings only), the builder's intersection leaves `limit`, whole
@@ -126,7 +143,7 @@ Robinhood code.
 
 | State | Entered | Blocks | Ends | Who | Session close, midnight, restart, version change |
 |---|---|---|---|---|---|
-| DEC-529 Proposed | Now | The live run only | The founder accepts | Founder | — |
+| DEC-529 not yet recorded Accepted | Now | B2b's and C1's implementations, and the live run | The founder confirms, or the coordinator records it at merge | Founder, coordinator | — |
 | Logged out | Run start | Every Robinhood call | OAuth login in the founder's browser | Founder | Restart logs out (no token on disk) |
 | Logged in | Token in memory | Nothing | Expiry, revocation, exit | Robinhood, founder | Expiry mid-run: `closing_only`; the resting stop is unaffected |
 | Contract or profile drift | Hash differs at login | Every opening | A released connector version | Agents, founder | Checked at every login |
@@ -136,7 +153,8 @@ Robinhood code.
 | Submitted, answer lost | `OrderSubmitted` without an answer | Every order in the instrument | Exactly one match, else the founder reconciles | Executor, founder | Next run refused (DEC-470 item 1) |
 | Working entry (`gfd`) | Accepted | Another opening | Filled, or cancelled at the run's bound | Executor | `gfd` expires at the close |
 | Filled, stop not yet placed | Complete fill | Adds | Stop accepted | Executor | Unprotected interval journaled and alerted beyond `max_unprotected_s` |
-| Protected | Stop accepted (`gtc`) | Adds | Stop fills, or the founder exits | Robinhood, founder | Rests with no process running; GTC expiry unknown (open question) |
+| Protected | Stop accepted (`gtc`) | Adds | Stop fills, Robinhood expires it, or the founder exits | Robinhood, founder | Rests with no process running; GTC expiry is not published, so the founder checks the stop in the app after the run and periodically while the position is held (DEC-529 item 7) |
+| Connection spent | The first `place_equity_order` that fills | Every further live run on that record | A new connection record and a new decision | Founder | DEC-529 item 3's lapse |
 | Done | Run report | Every further run (account not flat) | — | — | `journal export`, `journal verify` clean |
 
 ## Adversary review
@@ -160,13 +178,15 @@ Robinhood code.
 | Reference | Scope | Outcome | Matches? |
 |---|---|---|---|
 | Trading §5.2 "Alpaca capability matrix" ↔ DEC-531 | Every broker | Profiles as data | **No** until SP1 renames it and adds Robinhood's profile |
-| Executor `protection.rs` (`asset_class == Crypto` picks one stop-limit) ↔ DEC-531 item 2 | Protection | Strongest form the profile offers | **No**: B2 replaces the branch |
-| DEC-441 item 10 ↔ U-R1, U-R2 ↔ the contract | Idempotency | Submit with id, query by id | **No**: no query by `ref_id`; DEC-529 item 4 (founder) |
+| Executor `protection.rs` (`asset_class == Crypto` picks one stop-limit) ↔ DEC-531 item 2 | Protection | Strongest form the profile offers | **No**: B2a replaces the branch |
+| DEC-441 item 10 ↔ U-R1, U-R2 ↔ the contract | Idempotency | Submit with id, query by id | **No**: no query by `ref_id`; DEC-529 item 4 resolves it for this order only (B2b, C3) |
+| DEC-441 item 15 ↔ U-R10 | Platform terms | Written answer before any connection | Resolved for this order only by DEC-529 item 5; customers still blocked |
+| FR-2.6 (1× verified) ↔ U-R7 | Account | Margin field | **No** field; DEC-529 item 11's attestation for this order |
 | Trading §5.4 (OCO or bracket for equities) ↔ Robinhood's profile | Protection | One GTC stop-limit | **No**: SP1, DEC-529 item 7 (founder) |
 | Trading §4.2 (`sip` for live equities) | Live quote | Collar and risk mark | **No**: DEC-529 item 12, SP1 |
 | Trading §7.2 (account type and regime per broker) | Account | Robinhood rows | **No**: SP1 |
 | Mandate §6.1 `cli_confirm` paper only ↔ DEC-155 item 4 | Live grant | Method field | **No**: DEC-529 item 3, until E9-4 |
-| ES-23 ↔ the runner's `live` feature | Build | — | **No**: DEC-529 item 3 |
+| ES-23 ↔ the runner's `live` feature | Build | — | **No**: DEC-529 item 3; X1 adds the check ES-23 assumes |
 | Connections §6.2 rule 5 ↔ ES-23 numbers | Prices, quantities | Decimal strings via `mandate-num` | Yes |
 | CN-8 ↔ `get_accounts` | Reads | Other accounts dropped | Yes, by C2 |
 | DEC-124 ↔ the rehearsal | Founder's run | Simulated stage first | Yes, R0 |
@@ -174,77 +194,94 @@ Robinhood code.
 ## Slices, in parallel lanes
 
 T is a tests PR and I its implementation PR (DEC-77); D docs; SP a protected spec PR the founder
-approves. **Now** means it can start today, beside the paper path. Lanes touch different crates,
-so six builders can work at once; reviews run in parallel across lanes and merges one at a time.
+approves. **Size rule:** every PR stays under 400 non-generated changed lines, tests included,
+unless its body says why; a slice that would cross it splits before review. Lanes touch
+different crates; reviews run in parallel across lanes and merges stay one at a time. "Now"
+means it can start today; the coordinator staggers starts to avoid crate conflicts and usage
+limits.
 
-| # | Lane | Story | Kind | Crate | What | After | Now? | Estimate |
+| # | Lane | Story | Kind | Crate | What | After | Start | Estimate |
 |---|---|---|---|---|---|---|---|---|
 | L0 | — | E7-15 | D | docs | This brief, DEC-529, DEC-531, ADR-0004, the contract | — | this PR | — |
-| SP1 | — | E7-23 | SP | `docs/specs/` | Trading §5.2 as broker profiles with Robinhood's; §5.4, §4.2, §7.2 Robinhood rows; connections §4, §6.2, §6.6 from the contract; mandate §6.1 and V-001 per DEC-529 | — (DEC-529 parts wait for the founder) | **now** | 200–300 |
-| B1 | Profile | E7-23 | T, I | `mandate-executor`, `mandate-alpaca` | `CapabilityProfile` and its hash; `BrokerConnector::profile`; Alpaca declares §5.2; registered as `broker_profile` configuration | — | **now** (coordinate with the paper path's A1 in `mandate-alpaca`) | T 250–350, I 200–300 |
-| B2 | Profile | E7-23 | T, I | `mandate-executor` | Protection and reconciliation read the profile; the `asset_class == Crypto` branch goes; LT-2's property over generated profiles; LT-14 | B1 | **now** | T 250–350, I 200–300 |
-| B3 | Profile | E7-23 | T, I | `mandate-builder` | Quantity form from policy ∩ profile (LT-3); deployment refuses a policy the profile cannot meet | B1 | **now** | T 200–300, I 150–250 |
-| M1 | MCP | E7-16 | T, I | **new** `mandate-mcp` | Transport: pinned host, HTTPS only (loopback in test builds), no redirects, JSON-RPC, `Mcp-Session-Id`, JSON and SSE answers, timeouts, the token bucket with a reserved exit budget | — | **now** | T 300–400, I 300–400 |
-| M2 | MCP | E7-16 | T, I | `mandate-mcp` | Allowlist, contract hash, drift halts, fund-movement tool refuses, metadata never surfaces | M1 | **now** | T 200–300, I 150–250 |
-| O1 | MCP | E7-24 | T, I | `mandate-mcp` `auth` | OAuth 2.1 with PKCE and single-use `state` on a loopback redirect; token in `SecretString` only (LT-9); `getrandom` row | M1 | **now** | T 250–350, I 250–350 |
-| S1 | Robinhood | E7-25 | T, I | **new** `mandate-rh-sim` | The contract's rules as a pure core: types, quantity forms, `gfd`/`gtc`, regular hours, `agentic_allowed`, `ref_id` dedup, the ten states, cancel refused when terminal, `review` alerts, scripted fills and faults | — | **now** | T 250–350, I 250–350 |
-| S2 | Robinhood | E7-25 | T, I | `mandate-rh-sim` | Loopback MCP server over S1, injection and extra-tool variants, a lost-answer fault, a binary for the rehearsal | S1, M1 | **now** | T 200–300, I 200–300 |
-| C1 | Robinhood | E7-6 | T, I | **new** `mandate-robinhood` | Its profile; `Submit` → `review_equity_order` then `place_equity_order` with the derived `ref_id`; `Cancel`; the state mapping | M2, S1, B1 | **now** | T 300–400, I 250–350 |
-| C2 | Robinhood | E7-6 | T, I | `mandate-robinhood` | Reads filtered to the agentic account (CN-8). The account fingerprint (CN-5) follows after the live run: one connection needs no duplicate check | C1 | **now** | T 200–300, I 150–250 |
-| K1a | Live | M7 | T, I | `mandate-cli` | The `inbox` and `grant` commands (M7's clap remainder) over the existing approval path | — | **now** | T 200–300, I 200–300 |
-| K1b | Live | E7-11 | T, I | `mandate-cli` | `connection record`: a Robinhood `ConnectionEstablished` (scopes the allowlist, the account number by reference, the 1× attestation), and `live` accepted by `version confirm` and `agent deploy` for that connection only (DEC-529 item 3) | the paper path's P0 | as soon as P0 merges | T 200–300, I 150–250 |
-| G1 | Live | E7-26 | T, I | the runner (`mandate-paper`) | The connector chosen from the connection record and the environment from the confirmed mandate; the `live` feature and LT-1's build test; `ask` openings wait for the grant (LT-4); the quote cross-check | E1b, K1a, K1b, C2, O1, B2, B3 | no | T 300–400, I 250–350 |
-| R0 | — | — | run, then D | — | The founder's rehearsal and live run (below); a docs PR records the evidence | G1, the paper path's E2, DEC-529 accepted | no | — |
+| SP1 | — | E7-23 | SP | `docs/specs/` | Trading §5.2 as broker profiles with Robinhood's; §5.4, §4.2, §7.2 Robinhood rows; connections §4, §6.2, §6.6 from the contract; mandate §6.1 and V-001 per DEC-529 | — | now | 200–300 |
+| X1 | Live | E7-26 | T, I | `xtask` | `cargo xtask live-feature`: only the runner may declare a `live` feature, and no CI or release build enables it except one compile-only job (ES-23 as DEC-529 item 3 narrows it; no check enforces ES-23's ban today) | — | now | T 100–200, I 100–200 |
+| B1 | Profile | E7-23 | T, I | `mandate-domain`, `mandate-executor`, `mandate-alpaca` | `CapabilityProfile` and its canonical hash (via `mandate-canon`) in `mandate-domain`; `BrokerConnector::profile` in the executor; Alpaca declares §5.2; registered as `broker_profile` configuration | #668 and the executor fixes | after #668 | T 250–350, I 200–300 |
+| B2a | Profile | E7-23 | T, I | `mandate-executor` | Protection reads the profile: the strongest form it offers; the `asset_class == Crypto` branch goes; LT-2's property over generated profiles; LT-14 | B1 | after B1 | T 250–350, I 200–300 |
+| B2b | Profile | E7-23 | T, I | `mandate-executor` | Reconciliation: a `BrokerRequest` variant listing an account's orders by instrument, origin (`agentic`) and created-since, and the `Unknown`-adoption path: exactly one match adopted, zero or several stay `Unknown` (DEC-529 item 4); used only when the profile has no query by client id and the ledger shows one agent on the account | B2a; the I waits for DEC-529 Accepted | after B2a | T 250–350, I 200–300 |
+| B3 | Profile | E7-23 | T, I | `mandate-builder` | Quantity form from policy ∩ profile (LT-3), reading the profile from `mandate-domain`; deployment refuses a policy the profile cannot meet; one share must pass every limit or nothing is sent (DEC-529 item 2) | B1 | after B1 | T 200–300, I 150–250 |
+| M1 | MCP | E7-16 | T ×4, I | **new** `mandate-mcp` | Transport: pinned host, HTTPS only (loopback in test builds), no redirects, JSON-RPC, `Mcp-Session-Id`, JSON and SSE answers, timeouts, the token bucket with a reserved exit budget. Already split into four tests PRs; implementations split to match | — | started | T 4 × 150–300, I 2 × 250–350 |
+| M2 | MCP | E7-16 | T, I | `mandate-mcp` | Allowlist, contract hash, drift halts, fund-movement tool refuses, metadata never surfaces | M1 | after M1 | T 200–300, I 150–250 |
+| O1a | MCP | E7-24 | T, I | `mandate-mcp` `auth` | Discovery from the server's published authorization metadata, and client registration as the published MCP flow describes it | M1 | after M1 | T 200–300, I 200–300 |
+| O1b | MCP | E7-24 | T, I | `mandate-mcp` `auth` | Authorization code with PKCE (S256) and single-use `state` on a loopback redirect; the token in `SecretString` only (LT-9); the `getrandom` row | O1a | after O1a | T 200–300, I 200–300 |
+| S1 | Robinhood | E7-25 | T, I | **new** `mandate-rh-sim` | The contract's rules as a pure core: types, quantity forms, `gfd`/`gtc`, regular hours, `agentic_allowed`, `ref_id` dedup, the ten states, cancel refused when terminal, `review` alerts, scripted fills and faults | — | started | T 250–350, I 250–350 |
+| S2 | Robinhood | E7-25 | T, I | `mandate-rh-sim` | Loopback MCP server over S1, injection and extra-tool variants, a lost-answer fault, an unexpected-shape fault, a binary for the rehearsal | S1, M1 | after M1 | T 200–300, I 200–300 |
+| C1 | Robinhood | E7-6 | T, I | **new** `mandate-robinhood` | Its profile; `Submit` → `review_equity_order` then `place_equity_order` with the derived `ref_id`; `Cancel`; the state mapping; an unparseable or unexpected place answer is `Unknown` (LT-6) | M2, S1, B1; the I waits for DEC-529 Accepted | after M2 | T 300–400, I 250–350 |
+| C2 | Robinhood | E7-6 | T, I | `mandate-robinhood` | Reads filtered to the agentic account (CN-8). The account fingerprint (CN-5) follows after the live run: one connection needs no duplicate check | C1 | after C1 | T 200–300, I 150–250 |
+| C3 | Robinhood | E7-6 | T, I | `mandate-robinhood` | B2b's list request mapped to `get_equity_orders` with `symbol`, `placed_agent` `agentic` and `created_at_gte`, all pages | C1, B2b | after B2b | T 150–250, I 100–200 |
+| C4 | Robinhood | E7-6 | T, I | `mandate-robinhood` | The preflight facts and the account snapshot from `get_accounts`, `get_portfolio`, `get_equity_positions`, `get_equity_orders`, quotes and tradability, mapped to what DEC-470 item 1 checks (no position, no open order, cash, buying power); any unknown or missing field refuses (rule 3) | C2 | after C2 | T 250–350, I 200–300 |
+| K1a | Live | M7 | T, I | `mandate-cli` | The `inbox` and `grant` commands (M7's clap remainder) over the existing approval path, on P0's Postgres control journal | P0 (merged) | after D1b settles | T 200–300, I 200–300 |
+| K1b | Live | E7-11 | T, I | `mandate-cli` | `connection record`: a Robinhood `ConnectionEstablished` (scopes the allowlist, the account number by reference, the 1× attestation), and `live` accepted by `version confirm` and `agent deploy` for that connection only (DEC-529 item 3) | D2 (#708 tests in review; its implementation follows) | after D2 | T 200–300, I 150–250 |
+| G1a | Live | E7-26 | T, I | the runner (`mandate-paper`) | The connector chosen from the connection record and the environment from the confirmed mandate; the `live` feature; LT-1's build test; the lapse check: refuse unless the account is flat and the connection record is unspent (DEC-529 item 3) | E1b, K1b, C4, O1b, X1 | after E1b | T 250–350, I 200–300 |
+| G1b | Live | E7-26 | T, I | the runner | `ask` openings wait for the grant (LT-4); the quote cross-check (DEC-529 item 12); bounded reads until LT-10; then `journal export` | G1a, K1a, B2a, B3, C3 | after G1a | T 250–350, I 200–300 |
+| R0 | — | — | run, then D | — | The founder's rehearsal and live run (below); a docs PR records the evidence | G1b, the paper path's E2, DEC-529 Accepted | — | — |
 
 **The paper runner is built generic from the start.** The paper path's E1a and E1b build the
 runner so it takes the connector from a `BrokerConnector` chosen by the connection record and
 the environment from the mandate, with Alpaca paper as the only connector compiled by default.
-That is the same work as an Alpaca-only runner, and it removes a whole generalization slice from
-this path's tail. The coordinator applies it to the paper brief's E1a and E1b. Renaming the
-crate to `mandate-run` waits until after the live run.
+That is the same work as an Alpaca-only runner, and it removes a generalization slice from this
+path's tail. The coordinator accepted it for E1a's brief. Renaming the crate to `mandate-run`
+waits until after the live run.
 
-**Totals.** 27 PRs (one docs, one spec, 13 tests and 12 implementation PRs), about 6,000 to
-8,500 changed lines. All but G1 start now or as soon as P0 merges.
+**Tests against the simulated server.** `mandate-rh-sim` is a `tool` crate, so no product crate
+may depend on it, not even for tests (`xtask/layers.toml`, checked by `cargo xtask layers`). The
+end-to-end tests that drive `mandate-mcp` and `mandate-robinhood` against it live in
+`mandate-rh-sim`'s own `tests/`, as `mandate-refcases` tests other crates from its own; each
+product crate's unit tests use in-crate doubles.
 
-**Critical path.** The paper path's E1b → G1 (one tests PR, one implementation PR) → the
-rehearsal → the live run. Everything else runs beside the paper path.
+**Totals.** 45 PRs: one docs, one spec, one evidence docs PR, and 42 tests and implementation
+PRs (21 pairs, with M1's four tests PRs and two implementation PRs). About 8,000 to 11,500
+changed lines.
 
-## Schedule: a target of Monday 2026-10-26
+**Critical path.** The paper path's E1b and D2 → K1b and G1a → G1b → the rehearsal → the live
+run. Everything else runs beside the paper path.
 
-The founder's deadline is 2026-11-02. This schedule targets everything done a week earlier,
-by Monday 2026-10-26, as requested in this brief's session on 2026-10-08, so a slip still lands
-before the deadline. Working back from that target:
+## Schedule
 
-| Date | What is done |
+The founder's deadline is 2026-11-02. This brief's session asked for everything a week early, so
+the **target** is code complete on Wednesday 2026-10-21 and the live run around Friday
+2026-10-23, with 2026-10-26 as buffer. The **realistic fallback** is the live run by Friday
+2026-10-30, still before the deadline. The target holds only in the paper path's best case.
+
+| Date | Target |
 |---|---|
-| Fri 2026-10-09 | The founder answers DEC-529 and approves SP1. The coordinator adds the backlog rows, applies the generic runner to the paper brief, and starts six builders: the B, M, S and C lanes, K1a, and O1 |
-| Fri 2026-10-16 | Every "now" tests PR merged; B1, M1, S1, C1 and K1a implementations merged. The paper path's E1b merged (its own brief's target) |
-| Tue 2026-10-20 | Every "now" implementation merged; K1b merged; the paper path's E2 run done. G1's tests PR merged |
-| Wed 2026-10-21 | G1's implementation merged. The path is complete in code |
+| Fri 2026-10-09 | DEC-529 recorded as Accepted; SP1 opened. S1, M1 under way; X1 and SP1 start |
+| Fri 2026-10-16 | M1, M2, S1 and the B1 tests merged; O1a, S2, C1 and B2a under way. The paper path's E1b merged |
+| Tue 2026-10-20 | The profile, MCP and Robinhood lanes merged; K1a and K1b merged after D2; the paper path's E2 run done; G1a merged |
+| Wed 2026-10-21 | G1b merged: the path is complete in code |
 | Thu 2026-10-22 | The founder's rehearsal against `mandate-rh-sim` (R0 steps 1 and 2) |
 | Fri 2026-10-23 | The live run (R0 steps 3 to 8) |
-| Mon 2026-10-26 | Buffer: a second live attempt if Friday's model said `Flat` or the gate refused, and R0's evidence PR merged. **Everything done** |
+| Mon 2026-10-26 | Buffer: a second attempt if Friday's model said `Flat` or the gate refused (item 1 of DEC-529 allows it), and R0's evidence PR |
+| Fri 2026-10-30 | Realistic fallback for the live run |
 
-**What it takes, and the decisions I made to get there:**
+**What the target needs:**
 
-- **Six builders from 2026-10-09**, one per lane plus K1a and O1. Every "now" slice touches its
-  own crate, so they do not collide.
-- **Reviews run in parallel across lanes; merges stay one at a time.** At one review at a time,
-  27 PRs plus the paper path's remaining ones cannot finish by 2026-10-21. Each review is still
-  independent and on a different model, and each pair is still tests first (DEC-77).
-- **A tests PR and its implementation PR can be open together**, with the implementation
-  rebased after the tests merge, as long as the tests PR's pending tests are shown failing on
-  its stubs first. This saves a review cycle per pair without weakening DEC-77.
-- **Cut, not deferred into a hack:** the account fingerprint (CN-5, needed only once there is a
-  second connection) and the crate rename. Both follow the live run as normal stories.
-- **The founder's answers by 2026-10-09.** DEC-529 and SP1 gate only G1 and the live run, but a
-  late answer moves the whole tail.
+- **The lanes started as soon as their crates are free.** The coordinator staggers them: S1 and
+  M1 now; B1 after #668 and the executor fixes; O1a and S2 after M1; C1 after M2, S1 and B1;
+  K1a after the D1b and D2 work in `mandate-cli` settles.
+- **Reviews in parallel across lanes; merges one at a time.** Each review is still
+  independent and on a different model.
+- **An implementation PR may be open as a draft beside its tests PR** once the pending tests
+  are shown failing on the stubs, then rebased after the tests merge. Tests still land first
+  (DEC-77).
+- **Cut, not deferred into a hack:** the account fingerprint (CN-5) and the crate rename, both
+  normal stories after the live run.
 
-**Risks, in order:** the paper path slipping past 2026-10-20 (the one thing this path cannot
-absorb; the 2026-10-26 buffer is one trading day); OAuth discovery at Robinhood's server needing
-something the published MCP authorization flow does not describe (a stop condition, found by
-O1's tests against the published flow, so it surfaces by about 2026-10-14); and a model that says
-`Flat` on both 2026-10-23 and 2026-10-26, which nobody works around (DEC-475).
+**Risks, in order:** the paper path slipping past 2026-10-20, which moves the live run to the
+fallback; the stagger pushing B1, and with it B2a, B3 and C1, past 2026-10-16; OAuth discovery at
+Robinhood's server needing something the published MCP authorization flow does not describe (a
+stop condition, found by O1a's tests against the published flow); the response shapes, which
+are assumed until R0 step 4 reads real answers; and a model that says `Flat` on every attempt
+day, which nobody works around (DEC-475).
 
 ### The founder's run (R0)
 
@@ -269,8 +306,14 @@ sees its output during the run (`AGENTS.md` rule 8).
 6. `mandate journal export` for the agent, account and control streams, then `mandate journal
    verify <file> --store <root>` on each: clean.
 7. The same command again: refused before any place call (DEC-470 item 1).
-8. The founder checks the position and the stop in the Robinhood app and records the evidence
-   (no account number) in R0's docs PR.
+8. The founder checks the position and the resting stop in the Robinhood app, and records the
+   evidence (no account number) in R0's docs PR. Robinhood's GTC expiry is not published, so the
+   founder checks the stop again periodically while the position is held and re-places it by
+   hand if it lapsed (DEC-529 item 7).
+
+Step 4 is the first time real Robinhood answers are read: the response shapes are assumed until
+then. A refusal there for an unexpected shape is a finding for the connector, not something to
+work around.
 
 ## Decisions
 
@@ -278,12 +321,16 @@ sees its output during the run (`AGENTS.md` rule 8).
 
 | # | What | Meanwhile |
 |---|---|---|
-| F-1 | The live order and its narrowings of rule 8, ES-23, DEC-155 item 4 and V-001 | Everything is built; nothing live is run |
-| F-2 | The instrument and `max_order_usd` (whole shares, so one share must fit) | Agents propose neither |
-| F-3 | Recovery without a query by `ref_id` (DEC-529 item 4) | B2's fallback is built behind the profile and refuses every profile without a query by client id until accepted |
-| F-4 | DEC-441 items 15, 16, 17 and 20 as DEC-529 reads them; counsel | No customer connection; no live run |
-| F-5 | The live quote source (DEC-529 item 12) | No live run |
-| F-6 | Founder-owned files (new crates' entries, the `getrandom` row) and SP1 | Each PR names it |
+Relayed as accepted on 2026-10-08; each reads Accepted once DEC-529's status does.
+
+| # | What | Answer, or the course until DEC-529 reads Accepted |
+|---|---|---|
+| F-1 | The live order and its narrowings of rule 8, ES-23, DEC-155 item 4, V-001, FR-2.6, trading §4.2 and the tracker's counsel line | Accepted as recommended. Nothing live runs before the status reads Accepted |
+| F-2 | The cap and the instrument class (whole shares, so one share must fit) | The founder chose them: `max_order_usd` 100 USD, a cheap broad ETF under about 90 USD a share; the ticker in the mandate |
+| F-3 | Recovery without a query by `ref_id` (DEC-529 item 4), resolving DEC-441 item 10 for this order only | Accepted as recommended. B2b's and C1's implementations wait for the status |
+| F-4 | DEC-441 items 15, 16, 17 and 20 as DEC-529 reads them; counsel | Accepted as recommended; counsel not required for this own-account order and still required for any customer use |
+| F-5 | The live quote source (DEC-529 item 12) | Accepted as recommended |
+| F-6 | Founder-owned files (new crates' entries, the `getrandom` row) and SP1 | SP1 approved as DEC-529 states it; each PR names its founder-owned files |
 
 ### Decided by agents
 
@@ -291,8 +338,8 @@ sees its output during the run (`AGENTS.md` rule 8).
   broker rules as capability profiles.
 - The `ref_id` derivation: a UUID version 8 from SHA-256 (`mandate-canon`) of the intent's
   idempotency key; C1 records it.
-- One runner for every environment, built generic in the paper path's E1a, not a live binary; the confirmation is the
-  approval flow (DEC-529 item 1).
+- One runner for every environment, built generic in the paper path's E1a, not a live binary;
+  the confirmation is the approval flow (DEC-529 item 1).
 - E9-4 stays off this path: the approval record's method field lets it replace `cli_confirm`
   without rework.
 
@@ -320,11 +367,12 @@ Stop and write a decision rather than continuing if:
 - the OAuth flow needs a client secret, a non-loopback redirect, or a token on disk;
 - protection would leave a filled position unprotected after the run;
 - moving Alpaca onto its profile changes any Alpaca outcome (LT-14);
-- a new dependency beyond `getrandom` seems necessary.
+- a new dependency beyond `getrandom`, or a feature beyond `tokio`'s `net`, seems necessary;
+- a PR would cross 400 non-generated lines, tests included, without saying why.
 
 ## Definition of done
 
-- [ ] DEC-529 accepted; SP1 merged; DEC-531's profiles in use by Alpaca and Robinhood.
+- [ ] DEC-529 reads Accepted; SP1 merged; DEC-531's profiles in use by Alpaca and Robinhood.
 - [ ] No broker name or asset-class branch for a broker rule in the builder, executor, gate or
       reconciliation (LT-2).
 - [ ] The rehearsal against `mandate-rh-sim` ran clean, restart included.

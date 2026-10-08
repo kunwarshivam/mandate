@@ -49,7 +49,7 @@ them with `mandate-num` and never through a float (connections spec §6.2 rule 5
 | U-R4 | OCO or bracket, or at least a resting stop-limit | Resting stop-limit **confirmed from contract**; OCO placement **confirmed absent from the tool list**; whether OCO can be placed another way **needs Robinhood's written answer** | `stop_limit` with `gtc`. A `get_advanced_orders` listing includes OCO groups, but no tool places one, and no bracket parameter exists | One GTC stop-limit for the whole position after the entry fills completely (DEC-441 item 17, DEC-529 item 7) |
 | U-R5 | Token lifetime, refresh, how revocation shows | **Open; needs Robinhood's written answer** | Nothing in the tool contract | Treated as short-lived: the founder logs in at each run; a failed call for authorization reasons sets `closing_only` (CN-6). The resting GTC stop needs no session |
 | U-R6 | Account status fields and restriction rejects | **Open in part** | `review_equity_order` returns pre-trade alerts for buying power, pattern day trading and halts. The fields of `get_accounts` and `get_portfolio` are not in the contract; error codes are not published | `review_equity_order` before every place; any alert is a refusal before the place. An unrecognized status or error is `blocked` (trading spec §7.3 row 1) |
-| U-R7 | Margin and 1× status | **Open; needs Robinhood's written answer** | No field in the contract shows margin or a 1× cap | For the founder's order only: the founder confirms a cash account or margin disabled in the typed confirmation (DEC-529 item 11). For customers: paused and prompted (FR-2.6) |
+| U-R7 | Margin and 1× status | **Open; needs Robinhood's written answer** | The contract shows no margin field and no 1× cap | For the founder's order only: the founder attests, with `cli_confirm` when recording the connection, that the agentic account is a cash account or has margin disabled, and the gate's buying power is the lower of cash and the broker's figure (DEC-529 item 11). For customers: paused and prompted (FR-2.6) |
 | U-R8 | Fills, fees, dividends, deposits and withdrawals as an activity feed | **Open in part** | Orders (`get_equity_orders` with states), positions (`get_equity_positions`) and tax lots (`get_equity_tax_lots`) exist. No deposit, withdrawal or dividend feed is listed; fill and execution detail fields of `orders[]` are not published | For one order on a flat, dedicated account: reconciliation compares the order's state and filled quantity and the position. Full reconciliation (trading spec §11) for customers waits for an answer |
 | U-R9 | Rate limits | **Open; needs Robinhood's written answer** | Not published in the contract | Spec §6.5's conservative token bucket, with a reserved budget for exits and cancels |
 | U-R10 | Platform terms: one platform for many customers, data use, attribution | **Needs Robinhood's written answer** (DEC-441 item 15) | Not in the tool contract. `placed_agent` `agentic` shows Robinhood attributes orders to the agent channel | Does not block the founder's own order (DEC-529 item 5); blocks every customer connection |
@@ -58,9 +58,17 @@ them with `mandate-num` and never through a float (connections spec §6.2 rule 5
 
 ### Unknown from the contract, all rows
 
-Rate limits; error codes; whether a retry with the same `ref_id` returns the original order;
-the fields of `orders[]`, including fill and execution detail and whether `ref_id` is echoed;
-OAuth token lifetime and scopes; and the account and session status values.
+Rate limits; error codes; the retry behaviour of `ref_id` (the upstream deduplicates by it, but
+whether a retry returns the original order, an error, or something else is not stated); the
+output shape of every tool, including the fields of `orders[]`, fill and execution detail, and
+whether `ref_id` is echoed; how long a `gtc` order rests before Robinhood expires it; OAuth token
+lifetime and scopes; and the account and session status values.
+
+**Response shapes are assumed.** The contract publishes inputs, not outputs, so every parser the
+connector has is written against an assumed shape. The rule for that (the brief's LT-6): an
+unparseable or unexpected answer to a place call is `Unknown`, never treated as rejected and
+never re-sent; an unexpected answer to a read refuses (rule 3). The first real check of the
+shapes is the founder's run with login and reads and no place call (the brief's R0 step 4).
 
 ## Crash recovery without a query by `ref_id` (DEC-441 item 10)
 
