@@ -14,10 +14,15 @@
 # chain of path dependencies of any kind (normal, dev, build), whatever its layer allows; each name
 # is a workspace member or in `planned`. No crate may have a path dependency outside the workspace,
 # whose dependencies the check could not see (DEC-525).
+# `allowed_dependents`, when set, is an allowlist: only the workspace crates it names may depend on
+# the crate, by a dependency of any kind; each name is a workspace member or in `planned` (DEC-642
+# item 7). `dev_only = true` lets other crates depend on the crate only as a dev-dependency
+# (DEC-645).
 #
 # Planned crates and layers, created only when a story needs them:
-#   0  mandate-num, mandate-time, mandate-canon
-#   1  mandate-domain, mandate-approval, mandate-liquidity (pure cores over layer-0 values;
+#   0  mandate-num, mandate-time, mandate-canon, mandate-identity-seal (DEC-642 item 7: its
+#      allowed_dependents list is the only thing that may build an identity session or membership)
+#   1  mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1)
 #   2  mandate-journal, mandate-accounting, and mandate-passkey, the WebAuthn relying party
 #      (E9-1, DEC-660), which verifies and never signs
@@ -43,6 +48,8 @@
 #   10 mandate-rh-sim, the simulated Robinhood broker (E7-25, DEC-124): above every product crate,
 #      so none can take it as a normal dependency and it stays out of every production graph,
 #      while the Robinhood connector's tests (C1) reach it as a dev-dependency
+#   11 mandate-identity-testkit (DEC-645): above every product crate, so only dev-dependencies
+#      reach it, as mandate-rh-sim
 #   tool  mandate-refcases, xtask
 
 impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
@@ -90,6 +97,25 @@ layer = 2
 safety_critical = true
 pure = true
 allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
+
+[crates.mandate-identity]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+[crates.mandate-identity-seal]
+layer = 0
+safety_critical = true
+pure = true
+allowed_external = []
+allowed_dependents = ["mandate-identity", "mandate-identity-testkit"]
+
+[crates.mandate-identity-testkit]
+layer = 11
+safety_critical = false
+pure = true
+dev_only = true
 
 [crates.mandate-liquidity]
 layer = 1

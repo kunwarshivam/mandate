@@ -725,6 +725,14 @@ struct CratePolicy {
     /// dependencies, dev-dependencies included, whatever the layers allow (DEC-525).
     #[serde(default)]
     forbidden_internal: Vec<String>,
+    /// When set, the only workspace crates that may depend on this crate, by a dependency of any
+    /// kind: an allowlist, so a crate added later is refused until it is named (DEC-642 item 7).
+    #[serde(default)]
+    allowed_dependents: Option<Vec<String>>,
+    /// Whether every workspace crate that depends on this one must do so as a dev-dependency, as
+    /// test support must (DEC-645).
+    #[serde(default)]
+    dev_only: bool,
 }
 
 enum Layer {
@@ -774,6 +782,19 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
             )
         }));
     }
+    for (listed, own) in &policy.crates {
+        let unknown = own
+            .allowed_dependents
+            .iter()
+            .flatten()
+            .filter(|name| !names.contains(name.as_str()) && !policy.planned.contains(name));
+        problems.extend(unknown.map(|name| {
+            format!(
+                "`{listed}` allows `{name}` as a dependent, which is neither a workspace member nor \
+                 in `planned` (DEC-642 item 7)"
+            )
+        }));
+    }
     for pkg in &packages {
         let Some(own) = policy.crates.get(&pkg.name) else {
             problems.push(format!("`{}` has no entry in xtask/layers.toml", pkg.name));
@@ -805,6 +826,22 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
                 let Some(dep_policy) = policy.crates.get(&dep.name) else {
                     continue;
                 };
+                if dep_policy.dev_only && dep.kind.as_deref() != Some("dev") {
+                    problems.push(format!(
+                        "`{}` depends on `{}`, which is dev-only in xtask/layers.toml, other than as \
+                         a dev-dependency (DEC-645)",
+                        pkg.name, dep.name
+                    ));
+                }
+                if let Some(allowed) = &dep_policy.allowed_dependents
+                    && !allowed.contains(&pkg.name)
+                {
+                    problems.push(format!(
+                        "`{}` depends on `{}`, whose allowed_dependents in xtask/layers.toml does \
+                         not name it (DEC-642 item 7)",
+                        pkg.name, dep.name
+                    ));
+                }
                 match (&own_layer, layer_of(dep_policy, &dep.name)?) {
                     (Layer::Product(_), Layer::Tool) => {
                         problems.push(format!(
@@ -2320,7 +2357,12 @@ const STUB_MARKERS: [&str; 5] = [
 /// 3): while a second bracket's OCO awaits its acknowledgment, a third bracket's start ends the
 /// first open interval in the instrument rather than the awaited one. It reaches no stub and fails
 /// on that behaviour until E4b's fix deletes the row with its `#[ignore]` line.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
+///
+/// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
+/// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
+/// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
+/// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2357,6 +2399,18 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
+    ),
+    (
+        "crates/mandate-runtime/tests/answer_records.rs",
+        "every_answer_record_the_runtime_writes_passes_the_journals_check",
+    ),
+    (
+        "crates/mandate-runtime/tests/answer_records.rs",
+        "a_responded_record_carries_its_quorum_only_where_check_7_was_judged",
+    ),
+    (
+        "crates/mandate-runtime/tests/answer_records.rs",
+        "decided_by_now_is_null_unless_the_reclassification_asks",
     ),
 ];
 
@@ -3373,6 +3427,8 @@ mod tests {
                     pure: false,
                     allowed_external: Vec::new(),
                     forbidden_internal: banned.unwrap_or_default(),
+                    allowed_dependents: None,
+                    dev_only: false,
                 };
                 ((*name).to_owned(), policy)
             })
@@ -3491,6 +3547,66 @@ mod tests {
         let planned: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpaca", "mandate-paper"])];
         let problems = layer_problems(&policy(&layers, &planned, &["mandate-paper"]), &members())?;
         assert_eq!(problems, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// A crate with `allowed_dependents` may be depended on, by a normal or a dev-dependency, only
+    /// by the crates it names; one it does not name is a problem, and so is a name that is neither
+    /// a member nor planned (DEC-642 item 7).
+    #[test]
+    fn only_an_allowed_dependent_may_depend_on_a_sealed_crate() -> Result<()> {
+        let layers = [("seal", 0), ("core", 1), ("kit", 11), ("api", 6)];
+        let sealed = |allowed: &[&str]| {
+            let mut p = policy(&layers, &[], &["store"]);
+            if let Some(seal) = p.crates.get_mut("seal") {
+                seal.allowed_dependents = Some(allowed.iter().map(|n| (*n).to_owned()).collect());
+            }
+            p
+        };
+        let meta = |api_kind: Option<&'static str>| {
+            workspace(vec![
+                member("seal", &[]),
+                member("core", &[("seal", None)]),
+                member("kit", &[("seal", None), ("core", None)]),
+                member("api", &[("core", None), ("seal", api_kind)]),
+            ])
+        };
+        for kind in [None, Some("dev")] {
+            let problems = layer_problems(&sealed(&["core", "kit", "store"]), &meta(kind))?;
+            let named = "`api` depends on `seal`, whose allowed_dependents";
+            assert!(
+                problems.iter().any(|p| p.starts_with(named)),
+                "{kind:?}: {problems:?}"
+            );
+            assert_eq!(problems.len(), 1, "{kind:?}: {problems:?}");
+        }
+        let allowed = layer_problems(&sealed(&["core", "kit", "api"]), &meta(None))?;
+        assert_eq!(allowed, Vec::<String>::new());
+        let typo = layer_problems(&sealed(&["core", "kit", "api", "stor"]), &meta(None))?;
+        assert!(
+            typo.iter()
+                .any(|p| p.starts_with("`seal` allows `stor` as a dependent")),
+            "{typo:?}"
+        );
+        Ok(())
+    }
+
+    /// A `dev_only` crate may be depended on only as a dev-dependency (DEC-645).
+    #[test]
+    fn a_dev_only_crate_is_only_a_dev_dependency() -> Result<()> {
+        let layers = [("kit", 11), ("api", 6)];
+        let mut p = policy(&layers, &[], &[]);
+        if let Some(kit) = p.crates.get_mut("kit") {
+            kit.dev_only = true;
+        }
+        for (kind, refused) in [(None, true), (Some("build"), true), (Some("dev"), false)] {
+            let meta = workspace(vec![member("kit", &[]), member("api", &[("kit", kind)])]);
+            let problems = layer_problems(&p, &meta)?;
+            let named = problems
+                .iter()
+                .any(|p| p.starts_with("`api` depends on `kit`, which is dev-only"));
+            assert_eq!(named, refused, "{kind:?}: {problems:?}");
+        }
         Ok(())
     }
 
