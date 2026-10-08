@@ -108,14 +108,7 @@ jobs:
       # The Postgres journal tests run here, not in `fast` (DEC-109): the supported version, ES-08.
       - name: Start PostgreSQL 18 (digest-pinned)
         if: steps.change.outputs.docs_only != 'true'
-        run: |
-          docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 \
-            postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
-          for _ in $(seq 1 30); do
-            docker exec postgres pg_isready -U postgres && exit 0
-            sleep 2
-          done
-          echo "PostgreSQL did not become ready" >&2; exit 1
+        run: .github/scripts/start-postgres.sh
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: steps.change.outputs.docs_only != 'true'
         with:
@@ -160,8 +153,17 @@ jobs:
                 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
                 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175,
                 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191]
+    # DEC-519. The database `full-checks` has, so a mutant in code only the Postgres tests reach is
+    # judged by them rather than reported missed while they skip; required, so they fail rather than
+    # skip if it is ever missing. No debuginfo: xtask sets the same two settings on every build the
+    # gate makes, and setting them here as well puts them in rust-cache's key, so the dependencies
+    # it restores were built the way the gate builds and are not rebuilt in every shard.
     env:
       MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/192
+      MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+      MANDATE_PG_REQUIRED: "1"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -173,6 +175,9 @@ jobs:
       - name: No changed safety-critical source
         if: steps.change.outputs.docs_only == 'true'
         run: echo "docs-only change; no mutation shard has source to test (DEC-112)"
+      - name: Start PostgreSQL 18 (digest-pinned)
+        if: steps.change.outputs.docs_only != 'true'
+        run: .github/scripts/start-postgres.sh
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         if: steps.change.outputs.docs_only != 'true'
         with:
