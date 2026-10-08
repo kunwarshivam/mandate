@@ -108,7 +108,7 @@ def base_drafts() -> dict[str, dict]:
         "client_request": envelope("request", "OwnerRequestSubmitted", CLIENT, request),
         "revoked_compromised": envelope("revoked", "ConnectionRevoked", USER, revoked, KILL_SWITCH, version=2),
         "client_connected": envelope("connected", "ClientConnected", USER, connected),
-        "client_revoked": envelope("client_revoked", "ClientRevoked", USER, {"client_id": CLIENT_ID, "user": OWNER}),
+        "client_revoked": envelope("client_revoked", "ClientRevoked", USER, {"client_id": CLIENT_ID, "user": OWNER, "reason": "owner"}),
     }
 
 
@@ -166,15 +166,16 @@ MEMBER_CASES = {
     "client_revoked": (
         ("client_id", 7, "client/01"),
         ("user", 7, ""),
+        ("reason", 7, "expired"),
     ),
 }
-# A `null` `scopes` or `agents` is refused by rule 71, at the member's own path with the same reason,
+# A `null` `scopes` or `agents` is refused by rule 71, and a `null` `user` by rule 73 or 74, at the member's own path with the same reason,
 # so it is refused identically whether or not its type is checked first.
-RULE_TYPED = ("scopes", "agents")
+RULE_TYPED = ("scopes", "agents", "user")
 NULLED = {
     "revoked_compromised": ("connection_id", "reason", "step_up"),
     "client_connected": ("client_id", "user", "scopes", "agents", "step_up"),
-    "client_revoked": ("client_id", "user"),
+    "client_revoked": ("client_id", "user", "reason"),
 }
 
 
@@ -437,6 +438,38 @@ def invalid_drafts() -> list[dict]:
             "schema",
             "actor.kind",
         ),
+        invalid(
+            "owner_revocation_by_another_user",
+            "rule 74: `owner` is the client's own user",
+            "client_revoked",
+            [change("actor.id", "user_admin_01")],
+            "schema",
+            "payload.user",
+        ),
+        invalid(
+            "admin_revocation_by_the_owner",
+            "rule 74: `admin` is another user",
+            "client_revoked",
+            [change("payload.reason", "admin")],
+            "schema",
+            "payload.user",
+        ),
+        invalid(
+            "deprovisioning_by_a_user",
+            "rule 74: deactivation and deprovisioning are the system's",
+            "client_revoked",
+            [change("payload.reason", "deprovisioned")],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "owner_revocation_by_the_system",
+            "rule 74",
+            "client_revoked",
+            [change("actor", dict(SERVICES))],
+            "schema",
+            "actor.kind",
+        ),
     ]
 
 
@@ -472,13 +505,25 @@ def valid_drafts() -> list[dict]:
             "client_revoked_on_deprovisioning",
             "rule 74: the system revokes a deprovisioned user's clients (identity §11.1)",
             "client_revoked",
-            [change("actor", dict(SERVICES))],
+            [change("actor", dict(SERVICES)), change("payload.reason", "deprovisioned")],
+        ),
+        valid(
+            "client_revoked_on_deactivation",
+            "rule 74: identity §5.2 step 2",
+            "client_revoked",
+            [change("actor", dict(SERVICES)), change("payload.reason", "member_deactivated")],
         ),
         valid(
             "client_revoked_by_an_admin",
             "rule 74: an admin may revoke another member's client",
             "client_revoked",
-            [change("actor.id", "user_admin_01")],
+            [change("actor.id", "user_admin_01"), change("payload.reason", "admin")],
+        ),
+        valid(
+            "client_revoked_as_compromised_by_the_system",
+            "rule 74: either a user or the system may revoke a compromised client",
+            "client_revoked",
+            [change("actor", dict(SERVICES)), change("payload.reason", "compromised")],
         ),
     ]
 
@@ -560,6 +605,8 @@ VALIDATOR_MUTANTS = (
     "rule.73.actor",
     "rule.73.user",
     "rule.74",
+    "rule.74.owner",
+    "rule.74.admin",
     "record.extra",
     "record.missing",
     *sorted({f"loose.payload.{member}" for cases in MEMBER_CASES.values() for member, _, _ in cases}),
