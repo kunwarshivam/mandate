@@ -22,6 +22,13 @@ the owl, the rules and the record.
 - [ ] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
       ten minutes that must be perfect on every release.
 - [ ] **Five people, watched.** Twenty minutes each, say nothing, write down where they hesitate.
+- [ ] **Reference, not inspiration.** Five products and what is taken from each, written down:
+      Linear (speed and keyboard), Bloomberg (density without clutter), Things (calm states), Arc
+      (character without jokes), the Macintosh HIG of 1992 (consistency). Nothing else on the
+      list; a proposal that cites none of them is suspect.
+- [ ] **A craft checklist in CI.** Not look-pinning tests (DEC-502) but the mechanical rules that
+      make "best": the 8px grid, the type scale only, contrast, 44px targets, no orphan word in a
+      heading, no string outside the voice file.
 
 ## B. Quick fixes (small, no DEC)
 
@@ -67,6 +74,12 @@ the owl, the rules and the record.
       and workspace at the bottom with the theme. (R-21)
 - [ ] **Needs you holds requests only.** Degraded feeds go to the degraded bar; one line per
       agent, not per instrument. (R-11)
+- [ ] **The palette's first row.** "Stop…" is the first item with nothing typed, so it reads as
+      the default; Go to first, Safety after, or Stop in its own row below the list. (R-18)
+- [ ] **One request, one place.** An approval appears as a page, a card in the thread and a row
+      in Needs you; one representation that the others link to.
+- [ ] **Lists are the product.** The agent rows, the approvals and the decisions share one row
+      shape: one line, a consistent right column, one height per density, walkable by keyboard.
 
 ## D. The state system (DEC)
 
@@ -113,6 +126,16 @@ the owl, the rules and the record.
       (R-13)
 - [ ] **Unreachable deployment:** screens that need it greyed; Stop opens straight onto "reach the
       broker directly". (R-12)
+- [ ] **The ladder drawn once.** The mandate page's top rail of ticks duplicates the list below
+      it. (R-22)
+- [ ] **Trust you can test.** "What if I do nothing?" as a line on every request; the Stop sheet
+      says what will rest at the broker afterwards; Verify chain runs in front of the owner.
+- [ ] **The approval shows the mandate after the fill:** the headroom bars as they would be if
+      this order filled (the risk-impact block starts this).
+- [ ] **Typing a change shows its consequence:** which rung it moves and whether the gate would
+      allow it, before it is confirmed.
+- [ ] **The mandate takes shape beside the set-up chat** as each field is understood, so the
+      owner watches the rules form rather than reading a summary at the end. (R-7)
 
 ## G. Craft
 
@@ -145,6 +168,28 @@ the owl, the rules and the record.
 - [ ] **One live thing.** A real window with a demo paper agent's last five decisions, read-only.
 - [ ] **A print page.** `⌘P` on any record gives a clean document with the hash at the foot.
 - [ ] **Sign-in carries the owls:** the lineup under the heading of the logon window. (R-23)
+- [ ] **The first screen after sign-in** keeps something of the logon window (its bevel, its
+      letter), so the landing page and the product read as one place. (R-8)
+- [ ] **Tour.mp4** is the one pre-rendered thing in the product and the one place a video tool
+      belongs; its re-render with the product's owls is already tracked.
+
+## Learnings (not action items)
+
+- **The cringe test.** Quirk is a consistent world; cringe is a joke the product tells about
+  itself. Ask of every idea: would it still work on a bad day with real money?
+- **Cut before you add.** The product's weaknesses were duplicates and unbuilt doors, not missing
+  features. A cutting pass makes a clean canvas; decoration on a cluttered one is noise.
+- **A test pins an invariant, not the look** (DEC-502). Feedback that became a measurement that
+  became a test is how the rules file outran the product.
+- **A fixture is a story and must be consistent with itself.** The drawdown scenario edited the
+  agent's state and left its orders and prices telling the old story; the chart showed the seam.
+  `market.test.ts` now holds every scenario to a path.
+- **Review from viewport captures, not full-page ones.** A full-page screenshot paints fixed
+  chrome (the dock, the scenario panel) mid-page; the artefact looks like a defect.
+- **The repository's CI rejects any `Co-authored-by` trailer** (`docs-checks.sh`); commits carry
+  the session link only.
+- **The set-up flow may never suggest an amount** (DEC-476, DEC-477, pinned by a test): example
+  prompts and placeholders are out, however helpful they would be.
 
 ## What to refuse
 
