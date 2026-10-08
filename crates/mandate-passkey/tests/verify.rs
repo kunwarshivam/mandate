@@ -148,7 +148,6 @@ fn client_data_that_is_not_the_expected_object_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn unknown_client_data_members_are_ignored_even_when_repeated() {
     let unknown = [
         r#"{"other_keys_can_be_added_here":"do not compare clientDataJSON against a template","topOrigin":"https://app.owlhead.ai","#,
@@ -165,7 +164,6 @@ fn unknown_client_data_members_are_ignored_even_when_repeated() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn authenticator_data_shorter_than_its_header_is_malformed() {
     let authenticator = Authenticator::new(Alg::Es256);
     let mut assertion = authenticator.assert(&Ceremony::get(&CHALLENGE, 5));

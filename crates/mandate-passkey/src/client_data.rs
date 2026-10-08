@@ -1,6 +1,7 @@
 //! `clientDataJSON` (WebAuthn §5.8.1): the ceremony type, the challenge, the origin, and the
-//! cross-origin flag. Unknown members are ignored as the standard requires; a duplicate member,
-//! a missing one, or anything but an object is refused.
+//! cross-origin flag. A duplicate of a member read here, a missing one, or anything but an
+//! object is refused; other members are ignored, as the standard requires, duplicates included
+//! (DEC-660 item 4.5).
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
