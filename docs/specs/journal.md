@@ -1749,7 +1749,10 @@ from its `cool_off_ends_at` and every other role at once;
 `MemberDeactivated` makes the member `deactivated`, keeping its roles for a reactivation; and
 `MemberRemoved` makes it `removed`. `removed`, `expired`, and `revoked` are terminal: a removed
 member comes back only through a new invitation, which starts a new membership with no role of the
-old one. A record that does not fit the state it finds is refused: a second activation of a member
+old one. An invitation an activation used is `accepted`, the fold's own name for it: identity spec
+§5.1 has no such state, because the membership it started takes over. A record that does not fit the
+state it finds is refused: a `MemberInvited` whose invitation ULID was already issued; any record
+naming an invitation never issued or a member never activated; a second activation of a member
 whose membership is not `removed`; an activation by an invitation that is not `invited` at
 `activated_at` (so `activated_at` < `expires_at`, and an invitation activates at most once) or with
 roles other than the invitation's; a role change for a member who is not `active` or `cooling_off`,

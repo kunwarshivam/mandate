@@ -286,6 +286,23 @@ def histories() -> list[dict]:
                 probe(ts(hours(7)), 2, {B: "active"}, {B: ["auditor"]}, {INV["B"]: "accepted"}),
             ],
         },
+        {
+            "name": "changed_and_deactivated_while_cooling_off",
+            "clause": "§9.8: a member in `cooling_off` may have roles changed and be deactivated",
+            "records": [
+                founding(T0),
+                invited(h1, INV["A"], ["approver", "viewer"]),
+                accepted(h2, B, INV["A"], ["approver", "viewer"]),
+                role_changed(h3, B, ["auditor"], []),
+                deactivated(hours(4), B),
+            ],
+            "unreadable": False,
+            "probes": [
+                probe(ts(h3), 1, {B: "cooling_off"}, {B: ["auditor", "viewer"]}),
+                probe(ts(hours(4)), 1, {B: "deactivated"}, {B: []}),
+                probe(day_after_h2, 1, {B: "deactivated"}, {B: []}),
+            ],
+        },
         *[
             {
                 "name": name,
@@ -366,6 +383,36 @@ def unreadable_histories() -> list[tuple[str, str, list[dict]]]:
             "§9.8",
             [founding(T0), accepted(h2, B, INV["C"], ["viewer"])],
         ),
+        (
+            "an_invitation_issued_twice",
+            "§9.8: an invitation's ULID is issued once",
+            [founding(T0), invited(h1, INV["A"], ["viewer"]), invited(h2, INV["A"], ["auditor"])],
+        ),
+        (
+            "a_revocation_of_an_accepted_invitation",
+            "§9.8: only an `invited` invitation is revoked",
+            [*two_users, revoked(hours(3), INV["A"])],
+        ),
+        (
+            "a_revocation_of_an_expired_invitation",
+            "§9.8: an invitation is `expired` from its `expires_at`",
+            [founding(T0), invited(h1, INV["A"], ["viewer"]), revoked(h1 + timedelta(days=7), INV["A"])],
+        ),
+        (
+            "a_revocation_of_an_unknown_invitation",
+            "§9.8",
+            [founding(T0), revoked(h1, INV["C"])],
+        ),
+        (
+            "a_role_change_of_an_unknown_member",
+            "§9.8",
+            [founding(T0), role_changed(h1, C, ["auditor"], [])],
+        ),
+        (
+            "a_deactivation_of_an_unknown_member",
+            "§9.8",
+            [founding(T0), deactivated(h1, C)],
+        ),
     ]
 
 
@@ -393,6 +440,11 @@ class Fold:
     def refuse(self) -> None:
         self.unreadable = True
 
+    def unknown_member(self) -> None:
+        """A record about a member the fold has never activated."""
+        if "fold.unknown_member_tolerated" not in self.skip:
+            self.refuse()
+
     def apply(self, rec: dict) -> None:
         kind = rec["event_type"]
         p = rec["payload"]
@@ -402,7 +454,7 @@ class Fold:
                 self.clients.add(rec["actor"]["id"])
             return
         if kind == "MemberInvited":
-            if p["invitation"] in self.invitations:
+            if p["invitation"] in self.invitations and "fold.duplicate_invitation_tolerated" not in self.skip:
                 return self.refuse()
             self.invitations[p["invitation"]] = {
                 "state": "invited",
@@ -411,7 +463,9 @@ class Fold:
             }
         elif kind == "MemberInvitationRevoked":
             inv = self.invitations.get(p["invitation"])
-            if inv is None or not self.open(inv, at):
+            if inv is None:
+                return None if "fold.revoke_unknown_tolerated" in self.skip else self.refuse()
+            if not self.open(inv, at) and "fold.revoke_any_state" not in self.skip:
                 return self.refuse()
             if "fold.revocation_ignored" not in self.skip:
                 inv["state"] = "revoked"
@@ -419,7 +473,9 @@ class Fold:
             self.activate(p, at)
         elif kind == "MemberRoleChanged":
             m = self.members.get(p["member"])
-            if m is None or m.status not in LIVE:
+            if m is None:
+                return self.unknown_member()
+            if m.status not in LIVE:
                 return self.refuse()
             if any(r not in m.roles for r in p["removed"]) or any(a["role"] in m.roles for a in p["added"]):
                 return self.refuse()
@@ -430,7 +486,9 @@ class Fold:
                 m.roles[a["role"]] = end
         elif kind == "MemberDeactivated":
             m = self.members.get(p["member"])
-            if m is None or m.status not in LIVE:
+            if m is None:
+                return self.unknown_member()
+            if m.status not in LIVE:
                 return self.refuse()
             m.kept, m.roles, m.status = sorted(m.roles), {}, "deactivated"
         elif kind == "MemberReactivated":
@@ -615,6 +673,10 @@ FOLD_MUTANTS = (
     "fold.old_roles_kept",
     "fold.deactivated_counts",
     "fold.revocation_ignored",
+    "fold.revoke_any_state",
+    "fold.revoke_unknown_tolerated",
+    "fold.unknown_member_tolerated",
+    "fold.duplicate_invitation_tolerated",
 )
 
 
