@@ -4,6 +4,7 @@
     1,
     "-0",
     "1e5",
+    "1e2",
     "+1",
     "01",
     "1.",
@@ -30,6 +31,7 @@
     "",
     "has space",
     "btc/usd",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   ],
   "EventId": [

@@ -22,7 +22,7 @@
     "Id": {
       "description": "An opaque id (§3.1, journal spec §2's identifier grammar); it embeds no name, instrument, or personal datum.",
       "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{1,128}$"
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
     },
     "EventId": {
       "description": "A journal event id: a ULID in Crockford base32 (journal spec §3). Its time component carries no meaning.",
