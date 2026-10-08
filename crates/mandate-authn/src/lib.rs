@@ -42,8 +42,8 @@ pub use mandate_time::UtcNanos;
 pub use oidc::{CLOCK_SKEW_S, IssuerConfig, MAX_TOKEN_BYTES, TokenKind, VerifiedSubject, verify};
 pub use session::{
     ACCESS_TOKEN_LIFETIME_S, EndReason, OrgKind, ProviderAnswer, REDUCTION_ONLY_LIFETIME_S, Reach,
-    RefreshSecret, Refreshed, Request, SessionLimits, SessionPolicy, SessionRecord, SessionRefusal,
-    SubjectStanding,
+    RefreshDigest, RefreshSecret, Refreshed, Request, SessionLimits, SessionPolicy, SessionRecord,
+    SessionRefusal, SubjectStanding,
 };
 
 /// The part of a compact JWS a [`Refusal::Malformed`] points at.
