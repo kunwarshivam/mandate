@@ -20,8 +20,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `OwnerRequestSubmitted`, and `RecordsAccessed`. §9.8's rules 55 and 64 already had client branches,
   which now admit. §9.9 closes `ConnectionRevoked` version 2, with the reason `owner` or
   `compromised` and its step-up (workspace API §5.6), and `ClientConnected` and `ClientRevoked`
-  (identity spec §12.1), with rules 69 to 74; `ClientRevoked` records why with a closed `reason`. Version 1 of `ConnectionRevoked` stays registered and
-  unchanged. The vectors gain a generated `client_actor` section and stay version 3.
+  (identity spec §12.1), with rules 69 to 74; `ClientRevoked` records why with a closed `reason`.
+  Version 1 of `ConnectionRevoked` stays registered and unchanged. The vectors gain a generated
+  `client_actor` section and stay version 3.
 - **v0.19 ([DEC-670](../project/decisions/DEC-670.md)):** §9.8 closes four control-stream records
   the [workspace API](workspace-api.md) commits (its §4.1, §4.6, §5.1; DEC-436 item 14), with rules
   54 to 65. `MandateDraftSaved` records one explicit draft save, its draft stored as an artifact.

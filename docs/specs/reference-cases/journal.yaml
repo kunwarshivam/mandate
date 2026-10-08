@@ -14157,6 +14157,18 @@ client_actor:
       outcome: Invalid
       reason: schema
       path: actor.kind
+  - name: deactivation_by_a_user
+    clause: 'rule 74: deactivation is the system''s'
+    base_draft: client_revoked
+    changes:
+    - path: payload.reason
+      value: member_deactivated
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
   - name: owner_revocation_by_the_system
     clause: rule 74
     base_draft: client_revoked
