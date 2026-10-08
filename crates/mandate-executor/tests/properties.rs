@@ -724,6 +724,89 @@ fn scripted_doubted() -> impl Strategy<Value = Vec<Step>> {
     })
 }
 
+/// Defect E5b's shape (#668 round 2; backlog E5b), after the prefix: a completed CPHC bracket, a
+/// risk exit whose protection's cancel is confirmed so it is submitted, the protection's cancel
+/// delivered again, and a second risk exit. The ladder steps the first exit before the broker has
+/// acknowledged it, and the second goes beside that cancel. The pinned seed's random steps never
+/// reach it, so it leads every script of the property it pins, which fails on it until E5b's fix.
+const STEP_BESIDE_LEAD: [Step; 9] = [
+    Step::Fill,
+    Step::Intent {
+        which: 1,
+        exiting: false,
+        other: true,
+        protected: true,
+    },
+    Step::Acknowledge,
+    Step::Fill,
+    Step::Fill,
+    Step::Intent {
+        which: 3,
+        exiting: true,
+        other: true,
+        protected: false,
+    },
+    Step::Cancelled,
+    Step::Cancelled,
+    Step::Intent {
+        which: 2,
+        exiting: true,
+        other: true,
+        protected: false,
+    },
+];
+
+fn scripted_beside_a_step() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(STEP_BESIDE_LEAD);
+        script.extend(random);
+        script
+    })
+}
+
+/// Defect E4b's shape (#668 round 2; backlog E4b), after the protected lead: a second CPHC
+/// bracket, a risk exit, a fill, a cancel confirmed and the waits that leave an OCO's
+/// acknowledgment awaited while a later interval starts, which ends the first open interval rather
+/// than the awaited one. The property it pins draws half its scripts from it and half from the
+/// wide protected search (#668 round 3, minor a), so it fails at every seed until E4b's fix and
+/// still searches widely after it.
+const AWAITED_LEAD: [Step; 8] = [
+    Step::Intent {
+        which: 3,
+        exiting: false,
+        other: true,
+        protected: true,
+    },
+    Step::Intent {
+        which: 2,
+        exiting: true,
+        other: true,
+        protected: false,
+    },
+    Step::Fill,
+    Step::Intent {
+        which: 0,
+        exiting: false,
+        other: false,
+        protected: false,
+    },
+    Step::Cancelled,
+    Step::Wait,
+    Step::Timeout,
+    Step::Acknowledge,
+];
+
+fn scripted_awaited() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(PROTECTED_LEAD);
+        script.extend(AWAITED_LEAD);
+        script.extend(random);
+        script
+    })
+}
+
 /// The steps that age an opening past `max_intent_age_s` (120 seconds) before anything lets it go:
 /// a restart, so the startup reconciliation holds every opening (`startup_reconciliation_pending`),
 /// a fresh plain opening on `AAPL`, four thirty-four-second waits, and the snapshot that ends the
@@ -1289,7 +1372,6 @@ proptest! {
     /// next attempt, so ids — not `(id, attempt)` pairs — are what the two sides share; the
     /// duplicate guarantee is the separate `accepted_for(id) <= 1`.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_submit_effect_follows_the_order_submitted_draft_that_names_it(script in scripted()) {
         let run = play(&script);
         let accepted: BTreeSet<String> = run
@@ -1346,7 +1428,6 @@ proptest! {
     /// (10)), so the id is judged per intent and rung, the rung read from the same companion
     /// (DEC-521 item 1).
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_client_order_id_is_a_function_of_the_intent_id_alone(script in scripted_doubted()) {
         let run = play(&script);
         let mut by_intent: BTreeMap<(String, u64), BTreeSet<String>> = BTreeMap::new();
@@ -1389,7 +1470,6 @@ proptest! {
     /// intent a submission carries rides its `OrderRequestRecorded` companion (§9.5, rule 45), so
     /// the loop reads the merged view, the way the fold does.
     #[test]
-    #[ignore = "pending E7-2"]
     fn distinct_intents_never_share_a_client_order_id(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -1449,7 +1529,6 @@ proptest! {
     /// crash at any point of any step, and a restart with the broker carried across, leaves every
     /// client order id accepted at most once — and the prefix's order still exactly once.
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_crash_point_makes_the_broker_see_two_orders_for_one_intent(
         script in scripted(),
         point in prop::sample::select(&CrashPoint::ALL[..]),
@@ -1491,7 +1570,6 @@ proptest! {
     /// last went `unknown` (DEC-133's ruling on absences), and measures their span on the
     /// `risk_clock` timestamps. The doubted lead puts a resubmission in every script.
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_recovery_submits_without_a_confirmed_absence(script in scripted_doubted()) {
         let run = play(&script);
         let mut absences: BTreeMap<String, (u32, Option<i64>)> = BTreeMap::new();
@@ -1555,7 +1633,6 @@ proptest! {
     /// §5.7: filled quantity is non-decreasing, at most the order quantity, and equals the sum of
     /// unique fills.
     #[test]
-    #[ignore = "pending E7-2"]
     fn filled_quantity_equals_the_sum_of_unique_fills(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -1602,7 +1679,6 @@ proptest! {
     /// read as a terminal one (DEC-133's ruling on absences: `unknown` with `lookup: "absent"` is a
     /// lookup result, not a state change).
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_terminal_order_leaves_its_terminal_state(script in scripted()) {
         let run = play(&script);
         let mut terminal: BTreeMap<String, String> = BTreeMap::new();
@@ -1642,7 +1718,6 @@ proptest! {
 
     /// §5.7 and interpretation 26: a reservation outlives everything but a terminal state.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_reservation_is_never_released_before_a_terminal_state(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -1667,7 +1742,6 @@ proptest! {
 
     /// §5.7 and interpretation 26: every one of the six terminal states releases the reservation.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_terminal_state_releases_its_reservation(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -1693,7 +1767,6 @@ proptest! {
 
     /// ES-21, journal §8: replaying the drafts a run journaled reproduces its state.
     #[test]
-    #[ignore = "pending E7-2"]
     fn folding_the_journaled_drafts_reproduces_the_live_state(script in scripted()) {
         let run = play(&script);
         prop_assume!(!run.drafts.is_empty());
@@ -1717,7 +1790,6 @@ proptest! {
 
     /// ES-21, journal §8: a replay emits nothing.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_replay_emits_no_draft_and_no_broker_effect(script in scripted()) {
         let run = play(&script);
         prop_assume!(!run.shell.account_journal.is_empty());
@@ -1739,7 +1811,6 @@ proptest! {
 
     /// ES-21: two runs of the same inputs give equal effect lists.
     #[test]
-    #[ignore = "pending E7-2"]
     fn two_runs_of_the_same_inputs_give_equal_effects(script in scripted()) {
         let first = play(&script);
         let second = play(&script);
@@ -1761,7 +1832,6 @@ proptest! {
     /// `AGENTS.md` rule 13, made unrepresentable: no agent-scoped effect names the account-wide
     /// endpoints. The script only ever fires an agent-scoped switch.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_agent_scoped_effect_can_name_the_account_wide_endpoints(script in scripted()) {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
@@ -1784,7 +1854,6 @@ proptest! {
 
     /// §5.5: the final mode is journaled before any cancel and any sell of the same switch.
     #[test]
-    #[ignore = "pending E7-4"]
     fn the_mode_draft_precedes_every_cancel_and_every_sell(script in scripted()) {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
@@ -1866,7 +1935,6 @@ proptest! {
     /// §5.4: a completely filled bracket entry activates its legs, and Σ protective sell quantity
     /// never exceeds the position.
     #[test]
-    #[ignore = "pending E7-4"]
     fn protective_sell_quantity_never_exceeds_the_position(
         script in scripted_protected_complete()
     ) {
@@ -1920,7 +1988,9 @@ proptest! {
     /// interval's instrument and inside the interval.
     #[test]
     #[ignore = "pending E7-4"]
-    fn no_interval_exceeds_the_limit_without_an_alert(script in scripted_protected()) {
+    fn no_interval_exceeds_the_limit_without_an_alert(
+        script in prop_oneof![scripted_awaited(), scripted_protected()],
+    ) {
         let run = play(&script);
         let accountant = ProtectionAccountant::of(&run.drafts);
         prop_assert!(
@@ -1968,7 +2038,11 @@ proptest! {
     /// resolved by the order's own terminal state on the journal, or, for a protective order, by
     /// the `ProtectionChanged` that records it cancelled — never by the request being accepted.
     /// Two rulings bound the wait. Rule 5's wait ends when the cancel is journaled overdue
-    /// (`cancel_overdue`, DEC-160 (7), (13), (18)). And an entry that turns terminal partly
+    /// (`cancel_overdue`, DEC-160 (7), (13), (18)), and an exit never waits twice on the same
+    /// submission of an opening: once that opening's wait went overdue, even before its cancel
+    /// could be asked (an unacknowledged opening is queried, never cancelled blind), a cancel asked
+    /// later for the same submission holds no sell; a resubmission starts the wait afresh. And an
+    /// entry that turns terminal partly
     /// filled, "after that cancel or by any other path", gets its OCO for the filled quantity
     /// (DEC-346 item 6), so a protective submission does not wait on any buy's cancel, plain or
     /// bracket (DEC-521 item 2). A plain buy that fills only adds to the position. A bracket
@@ -1982,7 +2056,9 @@ proptest! {
     /// waits, and the exit then asks its cancel too (DEC-160 (13)), so a buy is not judged here.
     #[test]
     #[ignore = "pending E7-4"]
-    fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {
+    fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(
+        script in scripted_beside_a_step(),
+    ) {
         let run = play(&script);
         if let (Some(batch), Some(true)) = (run.kill_batches.first(), run.kill_working.first()) {
             prop_assert!(
@@ -1997,6 +2073,7 @@ proptest! {
         let mut instrument_of: BTreeMap<String, String> = BTreeMap::new();
         let mut outstanding: BTreeMap<String, String> = BTreeMap::new();
         let mut buys: BTreeSet<String> = BTreeSet::new();
+        let mut overdue_submissions: BTreeSet<String> = BTreeSet::new();
         for effect in &run.effects {
             if let Effect::Broker(BrokerRequest::Submit(order)) = effect
                 && order.side == mandate_accounting::Side::Buy
@@ -2008,6 +2085,7 @@ proptest! {
                     let name = field(draft, "instrument_id").or(field(draft, "instrument"));
                     if let (Some(id), Some(name)) = (field(draft, "client_order_id"), name) {
                         instrument_of.insert(id.to_owned(), name.to_owned());
+                        overdue_submissions.remove(id);
                     }
                 }
                 Effect::Journal(draft)
@@ -2021,11 +2099,16 @@ proptest! {
                 }
                 Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
                     let id = client_order_id.as_str().to_owned();
-                    let name = instrument_of.get(&id).cloned().unwrap_or_default();
-                    outstanding.insert(id, name);
+                    if !(buys.contains(&id) && overdue_submissions.contains(&id)) {
+                        let name = instrument_of.get(&id).cloned().unwrap_or_default();
+                        outstanding.insert(id, name);
+                    }
                 }
                 Effect::Journal(draft) if draft.event_type == "OrderStateChanged" => {
                     let overdue = draft.payload.get("cancel_overdue") == Some(&Value::Bool(true));
+                    if overdue && let Some(id) = field(draft, "client_order_id") {
+                        overdue_submissions.insert(id.to_owned());
+                    }
                     if (overdue
                         || field(draft, "state")
                             .and_then(shadow_state)
@@ -2141,7 +2224,6 @@ proptest! {
 
     /// `AGENTS.md` rule 13: no risk-reducing submission is ever denied by a pacing control.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_risk_reducing_submission_is_ever_denied_by_a_pacing_control(script in scripted()) {
         let run = play(&script);
         let pacing = [
@@ -2183,7 +2265,6 @@ proptest! {
 
     /// `AGENTS.md` rule 13: the only holds on an exit are the four the rule names.
     #[test]
-    #[ignore = "pending E7-4"]
     fn the_only_holds_on_an_exit_are_the_four_the_rule_names(script in scripted()) {
         let run = play(&script);
         let allowed = ["agent_paused", "agent_stopped", "unknown_order_in_flight", "broker"];
@@ -2270,7 +2351,6 @@ proptest! {
     /// not from the crate — differs, and each must be adopted with exactly one
     /// `CompensatingEvent`.
     #[test]
-    #[ignore = "pending E7-3"]
     fn every_order_difference_adopts_the_broker_with_a_compensating_event(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -2331,7 +2411,6 @@ proptest! {
     /// position — which would make the ledger agree with the broker and destroy the evidence —
     /// is caught (interpretation 13, planted bug 18).
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_position_cash_or_fee_difference_is_ever_adopted(script in scripted()) {
         let run = play(&script);
         let ids = TestIds;
@@ -2396,7 +2475,6 @@ proptest! {
     /// `AAPL` share than the shadow ledger, a quantity no script reaches, so there is always a
     /// position difference to pause on (planted bug 9).
     #[test]
-    #[ignore = "pending E7-3"]
     fn a_reconciliation_leaves_nothing_unexplained_and_unpaused(script in scripted()) {
         let run = play(&script);
         let ids = TestIds;
@@ -2445,7 +2523,6 @@ proptest! {
     /// the journal lacks and the position that fill explains, so the fill must be ingested before
     /// the position is compared (planted bug 10), and the run closes the batch.
     #[test]
-    #[ignore = "pending E7-3"]
     fn the_reconciliation_order_is_orders_then_fills_then_positions_then_cash_then_fees(
         script in scripted(),
     ) {
@@ -2575,7 +2652,6 @@ proptest! {
     /// the run's expected head must be that older head — never the current one, which would let
     /// the append land after submissions the snapshot never saw (planted bug 17).
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_reconciliation_run_is_appended_after_a_submission_it_did_not_cover(
         script in scripted(),
     ) {
@@ -2649,7 +2725,6 @@ proptest! {
     /// §4.7 timestamp on a whole second ("never integer seconds"), read as one. A script whose run
     /// appends no risk input (no fill, so no `FillApplied` or `FeesCharged`) has none to judge.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_risk_input_draft_carries_a_non_decreasing_risk_clock(script in scripted()) {
         let run = play(&script);
         let risk_inputs = [
@@ -2693,7 +2768,6 @@ proptest! {
 
     /// Journal §2: every copied fact cites its origin.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_copied_draft_cites_its_origin(script in scripted()) {
         let run = play(&script);
         let copied = [
@@ -2723,7 +2797,6 @@ proptest! {
 
     /// DEC-131 item 6: an event id is a function of `(epoch, head, ordinal)` and nothing else.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_derived_event_id_is_a_function_of_epoch_head_and_ordinal(script in scripted()) {
         let first = play(&script);
         let second = play(&script);
@@ -2896,7 +2969,6 @@ proptest! {
 
     /// `AGENTS.md` rules 6 and 7, journal §6.4: nothing sensitive reaches a draft or an alert.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_draft_payload_holds_a_credential_or_an_account_number(script in scripted()) {
         let run = play(&script);
         prop_assume!(!run.drafts.is_empty());
@@ -2916,7 +2988,6 @@ proptest! {
 
     /// `AGENTS.md` rule 6, DEC-11: an alert carries an opaque id and a message key only.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_alert_payload_holds_an_instrument_a_price_or_a_quantity(script in scripted()) {
         let run = play(&script);
         let alerts: Vec<_> = run
@@ -2947,7 +3018,6 @@ proptest! {
     /// opening the startup reconciliation holds until it is past the age, which is where an age
     /// check made only on a resubmission would let it go (planted bug 19).
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_submission_carries_an_intent_older_than_its_maximum_age(script in scripted_stale()) {
         let run = play(&script);
         let mut received: BTreeMap<String, i64> = BTreeMap::new();

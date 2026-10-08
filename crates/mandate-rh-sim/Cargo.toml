@@ -1,0 +1,17 @@
+[package]
+name = "mandate-rh-sim"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The simulated Robinhood broker: the published equity order contract's rules as a pure, deterministic core (DEC-124, DEC-441 items 11 and 16)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-num.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
