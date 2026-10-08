@@ -2300,6 +2300,7 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
     args.extend(CODE_PATHS);
     let files = output_in(root, "git", &args)?;
     let packages = package_dirs(root)?;
+    let rows = behaviour_only_rows(root)?;
     let mut tests = Vec::new();
     for file in files.lines().filter(|f| f.ends_with(".rs")) {
         let Ok(text) = fs::read_to_string(root.join(file)) else {
@@ -2322,18 +2323,18 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         eprintln!("    pending: no pending tests");
         return Ok(Vec::new());
     }
-    let mut stale: Vec<String> = BEHAVIOUR_ONLY_TESTS
+    let mut stale: Vec<String> = rows
         .iter()
-        .filter(|(file, name)| {
-            root.join(file).exists()
-                && !tests
-                    .iter()
-                    .any(|t| t.file == *file && t.test.path == *name)
+        .filter(|row| {
+            root.join(&row.file).exists() && !tests.iter().any(|t| row.names(&t.file, &t.test.path))
         })
-        .map(|(file, name)| {
+        .map(|row| {
             format!(
-                "BEHAVIOUR_ONLY_TESTS names `{name}` in {file}, which is no longer a pending test \
-                 there; delete the row, which is how the exception expires (DEC-137)"
+                "{BEHAVIOUR_ONLY_DIR}/{} names `{}` in {}, which is no longer a pending test \
+                 there; delete the row, which is how the exception expires (DEC-137)",
+                row.file_name().unwrap_or_default(),
+                row.test,
+                row.file
             )
         })
         .collect();
@@ -2388,7 +2389,7 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         );
     }
     let outcomes = test_outcomes(&String::from_utf8(out.stdout).context("non-UTF-8 output")?);
-    let mut problems = verdicts(&tests, &outcomes);
+    let mut problems = verdicts(&tests, &outcomes, &rows);
     problems.append(&mut stale);
     if problems.is_empty() {
         eprintln!(
@@ -2486,168 +2487,124 @@ const STUB_MARKERS: [&str; 5] = [
 ];
 
 /// The pending tests that fail on the answer a partly implemented crate gives rather than at a
-/// stub, named one by one so the exception cannot spread. E6-6 and E6-8 (DEC-163) retired the
-/// `mandate-risk` rows with the session rules, §5.3 rule 4 and the pacing that decided them.
-/// DEC-110's rule still holds for them: each must run and must fail. Each row goes when its story
-/// lands, and the gate names every row it applies (DEC-137).
-///
-/// The 2 protective-sequence rows left (both `hand`) are E7-4's (DEC-140's addendum, the
-/// coordinator's ruling (d) on #174): slice 5's crypto stop-limit cases, which
-/// see no stop-limit or whole-share protection where E7-4's protective sequence belongs, instead of
-/// a stub's report. Each still runs and fails, and the slice that implements it deletes its row
-/// with its `#[ignore]` line; slice 2 deleted the four bracket and partial-fill OCO rows (DEC-346).
-/// The stub check runs first, so a row whose test stops at a stub is reported for deletion rather
-/// than applied (#194 review, round 1, finding 4).
-///
-/// The tracer row is E2-14's wrong-high-print rule. The shell deliberately owns no price-trust
-/// arithmetic (DEC-138 item 3), so the end-to-end test reaches the existing production path and
-/// proves the missing market-data behavior by observing the forbidden submission. E2-14 deletes
-/// both the marker and this row when its founder-gated price-trust rule lands.
-///
-/// The `properties` row is E7-4's too. Since slice 2 places brackets, its minimal failure is a
-/// script that ends while the protected lead's partly filled entry is still inside its interval,
-/// which no implementation can close before the script stops; it waits on a tests correction
-/// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
-/// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
-/// 4).
-///
-/// Three more are E7-4's, let past the kill switch's stub by slice 7 (#668; DEC-485 item 17), each
-/// failing on behaviour the slice does not own:
-/// - `protective_sell_quantity_never_exceeds_the_position_in_any_script` (defect E1): an exit is
-///   submitted beside a bracket's just-activated legs, leaving protection of 2 against a position
-///   of 1 (backlog: "E7-4 (stream K), E1 from E7-4 slice 7's tests correction", DEC-506).
-/// - `no_resting_order_is_submitted_inside_an_unprotected_interval` (defect E2): an opening rests
-///   while protection is cancelled for an exit (backlog: "E7-4 (stream K), E2 from E7-4 slice 7's
-///   tests correction", DEC-506 item 8).
-/// - `hand::an_owner_exit_outside_the_session_prices_from_the_confirmed_bid` (DEC-485 item 11):
-///   outside the regular session a confirmed owner's flatten is queued for the session at the
-///   floor rather than sold in extended hours from the confirmed bid. A loud stub there would fail
-///   the whole step that prices the close: the switch's own step where nothing needs cancelling
-///   first, so its mode and record would never be journaled (`AGENTS.md` rule 13: the kill switch
-///   is always available), or the step confirming the protection's cancel, leaving the position
-///   unprotected and unsold. The session slice deletes this row with the extended-hours path.
-///
-/// Two more `properties` rows went back to pending in #668's round 2, failing on executor defects
-/// at random seeds the pinned one missed; each property's scripts now lead with its defect's shape
-/// (`STEP_BESIDE_LEAD`, `AWAITED_LEAD`), so it fails at every seed until the fix lands:
-/// - `no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` (defect E5b): the exit
-///   ladder steps a rung the broker has not yet acknowledged, asking its cancel, and another exit
-///   goes beside that cancel (backlog: "E7-4 (stream K), E5b from #668's round-2 review").
-/// - `no_interval_exceeds_the_limit_without_an_alert` (defect E4b): while a bracket's OCO awaits
-///   its acknowledgment, a new interval's start ends the first open interval rather than the
-///   awaited one, so the bound alerts late (backlog: "E7-4 (stream K), E4b from E4's fix"). Its
-///   scripts are now either that lead or the wide protected search, so the search stays reachable.
-///
-/// One more `hand` row is defect E4b (backlog: "E7-4 (stream K), E4b from E4's fix"; DEC-521 item
-/// 3): while a second bracket's OCO awaits its acknowledgment, a third bracket's start ends the
-/// first open interval in the instrument rather than the awaited one. It reaches no stub and fails
-/// on that behaviour until E4b's fix deletes the row with its `#[ignore]` line.
-///
-/// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
-/// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
-/// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
-/// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
-///
-/// The two rows for journal spec v0.18's `policy_overlay` label are J3's (DEC-536). They check
-/// `Draft::parse`, the journal's existing draft check, against the vectors' `policy_overlay`
-/// section. There is no stub to stop at: until J3's implementation adds the label, the journal
-/// answers `non_canonical`, which is the behaviour they fail on. J3's implementation deletes the
-/// two rows with the `#[ignore]` lines.
-///
-/// Four more `hand` rows are E1's sizing paths (DEC-532; backlog: "E7-4 (stream K), E1 from E7-4
-/// slice 7's tests correction"): `replace` after an exit, `new_day`'s re-placement, a passive
-/// exit's rest and `re_cover` each size protection on a position that includes a working bracket's
-/// filled shares, which its held legs will cover. They reach no stub and fail on that sizing until
-/// E1's fix deletes the rows with their `#[ignore]` lines.
-///
-/// The 2 `xtask` rows are X1's (E7-26; #738 review, findings 2 and 4): they drive the lint job and
-/// `ci_files` over fixture repositories, which the live-feature check's stub is not on the path
-/// of, so they fail on what today's code does: the lint job does not yet run the check, and
-/// `ci_files` neither reads `.github/actions` and `.cargo/config.toml` nor tolerates an absent
-/// directory. X1's implementation deletes both rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 21] = [
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity",
-    ),
-    ("crates/mandate-shell/tests/tracer.rs", "outlier_close"),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "every_unprotected_interval_has_a_journaled_start_and_end",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "protective_sell_quantity_never_exceeds_the_position_in_any_script",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "no_resting_order_is_submitted_inside_an_unprotected_interval",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_owner_exit_outside_the_session_prices_from_the_confirmed_bid",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "no_interval_exceeds_the_limit_without_an_alert",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
-    ),
-    (
-        "crates/mandate-runtime/tests/answer_records.rs",
-        "every_answer_record_the_runtime_writes_passes_the_journals_check",
-    ),
-    (
-        "crates/mandate-runtime/tests/answer_records.rs",
-        "a_responded_record_carries_its_quorum_only_where_check_7_was_judged",
-    ),
-    (
-        "crates/mandate-runtime/tests/answer_records.rs",
-        "decided_by_now_is_null_unless_the_reclassification_asks",
-    ),
-    (
-        "crates/mandate-journal/tests/policy_overlay.rs",
-        "every_policy_overlay_valid_draft_parses",
-    ),
-    (
-        "crates/mandate-journal/tests/policy_overlay.rs",
-        "every_policy_overlay_invalid_draft_is_refused_with_its_reason_at_its_path",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_re_cover_leaves_a_held_brackets_shares_to_its_legs",
-    ),
-    (
-        "xtask/src/main.rs",
-        "tests::ci_files_reads_every_file_that_decides_a_build",
-    ),
-    (
-        "xtask/src/main.rs",
-        "tests::the_lint_job_runs_the_live_feature_check_on_its_repository",
-    ),
-];
+/// stub, one TOML file a row, so that two PRs adding or deleting rows never touch the same lines.
+/// What a row is, why each exists, and what the gate refuses are in the directory's README
+/// (DEC-137).
+const BEHAVIOUR_ONLY_DIR: &str = "xtask/behaviour-only";
+
+/// The one file outside `crates/` a behaviour-only row may name: xtask's own unit tests, in its
+/// `tests` module, which `cargo xtask ci pending` finds pending like any crate's.
+const XTASK_OWN_TESTS: &str = "xtask/src/main.rs";
+
+/// One row of [`BEHAVIOUR_ONLY_DIR`]: a pending test, by its file and its path as the pending
+/// marker names it, and why it fails on behaviour rather than at its story's stub.
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
+#[serde(deny_unknown_fields)]
+struct BehaviourOnlyRow {
+    file: String,
+    test: String,
+    reason: String,
+}
+
+impl BehaviourOnlyRow {
+    /// The only name this row's file may have: `<crate>__<suite>__<test>.toml`, with `::` in the
+    /// test path written `__`. One name per row is what makes a duplicate a path collision. A row
+    /// of [`XTASK_OWN_TESTS`] is crate `xtask`, suite `main`, and its test must be in `tests`.
+    fn file_name(&self) -> Option<String> {
+        let (krate, suite) = if self.file == XTASK_OWN_TESTS {
+            if !self.test.starts_with("tests::") {
+                return None;
+            }
+            ("xtask", "main")
+        } else {
+            let rest = self.file.strip_prefix("crates/")?;
+            let (krate, _) = rest.split_once('/')?;
+            (krate, Path::new(rest).file_stem()?.to_str()?)
+        };
+        Some(format!(
+            "{krate}__{suite}__{}.toml",
+            self.test.replace("::", "__")
+        ))
+    }
+
+    fn names(&self, file: &str, test: &str) -> bool {
+        self.file == file && self.test == test
+    }
+}
+
+/// Every row in [`BEHAVIOUR_ONLY_DIR`], sorted by file and test; none in a repository without the
+/// directory, which only makes the gate stricter, since a row only excuses. Refuses anything there
+/// but the README and `.toml` rows, a row that does not parse or has an empty field, and a file
+/// whose name is not [`BehaviourOnlyRow::file_name`]. That name is a function of the row, so a
+/// second copy of a row is a second file at the same path, which git refuses to merge.
+fn behaviour_only_rows(root: &Path) -> Result<Vec<BehaviourOnlyRow>> {
+    let dir = root.join(BEHAVIOUR_ONLY_DIR);
+    let mut rows = Vec::new();
+    if !dir.exists() {
+        return Ok(rows);
+    }
+    let mut problems = Vec::new();
+    let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
+        .with_context(|| format!("reading {BEHAVIOUR_ONLY_DIR}"))?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<_>>()?;
+    entries.sort();
+    for path in entries {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        if name == "README.md" {
+            continue;
+        }
+        if !name.ends_with(".toml") || !path.is_file() {
+            problems.push(format!(
+                "{BEHAVIOUR_ONLY_DIR}/{name} is not a row; the directory holds its README and \
+                 one `.toml` file a row"
+            ));
+            continue;
+        }
+        let row: BehaviourOnlyRow = match fs::read_to_string(&path)
+            .map_err(anyhow::Error::from)
+            .and_then(|text| toml::from_str(&text).map_err(anyhow::Error::from))
+        {
+            Ok(row) => row,
+            Err(err) => {
+                problems.push(format!(
+                    "{BEHAVIOUR_ONLY_DIR}/{name} is not a row of `file`, `test` and `reason`: \
+                     {err}"
+                ));
+                continue;
+            }
+        };
+        if [&row.file, &row.test, &row.reason]
+            .iter()
+            .any(|field| field.trim().is_empty())
+        {
+            problems.push(format!(
+                "{BEHAVIOUR_ONLY_DIR}/{name} has an empty field; a row names its file, its test, \
+                 and the reason it fails on behaviour"
+            ));
+            continue;
+        }
+        match row.file_name() {
+            Some(expected) if expected == name => rows.push(row),
+            Some(expected) => problems.push(format!(
+                "{BEHAVIOUR_ONLY_DIR}/{name} names `{}` in {}, so it must be named {expected}",
+                row.test, row.file
+            )),
+            None => problems.push(format!(
+                "{BEHAVIOUR_ONLY_DIR}/{name} names `{}` in {}, which is not a file under \
+                 `crates/<crate>/` nor a test in {XTASK_OWN_TESTS}'s `tests` module",
+                row.test, row.file
+            )),
+        }
+    }
+    rows.sort();
+    report(problems, "behaviour-only")?;
+    Ok(rows)
+}
 
 /// Whether a pending test's failure output shows that it stopped at a stub. A one-word marker
 /// matches as a whole word, so `Unimplemented` is not found in `Unimplementedish`; the phrases
@@ -2717,10 +2674,14 @@ fn first_panic_line(output: &str) -> String {
 }
 
 /// A problem for each pending test that passed in any binary, ran in none, or failed on something
-/// other than its story's stub. The stub check comes first: a `BEHAVIOUR_ONLY_TESTS` row applies
+/// other than its story's stub. The stub check comes first: a [`BEHAVIOUR_ONLY_DIR`] row applies
 /// only to a test that fails it, and a listed test that stops at its stub anyway is a problem too,
 /// naming the row to delete, so the exception can only shrink (#194 review, round 1, finding 4).
-fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
+fn verdicts(
+    tests: &[PendingTestRun],
+    outcomes: &[TestOutcome],
+    rows: &[BehaviourOnlyRow],
+) -> Vec<String> {
     tests
         .iter()
         .filter_map(|t| {
@@ -2742,16 +2703,14 @@ fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
                      is implemented, so make it assert what the stubs cannot satisfy (DEC-77)"
                 ))
             } else {
-                let listed = BEHAVIOUR_ONLY_TESTS
-                    .iter()
-                    .any(|(file, name)| *file == t.file && *name == t.test.path);
+                let listed = rows.iter().any(|row| row.names(&t.file, &t.test.path));
                 let story = &t.test.story;
                 match runs
                     .iter()
                     .find(|o| !names_a_stub(failure_cause(&o.output)))
                 {
                     None if listed => Some(format!(
-                        "{at} fails at its stub, so its BEHAVIOUR_ONLY_TESTS row is not needed; \
+                        "{at} fails at its stub, so its behaviour-only row is not needed; \
                          delete the row, which is how the exception stays as small as it must \
                          be (DEC-137)"
                     )),
@@ -2759,7 +2718,7 @@ fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
                     Some(_) if listed => {
                         eprintln!(
                             "    pending: {}:{}: `{}` fails on a partly implemented crate's \
-                             answer, not at a stub; it is named in BEHAVIOUR_ONLY_TESTS until {} \
+                             answer, not at a stub; it is named in {BEHAVIOUR_ONLY_DIR} until {} \
                              lands",
                             t.file, t.test.line, t.test.path, story
                         );
@@ -3496,16 +3455,16 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency, Layers,
-        MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, Metadata,
+        BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency,
+        Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, Metadata,
         MutantPlan, MutantShard, MutatedCrate, Package, PendingTest, PendingTestRun, REFCASES,
-        TestOutcome, actionlint_workflows, backticked_paths, base_ref_in, check_schedule, ci,
-        ci_files, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
-        files_by_extension, first_panic_line, forbidden_reached, generated_pending_markers,
-        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
-        listed_mutant_counts, live_feature_problems, live_test_counts, metadata_in,
-        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
-        mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
+        TestOutcome, actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows,
+        check_schedule, ci, ci_files, classify, contains_dec_id, contains_word, external_oracles,
+        failure_cause, files_by_extension, first_panic_line, forbidden_reached,
+        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
+        layer_problems, lint, listed_mutant_counts, live_feature_problems, live_test_counts,
+        metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
+        mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
         pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
         spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
         test_outcomes, unjudged_mutants, verdicts, workspace_closure,
@@ -4396,7 +4355,7 @@ mod tests {
             new(8, Some("a::fs"), "own_error"),
             new(9, Some("a::fs"), "skipped"),
         ];
-        let verdicts = verdicts(&tests, &outcomes);
+        let verdicts = verdicts(&tests, &outcomes, &[]);
         let problems: Vec<String> = verdicts
             .iter()
             .map(|p| p.split([',', ';']).next().unwrap_or_default().to_owned())
@@ -4426,10 +4385,13 @@ mod tests {
 
     #[test]
     fn a_behaviour_only_row_is_used_only_where_the_stub_check_fails() {
-        let (file, name) = BEHAVIOUR_ONLY_TESTS
-            .first()
-            .copied()
-            .unwrap_or_else(|| panic!("the list has a row to test with"));
+        let file = "crates/a/tests/hand.rs";
+        let name = "a_listed_test";
+        let rows = [BehaviourOnlyRow {
+            file: file.to_owned(),
+            test: name.to_owned(),
+            reason: "fails on the partial answer".to_owned(),
+        }];
         let run = |path: &str| PendingTestRun {
             file: file.to_owned(),
             package: "a".to_owned(),
@@ -4449,7 +4411,7 @@ mod tests {
         let at_the_stub = "panicked at x.rs:1:1:\nUnimplemented { story: \"E1-1\" }";
         let on_the_answer = "panicked at x.rs:1:1:\nno cancel where the sequence belongs";
 
-        let unneeded = verdicts(&[run(name)], &[failed(name, at_the_stub)]);
+        let unneeded = verdicts(&[run(name)], &[failed(name, at_the_stub)], &rows);
         assert_eq!(
             unneeded.len(),
             1,
@@ -4464,19 +4426,286 @@ mod tests {
         );
 
         assert!(
-            verdicts(&[run(name)], &[failed(name, on_the_answer)]).is_empty(),
+            verdicts(&[run(name)], &[failed(name, on_the_answer)], &rows).is_empty(),
             "a listed test that fails on the partial answer is what the row is for"
         );
         let unlisted = "not_a_row_of_the_list";
-        let away = verdicts(&[run(unlisted)], &[failed(unlisted, on_the_answer)]);
+        let away = verdicts(&[run(unlisted)], &[failed(unlisted, on_the_answer)], &rows);
         assert!(
             away.len() == 1 && away.iter().all(|p| p.contains("fails away from its stub")),
             "and an unlisted one failing the same way is still a problem: {away:?}"
         );
         assert!(
-            verdicts(&[run(unlisted)], &[failed(unlisted, at_the_stub)]).is_empty(),
+            verdicts(&[run(unlisted)], &[failed(unlisted, at_the_stub)], &rows).is_empty(),
             "while an unlisted one at its stub is what every pending test must do"
         );
+    }
+
+    /// The rows the `BEHAVIOUR_ONLY_TESTS` array held when it moved to one file a row. Each is
+    /// still loaded unless its test is no longer pending in its file, the one way a row may go;
+    /// at the migration every one was pending, so the loaded set was exactly this one.
+    const ROWS_BEFORE_THE_DIRECTORY: [(&str, &str); 21] = [
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity",
+        ),
+        ("crates/mandate-shell/tests/tracer.rs", "outlier_close"),
+        (
+            "crates/mandate-executor/tests/properties.rs",
+            "every_unprotected_interval_has_a_journaled_start_and_end",
+        ),
+        (
+            "crates/mandate-executor/tests/properties.rs",
+            "protective_sell_quantity_never_exceeds_the_position_in_any_script",
+        ),
+        (
+            "crates/mandate-executor/tests/properties.rs",
+            "no_resting_order_is_submitted_inside_an_unprotected_interval",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "an_owner_exit_outside_the_session_prices_from_the_confirmed_bid",
+        ),
+        (
+            "crates/mandate-executor/tests/properties.rs",
+            "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding",
+        ),
+        (
+            "crates/mandate-executor/tests/properties.rs",
+            "no_interval_exceeds_the_limit_without_an_alert",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
+        ),
+        (
+            "crates/mandate-runtime/tests/answer_records.rs",
+            "every_answer_record_the_runtime_writes_passes_the_journals_check",
+        ),
+        (
+            "crates/mandate-runtime/tests/answer_records.rs",
+            "a_responded_record_carries_its_quorum_only_where_check_7_was_judged",
+        ),
+        (
+            "crates/mandate-runtime/tests/answer_records.rs",
+            "decided_by_now_is_null_unless_the_reclassification_asks",
+        ),
+        (
+            "crates/mandate-journal/tests/policy_overlay.rs",
+            "every_policy_overlay_valid_draft_parses",
+        ),
+        (
+            "crates/mandate-journal/tests/policy_overlay.rs",
+            "every_policy_overlay_invalid_draft_is_refused_with_its_reason_at_its_path",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_re_cover_leaves_a_held_brackets_shares_to_its_legs",
+        ),
+        (
+            "xtask/src/main.rs",
+            "tests::ci_files_reads_every_file_that_decides_a_build",
+        ),
+        (
+            "xtask/src/main.rs",
+            "tests::the_lint_job_runs_the_live_feature_check_on_its_repository",
+        ),
+    ];
+
+    #[test]
+    fn every_row_of_the_old_array_is_loaded_until_its_test_stops_being_pending() -> Result<()> {
+        let root = repo_root()?;
+        let rows = behaviour_only_rows(&root)?;
+        for (file, test) in ROWS_BEFORE_THE_DIRECTORY {
+            let pending = fs::read_to_string(root.join(file))
+                .map(|text| pending_tests(&text).iter().any(|t| t.path == test))
+                .unwrap_or(false);
+            let loaded = rows.iter().any(|row| row.names(file, test));
+            assert!(
+                loaded || !pending,
+                "`{test}` in {file} is still pending, so its row must still be in \
+                 {BEHAVIOUR_ONLY_DIR}"
+            );
+        }
+        let mut sorted = rows.clone();
+        sorted.sort();
+        assert_eq!(rows, sorted, "the rows load in file and test order");
+        Ok(())
+    }
+
+    /// A row file the gate cannot trust is refused, naming the file: anything but the README and
+    /// `.toml` rows, an unknown, missing, or empty field, and a name that is not the row's own.
+    #[test]
+    fn a_malformed_or_misnamed_row_is_refused() -> Result<()> {
+        let fx = Fixture(env::temp_dir().join(format!(
+            "mandate-xtask-behaviour-rows-{}",
+            std::process::id()
+        )));
+        if fx.0.exists() {
+            fs::remove_dir_all(&fx.0)?;
+        }
+        assert!(
+            behaviour_only_rows(&fx.0)?.is_empty(),
+            "no directory, no rows: a row only excuses, so none is the stricter gate"
+        );
+        let row = |test: &str| {
+            format!(
+                "file = \"crates/a/tests/hand.rs\"\ntest = \"{test}\"\nreason = \"\"\"\nwhy\n\"\"\"\n"
+            )
+        };
+        let dir = BEHAVIOUR_ONLY_DIR;
+        fx.write(&format!("{dir}/README.md"), "# rows\n")?;
+        fx.write(&format!("{dir}/a__hand__listed.toml"), &row("listed"))?;
+        fx.write(
+            &format!("{dir}/a__hand__inner__nested.toml"),
+            &row("inner::nested"),
+        )?;
+        let rows = behaviour_only_rows(&fx.0)?;
+        assert_eq!(
+            rows.iter().map(|r| r.test.as_str()).collect::<Vec<_>>(),
+            ["inner::nested", "listed"],
+            "two well-formed rows load, sorted"
+        );
+        fx.write(
+            &format!("{dir}/xtask__main__tests__own.toml"),
+            "file = \"xtask/src/main.rs\"\ntest = \"tests::own\"\nreason = \"r\"\n",
+        )?;
+        let rows = behaviour_only_rows(&fx.0)?;
+        assert!(
+            rows.iter()
+                .any(|r| r.names("xtask/src/main.rs", "tests::own")),
+            "a row of xtask's own unit tests loads"
+        );
+        fs::remove_file(fx.0.join(format!("{dir}/xtask__main__tests__own.toml")))?;
+
+        let bad = [
+            (
+                "a__hand__other.toml",
+                row("listed"),
+                "must be named a__hand__listed.toml",
+            ),
+            ("notes.txt", "x".to_owned(), "is not a row"),
+            (
+                "a__hand__extra.toml",
+                row("extra") + "story = \"E1-1\"\n",
+                "is not a row of `file`, `test` and `reason`",
+            ),
+            (
+                "a__hand__short.toml",
+                "file = \"crates/a/tests/hand.rs\"\ntest = \"short\"\n".to_owned(),
+                "is not a row of `file`, `test` and `reason`",
+            ),
+            (
+                "a__hand__empty.toml",
+                "file = \"crates/a/tests/hand.rs\"\ntest = \"empty\"\nreason = \" \"\n".to_owned(),
+                "has an empty field",
+            ),
+            (
+                "outside.toml",
+                "file = \"tests/x.rs\"\ntest = \"t\"\nreason = \"r\"\n".to_owned(),
+                "not a file under `crates/<crate>/`",
+            ),
+            (
+                "web__x__t.toml",
+                "file = \"web/x.ts\"\ntest = \"t\"\nreason = \"r\"\n".to_owned(),
+                "not a file under `crates/<crate>/`",
+            ),
+            (
+                "xtask__other__tests__t.toml",
+                "file = \"xtask/src/other.rs\"\ntest = \"tests::t\"\nreason = \"r\"\n".to_owned(),
+                "not a file under `crates/<crate>/`",
+            ),
+            (
+                "xtask__main__t.toml",
+                "file = \"xtask/src/main.rs\"\ntest = \"t\"\nreason = \"r\"\n".to_owned(),
+                "not a test in xtask's `tests` module",
+            ),
+        ];
+        for (name, text, problem) in bad {
+            let path = format!("{dir}/{name}");
+            fx.write(&path, &text)?;
+            let refused = behaviour_only_rows(&fx.0).expect_err("the row is refused");
+            assert_eq!(
+                format!("{refused:#}"),
+                "behaviour-only: 1 problem(s)",
+                "{name}"
+            );
+            fs::remove_file(fx.0.join(&path))?;
+            assert!(
+                behaviour_only_rows(&fx.0).is_ok(),
+                "and only {name} was the problem ({problem})"
+            );
+        }
+        fs::remove_dir_all(&fx.0).ok();
+        Ok(())
+    }
+
+    /// The gate end to end, in a fixture repository: a row excuses its test's failure on
+    /// behaviour, and once the test is no longer pending the row is named for deletion.
+    #[test]
+    fn a_row_excuses_its_test_and_expires_with_its_marker() -> Result<()> {
+        let fx = Fixture::new("pending-rows")?;
+        let away = concat!(
+            "#[test]\n#[ignore = \"pending E1-1\"]\n",
+            "fn fails_on_behaviour() { assert_eq!(fx::lookup().ok(), Some(42)); }\n",
+        );
+        fx.write("crates/fx/tests/stubs.rs", away)?;
+        fx.commit()?;
+        let problems = pending_problems(&fx.0)?;
+        assert!(
+            problems.len() == 1
+                && problems
+                    .iter()
+                    .all(|p| p.contains("fails away from its stub")),
+            "unlisted, the behaviour failure is a problem: {problems:?}"
+        );
+
+        fx.write(
+            &format!("{BEHAVIOUR_ONLY_DIR}/fx__stubs__fails_on_behaviour.toml"),
+            concat!(
+                "file = \"crates/fx/tests/stubs.rs\"\n",
+                "test = \"fails_on_behaviour\"\n",
+                "reason = \"the fixture's partial answer\"\n",
+            ),
+        )?;
+        fx.commit()?;
+        assert_eq!(
+            pending_problems(&fx.0)?,
+            Vec::<String>::new(),
+            "with its row, it is excused"
+        );
+
+        fx.write(
+            "crates/fx/tests/stubs.rs",
+            &away.replace("fails_on_behaviour", "renamed"),
+        )?;
+        fx.commit()?;
+        let problems = pending_problems(&fx.0)?;
+        assert!(
+            problems.iter().any(|p| p.contains(
+                "xtask/behaviour-only/fx__stubs__fails_on_behaviour.toml names \
+                 `fails_on_behaviour` in crates/fx/tests/stubs.rs, which is no longer a pending \
+                 test there"
+            )),
+            "the row is named for deletion once its test is not pending: {problems:?}"
+        );
+        Ok(())
     }
 
     #[test]
@@ -5307,7 +5536,11 @@ mod tests {
             passed: false,
             output: output.to_owned(),
         };
-        let away = verdicts(std::slice::from_ref(&run), &[failed(shrunk_past_the_stub)]);
+        let away = verdicts(
+            std::slice::from_ref(&run),
+            &[failed(shrunk_past_the_stub)],
+            &[],
+        );
         assert!(
             away.len() == 1
                 && away.iter().all(|p| p.contains("fails away from its stub")
@@ -5316,7 +5549,7 @@ mod tests {
                     )),
             "{away:?}"
         );
-        assert!(verdicts(&[run], &[failed(stopped_at_the_stub)]).is_empty());
+        assert!(verdicts(&[run], &[failed(stopped_at_the_stub)], &[]).is_empty());
     }
 
     /// The whole pending gate over real properties, run three times: one whose shrinking passes
