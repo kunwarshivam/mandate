@@ -389,7 +389,7 @@ transaction with `MemberDeactivated` or `MemberRoleChanged`. **The audit view
 shows the gap:** `membership_unverified: true` stays in the journaled record, and the workspace
 API's audit read model (§4.8) and the web audit trail display it (owed by those lanes).
 
-**Principal-scope rows** ([DEC-816](../project/decisions/DEC-816.md) items 1, 2, and 5). The two
+**Principal-scope rows** ([DEC-816](../project/decisions/DEC-816.md) items 1, 2, and 5). The three
 `self` rows of §4.2 are authorized at principal scope: `authorize` is given the principal scope,
 reads no membership, yields no `TenantContext`, and grants the row to a user principal whose
 session is a full session (§6.2), and to no one else: a reduction-only session is refused
