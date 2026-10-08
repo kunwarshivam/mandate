@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/properties.rs"
+test = "protective_sell_quantity_never_exceeds_the_position_in_any_script"
+reason = """
+E7-4's, let past the kill switch's stub by slice 7 (#668; DEC-485 item 17), failing on behaviour
+the slice does not own (defect E1): an exit is submitted beside a bracket's just-activated legs,
+leaving protection of 2 against a position of 1 (backlog: "E7-4 (stream K), E1 from E7-4 slice
+7's tests correction", DEC-506).
+"""

@@ -1,0 +1,9 @@
+file = "crates/mandate-journal/tests/connections.rs"
+test = "every_invalid_connection_draft_is_refused_with_its_reason_at_its_path"
+reason = """
+E7-17's (DEC-800, journal spec v0.20 §9.8): one of the three rows for the connection records. It
+checks `Draft::parse`, the journal's existing check, so there is no stub for it to stop at. Today
+the journal answers `unknown_event_type`, `wrong_stream`, or `unknown_schema` for the connection
+records, which is what it fails on (DEC-137). E7-17's implementation deletes this file with its
+`#[ignore]` line.
+"""
