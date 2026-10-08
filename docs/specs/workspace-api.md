@@ -497,8 +497,9 @@ export or a verification it returns the `ExportCreated` or `VerificationRun` dra
 control-stream writer appends it before anything is served (API-16). The payload schemas of
 `ExportCreated`, `VerificationRun`, and `RecordsAccessed` are journal spec §9's.
 
-**Shapes.** Every response composes the shared `Envelope` and every error is a `Problem`
-(`schemas/workspace-api/envelope.schema.json`); ids, event ids, timestamps, decimals, and refs are
+**Shapes.** Every response composes the shared `Envelope` and every error is a `Problem`, both
+defined in `schemas/workspace-api/envelope.schema.json` (**Planned:** #788; until it lands, §3.2
+and §3.5 are the contract); ids, event ids, timestamps, decimals, and refs are
 the `Id`, `EventId`, `Timestamp`, `Decimal`, and `ContentRef` of
 `schemas/workspace-api/common.schema.json`. Every response carries `as_of`, an `AsOf`: one
 `Watermark` `{stream_id, seq, hash, recorded_at}` per stream it read. Every union is tagged by a
@@ -511,9 +512,9 @@ and the timeline rules below are its semantics.
 a trace node, a gate view, or a JSON or CSV view row, and the `hash` of a stream `head`, is 64
 lowercase hex exactly as journal spec §3 and the body re-hash give it. Everything else is a
 `sha256:` `ContentRef`: the `hash` of an `as_of` `Watermark` (the same digest, with the API adding
-the prefix), a segment manifest's `manifest_hash`, `artifact_ref`, `content_hash`, and every
-`config_refs` value. An export's `verifier_digest` is bare 64 hex where the journal records it
-(`ExportCreated`) and a `sha256:` ref where a view prints it. An anchor leaf's `hash` is bare, as
+the prefix), a segment manifest's `manifest_hash`, every `artifact_refs` value, a quoted item's `artifact`,
+and every `config_refs` value. An export's `verifier_digest` is bare 64 hex where the journal
+records it (`ExportCreated`, **Planned:** #772) and a `sha256:` ref where a view prints it. An anchor leaf's `hash` is bare, as
 journal spec §10 records it. Everything inside `payload`, and `actor.build`, is served exactly as
 recorded, in whatever form the event's schema gives it.
 
@@ -546,9 +547,10 @@ includes the journal) and gets 403. A principal with no membership in the path's
    (`acct:{ws}:…`, `agent:{ws}:…`, `ctl:{ws}`, `clock:{ws}`, `ntf:{ws}`, journal spec §2), by the
    same scoped lookup whatever its form. A malformed id is not rejected before the lookup: it is
    looked up and found absent. An id that is absent, malformed, or in another workspace returns
-   §3.5's `not_found` problem document with exactly the members `type`, `status` (404), `code`
-   (`not_found`), `title`, `effect` (`none`), and `retryable` (`false`): the same bytes for every
-   such id, with no `event_id`, `stream_id`, or other member added.
+   §3.5's `not_found` problem document, the `Problem` of #788 (**Planned**) with exactly these
+   members: `type` `https://mandate.dev/problems/not_found`, `status` 404, `code` `not_found`,
+   `title` `Not found`, `effect` `none`, `event_id` `null`, `retryable` `false`, and `violations`
+   `[]`. It is the same bytes for every such id; no id, `stream_id`, or other member is added.
 2. Query members that are not ids are validated as usual: an out-of-range `limit`, a malformed
    timestamp, or an unknown event type is 422 `invalid` with its `violations`, and is checked
    before any id is resolved, so it reveals nothing about one.
@@ -558,7 +560,13 @@ includes the journal) and gets 403. A principal with no membership in the path's
 `GET /journal/streams?after=&limit=` lists the workspace's streams in ascending byte order of
 `stream_id`, after the `after` stream id if given. Each item is `{stream_id, stream_type, head:
 {seq, hash, recorded_at}}`; `stream_type` is `account`, `agent`, `control`, `scheduler`, or
-`notice`. A stream with no event yet is not listed.
+`notice`. A stream with no event yet is not listed. `after` is a stream id, compared by bytes and
+never resolved, so it reveals nothing; `limit` has the event page's bounds: an integer from 1 to
+1,000, default 100, and outside them is 422 `invalid`, never clamped. The response is `{streams,
+next_after, as_of}`, with `next_after` the last listed `stream_id` or `null` when the list ends.
+Each page is read in one snapshot, but a listing of several pages is best effort while streams are
+being created: a stream whose first event commits after an earlier page was read and whose id sorts
+before that page's last id is not in this listing, and appears in a fresh one.
 
 `GET /journal/streams/{stream_id}/events?after_seq=&limit=` returns one page:
 
@@ -653,19 +661,39 @@ outcomes ([DEC-762](../project/decisions/DEC-762.md)):
   `event_type`; it is shown and not followed.
 
 The response is `{start, nodes, hops, truncated, as_of}`. `nodes` are events in the page item shape
-of the section above, each with its `depth`. `hops` are `{from, link, to, status}` with `from` an
+of the section above, each with its `stream_id` (a trace spans several streams, and `as_of` is per
+stream, as the one-event read, the gate view, and the timeline carry it), its `depth`, and its
+`quoted` list. `hops` are `{from, link, to, status}` with `from` an
 `event_id`, `link` the member name (`causation_id`, `payload.intent_id`, …), and `to` the target's
 `event_id` or `null` for `not_recorded`. A start event outside the workspace is the 404 above.
 
 **Model output (API-18).** A node's `body` is the record, for checking. What a client renders as
-model output comes only from the node's `quoted` list of `QuotedContent` items, each attributed
-to its model (`model_id`, `model_version`, `content_hash`) and naming the member `path` it quotes,
-with its `text` or its `artifact_ref`, one per model-authored member: in
-`ThesisProposed` and `ThesisRevised` `payload.invalidation`, `payload.evidence_sources`, and the
-prompt, response, and autopsy artifacts; in `ModelOutputRecorded` `payload.invalidation` and
-`payload.thesis_ref`; in `ModelInvocationRecorded` its prompt and response artifacts. Artifact
-content is named by `artifact_ref` and is not inlined. No other member of any node is ever typed to
-hold model text, and no hop or status is derived from it.
+model output comes only from the node's `quoted` list, one item per model-authored member the
+node's event holds, in the order below. Each item is `{path, quoted}`: `path` is the JSON Pointer
+(RFC 6901) of the quoted member in the event body (`/payload/invalidation`, …), and `quoted` is a
+`QuotedContent` of `schemas/workspace-api/common.schema.json` exactly as that schema closes it,
+with no member added. `path` sits on the wrapper because `QuotedContent` has no member for it. Its
+members:
+
+- `author`: `owner_selected` when the output is a signal model's that the agent's confirmed mandate
+  names (the owner chose it: "Output of software you selected", mandate spec §6.4, journal spec
+  §9's evidence label); `platform_authored` for every other output, the research agent's theses and
+  the compiler's invocations included (mandate spec §8.1, §8.4). Where the trace cannot tell, it is
+  `platform_authored`, which never presents platform output as the owner's choice.
+- `model_id` and `model_version`: the model or research agent id and version the event records.
+- `produced_at`: the event's `recorded_at`. `event_id`: the node's `event_id`.
+- `text` and `artifact`: for a member that holds the text inline, `text` is its recorded value (a
+  string as recorded, any other value as its canonical JSON, journal spec §4) and `artifact` is
+  `null`. For a member that holds an artifact ref, `artifact` is that ref as a `sha256:`
+  `ContentRef` and `text` is the empty string: artifact content is never inlined, and a client
+  fetches it by ref and renders it as this item's quoted content.
+
+The model's content hash is not a `QuotedContent` member; it stays in the node's `body`. The
+quoted members are: in `ThesisProposed` and `ThesisRevised` `payload.invalidation`,
+`payload.evidence_sources`, and the prompt, response, and autopsy artifacts; in
+`ModelOutputRecorded` `payload.invalidation` and `payload.thesis_ref`; in
+`ModelInvocationRecorded` its prompt and response artifacts. No other member of any node is ever
+typed to hold model text, and no hop or status is derived from it.
 
 #### Gate view (J6)
 
@@ -727,6 +755,8 @@ connection record. An unknown agent is the 404.
   stream_ids}`. `from` and `to` are timestamps. Per stream, the export holds the contiguous `seq`
   range from the first event with `recorded_at ≥ from` to the last with `recorded_at < to`, so each
   range has a trusted start (the previous event's `hash`) and verifies under journal spec §11.
+  Every stream's range is found and read in one database snapshot, so an export's ranges, and its
+  `as_of`, describe one moment, whatever is appended while it is built.
 - `format` is `canonical`, `json`, or `csv`. Every export builds the canonical export first (journal
   spec §12: segment files, manifests, anchors with inclusion proofs). Its anchor is the canonical
   export's **verifier digest** (journal spec §12, DEC-265 item 3: `ExportBundle::verifier_digest` in
@@ -755,6 +785,10 @@ ascending `stream_id` bytes:
 - **Formula injection.** A CSV cell whose first character is `=`, `+`, `-`, `@`, a tab (U+0009), or a
   carriage return (U+000D) is written with a single quote (`'`) before it. The canonical export is
   the record; the view is for reading, and that leading quote is the view's, not the record's.
+- **Only the canonical export is checkable.** Neither view holds the canonical body bytes, so
+  neither can be re-hashed or chain-checked on its own; a reader checks a view's rows against the
+  canonical export its `verifier_digest` names. The CSV view also leaves out `config_refs`; the JSON
+  lines view and the canonical export carry them.
 
 #### Verification (J4, FR-7.5, E12-3)
 
@@ -796,8 +830,12 @@ ascending `stream_id` bytes:
   first_failure: {seq, check} | null}`, with `check` one of §11's codes.
 - The API appends `VerificationRun` with that result and serves the result only once it is
   committed (AU-6). Response `202 {verification_id, phase: "recorded" | "running"}`;
-  `GET /verifications/{id}` returns the result. A failure is the same `VerificationRun` §11's
-  response keys on; the API takes no other action on it.
+  `GET /verifications/{id}` returns the result. The API takes no other action on a failure. Journal
+  spec §11's response to one (SEV-1; pausing the affected agents, or freezing mandate and deployment
+  changes for a control stream; legal hold; a new writer epoch from `IntegrityIncidentRecorded`;
+  the customer notice) is taken by whoever is on call (infrastructure design §8.4), through the
+  "Journal verification failure" alert that a failing `VerificationRun` raises (infrastructure
+  design §8.2, runbook RB-09).
 
 ### 4.9 How the web app's fixtures map
 
