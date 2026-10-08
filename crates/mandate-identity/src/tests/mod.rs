@@ -121,7 +121,7 @@ impl MembershipLookup for Failing {
 /// workspace's own record, so no pair can be checked (identity spec §4.5).
 pub(crate) struct Unreadable;
 
-impl sealed::Sealed for Unreadable {}
+impl LookupSeal for Unreadable {}
 
 impl MembershipLookup for Unreadable {
     fn memberships(&self, _: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed> {
