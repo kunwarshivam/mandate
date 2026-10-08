@@ -1,9 +1,10 @@
 //! An order's life in the simulator, one example per rule (E7-25): fills, `ref_id` after a lost
-//! answer, `gfd` and `gtc`, sessions, scripted answers, and the refusals of cancel and fill.
+//! answer and its two switches, `gfd` and `gtc`, sessions, scripted answers, and the refusals of
+//! cancel, fill and sell.
 
 mod common;
 
-use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, limit, price, qty, sim};
+use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, limit, price, qty, ref_id, sim};
 use mandate_rh_sim::{Event, Fault, OrderRequest, Session, SimError, State};
 
 type Outcome = Result<(), SimError>;
@@ -173,14 +174,25 @@ fn cancels_fills_and_sells_are_refused_where_the_contract_refuses() -> Outcome {
         sim.fill(&sell.id, qty("1"), price("498.99")),
         Err(SimError::ThroughLimit)
     );
-    let second = sim.place(&limit("sell", "1", "499", 5))?;
-    sim.fill(&second.id, qty("1"), price("499"))?;
-    let oversold = sim.fill(&sell.id, qty("1"), price("499"));
+    let second = limit("sell", "1", "499", 5);
+    let oversold = sim.place(&second);
     assert_eq!(
         oversold,
         Err(SimError::InsufficientShares),
-        "two sells of one share held"
+        "the working sell holds the one share"
     );
+    let other = sim.place(&OrderRequest {
+        symbol: "QQQ".to_owned(),
+        ..limit("buy", "1", "501", 6)
+    })?;
+    sim.fill(&other.id, qty("1"), price("500"))?;
+    let other_sell = OrderRequest {
+        symbol: "QQQ".to_owned(),
+        ..limit("sell", "1", "499", 7)
+    };
+    sim.place(&other_sell)?;
+    sim.cancel(AGENTIC, &sell.id)?;
+    sim.place(&second)?;
     let cancelled = sim.cancel(AGENTIC, &order.id)?;
     assert_eq!(
         (cancelled.state, cancelled.filled_quantity),
@@ -227,5 +239,37 @@ fn scripted_answers_and_broker_changes_follow_the_lifecycle() -> Outcome {
         sim.advance("rh-sim-missing", State::Voided),
         Err(SimError::UnknownOrder)
     );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_ref_id_is_echoed_and_a_changed_resend_refused_only_when_switched_on() -> Outcome {
+    let mut sim = sim()?;
+    let order = sim.place(&limit("buy", "1", "501", 1))?;
+    let echoed = |sim: &mandate_rh_sim::Sim| -> Result<Option<String>, SimError> {
+        Ok(sim.orders(AGENTIC)?.first().and_then(|o| o.ref_id.clone()))
+    };
+    assert_eq!(
+        (order.ref_id.clone(), echoed(&sim)?),
+        (None, None),
+        "not echoed by default"
+    );
+    sim.apply(Event::EchoRefId(true))?;
+    assert_eq!(echoed(&sim)?, Some(ref_id(1)));
+    let changed = limit("buy", "2", "501", 1);
+    assert_eq!(
+        sim.place(&changed)?.id,
+        order.id,
+        "a changed re-send returns the first by default"
+    );
+    sim.apply(Event::RefuseChangedResend(true))?;
+    assert_eq!(sim.place(&changed), Err(SimError::ChangedResend));
+    assert_eq!(
+        sim.place(&limit("buy", "1", "501", 1))?.id,
+        order.id,
+        "the same body still returns it"
+    );
+    assert_eq!(sim.orders(AGENTIC)?.len(), 1);
     Ok(())
 }
