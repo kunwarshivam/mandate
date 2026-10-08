@@ -2899,10 +2899,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   by that fill (rule 12). The same lag sizes §5.4's re-placement. Size from the broker's own
   report of the cancelled order, or hold the rung for it, before slice 2 lets protected
   positions exist outside the tests (DEC-160 (4)).
-- **E7-4 slice 7's tests correction, before the agent-scoped kill switch's implementation can pass `xtask ci pending`
-  (stream K, [DEC-485](decisions/DEC-485.md)):** with the switch live, no property script stops at its stub any more, so
-  every executor property marked pending runs to its own verdict. Those that now pass go live with the implementation
-  (DEC-485 item 16).
+- ~~**E7-4 slice 7's tests correction, before the agent-scoped kill switch's implementation can pass `xtask ci pending`
+  (stream K, [DEC-485](decisions/DEC-485.md))**~~ Done by [DEC-506](decisions/DEC-506.md) (#671, #672, #673): nine
+  corrected properties and both session hand tests go live with #668; E1, E2 and the confirmed owner's pre-market
+  pricing stay pending in `BEHAVIOUR_ONLY_TESTS` (DEC-485 items 11 and 17). The record as written before it: with the
+  switch live, no property script stops at its stub any more, so every executor property marked pending runs to its
+  own verdict. Those that now pass go live with the implementation (DEC-485 item 17).
   These still need a DEC-77 tests correction, or a coordinator-approved `BEHAVIOUR_ONLY_TESTS` row, because each passes
   vacuously or fails away from any stub on behaviour that predates the switch:
   - the `risk_clock` readers (the #456 round 1 row above): `no_interval_exceeds_the_limit_without_an_alert` and
