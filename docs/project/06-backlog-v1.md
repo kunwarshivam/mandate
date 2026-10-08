@@ -1066,13 +1066,26 @@ after U-A1 to U-A5 are recorded.
   perfect delivery except asks that skip (NT-5); the kill-switch and exit suites pass with the
   dispatcher hung (NT-9); a lost address alerts on the other channels (spec §5.6).
 - **E8-11 (Must, M7; SC)** As an approver, I want email notices (spec §4.4). Provider per DEC-438
-  item 21; until the founder decides, the adapter runs against a recorded fixture only.
-  *Accepted when:* NT-1's canary test passes on captured messages; links match `<origin>/n/<ULID>`
-  (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider configuration check.
-- **E8-12 (Must, M7; SC)** As an approver, I want one chat channel (spec §4.5), Slack or Telegram
-  per DEC-438 item 20. *Accepted when:* NT-1's canary test passes; every inbound message, button, or
+  item 21, decided in DEC-820 item 3 for the founder's own address only; every other recipient waits
+  for counsel's general footer.
+  *Accepted when:* NT-1's canary test passes on captured messages; links match
+  `<origin>/n/<notice id>` (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider
+  configuration check; the founder-only SMTP transport (spec §4.4, DEC-820 items 3 and 4) sends only
+  to the one founder address the deployment's configuration names, read from the vault, with exactly
+  `Sent by your Mandate workspace to its owner.` as the footer; a notice for any other recipient, a
+  workspace owner who is not the founder included, is refused `recipient_not_permitted` before any
+  connection, is not retried, marks no address `unreachable`, and raises no `channel_lost`; the
+  `xtask` email-footer check (DEC-700 item 4) exists, runs in `cargo xtask ci fast`'s lint, and is
+  shown to fail on a planted third mail transport and on a planted deny-listed mail crate (`lettre`)
+  outside the founder-only transport while the general footer is unresolved.
+- **E8-12 (Deferred: not in v1; SC)** As an approver, I want one chat channel (spec §4.5). The
+  founder did not take DEC-438 item 20 (2026-10-08, DEC-824): v1 has no chat channel, and Telegram
+  at M10 is a later option. If it is built, *accepted when:* NT-1's canary test passes; every inbound message, button, or
   callback leaves the control stream unchanged (NT-3); the webhook URL or bot token is read only
-  from the vault and appears in no log (rule 7).
+  from the vault and appears in no log (rule 7). For Telegram (spec §4.5, DEC-700 item 2): a linking
+  code is refused once 10 minutes have passed since it was shown; it is spent by the first message
+  that carries it, even when no address is then recorded; showing a new code revokes the earlier
+  one; and the replies to an unknown, an expired, and a spent code are byte-identical.
 - **E8-13 (Must, M9 and M10; SC)** As an approver, I want to open a notice, sign in, and answer
   inside my workspace (spec §6, G4), with `web_inbox` as a pull channel (DEC-438 item 3). Depends on
   the workspace API and identity specs (DEC-436, DEC-437). *Accepted when:* a captured link with no
@@ -2425,6 +2438,16 @@ an agent on a different model, zero missed mutants, and green CI).
   compliance wording is reserved for the founder and counsel (DEC-79).
 
 ## Spec follow-ups (minor review findings, deferred by the freeze rule)
+
+From the review of workspace API spec §4.8.1 (the audit read contracts, #767):
+
+- Exports: define the file states `GET /exports/{id}` reports (recorded, building, ready). Map a
+  failed or `Ambiguous` `ExportCreated` append to §3.5's `journal_unavailable` or `effect:
+  unknown`, retryable with the same `Idempotency-Key`. Define the per-stream range when
+  `recorded_at` steps back (DEC-764 notes the clock may), for example by seq bounds read from a
+  monotone index. Make the view header's `format` match the request's (`json` against `jsonl`).
+- `mandate-audit` enforces tenant isolation, so it is safety-critical. Its `xtask/layers.toml`
+  entry, CODEOWNERS line, and lint header land with the crate (#797).
 
 From the final review of mandate spec v0.3:
 
