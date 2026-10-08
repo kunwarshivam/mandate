@@ -11,7 +11,6 @@ use mandate_journal::StreamId;
 use proptest::prelude::*;
 
 #[test]
-#[ignore = "pending E12-6"]
 fn streams_lists_only_the_workspaces_written_streams_with_their_heads() {
     let mut fx = Fixture::new(2);
     fx.marks(&acct("ws_a", "ACCT2"), 3);
@@ -48,7 +47,6 @@ fn streams_lists_only_the_workspaces_written_streams_with_their_heads() {
 /// DEC-760 item 6: the list pages by `after` and `limit` in byte order. `after` is a cursor, not
 /// an id to resolve, so another workspace's stream id there only says where to start.
 #[test]
-#[ignore = "pending E12-6"]
 fn the_stream_list_pages_by_after_and_limit() {
     let fx = Fixture::new(1);
     let read = MemoryRead::new(&fx.journal);
@@ -85,7 +83,6 @@ fn the_stream_list_pages_by_after_and_limit() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn foreign_malformed_and_absent_ids_all_read_as_not_found() {
     let mut fx = Fixture::new(1);
     fx.journal
@@ -148,7 +145,6 @@ fn foreign_malformed_and_absent_ids_all_read_as_not_found() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn an_event_of_the_workspace_is_served_with_its_body_and_link() {
     let fx = Fixture::new(4);
     let read = MemoryRead::new(&fx.journal);
@@ -180,7 +176,6 @@ proptest! {
     /// API-9: as any workspace, every stream and event of another workspace reads exactly as an
     /// absent one does, and every one of its own reads.
     #[test]
-    #[ignore = "pending E12-6"]
     fn foreign_and_absent_reads_are_indistinguishable(
         reader in 0..WORKSPACES.len(),
         marks in 0..4u64,

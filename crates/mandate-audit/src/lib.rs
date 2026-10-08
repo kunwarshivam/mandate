@@ -16,16 +16,22 @@
 //! `prev_hash`, the stream head read with the page, and the cursor the last `seq` served.
 
 use mandate_canon::Digest;
-use mandate_journal::MemoryJournal;
+use mandate_journal::{MemoryJournal, StoredEvent, StreamId};
+
+/// The largest page (DEC-760 item 1).
+const MAX_LIMIT: u16 = 1000;
+
+/// The page size when the caller names none (DEC-760 item 1).
+const DEFAULT_LIMIT: u16 = 100;
+
+/// The largest `after_seq`: 2^53 − 1, the largest canonical integer (journal spec §4 rule 4).
+const MAX_AFTER_SEQ: u64 = 9_007_199_254_740_991;
 
 /// Why an audit read returned nothing. `NotFound` carries no detail, so a foreign id and an absent
 /// one cannot be told apart by their error (API-9). The other variants are the 422 `invalid` of a
 /// query member that is not an id, which a read checks before it resolves any id (DEC-760 item 5).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuditError {
-    /// The body of every stub in the tests PR (DEC-77, DEC-83).
-    #[error("{story} has not been implemented yet")]
-    Unimplemented { story: &'static str },
     /// The stream, event or workspace is absent, malformed, or in another workspace (API-9).
     #[error("not found")]
     NotFound,
@@ -45,8 +51,19 @@ pub struct WorkspaceId(String);
 impl WorkspaceId {
     /// A malformed id names no workspace, so it reads as [`AuditError::NotFound`].
     pub fn parse(text: &str) -> Result<Self, AuditError> {
-        let _ = text;
-        Err(AuditError::Unimplemented { story: "E12-6" })
+        let segment = !text.is_empty()
+            && text
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+        segment
+            .then(|| Self(text.to_owned()))
+            .ok_or(AuditError::NotFound)
+    }
+
+    /// Whether `stream` is one of this workspace's streams: its workspace segment, the second of
+    /// every stream id (journal spec §2), equals this id whole, never by prefix (DEC-770 item 1).
+    fn owns(&self, stream: &StreamId) -> bool {
+        stream.as_str().split(':').nth(1) == Some(self.0.as_str())
     }
 }
 
@@ -57,8 +74,14 @@ pub struct PageLimit(u16);
 
 impl PageLimit {
     pub fn new(limit: Option<u64>) -> Result<Self, AuditError> {
-        let _ = limit;
-        Err(AuditError::Unimplemented { story: "E12-6" })
+        let Some(limit) = limit else {
+            return Ok(Self(DEFAULT_LIMIT));
+        };
+        u16::try_from(limit)
+            .ok()
+            .filter(|n| (1..=MAX_LIMIT).contains(n))
+            .map(Self)
+            .ok_or(AuditError::LimitOutOfRange { limit })
     }
 }
 
@@ -155,6 +178,47 @@ impl<'a> MemoryRead<'a> {
     }
 }
 
+impl MemoryRead<'_> {
+    /// The rows of `stream_id` when it parses and is in `workspace`, empty for a stream that holds
+    /// no event; otherwise the one `NotFound` (API-9, DEC-760 item 4).
+    fn rows(&self, workspace: &WorkspaceId, stream_id: &str) -> Result<&[StoredEvent], AuditError> {
+        StreamId::parse(stream_id)
+            .filter(|stream| workspace.owns(stream))
+            .map(|stream| self.journal.rows(&stream))
+            .ok_or(AuditError::NotFound)
+    }
+}
+
+fn head(last: &StoredEvent) -> Head {
+    Head {
+        seq: last.seq,
+        hash: last.hash,
+        recorded_at: last.recorded_at.clone(),
+    }
+}
+
+fn stream_type(stream: &StreamId) -> StreamType {
+    match stream.stream_type() {
+        mandate_journal::StreamType::Account => StreamType::Account,
+        mandate_journal::StreamType::Agent => StreamType::Agent,
+        mandate_journal::StreamType::Control => StreamType::Control,
+        mandate_journal::StreamType::Scheduler => StreamType::Scheduler,
+    }
+}
+
+fn served(row: &StoredEvent) -> JournalEvent {
+    JournalEvent {
+        stream_id: row.stream_id.clone(),
+        seq: row.seq,
+        event_id: row.event_id.clone(),
+        event_type: row.event_type.clone(),
+        recorded_at: row.recorded_at.clone(),
+        body: row.body.clone(),
+        hash: row.hash,
+        prev_hash: row.prev_hash,
+    }
+}
+
 impl JournalRead for MemoryRead<'_> {
     fn streams(
         &self,
@@ -162,8 +226,22 @@ impl JournalRead for MemoryRead<'_> {
         after: Option<&str>,
         limit: PageLimit,
     ) -> Result<Vec<StreamEntry>, AuditError> {
-        let _ = (self.journal, workspace, after, limit.0);
-        Err(AuditError::Unimplemented { story: "E12-6" })
+        Ok(self
+            .journal
+            .stream_ids()
+            .filter(|id| after.is_none_or(|after| *id > after))
+            .filter_map(StreamId::parse)
+            .filter(|stream| workspace.owns(stream))
+            .filter_map(|stream| {
+                let last = self.journal.rows(&stream).last()?;
+                Some(StreamEntry {
+                    stream_id: last.stream_id.clone(),
+                    stream_type: stream_type(&stream),
+                    head: head(last),
+                })
+            })
+            .take(usize::from(limit.0))
+            .collect())
     }
 
     fn page(
@@ -173,12 +251,32 @@ impl JournalRead for MemoryRead<'_> {
         after_seq: u64,
         limit: PageLimit,
     ) -> Result<Page, AuditError> {
-        let _ = (self.journal, workspace, stream_id, after_seq, limit.0);
-        Err(AuditError::Unimplemented { story: "E12-6" })
+        if after_seq > MAX_AFTER_SEQ {
+            return Err(AuditError::AfterSeqOutOfRange { after_seq });
+        }
+        let rows = self.rows(workspace, stream_id)?;
+        let last = rows.last().ok_or(AuditError::NotFound)?;
+        let events: Vec<JournalEvent> = rows
+            .iter()
+            .filter(|row| row.seq > after_seq)
+            .take(usize::from(limit.0))
+            .map(served)
+            .collect();
+        let next_after_seq = events.last().map_or(after_seq, |event| event.seq);
+        Ok(Page {
+            stream_id: last.stream_id.clone(),
+            head: head(last),
+            events,
+            next_after_seq,
+            at_head: next_after_seq >= last.seq,
+        })
     }
 
     fn event(&self, workspace: &WorkspaceId, event_id: &str) -> Result<JournalEvent, AuditError> {
-        let _ = (self.journal, workspace, event_id);
-        Err(AuditError::Unimplemented { story: "E12-6" })
+        self.journal
+            .event(event_id)
+            .filter(|row| StreamId::parse(&row.stream_id).is_some_and(|s| workspace.owns(&s)))
+            .map(served)
+            .ok_or(AuditError::NotFound)
     }
 }
