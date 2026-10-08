@@ -3,64 +3,20 @@
 
 use super::{
     MAX_BODY_LEN, NoticeClass, PADDED_RECORD_LEN, PushEndpoint, PushPlaintext, PushRequest,
-    PushText, SecureRandom, Subscription, Urgency, VapidSigner, VapidSubject, WebPushError,
-    aes128gcm, build_request, encrypt, seal, vapid_authorization,
+    PushText, Subscription, Urgency, VapidSigner, VapidSubject, WebPushError, aes128gcm,
+    build_request, encrypt, seal, vapid_authorization,
 };
-use aes_gcm::Aes128Gcm;
-use aes_gcm::aead::{Aead, KeyInit};
-use base64ct::{Base64UrlUnpadded, Encoding};
-use hkdf::Hkdf;
-use p256::ecdsa::signature::{Signer, Verifier};
-use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
-use p256::{PublicKey, SecretKey};
+use p256::ecdsa::signature::Verifier;
+use p256::ecdsa::{Signature, VerifyingKey};
 use proptest::prelude::*;
-use sha2::Sha256;
+use vectors::{
+    AUTH, RFC_8188_IKM, RFC_8188_MESSAGE, RFC_8291_MESSAGE, SALT, TestSigner, UA_PUBLIC, b64, open,
+    rfc_random, seeded_random, short_auth, zero_random,
+};
 
-fn b64(text: &str) -> Vec<u8> {
-    Base64UrlUnpadded::decode_vec(text).unwrap_or_default()
-}
+#[path = "../tests/vectors/mod.rs"]
+mod vectors;
 
-/// Hands out the bytes it was given, in order, and fails once they run out.
-struct Scripted(Vec<u8>);
-
-impl SecureRandom for Scripted {
-    fn fill(&mut self, out: &mut [u8]) -> Result<(), WebPushError> {
-        if self.0.len() < out.len() {
-            return Err(WebPushError::Random);
-        }
-        let rest = self.0.split_off(out.len());
-        out.copy_from_slice(&self.0);
-        self.0 = rest;
-        Ok(())
-    }
-}
-
-/// A test key only: RFC 8291 §5's sender key, published in the RFC.
-struct TestSigner(SigningKey);
-
-impl TestSigner {
-    fn new() -> Self {
-        Self(SigningKey::from_slice(&b64(AS_PRIVATE)).unwrap_or_else(|_| unreachable!()))
-    }
-}
-
-impl VapidSigner for TestSigner {
-    fn public_key(&self) -> [u8; 65] {
-        let point = self.0.verifying_key().to_sec1_point(false);
-        point.as_bytes().try_into().unwrap_or([0; 65])
-    }
-    fn sign_es256(&self, message: &[u8]) -> Result<[u8; 64], WebPushError> {
-        let signature: Signature = self.0.sign(message);
-        Ok(signature.to_bytes().into())
-    }
-}
-
-const AUTH: &str = "BTBZMqHH6r4Tts7J_aSIgg";
-const UA_PRIVATE: &str = "q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94";
-const UA_PUBLIC: &str =
-    "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
-const AS_PRIVATE: &str = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
-const SALT: &str = "DGv6ra1nlYgDCS1FRnbzlw";
 const ENDPOINT: &str = "https://push.example.net/push/JzLQ3raZJfFBR0aqvOMsLrt54w4rJUsV";
 const NOW: u64 = 1_453_480_568;
 
@@ -68,34 +24,57 @@ fn subscription(endpoint: &str) -> Result<Subscription, WebPushError> {
     Subscription::new(PushEndpoint::parse(endpoint)?, &b64(UA_PUBLIC), &b64(AUTH))
 }
 
-fn rfc_random() -> Scripted {
-    Scripted([b64(AS_PRIVATE), b64(SALT)].concat())
-}
-
 fn subject() -> Result<VapidSubject, WebPushError> {
     VapidSubject::parse("mailto:push@example.invalid")
 }
 
-/// The receiver's side of RFC 8291 §3 and RFC 8188 §2, written apart from the sender's.
-fn open(body: &[u8]) -> Vec<u8> {
-    let (salt, rest) = body.split_at(16);
-    let (_, rest) = rest.split_at(5);
-    let (as_public, sealed) = rest.split_at(65);
-    let ua = SecretKey::from_slice(&b64(UA_PRIVATE)).unwrap_or_else(|_| unreachable!());
-    let sender = PublicKey::from_sec1_bytes(as_public).unwrap_or_else(|_| unreachable!());
-    let shared = p256::ecdh::diffie_hellman(ua.to_nonzero_scalar(), sender.as_affine());
-    let mut ikm = [0u8; 32];
-    let info = [b"WebPush: info\0".as_slice(), &b64(UA_PUBLIC), as_public].concat();
-    let _ =
-        Hkdf::<Sha256>::new(Some(&b64(AUTH)), shared.raw_secret_bytes()).expand(&info, &mut ikm);
-    let hk = Hkdf::<Sha256>::new(Some(salt), &ikm);
-    let (mut cek, mut nonce) = ([0u8; 16], [0u8; 12]);
-    let _ = hk.expand(b"Content-Encoding: aes128gcm\0", &mut cek);
-    let _ = hk.expand(b"Content-Encoding: nonce\0", &mut nonce);
-    Aes128Gcm::new_from_slice(&cek)
-        .unwrap_or_else(|_| unreachable!())
-        .decrypt(&nonce.into(), sealed)
-        .unwrap_or_default()
+/// Every `.rs` file under `dir`, at any depth.
+fn rust_files(dir: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            found.extend(rust_files(&path)?);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            found.push(path);
+        }
+    }
+    Ok(found)
+}
+
+#[test]
+fn no_product_code_reaches_the_rfc_vectors() -> std::io::Result<()> {
+    let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src = crate_dir.join("src");
+    let tests_module = src.join("tests.rs");
+    let product = rust_files(&src)?;
+    assert!(
+        product.len() >= 3,
+        "lib.rs, payload.rs and tests.rs at least"
+    );
+    for file in product.iter().filter(|f| **f != tests_module) {
+        let source = std::fs::read_to_string(file)?;
+        assert!(
+            !source.contains("vectors"),
+            "{} must not include the test vectors (DEC-794)",
+            file.display()
+        );
+    }
+    let lib = std::fs::read_to_string(src.join("lib.rs"))?;
+    assert!(
+        lib.contains("#[cfg(test)]\nmod tests;"),
+        "the tests module is test-only"
+    );
+    let mut held: Vec<String> = std::fs::read_dir(crate_dir.join("tests/vectors"))?
+        .map(|entry| entry.map(|e| e.file_name().to_string_lossy().into_owned()))
+        .collect::<Result<_, _>>()?;
+    held.sort();
+    assert_eq!(
+        held,
+        ["mod.rs"],
+        "the ignored directory holds only the vectors module"
+    );
+    Ok(())
 }
 
 #[test]
@@ -157,28 +136,19 @@ fn the_closed_tables_are_the_specs() {
 fn rfc_8291_section_5_message_is_reproduced_byte_exact() -> Result<(), WebPushError> {
     let plaintext = b"When I grow up, I want to be a watermelon";
     let body = seal(&subscription(ENDPOINT)?, plaintext, None, &mut rfc_random())?;
-    let expected = "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27ml\
-                    mlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPT\
-                    pK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN";
-    assert_eq!(body, b64(expected), "RFC 8291 §5 and Appendix A");
+    assert_eq!(body, b64(RFC_8291_MESSAGE), "RFC 8291 §5 and Appendix A");
     Ok(())
 }
 
 #[test]
 #[ignore = "pending E8-14"]
 fn rfc_8188_section_3_1_record_is_reproduced_byte_exact() -> Result<(), WebPushError> {
-    let expected = b64("I1BsxtFttlv3u_Oo94xnmwAAEAAA-NAVub2qFgBEuQKRapoZu-IxkIva3MEB1PD-ly8Thjg");
+    let expected = b64(RFC_8188_MESSAGE);
     let salt: [u8; 16] = expected
         .get(..16)
         .and_then(|s| s.try_into().ok())
         .unwrap_or([0; 16]);
-    let body = aes128gcm(
-        &b64("yqdlZ-tYemfogSmv7Ws5PQ"),
-        &salt,
-        &[],
-        b"I am the walrus",
-        None,
-    )?;
+    let body = aes128gcm(&b64(RFC_8188_IKM), &salt, &[], b"I am the walrus", None)?;
     assert_eq!(body, expected, "RFC 8188 §3.1");
     Ok(())
 }
@@ -351,7 +321,7 @@ fn bad_endpoints_keys_and_subjects_are_refused() -> Result<(), WebPushError> {
         let refused = Subscription::new(endpoint.clone(), &key, &b64(AUTH)).err();
         assert_eq!(refused, Some(WebPushError::InvalidKey));
     }
-    let short = Subscription::new(endpoint, &b64(UA_PUBLIC), &[0; 15]).err();
+    let short = Subscription::new(endpoint, &b64(UA_PUBLIC), &short_auth()).err();
     assert_eq!(short, Some(WebPushError::InvalidAuthSecret));
     for uri in [
         "push@example.com",
@@ -369,13 +339,7 @@ fn bad_endpoints_keys_and_subjects_are_refused() -> Result<(), WebPushError> {
         );
     }
     assert_eq!(
-        seal(
-            &subscription(ENDPOINT)?,
-            b"x",
-            None,
-            &mut Scripted(vec![0; 40])
-        )
-        .err(),
+        seal(&subscription(ENDPOINT)?, b"x", None, &mut zero_random()).err(),
         Some(WebPushError::Random)
     );
     Ok(())
@@ -398,7 +362,7 @@ proptest! {
         let json = format!(r#"{{"notice":"{hex}","text":"{key}"}}"#);
         let payload = PushPlaintext::new(notice, text);
         prop_assert_eq!(payload.as_bytes(), json.as_bytes());
-        let mut random = Scripted([seed.to_vec(), vec![9; 16]].concat());
+        let mut random = seeded_random(seed);
         let body = encrypt(&subscription(ENDPOINT)?, &payload, &mut random);
         prop_assume!(body != Err(WebPushError::Random));
         let body = body?;
