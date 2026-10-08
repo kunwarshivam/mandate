@@ -66,7 +66,7 @@ lifetime and scopes; and the account and session status values.
 
 **Response shapes are assumed.** The contract publishes inputs, not outputs, so every parser the
 connector has is written against an assumed shape. The rule for that (the brief's LT-6): an
-unparseable or unexpected answer to a place call is `Unknown`, never treated as rejected and
+unparsable or unexpected answer to a place call is `Unknown`, never treated as rejected and
 never re-sent; an unexpected answer to a read refuses (rule 3). The first real check of the
 shapes is the founder's run with login and reads and no place call (the brief's R0 step 4).
 
