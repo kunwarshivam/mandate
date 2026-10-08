@@ -1200,8 +1200,9 @@ proves each pending test fails on them (DEC-110).
   written by hand from the files on disk, 1.0.0's content hash pinned as a literal (DEC-518 item 1),
   the output mapping, `as_of` on early closes, weekends and
   a given calendar) and `crates/mandate-modelhost/tests/refusals.rs` (one refusal per failed check
-  in the brief's order, each refusal's stable code, FT-4 over random identity changes, and the
-  signal against an `i128` oracle with determinism), with fixtures in `tests/common/mod.rs`.
+  in the brief's order, each refusal's stable code, FT-4 over all 63 sets of identity changes, the
+  check order over every pair of stages, and the signal against an `i128` oracle with ties and a
+  clock-independence check), with fixtures in `tests/common/mod.rs`.
 - **Run:** `cargo nextest run -p mandate-modelhost`.
 
 ## Research-agent spike (E17-0)
