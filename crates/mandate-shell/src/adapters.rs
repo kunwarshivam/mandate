@@ -2415,6 +2415,8 @@ mod tests {
             buying_power: mandate_num::Usd::ZERO,
             non_marginable_buying_power: mandate_num::Usd::ZERO,
             accrued_fees: mandate_num::Usd::ZERO,
+            last_equity: mandate_num::Usd::ZERO,
+            maintenance_margin: mandate_num::Usd::ZERO,
         };
         let mut connector = SnapshotConnector {
             outcomes: VecDeque::from([

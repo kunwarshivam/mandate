@@ -115,6 +115,8 @@ mod tests {
             buying_power: Usd::parse("4000000")?,
             non_marginable_buying_power: Usd::parse(non_marginable)?,
             accrued_fees: Usd::ZERO,
+            last_equity: Usd::parse("1000000")?,
+            maintenance_margin: Usd::ZERO,
         })
     }
 
