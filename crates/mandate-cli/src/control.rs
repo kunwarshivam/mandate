@@ -223,9 +223,20 @@ fn build_ref() -> String {
 pub(crate) struct Shape {
     pub(crate) schema_version: u64,
     pub(crate) artifact_refs: Vec<String>,
-    /// The system actor that writes the event, or `None` for the owner.
-    pub(crate) system: Option<&'static str>,
 }
+
+/// Who writes a control-stream draft. Private to this module, so no other module can name the
+/// system writer, and [`draft`] refuses it for anything but the stream's opening (#725 review).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Writer {
+    /// The owner, as a `user` (EI-10).
+    Owner,
+    /// The vectors' `control_services` opener, as a `system`, for `StreamOpened` alone (DEC-527
+    /// item 7).
+    Opener,
+}
+
+const OPENER_ID: &str = "control_services";
 
 /// Commits `ctl:{workspace}`'s `StreamOpened` in the owner's environment, as the vectors'
 /// `control_services` opener (DEC-527 item 7), its id derived at head 0 (DEC-290).
@@ -246,9 +257,9 @@ pub(crate) fn open_control_stream(
     let shape = Shape {
         schema_version: 1,
         artifact_refs: Vec::new(),
-        system: Some("control_services"),
     };
     let bytes = draft(
+        Writer::Opener,
         owner,
         &stream,
         &event_id,
@@ -278,8 +289,16 @@ fn version(schema_version: u64) -> Result<Value, ControlError> {
 }
 
 /// The canonical bytes of one control-stream draft, written by the owner as a `user` (journal spec
-/// §3; EI-10 admits nothing else).
+/// §3; EI-10 admits nothing else), or, for the stream's `StreamOpened` alone, by the opener.
+///
+/// # Errors
+/// [`ControlError::Journal`] for the opener writing any other event type.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each is one envelope member's source; bundling them would name a type for one caller"
+)]
 fn draft(
+    writer: Writer,
     owner: &Owner,
     stream: &StreamId,
     event_id: &str,
@@ -288,21 +307,23 @@ fn draft(
     payload: Value,
     now: Now,
 ) -> Result<Vec<u8>, ControlError> {
+    let (kind, id) = match writer {
+        Writer::Owner => ("user", owner.user.as_str()),
+        Writer::Opener if event_type == "StreamOpened" => ("system", OPENER_ID),
+        Writer::Opener => {
+            return Err(ControlError::Journal(format!(
+                "only the stream's opening is written as {OPENER_ID}, not {event_type}"
+            )));
+        }
+    };
     let one = seconds(1)?;
     let fields = object(vec![
         (
             "actor",
             object(vec![
                 ("build", text(&build_ref())),
-                ("id", text(shape.system.unwrap_or(&owner.user))),
-                (
-                    "kind",
-                    text(if shape.system.is_some() {
-                        "system"
-                    } else {
-                        "user"
-                    }),
-                ),
+                ("id", text(id)),
+                ("kind", text(kind)),
                 ("version", text(env!("CARGO_PKG_VERSION"))),
             ])?,
         ),
@@ -627,9 +648,17 @@ pub(crate) fn commit(
     let shape = Shape {
         schema_version: 1,
         artifact_refs: Vec::new(),
-        system: None,
     };
-    let bytes = draft(owner, &stream, &event_id, event_type, shape, payload, now)?;
+    let bytes = draft(
+        Writer::Owner,
+        owner,
+        &stream,
+        &event_id,
+        event_type,
+        shape,
+        payload,
+        now,
+    )?;
     settle(journal, &stream, event_id, repeat, &bytes, now)
 }
 
@@ -654,7 +683,16 @@ pub(crate) fn commit_choice(
         ..
     } = decided;
     let payload = object(key)?;
-    let bytes = draft(owner, &stream, &event_id, event_type, shape, payload, now)?;
+    let bytes = draft(
+        Writer::Owner,
+        owner,
+        &stream,
+        &event_id,
+        event_type,
+        shape,
+        payload,
+        now,
+    )?;
     settle(journal, &stream, event_id, repeat, &bytes, now)
 }
 
@@ -712,5 +750,60 @@ mod tests {
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
             "{build}"
         );
+    }
+
+    /// The opener writes the stream's `StreamOpened` as the `control_services` system and nothing
+    /// else; the owner writes as a `user` (#725 review).
+    #[test]
+    fn only_the_opening_is_written_as_the_system() -> Result<(), ControlError> {
+        let owner = Owner {
+            workspace: "ws1".to_owned(),
+            user: "u1".to_owned(),
+            environment: Environment::Paper,
+        };
+        let now = Now {
+            at: UtcNanos::from_parts(1_790_000_000, 0)
+                .map_err(|e| ControlError::Journal(format!("{e:?}")))?,
+            secs: 1_790_000_000,
+        };
+        let stream = control_stream(&owner)?;
+        let shape = || Shape {
+            schema_version: 1,
+            artifact_refs: Vec::new(),
+        };
+        let actor = |writer, event_type| -> Result<(String, String), ControlError> {
+            let bytes = draft(
+                writer,
+                &owner,
+                &stream,
+                "01J8ZA00000000000000000001",
+                event_type,
+                shape(),
+                Value::Object(Object::new()),
+                now,
+            )?;
+            let body = parse(&bytes).map_err(|e| ControlError::Journal(format!("{e:?}")))?;
+            let member = |name: &str| {
+                let actor = body.get("actor").and_then(|a| a.get(name));
+                actor.and_then(Value::as_str).unwrap_or_default().to_owned()
+            };
+            Ok((member("kind"), member("id")))
+        };
+        let pair = |kind: &str, id: &str| (kind.to_owned(), id.to_owned());
+        assert_eq!(
+            actor(Writer::Opener, "StreamOpened")?,
+            pair("system", "control_services")
+        );
+        assert_eq!(
+            actor(Writer::Owner, "ApprovalResponseSubmitted")?,
+            pair("user", "u1")
+        );
+        for other in ["ConfigSnapshotRegistered", "ApprovalResponseSubmitted"] {
+            assert!(
+                matches!(actor(Writer::Opener, other), Err(ControlError::Journal(_))),
+                "{other}"
+            );
+        }
+        Ok(())
     }
 }

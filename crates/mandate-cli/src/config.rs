@@ -114,7 +114,6 @@ fn registration(
     let shape = Shape {
         schema_version,
         artifact_refs: vec![reference],
-        system: None,
     };
     commit_choice(journal, owner, decided, shape, now)
 }
