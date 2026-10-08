@@ -493,6 +493,32 @@ fn ownership_and_fencing() {
     ));
 }
 
+/// `stream_ids` lists the streams that hold an event, in byte order, and leaves out one whose
+/// ownership was taken but that holds none.
+#[test]
+fn stream_ids_lists_written_streams_in_byte_order() {
+    let mut j = journal_with(1);
+    let empty = StreamId::parse("acct:ws_1:A0").unwrap();
+    j.take_ownership(&empty);
+    assert_eq!(j.stream_ids().collect::<Vec<_>>(), [STREAM]);
+    let other = StreamId::parse("acct:ws_0:B").unwrap();
+    let epoch = j.take_ownership(&other);
+    let opened = edit(
+        &opened_draft("paper"),
+        "stream_id",
+        Some(r#""acct:ws_0:B""#),
+    );
+    let opened = edit(&opened, "payload.workspace_id", Some(r#""ws_0""#));
+    let opened = edit(&opened, "payload.account_ref", Some(r#""B""#));
+    let opened = edit(&opened, "event_id", Some(&format!("\"{}\"", event_id(77))));
+    assert!(matches!(
+        j.append(&other, 0, epoch, now(), &[&opened]),
+        AppendOutcome::Committed(_)
+    ));
+    assert_eq!(j.stream_ids().collect::<Vec<_>>(), ["acct:ws_0:B", STREAM]);
+    assert!(MemoryJournal::new().stream_ids().next().is_none());
+}
+
 #[test]
 fn seal_bounds_and_names() {
     let d = Draft::parse(&mark_draft(1, "1")).unwrap();

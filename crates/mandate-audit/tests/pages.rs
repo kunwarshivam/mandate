@@ -8,6 +8,7 @@ use common::{Fixture, T, acct, limit, ws};
 use mandate_audit::{AuditError, Head, JournalEvent, JournalRead, MemoryRead, PageLimit};
 use mandate_canon::{Digest, parse};
 use mandate_journal::StreamId;
+use proptest::prelude::*;
 
 /// The largest canonical integer, 2^53 − 1 (journal spec §4 rule 4).
 const MAX_SEQ: u64 = 9_007_199_254_740_991;
@@ -156,5 +157,83 @@ fn a_cursor_at_or_past_the_head_gives_an_empty_page_at_the_head() {
             Err(AuditError::AfterSeqOutOfRange { after_seq: after }),
             "an after_seq above 2^53 - 1 is refused"
         );
+    }
+}
+
+/// The streams the fuzz appends to: the one it pages, a sibling in the same workspace, and two of
+/// other workspaces, one whose id has the paged workspace's as a prefix.
+const FUZZ_STREAMS: [(&str, &str); 4] = [
+    ("ws_a", "ACCT1"),
+    ("ws_a", "ACCT2"),
+    ("ws_ab", "ACCT1"),
+    ("ws_b", "ACCT1"),
+];
+
+#[derive(Debug, Clone)]
+enum Op {
+    Append { stream: usize, count: u64 },
+    Read { limit: u64 },
+}
+
+fn op() -> impl Strategy<Value = Op> {
+    prop_oneof![
+        3 => (0..FUZZ_STREAMS.len(), 1..=3u64).prop_map(|(stream, count)| Op::Append { stream, count }),
+        4 => (1..=8u64).prop_map(|limit| Op::Read { limit }),
+        1 => (1..=1000u64).prop_map(|limit| Op::Read { limit }),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    /// E12-6's acceptance fuzz (API-15, AU-2): random page sizes, with appends to the paged stream
+    /// and to others between page reads. Every page holds as many events as were there to serve,
+    /// up to its limit, with the head as the journal's rows give it at that read; the concatenated
+    /// pages are the stream's appended events exactly once in `seq` order, and the chain check
+    /// passes across page boundaries from 64 zeros.
+    #[test]
+    #[ignore = "pending E12-6"]
+    fn paging_under_concurrent_appends_serves_the_stream_once_in_order_and_chains(
+        initial in 0..12u64,
+        ops in prop::collection::vec(op(), 1..40),
+    ) {
+        let mut fx = Fixture::new(initial);
+        let (workspace, account) = FUZZ_STREAMS[0];
+        let target = acct(workspace, account);
+        let mut cursor = 0u64;
+        let mut served: Vec<JournalEvent> = Vec::new();
+        let read_page = |fx: &Fixture, cursor: &mut u64, served: &mut Vec<JournalEvent>, l: u64| {
+            let available = fx.appended[&target].event_ids.len() as u64 - *cursor;
+            let page = MemoryRead::new(&fx.journal)
+                .page(&ws(workspace), &target, *cursor, limit(l))
+                .unwrap();
+            assert_eq!(page.events.len() as u64, available.min(l), "after {cursor}, limit {l}");
+            let first = *cursor + 1;
+            assert!(page.events.iter().map(|e| e.seq).eq(first..first + page.events.len() as u64));
+            let next = page.events.last().map_or(*cursor, |e| e.seq);
+            assert_eq!(page.next_after_seq, next);
+            assert_eq!(page.head, head_of(fx, &target), "the head read with the page");
+            assert_eq!(page.at_head, next == fx.appended[&target].event_ids.len() as u64);
+            *cursor = page.next_after_seq;
+            served.extend(page.events);
+        };
+        for op in ops {
+            match op {
+                Op::Append { stream, count } => {
+                    let (w, a) = FUZZ_STREAMS[stream];
+                    fx.marks(&acct(w, a), count);
+                }
+                Op::Read { limit } => read_page(&fx, &mut cursor, &mut served, limit),
+            }
+        }
+        let total = fx.appended[&target].event_ids.len();
+        while served.len() < total {
+            read_page(&fx, &mut cursor, &mut served, 1000);
+        }
+        read_page(&fx, &mut cursor, &mut served, 1000);
+        let ids: Vec<&String> = served.iter().map(|e| &e.event_id).collect();
+        let expected: Vec<&String> = fx.appended[&target].event_ids.iter().collect();
+        prop_assert_eq!(ids, expected);
+        assert_chain(&target, &served);
     }
 }

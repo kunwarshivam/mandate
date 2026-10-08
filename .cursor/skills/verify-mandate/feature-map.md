@@ -610,11 +610,13 @@ while a reducing purpose passes it.
   AU-1, AU-2; DEC-760 (bounds, cursor, head, the 404, the stream list); DEC-770 (the readings
   §4.8.1 leaves open: whole-segment ownership, never-written streams, the stream-list cursor).
 - **Code:** `mandate-audit`: `crates/mandate-audit/src/lib.rs` (`JournalRead`, scoped to the
-  caller's workspace, and `MemoryRead` over `MemoryJournal`). Pure and read-only: it writes no
-  journal.
+  caller's workspace, and `MemoryRead` over `MemoryJournal`, which lists streams with
+  `MemoryJournal::stream_ids`). Pure and read-only: it writes no journal.
 - **Tests:** `crates/mandate-audit/tests/pages.rs` (pending E12-6 until slice A1's
-  implementation: page bounds, the cursor, the head and `at_head`, and a chain check over a whole
-  stream).
+  implementation: page bounds, the cursor, the head and `at_head`, and paging under concurrent
+  appends with an independent chain check), `crates/mandate-audit/tests/scope.rs` (pending E12-6:
+  the stream list and its paging, and foreign, malformed and absent ids reading the same),
+  `crates/mandate-journal/tests/append.rs` (`stream_ids_lists_written_streams_in_byte_order`).
 - **Run:** `cargo nextest run -p mandate-audit --run-ignored all`.
 
 ## Production configuration references (E7-19)
