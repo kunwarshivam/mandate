@@ -5,8 +5,11 @@ Run from the repository root, in the reference environment (jsonschema 4.26.0, p
 
     python3 -I schemas/workspace-api/check_examples.py
 
-1. Every `*.schema.json` under `schemas/workspace-api/` is a valid JSON Schema 2020-12 document.
-   `$ref`s resolve against those files and `schemas/mandate.schema.json`, by `$id`.
+1. Every `*.schema.json` under `schemas/workspace-api/` is a valid JSON Schema 2020-12 document,
+   and its `$id` is `https://mandate.dev/schemas/workspace-api/v1/` plus its path from
+   `schemas/workspace-api/`. A relative `$ref` such as `../common.schema.json#/$defs/Decimal`
+   from `read-models/` then resolves the way the file tree reads. `$ref`s resolve against those
+   files and `schemas/mandate.schema.json`, by `$id`.
 2. Every `examples/<name>.json` must be valid. `<name>` is a schema file's path relative to
    `schemas/workspace-api/`, without `.schema.json`; a `/` in that path is `.` in the example's name,
    so `read-models/agent.schema.json` has `examples/read-models.agent.json`.
@@ -31,6 +34,7 @@ from referencing import Registry, Resource
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / "schemas/workspace-api"
 EXAMPLES = HERE / "examples"
+ID_BASE = "https://mandate.dev/schemas/workspace-api/v1/"
 
 
 def load(path: Path):
@@ -94,6 +98,9 @@ def main() -> int:
 
     for name, schema in sorted(schemas.items()):
         Draft202012Validator.check_schema(schema)
+        if schema.get("$id") != f"{ID_BASE}{name}.schema.json":
+            problems.append(f"{name}: $id must be {ID_BASE}{name}.schema.json")
+            continue
         stem = name.replace("/", ".")
         good_path, bad_path = EXAMPLES / f"{stem}.json", EXAMPLES / f"{stem}.invalid.json"
         if not good_path.exists():
