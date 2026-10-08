@@ -1,6 +1,6 @@
 //! The streamable HTTP transport: one `POST` per message to the pinned endpoint.
 
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -78,7 +78,6 @@ impl TransportConfig {
     };
 }
 
-#[derive(Debug)]
 pub struct McpTransport {
     client: reqwest::Client,
     endpoint: PinnedEndpoint,
@@ -210,7 +209,9 @@ impl McpTransport {
             *self.session() = None;
             return Err(McpError::SessionExpired);
         }
-        if let Some(assigned) = response.headers().get(SESSION_HEADER) {
+        if let Some(assigned) = response.headers().get(SESSION_HEADER)
+            && status.is_success()
+        {
             let visible = assigned
                 .as_bytes()
                 .iter()
@@ -218,7 +219,9 @@ impl McpTransport {
             if !visible || assigned.is_empty() {
                 return Err(McpError::BadSessionId);
             }
-            *self.session() = Some(assigned.clone());
+            let mut kept = assigned.clone();
+            kept.set_sensitive(true);
+            *self.session() = Some(kept);
         }
         Ok(response)
     }
@@ -251,5 +254,15 @@ fn classify(error: reqwest::Error) -> McpError {
         McpError::Timeout
     } else {
         McpError::Network
+    }
+}
+
+/// The session id the server assigned is server text and works as a bearer token, so the
+/// printout leaves it out, along with the client and the budget.
+impl fmt::Debug for McpTransport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("McpTransport")
+            .field("endpoint", &self.endpoint)
+            .finish_non_exhaustive()
     }
 }

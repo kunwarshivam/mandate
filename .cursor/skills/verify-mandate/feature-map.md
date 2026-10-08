@@ -500,12 +500,14 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   and the injected `Monotonic` clock), `crates/mandate-mcp/src/frame.rs` (JSON-RPC 2.0 framing, and
   the answer as one JSON body or an event stream), `crates/mandate-mcp/src/error.rs` (`McpError`,
   and `ServerText`, which has no `Display` and whose `Debug` withholds what the server sent).
-- **Tests:** in-crate, because loopback is accepted only in the crate's test build:
-  `crates/mandate-mcp/src/tests/endpoint.rs`, `crates/mandate-mcp/src/tests/budget.rs` (an oracle
-  that steps one refill period at a time), `crates/mandate-mcp/src/tests/server.rs` (the scripted
-  loopback server), `crates/mandate-mcp/src/tests/answers.rs`,
-  `crates/mandate-mcp/src/tests/bounds.rs` (sessions, redirects, timeouts, the exit budget, and a
-  canary in server text), `crates/mandate-mcp/src/tests/errors.rs`.
+- **Tests:** in-crate where a loopback server is needed, since loopback is accepted only in the
+  crate's own test build: `crates/mandate-mcp/src/tests/endpoint.rs`,
+  `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
+  loopback), `crates/mandate-mcp/src/tests/budget.rs` (an oracle that steps one refill period at a
+  time), `crates/mandate-mcp/src/tests/server.rs` (the scripted loopback server),
+  `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/bounds.rs` (sessions,
+  redirects, timeouts, the exit budget, and a canary in server text),
+  `crates/mandate-mcp/src/tests/errors.rs`.
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
 
 ## Risk gate

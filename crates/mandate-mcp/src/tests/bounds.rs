@@ -5,6 +5,8 @@
 use std::time::Duration;
 
 use serde_json::json;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 use super::server::{Answer, json, serve, with_type};
 use crate::{BucketConfig, BudgetConfig, CallClass, McpError, McpTransport, PinnedEndpoint};
@@ -216,6 +218,96 @@ async fn a_zero_timeout_size_cap_or_budget_is_refused() {
         assert!(
             matches!(refused, Err(McpError::BadConfig)),
             "{config:?}: {refused:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_session_id_never_appears_in_the_transport_printout() {
+    let assigned = with_session(
+        json(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#),
+        "s-secret-9",
+    );
+    let server = serve(vec![assigned]).await;
+    let transport = server.transport(TransportConfig::CONSERVATIVE);
+    transport
+        .request(READ, "initialize", &json!({}))
+        .await
+        .unwrap();
+    let printed = format!("{transport:?}");
+    assert!(printed.starts_with("McpTransport"), "{printed}");
+    assert!(!printed.contains("s-secret-9"), "{printed}");
+}
+
+#[tokio::test]
+async fn a_session_on_a_failed_answer_is_never_kept() {
+    let failed = with_session(with_type(500, "text/plain", ""), "s-from-500");
+    let ok = json(r#"{"jsonrpc":"2.0","id":2,"result":{}}"#);
+    let server = serve(vec![failed, ok]).await;
+    let transport = server.transport(TransportConfig::CONSERVATIVE);
+    let status = transport
+        .request(READ, "initialize", &json!({}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(status, McpError::HttpStatus { status: 500 }),
+        "{status:?}"
+    );
+    transport.request(READ, "ping", &json!({})).await.unwrap();
+    assert!(
+        !server.seen()[1].contains("mcp-session-id"),
+        "{}",
+        server.seen()[1]
+    );
+}
+
+#[tokio::test]
+async fn an_answer_that_stalls_mid_body_is_a_timeout() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 4096];
+        let _ = stream.read(&mut buf).await;
+        let head =
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n";
+        let _ = stream
+            .write_all(format!("{head}{{\"jsonrpc\"").as_bytes())
+            .await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    });
+    let config = TransportConfig {
+        request_timeout: Duration::from_millis(300),
+        ..TransportConfig::CONSERVATIVE
+    };
+    let endpoint = PinnedEndpoint::new("127.0.0.1", &url).unwrap();
+    let transport =
+        McpTransport::new(endpoint, config, Box::new(SystemMonotonic::start())).unwrap();
+    let stalled = transport.request(READ, "x", &json!({})).await.unwrap_err();
+    assert!(matches!(stalled, McpError::Timeout), "{stalled:?}");
+}
+
+#[tokio::test]
+async fn an_empty_event_is_skipped_and_an_explicit_null_is_present() {
+    let empty_event =
+        "data:\n\nevent: ping\n\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n";
+    let server = serve(vec![super::server::sse(empty_event)]).await;
+    let transport = server.transport(TransportConfig::CONSERVATIVE);
+    let result = transport.request(READ, "x", &json!({})).await.unwrap();
+    assert_eq!(result.as_json(), "{}");
+    for frame in [
+        r#"{"jsonrpc":"2.0","id":1,"result":{},"error":null}"#,
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":1},"result":null}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":null,"result":{}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"params":null,"result":{}}"#,
+    ] {
+        let server = serve(vec![json(frame)]).await;
+        let transport = server.transport(TransportConfig::CONSERVATIVE);
+        let got = transport.request(READ, "x", &json!({})).await;
+        assert_eq!(
+            got.map_or_else(|e| e.code(), |_| "ok"),
+            "malformed",
+            "{frame}"
         );
     }
 }

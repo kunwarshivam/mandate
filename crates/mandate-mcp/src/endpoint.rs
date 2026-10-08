@@ -23,7 +23,8 @@ impl Build {
 }
 
 /// An MCP endpoint on the pinned host: `https`, the host exactly as pinned, and no credentials,
-/// query, or fragment in the URL.
+/// query, or fragment in the URL. The pin is the host only: the port and the path are the
+/// connector's to choose, and the TLS certificate is verified for that host whatever the port.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinnedEndpoint {
     url: Url,

@@ -1,7 +1,7 @@
 //! JSON-RPC 2.0 framing, and the two shapes an answer comes in: one JSON body, or a stream of
 //! server-sent events of which one carries the response.
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use serde_json::value::RawValue;
 
@@ -16,20 +16,27 @@ pub(crate) fn request_body(id: Option<u64>, method: &str, params: &Value) -> Str
     message.to_string()
 }
 
+/// Every member but `jsonrpc` is read through [`present`], so an explicit `null` counts as
+/// present: `"error": null` beside a result is two answers, not one.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Message {
     jsonrpc: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     id: Option<Box<RawValue>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     method: Option<Box<RawValue>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     params: Option<Box<RawValue>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     result: Option<Box<RawValue>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     error: Option<Box<RawValue>>,
+}
+
+/// A member that is in the message, `null` included.
+fn present<'de, D: Deserializer<'de>>(member: D) -> Result<Option<Box<RawValue>>, D::Error> {
+    Box::<RawValue>::deserialize(member).map(Some)
 }
 
 #[derive(Deserialize)]
@@ -53,7 +60,7 @@ pub(crate) fn parse_sse(body: &[u8], id: u64) -> Result<ServerText, McpError> {
         .map(|line| line.strip_suffix('\r').unwrap_or(line))
     {
         if line.is_empty() {
-            if let Some(event) = data.take() {
+            if let Some(event) = data.take().filter(|event| !event.is_empty()) {
                 let message: Message =
                     serde_json::from_str(&event).map_err(|_| McpError::Malformed)?;
                 if message.method.is_none() {
@@ -83,7 +90,7 @@ fn response(message: Message, id: u64) -> Result<ServerText, McpError> {
         return Err(McpError::Malformed);
     }
     match (message.result, message.error, message.params) {
-        (Some(result), None, None) => Ok(ServerText::new(result)),
+        (Some(result), None, None) if result.get() != "null" => Ok(ServerText::new(result)),
         (None, Some(error), None) => {
             let ErrorCode { code } =
                 serde_json::from_str(error.get()).map_err(|_| McpError::Malformed)?;
