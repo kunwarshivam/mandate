@@ -42,7 +42,8 @@ pub struct SessionLimits {
 )]
 impl SessionLimits {
     /// The limits for `kind` under `policy`. A setting longer than the default, or not positive,
-    /// is refused: an organization may only shorten (§6.2).
+    /// is refused: an organization may only shorten (§6.2). So is an idle timeout longer than the
+    /// absolute lifetime it would run inside (DEC-652 item 2).
     pub fn resolve(_kind: OrgKind, _policy: SessionPolicy) -> Result<Self, SessionRefusal> {
         Err(SessionRefusal::Unimplemented { story: "E9-1" })
     }
@@ -68,6 +69,9 @@ impl fmt::Debug for RefreshSecret {
         f.write_str("RefreshSecret(..)")
     }
 }
+
+/// A refresh token's SHA-256 digest, the only form a session record keeps of it.
+pub type RefreshDigest = [u8; 32];
 
 /// What a request asks to do, as far as a session's reach goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,10 +164,11 @@ pub struct SubjectStanding {
     reason = "this method has no error to carry, so its stub is todo!(), the other form DEC-137 names"
 )]
 impl SubjectStanding {
-    /// The standing after a session of this subject ended at `now` for `ended`: only
-    /// [`EndReason::Deprovisioned`] records a deprovision signal; every other reason, a failed
-    /// refresh included, leaves the standing as it was.
-    pub fn noting(self, _ended: Option<EndReason>, _now: UtcNanos) -> Self {
+    /// The standing after the workspace saw a deprovision signal for this subject at `now`
+    /// (`invalid_grant`, a disabled or revoked subject, a back-channel logout), whatever state
+    /// any session of it is in, or with none open at all (§11.1, DEC-652 item 7). The latest
+    /// signal is kept, so an older one arriving late moves nothing back.
+    pub fn saw_deprovision(self, _now: UtcNanos) -> Self {
         todo!()
     }
 }
@@ -177,6 +182,16 @@ pub enum SessionRefusal {
     /// An organization tried to lengthen a limit, or set one that is not positive.
     #[error("the session limit may only be shortened")]
     LimitNotShortened,
+    /// The idle timeout would be longer than the absolute lifetime.
+    #[error("the idle timeout is longer than the absolute lifetime")]
+    IdleLongerThanAbsolute,
+    /// `now` is earlier than the session's opening or its last admitted activity: the clock
+    /// went backwards, and the session refuses rather than guess.
+    #[error("the clock is behind the session")]
+    ClockBehind,
+    /// The refresh secret to rotate to is the presented one or one already rotated away.
+    #[error("the next refresh secret was used before")]
+    RefreshSecretReused,
     /// A time this transition would compute is outside the clock's range.
     #[error("the session's times cannot be represented")]
     Unrepresentable,
@@ -243,6 +258,17 @@ impl SessionRecord {
         todo!()
     }
 
+    /// The SHA-256 digest of the current refresh token, the only form the record keeps of it;
+    /// `None` for a reduction-only session, which has none.
+    pub fn refresh_digest(&self) -> Option<RefreshDigest> {
+        todo!()
+    }
+
+    /// The digests of every refresh token rotated away, in byte order, kept to detect reuse.
+    pub fn rotated_digests(&self) -> Vec<RefreshDigest> {
+        todo!()
+    }
+
     /// Why the session ended, if it has.
     pub fn ended(&self) -> Option<EndReason> {
         todo!()
@@ -274,11 +300,13 @@ impl SessionRecord {
     }
 
     /// Admits `request` at `now` as [`SessionRecord::authorize`] does, and on success builds the
-    /// identity session `authorize` in `mandate-identity` reads: this record's reference, its kind
+    /// identity session `authorize` in `mandate-identity` reads: the `reference` the caller's store
+    /// keeps for this record, its kind
     /// ([`Reach::Full`] is `SessionKind::Full`; an outage and a reduction-only session are
     /// `SessionKind::ReductionOnly`), and the roles snapshot the caller read for this request,
-    /// passed through as read. A refusal builds nothing, so the request gets no session (DEC-652
-    /// item 9).
+    /// passed through as read: the caller (H1) builds it, for route 2 from every workspace where
+    /// the verified credential has an unsuspended row. A refusal builds nothing, so the request
+    /// gets no session (DEC-652 item 9).
     pub fn admit(
         &mut self,
         _request: Request,
