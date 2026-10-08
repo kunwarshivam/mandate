@@ -1383,6 +1383,7 @@ dependencies = [
  "mandate-journal-cold",
  "mandate-journal-pg",
  "mandate-marketdata",
+ "mandate-modelhost",
  "mandate-num",
  "mandate-time",
  "proptest",
