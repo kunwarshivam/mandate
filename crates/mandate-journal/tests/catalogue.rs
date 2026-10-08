@@ -22,6 +22,7 @@ const CLOCK: &str = "clock";
 
 /// Journal spec §9, with §2's copies into account streams: `ClockAdvanced`, and `OwnerAcknowledged`
 /// as a risk input (mandate spec §5.2, DEC-81).
+/// `OwnerAlertSent` and the notice stream's records are DEC-720's, written out in `tests/notices.rs`.
 const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("StreamOpened", &[ACCT, AGENT, CTL, CLOCK], &[]),
     ("IntentReceived", &[ACCT], &[MAN]),
@@ -89,7 +90,6 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("ConnectionEstablished", &[CTL], &[]),
     ("ConnectionRevoked", &[CTL], &[]),
     ("DisclosureAccepted", &[CTL], &[]),
-    ("OwnerAlertSent", &[CTL], &[]),
     ("OwnerAcknowledged", &[ACCT, CTL], &[]),
     ("ConfigSnapshotRegistered", &[CTL], &[]),
     ("SurveillanceReportGenerated", &[CTL], &[RULE]),
