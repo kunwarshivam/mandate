@@ -203,8 +203,8 @@ reaches that connection's broker hosts.
      `connecting`.
 
    It sends nothing to Alpaca. If the vault write fails, nothing is started. If the executor
-   start fails after the vault write, the API deletes the vault entry and the record stays
-   `connecting` until the teardown in step 6.
+   start fails after the vault write, the API deletes the vault entry and tears the connection
+   down at once (step 6, reason `start_failed`).
 4. **Exchange and checks (executor, `connecting`).** The executor opens the pending connection's
    account stream, `acct:{workspace_id}:{account_ref}`, with `StreamOpened`. It then exchanges the
    code at once at Alpaca's token endpoint; a code lives 10 minutes (§5.5). It authenticates with
@@ -239,11 +239,13 @@ reaches that connection's broker hosts.
    Then:
    - **if all pass**, the API appends `ConnectionEstablished` (version 2, E7-17) on the control
      stream, with `causation_id` set to the passing `ConnectionChecked`. That cross-stream
-     causation is permitted by E7-17 (#786). The executor leaves `connecting` only when it reads
-     that event from the control stream; from then on it runs as the account's executor.
-   - **if check 1, 2, 3, 7, or 4 refuses**, the API appends `ConnectionRefused` on the control stream (E7-17).
-     Its causation is the failed `ConnectionChecked` when the executor's check failed. The
-     teardown in step 6 runs at once.
+     causation is permitted by E7-17 (#786, journal §9.8). The executor leaves `connecting` only
+     when it reads that event from the control stream and copies it to the account stream, which
+     stays `connecting` until then (E7-17, §9.8 rule 68). From then on it runs as the account's
+     executor.
+   - **if check 1, 2, 3, 7, or 4 refuses**, the API appends `ConnectionRefused` on the control
+     stream (E7-17), naming the check. Its causation is the failed `ConnectionChecked` when the
+     executor's check failed. The teardown in step 6 runs at once.
 
    **Until E7-17 lands, steps 4 to 6 cannot be built.**
 6. **Teardown, the only exit from `connecting` other than step 5.** The connection manager tears a
@@ -253,8 +255,10 @@ reaches that connection's broker hosts.
      §3.1). The account id stays in the personal-data vault until its retention ends and it is
      erased with `PersonalDataErased` (journal §6.4);
    - revokes the client-secret grant and stops the executor;
-   - journals `ConnectionRefused` (refusal or timeout) on the control stream, without the token
-     (CN-10).
+   - journals `ConnectionRefused` on the control stream, without the token (CN-10). After a
+     refused check it names the check. Otherwise `check` is null and `reason` is `timeout`,
+     `restart_past_deadline`, `executor_stopped`, or `start_failed`, with null causation (E7-17,
+     #786, journal §9.8).
 
    A refused connection leaves its account stream behind: `StreamOpened` and the failed
    `ConnectionChecked`, if any. That `account_ref` is never bound to a connection and never used
@@ -265,7 +269,9 @@ reaches that connection's broker hosts.
      `ConnectionEstablished` for one whose results all passed and whose check 4 still passes, and
      tears down every other one that is past its deadline.
    - *Executor restart while `connecting`:* the executor never re-runs an exchange. If a token is
-     stored, it re-runs the checks; if none is, it stops, and the teardown follows.
+     stored, it re-runs the checks; if none is, it stops, and the teardown follows (reason
+     `executor_stopped`). An API restart that finds a record past its deadline tears it down with
+     reason `restart_past_deadline`.
 
 **The redirect URI is fixed:** `https://api.owlhead.ai/v1/oauth/alpaca/callback`, on the domain in
 DEC-820 and DEC-822, both pending on PR #762. A registered URI cannot carry a workspace id, so the
