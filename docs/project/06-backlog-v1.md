@@ -4448,3 +4448,11 @@ From the round-6 review of the flatten adapter's implementation PR ([#596](https
   `StoredEvent::draft()` that also checks the columns) is private, so the flatten adapter holds a
   second copy of the three assigned-field names, the digest form, and the re-seal, the exact
   things that must not drift from `seal`.
+
+From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.md)):
+
+- Close `SegmentEvicted` (journal spec §6.2, §9): which segment left the hot store, by its
+  `SegmentExported` manifest hash, and when. Left out of DEC-783 by the lead's ruling, so a hot-store
+  eviction record stays prose until a story needs to read it.
+- Re-stamping an anchor's timestamp token before it expires (§10): `AnchorComputed.token` is the
+  first stamp only; a later stamp needs its own record.

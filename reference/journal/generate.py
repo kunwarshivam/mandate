@@ -35,6 +35,7 @@ import account
 import approval
 import audit
 import clients
+import cold
 import control
 import research
 import risk_state
@@ -3513,6 +3514,7 @@ def render(
     workspace_section: dict,
     client_section: dict,
     audit_section: dict,
+    cold_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3528,6 +3530,7 @@ def render(
             "workspace_api": workspace_section,
             "client_actor": client_section,
             "records_access": audit_section,
+            "cold_records": cold_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3574,6 +3577,7 @@ def main(argv: list[str] | None = None) -> int:
     workspace_section = workspace.build_section()
     client_section = clients.build_section()
     audit_section = audit.build_section()
+    cold_section = cold.build_section(v3)
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3597,6 +3601,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += clients.run_mutants(client_section)
     problems += audit.check_section(audit_section)
     problems += audit.run_mutants(audit_section)
+    problems += cold.check_section(cold_section, v3)
+    problems += cold.run_mutants(cold_section, v3)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3615,6 +3621,7 @@ def main(argv: list[str] | None = None) -> int:
         workspace_section,
         client_section,
         audit_section,
+        cold_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -3629,6 +3636,7 @@ def main(argv: list[str] | None = None) -> int:
         or workspace.check_section(reread["workspace_api"])
         or clients.check_section(reread["client_actor"])
         or audit.check_section(reread["records_access"])
+        or cold.check_section(reread["cold_records"], v3)
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -3680,7 +3688,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(clients.vector_mutants(client_section))} vector mutants caught; "
         f"{len(audit_section['drafts'])} records-access drafts, {len(audit_section['invalid_drafts'])} invalid and "
         f"{len(audit_section['valid_drafts'])} valid; {len(audit.VALIDATOR_MUTANTS)} validator and "
-        f"{len(audit.vector_mutants(audit_section))} vector mutants caught"
+        f"{len(audit.vector_mutants(audit_section))} vector mutants caught; "
+        f"{len(cold_section['drafts'])} cold-record drafts, {len(cold_section['invalid_drafts'])} invalid and "
+        f"{len(cold_section['valid_drafts'])} valid; {len(cold.VALIDATOR_MUTANTS)} validator and "
+        f"{len(cold.vector_mutants(cold_section))} vector mutants caught"
     )
     return 0
 
