@@ -17,7 +17,8 @@
   OCO or bracket, equities are protected by one GTC stop-limit for the whole position after the
   entry fills completely (DEC-529 item 7). §4.2 adds the cross-checked broker quote for the
   founder's one live order (DEC-529 item 12); §7.2 adds Robinhood's account type, 1× and regime
-  rows (DEC-529 item 11; [DEC-620](../project/decisions/DEC-620.md) items 1 and 2). Founder-reserved under DEC-79 and accepted on 2026-10-08. Every narrowing
+  rows (DEC-529 item 11; [DEC-620](../project/decisions/DEC-620.md) items 1 and 2). The stop-limit's
+  limit is the mandate's `stop_limit_offset` ([DEC-539](../project/decisions/DEC-539.md)). Founder-reserved under DEC-79 and accepted on 2026-10-08. Every narrowing
   is for DEC-529's one order; no Alpaca outcome and no reference case changes.
 - **v0.15:** §7.3 gains a row for a connection the connector reports `degraded` or `suspended`
   ([connections spec §9.1](connections.md#91-states)): account state `closing_only`, all agents
@@ -469,7 +470,7 @@ protective legs are checked against position + entry quantity.
 
 **Crypto (simple orders only):**
 
-- One **GTC stop-limit sell** for the whole position; limit = stop × (1 − `crypto_stop_limit_offset`), the mandate's fraction.
+- One **GTC stop-limit sell** for the whole position; limit = stop × (1 − `stop_limit_offset`), the mandate's fraction (`crypto_stop_limit_offset` in mandate schema version 1; [DEC-539](../project/decisions/DEC-539.md)).
 - Take-profit is managed by the runtime (it watches price and submits a marketable exit when the
   target is reached), not a resting order.
 - **Adds and exits:** cancel the stop-limit → confirm → submit the order → after a terminal state,
@@ -481,8 +482,9 @@ protective legs are checked against position + entry quantity.
 item 7, resolving DEC-441 item 17 for DEC-529's one order):
 
 - One **GTC stop-limit sell** for the whole position, placed once the entry has filled completely,
-  as for crypto. Its stop price is set from `stop_distance` as a bracket's stop leg is; how its
-  limit is set is open (§15 q9), and until it is decided no such mandate deploys (DEC-620 item 4).
+  as for crypto. Its stop price is set from `stop_distance` as a bracket's stop leg is, and its
+  limit = stop × (1 − `stop_limit_offset`), the same mandate fraction as crypto's
+  ([DEC-539](../project/decisions/DEC-539.md)); mandate spec V-008 requires it here.
 - Take-profit is managed by the runtime, as for crypto. The entry is a plain limit order; the
   unprotected interval starts at its first partial fill. If the entry is not complete within
   `bracket_partial_fill_timeout`, or ends partly filled, the executor cancels the remainder,
@@ -1192,9 +1194,8 @@ header defines harness rules (time model, simulated broker, fixture defaults, vo
 6. Whether Alpaca applies the TAF cap per execution or per order (fee activity check).
 7. Whether pending crypto wash-sale legislation changes what must be recorded now.
 8. The data source and refresh cadence for ETP and ETN classification (§3.2 item 6).
-9. How the limit price of an equity stop-limit is set on a profile with no OCO or bracket (§5.4):
-   crypto's `crypto_stop_limit_offset` is defined only for crypto (mandate spec V-008). A mandate
-   field or policy value is the founder's to choose (DEC-529 item 7).
+9. Answered by [DEC-539](../project/decisions/DEC-539.md): an equity stop-limit on a profile with
+   no OCO or bracket takes its limit from the mandate's one `stop_limit_offset` (§5.4).
 
 ## 16. Out of scope for v1
 

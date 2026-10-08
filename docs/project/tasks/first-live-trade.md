@@ -182,7 +182,7 @@ Robinhood code.
 | DEC-441 item 10 ↔ U-R1, U-R2 ↔ the contract | Idempotency | Submit with id, query by id | **No**: no query by `ref_id`; DEC-529 item 4 resolves it for this order only (B2b, C3) |
 | DEC-441 item 15 ↔ U-R10 | Platform terms | Written answer before any connection | Resolved for this order only by DEC-529 item 5; customers still blocked |
 | FR-2.6 (1× verified) ↔ U-R7 | Account | Margin field | **No** field; DEC-529 item 11's attestation for this order |
-| Trading §5.4 (OCO or bracket for equities) ↔ Robinhood's profile | Protection | One GTC stop-limit | Yes, by SP1 (DEC-529 item 7); the stop-limit's limit price is trading §15 q9 |
+| Trading §5.4 (OCO or bracket for equities) ↔ Robinhood's profile | Protection | One GTC stop-limit | Yes, by SP1 (DEC-529 item 7); the stop-limit's limit is `stop_limit_offset` (DEC-539) |
 | Trading §4.2 (`sip` for live equities) | Live quote | Collar and risk mark | Yes, by SP1 (DEC-529 item 12) |
 | Trading §7.2 (account type and regime per broker) | Account | Robinhood rows | Yes, by SP1 |
 | Mandate §6.1 `cli_confirm` paper only ↔ DEC-155 item 4 | Live grant | Method field | Yes, by SP1 (DEC-529 item 3), until E9-4 |
