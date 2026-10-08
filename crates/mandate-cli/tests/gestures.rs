@@ -117,7 +117,6 @@ fn registered() -> (Journal, Store) {
 /// §4.2's: W-002, as 1000 x 0.05 at the stop is over 0.02 x 1000 a day. A shown deployment checks
 /// the V-rules as its gesture does.
 #[test]
-#[ignore = "pending E10-16"]
 fn a_shown_code_is_the_gestures_and_showing_writes_nothing() {
     let (mut journal, mut store) = registered();
     let mut ids = FixedIds::default();
@@ -337,7 +336,6 @@ fn refusals_without_a_database(tag: &str) {
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn a_bad_owner_or_an_unreadable_file_is_refused_without_a_database() {
     refusals_without_a_database("refusals");
 }
@@ -364,7 +362,6 @@ fn url_password() -> Option<String> {
 /// shown code commits nothing; each typed one commits one event with an assertion of its own.
 /// Nothing printed names the DSN.
 #[test]
-#[ignore = "pending E10-16"]
 fn the_binary_creates_confirms_and_deploys_in_postgres() {
     refusals_without_a_database("binary");
     let Some(db) = TestDb::new() else {

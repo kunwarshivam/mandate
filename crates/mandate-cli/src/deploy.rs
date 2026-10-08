@@ -3,7 +3,9 @@
 //! `cli_confirm` evidence, and commits exactly one `AgentDeployed` (journal spec §9.2, DEC-155
 //! item 5). Paper only.
 
-use mandate_journal::ArtifactStore;
+use mandate_canon::Value;
+use mandate_journal::{ArtifactSource, ArtifactStore};
+use mandate_spec::Mandate;
 
 use crate::control::{
     ControlError, ControlJournal, Ids, Now, Owner, Submitted, agent_stream, code_of, object,
@@ -24,6 +26,87 @@ fn active<'a>(rows: &'a [Row], agent: &str) -> Option<&'a Row> {
             && r.member("agent_id") == Some(agent)
     })?;
     (latest.event_type == DEPLOYED).then_some(latest)
+}
+
+/// The code that deploys `agent` with `version` (DEC-530 item 4).
+///
+/// # Errors
+/// [`ControlError::Journal`] for an object the canonical form cannot hold.
+pub(crate) fn deploy_code(agent: &str, version: &str) -> Result<String, ControlError> {
+    let gesture = object(vec![
+        ("agent_id", text(agent)),
+        ("gesture", text("agent_deploy")),
+        ("mandate_version", text(version)),
+    ])?;
+    Ok(code_of(&gesture))
+}
+
+/// What deploying reads, and the agent's active deployment of `version` when it is one.
+pub(crate) struct Checked {
+    rows: Vec<Row>,
+    document: Value,
+    mandate: Mandate,
+    pub(crate) earlier: Option<Submitted>,
+}
+
+/// DEC-530 item 9's checks up to `agent_active`, the code's only when one is given.
+///
+/// # Errors
+/// As [`deploy`].
+pub(crate) fn deploy_checks(
+    journal: &dyn ControlJournal,
+    store: &dyn ArtifactSource,
+    owner: &Owner,
+    (agent, version): (&str, &str),
+    code: Option<&str>,
+) -> Result<Checked, ControlError> {
+    paper_only(owner)?;
+    agent_stream(owner, agent).map_err(|_| refused("agent_invalid"))?;
+    let rows = rows(journal, owner)?;
+    if latest(&rows, CREATED, version).is_none() {
+        return Err(refused("version_unknown"));
+    }
+    let (document, mandate) = stored(store, version)?;
+    let confirmed =
+        latest(&rows, CONFIRMED, version).ok_or_else(|| refused("version_unconfirmed"))?;
+    let last = rows.iter().rev().find(|r| r.event_type == CONFIRMED);
+    if last.map(|r| r.seq) != Some(confirmed.seq) {
+        return Err(refused("version_superseded"));
+    }
+    if let Some(code) = code
+        && code != deploy_code(agent, version)?
+    {
+        return Err(refused("code_mismatch"));
+    }
+    let earlier = match active(&rows, agent) {
+        Some(deployed) if deployed.member("mandate_version") == Some(version) => {
+            Some(deployed.submitted())
+        }
+        Some(_) => return Err(refused("agent_active")),
+        None => None,
+    };
+    Ok(Checked {
+        rows,
+        document,
+        mandate,
+        earlier,
+    })
+}
+
+/// The rest of item 9's checks: the V-rules for `agent` and the instruments; the warnings.
+///
+/// # Errors
+/// As [`deploy`].
+pub(crate) fn rule_checks(
+    checked: &Checked,
+    store: &dyn ArtifactSource,
+    agent: &str,
+    now: Now,
+) -> Result<Vec<&'static str>, ControlError> {
+    let (rows, mandate) = (&checked.rows, &checked.mandate);
+    let warnings = check_rules(rows, store, (mandate, agent), None, now)?;
+    check_instruments(rows, store, &checked.document)?;
+    Ok(warnings)
 }
 
 /// Deploys `agent` with `version` when `code` is the one shown for both (DEC-530 item 4): stores
@@ -47,35 +130,11 @@ pub fn deploy(
     code: &str,
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    paper_only(owner)?;
-    agent_stream(owner, agent).map_err(|_| refused("agent_invalid"))?;
-    let rows = rows(journal, owner)?;
-    if latest(&rows, CREATED, version).is_none() {
-        return Err(refused("version_unknown"));
+    let checked = deploy_checks(&*journal, &*store, owner, (agent, version), Some(code))?;
+    if let Some(earlier) = checked.earlier {
+        return Ok(earlier);
     }
-    let (document, mandate) = stored(store, version)?;
-    let confirmed =
-        latest(&rows, CONFIRMED, version).ok_or_else(|| refused("version_unconfirmed"))?;
-    let last = rows.iter().rev().find(|r| r.event_type == CONFIRMED);
-    if last.map(|r| r.seq) != Some(confirmed.seq) {
-        return Err(refused("version_superseded"));
-    }
-    let gesture = object(vec![
-        ("agent_id", text(agent)),
-        ("gesture", text("agent_deploy")),
-        ("mandate_version", text(version)),
-    ])?;
-    if code != code_of(&gesture) {
-        return Err(refused("code_mismatch"));
-    }
-    if let Some(deployed) = active(&rows, agent) {
-        if deployed.member("mandate_version") == Some(version) {
-            return Ok(deployed.submitted());
-        }
-        return Err(refused("agent_active"));
-    }
-    check_rules(&rows, store, (&mandate, agent), None, now)?;
-    check_instruments(&rows, store, &document)?;
+    rule_checks(&checked, &*store, agent, now)?;
     let step_up = object(vec![
         ("assertion_id", text(&ids.assertion_id())),
         ("authenticated_at", seconds(now.secs)?),

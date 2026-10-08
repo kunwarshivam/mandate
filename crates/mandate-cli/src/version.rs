@@ -8,7 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::{
-    ArtifactError, ArtifactRef, ArtifactStore, Environment, StoredEvent, get_artifact,
+    ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, Environment, StoredEvent,
+    get_artifact,
 };
 use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
 use mandate_spec::validate::validate;
@@ -193,9 +194,23 @@ pub fn create(
     )
 }
 
+/// The version `document` creates: `sha256:` and the SHA-256 of the mandate's canonical bytes
+/// (mandate spec §9.1).
+///
+/// # Errors
+/// `mandate_invalid` for bytes that are not a mandate.
+pub(crate) fn version_of(document: &[u8]) -> Result<String, ControlError> {
+    let value = parse(document).map_err(|_| refused("mandate_invalid"))?;
+    let mandate = Mandate::parse(&value).map_err(|_| refused("mandate_invalid"))?;
+    let canonical = mandate
+        .canonical_bytes()
+        .map_err(|_| refused("mandate_invalid"))?;
+    Ok(reference(Digest::of(&canonical)))
+}
+
 /// The stored document `version` names, parsed, and the mandate it is.
 pub(crate) fn stored(
-    store: &dyn ArtifactStore,
+    store: &dyn ArtifactSource,
     version: &str,
 ) -> Result<(Value, Mandate), ControlError> {
     let reference = ArtifactRef::parse(version).ok_or_else(|| refused("version_unknown"))?;
@@ -211,7 +226,7 @@ pub(crate) fn stored(
 
 /// Every control-stream record as the fact the spec's fold reads (DEC-505 item 1), or
 /// `control_stream_invalid` for one that cannot be mapped.
-fn facts(rows: &[Row], store: &dyn ArtifactStore) -> Result<Vec<JournaledFact>, ControlError> {
+fn facts(rows: &[Row], store: &dyn ArtifactSource) -> Result<Vec<JournaledFact>, ControlError> {
     let documents = |d: &Digest| {
         let bytes = get_artifact(store, &ArtifactRef::from_digest(*d)).ok()?;
         parse(&bytes).ok()
@@ -230,7 +245,7 @@ fn facts(rows: &[Row], store: &dyn ArtifactStore) -> Result<Vec<JournaledFact>, 
 /// stream folds to (DEC-530 items 5 and 9); the warnings, by code.
 pub(crate) fn check_rules(
     rows: &[Row],
-    store: &dyn ArtifactStore,
+    store: &dyn ArtifactSource,
     (mandate, agent): (&Mandate, &str),
     confirming: Option<(Digest, &[String])>,
     now: Now,
@@ -278,7 +293,7 @@ pub(crate) fn check_rules(
 /// names its asset id, with its symbol (DEC-505 item 1, DEC-523 item 5).
 pub(crate) fn check_instruments(
     rows: &[Row],
-    store: &dyn ArtifactStore,
+    store: &dyn ArtifactSource,
     document: &Value,
 ) -> Result<(), ControlError> {
     let mut snapshots: BTreeMap<String, String> = BTreeMap::new();
@@ -313,6 +328,53 @@ pub(crate) fn check_instruments(
     Ok(())
 }
 
+/// The code that confirms `version` (DEC-530 item 4).
+///
+/// # Errors
+/// [`ControlError::Journal`] for an object the canonical form cannot hold.
+pub(crate) fn confirm_code(version: &str) -> Result<String, ControlError> {
+    let gesture = object(vec![
+        ("gesture", text("mandate_confirm")),
+        ("mandate_version", text(version)),
+    ])?;
+    Ok(code_of(&gesture))
+}
+
+/// What a confirmation's checks read: the stream, the document's envelope paths, and the warnings.
+pub(crate) type Confirmable = (Vec<Row>, Vec<String>, Vec<&'static str>);
+
+/// What confirming `version` reads and checks, in DEC-530 item 5's order, the code only when one
+/// is given: the stream, the document's envelope paths, and the warnings the confirmation
+/// acknowledges.
+///
+/// # Errors
+/// As [`confirm`].
+pub(crate) fn confirm_checks(
+    journal: &dyn ControlJournal,
+    store: &dyn ArtifactSource,
+    owner: &Owner,
+    version: &str,
+    code: Option<&str>,
+    now: Now,
+) -> Result<Confirmable, ControlError> {
+    paper_only(owner)?;
+    let rows = rows(journal, owner)?;
+    if latest(&rows, CREATED, version).is_none() {
+        return Err(refused("version_unknown"));
+    }
+    let (document, mandate) = stored(store, version)?;
+    if let Some(code) = code
+        && code != confirm_code(version)?
+    {
+        return Err(refused("code_mismatch"));
+    }
+    let paths = envelope_paths(&document);
+    let digest = Digest::of(&to_canonical(&document));
+    let warnings = check_rules(&rows, store, (&mandate, ""), Some((digest, &paths)), now)?;
+    check_instruments(&rows, store, &document)?;
+    Ok((rows, paths, warnings))
+}
+
 /// Confirms `version` when `code` is the one shown for it (DEC-530 item 4): stores the record with
 /// fresh `cli_confirm` evidence, then commits one `MandateConfirmed` naming every envelope path.
 ///
@@ -327,23 +389,8 @@ pub fn confirm(
     code: &str,
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    paper_only(owner)?;
-    let rows = rows(journal, owner)?;
-    if latest(&rows, CREATED, version).is_none() {
-        return Err(refused("version_unknown"));
-    }
-    let (document, mandate) = stored(store, version)?;
-    let gesture = object(vec![
-        ("gesture", text("mandate_confirm")),
-        ("mandate_version", text(version)),
-    ])?;
-    if code != code_of(&gesture) {
-        return Err(refused("code_mismatch"));
-    }
-    let paths = envelope_paths(&document);
-    let digest = Digest::of(&to_canonical(&document));
-    let warnings = check_rules(&rows, store, (&mandate, ""), Some((digest, &paths)), now)?;
-    check_instruments(&rows, store, &document)?;
+    let (rows, paths, warnings) =
+        confirm_checks(&*journal, &*store, owner, version, Some(code), now)?;
     let last = rows.iter().rev().find(|r| r.event_type == CONFIRMED);
     if let Some(earlier) = last.filter(|r| r.member("mandate_version") == Some(version)) {
         return Ok(earlier.submitted());
