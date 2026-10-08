@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, to_canonical};
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
 use mandate_num::Usd;
 use mandate_shell::control::{
     ConfirmedVersion, ControlRecord, DeploymentRefusal as Refusal, RunFacts, confirmed_version,
@@ -131,6 +132,21 @@ fn run() -> RunFacts {
     }
 }
 
+/// An `AgentStopped` for `agent` (journal spec §9.2's shape).
+fn stop(agent: &str) -> String {
+    format!(
+        r#"{{"agent_id":"{agent}","connection_id":"{CONNECTION}","loss_added":"0","reason":"owner_stop","retired_on":"2026-10-06"}}"#
+    )
+}
+
+/// An artifact store that cannot be read.
+struct Unavailable;
+impl ArtifactSource for Unavailable {
+    fn read_artifact(&self, _: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+        Err(ArtifactError::Unavailable)
+    }
+}
+
 fn violations(rules: &[Violation]) -> Option<Refusal> {
     Some(Refusal::Violations(rules.iter().copied().collect()))
 }
@@ -173,13 +189,9 @@ fn without_a_deployment_of_this_agent_there_is_no_input() {
 #[test]
 #[ignore = "pending E19-11"]
 fn a_stopped_agent_refuses_until_it_is_deployed_again() {
-    let stop = format!(
-        r#"{{"agent_id":"{AGENT}","connection_id":"{CONNECTION}","loss_added":"0","reason":"owner_stop","retired_on":"2026-10-06"}}"#
-    );
-    let other = stop.replace(AGENT, "agent_other");
-    let others = Stream::deployed().then("AgentStopped", &other);
+    let others = Stream::deployed().then("AgentStopped", &stop("agent_other"));
     assert_eq!(others.refused(), None, "another agent's stop");
-    let stopped = Stream::deployed().then("AgentStopped", &stop);
+    let stopped = Stream::deployed().then("AgentStopped", &stop(AGENT));
     assert_eq!(stopped.refused(), Some(Refusal::Stopped));
     let deploy = stopped.text(3);
     let again = stopped.then("AgentDeployed", &deploy);
@@ -201,6 +213,27 @@ fn the_latest_deployment_counts_and_its_document_must_be_stored_intact() {
     let mut corrupt = Stream::deployed();
     corrupt.store.values_mut().for_each(|b| b.push(b' '));
     assert_eq!(corrupt.refused(), Some(Refusal::DocumentCorrupt));
+}
+
+/// The records are read in `seq` order, not slice order: a stop at seq 5 listed before the
+/// deployment at seq 4 still follows it.
+#[test]
+#[ignore = "pending E19-11"]
+fn the_stream_is_read_in_seq_order() {
+    let mut reordered = Stream::deployed().then("AgentStopped", &stop(AGENT));
+    reordered.records.swap(3, 4);
+    assert_eq!(reordered.refused(), Some(Refusal::Stopped));
+}
+
+/// A stored document that re-hashes but is no mandate, and a store that cannot be read, refuse.
+#[test]
+#[ignore = "pending E19-11"]
+fn an_unreadable_document_or_store_refuses() {
+    let unreadable = Stream::of(&json(r#"{"name":"not a mandate"}"#), &envelope());
+    assert_eq!(unreadable.refused(), Some(Refusal::DocumentUnreadable));
+    let stream = Stream::deployed();
+    let refused = confirmed_version(&stream.records, &Unavailable, &run()).err();
+    assert_eq!(refused, Some(Refusal::StoreUnavailable));
 }
 
 /// A path the owner did not confirm (V-020; `/name`, which no other rule reads), a confirmation of
