@@ -502,6 +502,26 @@ here, so replacing fixtures with calls changes no screen contract:
 | `Connection` | `GET /connections/{id}` |
 | `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`) | §5.5's phases; `undelivered` is `effect: none` |
 
+### 4.10 Notification addresses (web push)
+
+A member's own push address: where the dispatcher sends their opaque notices (notifications spec
+§4.6, NT-2). The address is personal data held in the vault, never in the journal, a log, or a
+response (API-11's shape). These routes add no trading rule and change no mandate (DEC-795).
+
+| Operation | Method and path | Event | Notes |
+|---|---|---|---|
+| Set this browser's push address | `PUT /me/channels/web_push` | `NotificationAddressChanged` (`action: added`; journal change) | §5.7. Step-up. The subscription's `endpoint` and keys go straight to the vault in the same request; the event records only an opaque address reference. An endpoint outside the deployment's push-service allowlist is `invalid` (DEC-792). Setting the same subscription again returns the original outcome (§3.4) |
+| Remove a push address | `DELETE /me/channels/web_push/{address_ref}` | `NotificationAddressChanged` (`action: removed`; journal change) | §5.7. Step-up. Removes the vault entry; the pull channels (`web_inbox`, `cli_inbox`) are not addresses and are never affected |
+| List one's push addresses | `GET /me/channels/web_push` | — | Opaque `address_ref`s with when each was added and its last delivery status (notifications spec §5.6); never an endpoint or a key |
+
+**Not risk reduction.** Neither route is an API-7 operation: a removed address can silence the
+safety notices that are a member's out-of-band signal of a takeover (identity spec ID-14), so both
+may be refused for missing step-up, a rate limit, or a frozen control stream like any other change.
+**Only one's own.** `/me` resolves to the authenticated user; there is no route that sets or
+removes another member's address, and a client, a service account, the host CLI, and a platform
+operator have none (API-6). Which identity spec §4.2 row authorizes it is settled with the identity
+spec's owner before this section is final (DEC-795 item 3).
+
 ---
 
 ## 5. Safety-relevant request and response shapes
@@ -674,6 +694,37 @@ The kill-switch half is an API-7 operation: without valid step-up, or while the 
 frozen, the API still commits the kill switch, and refuses only the revocation with
 `step_up_required` (`effect: recorded` for the kill switch). The batch is otherwise all or nothing.
 
+### 5.7 Set or remove a push address
+
+`PUT /me/channels/web_push` with:
+
+| Member | Type | Meaning |
+|---|---|---|
+| `endpoint` | string | The subscription's push endpoint: `https`, on a host in the deployment's allowlist (DEC-792), at most 2,048 characters |
+| `keys` | `{p256dh, auth}` | The subscription's keys as unpadded base64url: `p256dh` an uncompressed P-256 point (65 octets), `auth` 16 octets |
+| `step_up` | step-up or `null` | Bound to digest = SHA-256 of `{channel: "web_push", action: "added", endpoint, keys}` (kind `notification_address`) |
+
+`DELETE /me/channels/web_push/{address_ref}` with `{step_up}`, bound to digest = SHA-256 of
+`{channel: "web_push", action: "removed", address_ref}`.
+
+Both answer `202` with the committed watermark, `phase: "recorded"`, and the `address_ref`. Neither
+response, problem document, nor event carries the endpoint or a key, and the response schema bars
+secret-shaped member names (API-11). In order, the API:
+
+1. checks the session, CSRF (§3.3), the request's shape, the allowlist, and the step-up evidence;
+   any failure is refused with `effect: none` and nothing is written to the vault;
+2. writes the address to the vault (or deletes it), keyed by a new random `address_ref`; a vault
+   failure is `effect: none`, `retryable: true`;
+3. appends `NotificationAddressChanged` `{member, channel: "web_push", action, address_ref}` on the
+   control stream with its id derived from the `Idempotency-Key` (§3.4). If the append fails after
+   the vault write, the vault entry is deleted again and the answer is `effect: none`; if the
+   outcome is unknown, `effect: unknown`, and the dispatcher reads only addresses whose event is
+   committed, so an orphaned vault entry is never sent to.
+
+The dispatcher sends only to addresses whose last `NotificationAddressChanged` is `added`
+(notifications spec §5.1). Whether the change itself raises an `account_changed` safety notice to
+the member's other channels is the notifications spec's to decide (DEC-795 item 5).
+
 ---
 
 ## 6. Consistency model
@@ -781,6 +832,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Journal queries, trace, exports over the API | **Planned** (E12-6) |
 | Journal events this spec needs (`MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, `OwnerRequestSubmitted`, `hold_openings`, client events) | **Planned** (E10-15, journal spec change first) |
 | Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
+| Notification addresses (§4.10, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14; the route is mounted once the API's authentication middleware lands, journal spec change first) |
 
 ---
 
