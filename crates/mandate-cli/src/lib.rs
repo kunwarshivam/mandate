@@ -30,6 +30,7 @@ pub mod download;
 pub mod inspect;
 pub mod journal;
 pub mod postgres;
+pub mod register;
 
 /// Mandate research and audit tools.
 #[derive(Debug, Parser)]
@@ -54,4 +55,10 @@ pub enum Command {
     /// Put bytes into a content-addressed artifact store, or fetch them back re-hashed.
     #[command(subcommand)]
     Artifact(artifact::ArtifactCommand),
+    /// Store a configuration object and register it on the workspace control stream, in paper.
+    #[command(subcommand)]
+    Config(register::ConfigCommand),
+    /// Store a model's content object and register it on the workspace control stream, in paper.
+    #[command(subcommand)]
+    Model(register::ModelCommand),
 }

@@ -11,6 +11,7 @@ use crate::control::{ControlError, ControlJournal, Now, Owner, Submitted};
 /// version 2's `policy_set` and `model_registry` (DEC-484 item 4). `mandate_version` and
 /// `model_version` are other commands'.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[value(rename_all = "snake_case")]
 pub enum ConfigKind {
     FeeConfig,
     TradingCalendar,
