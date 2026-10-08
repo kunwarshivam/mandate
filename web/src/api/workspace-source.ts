@@ -7,6 +7,7 @@
  * (identity spec §3.2, §9.2), through `resolveWorkspace`.
  */
 import type { Environment, Workspace } from "@/fixtures/types";
+import type { Fetch } from "./client";
 import type { Timestamp, Watermark } from "./types";
 
 /** The build-time choice. `unconfigured` renders as unreachable, never as fixtures. */
@@ -19,25 +20,41 @@ export interface SourceEnv {
   NEXT_PUBLIC_WORKSPACE_API_URL?: string;
 }
 
-/** One active membership, as `GET /v1/me/workspaces` lists it (identity spec, pending: lane L1). */
+/** One active membership, as `GET /v1/me/workspaces` lists it (identity spec §4.5, #811). */
 export interface Membership {
   workspace_id: string;
   label: string;
-  role: string;
+  /** The effective roles: those already past their cool-off (identity spec §8.3); possibly none. */
+  roles: string[];
 }
 
 /**
- * The signed-in principal's active memberships, from `GET /v1/me/workspaces`, or `null` while no
- * route serves them. The identity service owns the answer (lane L1); the web app never takes a
- * workspace id from its build or its URL alone.
+ * `GET /v1/me/session` (identity spec §4.5): a full session (§6.2) learns its workspaces from
+ * `/v1/me/workspaces`; a reduction-only session (§6.4 route 2) covers exactly the workspaces it
+ * lists, and never reads the membership index.
  */
-export type WorkspaceResolver = () => Promise<Membership[] | null>;
+export type SessionInfo =
+  | { kind: "full"; expires_at: Timestamp }
+  | { kind: "reduction_only"; workspaces: Array<{ workspace_id: string; label: string }>; expires_at: Timestamp };
 
-/** Which workspace this session reads. `choose`: several memberships and none chosen yet (G1's switcher, by label). */
+/** An identity read's outcome. `retryable` failures (`membership_unavailable`, 503) are unreachable, never fixtures. */
+export type IdentityAnswer<T> = { ok: true; value: T } | { ok: false; code: string; retryable: boolean };
+
+/** The two identity routes the web app reads before it can name a workspace. `null`: no route serves it yet. */
+export interface IdentityApi {
+  session(): Promise<IdentityAnswer<SessionInfo> | null>;
+  memberships(): Promise<IdentityAnswer<Membership[]> | null>;
+}
+
+/**
+ * Which workspace this session reads. `choose`: several workspaces, offered by label (G1's
+ * switcher), with the last-used one as the default only while it is still among them.
+ */
 export type WorkspaceResolution =
   | { kind: "fixtures" }
   | { kind: "workspace"; baseUrl: string; workspaceId: string; label: string }
-  | { kind: "choose"; baseUrl: string; workspaces: Array<{ workspace_id: string; label: string }> }
+  | { kind: "choose"; baseUrl: string; workspaces: Array<{ workspace_id: string; label: string }>; preferred: string | null }
+  | { kind: "unreachable"; reason: string; retryable: boolean }
   | { kind: "unconfigured"; reason: string };
 
 /** Common `Freshness` (spec §6.1, API-14): the server's judgment of one value's age, measured to `served_at`. */
@@ -66,20 +83,32 @@ export function dataSourceFrom(env: SourceEnv): DataSource {
   throw new Error("Unimplemented: E11-9");
 }
 
-/** Until the identity service serves the principal's memberships, there is no workspace to read. */
-export const membershipsNotServedYet: WorkspaceResolver = async () => {
-  throw new Error("Unimplemented: E11-9");
+/** Until the identity routes are served, there is no session or membership to read. */
+export const identityNotServedYet: IdentityApi = {
+  session: async () => {
+    throw new Error("Unimplemented: E11-9");
+  },
+  memberships: async () => {
+    throw new Error("Unimplemented: E11-9");
+  },
 };
 
+/** The identity routes over HTTP, at the API's origin, with the session cookie (identity spec §4.5). */
+export function createIdentityApi(options: { fetch: Fetch; baseUrl: string }): IdentityApi {
+  void options;
+  throw new Error("Unimplemented: E11-9");
+}
+
 /**
- * The workspace to read: fixtures need none; the API reads one the principal is a member of, the
- * `chosen` one only when it is among them. A resolver that fails or answers nothing usable is
- * `unconfigured`, never fixtures.
+ * The workspace to read. Fixtures need none and ask nothing. Otherwise `/v1/me/session` comes first:
+ * a reduction-only session's own list is the answer and `/v1/me/workspaces` is never read; a full
+ * session reads its memberships. `lastUsed` is an opaque id remembered on this device, offered as the
+ * default only while it is listed. Any failure is unreachable or unconfigured, never fixtures.
  */
-export async function resolveWorkspace(source: DataSource, resolver: WorkspaceResolver, chosen: string | null): Promise<WorkspaceResolution> {
+export async function resolveWorkspace(source: DataSource, identity: IdentityApi, lastUsed: string | null): Promise<WorkspaceResolution> {
   void source;
-  void resolver;
-  void chosen;
+  void identity;
+  void lastUsed;
   throw new Error("Unimplemented: E11-9");
 }
 

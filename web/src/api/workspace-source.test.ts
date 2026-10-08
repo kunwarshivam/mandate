@@ -1,16 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { Watermark } from "./types";
+import type { Fetch } from "./client";
 import {
+  createIdentityApi,
   dataSourceFrom,
   freshnessView,
-  membershipsNotServedYet,
+  identityNotServedYet,
   pnlLabel,
   resolveWorkspace,
   shouldRefetch,
   streamAgeSeconds,
   unreachableWorkspace,
+  type IdentityAnswer,
+  type IdentityApi,
+  type Membership,
+  type SessionInfo,
   type SourceEnv,
-  type WorkspaceResolver,
 } from "./workspace-source";
 
 const HASH = `sha256:${"0f".repeat(32)}` as const;
@@ -61,61 +66,145 @@ describe("the data source, chosen at build time (DEC-736)", () => {
   });
 });
 
-describe("which workspace is read: the principal's memberships at run time (identity spec §3.2, §9.2)", () => {
+describe("which workspace is read: the session, then its memberships (identity spec §4.5, §6.2, §6.4 route 2)", () => {
   const api = { kind: "api", baseUrl: "https://ws.example" } as const;
-  const members = (...ids: string[]): WorkspaceResolver => async () => ids.map((id, i) => ({ workspace_id: id, label: `Workspace ${i + 1}`, role: "operator" }));
+  const EXPIRES = "2026-09-28T19:05:20.000000000Z";
+  const listed = (...ids: string[]) => ids.map((id, i) => ({ workspace_id: id, label: `Workspace ${i + 1}` }));
 
-  it.skip("pending E11-9: fixtures need no workspace, and the resolver is never asked", async () => {
-    let asked = 0;
-    const resolver: WorkspaceResolver = async () => {
-      asked += 1;
-      return [{ workspace_id: "ws_1", label: "Workspace 1", role: "operator" }];
+  /** An identity API answering from fixed values, counting each route's reads. */
+  function identity(session: IdentityAnswer<SessionInfo> | null, memberships: IdentityAnswer<Membership[]> | null = null) {
+    const reads = { session: 0, memberships: 0 };
+    const value: IdentityApi = {
+      session: async () => {
+        reads.session += 1;
+        return session;
+      },
+      memberships: async () => {
+        reads.memberships += 1;
+        return memberships;
+      },
     };
-    expect(await resolveWorkspace({ kind: "fixtures" }, resolver, null)).toEqual({ kind: "fixtures" });
-    expect((await resolveWorkspace({ kind: "unconfigured", reason: "no API configured" }, resolver, null)).kind).toBe("unconfigured");
-    expect(asked).toBe(0);
+    return { value, reads };
+  }
+  const full = (...ids: string[]) =>
+    identity({ ok: true, value: { kind: "full", expires_at: EXPIRES } }, { ok: true, value: listed(...ids).map((w) => ({ ...w, roles: ["operator"] })) });
+  const reduction = (...ids: string[]) => identity({ ok: true, value: { kind: "reduction_only", workspaces: listed(...ids), expires_at: EXPIRES } });
+
+  it.skip("pending E11-9: fixtures and an unconfigured source ask the identity routes nothing", async () => {
+    const id = full("ws_1");
+    expect(await resolveWorkspace({ kind: "fixtures" }, id.value, null)).toEqual({ kind: "fixtures" });
+    expect((await resolveWorkspace({ kind: "unconfigured", reason: "no API configured" }, id.value, null)).kind).toBe("unconfigured");
+    expect(id.reads).toEqual({ session: 0, memberships: 0 });
   });
 
-  it.skip("pending E11-9: one membership is the workspace read", async () => {
-    expect(await resolveWorkspace(api, members("ws_1"), null)).toEqual({ kind: "workspace", baseUrl: "https://ws.example", workspaceId: "ws_1", label: "Workspace 1" });
+  it.skip("pending E11-9: a full session with one membership reads that workspace", async () => {
+    const id = full("ws_1");
+    expect(await resolveWorkspace(api, id.value, null)).toEqual({ kind: "workspace", baseUrl: "https://ws.example", workspaceId: "ws_1", label: "Workspace 1" });
+    expect(id.reads).toEqual({ session: 1, memberships: 1 });
   });
 
-  it.skip("pending E11-9: until the identity service serves memberships, the API source is unconfigured", async () => {
-    expect((await resolveWorkspace(api, membershipsNotServedYet, null)).kind).toBe("unconfigured");
-    expect((await resolveWorkspace(api, async () => null, null)).kind).toBe("unconfigured");
+  it.skip("pending E11-9: a full session with several offers them by label, the last-used one as the default", async () => {
+    expect(await resolveWorkspace(api, full("ws_1", "ws_2").value, "ws_2")).toEqual({ kind: "choose", baseUrl: "https://ws.example", workspaces: listed("ws_1", "ws_2"), preferred: "ws_2" });
   });
 
-  it.skip("pending E11-9: a resolver that fails is unconfigured, never fixtures", async () => {
-    const failing: WorkspaceResolver = async () => {
-      throw new TypeError("Failed to fetch");
+  it.skip("pending E11-9: a last-used workspace that is no longer a membership is ignored", async () => {
+    expect(await resolveWorkspace(api, full("ws_1", "ws_2").value, "ws_gone")).toMatchObject({ kind: "choose", preferred: null });
+    expect(await resolveWorkspace(api, full("ws_1").value, "ws_gone")).toMatchObject({ kind: "workspace", workspaceId: "ws_1" });
+  });
+
+  it.skip("pending E11-9: a reduction-only session uses its own list and never reads the membership index", async () => {
+    const one = reduction("ws_1");
+    expect(await resolveWorkspace(api, one.value, null)).toEqual({ kind: "workspace", baseUrl: "https://ws.example", workspaceId: "ws_1", label: "Workspace 1" });
+    expect(one.reads).toEqual({ session: 1, memberships: 0 });
+    const several = reduction("ws_1", "ws_2");
+    expect(await resolveWorkspace(api, several.value, "ws_1")).toEqual({ kind: "choose", baseUrl: "https://ws.example", workspaces: listed("ws_1", "ws_2"), preferred: "ws_1" });
+    expect(await resolveWorkspace(api, several.value, "ws_3")).toMatchObject({ kind: "choose", preferred: null });
+    expect(several.reads.memberships).toBe(0);
+  });
+
+  it.skip("pending E11-9: the session read failing is unreachable, never fixtures, and memberships are not read", async () => {
+    const id = identity({ ok: false, code: "network", retryable: true });
+    expect(await resolveWorkspace(api, id.value, null)).toMatchObject({ kind: "unreachable", retryable: true });
+    expect(id.reads.memberships).toBe(0);
+  });
+
+  it.skip("pending E11-9: membership_unavailable is unreachable and retryable, never fixtures", async () => {
+    const id = identity({ ok: true, value: { kind: "full", expires_at: EXPIRES } }, { ok: false, code: "membership_unavailable", retryable: true });
+    expect(await resolveWorkspace(api, id.value, null)).toEqual({ kind: "unreachable", reason: "membership_unavailable", retryable: true });
+  });
+
+  it.skip("pending E11-9: until the identity routes are served, the API source is unconfigured", async () => {
+    expect((await resolveWorkspace(api, identityNotServedYet, null)).kind).toBe("unconfigured");
+    expect((await resolveWorkspace(api, identity(null).value, null)).kind).toBe("unconfigured");
+    expect((await resolveWorkspace(api, identity({ ok: true, value: { kind: "full", expires_at: EXPIRES } }, null).value, null)).kind).toBe("unconfigured");
+  });
+
+  it.skip("pending E11-9: no workspace, a duplicate, or an id that is not a path segment is unconfigured", async () => {
+    expect((await resolveWorkspace(api, full().value, null)).kind).toBe("unconfigured");
+    expect((await resolveWorkspace(api, full("ws_1", "ws_1").value, null)).kind).toBe("unconfigured");
+    expect((await resolveWorkspace(api, full("../admin").value, null)).kind).toBe("unconfigured");
+    expect((await resolveWorkspace(api, reduction().value, null)).kind).toBe("unconfigured");
+    expect((await resolveWorkspace(api, reduction("ws 2").value, null)).kind).toBe("unconfigured");
+  });
+});
+
+describe("the identity routes over HTTP (identity spec §4.5)", () => {
+  function serving(answers: Record<string, () => Response>) {
+    const calls: Array<{ url: string; credentials: RequestCredentials | undefined }> = [];
+    const fetch: Fetch = async (input, init) => {
+      calls.push({ url: input, credentials: init.credentials });
+      const answer = answers[new URL(input).pathname];
+      return answer ? answer() : new Response(JSON.stringify({ code: "not_found", effect: "none" }), { status: 404 });
     };
-    expect((await resolveWorkspace(api, failing, null)).kind).toBe("unconfigured");
+    return { fetch, calls };
+  }
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  const EXPIRES = "2026-09-28T19:05:20.000000000Z";
+
+  it.skip("pending E11-9: reads its own session and memberships at the API origin, with the session cookie and no workspace in the path", async () => {
+    const http = serving({
+      "/v1/me/session": () => json(200, { kind: "full", expires_at: EXPIRES }),
+      "/v1/me/workspaces": () => json(200, [{ workspace_id: "ws_1", label: "Home", roles: ["operator", "approver"] }]),
+    });
+    const api = createIdentityApi({ fetch: http.fetch, baseUrl: "https://ws.example" });
+    expect(await api.session()).toEqual({ ok: true, value: { kind: "full", expires_at: EXPIRES } });
+    expect(await api.memberships()).toEqual({ ok: true, value: [{ workspace_id: "ws_1", label: "Home", roles: ["operator", "approver"] }] });
+    expect(http.calls).toEqual([
+      { url: "https://ws.example/v1/me/session", credentials: "include" },
+      { url: "https://ws.example/v1/me/workspaces", credentials: "include" },
+    ]);
   });
 
-  it.skip("pending E11-9: a chosen workspace is read only when the principal is a member of it", async () => {
-    expect(await resolveWorkspace(api, members("ws_1", "ws_2"), "ws_2")).toEqual({ kind: "workspace", baseUrl: "https://ws.example", workspaceId: "ws_2", label: "Workspace 2" });
-    expect((await resolveWorkspace(api, members("ws_1"), "ws_other")).kind).toBe("unconfigured");
-  });
-
-  it.skip("pending E11-9: several memberships and none chosen asks the owner to choose, by label", async () => {
-    expect(await resolveWorkspace(api, members("ws_1", "ws_2"), null)).toEqual({
-      kind: "choose",
-      baseUrl: "https://ws.example",
-      workspaces: [
-        { workspace_id: "ws_1", label: "Workspace 1" },
-        { workspace_id: "ws_2", label: "Workspace 2" },
-      ],
+  it.skip("pending E11-9: a reduction-only session lists the workspaces it covers", async () => {
+    const http = serving({ "/v1/me/session": () => json(200, { kind: "reduction_only", workspaces: [{ workspace_id: "ws_1", label: "Home" }], expires_at: EXPIRES }) });
+    expect(await createIdentityApi({ fetch: http.fetch, baseUrl: "https://ws.example" }).session()).toEqual({
+      ok: true,
+      value: { kind: "reduction_only", workspaces: [{ workspace_id: "ws_1", label: "Home" }], expires_at: EXPIRES },
     });
   });
 
-  it.skip("pending E11-9: the same workspace listed twice is unconfigured, not a choice", async () => {
-    expect((await resolveWorkspace(api, members("ws_1", "ws_1"), null)).kind).toBe("unconfigured");
+  it.skip("pending E11-9: 503 membership_unavailable is a retryable failure", async () => {
+    const http = serving({ "/v1/me/workspaces": () => json(503, { code: "membership_unavailable", effect: "none", retryable: true }) });
+    expect(await createIdentityApi({ fetch: http.fetch, baseUrl: "https://ws.example" }).memberships()).toEqual({ ok: false, code: "membership_unavailable", retryable: true });
   });
 
-  it.skip("pending E11-9: no membership, or an id that is not a path segment, is unconfigured", async () => {
-    expect((await resolveWorkspace(api, members(), null)).kind).toBe("unconfigured");
-    expect((await resolveWorkspace(api, members("../admin"), null)).kind).toBe("unconfigured");
-    expect((await resolveWorkspace(api, members("ws_1", "ws 2"), "ws 2")).kind).toBe("unconfigured");
+  it.skip("pending E11-9: roles is a list; a single role, or an unknown session kind, is refused", async () => {
+    const http = serving({
+      "/v1/me/session": () => json(200, { kind: "partial", expires_at: EXPIRES }),
+      "/v1/me/workspaces": () => json(200, [{ workspace_id: "ws_1", label: "Home", role: "operator" }]),
+    });
+    const api = createIdentityApi({ fetch: http.fetch, baseUrl: "https://ws.example" });
+    expect(await api.session()).toMatchObject({ ok: false, retryable: false });
+    expect(await api.memberships()).toMatchObject({ ok: false, retryable: false });
+  });
+
+  it.skip("pending E11-9: no answer at all is a retryable failure, never an empty list", async () => {
+    const fetch: Fetch = async () => {
+      throw new TypeError("Failed to fetch");
+    };
+    const api = createIdentityApi({ fetch, baseUrl: "https://ws.example" });
+    expect(await api.session()).toEqual({ ok: false, code: "network", retryable: true });
+    expect(await api.memberships()).toEqual({ ok: false, code: "network", retryable: true });
   });
 });
 
