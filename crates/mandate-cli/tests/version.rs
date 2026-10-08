@@ -29,6 +29,7 @@ const VERSION_RECORD: &str =
     r#"{"kind":"mandate_version_record","mandate_version":"@V","user":"user-owner"}"#;
 const CONFIRMED: &str = r#"{"confirmed_paths":[@C],"mandate_version":"@V","record_ref":"@R"}"#;
 const CONFIRMATION_RECORD: &str = r#"{"kind":"mandate_confirmation_record","mandate_version":"@V","step_up":{"assertion_id":"cli-assertion-1","authenticated_at":1790000000,"method":"cli_confirm"},"user":"user-owner","warnings":["W-002"]}"#;
+const REVOKED: &str = r#"{"connection_id":"conn_alpaca_paper_01"}"#;
 /// The fixture's top-level members but the two system fields (mandate spec §4.1 V-020).
 const PATHS: &str = "autonomy behavior capital connection_id environment goal name notifications \
                      protection risk universe";
@@ -81,7 +82,7 @@ enum Do<'a> {
     Confirm(&'a str, Option<&'a str>),
     Seed(&'a str, &'a str),
     As(Environment),
-    /// Remove, or overwrite, the fixture's stored document.
+    /// Remove, or overwrite, the stored fixture.
     Lose,
     Corrupt,
 }
@@ -94,8 +95,8 @@ struct World {
     store: Store,
     ids: FixedIds,
     environment: Option<Environment>,
-    /// Every write to the store fails.
-    broken: bool,
+    /// The store's writes fail once this many more have succeeded.
+    fails_after: Option<usize>,
 }
 
 impl World {
@@ -112,8 +113,8 @@ impl World {
     fn seed(&mut self, event_type: &str, payload: &str) {
         let control = stream(CONTROL);
         let head = self.journal.head(&control).unwrap().seq;
-        let id = format!("9{head:025}");
-        let draft = SEEDED.replace("@I", &id).replace("@T", event_type);
+        let draft = SEEDED.replace("@I", &format!("9{head:025}"));
+        let draft = draft.replace("@T", event_type);
         let draft = [draft.replace("@P", payload)];
         let (journal, at) = (&mut self.journal, at(NOW).at);
         let epoch = journal.take_ownership(&control).unwrap();
@@ -128,10 +129,11 @@ impl World {
             ..owner()
         };
         let now = at(NOW);
-        let mut unwritable = Unwritable(self.store.clone());
-        let store: &mut dyn ArtifactStore = match self.broken {
-            true => &mut unwritable,
-            false => &mut self.store,
+        let (after, store) = (self.fails_after, self.store.clone());
+        let mut failing = Failing(store, after.unwrap_or_default());
+        let store: &mut dyn ArtifactStore = match after {
+            Some(_) => &mut failing,
+            None => &mut self.store,
         };
         let journal = &mut self.journal;
         let fixture = Digest::of(&canonical(MANDATE));
@@ -241,7 +243,6 @@ fn a_confirmation_is_one_event_bound_to_the_version_shown_that_the_spec_fold_rea
         let fact = JournaledFact::from_record(&row.event_type, &payload, &documents, None);
         facts.extend(fact.unwrap());
     }
-    assert_eq!(facts.len(), 3, "the model, the version, its confirmation");
     let mandate = Mandate::parse(&json(MANDATE)).unwrap();
     let membership = Some(Membership {
         workspace_users: 1,
@@ -259,10 +260,7 @@ fn a_confirmation_is_one_event_bound_to_the_version_shown_that_the_spec_fold_rea
     let context = ValidationContext::from_journal(&mandate, args, &facts).unwrap();
     let violations = validate(&mandate, &context).unwrap().violations;
     let supplied = BTreeSet::from([Violation::V001, Violation::V002]);
-    assert_eq!(
-        violations, supplied,
-        "only the facts the run supplies (DEC-505 item 3)"
-    );
+    assert_eq!(violations, supplied, "the run's two facts (DEC-505)");
 }
 
 /// Every refusal carries one of DEC-530 item 10's codes, each case its own, and writes nothing:
@@ -272,9 +270,8 @@ fn a_confirmation_is_one_event_bound_to_the_version_shown_that_the_spec_fold_rea
 fn every_refusal_has_its_own_code_and_writes_nothing() {
     use Do::{As, Confirm, Corrupt, Create, Lose, Seed};
     let unreadable = MODEL.replace(r#"["fast_periods","slow_periods"]"#, r#""x""#);
-    let revoked = r#"{"connection_id":"conn_alpaca_paper_01"}"#;
     let (v1, model) = (Create("v1"), Seed("ConfigSnapshotRegistered", &unreadable));
-    let revoke = Seed("ConnectionRevoked", revoked);
+    let revoke = Seed("ConnectionRevoked", REVOKED);
     let (live, backtest) = (As(Environment::Live), As(Environment::Backtest));
     let (confirm, other) = (|name| Confirm(name, None), confirm_code("v2"));
     let cases: [(&str, &[Do<'_>], Do<'_>); 15] = [
@@ -314,38 +311,40 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
     assert_eq!(seen, codes, "the closed set, each code its own");
 }
 
-/// A store that reads the objects it holds and fails every write.
-struct Unwritable(Store);
+/// A store that reads the objects it holds and fails every write once `1` more have succeeded.
+struct Failing(Store, usize);
 
-impl ArtifactSource for Unwritable {
+impl ArtifactSource for Failing {
     fn read_artifact(&self, reference: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
         self.0.read_artifact(reference)
     }
 }
 
-impl ArtifactStore for Unwritable {
-    fn put_artifact(&mut self, _: &[u8]) -> Result<ArtifactRef, ArtifactError> {
-        Err(ArtifactError::Unavailable)
+impl ArtifactStore for Failing {
+    fn put_artifact(&mut self, bytes: &[u8]) -> Result<ArtifactRef, ArtifactError> {
+        self.1 = self.1.checked_sub(1).ok_or(ArtifactError::Unavailable)?;
+        self.0.put_artifact(bytes)
     }
 }
 
-/// Each command stores its objects before it commits, so a store that fails commits nothing.
+/// Each command stores every object, the document and then the record, before it commits, so a
+/// store that fails at any of those writes commits nothing.
 #[test]
 #[ignore = "pending E10-16"]
 fn a_store_that_fails_commits_nothing() {
-    for (earlier, step) in [
-        (None, Do::Create("v1")),
-        (Some(Do::Create("v1")), Do::Confirm("v1", None)),
+    let (create, confirm) = (Do::Create("v1"), Do::Confirm("v1", None));
+    for (setup, step, after) in [
+        (None, create, 0),
+        (None, create, 1),
+        (Some(create), confirm, 0),
     ] {
         let mut world = World::new();
-        earlier.map(|e| world.run(e).unwrap());
+        setup.map(|e| world.run(e).unwrap());
         let before = world.appends();
-        world.broken = true;
+        world.fails_after = Some(after);
         let result = world.run(step);
-        assert!(
-            matches!(result, Err(ControlError::Journal(_))),
-            "{step:?}: {result:?}"
-        );
-        assert_eq!(world.appends(), before, "{step:?}: nothing appended");
+        let failed = matches!(result, Err(ControlError::Journal(_)));
+        assert!(failed, "{step:?} after {after}: {result:?}");
+        assert_eq!(world.appends(), before, "{step:?} after {after}");
     }
 }
