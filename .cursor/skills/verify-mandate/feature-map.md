@@ -282,6 +282,9 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
   `crates/mandate-runtime/tests/properties.rs` (26 properties against three oracles that share no
   code with the crate: a shadow fold rebuilt from the emitted drafts' payloads, a separately written
   restriction lattice, and an interval accumulator for durations),
+  `crates/mandate-runtime/tests/observation.rs` (`ObservationRecorded` as journal spec §9.1 closes
+  it, checked against `mandate-journal`'s registered schema: E15-13, slice R0 of the
+  [first paper trade brief](../../../docs/project/tasks/first-paper-trade.md)),
   `crates/mandate-runtime/tests/common/mod.rs` (the in-memory shell, which can put an append in doubt,
   fence a writer, and crash and restart), and `crates/mandate-runtime/tests/golden-journal.json` (the
   committed fold output that pins `FOLD_VERSION`). Planted bugs per test: the task brief.

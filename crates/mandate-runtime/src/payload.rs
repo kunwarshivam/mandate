@@ -71,12 +71,6 @@ pub(crate) fn stamp(at: RiskClock, field: &'static str) -> Result<Value, Runtime
         .map_err(|_| non_canonical(field))
 }
 
-/// A risk-clock second that may be negative, which the canonical integer form cannot hold (journal
-/// spec §4.4 admits no sign), written as canonical decimal text instead.
-pub(crate) fn seconds_text(at: RiskClock) -> Value {
-    Value::Str(at.secs().to_string())
-}
-
 pub(crate) fn str_of<'a>(payload: &'a Value, field: &str) -> Option<&'a str> {
     payload.get(field).and_then(Value::as_str)
 }

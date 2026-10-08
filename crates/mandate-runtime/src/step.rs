@@ -817,17 +817,10 @@ fn activated(
     ])
 }
 
-fn observed(observation: &Observation) -> Result<Value, RuntimeError> {
-    let instrument = match &observation.instrument {
-        Some(instrument) => payload::text(instrument.as_str()),
-        None => Value::Null,
-    };
-    payload::object(vec![
-        ("source", payload::text(&observation.source)),
-        ("instrument", instrument),
-        ("at", payload::seconds_text(observation.at)),
-        ("data", observation.data.clone()),
-    ])
+/// The `ObservationRecorded` payload of journal spec §9.1. A stub until E15-13's slice R0 writes the
+/// closed schema's members (DEC-503 item 7).
+fn observed(_observation: &Observation) -> Result<Value, RuntimeError> {
+    Err(RuntimeError::Unimplemented { story: "E15-13" })
 }
 
 fn modelled(output: &ModelOutput) -> Result<Value, RuntimeError> {
