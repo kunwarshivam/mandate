@@ -25,8 +25,8 @@ use std::collections::BTreeMap;
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::{
-    AppendOutcome, Draft, Environment, EventCheck, EventFailure, Head, Invalid, InvalidReason,
-    StoredEvent, StreamId, TrustedStart, check_batch, seal, verify_events,
+    AppendOutcome, ArtifactSource, Draft, Environment, EventCheck, EventFailure, Head, Invalid,
+    InvalidReason, StoredEvent, StreamId, TrustedStart, check_batch, seal, verify_events,
 };
 use mandate_time::UtcNanos;
 use sqlx::migrate::{Migration, MigrationType, Migrator};
@@ -111,6 +111,17 @@ impl From<sqlx::Error> for PgError {
     fn from(e: sqlx::Error) -> Self {
         Self::Unavailable(e)
     }
+}
+
+/// Why an artifact-aware append returned no outcome.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AppendError {
+    /// Stored events the append had to read failed re-verification, and nothing was written.
+    #[error(transparent)]
+    Integrity(#[from] IntegrityError),
+    /// The DEC-77 stub of J0's tests PR: the implementation PR replaces it.
+    #[error("{story} has not been implemented yet")]
+    Unimplemented { story: &'static str },
 }
 
 /// How many times an append reruns after losing a race it cannot see before it starts: the same
@@ -210,6 +221,27 @@ impl PgJournal {
             }
         }
         Ok(AppendOutcome::Unavailable)
+    }
+
+    /// [`append`](Self::append) for drafts whose configuration objects are read from `artifacts`:
+    /// a version-2 draft that [`Draft::config_artifact_path`] names is checked against the objects
+    /// it references instead of being refused, with the outcome
+    /// `MemoryJournal::append_with_config_artifacts` gives for the same stream state, drafts, and
+    /// artifacts (journal spec §5.1, §11 check 6; DEC-510). Idempotency is decided first, so an
+    /// identical retry is `AlreadyCommitted` whatever `artifacts` holds; a refused batch writes
+    /// nothing.
+    pub async fn append_with_config_artifacts(
+        &self,
+        stream: &StreamId,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[&[u8]],
+        artifacts: &(dyn ArtifactSource + Sync),
+    ) -> Result<AppendOutcome, AppendError> {
+        let _ = (stream, expected_head, writer_epoch);
+        let _ = (recorded_at, drafts, artifacts);
+        Err(AppendError::Unimplemented { story: "E7-19" })
     }
 
     /// Every event of `stream` in `seq` order, after checking the whole chain from seq 1 (journal

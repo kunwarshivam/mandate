@@ -4095,6 +4095,39 @@ fn a_kill_switch_applies_the_mode_before_it_cancels() {
     assert_eq!(to, Some("stopped"), "an owner kill switch is `stopped`");
 }
 
+/// 2026-09-22 08:00 ET (12:00 UTC), a Tuesday on the committed calendar: pre-market. The suite's
+/// clock-0 instants are read as the regular session (DEC-260 (13)), so a session test that must
+/// see the session matter moves its clock onto the calendar (DEC-506).
+const PRE_MARKET: i64 = 1_790_078_400;
+
+/// 2026-09-22 11:00 ET (15:00 UTC): the regular session of the same day, the control that shows
+/// the session, not something else, decides.
+const REGULAR_SESSION: i64 = 1_790_089_200;
+
+/// Whether a run asks the cancel of the protected position's resting OCO.
+fn cancels_the_protection(ran: &common::Ran) -> bool {
+    ran.effects.iter().any(|e| {
+        matches!(e, Effect::Broker(BrokerRequest::Cancel { client_order_id })
+            if client_order_id.as_str() == "md-oco-1")
+    })
+}
+
+/// The instruments a run's `KillSwitchActivated` defers to the regular session.
+fn deferred(ran: &common::Ran) -> Vec<String> {
+    ran.draft("KillSwitchActivated")
+        .and_then(|d| d.payload.get("deferred"))
+        .and_then(mandate_canon::Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(mandate_canon::Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// §5.5: an automated kill switch sells equities only in the regular session, leaving protection
+/// in place until then (DEC-485 items 5 and 10). Pre-market it asks no cancel of the resting OCO,
+/// sells nothing, and journals the instrument as `deferred`; the same switch in the regular
+/// session cancels the protection for its close and defers nothing.
 #[test]
 #[ignore = "pending E7-4"]
 fn an_automated_flatten_defers_equity_sells_to_the_session() {
@@ -4103,37 +4136,54 @@ fn an_automated_flatten_defers_equity_sells_to_the_session() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = protected_position(&ports);
-    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+    for (at, pre_market) in [(PRE_MARKET, true), (REGULAR_SESSION, false)] {
+        let mut shell = protected_position(&ports);
+        shell.run(Input::Tick(clock(at)), &ports);
+        shell.run(Input::Market(quote(AAPL, "155", "155.1", at)), &ports);
 
-    let ran = shell.run(
-        Input::Command(Command::KillSwitch {
-            scope: KillScope::Agent(agent(common::AGENT)),
-            initiator: Initiator::RiskLimit,
-            confirmation: None,
-        }),
-        &ports,
-    );
+        let ran = shell.run(
+            Input::Command(Command::KillSwitch {
+                scope: KillScope::Agent(agent(common::AGENT)),
+                initiator: Initiator::RiskLimit,
+                confirmation: None,
+            }),
+            &ports,
+        );
 
-    assert!(
-        ran.submissions().iter().all(|o| o.side != Side::Sell),
-        "an automated kill switch sells equities only in the regular session (§5.5)"
-    );
-    let to = ran
-        .draft("AgentModeApplied")
-        .and_then(|d| d.payload.get("to"))
-        .and_then(mandate_canon::Value::as_str);
-    assert_eq!(
-        to,
-        Some("paused"),
-        "a mandate limit is `paused`, not `stopped`"
-    );
-    assert!(
-        ran.draft("KillSwitchActivated")
-            .and_then(|d| d.payload.get("deferred"))
-            .is_some(),
-        "and the deferral is journaled rather than forgotten"
-    );
+        let to = ran
+            .draft("AgentModeApplied")
+            .and_then(|d| d.payload.get("to"))
+            .and_then(mandate_canon::Value::as_str);
+        assert_eq!(
+            to,
+            Some("paused"),
+            "a mandate limit is `paused`, not `stopped`"
+        );
+        if pre_market {
+            assert!(
+                ran.submissions().iter().all(|o| o.side != Side::Sell),
+                "an automated kill switch sells equities only in the regular session (§5.5)"
+            );
+            assert!(
+                !cancels_the_protection(&ran),
+                "and leaves protection in place until then (§5.5)"
+            );
+            assert_eq!(
+                deferred(&ran),
+                vec![AAPL.to_owned()],
+                "and the deferral is journaled rather than forgotten"
+            );
+        } else {
+            assert!(
+                cancels_the_protection(&ran),
+                "in the regular session the close cancels the protection first (§5.4, §5.5)"
+            );
+            assert!(
+                deferred(&ran).is_empty(),
+                "and nothing is deferred in the session"
+            );
+        }
+    }
 }
 
 #[test]
@@ -4262,6 +4312,11 @@ fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
     );
 }
 
+/// §5.5: without the owner's confirmed bid, bid size and floor, an owner kill switch's equity sells
+/// wait for the session. DEC-260 (13) reads that wait for an owner exit in pre-market as a
+/// regular-session limit the broker queues to the session, never an extended-hours order. So
+/// pre-market, once the protection's cancel is confirmed, no sell goes with `extended_hours`; in
+/// the regular session, the control, the same switch's close is submitted.
 #[test]
 #[ignore = "pending E7-4"]
 fn an_unconfirmed_owner_exit_waits_for_the_session() {
@@ -4270,26 +4325,54 @@ fn an_unconfirmed_owner_exit_waits_for_the_session() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = protected_position(&ports);
+    for (at, pre_market) in [(PRE_MARKET, true), (REGULAR_SESSION, false)] {
+        let mut shell = protected_position(&ports);
+        shell.run(Input::Tick(clock(at)), &ports);
+        shell.run(Input::Market(quote(AAPL, "155", "155.1", at)), &ports);
 
-    let ran = shell.run(
-        Input::Command(Command::KillSwitch {
-            scope: KillScope::Agent(agent(common::AGENT)),
-            initiator: Initiator::Owner,
-            confirmation: None,
-        }),
-        &ports,
-    );
-
-    assert!(
-        ran.submissions().iter().all(|o| o.side != Side::Sell),
-        "without the confirmed bid, bid size, and floor, equity sells wait for the session (§5.5)"
-    );
-    assert!(
-        ran.draft_types().contains(&"KillSwitchActivated"),
-        "the switch itself is still journaled and the mode still applied: {:?}",
-        ran.draft_types()
-    );
+        let ran = shell.run(
+            Input::Command(Command::KillSwitch {
+                scope: KillScope::Agent(agent(common::AGENT)),
+                initiator: Initiator::Owner,
+                confirmation: None,
+            }),
+            &ports,
+        );
+        assert!(
+            ran.draft_types().contains(&"KillSwitchActivated"),
+            "the switch itself is journaled and the mode applied: {:?}",
+            ran.draft_types()
+        );
+        assert!(
+            ran.submissions().iter().all(|o| o.side != Side::Sell),
+            "no sell goes before the protection's cancel is confirmed (§5.4)"
+        );
+        let after = shell.run(
+            Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                client_order_id: "md-oco-1".to_owned(),
+            })),
+            &ports,
+        );
+        let sells: Vec<_> = after
+            .submissions()
+            .into_iter()
+            .filter(|o| o.side == Side::Sell)
+            .collect();
+        if pre_market {
+            assert!(
+                sells.iter().all(|o| !o.extended_hours),
+                "without the confirmed bid, bid size, and floor, equity sells wait for the \
+                 session (§5.5): no extended-hours sell pre-market, {sells:?}"
+            );
+        } else {
+            assert_eq!(
+                sells.len(),
+                1,
+                "in the regular session the owner's close is submitted once its protection's \
+                 cancel is confirmed"
+            );
+        }
+    }
 }
 
 /// §5.5 exempts a kill switch's sells from the agent's mode, and DEC-260 (3) binds the slice that
