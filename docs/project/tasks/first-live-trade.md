@@ -27,8 +27,8 @@ the live order itself and the few narrowings it needs. **Until the founder accep
 every slice except the live run is still built, because each is product work; nothing live is
 run.**
 
-This path needs the [first paper trade](first-paper-trade.md)'s runner (E1a, E1b, built generic) and its manual
-run (E2).
+This path needs the [first paper trade](first-paper-trade.md)'s runner (E1a, E1b, built
+generic) and its manual run (E2).
 
 ## Story
 
