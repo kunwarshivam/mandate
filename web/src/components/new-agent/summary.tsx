@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button } from "@cloudflare/kumo/components/button";
 import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
 import { Undo } from "pixelarticons/react/Undo.js";
-import { Owl } from "@/components/domain/owl";
+import { HatchingOwl } from "@/components/domain/owl";
 import { KEY } from "@/components/kumo/key";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import { StepUpDialog } from "@/components/stop/step-up-dialog";
@@ -142,7 +142,7 @@ function Progress({ deployment }: { deployment: Deployment }) {
       return (
         <div data-phase="recorded" className="grid gap-4">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-            <Owl seed={deployment.agentId} mood="awake" className="size-14" />
+            <HatchingOwl seed={deployment.agentId} className="size-16" />
             <div className="grid min-w-0 gap-0.5">
               <p className="font-semibold">{agent ? `${agent.label} is running on paper.` : "It is running on paper."}</p>
               <p className="text-sm text-pretty text-muted-foreground">Recorded in the journal at {at(deployment.recordedAt ?? now)}, as version 1. This owl is its own, drawn from its ID.</p>

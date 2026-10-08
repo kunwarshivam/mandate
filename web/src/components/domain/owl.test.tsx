@@ -1,13 +1,31 @@
 import { render } from "@testing-library/react";
+import { MotionConfig } from "motion/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { AgentMode } from "@/fixtures/types";
 import { AGENT_IDS, buildWorkspace } from "@/fixtures/workspace";
-import { AgentOwl, FEATHERS, Owl, beakFor, moodFor, owlRows, owlShape } from "./owl";
+import { AgentOwl, FEATHERS, HatchingOwl, Owl, beakFor, moodFor, owlRows, owlShape } from "./owl";
 
 const MODES: AgentMode[] = ["normal", "exits_only", "paused", "stopped"];
 
 describe("an agent's owl", () => {
+  it("hatches once from an egg on its own grid, and under reduced motion is simply there (DEC-505)", () => {
+    const { container, unmount } = render(<HatchingOwl seed={AGENT_IDS.btc} className="size-16" />);
+    const hatch = container.querySelector("[data-slot=hatch]")!;
+    expect(hatch.querySelector("[data-slot=owl]")).toHaveAttribute("data-mood", "awake");
+    expect(hatch.querySelector("[data-slot=egg]")).not.toBeNull();
+    expect(hatch.querySelector("[data-slot=egg]")!.querySelectorAll("rect").length).toBeGreaterThan(10);
+    unmount();
+    const reduced = render(
+      <MotionConfig reducedMotion="always">
+        <HatchingOwl seed={AGENT_IDS.btc} />
+      </MotionConfig>,
+    ).container.querySelector("[data-slot=hatch]")!;
+    expect(reduced).toHaveAttribute("data-reduced");
+    expect(reduced.querySelector("[data-slot=egg]")).toBeNull();
+    expect(reduced.querySelector("[data-slot=owl]")).not.toBeNull();
+  });
+
   it("draws the same owl for the same ID, every time", () => {
     for (const id of Object.values(AGENT_IDS)) {
       expect(owlShape(id)).toEqual(owlShape(id));

@@ -99,7 +99,7 @@ export function CopilotButton({ className }: { className?: string }) {
         className,
       )}
     >
-      <BrandOwl still className="size-6" />
+      <BrandOwl still className="size-8" />
       <span className="max-[100rem]:sr-only">Ask Owlhead</span>
       <kbd className="rounded-sm border border-border px-1 font-mono text-[0.6875rem] text-muted-foreground max-[100rem]:hidden" aria-hidden>
         ⌘J

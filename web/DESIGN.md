@@ -138,6 +138,10 @@ One line each; the reference has the rest.
   their own shapes.
 - **Icons** (DEC-478). Pixelarticons at 24 or 48px, one import per icon; Phosphor and Lucide are
   lint-banned in app code.
+- **Owls** (DEC-217, DEC-505). A 16-pixel sprite whose ears and markings come from the agent's ID
+  and whose eyes say its mode and nothing else; drawn only at 16, 32, 48, 64 or 80px, where a sprite
+  pixel is whole, so the owls and the icons share one pixel grid. A new agent's owl hatches once,
+  when the runtime records it; under reduced motion it is simply there.
 - **Stop control and sheet** (DEC-206). The octagon pill, quiet or loud; one sheet for every opener,
   Pause before Stop before Close everything.
 - **Kill-switch button.** The only thing that draws crimson.

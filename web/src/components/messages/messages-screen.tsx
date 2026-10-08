@@ -60,7 +60,7 @@ function ThreadBar({ agent, view }: { agent: Agent; view: ThreadView }) {
         <ArrowLeft aria-hidden className="size-6" />
       </Link>
       <div className="relative flex min-w-0 flex-1 items-center gap-2.5 rounded-lg max-lg:min-h-11 max-lg:has-[a:focus-visible]:ring-2 max-lg:has-[a:focus-visible]:ring-ring lg:gap-3 lg:pb-3">
-        <AgentOwl agent={agent} className="size-7 shrink-0 lg:hidden" />
+        <AgentOwl agent={agent} className="size-8 shrink-0 lg:hidden" />
         <div className="grid min-w-0 gap-0.5 lg:gap-1">
           <h2 id="thread-title" className="flex min-w-0 items-center gap-x-3 gap-y-1 font-semibold max-lg:leading-5 lg:flex-wrap lg:text-h3">
             <Link

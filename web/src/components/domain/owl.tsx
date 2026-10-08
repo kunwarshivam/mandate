@@ -1,7 +1,7 @@
 "use client";
 
 import { type CSSProperties, type RefObject, useEffect, useRef } from "react";
-import { AnimatePresence, type MotionValue, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
+import { AnimatePresence, type MotionValue, motion, useReducedMotion, useReducedMotionConfig, useSpring, useTransform } from "motion/react";
 import type { Agent, AgentMode } from "@/fixtures/types";
 import { cn } from "@/lib/utils";
 import { EYE_ROW, type OwlMood, type OwlRect, PX, beakFor, bodyRects, eyeRects, owlShape } from "./owl-sprite";
@@ -214,6 +214,62 @@ export function Owl({
         </>
       ) : null}
     </svg>
+  );
+}
+
+/** The egg on the sprite's own grid: an outline and a shell, two halves that part along row 9. */
+const EGG_ROWS = ["......oooo......", ".....obbbbo.....", "....obbbbbbo....", "...obbbbbbbbo...", "...obbbbbbbbo...", "..obbbbbbbbbbo..", "..obbbbbbbbbbo..", "..obbbbbbbbbbo..", "..obbbbbbbbbbo..", "..obbbbbbbbbbo..", "..obbbbbbbbbbo..", "...obbbbbbbbo...", "...obbbbbbbbo...", "....obbbbbbo....", ".....oooooo.....", "................"] as const;
+const EGG_CRACK = 9;
+
+function eggRects(rows: readonly string[]): OwlRect[] {
+  const out: OwlRect[] = [];
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      const c = row[x];
+      if (c === ".") continue;
+      let w = 1;
+      while (row[x + w] === c) w++;
+      out.push({ x, y, w, h: 1, fill: c === "o" ? "var(--muted-foreground)" : "var(--muted)" });
+      x += w - 1;
+    }
+  });
+  return out;
+}
+
+const HATCH_MS = 600;
+
+/**
+ * A new agent's owl hatching, once, when the runtime has recorded it (DEC-505): the egg parts along
+ * its crack, the top half lifting away and the bottom half sinking, and the owl rises into place
+ * over 600ms. It answers the owner's act of creating the agent, never plays again, and under
+ * reduced motion the owl is simply there.
+ */
+export function HatchingOwl({ seed, className }: { seed: string; className?: string }) {
+  const reduced = useReducedMotionConfig() ?? false;
+  const top = eggRects(EGG_ROWS.slice(0, EGG_CRACK));
+  const bottom = eggRects(EGG_ROWS.map((row, y) => (y < EGG_CRACK ? "................" : row)));
+  const ease = [0.22, 1, 0.36, 1] as const;
+  return (
+    <span data-slot="hatch" data-reduced={reduced ? "" : undefined} className={cn("relative inline-grid shrink-0 place-items-center", className)}>
+      <motion.span
+        className="col-start-1 row-start-1 size-full"
+        initial={reduced ? false : { opacity: 0, scale: 0.85, y: 6 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: reduced ? 0 : HATCH_MS / 1000, delay: reduced ? 0 : 0.18, ease }}
+      >
+        <Owl seed={seed} mood="awake" className="size-full" />
+      </motion.span>
+      {reduced ? null : (
+        <svg viewBox="0 0 64 64" aria-hidden data-slot="egg" className="pointer-events-none col-start-1 row-start-1 size-full overflow-visible" shapeRendering="crispEdges">
+          <motion.g initial={{ opacity: 1, y: 0, rotate: 0 }} animate={{ opacity: 0, y: -22, rotate: -14 }} transition={{ duration: HATCH_MS / 1000, ease }} style={{ originX: "32px", originY: `${EGG_CRACK * PX}px` }}>
+            <Rects rects={top} />
+          </motion.g>
+          <motion.g initial={{ opacity: 1, y: 0 }} animate={{ opacity: 0, y: 10 }} transition={{ duration: HATCH_MS / 1000, ease }}>
+            <Rects rects={bottom} />
+          </motion.g>
+        </svg>
+      )}
+    </span>
   );
 }
 

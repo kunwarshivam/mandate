@@ -100,17 +100,19 @@ the owl, the rules and the record.
 
 ## E. The owls (DEC)
 
-- [ ] **One pixel grid** for the owls, the icons, the info symbol and the hourglass; snap every
-      icon box to whole pixels. (R-8)
+- [x] **One pixel grid.** Owls draw only at 16, 32, 48, 64 or 80px, where a sprite pixel is whole
+      (the 24, 28 and 56px owls are gone); the icons were on the grid already. (R-8, DEC-505)
 - [x] **Four frames per owl.** Already shipped (DEC-217, `owl-sprite.ts`): eyes open when
       trading, lidded on selling only, asleep with a "z" when paused, shut when stopped; nothing
       follows P&L. The review missed it because every fixture agent was trading. (R-1)
 - [x] **One distinguishing feature per agent.** Already shipped: ears and markings come from the
       agent's ID (`owlShape`), so the silhouettes differ in greyscale.
-- [ ] **The hatch.** Create agent ends with the owl hatching once, 600ms, then on its branch.
+- [x] **The hatch.** When the runtime records a new agent its owl hatches from an egg once, 600ms;
+      under reduced motion it is simply there. (DEC-505)
 - [x] **Silence as a feature.** Already shipped: the all-clear is the brand owl and "All clear.
       Nothing needs you."
-- [ ] **One era of type on the landing page:** the Pixelify wordmark, not the figlet ASCII.
+- [ ] **One era of type on the landing page:** the Pixelify wordmark, not the figlet ASCII. Waits
+      on the founder: DEC-467 chose the upright block letters on 2026-10-05.
 
 ## F. Home and the agent page (DEC)
 
