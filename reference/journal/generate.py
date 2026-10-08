@@ -3657,8 +3657,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(approval_section['valid_drafts'])} valid; {len(approval.VALIDATOR_MUTANTS)} validator and "
         f"{len(approval.vector_mutants(approval_section))} vector mutants caught; "
         f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "
-        f"{len(connections_section['valid_drafts'])} valid, {len(connections_section['sequences'])} stream sequences; "
-        f"{len(connections.VALIDATOR_MUTANTS)} validator, {len(connections.STREAM_MUTANTS)} stream, and "
+        f"{len(connections_section['valid_drafts'])} valid, {len(connections_section['sequences'])} stream sequences, "
+        f"{len(connections_section['chains'])} cause chains; "
+        f"{len(connections.VALIDATOR_MUTANTS)} validator, {len(connections.STREAM_MUTANTS)} stream, "
+        f"{len(connections.CHAIN_MUTANTS)} chain, and "
         f"{len(connections.vector_mutants(connections_section))} vector mutants caught"
     )
     return 0

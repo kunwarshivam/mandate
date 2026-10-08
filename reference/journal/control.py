@@ -329,8 +329,9 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
     ("band_bp", INT),
 )
 
-# §9.12 (DEC-800): a connection's history. The control stream's three records and the account
-# stream's three, with `ConnectionEstablished` at version 2 below.
+# §9.8 (DEC-800): a connection's history. The control stream's three records and the account
+# stream's three, with `ConnectionEstablished` at version 2 below, and the executor's copies of the
+# establishment and a rotation on the account stream.
 CHECK_REASONS = {
     "scope": ("scope_mismatch", "fund_movement", "permissions_unreadable"),
     "environment": ("wrong_environment", "reaches_both"),
@@ -338,28 +339,36 @@ CHECK_REASONS = {
     "uniqueness": ("already_connected",),
     "contract": ("tools_missing", "contract_drift"),
 }
+# A teardown refuses a connect that no check refused (connections spec §5.2 step 6): `check` is null.
+TEARDOWN_REASONS = ("timeout", "restart_past_deadline", "executor_stopped", "start_failed")
+# The control services' fingerprint comparison: never an executor's result (rule 58).
+SERVICES_ONLY_REASONS = ("account_mismatch",)
 ALL_CHECK_REASONS = tuple(r for reasons in CHECK_REASONS.values() for r in reasons)
 REFUSING_CHECKS = tuple(CHECK_REASONS)
 EXECUTOR_CHECKS = ("account", "contract", "environment", "scope")
 REQUIRED_CHECKS = ("account", "environment", "scope")
+# Brokers whose connections are MCP (connections spec §3, `mcp_oauth`): check 7 is always listed.
+MCP_BROKERS = ("robinhood",)
+MARGIN_ATTESTATIONS = ("cash_account", "margin_disabled")
 CONNECTION_STATES = ("active", "degraded", "suspended")
 DEGRADING = ("network_errors", "rate_headroom", "contract_drift")
 SUSPENDING = ("authorization_failed", "credential_expired", "refresh_failed", "check_failed", "lease_expired")
 STATE_REASONS = (*DEGRADING, *SUSPENDING, "condition_cleared", "acknowledged")
+PII_REF = T("pii_ref")
 SCHEMAS[("ctl", "ConnectionRefused")] = rec(
     ("connection_id", IDENT_T),
     ("broker", STR),
     ("environment", one_of("paper", "live")),
     ("occasion", one_of("connect", "reconnect", "reauthorize")),
-    ("check", one_of(*REFUSING_CHECKS)),
-    ("reason", one_of(*(r for c in REFUSING_CHECKS for r in CHECK_REASONS[c]))),
+    ("check", opt(one_of(*REFUSING_CHECKS))),
+    ("reason", one_of(*(r for c in REFUSING_CHECKS for r in CHECK_REASONS[c]), *TEARDOWN_REASONS)),
     ("existing_connection_id", opt(IDENT_T)),
     ("user", STR),
     ("step_up", STEP_UP),
 )
-SCHEMAS[("ctl", "ConnectionCredentialRotated")] = rec(
-    ("connection_id", IDENT_T), ("scopes", list_of(STR)), ("user", STR), ("step_up", STEP_UP)
-)
+ROTATED_FIELDS = (("connection_id", IDENT_T), ("scopes", list_of(STR)), ("user", STR), ("step_up", STEP_UP))
+SCHEMAS[("ctl", "ConnectionCredentialRotated")] = rec(*ROTATED_FIELDS)
+SCHEMAS[("acct", "ConnectionCredentialRotated")] = rec(*ROTATED_FIELDS, ("risk_clock", RISK_CLOCK))
 SCHEMAS[("acct", "ConnectionChecked")] = rec(
     ("connection_id", IDENT_T),
     ("occasion", one_of("connect", "reconnect", "reauthorize", "executor_start", "daily")),
@@ -373,7 +382,7 @@ SCHEMAS[("acct", "ConnectionChecked")] = rec(
             )
         ),
     ),
-    ("account_pii_ref", opt(IDENT_T)),
+    ("account_pii_ref", opt(PII_REF)),
     ("risk_clock", RISK_CLOCK),
 )
 SCHEMAS[("acct", "ConnectionStateChanged")] = rec(
@@ -463,6 +472,13 @@ PROTECTION_CHANGED = rec(
     ("acknowledged", opt(BOOL)),
     ("risk_clock", RISK_CLOCK),
 )
+ESTABLISHED_V2 = rec(
+    *SCHEMAS[("ctl", "ConnectionEstablished")].fields,
+    ("account_ref", ULID),
+    ("user", STR),
+    ("step_up", STEP_UP),
+    ("margin_attestation", opt(one_of(*MARGIN_ATTESTATIONS))),
+)
 VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "StreamOpened"): (1,),
     ("acct", "IntentReceived"): (1, 2),
@@ -471,6 +487,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
+    ("acct", "ConnectionEstablished"): (2,),
 }
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "StreamOpened", 1): rec(
@@ -487,12 +504,8 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
     ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
-    ("ctl", "ConnectionEstablished", 2): rec(
-        *SCHEMAS[("ctl", "ConnectionEstablished")].fields,
-        ("account_ref", ULID),
-        ("user", STR),
-        ("step_up", STEP_UP),
-    ),
+    ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
+    ("acct", "ConnectionEstablished", 2): rec(*ESTABLISHED_V2.fields, ("risk_clock", RISK_CLOCK)),
 }
 
 
@@ -565,6 +578,11 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
         if not ok and "types.risk_clock" not in skip:
             return [Violation("types", "non_canonical", path)]
         return []
+    if ty.kind == "pii_ref":
+        if not isinstance(value, str):
+            return [Violation("types", "schema", path)]
+        ok = (value.startswith("pii_") and is_ulid(value[4:])) or "types.pii_ref" in skip
+        return [] if ok else [Violation("types", "non_canonical", path)]
     if ty.kind in ("pointer", "date", "asset_id"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
@@ -794,7 +812,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
 
 def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.12's consistency rules 54 to 60 (rule 61 is a copy rule), each reported once."""
+    """§9.8's consistency rules 54 to 65 but the copy rules 61 and 63, each reported once."""
     p = draft["payload"]
     out: list[Violation] = []
 
@@ -803,13 +821,18 @@ def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
             out.append(Violation(f"rule.{name}", reason, path))
 
     if event_type == "ConnectionRefused":
-        rule("54", p["reason"] in CHECK_REASONS.get(p["check"], ()), "payload.reason")
+        if p["check"] is None:
+            fits = p["reason"] in TEARDOWN_REASONS or "rule.54.teardown" in skip
+        else:
+            fits = p["reason"] in CHECK_REASONS.get(p["check"], ())
+        rule("54", fits, "payload.reason")
         existing = p["existing_connection_id"]
         if p["check"] == "uniqueness":
             named = existing is not None and (existing != p["connection_id"] or "rule.55.self" in skip)
         else:
             named = existing is None
         rule("55", named, "payload.existing_connection_id")
+        rule("65", p["check"] is not None or draft["causation_id"] is None, "causation_id")
     if event_type in ("ConnectionCredentialRotated", "ConnectionCredentialRefreshed"):
         scopes = p["scopes"]
         rule("56", isinstance(scopes, list) and ascending(encoded(scopes)), "payload.scopes", "non_canonical")
@@ -820,9 +843,9 @@ def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
         rule("57.required", all(c in listed for c in REQUIRED_CHECKS), "payload.results")
         for i, r in enumerate(p["results"]):
             failed = r["result"] == "failed"
-            fits = (r["reason"] is not None) == failed and (
-                r["reason"] is None or r["reason"] in CHECK_REASONS.get(r["check"], ()) or "rule.58.belongs" in skip
-            )
+            belongs = r["reason"] in CHECK_REASONS.get(r["check"], ()) or "rule.58.belongs" in skip
+            executors = r["reason"] not in SERVICES_ONLY_REASONS or "rule.58.services" in skip
+            fits = (r["reason"] is not None) == failed and (r["reason"] is None or (belongs and executors))
             rule("58", fits, f"payload.results[{i}].reason")
             if not fits:
                 break
@@ -845,6 +868,9 @@ def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
         if fits:
             allowed = {"active": ("degraded", "suspended"), "degraded": ("active", "degraded")}
             rule("60", frm in allowed.get(to, CONNECTION_STATES), "payload.from")
+    if event_type == "ConnectionEstablished" and draft["schema_version"] == 2:
+        attested = p["margin_attestation"] is not None
+        rule("64", attested == (p["environment"] == "live"), "payload.margin_attestation")
     return out
 
 
@@ -1010,6 +1036,9 @@ def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[
     checked_first = event_type == "ConnectionCredentialRotated" or (
         event_type == "ConnectionEstablished" and draft["schema_version"] == 2
     )
+    copied = kind == "acct" and event_type in ("ConnectionEstablished", "ConnectionCredentialRotated")
+    if copied and "rule.63.copy" in skip:
+        checked_first = False
     if checked_first and draft["causation_id"] is None and "rule.63" not in skip:
         return [Violation("rule.63", "schema", "causation_id")]
     acknowledged = event_type == "ConnectionStateChanged" and draft["payload"]["reason"] == "acknowledged"

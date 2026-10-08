@@ -10342,7 +10342,7 @@ approval_answers:
     expect:
       outcome: Valid
 connections:
-  spec: docs/specs/journal.md v0.23 §9.12 (DEC-800)
+  spec: docs/specs/journal.md v0.19 §9.8 (DEC-800)
   drafts:
     established_v2:
       envelope_version: 1
@@ -10365,15 +10365,72 @@ connections:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes:
+        scopes: &id005
         - data
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id005
+        step_up: &id006
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
+        margin_attestation: null
+      artifact_refs: []
+      pii_refs: []
+    established_copy:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4C7A000000000000000C7
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: ConnectionEstablished
+      schema_version: 2
+      event_time: '2026-09-22T13:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4C1A000000000000000C1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        broker: alpaca
+        environment: paper
+        scopes: *id005
+        account_ref: 01J8Z2ACCT00000000000000A1
+        user: user_owner_01
+        step_up: *id006
+        margin_attestation: null
+        risk_clock: '2026-09-22T13:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    rotated_copy:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4C8A000000000000000C8
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: ConnectionCredentialRotated
+      schema_version: 1
+      event_time: '2026-09-22T13:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4C3A000000000000000C3
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        scopes: &id007
+        - data
+        - trading
+        user: user_owner_01
+        step_up: *id006
+        risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
       pii_refs: []
     refused_scope:
@@ -10402,7 +10459,7 @@ connections:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id005
+        step_up: *id006
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -10424,11 +10481,9 @@ connections:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes:
-        - data
-        - trading
+        scopes: *id007
         user: user_owner_01
-        step_up: *id005
+        step_up: *id006
       artifact_refs: []
       pii_refs: []
     checked_start:
@@ -10461,11 +10516,11 @@ connections:
         - check: scope
           result: passed
           reason: null
-        account_pii_ref: pii_acct_7Q2M
+        account_pii_ref: pii_01J8Z2PR0000000000000000A1
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
       pii_refs:
-      - pii_acct_7Q2M
+      - pii_01J8Z2PR0000000000000000A1
     state_degraded:
       envelope_version: 1
       environment: paper
@@ -10518,7 +10573,7 @@ connections:
       pii_refs: []
   invalid_drafts:
   - name: established_v2.connection_id.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.connection_id
@@ -10528,7 +10583,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: established_v2.connection_id.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.connection_id
@@ -10538,7 +10593,7 @@ connections:
       reason: non_canonical
       path: payload.connection_id
   - name: established_v2.broker.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.broker
@@ -10548,7 +10603,7 @@ connections:
       reason: schema
       path: payload.broker
   - name: established_v2.broker.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.broker
@@ -10558,7 +10613,7 @@ connections:
       reason: non_canonical
       path: payload.broker
   - name: established_v2.environment.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.environment
@@ -10568,7 +10623,7 @@ connections:
       reason: schema
       path: payload.environment
   - name: established_v2.environment.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.environment
@@ -10578,7 +10633,7 @@ connections:
       reason: non_canonical
       path: payload.environment
   - name: established_v2.scopes.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.scopes
@@ -10588,7 +10643,7 @@ connections:
       reason: schema
       path: payload.scopes
   - name: established_v2.account_ref.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.account_ref
@@ -10598,7 +10653,7 @@ connections:
       reason: schema
       path: payload.account_ref
   - name: established_v2.account_ref.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.account_ref
@@ -10608,7 +10663,7 @@ connections:
       reason: non_canonical
       path: payload.account_ref
   - name: established_v2.user.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.user
@@ -10618,7 +10673,7 @@ connections:
       reason: schema
       path: payload.user
   - name: established_v2.user.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.user
@@ -10628,7 +10683,7 @@ connections:
       reason: non_canonical
       path: payload.user
   - name: established_v2.step_up.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.step_up
@@ -10637,8 +10692,28 @@ connections:
       outcome: Invalid
       reason: schema
       path: payload.step_up
+  - name: established_v2.margin_attestation.kind
+    clause: §9.8 types
+    base_draft: established_v2
+    changes:
+    - path: payload.margin_attestation
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.margin_attestation
+  - name: established_v2.margin_attestation.form
+    clause: §9.8 types
+    base_draft: established_v2
+    changes:
+    - path: payload.margin_attestation
+      value: cash
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.margin_attestation
   - name: established_v2.account_ref.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.account_ref
@@ -10648,7 +10723,7 @@ connections:
       reason: schema
       path: payload.account_ref
   - name: established_v2.user.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.user
@@ -10658,7 +10733,7 @@ connections:
       reason: schema
       path: payload.user
   - name: established_v2.step_up.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: established_v2
     changes:
     - path: payload.step_up
@@ -10668,17 +10743,17 @@ connections:
       reason: schema
       path: payload.step_up
   - name: established_v2.missing
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: established_v2
     changes:
-    - path: payload.step_up
+    - path: payload.margin_attestation
       delete: true
     expect:
       outcome: Invalid
       reason: schema
-      path: payload.step_up
+      path: payload.margin_attestation
   - name: established_v2.extra
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: established_v2
     changes:
     - path: payload.note
@@ -10687,8 +10762,158 @@ connections:
       outcome: Invalid
       reason: schema
       path: payload.note
+  - name: established_copy.margin_attestation.kind
+    clause: §9.8 types
+    base_draft: established_copy
+    changes:
+    - path: payload.margin_attestation
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.margin_attestation
+  - name: established_copy.margin_attestation.form
+    clause: §9.8 types
+    base_draft: established_copy
+    changes:
+    - path: payload.margin_attestation
+      value: cash
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.margin_attestation
+  - name: established_copy.risk_clock.kind
+    clause: §9.8 types
+    base_draft: established_copy
+    changes:
+    - path: payload.risk_clock
+      value: 1790000000
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: established_copy.risk_clock.form
+    clause: §9.8 types
+    base_draft: established_copy
+    changes:
+    - path: payload.risk_clock
+      value: '2026-09-22T13:00:00.500000000Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.risk_clock
+  - name: established_copy.account_ref.null
+    clause: §9.8 types
+    base_draft: established_copy
+    changes:
+    - path: payload.account_ref
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.account_ref
+  - name: established_copy.risk_clock.null
+    clause: §9.8 types
+    base_draft: established_copy
+    changes:
+    - path: payload.risk_clock
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: established_copy.missing
+    clause: §9.8 closed
+    base_draft: established_copy
+    changes:
+    - path: payload.risk_clock
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: established_copy.extra
+    clause: §9.8 closed
+    base_draft: established_copy
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: rotated_copy.scopes.kind
+    clause: §9.8 types
+    base_draft: rotated_copy
+    changes:
+    - path: payload.scopes
+      value: trading
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.scopes
+  - name: rotated_copy.risk_clock.kind
+    clause: §9.8 types
+    base_draft: rotated_copy
+    changes:
+    - path: payload.risk_clock
+      value: 1790000000
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: rotated_copy.risk_clock.form
+    clause: §9.8 types
+    base_draft: rotated_copy
+    changes:
+    - path: payload.risk_clock
+      value: '2026-09-22T13:00:00.500000000Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.risk_clock
+  - name: rotated_copy.scopes.null
+    clause: §9.8 types
+    base_draft: rotated_copy
+    changes:
+    - path: payload.scopes
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.scopes
+  - name: rotated_copy.risk_clock.null
+    clause: §9.8 types
+    base_draft: rotated_copy
+    changes:
+    - path: payload.risk_clock
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: rotated_copy.missing
+    clause: §9.8 closed
+    base_draft: rotated_copy
+    changes:
+    - path: payload.risk_clock
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: rotated_copy.extra
+    clause: §9.8 closed
+    base_draft: rotated_copy
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
   - name: refused_scope.connection_id.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.connection_id
@@ -10698,7 +10923,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: refused_scope.connection_id.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.connection_id
@@ -10708,7 +10933,7 @@ connections:
       reason: non_canonical
       path: payload.connection_id
   - name: refused_scope.broker.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.broker
@@ -10718,7 +10943,7 @@ connections:
       reason: schema
       path: payload.broker
   - name: refused_scope.broker.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.broker
@@ -10728,7 +10953,7 @@ connections:
       reason: non_canonical
       path: payload.broker
   - name: refused_scope.environment.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.environment
@@ -10738,7 +10963,7 @@ connections:
       reason: schema
       path: payload.environment
   - name: refused_scope.environment.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.environment
@@ -10748,7 +10973,7 @@ connections:
       reason: non_canonical
       path: payload.environment
   - name: refused_scope.occasion.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.occasion
@@ -10758,7 +10983,7 @@ connections:
       reason: schema
       path: payload.occasion
   - name: refused_scope.occasion.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.occasion
@@ -10768,7 +10993,7 @@ connections:
       reason: non_canonical
       path: payload.occasion
   - name: refused_scope.check.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.check
@@ -10778,7 +11003,7 @@ connections:
       reason: schema
       path: payload.check
   - name: refused_scope.check.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.check
@@ -10788,7 +11013,7 @@ connections:
       reason: non_canonical
       path: payload.check
   - name: refused_scope.reason.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.reason
@@ -10798,7 +11023,7 @@ connections:
       reason: schema
       path: payload.reason
   - name: refused_scope.reason.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.reason
@@ -10808,7 +11033,7 @@ connections:
       reason: non_canonical
       path: payload.reason
   - name: refused_scope.existing_connection_id.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.existing_connection_id
@@ -10818,7 +11043,7 @@ connections:
       reason: schema
       path: payload.existing_connection_id
   - name: refused_scope.existing_connection_id.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.existing_connection_id
@@ -10828,7 +11053,7 @@ connections:
       reason: non_canonical
       path: payload.existing_connection_id
   - name: refused_scope.user.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.user
@@ -10838,7 +11063,7 @@ connections:
       reason: schema
       path: payload.user
   - name: refused_scope.user.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.user
@@ -10848,7 +11073,7 @@ connections:
       reason: non_canonical
       path: payload.user
   - name: refused_scope.step_up.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.step_up
@@ -10858,7 +11083,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: refused_scope.connection_id.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.connection_id
@@ -10868,7 +11093,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: refused_scope.occasion.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.occasion
@@ -10877,18 +11102,8 @@ connections:
       outcome: Invalid
       reason: schema
       path: payload.occasion
-  - name: refused_scope.check.null
-    clause: §9.12 types
-    base_draft: refused_scope
-    changes:
-    - path: payload.check
-      value: null
-    expect:
-      outcome: Invalid
-      reason: schema
-      path: payload.check
   - name: refused_scope.reason.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.reason
@@ -10898,7 +11113,7 @@ connections:
       reason: schema
       path: payload.reason
   - name: refused_scope.user.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.user
@@ -10908,7 +11123,7 @@ connections:
       reason: schema
       path: payload.user
   - name: refused_scope.step_up.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refused_scope
     changes:
     - path: payload.step_up
@@ -10918,7 +11133,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: refused_scope.missing
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: refused_scope
     changes:
     - path: payload.step_up
@@ -10928,7 +11143,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: refused_scope.extra
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: refused_scope
     changes:
     - path: payload.note
@@ -10938,7 +11153,7 @@ connections:
       reason: schema
       path: payload.note
   - name: rotated.connection_id.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: rotated
     changes:
     - path: payload.connection_id
@@ -10948,7 +11163,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: rotated.connection_id.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: rotated
     changes:
     - path: payload.connection_id
@@ -10958,7 +11173,7 @@ connections:
       reason: non_canonical
       path: payload.connection_id
   - name: rotated.scopes.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: rotated
     changes:
     - path: payload.scopes
@@ -10968,7 +11183,7 @@ connections:
       reason: schema
       path: payload.scopes
   - name: rotated.user.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: rotated
     changes:
     - path: payload.user
@@ -10978,7 +11193,7 @@ connections:
       reason: schema
       path: payload.user
   - name: rotated.user.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: rotated
     changes:
     - path: payload.user
@@ -10988,7 +11203,7 @@ connections:
       reason: non_canonical
       path: payload.user
   - name: rotated.step_up.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: rotated
     changes:
     - path: payload.step_up
@@ -10998,7 +11213,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: rotated.connection_id.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: rotated
     changes:
     - path: payload.connection_id
@@ -11008,7 +11223,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: rotated.scopes.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: rotated
     changes:
     - path: payload.scopes
@@ -11018,7 +11233,7 @@ connections:
       reason: schema
       path: payload.scopes
   - name: rotated.user.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: rotated
     changes:
     - path: payload.user
@@ -11028,7 +11243,7 @@ connections:
       reason: schema
       path: payload.user
   - name: rotated.step_up.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: rotated
     changes:
     - path: payload.step_up
@@ -11038,7 +11253,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: rotated.missing
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: rotated
     changes:
     - path: payload.step_up
@@ -11048,7 +11263,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: rotated.extra
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: rotated
     changes:
     - path: payload.note
@@ -11058,7 +11273,7 @@ connections:
       reason: schema
       path: payload.note
   - name: checked_start.connection_id.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.connection_id
@@ -11068,7 +11283,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: checked_start.connection_id.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.connection_id
@@ -11078,7 +11293,7 @@ connections:
       reason: non_canonical
       path: payload.connection_id
   - name: checked_start.occasion.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.occasion
@@ -11088,7 +11303,7 @@ connections:
       reason: schema
       path: payload.occasion
   - name: checked_start.occasion.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.occasion
@@ -11098,7 +11313,7 @@ connections:
       reason: non_canonical
       path: payload.occasion
   - name: checked_start.results.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.results
@@ -11108,7 +11323,7 @@ connections:
       reason: schema
       path: payload.results
   - name: checked_start.account_pii_ref.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.account_pii_ref
@@ -11118,7 +11333,7 @@ connections:
       reason: schema
       path: payload.account_pii_ref
   - name: checked_start.account_pii_ref.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.account_pii_ref
@@ -11128,7 +11343,7 @@ connections:
       reason: non_canonical
       path: payload.account_pii_ref
   - name: checked_start.risk_clock.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.risk_clock
@@ -11138,7 +11353,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: checked_start.risk_clock.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.risk_clock
@@ -11148,7 +11363,7 @@ connections:
       reason: non_canonical
       path: payload.risk_clock
   - name: checked_start.connection_id.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.connection_id
@@ -11158,7 +11373,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: checked_start.occasion.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.occasion
@@ -11168,7 +11383,7 @@ connections:
       reason: schema
       path: payload.occasion
   - name: checked_start.results.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.results
@@ -11178,7 +11393,7 @@ connections:
       reason: schema
       path: payload.results
   - name: checked_start.risk_clock.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: checked_start
     changes:
     - path: payload.risk_clock
@@ -11188,7 +11403,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: checked_start.missing
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: checked_start
     changes:
     - path: payload.risk_clock
@@ -11198,7 +11413,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: checked_start.extra
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: checked_start
     changes:
     - path: payload.note
@@ -11208,7 +11423,7 @@ connections:
       reason: schema
       path: payload.note
   - name: state_degraded.connection_id.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.connection_id
@@ -11218,7 +11433,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: state_degraded.connection_id.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.connection_id
@@ -11228,7 +11443,7 @@ connections:
       reason: non_canonical
       path: payload.connection_id
   - name: state_degraded.from.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.from
@@ -11238,7 +11453,7 @@ connections:
       reason: schema
       path: payload.from
   - name: state_degraded.from.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.from
@@ -11248,7 +11463,7 @@ connections:
       reason: non_canonical
       path: payload.from
   - name: state_degraded.to.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.to
@@ -11258,7 +11473,7 @@ connections:
       reason: schema
       path: payload.to
   - name: state_degraded.to.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.to
@@ -11268,7 +11483,7 @@ connections:
       reason: non_canonical
       path: payload.to
   - name: state_degraded.reason.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.reason
@@ -11278,7 +11493,7 @@ connections:
       reason: schema
       path: payload.reason
   - name: state_degraded.reason.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.reason
@@ -11288,7 +11503,7 @@ connections:
       reason: non_canonical
       path: payload.reason
   - name: state_degraded.risk_clock.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.risk_clock
@@ -11298,7 +11513,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: state_degraded.risk_clock.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.risk_clock
@@ -11308,7 +11523,7 @@ connections:
       reason: non_canonical
       path: payload.risk_clock
   - name: state_degraded.connection_id.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.connection_id
@@ -11318,7 +11533,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: state_degraded.from.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.from
@@ -11328,7 +11543,7 @@ connections:
       reason: schema
       path: payload.from
   - name: state_degraded.to.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.to
@@ -11338,7 +11553,7 @@ connections:
       reason: schema
       path: payload.to
   - name: state_degraded.reason.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.reason
@@ -11348,7 +11563,7 @@ connections:
       reason: schema
       path: payload.reason
   - name: state_degraded.risk_clock.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: state_degraded
     changes:
     - path: payload.risk_clock
@@ -11358,7 +11573,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: state_degraded.missing
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: state_degraded
     changes:
     - path: payload.risk_clock
@@ -11368,7 +11583,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: state_degraded.extra
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: state_degraded
     changes:
     - path: payload.note
@@ -11378,7 +11593,7 @@ connections:
       reason: schema
       path: payload.note
   - name: refreshed.connection_id.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refreshed
     changes:
     - path: payload.connection_id
@@ -11388,7 +11603,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: refreshed.connection_id.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refreshed
     changes:
     - path: payload.connection_id
@@ -11398,7 +11613,7 @@ connections:
       reason: non_canonical
       path: payload.connection_id
   - name: refreshed.scopes.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refreshed
     changes:
     - path: payload.scopes
@@ -11408,7 +11623,7 @@ connections:
       reason: schema
       path: payload.scopes
   - name: refreshed.risk_clock.kind
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refreshed
     changes:
     - path: payload.risk_clock
@@ -11418,7 +11633,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: refreshed.risk_clock.form
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refreshed
     changes:
     - path: payload.risk_clock
@@ -11428,7 +11643,7 @@ connections:
       reason: non_canonical
       path: payload.risk_clock
   - name: refreshed.connection_id.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refreshed
     changes:
     - path: payload.connection_id
@@ -11438,7 +11653,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: refreshed.scopes.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refreshed
     changes:
     - path: payload.scopes
@@ -11448,7 +11663,7 @@ connections:
       reason: schema
       path: payload.scopes
   - name: refreshed.risk_clock.null
-    clause: §9.12 types
+    clause: §9.8 types
     base_draft: refreshed
     changes:
     - path: payload.risk_clock
@@ -11458,7 +11673,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: refreshed.missing
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: refreshed
     changes:
     - path: payload.risk_clock
@@ -11468,7 +11683,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: refreshed.extra
-    clause: §9.12 closed
+    clause: §9.8 closed
     base_draft: refreshed
     changes:
     - path: payload.note
@@ -11478,7 +11693,7 @@ connections:
       reason: schema
       path: payload.note
   - name: established_v1_with_account_ref
-    clause: '§9.12: version 1 stays closed with its four members'
+    clause: '§9.8: version 1 stays closed with its four members'
     base_draft: established_v2
     changes:
     - path: schema_version
@@ -11487,12 +11702,14 @@ connections:
       delete: true
     - path: payload.step_up
       delete: true
+    - path: payload.margin_attestation
+      delete: true
     expect:
       outcome: Invalid
       reason: schema
       path: payload.account_ref
   - name: established_version_3
-    clause: '§9.12: versions 1 and 2 only'
+    clause: '§9.8: versions 1 and 2 only'
     base_draft: established_v2
     changes:
     - path: schema_version
@@ -11502,7 +11719,7 @@ connections:
       reason: unknown_schema
       path: payload
   - name: established_carries_a_secret
-    clause: '§9.12, CN-1: a credential has no member to sit in'
+    clause: '§9.8, CN-1: a credential has no member to sit in'
     base_draft: established_v2
     changes:
     - path: payload.api_secret
@@ -11512,7 +11729,7 @@ connections:
       reason: schema
       path: payload.api_secret
   - name: refused_carries_the_fingerprint
-    clause: '§9.12, connections spec §3: the fingerprint is never journaled'
+    clause: '§9.8, connections spec §3: the fingerprint is never journaled'
     base_draft: refused_scope
     changes:
     - path: payload.account_fingerprint
@@ -11522,7 +11739,7 @@ connections:
       reason: schema
       path: payload.account_fingerprint
   - name: established_step_up_extra
-    clause: '§9.12: the step-up evidence is closed'
+    clause: '§9.8: the step-up evidence is closed'
     base_draft: established_v2
     changes:
     - path: payload.step_up.token
@@ -11544,7 +11761,7 @@ connections:
       reason: non_canonical
       path: payload.scopes
   - name: refused_on_the_account_stream
-    clause: '§9.12: a control-stream record'
+    clause: '§9.8: a control-stream record'
     base_draft: refused_scope
     changes:
     - path: stream_id
@@ -11554,7 +11771,7 @@ connections:
       reason: wrong_stream
       path: event_type
   - name: state_on_the_control_stream
-    clause: '§9.12: an account-stream record'
+    clause: '§9.8: an account-stream record'
     base_draft: state_degraded
     changes:
     - path: stream_id
@@ -11694,7 +11911,7 @@ connections:
       reason: schema
       path: payload.results
   - name: checked_uniqueness
-    clause: '§9.12: uniqueness is a connect-time check'
+    clause: '§9.8: uniqueness is a connect-time check'
     base_draft: checked_start
     changes:
     - path: payload.results
@@ -11930,7 +12147,7 @@ connections:
       reason: schema
       path: payload.account_pii_ref
   - name: refused_for_one_x
-    clause: '§9.12: checks 5 and 6 come from AccountStateObserved and never refuse a connection'
+    clause: '§9.8: checks 5 and 6 come from AccountStateObserved and never refuse a connection'
     base_draft: refused_scope
     changes:
     - path: payload.check
@@ -11959,9 +12176,152 @@ connections:
       outcome: Invalid
       reason: schema
       path: causation_id
+  - name: establishment_copied_without_its_original
+    clause: 'rule 63: the account stream''s copy names the control stream''s original'
+    base_draft: established_copy
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: rotation_copied_without_its_original
+    clause: rule 63
+    base_draft: rotated_copy
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: establishment_copied_at_version_1
+    clause: '§9.8: only version 2 names an account stream to copy into'
+    base_draft: established_copy
+    changes:
+    - path: schema_version
+      value: 1
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: account_number_as_its_reference
+    clause: '§9.8: account_pii_ref is a personal-data vault reference, pii_ and a ULID (§6.4)'
+    base_draft: checked_start
+    changes:
+    - path: payload.account_pii_ref
+      value: '4111111111111111'
+    - path: pii_refs
+      value:
+      - '4111111111111111'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.account_pii_ref
+  - name: reference_without_a_ulid
+    clause: '§9.8: pii_ and a ULID'
+    base_draft: checked_start
+    changes:
+    - path: payload.account_pii_ref
+      value: pii_acct_7Q2M
+    - path: pii_refs
+      value:
+      - pii_acct_7Q2M
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.account_pii_ref
+  - name: executor_reports_another_account
+    clause: 'rule 58: the fingerprint comparison is the control services'', refused on the control stream'
+    base_draft: checked_start
+    changes:
+    - path: payload.results
+      value:
+      - check: account
+        result: failed
+        reason: account_mismatch
+      - check: environment
+        result: passed
+        reason: null
+      - check: scope
+        result: passed
+        reason: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.results[0].reason
+  - name: teardown_naming_a_check
+    clause: 'rule 54: a teardown names no check'
+    base_draft: refused_scope
+    changes:
+    - path: payload.reason
+      value: timeout
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: no_check_but_a_checks_reason
+    clause: 'rule 54: with no check, the reason is a teardown''s'
+    base_draft: refused_scope
+    changes:
+    - path: payload.check
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: teardown_with_a_cause
+    clause: 'rule 65: no check failed, so nothing caused it'
+    base_draft: refused_scope
+    changes:
+    - path: payload.check
+      value: null
+    - path: payload.reason
+      value: timeout
+    - path: causation_id
+      value: 01J8Z4C4A000000000000000C4
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: live_without_the_attestation
+    clause: 'rule 64: a live connection carries the owner''s no-margin attestation (DEC-529 item 11)'
+    base_draft: established_v2
+    changes:
+    - path: payload.environment
+      value: live
+    - path: environment
+      value: live
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.margin_attestation
+  - name: paper_with_an_attestation
+    clause: 'rule 64: only a live connection carries it'
+    base_draft: established_v2
+    changes:
+    - path: payload.margin_attestation
+      value: cash_account
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.margin_attestation
+  - name: copy_live_without_the_attestation
+    clause: rule 64 holds on the copy
+    base_draft: established_copy
+    changes:
+    - path: payload.environment
+      value: live
+    - path: environment
+      value: live
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.margin_attestation
   valid_drafts:
   - name: established_version_1
-    clause: '§9.12: version 1 stays registered'
+    clause: '§9.8: version 1 stays registered'
     base_draft: established_v2
     changes:
     - path: schema_version
@@ -11971,6 +12331,8 @@ connections:
     - path: payload.user
       delete: true
     - path: payload.step_up
+      delete: true
+    - path: payload.margin_attestation
       delete: true
     - path: causation_id
       value: null
@@ -12046,11 +12408,67 @@ connections:
     expect:
       outcome: Valid
   - name: checked_for_a_reauthorization
-    clause: '§9.12: the executor checks a replaced credential before it is accepted'
+    clause: '§9.8: the executor checks a replaced credential before it is accepted'
     base_draft: checked_start
     changes:
     - path: payload.occasion
       value: reauthorize
+    expect:
+      outcome: Valid
+  - name: teardown_after_the_deadline
+    clause: 'rules 54 and 65: connections spec §5.2 step 6'
+    base_draft: refused_scope
+    changes:
+    - path: payload.check
+      value: null
+    - path: payload.reason
+      value: timeout
+    expect:
+      outcome: Valid
+  - name: teardown_on_restart
+    clause: rule 54
+    base_draft: refused_scope
+    changes:
+    - path: payload.check
+      value: null
+    - path: payload.reason
+      value: restart_past_deadline
+    - path: payload.occasion
+      value: reauthorize
+    expect:
+      outcome: Valid
+  - name: teardown_when_the_executor_never_started
+    clause: 'rule 54: connections spec §5.2 step 3'
+    base_draft: refused_scope
+    changes:
+    - path: payload.check
+      value: null
+    - path: payload.reason
+      value: start_failed
+    expect:
+      outcome: Valid
+  - name: control_services_find_another_account
+    clause: 'rule 54: account_mismatch is the control services'' refusal'
+    base_draft: refused_scope
+    changes:
+    - path: payload.check
+      value: account
+    - path: payload.reason
+      value: account_mismatch
+    expect:
+      outcome: Valid
+  - name: live_robinhood_attested
+    clause: rule 64
+    base_draft: established_v2
+    changes:
+    - path: payload.broker
+      value: robinhood
+    - path: payload.environment
+      value: live
+    - path: environment
+      value: live
+    - path: payload.margin_attestation
+      value: margin_disabled
     expect:
       outcome: Valid
   - name: degraded_again
@@ -12117,7 +12535,7 @@ connections:
       outcome: Valid
   sequences:
   - name: connect_revoke_reconnect
-    clause: 'rule 64: a reconnect after its revocation, same broker, environment, and account_ref'
+    clause: 'rule 66: a reconnect after its revocation, same broker, environment, and account_ref'
     records:
     - base_draft: established_v2
       changes:
@@ -12143,7 +12561,7 @@ connections:
     expect:
       outcome: Valid
   - name: every_occasion_in_its_place
-    clause: rule 65
+    clause: rule 67
     records:
     - base_draft: refused_scope
       changes:
@@ -12193,7 +12611,7 @@ connections:
     expect:
       outcome: Valid
   - name: revocation_is_never_refused
-    clause: '§9.12: no rule refuses a ConnectionRevoked'
+    clause: '§9.8: no rule refuses a ConnectionRevoked'
     records:
     - base_draft: rotated
       changes:
@@ -12233,7 +12651,7 @@ connections:
     expect:
       outcome: Valid
   - name: a_refused_id_connects_later
-    clause: 'rule 65: a refused connect leaves no connection'
+    clause: 'rule 67: a refused connect leaves no connection'
     records:
     - base_draft: refused_scope
       changes:
@@ -12249,8 +12667,30 @@ connections:
         value: 01J8Z4S02A0000000000000000
     expect:
       outcome: Valid
+  - name: rotations_narrow
+    clause: 'rule 67: a rotation keeps or narrows the scopes'
+    records:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - &id008
+        path: payload.scopes
+        value:
+        - trading
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - *id008
+    expect:
+      outcome: Valid
   - name: established_twice
-    clause: 'rule 64: not revoked'
+    clause: 'rule 66: not revoked'
     records:
     - base_draft: established_v2
       changes:
@@ -12264,9 +12704,9 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 1
-      rule: '64'
+      rule: '66'
   - name: reconnect_another_account
-    clause: rule 64
+    clause: rule 66
     records:
     - base_draft: established_v2
       changes:
@@ -12285,15 +12725,16 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - path: payload.account_ref
+      - &id014
+        path: payload.account_ref
         value: 01J8Z2ACCT00000000000000B7
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 2
-      rule: '64'
+      rule: '66'
   - name: reconnect_another_environment
-    clause: rule 64
+    clause: rule 66
     records:
     - base_draft: established_v2
       changes:
@@ -12312,17 +12753,22 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - path: payload.environment
+      - &id011
+        path: payload.environment
         value: live
-      - path: environment
+      - &id012
+        path: environment
         value: live
+      - &id013
+        path: payload.margin_attestation
+        value: cash_account
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 2
-      rule: '64'
+      rule: '66'
   - name: reconnect_another_broker
-    clause: rule 64
+    clause: rule 66
     records:
     - base_draft: established_v2
       changes:
@@ -12347,9 +12793,9 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 2
-      rule: '64'
+      rule: '66'
   - name: version_1_never_reestablished
-    clause: rule 64
+    clause: rule 66
     records:
     - base_draft: established_v2
       changes:
@@ -12362,6 +12808,8 @@ connections:
       - path: payload.user
         delete: true
       - path: payload.step_up
+        delete: true
+      - path: payload.margin_attestation
         delete: true
     - base_draft: rotated
       changes:
@@ -12380,9 +12828,9 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 2
-      rule: '64'
+      rule: '66'
   - name: two_connections_one_account
-    clause: 'rule 64: one account_ref, one connection (CN-5)'
+    clause: 'rule 66: one account_ref, one connection (CN-5)'
     records:
     - base_draft: established_v2
       changes:
@@ -12398,9 +12846,9 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 1
-      rule: '64'
+      rule: '66'
   - name: established_again_after_reconnect
-    clause: rule 64
+    clause: rule 66
     records:
     - base_draft: established_v2
       changes:
@@ -12427,9 +12875,9 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 3
-      rule: '64'
+      rule: '66'
   - name: rotated_never_established
-    clause: rule 65
+    clause: rule 67
     records:
     - base_draft: rotated
       changes:
@@ -12439,9 +12887,9 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 0
-      rule: '65'
+      rule: '67'
   - name: rotated_after_revocation
-    clause: rule 65
+    clause: rule 67
     records:
     - base_draft: established_v2
       changes:
@@ -12464,9 +12912,30 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 2
-      rule: '65'
+      rule: '67'
+  - name: rotation_widens_the_scopes
+    clause: 'rule 67: a rotation never adds a scope'
+    records:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - *id008
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 2
+      rule: '67'
   - name: reauthorize_after_revocation
-    clause: rule 65
+    clause: rule 67
     records:
     - base_draft: established_v2
       changes:
@@ -12493,9 +12962,9 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 2
-      rule: '65'
+      rule: '67'
   - name: reconnect_while_connected
-    clause: rule 65
+    clause: rule 67
     records:
     - base_draft: established_v2
       changes:
@@ -12513,9 +12982,9 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 1
-      rule: '65'
+      rule: '67'
   - name: connect_an_established_id
-    clause: rule 65
+    clause: rule 67
     records:
     - base_draft: established_v2
       changes:
@@ -12542,9 +13011,9 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 2
-      rule: '65'
+      rule: '67'
   - name: reconnect_refused_for_another_environment
-    clause: rule 65
+    clause: rule 67
     records:
     - base_draft: established_v2
       changes:
@@ -12575,14 +13044,39 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 2
-      rule: '65'
-  - name: degraded_cleared_acknowledged_then_suspended
-    clause: rule 66
+      rule: '67'
+  - name: degraded_cleared_acknowledged_then_suspended_and_reauthorized
+    clause: 'rule 68: the B1 path: a reauthorize after the suspension, accepted by a rotation, then cleared'
     records:
-    - base_draft: state_degraded
+    - &id009
+      base_draft: checked_start
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - &id010
+      base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: causation_id
+        value: 01J8Z4C1A000000000000000C1
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
       - path: payload.from
         value: active
       - path: payload.to
@@ -12594,7 +13088,7 @@ connections:
     - base_draft: state_degraded
       changes:
       - path: event_id
-        value: 01J8Z4S02A0000000000000000
+        value: 01J8Z4S04A0000000000000000
       - path: payload.from
         value: degraded
       - path: payload.to
@@ -12606,7 +13100,7 @@ connections:
     - base_draft: state_degraded
       changes:
       - path: event_id
-        value: 01J8Z4S03A0000000000000000
+        value: 01J8Z4S05A0000000000000000
       - path: payload.from
         value: degraded
       - path: payload.to
@@ -12618,7 +13112,7 @@ connections:
     - base_draft: state_degraded
       changes:
       - path: event_id
-        value: 01J8Z4S04A0000000000000000
+        value: 01J8Z4S06A0000000000000000
       - path: payload.from
         value: active
       - path: payload.to
@@ -12630,7 +13124,7 @@ connections:
     - base_draft: state_degraded
       changes:
       - path: event_id
-        value: 01J8Z4S05A0000000000000000
+        value: 01J8Z4S07A0000000000000000
       - path: payload.from
         value: suspended
       - path: payload.to
@@ -12642,7 +13136,7 @@ connections:
     - base_draft: checked_start
       changes:
       - path: event_id
-        value: 01J8Z4S06A0000000000000000
+        value: 01J8Z4S08A0000000000000000
       - path: payload.occasion
         value: reauthorize
       - path: payload.results
@@ -12656,10 +13150,14 @@ connections:
         - check: scope
           result: passed
           reason: null
+    - base_draft: rotated_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S09A0000000000000000
     - base_draft: state_degraded
       changes:
       - path: event_id
-        value: 01J8Z4S07A0000000000000000
+        value: 01J8Z4S10A0000000000000000
       - path: payload.from
         value: suspended
       - path: payload.to
@@ -12667,11 +13165,11 @@ connections:
       - path: payload.reason
         value: condition_cleared
       - path: causation_id
-        value: 01J8Z4S06A0000000000000000
+        value: 01J8Z4S09A0000000000000000
     - base_draft: state_degraded
       changes:
       - path: event_id
-        value: 01J8Z4S08A0000000000000000
+        value: 01J8Z4S11A0000000000000000
       - path: payload.from
         value: suspended
       - path: payload.to
@@ -12682,45 +13180,372 @@ connections:
         value: 01J8Z4C0A000000000000000K9
     expect:
       outcome: Valid
-  - name: suspension_cleared_without_a_passing_check
-    clause: 'rule 66: the credential passed every check first'
+  - name: executor_start_after_binding
+    clause: 'rule 68: checks after the binding'
     records:
-    - base_draft: state_degraded
+    - *id009
+    - *id010
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.occasion
+        value: executor_start
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+      - path: payload.occasion
+        value: daily
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    expect:
+      outcome: Valid
+  - name: mcp_lists_its_contract
+    clause: 'rule 68: an MCP connection''s checks list check 7'
+    records:
+    - base_draft: checked_start
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
-      - path: payload.from
-        value: active
-      - path: payload.to
-        value: suspended
-      - path: payload.reason
-        value: authorization_failed
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: contract
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
       - path: causation_id
-        value: null
+        value: 01J8Z4C1A000000000000000C1
+      - &id015
+        path: payload.broker
+        value: robinhood
+      - *id011
+      - *id012
+      - *id013
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.occasion
+        value: daily
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: contract
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    expect:
+      outcome: Valid
+  - name: state_on_an_unbound_stream
+    clause: 'rule 68: the stream is connecting until its establishment is copied'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
     - base_draft: state_degraded
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
       - path: payload.from
-        value: suspended
+        value: active
       - path: payload.to
-        value: suspended
+        value: degraded
       - path: payload.reason
-        value: condition_cleared
+        value: network_errors
       - path: causation_id
         value: null
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 1
-      rule: '66'
-  - name: suspension_cleared_by_a_failed_check
-    clause: rule 66
+      rule: '68'
+  - name: refreshed_on_an_unbound_stream
+    clause: rule 68
     records:
-    - base_draft: state_degraded
+    - base_draft: refreshed
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 0
+      rule: '68'
+  - name: daily_check_on_an_unbound_stream
+    clause: 'rule 68: an executor starts only on a bound stream'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: daily
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 0
+      rule: '68'
+  - name: bound_without_a_passing_connect_check
+    clause: 'rule 68: the copy follows the connect sequence''s passing check'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: failed
+          reason: scope_mismatch
+    - base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: causation_id
+        value: 01J8Z4C1A000000000000000C1
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 1
+      rule: '68'
+  - name: bound_to_another_account
+    clause: 'rule 68: the copy names this stream''s account_ref'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: causation_id
+        value: 01J8Z4C1A000000000000000C1
+      - *id014
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 1
+      rule: '68'
+  - name: mcp_bound_without_its_contract
+    clause: 'rule 68: an MCP connection''s connect check lists check 7'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: causation_id
+        value: 01J8Z4C1A000000000000000C1
+      - *id015
+      - *id011
+      - *id012
+      - *id013
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 1
+      rule: '68'
+  - name: mcp_daily_check_without_its_contract
+    clause: rule 68
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: contract
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: causation_id
+        value: 01J8Z4C1A000000000000000C1
+      - *id015
+      - *id011
+      - *id012
+      - *id013
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.occasion
+        value: daily
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 2
+      rule: '68'
+  - name: rotation_copied_without_a_passing_reauthorize
+    clause: 'rule 68: a rotation follows a passing reauthorize check'
+    records:
+    - *id009
+    - *id010
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.occasion
+        value: reauthorize
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: failed
+          reason: scope_mismatch
+    - base_draft: rotated_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 3
+      rule: '68'
+  - name: suspension_cleared_without_a_rotation
+    clause: 'rule 68: the clearing cause is the copied rotation'
+    records:
+    - *id009
+    - *id010
+    - &id016
+      base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
       - path: payload.from
         value: active
       - path: payload.to
@@ -12729,27 +13554,10 @@ connections:
         value: authorization_failed
       - path: causation_id
         value: null
-    - base_draft: checked_start
-      changes:
-      - path: event_id
-        value: 01J8Z4S02A0000000000000000
-      - path: payload.occasion
-        value: reauthorize
-      - path: payload.results
-        value:
-        - check: account
-          result: failed
-          reason: account_mismatch
-        - check: environment
-          result: passed
-          reason: null
-        - check: scope
-          result: passed
-          reason: null
     - base_draft: state_degraded
       changes:
       - path: event_id
-        value: 01J8Z4S03A0000000000000000
+        value: 01J8Z4S04A0000000000000000
       - path: payload.from
         value: suspended
       - path: payload.to
@@ -12757,19 +13565,22 @@ connections:
       - path: payload.reason
         value: condition_cleared
       - path: causation_id
-        value: 01J8Z4S02A0000000000000000
+        value: null
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 2
-      rule: '66'
-  - name: two_connections_on_one_account_stream
-    clause: 'rule 66: one account stream, one connection (CN-5)'
+      index: 3
+      rule: '68'
+  - name: refused_reauth_check_clears
+    clause: 'rule 68: a passing reauthorize the control services refused never clears (no rotation names it)'
     records:
+    - *id009
+    - *id010
+    - *id016
     - base_draft: checked_start
       changes:
       - path: event_id
-        value: 01J8Z4S01A0000000000000000
+        value: 01J8Z4S04A0000000000000000
       - path: payload.occasion
         value: reauthorize
       - path: payload.results
@@ -12786,7 +13597,139 @@ connections:
     - base_draft: state_degraded
       changes:
       - path: event_id
-        value: 01J8Z4S02A0000000000000000
+        value: 01J8Z4S05A0000000000000000
+      - path: payload.from
+        value: suspended
+      - path: payload.to
+        value: suspended
+      - path: payload.reason
+        value: condition_cleared
+      - path: causation_id
+        value: 01J8Z4S04A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 4
+      rule: '68'
+  - name: stale_check_clears
+    clause: 'rule 68: the reauthorize came after the suspension'
+    records:
+    - *id009
+    - *id010
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.occasion
+        value: reauthorize
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+      - path: payload.from
+        value: active
+      - path: payload.to
+        value: suspended
+      - path: payload.reason
+        value: authorization_failed
+      - path: causation_id
+        value: null
+    - base_draft: rotated_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S05A0000000000000000
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S06A0000000000000000
+      - path: payload.from
+        value: suspended
+      - path: payload.to
+        value: suspended
+      - path: payload.reason
+        value: condition_cleared
+      - path: causation_id
+        value: 01J8Z4S05A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 5
+      rule: '68'
+  - name: stale_rotation_clears
+    clause: 'rule 68: the rotation came after the suspension'
+    records:
+    - *id009
+    - *id010
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.occasion
+        value: reauthorize
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: rotated_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S05A0000000000000000
+      - path: payload.from
+        value: active
+      - path: payload.to
+        value: suspended
+      - path: payload.reason
+        value: authorization_failed
+      - path: causation_id
+        value: null
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S06A0000000000000000
+      - path: payload.from
+        value: suspended
+      - path: payload.to
+        value: suspended
+      - path: payload.reason
+        value: condition_cleared
+      - path: causation_id
+        value: 01J8Z4S04A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 5
+      rule: '68'
+  - name: two_connections_on_one_account_stream
+    clause: 'rule 68: one account stream, one connection (CN-5)'
+    records:
+    - *id009
+    - *id010
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
       - path: payload.from
         value: active
       - path: payload.to
@@ -12798,125 +13741,19 @@ connections:
     - base_draft: refreshed
       changes:
       - path: event_id
-        value: 01J8Z4S03A0000000000000000
+        value: 01J8Z4S04A0000000000000000
       - path: payload.connection_id
         value: conn_alpaca_paper_2
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 2
-      rule: '66'
+      index: 3
+      rule: '68'
   - name: first_change_not_from_active
-    clause: rule 66
+    clause: rule 68
     records:
-    - base_draft: state_degraded
-      changes:
-      - path: event_id
-        value: 01J8Z4S01A0000000000000000
-      - path: payload.from
-        value: degraded
-      - path: payload.to
-        value: suspended
-      - path: payload.reason
-        value: check_failed
-      - path: causation_id
-        value: null
-    expect:
-      outcome: Mismatch
-      code: connection_lifecycle_mismatch
-      index: 0
-      rule: '66'
-  - name: from_not_the_last_state
-    clause: rule 66
-    records:
-    - base_draft: state_degraded
-      changes:
-      - path: event_id
-        value: 01J8Z4S01A0000000000000000
-      - path: payload.from
-        value: active
-      - path: payload.to
-        value: suspended
-      - path: payload.reason
-        value: check_failed
-      - path: causation_id
-        value: null
-    - base_draft: state_degraded
-      changes:
-      - path: event_id
-        value: 01J8Z4S02A0000000000000000
-      - path: payload.from
-        value: degraded
-      - path: payload.to
-        value: degraded
-      - path: payload.reason
-        value: contract_drift
-      - path: causation_id
-        value: null
-    expect:
-      outcome: Mismatch
-      code: connection_lifecycle_mismatch
-      index: 1
-      rule: '66'
-  - name: acknowledged_before_cleared
-    clause: 'rule 66: the acknowledgment never lifts a cause that has not cleared'
-    records:
-    - base_draft: state_degraded
-      changes:
-      - path: event_id
-        value: 01J8Z4S01A0000000000000000
-      - path: payload.from
-        value: active
-      - path: payload.to
-        value: degraded
-      - path: payload.reason
-        value: contract_drift
-      - path: causation_id
-        value: null
-    - base_draft: state_degraded
-      changes:
-      - path: event_id
-        value: 01J8Z4S02A0000000000000000
-      - path: payload.from
-        value: degraded
-      - path: payload.to
-        value: active
-      - path: payload.reason
-        value: acknowledged
-      - path: causation_id
-        value: 01J8Z4C0A000000000000000K9
-    expect:
-      outcome: Mismatch
-      code: connection_lifecycle_mismatch
-      index: 1
-      rule: '66'
-  - name: acknowledged_after_the_cause_returned
-    clause: rule 66
-    records:
-    - base_draft: state_degraded
-      changes:
-      - path: event_id
-        value: 01J8Z4S01A0000000000000000
-      - path: payload.from
-        value: active
-      - path: payload.to
-        value: degraded
-      - path: payload.reason
-        value: network_errors
-      - path: causation_id
-        value: null
-    - base_draft: state_degraded
-      changes:
-      - path: event_id
-        value: 01J8Z4S02A0000000000000000
-      - path: payload.from
-        value: degraded
-      - path: payload.to
-        value: degraded
-      - path: payload.reason
-        value: condition_cleared
-      - path: causation_id
-        value: null
+    - *id009
+    - *id010
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -12924,9 +13761,65 @@ connections:
       - path: payload.from
         value: degraded
       - path: payload.to
+        value: suspended
+      - path: payload.reason
+        value: check_failed
+      - path: causation_id
+        value: null
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 2
+      rule: '68'
+  - name: from_not_the_last_state
+    clause: rule 68
+    records:
+    - *id009
+    - *id010
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.from
+        value: active
+      - path: payload.to
+        value: suspended
+      - path: payload.reason
+        value: check_failed
+      - path: causation_id
+        value: null
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+      - path: payload.from
+        value: degraded
+      - path: payload.to
         value: degraded
       - path: payload.reason
-        value: network_errors
+        value: contract_drift
+      - path: causation_id
+        value: null
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 3
+      rule: '68'
+  - name: acknowledged_before_cleared
+    clause: 'rule 68: the acknowledgment never lifts a cause that has not cleared'
+    records:
+    - *id009
+    - *id010
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.from
+        value: active
+      - path: payload.to
+        value: degraded
+      - path: payload.reason
+        value: contract_drift
       - path: causation_id
         value: null
     - base_draft: state_degraded
@@ -12945,4 +13838,347 @@ connections:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
       index: 3
-      rule: '66'
+      rule: '68'
+  - name: acknowledged_after_the_cause_returned
+    clause: rule 68
+    records:
+    - *id009
+    - *id010
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.from
+        value: active
+      - path: payload.to
+        value: degraded
+      - path: payload.reason
+        value: network_errors
+      - path: causation_id
+        value: null
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+      - path: payload.from
+        value: degraded
+      - path: payload.to
+        value: degraded
+      - path: payload.reason
+        value: condition_cleared
+      - path: causation_id
+        value: null
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S05A0000000000000000
+      - path: payload.from
+        value: degraded
+      - path: payload.to
+        value: degraded
+      - path: payload.reason
+        value: network_errors
+      - path: causation_id
+        value: null
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S06A0000000000000000
+      - path: payload.from
+        value: degraded
+      - path: payload.to
+        value: active
+      - path: payload.reason
+        value: acknowledged
+      - path: causation_id
+        value: 01J8Z4C0A000000000000000K9
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 5
+      rule: '68'
+  chains:
+  - name: connect_then_reauthorize
+    clause: '§11: every cause on its stream, for its connection, passing'
+    records:
+    - &id022
+      base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - &id017
+      base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: causation_id
+        value: 01J8Z4S01A0000000000000000
+    - &id018
+      base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: causation_id
+        value: 01J8Z4S02A0000000000000000
+    - &id019
+      base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+      - path: payload.occasion
+        value: reauthorize
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - &id020
+      base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S05A0000000000000000
+      - path: causation_id
+        value: 01J8Z4S04A0000000000000000
+    - &id021
+      base_draft: rotated_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S06A0000000000000000
+      - path: causation_id
+        value: 01J8Z4S05A0000000000000000
+    expect:
+      outcome: Valid
+  - name: established_on_a_failed_check
+    clause: '§11: the establishment''s check passed every result'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: failed
+          reason: scope_mismatch
+    - *id017
+    - *id018
+    - *id019
+    - *id020
+    - *id021
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 1
+  - name: established_on_a_daily_check
+    clause: '§11: occasion connect'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: daily
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - *id017
+    - *id018
+    - *id019
+    - *id020
+    - *id021
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 1
+  - name: established_on_another_connections_check
+    clause: '§11: the same connection_id'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+      - path: payload.connection_id
+        value: conn_alpaca_paper_2
+    - *id017
+    - *id018
+    - *id019
+    - *id020
+    - *id021
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 1
+  - name: established_on_another_accounts_check
+    clause: '§11: the check is on the stream account_ref names'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+      - path: stream_id
+        value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
+    - *id017
+    - *id018
+    - *id019
+    - *id020
+    - *id021
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 1
+  - name: mcp_established_without_its_contract
+    clause: '§11: check 7 for an MCP connection'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: causation_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.broker
+        value: robinhood
+      - path: payload.environment
+        value: live
+      - path: environment
+        value: live
+      - path: payload.margin_attestation
+        value: cash_account
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 1
+  - name: rotated_on_a_connect_check
+    clause: '§11: occasion reauthorize'
+    records:
+    - *id022
+    - *id017
+    - *id018
+    - *id019
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S05A0000000000000000
+      - path: causation_id
+        value: 01J8Z4S01A0000000000000000
+    - *id021
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 4
+  - name: copy_differs_from_its_original
+    clause: '§11: a copy carries its original''s members'
+    records:
+    - *id022
+    - *id017
+    - base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: causation_id
+        value: 01J8Z4S02A0000000000000000
+      - path: payload.scopes
+        value:
+        - trading
+    - *id019
+    - *id020
+    - *id021
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 2
+  - name: copy_of_nothing
+    clause: '§11: a copy names its original'
+    records:
+    - *id022
+    - *id017
+    - *id018
+    - *id019
+    - *id020
+    - base_draft: rotated_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S06A0000000000000000
+      - path: causation_id
+        value: 01J8Z4S04A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 5
