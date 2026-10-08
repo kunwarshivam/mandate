@@ -53,7 +53,7 @@ pub fn hash() -> Digest {
 }
 
 pub fn at(text: &str) -> UtcNanos {
-    UtcNanos::parse(text).unwrap()
+    UtcNanos::parse_rfc3339(text).unwrap()
 }
 
 pub fn dec(text: &str) -> ParamValue {
