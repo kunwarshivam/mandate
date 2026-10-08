@@ -420,8 +420,12 @@ Every channel is one adapter behind one interface:
 - Adapters take no string from the caller except the address handle, which they dereference
   through the vault client. They cannot read the journal or write the control stream (NT-3).
 - `reason` is a closed enum (`timeout`, `rate_limited`, `provider_error`, `address_rejected`,
-  `auth_failed`, `too_large`, `recipient_not_permitted`); provider error text is never journaled or
-  logged, since a provider may echo the message.
+  `auth_failed`, `too_large`, `recipient_not_permitted`, `bounced`, `complained`, `unsubscribed`);
+  provider error text is never journaled or logged, since a provider may echo the message. The
+  last three come from a provider `receipt`. `address_rejected`, `auth_failed`, `bounced`,
+  `complained`, and `unsubscribed` are `permanent`, mark the address `unreachable`, and raise
+  `channel_lost` (§5.6) (DEC-700 item 8). The brief's own opt-out is not a receipt and never one of
+  these reasons (§5.7).
 - `recipient_not_permitted` is the platform's own refusal (§4.4: a recipient the founder-only mail
   transport may not address), not the provider's verdict on the address. It is `permanent` for that
   notice and channel, is not retried, marks no address `unreachable`, and raises no `channel_lost`
@@ -434,11 +438,12 @@ Every channel is one adapter behind one interface:
 | Class | Attempts | Stops when |
 |---|---|---|
 | `action` | At once; then after 15 s, 60 s, 5 min; then every 15 min | The approval is no longer pending (terminal event, deadline passed, or cancellation), recorded as `abandoned` with reason `not_pending` |
-| `safety` | Same schedule | Accepted, a permanent failure, or 24 hours |
-| `info` | Same schedule | Accepted, a permanent failure, or 6 hours |
+| `safety` | Same schedule | Accepted, a permanent failure, or 24 hours, recorded as `abandoned` with reason `retry_window_ended` |
+| `info` | Same schedule | Accepted, a permanent failure, or 6 hours, recorded as `abandoned` with reason `retry_window_ended` |
 
 A `retryable` result, a timeout, and a provider 429 all retry. `permanent` stops that channel for
 that notice and, for `address_rejected` or `auth_failed`, marks the address (§5.6); `recipient_not_permitted` marks nothing (§5.2).
+`not_pending` is for `action` only and `retry_window_ended` for `safety` and `info` only.
 
 ### 5.4 Coalescing and rate limits
 
@@ -474,7 +479,7 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 | `ApprovalDelivered` | Agent (the runtime) | The pull channels' `delivered`, in the request's own batch, at every stage. Push outcomes are not copied here: check 4 is met by the pull channel | As journal spec §9: approval, channel, status, message id |
 | `OwnerAlertSent` | The subject's own stream (its owner) | With the subject, in the same batch | Subject event, kind, and for a kill switch the owner command it carries out (journal spec v0.12) |
 | `NoticeIssued` | Notice (the dispatcher) | Before the first send | Notice id, kind, class, cause and its stream, recipients (opaque) |
-| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason` (§5.2's closed enum, `recipient_not_permitted` included, plus `bounced` and `not_pending`), `provider_message_id`, `coalesced_into` |
+| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason` (§5.2's closed enum, plus the dispatcher's own `not_pending` for `action` and `retry_window_ended` for `safety` and `info`, both only with `abandoned`), `provider_message_id`, `coalesced_into` |
 
 `delivered` means the provider accepted the message, not that a person read it. A later bounce is a
 new record for the same provider message id with `failed` and reason `bounced`; it never retracts an
@@ -497,12 +502,13 @@ The reference cases and the code change to `kind` in E8-9 (slice S4); until then
 
 ### 5.6 Bounces, complaints, and lost addresses
 
-- A hard bounce, `address_rejected`, or a complaint marks that user's address on that channel
-  `unreachable` on its `NoticeAttempted`. The dispatcher stops sending to it and issues a
-  `channel_lost` notice, whose cause is that record on its own stream, to the user's other channels
-  and the pull channels.
-- `auth_failed` (a revoked Slack webhook, a removed Telegram bot) does the same, and also raises an
-  operator alert when the credential is the platform's (the Telegram bot token).
+- Exactly five reasons mark that user's address on that channel `unreachable` on its
+  `NoticeAttempted`: `address_rejected`, `auth_failed`, `bounced` (a hard bounce), `complained`,
+  and `unsubscribed` (a provider-level unsubscribe or suppression, from a provider receipt). The dispatcher stops sending to the address and issues a `channel_lost` notice, whose
+  cause is that record on its own stream, to the user's other channels and the pull channels. No
+  other reason marks an address; `recipient_not_permitted` in particular marks nothing (§5.2).
+- `auth_failed` (a revoked Slack webhook, a removed Telegram bot) also raises an operator alert
+  when the credential is the platform's (the Telegram bot token).
 - An address comes back only when the signed-in user re-verifies it in the workspace.
 - An owner whose every push address is `unreachable` still has the pull channels. No trading state
   changes (NT-5); whether a live agent should hold openings in that case is Proposed (DEC-438 item
@@ -512,8 +518,8 @@ The reference cases and the code change to `kind` in E8-9 (slice S4); until then
 
 | Notice | Can the recipient stop it? |
 |---|---|
-| `info` push (the brief) | Yes, from the email's unsubscribe link or the settings screen; the brief stays readable in the app |
-| `action` and `safety` push | Not by a link. They follow the mandate's `notifications.channels`; removing a channel is a mandate version, risk-increasing, so it is confirmed with step-up (mandate spec §9.2). A provider-level unsubscribe or suppression is honored as a lost address (§5.6), never ignored |
+| `info` push (the brief) | Yes, from the email's unsubscribe link or the settings screen; the brief stays readable in the app. The brief's `List-Unsubscribe` header and link point at the workspace's own one-click endpoint (RFC 8058), keyed by the brief's notice id, never at the provider; a request there stops only the brief for that recipient and channel and marks no address, so it never silences `action` or `safety` mail. It is told apart from a provider suppression by where it arrives: only that endpoint records a brief opt-out, and a provider `unsubscribed` receipt is never read as one. The notice id carries no authority, so whoever holds it can at most stop that recipient's brief push |
+| `action` and `safety` push | Not by a link. They follow the mandate's `notifications.channels`; removing a channel is a mandate version, risk-increasing, so it is confirmed with step-up (mandate spec §9.2). A provider-level unsubscribe or suppression arrives as a provider receipt, is the `unsubscribed` reason, and is honored as a lost address (§5.6), never ignored |
 
 The mandate schema keeps at least one push channel (`minItems: 1`), so an owner always has one
 configured; whether it still works is §5.6's question.
