@@ -1,7 +1,7 @@
 # Founder steps: the demo API host
 
 These are your steps, in order, to bring up the API host for the demo ([DEC-822](../docs/project/decisions/DEC-822.md),
-pending on PR #762). This means one Hetzner CX22 with Ubuntu 24.04, behind a Cloudflare Tunnel, serving
+pending on PR #762). This means one Hetzner CX22 (or its current equivalent) with Ubuntu 24.04, behind a Cloudflare Tunnel, serving
 `api.owlhead.ai`. Do each step only when you reach it. Agents never get access to the host,
 Hetzner, or Cloudflare. Never paste a secret, a token, or the server's IP address into chat, an
 issue, or the repository.
@@ -14,13 +14,16 @@ issue, or the repository.
 2. **SSH key.** Under *Security → SSH keys*, add your public key, for example
    `~/.ssh/id_ed25519.pub`. If you have none, create one with `ssh-keygen -t ed25519`.
 3. **Firewall.** Under *Firewalls*, create `owlhead-ssh`:
-   - one inbound rule: TCP port 22, source your own IP address (a `/32`);
+   - one inbound rule: TCP port 22, source your own IP address (a `/32`). If your IP changes and
+     SSH stops answering, update this rule in the console, or use the server's *Console* button
+     (a browser terminal that needs no SSH);
    - no other inbound rule;
    - leave outbound open. The tunnel, apt, and Alpaca are all outbound.
 4. **Server.** Under *Servers → Add server*:
    - pick a location;
    - image: **Ubuntu 24.04**;
-   - type: **CX22** (shared vCPU, x86, 2 vCPU, 4 GB). Check the price shown;
+   - type: **CX22**, or its current equivalent if Hetzner renamed it (shared vCPU, x86, 2 vCPU,
+     4 GB). Check the price shown;
    - SSH key: the one from step 2. Set no root password;
    - firewall: `owlhead-ssh`;
    - **Backups: on**;
@@ -80,20 +83,24 @@ issue, or the repository.
 
 ## D. Secrets, last, then the first start
 
-9. **Fill `/etc/owlhead/api.env`** on the host. Each line in it says what goes there.
+9. **Fill `/etc/owlhead/api.env`** on the host. Have Alpaca's OAuth app page (paper, DEC-821)
+   open for its client id and secret.
 
    ```bash
-   openssl rand -base64 32   # run twice: one value for the session key, one for the vault key
-   nano /etc/owlhead/api.env
+   cd /root/owlhead/deploy
+   bash set-secrets.sh
    ```
 
-   - `MANDATE_API_DATABASE_URL`: the value written in the file's comment. It has no password.
-   - `MANDATE_API_SESSION_SIGNING_KEY` and `MANDATE_VAULT_KEY`: the two random values. Also
-     keep the vault key in your password manager: losing it loses every stored connection.
-   - `ALPACA_OAUTH_CLIENT_ID` and `ALPACA_OAUTH_CLIENT_SECRET`: from Alpaca's OAuth app page
-     (paper, DEC-821).
+   It makes the session key and the vault key with `openssl` straight into the file, asks for the
+   Alpaca client id and then the secret (the secret is not echoed), and keeps every value already
+   set. The database URL is already filled in; it has no password. Nothing is printed.
 
-   Check that it is still `root root` and `-rw-------` with `ls -l /etc/owlhead/api.env`.
+   Then copy the vault key into your password manager: losing it loses every stored connection.
+   `grep '^MANDATE_VAULT_KEY=' /etc/owlhead/api.env` shows it once; clear the screen after.
+
+   If you edit the file by hand instead (`nano /etc/owlhead/api.env`): Ctrl+O, then Enter, saves;
+   Ctrl+X quits. Check that it is still `root root` and `-rw-------` with
+   `ls -l /etc/owlhead/api.env`.
 10. **Start the API and check it answers locally:**
 
     ```bash
@@ -106,12 +113,13 @@ issue, or the repository.
 ## E. Cloudflare Tunnel, only once the API answers
 
 11. **Create the tunnel.** `owlhead.ai` must already be a zone in your Cloudflare account.
-    - In the Cloudflare dashboard, go to *Zero Trust → Networks → Tunnels → Create a tunnel →
-      Cloudflared*, and name it `owlhead-api`.
-    - On the *Install and run a connector* page, copy only the token: the long string after
-      `service install` in the command shown. Do not run that command.
+    Cloudflare moves its menus, so these are the outcomes to reach rather than exact clicks:
+    - a **Cloudflare Tunnel** of type *cloudflared*, named `owlhead-api` (under Zero Trust, in the
+      Networks or Tunnels section);
+    - on its connector-install page, the **tunnel token**: the long string after
+      `service install` in the command shown. Copy only that string. Do not run the command.
 12. **Run the connector on the host.** Paste the token when the script asks for it; it does not
-    echo.
+    echo, and it refuses anything that is not a single token (for example the whole command).
 
     ```bash
     cd /root/owlhead/deploy
@@ -119,7 +127,8 @@ issue, or the repository.
     ```
 
     The dashboard should show the tunnel as *Healthy*.
-13. **Public hostname.** In the tunnel's *Public Hostname* tab, add:
+13. **Public hostname.** On the tunnel, add a public hostname (its *Public Hostname* or *Routes*
+    tab):
     - subdomain `api`, domain `owlhead.ai`;
     - service type **HTTP**, URL **`127.0.0.1:8080`**. Use `127.0.0.1`, not `localhost`: the API
       listens on IPv4 loopback only, and `localhost` can resolve to IPv6 first.
@@ -137,24 +146,35 @@ issue, or the repository.
     systemctl list-timers owlhead-backup.timer --no-pager
     ```
 
+    A failed backup logs an error. Check weekly, until notifications exist:
+    `journalctl -p err -t owlhead-backup --since -7d --no-pager` should print nothing.
+
 15. **Prove the backup restores.** Do this now, then monthly:
 
     ```bash
     cd /root/owlhead/deploy
-    bash restore-check.sh /var/backups/owlhead/owlhead-<stamp>.dump /var/backups/owlhead/artifacts-<stamp>.tar.gz
+    bash restore-check.sh /var/backups/owlhead/owlhead-<stamp>.dump /var/backups/owlhead/state-<stamp>.tar.gz
     ```
 
-    It restores into a scratch database and runs `mandate journal verify` on every stream. The
-    run passes only if it ends with `restore check passed`.
+    It restores into a scratch database, runs `mandate journal verify` on every stream, and checks
+    each one ends at its recorded head. The run passes only if its last line starts with
+    `restore check passed`. Before the first agent runs, the journal is empty, and the last line
+    says so: `restore check passed: the restored journal is empty`.
+
+    To restore for real, after losing the VM or a bad migration, follow *Restore after losing the
+    VM or a bad migration* in [README.md](README.md).
 
 ## What each backup covers
 
 - **Nightly local backup** (`owlhead-backup.timer`, 03:30 UTC, 14 days kept): a consistent
-  `pg_dump` of the database and a tarball of the artifact store, in `/var/backups/owlhead`. It
+  `pg_dump` of the database and a tarball of the artifact store and the vault, in
+  `/var/backups/owlhead`. It
   protects against a bad migration, a mistaken delete, or a damaged table. It is on the same disk,
   so it does not protect against losing the VM.
 - **Hetzner Backups** (daily, 7 kept): an image of the whole disk, taken while the server runs.
-  This covers losing the VM, and it includes the local backups above. A database restored from
+  This covers losing the VM, and it includes the local backups above **and**
+  `/etc/owlhead/api.env`, so an image holds the vault together with its key: keep the Hetzner
+  account protected accordingly. A database restored from
   the image is crash-consistent, so after such a restore, run the restore check on the newest
   local dump.
 - **Neither is off-site** beyond Hetzner's own storage. An off-site copy comes before any customer

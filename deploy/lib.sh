@@ -4,6 +4,8 @@
 set -euo pipefail
 
 DRY_RUN=0
+# Set to 1 by put_file when it wrote a file whose content changed (or would, in a dry run).
+CHANGED=0
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export DEPLOY_DIR
 
@@ -33,15 +35,20 @@ run() {
   fi
 }
 
-# Writes stdin to a file with an owner and mode, replacing it only when the content differs.
+# Writes stdin to a file with an owner and mode, replacing it only when the content differs, and
+# sets CHANGED=1 when it did. A dry run prints the content instead; never pass it a secret then.
 put_file() {
   local dest="$1" mode="$2" owner="$3" tmp
+  CHANGED=0
   tmp="$(mktemp)"
   cat >"$tmp"
+  if ! cmp -s "$tmp" "$dest" 2>/dev/null; then
+    CHANGED=1
+  fi
   if [ "$DRY_RUN" = 1 ]; then
     printf '+ write %s (%s %s):\n' "$dest" "$owner" "$mode"
     sed 's/^/    /' "$tmp"
-  elif ! cmp -s "$tmp" "$dest" 2>/dev/null; then
+  elif [ "$CHANGED" = 1 ]; then
     install -o "${owner%%:*}" -g "${owner##*:}" -m "$mode" "$tmp" "$dest"
   else
     chown "$owner" "$dest"
@@ -85,5 +92,18 @@ require_host() {
   if [ "$DRY_RUN" = 0 ] && [ "$(id -u)" != 0 ]; then
     echo "run as root (or with sudo); --dry-run needs no root" >&2
     exit 1
+  fi
+}
+
+# Fails unless `mandate journal verify`'s result line verified the stream from seq 1 to the head that
+# stream_heads records, ending at the recorded hash. A dump that lost a stream's last events still
+# verifies as a shorter chain, so the head is what catches it.
+check_head() {
+  local verified="$1" stream="$2" seq="$3" hash="$4"
+  local want="result: verified, stream $stream, seq 1 to $seq, last hash $hash"
+  if [ "$verified" != "$want" ]; then
+    printf 'stream %s does not end at its recorded head (seq %s, hash %s): %s\n' \
+      "$stream" "$seq" "$hash" "${verified:-no result}" >&2
+    return 1
   fi
 }

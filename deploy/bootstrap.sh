@@ -50,7 +50,15 @@ fi
 run env DEBIAN_FRONTEND=noninteractive apt-get install -y "postgresql-$PG_VERSION"
 put_file "$PG_CONF_D/10-owlhead.conf" 0644 postgres:postgres <"$DEPLOY_DIR/postgres/10-owlhead.conf"
 run systemctl enable postgresql
-run systemctl restart postgresql
+if [ "$CHANGED" = 1 ]; then
+  run systemctl restart postgresql
+else
+  run systemctl start postgresql
+fi
+if [ "$DRY_RUN" = 0 ] && [ -z "$(query postgres "SELECT 1 FROM pg_hba_file_rules WHERE type = 'local' AND 'all' = ANY (user_name) AND auth_method = 'peer'")" ]; then
+  echo "pg_hba.conf has no 'local all all peer' rule; the API's passwordless socket login needs it" >&2
+  exit 1
+fi
 
 say "Database, roles, and schema"
 if [ -z "$(query postgres "SELECT 1 FROM pg_database WHERE datname = '$DB'")" ]; then
@@ -71,6 +79,8 @@ BEGIN
 END
 \$\$;
 REVOKE ALL ON DATABASE $DB FROM PUBLIC;
+REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
+REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
 GRANT CONNECT ON DATABASE $DB TO $API_USER;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 CREATE SCHEMA IF NOT EXISTS journal AUTHORIZATION mandate_journal_owner;
@@ -111,7 +121,7 @@ if ! id -u "$API_USER" >/dev/null 2>&1; then
   run useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$API_USER"
 fi
 run install -d -o root -g root -m 0700 /etc/owlhead
-run install -d -o "$API_USER" -g "$API_USER" -m 0700 /var/lib/owlhead /var/lib/owlhead/artifacts
+run install -d -o "$API_USER" -g "$API_USER" -m 0700 /var/lib/owlhead /var/lib/owlhead/artifacts /var/lib/owlhead/vault
 run install -d -o root -g root -m 0700 /var/backups/owlhead
 if [ ! -f /etc/owlhead/api.env ]; then
   put_file /etc/owlhead/api.env 0600 root:root <"$DEPLOY_DIR/api.env.example"
@@ -123,7 +133,7 @@ fi
 
 say "systemd units: the API (installed, not started) and the backup timer"
 put_file /usr/local/sbin/owlhead-backup 0755 root:root <"$DEPLOY_DIR/backup.sh"
-for unit in owlhead-api.service owlhead-backup.service owlhead-backup.timer; do
+for unit in owlhead-api.service owlhead-backup.service owlhead-backup.timer owlhead-backup-failed.service; do
   put_file "/etc/systemd/system/$unit" 0644 root:root <"$DEPLOY_DIR/systemd/$unit"
 done
 run systemctl daemon-reload
@@ -131,7 +141,7 @@ run systemctl enable --now owlhead-backup.timer
 
 say "Done"
 cat <<'NEXT'
-Next (deploy/FOUNDER-STEPS.md): copy the API binary to /usr/local/bin/mandate-api-server, fill
-/etc/owlhead/api.env, then `systemctl enable --now owlhead-api`. The API unit does not start
+Next (deploy/FOUNDER-STEPS.md): copy the API binary to /usr/local/bin/mandate-api-server, run
+`bash set-secrets.sh`, then `systemctl enable --now owlhead-api`. The API unit does not start
 until the binary exists.
 NEXT

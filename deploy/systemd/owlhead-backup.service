@@ -4,6 +4,7 @@
 Description=Owlhead nightly backup: pg_dump of the journal database and the artifact store
 After=postgresql.service
 Requires=postgresql.service
+OnFailure=owlhead-backup-failed.service
 
 [Service]
 Type=oneshot

@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
 # Proves a backup restores: loads a pg_dump into a scratch database, exports every journal stream
-# from it, and runs `mandate journal verify` (journal spec §11) on each against the backed-up
-# artifact store. Run as root, monthly and after any restore:
+# from it, runs `mandate journal verify` (journal spec §11) on each against the backed-up artifact
+# store, and checks that each verified span ends at the head `stream_heads` records, so a backup
+# that lost a stream's last events fails. Run as root, monthly and after any restore:
 #
-#   bash restore-check.sh /var/backups/owlhead/owlhead-<stamp>.dump /var/backups/owlhead/artifacts-<stamp>.tar.gz
+#   bash restore-check.sh /var/backups/owlhead/owlhead-<stamp>.dump /var/backups/owlhead/state-<stamp>.tar.gz
 #
 # Needs the `mandate` CLI at /usr/local/bin/mandate. The scratch database is dropped at the end;
-# the live database is never touched.
+# the live database is never touched. What it cannot see: a stream whose events and stream_heads
+# row were both deleted leaves no trace in the database; only the cold segments and anchors (journal
+# spec §6.2, §10, §11) show it.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 if [ "$#" -ne 2 ]; then
-  echo "usage: bash restore-check.sh <owlhead-*.dump> <artifacts-*.tar.gz>" >&2
+  echo "usage: bash restore-check.sh <owlhead-*.dump> <state-*.tar.gz>" >&2
   exit 2
 fi
 DUMP="$1"
-ARTIFACTS_TAR="$2"
+STATE_TAR="$2"
 require_host
 
 CHECK_DB=owlhead_restore_check
@@ -41,21 +44,22 @@ runuser -u postgres -- createdb "$CHECK_DB"
 runuser -u postgres -- pg_restore --exit-on-error -d "$CHECK_DB" <"$DUMP"
 runuser -u postgres -- psql -XqA -v ON_ERROR_STOP=1 -d "$CHECK_DB" \
   -c "ALTER DATABASE $CHECK_DB SET search_path = journal"
-tar -C "$work" -xzf "$ARTIFACTS_TAR"
+tar -C "$work" -xzf "$STATE_TAR" artifacts
 chown -R postgres:postgres "$work"
 
-say "Export and verify every stream"
-streams="$(runuser -u postgres -- psql -XtA -v ON_ERROR_STOP=1 -d "$CHECK_DB" \
-  -c "SELECT stream_id FROM journal.stream_heads ORDER BY stream_id")"
-if [ -z "$streams" ]; then
-  echo "the restored journal has no streams; nothing to verify"
+say "Export and verify every stream, each to its recorded head"
+heads="$(runuser -u postgres -- psql -XtA -F ' ' -v ON_ERROR_STOP=1 -d "$CHECK_DB" \
+  -c "SELECT stream_id, seq, encode(hash, 'hex') FROM journal.stream_heads ORDER BY stream_id")"
+if [ -z "$heads" ]; then
+  echo "restore check passed: the restored journal is empty (no stream has an event yet)"
   exit 0
 fi
 count=0
-while IFS= read -r stream; do
+while read -r stream seq hash; do
   out="$work/segment-$count.jsonl"
   runuser -u postgres -- "$MANDATE" journal export "$stream" "$out" --journal "$DSN"
-  runuser -u postgres -- "$MANDATE" journal verify "$out" --store "$work/artifacts"
+  verified="$(runuser -u postgres -- "$MANDATE" journal verify "$out" --store "$work/artifacts" | tee /dev/stderr | grep '^result: ')"
+  check_head "$verified" "$stream" "$seq" "$hash"
   count=$((count + 1))
-done <<<"$streams"
-echo "restore check passed: $count streams verified"
+done <<<"$heads"
+echo "restore check passed: $count streams verified to their recorded heads"
