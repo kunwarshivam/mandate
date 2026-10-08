@@ -4,7 +4,7 @@
  * commands in memory by idempotency key (API-4), and plays the `unreachable` and `result-unknown`
  * scenarios as a network that does not answer.
  */
-import { UNIMPLEMENTED } from "./decode";
+import { UNIMPLEMENTED } from "./unimplemented";
 import type { Fetch } from "./client";
 import type { Scenario } from "@/fixtures/types";
 

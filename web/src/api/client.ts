@@ -5,8 +5,8 @@
  * outcome could not be confirmed is `effect: "unknown"`, never success and never "nothing happened"
  * (API-13). It has no order-placing method (DEC-528).
  */
-import { UNIMPLEMENTED } from "./decode";
-import type { CommandOutcome, CommandStatus, Decoder, JsonObject, KillSwitchRequest, Operation, PreparedCommand, ReadOutcome } from "./types";
+import type { CommandOutcome, CommandStatus, Decoder, Effect, JsonObject, KillSwitchRequest, Operation, PreparedCommand, ReadOutcome, Violation, Watermark } from "./types";
+import { UNIMPLEMENTED } from "./unimplemented";
 
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -19,6 +19,34 @@ export interface ClientOptions {
   newKey?: () => string;
   /** Called on a 401 `unauthenticated`, never on `step_up_required`. */
   onUnauthenticated?: () => void;
+  /** The shared envelope and problem shapes; see `CommonSchema`. A member left undefined keeps its default. */
+  schema?: Partial<CommonSchema>;
+}
+
+/** What every read carries (spec §3.2, §6.1). */
+export interface ReadEnvelope {
+  api_version: string;
+  as_of: Watermark[];
+}
+
+/** The §3.5 members a problem document states; `null` where it does not state one. */
+export interface ProblemFields {
+  code: string | null;
+  effect: Effect | null;
+  event_id: string | null;
+  retryable: boolean | null;
+  violations: Violation[];
+}
+
+/**
+ * The seam for the types generated from `schemas/workspace-api/common/`. The defaults follow only
+ * the prose of spec §3.5 and §6.1; the generated decoders replace them when the schemas land. Either
+ * way the client, not the decoder, decides the fallback: an unstated effect on a command is
+ * `unknown`, and a decoder that throws never turns a sent command into a rejection.
+ */
+export interface CommonSchema {
+  envelope: Decoder<ReadEnvelope>;
+  problem: (body: unknown) => ProblemFields;
 }
 
 export interface WorkspaceClient {
@@ -34,6 +62,9 @@ export interface WorkspaceClient {
   send(command: PreparedCommand): Promise<CommandOutcome>;
   commandStatus(eventId: string): Promise<ReadOutcome<CommandStatus>>;
 }
+
+/** Spec §3.3's CSRF defence (L2's pin, DEC-681): a header a cross-site form cannot set, on every command. */
+export const CSRF_HEADER = "X-Mandate-Request";
 
 /** Each operation's route under the workspace (spec §4.2 to §4.4, §5). */
 export const OPERATIONS: Readonly<Record<Operation, `/${string}`>> = {
@@ -55,6 +86,7 @@ export function isIdempotencyKey(key: string): boolean {
   throw new Error(UNIMPLEMENTED);
 }
 
+/** Random from the platform's CSPRNG (`crypto.getRandomValues`): a key must not be guessable. */
 export function newIdempotencyKey(): string {
   throw new Error(UNIMPLEMENTED);
 }

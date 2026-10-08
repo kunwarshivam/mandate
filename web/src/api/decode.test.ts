@@ -43,6 +43,27 @@ describe("timestamps, refs and integers", () => {
     expect(issue(timestamp(1759082720, "/t")).problem).toBe("wrong_type");
   });
 
+  it.skip("pending E11-9: refuses timestamps outside journal spec §4.7's calendar range", () => {
+    for (const text of ["1970-01-01T00:00:00.000000000Z", "9999-12-31T23:59:59.999999999Z", "2028-02-29T12:00:00.000000000Z"]) {
+      expect(timestamp(text, "/t"), text).toEqual({ ok: true, value: text });
+    }
+    const bad = [
+      "1969-12-31T23:59:59.999999999Z",
+      "2026-09-28T18:05:60.000000000Z",
+      "2026-09-28T24:00:00.000000000Z",
+      "2026-09-28T18:60:00.000000000Z",
+      "2026-13-01T00:00:00.000000000Z",
+      "2026-00-10T00:00:00.000000000Z",
+      "2026-09-00T00:00:00.000000000Z",
+      "2026-02-29T00:00:00.000000000Z",
+      "2026-04-31T00:00:00.000000000Z",
+      "2100-02-29T00:00:00.000000000Z",
+    ];
+    for (const text of bad) {
+      expect(issue(timestamp(text, "/t")), text).toMatchObject({ problem: "not_canonical", value: text });
+    }
+  });
+
   it.skip("pending E11-9: accepts only sha256 content refs", () => {
     const ref = `sha256:${"ab".repeat(32)}`;
     expect(contentRef(ref, "/h")).toEqual({ ok: true, value: ref });

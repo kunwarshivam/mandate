@@ -4,8 +4,7 @@
  * typed issue the screen can render rather than an exception.
  */
 import type { ContentRef, Decoder, Watermark } from "./types";
-
-export const UNIMPLEMENTED = "Unimplemented: E11-9";
+import { UNIMPLEMENTED } from "./unimplemented";
 
 function unimplemented(): never {
   throw new Error(UNIMPLEMENTED);
@@ -37,6 +36,11 @@ export function nullable<T>(inner: Decoder<T>): Decoder<T | null> {
 export function array<T>(item: Decoder<T>): Decoder<T[]> {
   void item;
   return () => unimplemented();
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  void value;
+  return unimplemented();
 }
 
 /** Reads the named members and ignores every other one (spec §3.2). */
