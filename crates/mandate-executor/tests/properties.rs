@@ -1337,7 +1337,6 @@ proptest! {
     /// every script resubmit one intent at a second attempt, which is where an id that depends on
     /// the attempt would show.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_client_order_id_is_a_function_of_the_intent_id_alone(script in scripted_doubted()) {
         let run = play(&script);
         let mut by_intent: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -1478,7 +1477,6 @@ proptest! {
     /// last went `unknown` (DEC-133's ruling on absences), and measures their span on the
     /// `risk_clock` timestamps. The doubted lead puts a resubmission in every script.
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_recovery_submits_without_a_confirmed_absence(script in scripted_doubted()) {
         let run = play(&script);
         let mut absences: BTreeMap<String, (u32, Option<i64>)> = BTreeMap::new();
@@ -1627,7 +1625,6 @@ proptest! {
 
     /// §5.7 and interpretation 26: a reservation outlives everything but a terminal state.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_reservation_is_never_released_before_a_terminal_state(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -1677,7 +1674,6 @@ proptest! {
 
     /// ES-21, journal §8: replaying the drafts a run journaled reproduces its state.
     #[test]
-    #[ignore = "pending E7-2"]
     fn folding_the_journaled_drafts_reproduces_the_live_state(script in scripted()) {
         let run = play(&script);
         prop_assume!(!run.drafts.is_empty());
@@ -1846,7 +1842,6 @@ proptest! {
     /// §5.4: a completely filled bracket entry activates its legs, and Σ protective sell quantity
     /// never exceeds the position.
     #[test]
-    #[ignore = "pending E7-4"]
     fn protective_sell_quantity_never_exceeds_the_position(
         script in scripted_protected_complete()
     ) {
@@ -1899,7 +1894,6 @@ proptest! {
     /// last clock, and an alert counts for it when the draft the notification names is in the
     /// interval's instrument and inside the interval.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_interval_exceeds_the_limit_without_an_alert(script in scripted_protected()) {
         let run = play(&script);
         let accountant = ProtectionAccountant::of(&run.drafts);
@@ -1956,7 +1950,6 @@ proptest! {
     /// order after a confirmation; an opening may be accepted while an exit waits, and the exit
     /// then asks its cancel too (DEC-160 (13)), so a buy is not judged here.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {
         let run = play(&script);
         if let (Some(batch), Some(true)) = (run.kill_batches.first(), run.kill_working.first()) {
@@ -2619,7 +2612,6 @@ proptest! {
     /// §4.7 timestamp on a whole second ("never integer seconds"), read as one. A script whose run
     /// appends no risk input (no fill, so no `FillApplied` or `FeesCharged`) has none to judge.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_risk_input_draft_carries_a_non_decreasing_risk_clock(script in scripted()) {
         let run = play(&script);
         let risk_inputs = [
@@ -2913,7 +2905,6 @@ proptest! {
     /// opening the startup reconciliation holds until it is past the age, which is where an age
     /// check made only on a resubmission would let it go (planted bug 19).
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_submission_carries_an_intent_older_than_its_maximum_age(script in scripted_stale()) {
         let run = play(&script);
         let mut received: BTreeMap<String, i64> = BTreeMap::new();

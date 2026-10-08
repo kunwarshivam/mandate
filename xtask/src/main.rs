@@ -2193,7 +2193,23 @@ const STUB_MARKERS: [&str; 5] = [
 /// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
+///
+/// Three more are E7-4's, let past the kill switch's stub by slice 7 (#668; DEC-485 item 17), each
+/// failing on behaviour the slice does not own:
+/// - `protective_sell_quantity_never_exceeds_the_position_in_any_script` (defect E1): an exit is
+///   submitted beside a bracket's just-activated legs, leaving protection of 2 against a position
+///   of 1 (backlog: "E7-4 (stream K), E1 from E7-4 slice 7's tests correction", DEC-506).
+/// - `no_resting_order_is_submitted_inside_an_unprotected_interval` (defect E2): an opening rests
+///   while protection is cancelled for an exit (backlog: "E7-4 (stream K), E2 from E7-4 slice 7's
+///   tests correction", DEC-506 item 8).
+/// - `hand::an_owner_exit_outside_the_session_prices_from_the_confirmed_bid` (DEC-485 item 11):
+///   outside the regular session a confirmed owner's flatten is queued for the session at the
+///   floor rather than sold in extended hours from the confirmed bid. A loud stub there would fail
+///   the whole step that prices the close: the switch's own step where nothing needs cancelling
+///   first, so its mode and record would never be journaled (`AGENTS.md` rule 13: the kill switch
+///   is always available), or the step confirming the protection's cancel, leaving the position
+///   unprotected and unsold. The session slice deletes this row with the extended-hours path.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2206,6 +2222,18 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "protective_sell_quantity_never_exceeds_the_position_in_any_script",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_resting_order_is_submitted_inside_an_unprotected_interval",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "an_owner_exit_outside_the_session_prices_from_the_confirmed_bid",
     ),
 ];
 
