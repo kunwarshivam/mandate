@@ -2426,6 +2426,16 @@ an agent on a different model, zero missed mutants, and green CI).
 
 ## Spec follow-ups (minor review findings, deferred by the freeze rule)
 
+From the review of workspace API spec §4.8.1 (the audit read contracts, #767):
+
+- Exports: define the file states `GET /exports/{id}` reports (recorded, building, ready). Map a
+  failed or `Ambiguous` `ExportCreated` append to §3.5's `journal_unavailable` or `effect:
+  unknown`, retryable with the same `Idempotency-Key`. Define the per-stream range when
+  `recorded_at` steps back (DEC-764 notes the clock may), for example by seq bounds read from a
+  monotone index. Make the view header's `format` match the request's (`json` against `jsonl`).
+- `mandate-audit` enforces tenant isolation, so it is safety-critical. Its `xtask/layers.toml`
+  entry, CODEOWNERS line, and lint header land with the crate (#797).
+
 From the final review of mandate spec v0.3:
 
 - Tie the loss carry to the broker account rather than `connection_id`; show the carry and its

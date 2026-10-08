@@ -524,11 +524,15 @@ rules below are its semantics.
 | **AU-5** | **A timeline misses nothing and repeats nothing.** Paging a timeline with its per-stream cursor yields every matching event of each stream exactly once, in that stream's `seq` order | Fuzz with filters and concurrent appends against a k-way merge oracle over the two streams |
 | **AU-6** | **Served after recorded.** No export byte and no verification result is served before its `ExportCreated` or `VerificationRun` is `Committed` or `AlreadyCommitted` | Fault injection on the append: a failed or `Ambiguous` append serves nothing |
 | **AU-7** | **CSV cells are inert.** No CSV cell starts with `=`, `+`, `-`, `@`, a tab, or a carriage return | Fuzz payload strings over those characters; an independent scan of every cell |
+| **AU-8** | **A verification covers its whole range.** A `pass` means every event from `from_seq` to `to_seq` was walked: `checked = to_seq − from_seq + 1`, the first and last `seq` are the range's, and a missing, reordered, or extra event fails | An oracle that counts the range independently; seeded deletions, duplicates, and truncations of the stored range each fail, and an out-of-range `from_seq` or `to_seq` is refused |
+| **AU-9** | **Audit output stays in the workspace.** Pages, traces, gate views, timelines, export files, and verification results are served only from the workspace deployment and are never sent to the global control plane. No request log, metric label, or tracing span carries an event body, a payload member, or an export's content. A notice that an export is ready or a verification is done carries only an opaque id and generic text (rule 6, API-10) | A seeded payload string in the journal; after every route is exercised, a scan of the logs, metrics, spans, notices, and the global control plane's inbound traffic finds it nowhere |
 
 **Who may call.** Every route here is the matrix row "Read records, verification; export": a
 workspace admin, an auditor, or a service account (§3.7). The role is checked before any id is
 resolved, so a viewer, an operator, or an approver gets 403 `forbidden` for every id, present or
-not, and learns nothing about existence. A client never reaches these routes (§3.8: `read` never
+not, and learns nothing about existence. This 403 denies the route itself, before and whatever any
+id, so §3.5's rule that 403 is never sent for a resource one cannot see does not apply: no resource
+is resolved. A client never reaches these routes (§3.8: `read` never
 includes the journal) and gets 403. A principal with no membership in the path's workspace gets the
 404 of API-9 for every route under it.
 
@@ -577,40 +581,63 @@ its `artifact_refs` and `config_refs` as stored.
 
 #### Causal trace (J2, FR-7.2, E12-1)
 
-`GET /journal/events/{event_id}/trace` walks from the start event back to its causes. It follows the
-links of the table below, the envelope's `causation_id` on every event, and nothing else: the
-executor writes `IntentReceived`, `GateDecided`, and `FillApplied` with a null `causation_id`, so a
-walk on `causation_id` alone would stop at the fill ([DEC-761](../project/decisions/DEC-761.md)).
-Each target is looked up by the rule in its row, only among the workspace's own streams.
+`GET /journal/events/{event_id}/trace` walks from the start event back to its causes. It follows
+the envelope's `causation_id` on every event, whatever its row, and the payload link members of the
+table below, and nothing else ([DEC-761](../project/decisions/DEC-761.md)). The journal spec
+requires a `causation_id` only on its copies of cross-stream facts (§2), on `IntentProposed` (§9.1
+rule 10), on `OrderSubmitted` version 2 (rule 45), and on `ApprovalResponded` (rule 50). So the
+walk never depends on any other `causation_id`. It uses the payload members the closed schemas
+carry: a fill names its order, and an order request names its intent. Where a row names the
+`causation_id` target's types, a target of another type is `unexpected_type`; elsewhere any event
+in the workspace is followed.
 
-| From | Link member | Target and where it is looked up |
+Every lookup is scoped (AU-1). An id is resolved only by the workspace-scoped lookup of §4.8.1's
+ids rule. A stream id the walk builds from a payload member, such as `agent:{ws}:{agent_id}`, uses
+the path's workspace id and is resolved by the same scoped lookup, never by a cross-workspace index.
+The lookups by payload member (`client_order_id`, `intent_id`, `thesis_id` on one stream) need an
+index on those members in the Postgres adapter; the in-memory reader scans.
+
+| From | Payload link member | Target and where it is looked up |
 |---|---|---|
 | `FillApplied`, `LateFillApplied` | `payload.client_order_id` | Every `OrderSubmitted` with that `client_order_id` and a lower `seq`, on the same account stream (one per attempt) |
-| `OrderSubmitted` version 2 | `causation_id` | Its `OrderRequestRecorded`, the same account stream (journal spec rule 45) |
-| `OrderSubmitted` version 1 | none | `not_recorded`: version 1 has no companion and names no intent |
+| `OrderSubmitted` version 2 | none (its `causation_id` is its `OrderRequestRecorded`, rule 45) | — |
+| `OrderSubmitted` version 1 | none | The walk ends here unless a `causation_id` is recorded: version 1 has no companion and names no intent |
 | `OrderRequestRecorded` | `payload.intent_id` | The `IntentReceived` and every `GateDecided` with that `intent_id` on the same account stream, and the `IntentProposed` whose `event_id` is the `intent_id` on `agent:{ws}:{payload.agent_id}`. A null `intent_id` (protective orders, a flatten) is no link |
-| `IntentReceived`, `GateDecided`, `OrderAbandoned`, `ProtectionChanged` | `payload.intent_id` | As the row above, with `agent_id` from the `IntentReceived` |
-| `IntentProposed` | `causation_id` | Its `DecisionMade`, `ApprovalRevalidated`, or `OwnerExitRequested` on the same agent stream (journal spec §9.1) |
-| `ApprovalRevalidated` | `causation_id`; `payload.approval` | Its `ApprovalResponded`; and the `ApprovalRequested` whose `event_id` is `approval`, both on the same agent stream |
-| `ApprovalResponded`, `OwnerExitRequested`, `OwnerCommandRefused` | `causation_id` | The `ApprovalResponseSubmitted` or `OwnerCommandIssued` on `ctl:{ws}` |
-| `ApprovalRequested` | `causation_id` | Its `DecisionMade` on the same agent stream |
+| `IntentReceived`, `GateDecided`, `ProtectionChanged` | `payload.intent_id` | As the row above, with `agent_id` from the `IntentReceived` (or the `ProtectionChanged`'s own) |
+| `IntentProposed` | none (its `causation_id` is one of `DecisionMade`, `ApprovalRevalidated`, `OwnerExitRequested`, §9.1 rule 10) | — |
+| `ApprovalRevalidated` | `payload.approval` | The `ApprovalRequested` whose `event_id` is `approval`, on the same agent stream. Its `causation_id` is followed as for any event; the runtime writes its `ApprovalResponded` there |
+| `ApprovalResponded` | none (its `causation_id` is its `ApprovalResponseSubmitted` on `ctl:{ws}`, rule 50) | — |
+| `ApprovalRequested` | `payload.content.evidence.outputs[].event_id` | Each `ModelOutputRecorded` the approval's content cites, on the same agent stream (§9.6) |
 | `DecisionMade` | `payload.outputs_used[]` | Each `ModelOutputRecorded` on the same agent stream |
 | `ModelOutputRecorded` | `payload.evidence[]`; `payload.thesis_id` | Each event named in `evidence`, on any stream of the workspace (observations, model invocations); and the `ThesisProposed` or `ThesisRevised` with that `thesis_id` on the same agent stream |
-| `UniverseChanged`, `AgentModeApplied`, `OwnerAcknowledged`, any other event | `causation_id` | The event it names, on any stream of the workspace |
+| Any other event, `OrderAbandoned` included | none | Only its `causation_id` (`OrderAbandoned` has no closed schema yet, so no payload member is a link; §12 question 7) |
 
-So the chain of a fill an agent proposed, approved by its owner, is: `FillApplied` →
-`OrderSubmitted` → `OrderRequestRecorded` → `IntentReceived`, `GateDecided`, and the agent stream's
-`IntentProposed` → `ApprovalRevalidated` → `ApprovalResponded` → the control stream's
-`ApprovalResponseSubmitted`, and `ApprovalRevalidated` → `ApprovalRequested` → `DecisionMade` →
-each `ModelOutputRecorded` → its `ObservationRecorded` and other evidence, and its thesis. Without an
-approval, `IntentProposed` → `DecisionMade` directly. `ModelInvocationRecorded` is reached when an
-event names it (in `evidence`); its own link members close with its schema (§12 question 7).
+The chain of a fill an agent proposed with no approval runs `FillApplied` → `OrderSubmitted` →
+`OrderRequestRecorded` (`causation_id`) → `IntentReceived`, every `GateDecided`, and the agent
+stream's `IntentProposed` → `DecisionMade` (`causation_id`, rule 10) → each `ModelOutputRecorded`
+→ its evidence (`ObservationRecorded`, …) and its thesis.
 
-The walk is breadth first from the start event (depth 0), in the table's order and, within a list
-member, in the list's order. Bounds and outcomes ([DEC-762](../project/decisions/DEC-762.md)):
+With an owner's approval, `IntentProposed` → `ApprovalRevalidated` (`causation_id`, rule 10) →
+`ApprovalRequested` (`payload.approval`) → each `ModelOutputRecorded` the approval cites → its
+evidence and thesis. The answer's side runs `ApprovalRevalidated` → `ApprovalResponded` → the
+control stream's `ApprovalResponseSubmitted`, through each `causation_id` as recorded.
 
-- **Depth** at most 16 hops and **at most 256 events** in one trace. A link not followed because of
-  either bound is a hop with status `beyond_bound`, and the response has `truncated: true`.
+No recorded member the journal spec requires links an approval to its `DecisionMade`. That hop is
+shown only when `ApprovalRequested`'s `causation_id` names the decision, as the runtime writes it
+today; otherwise the decision is not in the trace (§12 question 7).
+
+`ModelInvocationRecorded` is reached when an event names it (in `evidence`). Its own link members
+close with its schema (§12 question 7).
+
+The walk is breadth first from the start event (depth 0): an event's `causation_id` first, then the
+row's members in the table's order, and within a list member, in the list's order. All its reads
+use one database snapshot, and `as_of` is one `Watermark` per stream the walk read. Bounds and
+outcomes ([DEC-762](../project/decisions/DEC-762.md)):
+
+- **Bounds.** A trace goes at most 16 hops deep, holds at most 256 events, and records at most 1,024
+  hops. A link not followed because of any bound is a hop with status `beyond_bound`, and the
+  response has `truncated: true`. Once 1,024 hops are recorded, the walk stops and adds no further
+  hop.
 - **Each event once.** A link to an event already in the trace is a hop with status
   `already_shown` naming that event; it is not followed again. Cycles and self-links end here.
 - **A target that cannot be shown** (absent, malformed, in another workspace, or on a stream the row
@@ -645,7 +672,8 @@ Members ([DEC-763](../project/decisions/DEC-763.md)):
 |---|---|
 | `event_id`, `stream_id`, `seq`, `recorded_at`, `hash` | The envelope |
 | `intent_id`, `verdict`, `reason_code`, `data_profile`, `risk_clock` | The payload, as recorded |
-| `checks` | `payload.checks` in recorded order, each `{id, result, inputs, computed, reason_code}`. `result` is as recorded (`pass`, `fail`, `not_reached`). `reason_code` is the decision's `reason_code` on the first check whose result is `fail`, and `null` on every other, as trading spec §9.1 reports the first failing check's code |
+| `checks` | `payload.checks` in recorded order, each `{id, result, inputs, computed, reason_code}`. `result` is a closed set: `pass`, `fail`, or `not_reached`, the values the executor writes. A recorded value outside the set is served as `other`, with the recorded text in `recorded_result`, and never interpreted. `reason_code` is the decision's `reason_code` on the first check whose result is `fail`, and `null` on every other, as trading spec §9.1 reports the first failing check's code. A verdict other than `allow` with no `fail` check (a `hold` or `defer` that no check records as failed) leaves every check's `reason_code` `null`. The decision's own `reason_code` is still served at the top, and `decisive_check` is `null` |
+| `decisive_check` | The `id` of the first check whose result is `fail`, or `null` |
 | `rule_set` | `config_refs.rule_set`: the rule-set version the gate ran |
 | `config_refs` | Every `config_refs` entry as stored (`fee_config`, `trading_calendar`, `instrument_snapshot`, `mandate_version`, `rule_set`) |
 | `quotes_used`, `marks_used` | The payload's, as recorded, each with its `as_of` or `source` |
@@ -724,7 +752,9 @@ ascending `stream_id` bytes:
 
 `POST /verifications` (with `Idempotency-Key`) takes `{stream_id, from_seq, to_seq, trusted_start}`:
 
-- `to_seq` is an integer or `null` for the head read at start; `to_seq < from_seq` is 422.
+- `from_seq` is at least 1; `to_seq` is an integer or `null` for the head read at start. A
+  `from_seq` or `to_seq` above the stream's head at start, or `to_seq < from_seq`, is 422 `invalid`
+  with violation `range`.
 - `trusted_start` is `{kind: "genesis"}` (only with `from_seq` 1: 64 zeros), `{kind: "manifest",
   manifest_hash}` (a `SegmentExported` manifest of this stream whose `first_seq` is `from_seq`), or
   `{kind: "anchor", anchor_event_id}` (an `AnchorComputed` whose leaf for this stream has `seq` =
@@ -733,10 +763,29 @@ ascending `stream_id` bytes:
   manifest or anchor that is absent, foreign, or does not fit the range is 422 `invalid` with
   violation `trusted_start`, the same for absent and foreign.
 - One run covers at most 1,000,000 events; more is 422.
-- It runs journal spec §11's per-event checks in order over the range, then the per-range checks
-  that apply to it. The result is `{stream_id, from_seq, to_seq, trusted_start, result: "pass" |
-  "fail", checked, first_failure: {seq, check} | null}`, with `check` one of §11's codes and `seq`
-  the event it is reported at.
+- **Coverage (AU-8).** The run reads the events of `from_seq` to `to_seq` in one snapshot and walks
+  them in `seq` order. The first event read must be `from_seq` and the last `to_seq`; an event the
+  walk expects and does not find fails `seq_gap` at the expected `seq`. `checked` is the number of
+  events walked. `pass` requires `checked = to_seq − from_seq + 1` and no failure.
+- **Per-event checks:** journal spec §11's, in its order, on every event; the first failure is
+  reported.
+- **Per-range checks**, run only when no per-event check failed, and reported in this order:
+  - `anchor_head_mismatch`: for every `AnchorComputed` on `ctl:{ws}` (up to its head at start)
+    whose leaf for this stream has a `seq` inside the range, reported at that `seq`.
+  - `anchor_root_mismatch` and `tsa_token_invalid`: for those anchors and for the trusted-start
+    anchor itself, reported at the anchored `seq` (`from_seq` − 1 for the trusted start).
+  - `segment_manifest_mismatch`: for every `SegmentExported` manifest of this stream whose range
+    lies wholly inside the run's range, and for the trusted-start manifest, reported at the
+    segment's first `seq`.
+  - `segment_gap`: between consecutive such manifests, reported at the first missing `seq`.
+  - On an agent stream, `intent_action_mismatch` and `mode_event_mismatch` (§9.1, §11), only where
+    the event they reference is inside the range. As §11 says, a reference to an event before the
+    trusted start is not checked by that range. A `mode_event` that names no earlier event fails
+    only on a full chain: `from_seq` 1 with `genesis`, to the head.
+  - A `genesis` start runs these checks like any other kind; the kind changes only where the
+    trusted `prev_hash` comes from and which trusted-start object is checked.
+- **Result:** `{stream_id, from_seq, to_seq, trusted_start, result: "pass" | "fail", checked,
+  first_failure: {seq, check} | null}`, with `check` one of §11's codes.
 - The API appends `VerificationRun` with that result and serves the result only once it is
   committed (AU-6). Response `202 {verification_id, phase: "recorded" | "running"}`;
   `GET /verifications/{id}` returns the result. A failure is the same `VerificationRun` §11's
@@ -1046,8 +1095,8 @@ risk-reducing call never consults one (API-7, API-8).
 ## 10. Decisions
 
 §4.8.1's readings are [DEC-760](../project/decisions/DEC-760.md) to
-[DEC-767](../project/decisions/DEC-767.md), each Accepted under DEC-176: each adds a bound or a
-refusal and loosens nothing. The rest are recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
+[DEC-767](../project/decisions/DEC-767.md), each Accepted: each closes an unclosed contract by
+the reading that adds no risk (DEC-176 item 2). The rest are recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
 engineering readings an agent accepts (DEC-79, DEC-176): each adds no trading rule, or only tightens
 one. Items 9, 19, 20, and 21 carry the coordinator's round-1 settlements X1, X2, X3, and X5 and its
 ruling on M2 and M3.
@@ -1087,7 +1136,10 @@ follow-ups" there (freeze rule). **SC** marks a safety-critical story.
 6. **Server-sent events through corporate proxies** in hybrid: polling is the fallback; whether it
    is enough at the change rates of a busy workspace.
 7. **Trace links the journal does not record yet.** `ModelInvocationRecorded` names no event it
-   served, so a trace reaches it only when an output's `evidence` names it; a flatten's or a
+   served, so a trace reaches it only when an output's `evidence` names it. A flatten's or a
    protective order's `OrderRequestRecorded` carries no link to the `KillSwitchActivated` or the
-   opening it serves; a version-1 `OrderSubmitted` names no intent. Each needs a journal spec
+   opening it serves. A version-1 `OrderSubmitted` names no intent. `OrderAbandoned` has no closed
+   schema, so no payload member of it is a link. No member the journal spec requires links an
+   `ApprovalRequested` to its `DecisionMade`: the runtime writes the decision as its `causation_id`,
+   which the spec does not require. Each needs a journal spec
    member; until then the trace reports the hop as `not_recorded` or ends (§4.8.1).
