@@ -155,7 +155,8 @@ pub trait JournalRead {
     ) -> Result<Vec<StreamEntry>, AuditError>;
 
     /// The events of `stream_id` after `after_seq`, at most `limit` of them, with the head read in
-    /// the same snapshot.
+    /// the same snapshot. A stream's `seq` is gapless from 1 (journal spec §3), so the events after
+    /// `after_seq` start at index `after_seq` of its rows.
     fn page(
         &self,
         workspace: &WorkspaceId,
@@ -258,9 +259,11 @@ impl JournalRead for MemoryRead<'_> {
         }
         let rows = self.rows(workspace, stream_id)?;
         let last = rows.last().ok_or(AuditError::NotFound)?;
+        let after = usize::try_from(after_seq).unwrap_or(usize::MAX);
         let events: Vec<JournalEvent> = rows
+            .get(after..)
+            .unwrap_or_default()
             .iter()
-            .filter(|row| row.seq > after_seq)
             .take(usize::from(limit.0))
             .map(served)
             .collect();
