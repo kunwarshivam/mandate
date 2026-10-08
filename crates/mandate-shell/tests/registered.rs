@@ -217,7 +217,9 @@ fn the_artifacts_bind_the_registered_instrument_and_objects() {
 /// A registered object is judged as its file is: a fee schedule or a rule set the run cannot use
 /// is refused, never replaced by a reviewed default. A configuration whose instrument or model is
 /// not the confirmed mandate's is refused too, and so is registered content whose own
-/// `model_version` or `model_id` is not the pin's although its hash is the pinned one (DEC-504).
+/// `model_version` or `model_id` is not the pin's although its hash is the pinned one, content
+/// that names the pin under another `kind`, and the E7-7 file's `{"id","version"}` shape, which is
+/// no DEC-504 content object and has no fallback (DEC-504).
 #[test]
 #[ignore = "pending E7-19"]
 fn a_registered_object_the_run_cannot_use_is_refused() {
@@ -233,7 +235,12 @@ fn a_registered_object_the_run_cannot_use_is_refused() {
     let pinned = r#""model_version":"1.0.0""#;
     let renamed = model().replace(pinned, r#""model_version":"1.0.1""#);
     let other_id = model().replace("quant.ma_crossover", "quant.other");
-    for content in [renamed, other_id] {
+    let other_kind = model().replace(
+        r#""kind":"quant_model_content""#,
+        r#""kind":"llm_model_content""#,
+    );
+    let e7_7_shape = String::from_utf8(E7_7_MODEL.to_vec()).unwrap();
+    for content in [renamed, other_id, other_kind, e7_7_shape] {
         assert_ne!(content, model(), "the edit applied");
         assert_absent(Stream::with_model(SNAPSHOT, RULES, FEE, &content).artifacts());
     }
@@ -377,7 +384,8 @@ fn spy_facts(asset_id: &str, symbol: &str, exchange: BrokerExchange) -> PaperFac
 
 /// The preflight judges the broker's asset record against the instrument the registered artifacts
 /// bind (X-8): SPY's id, listed on arca as its snapshot says, holds; AAPL's id, SPY on nasdaq, or
-/// another symbol is refused at the asset record.
+/// another symbol is refused at the asset record, and a registered snapshot whose ETP
+/// classification is dated after the run is refused at the classification.
 #[test]
 #[ignore = "pending E7-19"]
 fn the_preflight_judges_the_registered_instruments_asset_record() {
@@ -396,4 +404,17 @@ fn the_preflight_judges_the_registered_instruments_asset_record() {
         let at_the_record = refused.contains("Absent") && refused.contains("asset record");
         assert!(at_the_record, "{asset_id} {symbol} {exchange:?}: {refused}");
     }
+    let classified_later = SNAPSHOT.replace("2026-09-21T00:00:00Z", "2026-09-29T00:00:00Z");
+    assert_ne!(classified_later, SNAPSHOT, "the edit applied");
+    let later = Stream::deployed(&classified_later, RULES, FEE)
+        .artifacts()
+        .unwrap();
+    let facts = spy_facts(SPY, "SPY", BrokerExchange::Arca);
+    let refused = format!(
+        "{:?}",
+        load_contexts(&later, &facts, now(), &agent).map(|_| ())
+    );
+    let at_the_classification =
+        refused.contains("Absent") && refused.contains("ETP classification");
+    assert!(at_the_classification, "{refused}");
 }
