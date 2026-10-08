@@ -107,7 +107,7 @@ fn a_clean_connect_reports_every_check_passed() {
         },
         "results in the record's order; contract only for MCP"
     );
-    assert_eq!(report.refusal(), Ok(None));
+    assert_eq!(report.refusal(), None);
     let mcp = run(&robinhood()).unwrap();
     let checks: Vec<Check> = mcp.results.iter().map(|(c, _)| *c).collect();
     assert_eq!(
@@ -119,7 +119,7 @@ fn a_clean_connect_reports_every_check_passed() {
             Check::Scope
         ]
     );
-    assert_eq!(mcp.refusal(), Ok(None));
+    assert_eq!(mcp.refusal(), None);
 }
 
 #[test]
@@ -150,6 +150,8 @@ fn nothing_that_can_move_funds_out_is_accepted() {
         &["trade", "withdraw"][..],
         &["transfer", "trade"],
         &["deposit"],
+        &["trade", "funding"],
+        &["trade", "withdrawal"],
     ] {
         let input = CheckInput {
             broker: Broker::KrakenDerivativesUs,
@@ -163,7 +165,14 @@ fn nothing_that_can_move_funds_out_is_accepted() {
             "{permissions:?}"
         );
     }
-    for tool in ["transfer_funds", "withdraw_crypto", "initiate_deposit"] {
+    for tool in [
+        "transfer_funds",
+        "withdraw_crypto",
+        "initiate_deposit",
+        "create_ach_transfer",
+        "send_crypto",
+        "wire_out",
+    ] {
         let mut input = robinhood();
         input.granted = Granted::Tools(set(&["get_accounts", "place_equity_order", tool]));
         assert_eq!(
@@ -229,6 +238,24 @@ fn the_environment_is_judged_from_documentation_without_a_request() {
         outcome(&run(&robinhood()).unwrap(), Check::Environment),
         Some(Outcome::Passed)
     );
+    let key = |broker, environment| CheckInput {
+        broker,
+        environment,
+        auth_kind: AuthKind::ApiKey,
+        granted: Granted::KeyPermissions(Some(set(&["trade"]))),
+        ..alpaca()
+    };
+    for (broker, environment) in [
+        (Broker::Alpaca, Environment::Paper),
+        (Broker::KrakenDerivativesUs, Environment::Paper),
+        (Broker::KrakenDerivativesUs, Environment::Live),
+    ] {
+        assert_eq!(
+            outcome(&run(&key(broker, environment)).unwrap(), Check::Environment),
+            Some(Outcome::Passed),
+            "a key is issued for one environment's host only ({broker:?} {environment:?})"
+        );
+    }
 }
 
 #[test]
@@ -247,9 +274,15 @@ fn the_account_is_read_and_for_robinhood_dedicated() {
         pii_ref: pii(),
         dedicated: Some(false),
     };
+    let not_dedicated = run(&shared).unwrap();
     assert_eq!(
-        outcome(&run(&shared).unwrap(), Check::Account),
+        outcome(&not_dedicated, Check::Account),
         Some(Outcome::Failed(Reason::NotDedicated))
+    );
+    assert_eq!(
+        not_dedicated.account_pii_ref,
+        Some(pii()),
+        "the account was read, so its reference is recorded (journal rule 62)"
     );
     shared.account = AccountRead::Read {
         pii_ref: pii(),
@@ -307,14 +340,14 @@ fn the_refusal_is_the_first_failed_check_in_section_8_1_order() {
     everything.contract = None;
     assert_eq!(
         run(&everything).unwrap().refusal(),
-        Ok(Some((Check::Scope, Reason::FundMovement)))
+        Some((Check::Scope, Reason::FundMovement))
     );
     let mut later = robinhood();
     later.account = AccountRead::Unreadable;
     later.contract = None;
     assert_eq!(
         run(&later).unwrap().refusal(),
-        Ok(Some((Check::Account, Reason::AccountUnreadable))),
+        Some((Check::Account, Reason::AccountUnreadable)),
         "check 3 before check 7"
     );
 }
@@ -347,7 +380,7 @@ fn a_later_failure_suspends_and_drift_degrades() {
         failed.account = AccountRead::Unreadable;
         assert_eq!(
             run(&failed).unwrap().later_state(),
-            Ok(Some(ConnectionState::Suspended)),
+            Some(ConnectionState::Suspended),
             "{occasion:?}"
         );
         let mut drifted = robinhood();
@@ -359,12 +392,12 @@ fn a_later_failure_suspends_and_drift_degrades() {
         });
         assert_eq!(
             run(&drifted).unwrap().later_state(),
-            Ok(Some(ConnectionState::Degraded)),
+            Some(ConnectionState::Degraded),
             "{occasion:?}"
         );
         let mut clean = alpaca();
         clean.occasion = occasion;
-        assert_eq!(run(&clean).unwrap().later_state(), Ok(None));
+        assert_eq!(run(&clean).unwrap().later_state(), None);
     }
     for occasion in [
         Occasion::Connect,
@@ -376,8 +409,156 @@ fn a_later_failure_suspends_and_drift_degrades() {
         refused.account = AccountRead::Unreadable;
         assert_eq!(
             run(&refused).unwrap().later_state(),
-            Ok(None),
+            None,
             "a refusal, not a state change ({occasion:?})"
         );
+    }
+}
+
+/// A report as [`run`] would make it, for the methods that only read one.
+fn report(occasion: Occasion, failed: &[(Check, Reason)]) -> CheckReport {
+    let results = [
+        Check::Account,
+        Check::Contract,
+        Check::Environment,
+        Check::Scope,
+    ]
+    .into_iter()
+    .map(|check| {
+        let reason = failed.iter().find(|(c, _)| *c == check).map(|(_, r)| *r);
+        (check, reason.map_or(Outcome::Passed, Outcome::Failed))
+    })
+    .collect();
+    CheckReport {
+        connection_id: ConnectionId("conn_r".to_owned()),
+        occasion,
+        results,
+        account_pii_ref: Some(pii()),
+    }
+}
+
+/// The checks a report failed, with why.
+type Failures<'a> = &'a [(Check, Reason)];
+
+/// One failure of each check, in §8.1's order.
+const ONE_EACH: [(Check, Reason); 4] = [
+    (Check::Scope, Reason::FundMovement),
+    (Check::Environment, Reason::WrongEnvironment),
+    (Check::Account, Reason::NotDedicated),
+    (Check::Contract, Reason::ContractDrift),
+];
+
+#[test]
+fn each_check_has_its_journal_code() {
+    for (check, code) in [
+        (Check::Account, "account"),
+        (Check::Contract, "contract"),
+        (Check::Environment, "environment"),
+        (Check::Scope, "scope"),
+    ] {
+        assert_eq!(check.code(), code);
+    }
+}
+
+/// Every suffix of §8.1's order: the refusal is the earliest failed check, whatever the report's
+/// own order (the record's, alphabetical).
+#[test]
+fn the_refusal_reads_any_report_in_section_8_1_order() {
+    assert_eq!(report(Occasion::Connect, &[]).refusal(), None);
+    for first in 0..ONE_EACH.len() {
+        let failed = &ONE_EACH[first..];
+        assert_eq!(
+            report(Occasion::Connect, failed).refusal(),
+            Some(ONE_EACH[first]),
+            "{failed:?}"
+        );
+    }
+}
+
+#[test]
+fn no_failed_check_ever_reaches_the_vault_write() {
+    for failure in ONE_EACH {
+        let stores = Cell::new(0);
+        let store = || {
+            stores.set(stores.get() + 1);
+            Ok(())
+        };
+        assert_eq!(
+            report(Occasion::Connect, &[failure]).then_store(store),
+            Err(ConnectError::CheckRefused),
+            "{failure:?}"
+        );
+        assert_eq!(stores.get(), 0, "no vault write after {failure:?}");
+    }
+    let stores = Cell::new(0);
+    let store = || {
+        stores.set(stores.get() + 1);
+        Ok(())
+    };
+    assert_eq!(report(Occasion::Connect, &[]).then_store(store), Ok(()));
+    assert_eq!(stores.get(), 1);
+    assert_eq!(
+        report(Occasion::Connect, &[]).then_store(|| Err(ConnectError::VaultUnavailable)),
+        Err(ConnectError::VaultUnavailable),
+        "the vault's own error is returned, never turned into success"
+    );
+}
+
+/// Later occasions, against a table written out here: any scope, environment, or account failure
+/// suspends, alone or with contract drift (journal rule 60: never degraded); a contract failure
+/// alone degrades; a connect-time occasion never changes state.
+#[test]
+fn a_later_failure_suspends_unless_only_the_contract_failed() {
+    use ConnectionState::{Degraded, Suspended};
+    let drift = (Check::Contract, Reason::ContractDrift);
+    let cases: [(Failures, Option<ConnectionState>); 10] = [
+        (&[], None),
+        (&[(Check::Scope, Reason::ScopeMismatch)], Some(Suspended)),
+        (
+            &[(Check::Environment, Reason::ReachesBoth)],
+            Some(Suspended),
+        ),
+        (
+            &[(Check::Account, Reason::AccountUnreadable)],
+            Some(Suspended),
+        ),
+        (&[(Check::Account, Reason::NotDedicated)], Some(Suspended)),
+        (&[drift], Some(Degraded)),
+        (&[(Check::Contract, Reason::ToolsMissing)], Some(Degraded)),
+        (
+            &[(Check::Scope, Reason::FundMovement), drift],
+            Some(Suspended),
+        ),
+        (
+            &[(Check::Account, Reason::NotDedicated), drift],
+            Some(Suspended),
+        ),
+        (
+            &[
+                (Check::Environment, Reason::WrongEnvironment),
+                (Check::Contract, Reason::ToolsMissing),
+            ],
+            Some(Suspended),
+        ),
+    ];
+    for (failed, want) in cases {
+        for occasion in [Occasion::ExecutorStart, Occasion::Daily] {
+            assert_eq!(
+                report(occasion, failed).later_state(),
+                want,
+                "{occasion:?} {failed:?}"
+            );
+        }
+        for occasion in [
+            Occasion::Connect,
+            Occasion::Reconnect,
+            Occasion::Reauthorize,
+        ] {
+            assert_eq!(
+                report(occasion, failed).later_state(),
+                None,
+                "{occasion:?} {failed:?}"
+            );
+        }
     }
 }
