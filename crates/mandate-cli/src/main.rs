@@ -5,11 +5,14 @@ use anyhow::{Context, bail};
 use clap::Parser;
 use mandate_cli::artifact::ArtifactCommand;
 use mandate_cli::control::Now;
+use mandate_cli::gestures::{AgentCommand, VersionCommand};
 use mandate_cli::inbox::ApprovalsCommand;
 use mandate_cli::journal::JournalCommand;
 use mandate_cli::register::{ConfigCommand, ModelCommand};
 use mandate_cli::workspace::WorkspaceCommand;
-use mandate_cli::{Cli, Command, artifact, download, inbox, inspect, journal, register, workspace};
+use mandate_cli::{
+    Cli, Command, artifact, download, gestures, inbox, inspect, journal, register, workspace,
+};
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
 use mandate_time::{Date, UtcNanos};
@@ -99,6 +102,18 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Workspace(WorkspaceCommand::Open(args)) => {
             workspace::open(&args, now()?, &mut io::stdout().lock())?;
+            Ok(())
+        }
+        Command::Version(VersionCommand::Create(args)) => {
+            gestures::create(&args, now()?, &mut io::stdout().lock())?;
+            Ok(())
+        }
+        Command::Version(VersionCommand::Confirm(args)) => {
+            gestures::confirm(&args, now()?, &mut io::stdout().lock())?;
+            Ok(())
+        }
+        Command::Agent(AgentCommand::Deploy(args)) => {
+            gestures::deploy(&args, now()?, &mut io::stdout().lock())?;
             Ok(())
         }
     }

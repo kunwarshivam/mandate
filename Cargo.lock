@@ -1628,6 +1628,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-identity"
+version = "0.0.0"
+dependencies = [
+ "mandate-time",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-journal"
 version = "0.0.0"
 dependencies = [

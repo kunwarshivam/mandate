@@ -28,6 +28,7 @@ pub mod config;
 pub mod control;
 pub mod deploy;
 pub mod download;
+pub mod gestures;
 pub mod inbox;
 pub mod inspect;
 pub mod journal;
@@ -71,4 +72,10 @@ pub enum Command {
     /// Open the workspace control stream, once, in paper.
     #[command(subcommand)]
     Workspace(workspace::WorkspaceCommand),
+    /// Create a mandate version, or show its confirmation code and confirm it, in paper.
+    #[command(subcommand)]
+    Version(gestures::VersionCommand),
+    /// Show an agent's deployment code, or deploy it with a confirmed version, in paper.
+    #[command(subcommand)]
+    Agent(gestures::AgentCommand),
 }
