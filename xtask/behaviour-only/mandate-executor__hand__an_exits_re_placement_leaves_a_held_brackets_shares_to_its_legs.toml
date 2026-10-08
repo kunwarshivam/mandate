@@ -1,0 +1,9 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs"
+reason = """
+E1's sizing paths (DEC-532; backlog: "E7-4 (stream K), E1 from E7-4 slice 7's tests
+correction"): `replace` after an exit, `new_day`'s re-placement, a passive exit's rest and
+`re_cover` each size protection on a position that includes a working bracket's filled shares,
+which its held legs will cover. It reaches no stub and fails on that sizing until E1's fix deletes
+this file with its `#[ignore]` line.
+"""

@@ -33,6 +33,7 @@ from pathlib import Path
 
 import account
 import approval
+import connections
 import control
 import research
 import risk_state
@@ -3815,6 +3816,7 @@ def render(
     account_section: dict,
     approval_section: dict,
     broker_profile: dict,
+    connections_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3828,6 +3830,7 @@ def render(
             "account_stream": account_section,
             "approval_answers": approval_section,
             "broker_profile": broker_profile,
+            "connections": connections_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3872,6 +3875,7 @@ def main(argv: list[str] | None = None) -> int:
     account_section = account.build_section(v3["genesis_prev_hash"])
     approval_section = approval.build_section()
     broker_profile = build_broker_profile_section(control_section)
+    connections_section = connections.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3891,6 +3895,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += approval.run_mutants(approval_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
+    problems += connections.check_section(connections_section)
+    problems += connections.run_mutants(connections_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3907,6 +3913,7 @@ def main(argv: list[str] | None = None) -> int:
         account_section,
         approval_section,
         broker_profile,
+        connections_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -3919,6 +3926,7 @@ def main(argv: list[str] | None = None) -> int:
         or account.check_section(reread["account_stream"])
         or approval.check_section(reread["approval_answers"])
         or check_broker_profile(reread["broker_profile"])
+        or connections.check_section(reread["connections"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -3963,7 +3971,13 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(approval_section['valid_drafts'])} valid; {len(approval.VALIDATOR_MUTANTS)} validator and "
         f"{len(approval.vector_mutants(approval_section))} vector mutants caught; "
         f"{len(broker_profile['invalid_drafts'])} invalid broker-profile registrations and "
-        f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught"
+        f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught; "
+        f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "
+        f"{len(connections_section['valid_drafts'])} valid, {len(connections_section['sequences'])} stream sequences, "
+        f"{len(connections_section['chains'])} cause chains; "
+        f"{len(connections.VALIDATOR_MUTANTS)} validator, {len(connections.STREAM_MUTANTS)} stream, "
+        f"{len(connections.CHAIN_MUTANTS)} chain, and "
+        f"{len(connections.vector_mutants(connections_section))} vector mutants caught"
     )
     return 0
 
