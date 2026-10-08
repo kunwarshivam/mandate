@@ -1000,6 +1000,22 @@ proves each pending test fails on them (DEC-110).
 - **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime -p mandate-cli`;
   `cargo xtask ci pending`.
 
+## The CLI's Postgres control journal (E10-16, P0)
+
+- **Spec:** `docs/specs/journal.md` §5.1, §6.1, §11 check 6; the first paper trade brief
+  (`docs/project/tasks/first-paper-trade.md`, P0 and X-12); DEC-510, DEC-520.
+- **Code:** `crates/mandate-cli/src/postgres.rs` (`JournalArgs`, the `--journal` and `--store`
+  options D1, D2 and V0 flatten; `PgControlJournal`, `mandate-journal-pg` behind `ControlJournal`,
+  appending through J0's artifact-aware append with the `mandate-artifacts-fs` store), stubbed
+  pending E10-16.
+- **Tests:** `crates/mandate-cli/tests/postgres.rs` (the control-stream vectors byte for byte, a
+  registration refused until its object is in the store, as `MemoryJournal` answers, and
+  ownership, fencing and retries as the CLI tests' journal answers; each starts with a
+  database-free DSN property; the options parse and hide the DSN), and the in-module
+  `waiting_sleeps_for_the_whole_delay`.
+- **Run:** `MANDATE_PG_URL=postgres://… cargo nextest run -p mandate-cli --test postgres`, or
+  `cargo xtask ci postgres`, which runs `mandate-cli` beside `mandate-journal-pg`.
+
 ## Reference-case harness
 
 - **Spec:** ADR-0001 ES-11; DEC-77 (pending and passing cases).

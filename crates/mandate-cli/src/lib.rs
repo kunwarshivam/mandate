@@ -28,6 +28,7 @@ pub mod control;
 pub mod download;
 pub mod inspect;
 pub mod journal;
+pub mod postgres;
 
 /// Mandate research and audit tools.
 #[derive(Debug, Parser)]
