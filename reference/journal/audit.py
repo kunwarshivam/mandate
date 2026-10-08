@@ -1,11 +1,11 @@
-"""Journal spec v0.19 §9.8's reference vectors (DEC-780): the control stream's `RecordsAccessed`,
+"""Journal spec v0.21 §9.10's reference vectors (DEC-780): the control stream's `RecordsAccessed`,
 `ExportCreated`, and `VerificationRun`.
 
-The schemas and rules 54 to 59 live in `control.py`, beside §9.2's to §9.7's, so one validator
+The schemas and rules 75 to 59 live in `control.py`, beside §9.2's to §9.7's, so one validator
 judges every closed schema. This module builds the `records_access` section: a base draft of each
 record, an invalid draft for every member type and rule, and valid drafts for the cases a rule might
 be misread to refuse. It checks the section with oracles of its own: every stream a valid draft
-names is parsed for its workspace independently of rule 54, no valid payload carries a member
+names is parsed for its workspace independently of rule 75, no valid payload carries a member
 outside the closed vocabulary of streams, positions, hashes, codes, and opaque IDs, and each run's
 result is recomputed from its ranges. Every seeded bug is shown caught.
 """
@@ -35,7 +35,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.19 §9.8 (DEC-780)"
+SPEC = "docs/specs/journal.md v0.21 §9.10 (DEC-780)"
 AT = "2026-09-21T15:00:00.000000000Z"
 IDS = {
     "read": "01J8Z3R1A000000000000000R1",
@@ -50,8 +50,10 @@ GENESIS = "0" * 64
 VERIFIER = "e" * 64
 VIEW = "f" * 64
 AUDITOR = {"kind": "user", "id": "user_auditor_01", "version": "1", "build": None}
+# §3's client actor (DEC-671): an owner-connected agent, recorded with the user it acts for.
+CLIENT = {"kind": "client", "id": "client_01", "version": "1", "build": None, "on_behalf_of": OWNER}
 AGENT_ACTOR = {"kind": "agent", "id": "agent_a", "version": "0.1.0", "build": "sha256:" + "c" * 64}
-# Every member name a §9.8 payload may carry, at any depth: streams, positions, hashes, check
+# Every member name a §9.10 payload may carry, at any depth: streams, positions, hashes, check
 # codes, and opaque IDs. An instrument, order, position, or mandate member is none of them.
 VOCABULARY = frozenset(
     (
@@ -235,31 +237,31 @@ def member_drafts() -> list[dict]:
     for base, cases in MEMBER_CASES.items():
         for path, wrong_kind, wrong_form in cases:
             label = path.removeprefix("payload.")
-            out.append(invalid(f"{base}.{label}.kind", "§9.8 types", base, [change(path, wrong_kind)], "schema", path))
+            out.append(invalid(f"{base}.{label}.kind", "§9.10 types", base, [change(path, wrong_kind)], "schema", path))
             if wrong_form is not None:
                 out.append(
-                    invalid(f"{base}.{label}.form", "§9.8 types", base, [change(path, wrong_form)], "non_canonical", path)
+                    invalid(f"{base}.{label}.form", "§9.10 types", base, [change(path, wrong_form)], "non_canonical", path)
                 )
     for base, members in NULLED.items():
         for path in members:
             label = path.removeprefix("payload.")
-            out.append(invalid(f"{base}.{label}.null", "§9.8 types", base, [change(path, None)], "schema", path))
+            out.append(invalid(f"{base}.{label}.null", "§9.10 types", base, [change(path, None)], "schema", path))
     for base in BASES:
         first = next(iter(BASES[base]["payload"]))
         out.append(
-            invalid(f"{base}.missing", "§9.8 closed", base, [delete(f"payload.{first}")], "schema", f"payload.{first}")
+            invalid(f"{base}.missing", "§9.10 closed", base, [delete(f"payload.{first}")], "schema", f"payload.{first}")
         )
-        out.append(invalid(f"{base}.extra", "§9.8 closed", base, [change("payload.instrument", "x")], "schema", "payload.instrument"))
+        out.append(invalid(f"{base}.extra", "§9.10 closed", base, [change("payload.instrument", "x")], "schema", "payload.instrument"))
     out.append(
-        invalid("range_missing_member", "§9.8 closed", "records_read", [delete(f"{R0}.to_hash")], "schema", f"{R0}.to_hash")
+        invalid("range_missing_member", "§9.10 closed", "records_read", [delete(f"{R0}.to_hash")], "schema", f"{R0}.to_hash")
     )
     out.append(
-        invalid("range_extra_member", "§9.8 closed", "records_read", [change(f"{R0}.quantity", "1")], "schema", f"{R0}.quantity")
+        invalid("range_extra_member", "§9.10 closed", "records_read", [change(f"{R0}.quantity", "1")], "schema", f"{R0}.quantity")
     )
     out.append(
         invalid(
             "failure_extra_member",
-            "§9.8 closed",
+            "§9.10 closed",
             "verification_fail",
             [change(f"{R0}.failure.detail", "x")],
             "schema",
@@ -271,14 +273,14 @@ def member_drafts() -> list[dict]:
 
 def invalid_drafts() -> list[dict]:
     """Each draft breaks exactly one rule, or the rules its `also` lists; together they cover every
-    §9.8 member type and rule."""
+    §9.10 member type and rule."""
     read, export, view = "records_read", "export_canonical", "export_view"
     ok, bad = "verification_pass", "verification_fail"
     return [
         *member_drafts(),
         invalid(
             "read_wrong_stream",
-            "§9.8: the records are control-stream records",
+            "§9.10: the records are control-stream records",
             read,
             [change("stream_id", AGENT_STREAM)],
             "wrong_stream",
@@ -286,7 +288,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "export_digest_listed_as_an_artifact",
-            "§9.8 types: a `digest` names no stored artifact, so `artifact_refs` does not list it",
+            "§9.10 types: a `digest` names no stored artifact, so `artifact_refs` does not list it",
             view,
             [],
             "artifact_refs",
@@ -302,10 +304,10 @@ def invalid_drafts() -> list[dict]:
             "artifact_refs",
         )
         | {"changes": [change("payload.result", "sha256:" + "9" * 64)]},
-        invalid("read_nothing", "rule 54: at least one range", read, [change("payload.ranges", [])], "schema", "payload.ranges"),
+        invalid("read_nothing", "rule 75: at least one range", read, [change("payload.ranges", [])], "schema", "payload.ranges"),
         invalid(
             "read_another_workspace",
-            "rule 54: tenant isolation (workspace API API-9)",
+            "rule 75: tenant isolation (workspace API API-9)",
             read,
             [change(f"{R0}.stream_id", FOREIGN_STREAM)],
             "schema",
@@ -313,7 +315,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "export_another_workspace_second",
-            "rule 54: every range, not only the first",
+            "rule 75: every range, not only the first",
             export,
             [change(f"{R1}.stream_id", "agent:ws_01J8Z9:agent_a")],
             "schema",
@@ -321,7 +323,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "verify_another_workspace_control",
-            "rule 54: the control stream of another workspace",
+            "rule 75: the control stream of another workspace",
             ok,
             [change("payload.ranges[2].stream_id", "ctl:ws_01J8Z9")],
             "schema",
@@ -329,7 +331,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "range_from_seq_zero",
-            "rule 54: seq starts at 1",
+            "rule 75: seq starts at 1",
             export,
             [change(f"{R0}.from_seq", 0)],
             "schema",
@@ -338,7 +340,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "range_reversed",
-            "rule 54: `to_seq` is at least `from_seq`",
+            "rule 75: `to_seq` is at least `from_seq`",
             read,
             [change(f"{R0}.to_seq", 11)],
             "schema",
@@ -346,7 +348,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "range_from_one_not_genesis",
-            "rule 54: seq 1 follows 64 zeros",
+            "rule 75: seq 1 follows 64 zeros",
             export,
             [change(f"{R0}.prev_hash", "9" * 64)],
             "schema",
@@ -354,7 +356,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "range_genesis_not_from_one",
-            "rule 54: only seq 1 follows 64 zeros",
+            "rule 75: only seq 1 follows 64 zeros",
             read,
             [change(f"{R0}.prev_hash", GENESIS)],
             "schema",
@@ -362,7 +364,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "ranges_out_of_order",
-            "rule 54: ranges sort by stream",
+            "rule 75: ranges sort by stream",
             export,
             [change(f"{R1}.stream_id", f"acct:{WORKSPACE}:01J8Z2ACCT00000000000000A0")],
             "schema",
@@ -370,7 +372,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "ranges_overlap",
-            "rule 54: two ranges of one stream never overlap",
+            "rule 75: two ranges of one stream never overlap",
             read,
             [change("payload.ranges", [span(AGENT_STREAM, 12, 30, "2" * 64, "3" * 64), span(AGENT_STREAM, 30, 31, "3" * 64, "5" * 64)])],
             "schema",
@@ -378,7 +380,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "ranges_repeat",
-            "rule 54: one range listed twice",
+            "rule 75: one range listed twice",
             read,
             [change("payload.ranges", [span(AGENT_STREAM, 12, 30, "2" * 64, "3" * 64)] * 2)],
             "schema",
@@ -386,7 +388,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "read_accessor_not_the_reader",
-            "rule 55: the accessor is the actor",
+            "rule 76: the accessor is the actor",
             read,
             [change("payload.accessor", OWNER)],
             "schema",
@@ -394,7 +396,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "read_resource_not_an_id",
-            "§9.8 types: a resource is an opaque `id`",
+            "§9.10 types: a resource is an opaque `id`",
             read,
             [change("payload.resources", ["agent a"])],
             "non_canonical",
@@ -402,7 +404,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "read_resources_unsorted",
-            "rule 55: resources sort by bytes",
+            "rule 76: resources sort by bytes",
             read,
             [change("payload.resources", ["notice_01", "agent_a"])],
             "schema",
@@ -410,7 +412,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "read_resource_twice",
-            "rule 55: each resource once",
+            "rule 76: each resource once",
             read,
             [change("payload.resources", ["agent_a", "agent_a"])],
             "schema",
@@ -418,15 +420,47 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "read_by_an_agent",
-            "rule 55: an agent runtime reads no records outside the product views",
+            "rule 76: an agent runtime reads no records outside the product views",
             read,
             [change("actor", AGENT_ACTOR), change("payload.accessor", AGENT_ACTOR["id"])],
             "schema",
             "actor.kind",
         ),
         invalid(
+            "client_read_for_no_one",
+            "§3 rule 66: a client actor names the user it acts for",
+            read,
+            [change("actor", {k: v for k, v in CLIENT.items() if k != "on_behalf_of"}), change("payload.accessor", CLIENT["id"])],
+            "schema",
+            "actor.on_behalf_of",
+        ),
+        invalid(
+            "client_read_recorded_as_its_human",
+            "rule 76: a client is its own accessor, never the user it acts for",
+            read,
+            [change("actor", CLIENT), change("payload.accessor", OWNER)],
+            "schema",
+            "payload.accessor",
+        ),
+        invalid(
+            "client_exports",
+            "§3 rule 68: a client never exports (workspace API §3.8)",
+            export,
+            [change("actor", CLIENT)],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "client_verifies",
+            "§3 rule 68: a client never verifies",
+            bad,
+            [change("actor", CLIENT)],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
             "export_by_an_agent",
-            "rule 56: a user or a service account exports",
+            "rule 77: a user or a service account exports",
             export,
             [change("actor", AGENT_ACTOR)],
             "schema",
@@ -434,7 +468,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "canonical_with_a_view",
-            "rule 56: a view exactly for a view form",
+            "rule 77: a view exactly for a view form",
             export,
             [change("payload.view", VIEW)],
             "schema",
@@ -442,7 +476,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "view_without_its_bytes",
-            "rule 56",
+            "rule 77",
             view,
             [change("payload.view", None)],
             "schema",
@@ -450,7 +484,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "scheduled_run_by_a_user",
-            "rule 57: a scheduled run is the verifier's own",
+            "rule 78: a scheduled run is the verifier's own",
             ok,
             [change("actor", USER)],
             "schema",
@@ -458,7 +492,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "requested_run_by_an_agent",
-            "rule 57",
+            "rule 78",
             bad,
             [change("actor", AGENT_ACTOR)],
             "schema",
@@ -466,7 +500,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "event_check_without_its_seq",
-            "rule 58: a per-event check names its seq",
+            "rule 79: a per-event check names its seq",
             bad,
             [change(f"{R0}.failure.seq", None)],
             "schema",
@@ -474,7 +508,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "range_check_with_a_seq",
-            "rule 58: a range check names no seq",
+            "rule 79: a range check names no seq",
             bad,
             [change(f"{R0}.failure.check", "anchor_root_mismatch")],
             "schema",
@@ -482,7 +516,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "failure_after_the_range",
-            "rule 58: the seq lies in the range",
+            "rule 79: the seq lies in the range",
             bad,
             [change(f"{R0}.failure.seq", 41)],
             "schema",
@@ -490,7 +524,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "failure_before_the_range",
-            "rule 58: the seq lies in the range",
+            "rule 79: the seq lies in the range",
             bad,
             [change(f"{R0}.failure.seq", 0)],
             "schema",
@@ -498,7 +532,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "passed_range_without_its_head",
-            "rule 58: a passed range names the head it verified",
+            "rule 79: a passed range names the head it verified",
             ok,
             [change(f"{R1}.to_hash", None)],
             "schema",
@@ -506,7 +540,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "fail_reported_as_pass",
-            "rule 59",
+            "rule 80",
             bad,
             [change("payload.result", "pass")],
             "schema",
@@ -514,7 +548,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "pass_reported_as_fail",
-            "rule 59",
+            "rule 80",
             ok,
             [change("payload.result", "fail")],
             "schema",
@@ -530,13 +564,13 @@ def valid_drafts() -> list[dict]:
     return [
         valid(
             "read_one_event",
-            "rule 54: a range of one event",
+            "rule 75: a range of one event",
             read,
             [change(f"{R0}.to_seq", 12)],
         ),
         valid(
             "read_two_ranges_of_one_stream",
-            "rule 54: disjoint ranges of one stream, adjacent included",
+            "rule 75: disjoint ranges of one stream, adjacent included",
             read,
             [
                 change(
@@ -547,13 +581,19 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "read_by_a_service_account",
-            "rule 55: a service account is a `system` actor (identity spec §3.1)",
+            "rule 76: a service account is a `system` actor (identity spec §3.1)",
             read,
             [change("actor", SERVICES), change("payload.accessor", SERVICES["id"])],
         ),
         valid(
+            "client_reads_its_own_records",
+            "rule 76 and §3 rule 68: a client records its own read, as its own accessor (workspace API §3.8)",
+            read,
+            [change("actor", CLIENT), change("payload.accessor", CLIENT["id"]), change("payload.operation", "agent_status")],
+        ),
+        valid(
             "read_scheduler_and_notice_streams",
-            "§9.8 types: every stream type of §2",
+            "§9.10 types: every stream type of §2",
             read,
             [
                 change(
@@ -567,7 +607,7 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "notice_resolved_by_a_client_read",
-            "rule 55: resources and a stored result (workspace API §3.9)",
+            "rule 76: resources and a stored result (workspace API §3.9)",
             read,
             [
                 change("payload.operation", "resolve_notice"),
@@ -576,13 +616,13 @@ def valid_drafts() -> list[dict]:
                 change("payload.result", "sha256:" + "9" * 64),
             ],
         ),
-        valid("json_view", "rule 56", view, [change("payload.form", "json")]),
-        valid("export_by_a_service_account", "rule 56", export, [change("actor", SERVICES)]),
-        valid("requested_run_by_a_service_account", "rule 57", bad, [change("actor", SERVICES)]),
-        valid("requested_run_passed", "rules 57 and 59", ok, [change("actor", USER), change("payload.trigger", "request")]),
+        valid("json_view", "rule 77", view, [change("payload.form", "json")]),
+        valid("export_by_a_service_account", "rule 77", export, [change("actor", SERVICES)]),
+        valid("requested_run_by_a_service_account", "rule 78", bad, [change("actor", SERVICES)]),
+        valid("requested_run_passed", "rules 78 and 59", ok, [change("actor", USER), change("payload.trigger", "request")]),
         valid(
             "restore_drill_failed_on_a_range_check",
-            "rules 58 and 59: a range check names no seq and may keep its head",
+            "rules 79 and 59: a range check names no seq and may keep its head",
             bad,
             [
                 change("actor", SERVICES),
@@ -593,13 +633,13 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "failure_at_the_first_event",
-            "rule 58: the range's own bounds are inside",
+            "rule 79: the range's own bounds are inside",
             bad,
             [change(f"{R0}.failure", {"check": "prev_hash_mismatch", "seq": 1})],
         ),
         valid(
             "failure_at_the_last_event",
-            "rule 58",
+            "rule 79",
             bad,
             [change(f"{R0}.failure", {"check": "seq_gap", "seq": 40})],
         ),
@@ -619,7 +659,7 @@ def found(check: str, message: str) -> str:
 
 def workspace_of(stream: str) -> str:
     """§2's `{workspace_id}`: the text between the first and second colon, found by position rather
-    than by rule 54's split."""
+    than by rule 75's split."""
     start = stream.index(":") + 1
     end = stream.find(":", start)
     return stream[start:] if end < 0 else stream[start:end]
@@ -672,24 +712,24 @@ def check_section(section: dict) -> list[str]:
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = (
-    "rule.54.empty",
-    "rule.54.workspace",
-    "rule.54.from_seq",
-    "rule.54.to_seq",
-    "rule.54.genesis",
-    "rule.54.order",
-    "boundary.rule_54_from_seq",
-    "boundary.rule_54_overlap",
-    "rule.55.accessor",
-    "rule.55.actor",
-    "rule.55.resources",
-    "rule.56.actor",
-    "rule.56.view",
-    "rule.57",
-    "rule.58.seq",
-    "rule.58.inside",
-    "rule.58.to_hash",
-    "rule.59",
+    "rule.75.empty",
+    "rule.75.workspace",
+    "rule.75.from_seq",
+    "rule.75.to_seq",
+    "rule.75.genesis",
+    "rule.75.order",
+    "boundary.rule_75_from_seq",
+    "boundary.rule_75_overlap",
+    "rule.76.accessor",
+    "rule.76.actor",
+    "rule.76.resources",
+    "rule.77.actor",
+    "rule.77.view",
+    "rule.78",
+    "rule.79.seq",
+    "rule.79.inside",
+    "rule.79.to_hash",
+    "rule.80",
     "types.stream_id",
     "types.digest",
     "record.extra",
@@ -727,7 +767,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         s["drafts"]["verification_fail"]["payload"]["result"] = "pass"
 
     return [
-        ("a base draft breaks rule 56", "drafts.valid", mutated(lambda s: s["drafts"]["export_canonical"]["payload"].update(view=VIEW))),
+        ("a base draft breaks rule 77", "drafts.valid", mutated(lambda s: s["drafts"]["export_canonical"]["payload"].update(view=VIEW))),
         ("a base read names another workspace's stream", "drafts.tenant", mutated(foreign_base)),
         ("a valid read names another workspace's stream", "drafts.tenant", mutated(foreign_valid)),
         ("a valid view carries an instrument", "drafts.vocabulary", mutated(instrument_valid)),

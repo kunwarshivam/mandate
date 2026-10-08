@@ -333,7 +333,107 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
     ("band_bp", INT),
 )
 
-# §9.8 (DEC-780): the records-access, export, and verification records. Each names what it covers
+# §9.8 (DEC-670): the records the workspace API commits. `MandateConfirmed` gains its agent link at
+# `schema_version` 2 (registered with the §9.5 versions below); the others close at 1.
+DRAFT_ORIGINS = ("description", "goal_answers", "template", "version", "edit", "compile")
+NEW_DRAFT_ORIGINS = DRAFT_ORIGINS[:4]
+CALL_REFUSALS = (
+    "policy_denied",
+    "budget_exhausted",
+    "rate_limited_local",
+    "meter_unavailable",
+    "input_rejected",
+    "model_withdrawn",
+)
+CALL_OUTCOMES = (
+    "ok",
+    *CALL_REFUSALS,
+    "deadline_exceeded",
+    "provider_unavailable",
+    "rate_limited_provider",
+    "credential_invalid",
+    "content_refused",
+    "schema_invalid",
+    "identity_mismatch",
+)
+SENT_NOTHING = ("response_ref", "reported_identity", "provider_request_id", "attempts", "tokens", "cost_usd")
+TOKENS = rec(("input", INT), ("output", INT), ("cached", INT))
+SCHEMAS[("ctl", "MandateDraftSaved")] = rec(
+    ("draft_id", IDENT_T),
+    ("draft", REF),
+    ("origin", one_of(*DRAFT_ORIGINS)),
+    ("base_draft", opt(REF)),
+    ("base_version", opt(REF)),
+)
+SCHEMAS[("ctl", "ModelInvocationRecorded")] = rec(
+    ("call_id", ULID),
+    ("purpose", one_of("compiler")),
+    ("draft_id", IDENT_T),
+    ("draft", REF),
+    ("model", rec(("model_id", STR), ("model_version", STR), ("content_hash", REF))),
+    ("endpoint", STR),
+    ("request_digest", REF),
+    ("sampling", rec(("temperature", DEC), ("seed", opt(INT)))),
+    ("prompt_ref", REF),
+    ("response_ref", opt(REF)),
+    ("reported_identity", opt(STR)),
+    ("provider_request_id", opt(STR)),
+    ("outcome", one_of(*CALL_OUTCOMES)),
+    ("attempts", INT),
+    ("tokens", TOKENS),
+    ("cost_usd", DEC),
+    ("price_table_ref", REF),
+    ("cache_hit", BOOL),
+    ("deadline", TS),
+    ("completed_at", TS),
+)
+SCHEMAS[("ctl", "OwnerRequestSubmitted")] = rec(
+    ("agent_id", IDENT_T),
+    ("instrument_id", T("asset_id")),
+    ("side", one_of("buy", "sell")),
+    ("quantity", opt(DEC)),
+    ("requested_by", one_of("owner", "client")),
+    ("client_id", opt(IDENT_T)),
+)
+CONFIRMED_V2 = rec(
+    ("mandate_version", REF),
+    ("confirmed_paths", list_of(POINTER)),
+    ("record_ref", REF),
+    ("agent_id", opt(IDENT_T)),
+    ("base_version", opt(REF)),
+)
+REQUIRED_REFS["ModelInvocationRecorded"] = ("model_version",)
+
+# §3 and §9.9 (DEC-671): the `client` actor, `ConnectionRevoked`'s reason, and the client records.
+ACTOR_KINDS = ("system", "agent", "user", "broker", "platform_operator", "client")
+CONTROL_ENVELOPE = rec(
+    *(
+        (name, rec(("kind", one_of(*ACTOR_KINDS)), *ty.fields[1:])) if name == "actor" else (name, ty)
+        for name, ty in ENVELOPE.fields
+    )
+)
+CLIENT_EVENTS = ("MandateDraftSaved", "OwnerRequestSubmitted", "RecordsAccessed")
+CLIENT_SCOPES = ("dry_run", "hold", "propose", "read", "request")
+REVOKED_V2 = rec(("connection_id", IDENT_T), ("reason", one_of("owner", "compromised")), ("step_up", STEP_UP))
+SCHEMAS[("ctl", "ClientConnected")] = rec(
+    ("client_id", IDENT_T),
+    ("user", STR),
+    ("scopes", list_of(one_of(*CLIENT_SCOPES))),
+    ("agents", list_of(IDENT_T)),
+    ("step_up", STEP_UP),
+)
+REVOCATION_ACTORS = {
+    "owner": ("user",),
+    "admin": ("user",),
+    "member_deactivated": ("system",),
+    "deprovisioned": ("system",),
+    "compromised": ("user", "system"),
+}
+SCHEMAS[("ctl", "ClientRevoked")] = rec(
+    ("client_id", IDENT_T), ("user", STR), ("reason", one_of(*REVOCATION_ACTORS))
+)
+
+# §9.10 (DEC-780): the records-access, export, and verification records. Each names what it covers
 # as stream ranges of its own workspace, bounded by event hashes, never by instrument or content.
 # A `digest` is bare hex, so it names no stored artifact and stays out of `artifact_refs`.
 GENESIS = "0" * 64
@@ -468,6 +568,8 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1,),
+    ("ctl", "MandateConfirmed"): (1, 2),
+    ("ctl", "ConnectionRevoked"): (1, 2),
 }
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "StreamOpened", 1): rec(
@@ -484,6 +586,8 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
     ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
+    ("ctl", "MandateConfirmed", 2): CONFIRMED_V2,
+    ("ctl", "ConnectionRevoked", 2): REVOKED_V2,
 }
 
 
@@ -794,6 +898,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         if p["acknowledged"] is not None and action != "unprotected_end":
             rule("44.acknowledged", False, "schema", "payload.acknowledged")
     out += answer_violations(event_type, draft, skip)
+    out += workspace_violations(event_type, draft, skip)
     out += audit_violations(event_type, draft, skip)
     return out
 
@@ -832,8 +937,111 @@ def answer_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
     return out
 
 
+def workspace_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.8's rules 54 to 65, on a well-typed payload, in rule order. A seeded `loose` bug can let a
+    member of the wrong kind through; the rules that read it then stop, as the journal's own reader
+    would refuse it before them."""
+    out: list[Violation] = []
+    try:
+        workspace_rules(event_type, draft, skip, out)
+    except (TypeError, ValueError, ArithmeticError, AttributeError, KeyError):
+        pass
+    return out
+
+
+def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: list[Violation]) -> None:
+    p = draft["payload"]
+    actor = draft["actor"]
+
+    def rule(name: str, holds: bool, path: str, reason: str = "schema") -> bool:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", reason, path))
+            return False
+        return True
+
+    if event_type == "MandateDraftSaved":
+        new = p["origin"] in NEW_DRAFT_ORIGINS
+        (
+            rule("54.base_draft", (p["base_draft"] is None) == new, "payload.base_draft")
+            and rule("54.base_version", (p["base_version"] is not None) == (p["origin"] == "version"), "payload.base_version")
+            and rule("54.compile", p["origin"] != "compile" or draft["causation_id"] is not None, "causation_id")
+        )
+        client = actor["kind"] == "client" and (p["origin"] == "version" or "rule.55.client_origin" in skip)
+        rule("55", actor["kind"] == "user" or client, "actor.kind")
+    if event_type == "ModelInvocationRecorded":
+        bound = draft["config_refs"].get("model_version")
+        if bound is not None:
+            rule("56", p["model"]["content_hash"] == bound, "payload.model.content_hash")
+        ok = p["outcome"] == "ok"
+        if ok:
+            missing = next((m for m in ("response_ref", "reported_identity") if p[m] is None), None)
+            rule("57", missing is None, f"payload.{missing}")
+        if p["outcome"] in CALL_REFUSALS:
+            sent = {
+                "response_ref": p["response_ref"] is not None,
+                "reported_identity": p["reported_identity"] is not None,
+                "provider_request_id": p["provider_request_id"] is not None,
+                "attempts": p["attempts"] != 0,
+                "tokens": any(v != 0 for v in p["tokens"].values()) and "rule.58.tokens" not in skip,
+                "cost_usd": Decimal(p["cost_usd"]) != 0,
+            }
+            first = next((m for m in SENT_NOTHING if sent[m]), None)
+            rule("58", first is None, f"payload.{first}")
+        if p["cache_hit"]:
+            if rule("59.hit", ok, "payload.cache_hit"):
+                spent = {
+                    "attempts": p["attempts"] != 0,
+                    "provider_request_id": p["provider_request_id"] is not None,
+                    "cost_usd": Decimal(p["cost_usd"]) != 0,
+                }
+                first = next((m for m in spent if spent[m]), None)
+                rule("59.free", first is None, f"payload.{first}")
+        elif p["outcome"] not in CALL_REFUSALS:
+            floor = 2 if "boundary.rule_59_attempts" in skip else 1
+            rule("59.attempts", p["attempts"] >= floor, "payload.attempts")
+        rule("60.cost", Decimal(p["cost_usd"]) >= 0, "payload.cost_usd")
+        if ok:
+            late = instant_nanos(p["completed_at"]) > instant_nanos(p["deadline"])
+            if "boundary.rule_60_strict" in skip:
+                late = instant_nanos(p["completed_at"]) >= instant_nanos(p["deadline"])
+            rule("60.late", not late, "payload.completed_at")
+        rule("61", actor["kind"] == "system", "actor.kind")
+    if event_type == "MandateConfirmed" and draft["schema_version"] == 2:
+        (
+            rule("62.paired", (p["base_version"] is None) == (p["agent_id"] is None), "payload.base_version")
+            and rule("62.moved", p["base_version"] != p["mandate_version"], "payload.base_version")
+        )
+        rule("63", actor["kind"] == "user", "actor.kind")
+    if event_type == "OwnerRequestSubmitted":
+        expected = {"user": "owner", "client": "client"}.get(actor["kind"])
+        if rule("64.actor", expected is not None, "actor.kind") and rule(
+            "64.requested_by", p["requested_by"] == expected, "payload.requested_by"
+        ):
+            client_id = actor["id"] if expected == "client" else None
+            rule("64.client_id", p["client_id"] == client_id, "payload.client_id")
+        if p["quantity"] is not None:
+            positive = Decimal(p["quantity"]) >= 0 if "boundary.rule_65_zero" in skip else Decimal(p["quantity"]) > 0
+            rule("65", positive, "payload.quantity")
+    if event_type == "ConnectionRevoked" and draft["schema_version"] == 2:
+        compromised = p["reason"] == "compromised"
+        rule("69", (draft["causation_id"] is not None) == compromised, "causation_id")
+        rule("70", actor["kind"] == "user", "actor.kind")
+    if event_type == "ClientConnected":
+        rule("71", bool(p["scopes"]) and bool(p["agents"]), "payload.scopes" if not p["scopes"] else "payload.agents")
+        rule("72.scopes", ascending(encoded(p["scopes"])), "payload.scopes", "non_canonical")
+        rule("72.agents", ascending(encoded(p["agents"])), "payload.agents", "non_canonical")
+        if rule("73.actor", actor["kind"] == "user", "actor.kind"):
+            rule("73.user", p["user"] == actor["id"], "payload.user")
+    if event_type == "ClientRevoked":
+        if rule("74", actor["kind"] in REVOCATION_ACTORS[p["reason"]], "actor.kind"):
+            if p["reason"] == "owner":
+                rule("74.owner", p["user"] == actor["id"], "payload.user")
+            if p["reason"] == "admin":
+                rule("74.admin", p["user"] != actor["id"], "payload.user")
+
+
 def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.8's rules 54 to 59, on a well-typed payload, in number order. A seeded `loose` or
+    """§9.10's rules 75 to 59, on a well-typed payload, in number order. A seeded `loose` or
     `nullable` bug can let a mistyped member through; a clause whose inputs are mistyped is not
     judged, so the bug shows as the type violation it hid rather than as a rule at the same path."""
     if event_type not in ("RecordsAccessed", "ExportCreated", "VerificationRun"):
@@ -848,56 +1056,56 @@ def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list
 
     ranges = p["ranges"] if isinstance(p["ranges"], list) else None
     items = [r if isinstance(r, dict) else {} for r in ranges or []]
-    rule("54.empty", ranges is None or bool(ranges), "payload.ranges")
+    rule("75.empty", ranges is None or bool(ranges), "payload.ranges")
     workspace = draft["stream_id"].split(":")[1]
     previous = None
     for i, r in enumerate(items):
         at = f"payload.ranges[{i}]"
         stream, first, last, prev = r.get("stream_id"), r.get("from_seq"), r.get("to_seq"), r.get("prev_hash")
         named = isinstance(stream, str)
-        rule("54.workspace", not named or stream.split(":")[1:2] == [workspace], f"{at}.stream_id")
-        least = 0 if "boundary.rule_54_from_seq" in skip else 1
-        rule("54.from_seq", not is_integer(first) or first >= least, f"{at}.from_seq")
+        rule("75.workspace", not named or stream.split(":")[1:2] == [workspace], f"{at}.stream_id")
+        least = 0 if "boundary.rule_75_from_seq" in skip else 1
+        rule("75.from_seq", not is_integer(first) or first >= least, f"{at}.from_seq")
         seqs = is_integer(first) and is_integer(last)
-        rule("54.to_seq", not seqs or last >= first, f"{at}.to_seq")
+        rule("75.to_seq", not seqs or last >= first, f"{at}.to_seq")
         typed = isinstance(prev, str) and is_integer(first)
-        rule("54.genesis", not typed or (prev == GENESIS) == (first == 1), f"{at}.prev_hash")
+        rule("75.genesis", not typed or (prev == GENESIS) == (first == 1), f"{at}.prev_hash")
         if previous is not None and named and isinstance(previous.get("stream_id"), str):
             here, before = stream.encode(), previous["stream_id"].encode()
-            gap = 0 if "boundary.rule_54_overlap" in skip else 1
+            gap = 0 if "boundary.rule_75_overlap" in skip else 1
             ends = is_integer(first) and is_integer(previous.get("to_seq"))
             disjoint = not ends or first >= previous["to_seq"] + gap
-            rule("54.order", here > before or (here == before and disjoint), f"{at}.stream_id")
+            rule("75.order", here > before or (here == before and disjoint), f"{at}.stream_id")
         previous = r
     if event_type == "RecordsAccessed":
         accessor = p["accessor"]
-        rule("55.accessor", not isinstance(accessor, str) or accessor == draft["actor"]["id"], "payload.accessor")
-        rule("55.actor", kind not in ("agent", "broker"), "actor.kind")
+        rule("76.accessor", not isinstance(accessor, str) or accessor == draft["actor"]["id"], "payload.accessor")
+        rule("76.actor", kind not in ("agent", "broker"), "actor.kind")
         resources = p["resources"] if isinstance(p["resources"], list) else []
         named = [r.encode() for r in resources if isinstance(r, str)]
-        rule("55.resources", all(a < b for a, b in zip(named, named[1:])), "payload.resources")
+        rule("76.resources", all(a < b for a, b in zip(named, named[1:])), "payload.resources")
     if event_type == "ExportCreated":
-        rule("56.actor", kind in ("user", "system"), "actor.kind")
+        rule("77.actor", kind in ("user", "system"), "actor.kind")
         if p["form"] in ("canonical", *VIEW_FORMS) and (p["view"] is None or isinstance(p["view"], str)):
-            rule("56.view", (p["view"] is not None) == (p["form"] in VIEW_FORMS), "payload.view")
+            rule("77.view", (p["view"] is not None) == (p["form"] in VIEW_FORMS), "payload.view")
     if event_type == "VerificationRun":
         if p["trigger"] in TRIGGERS:
             allowed = ("user", "system") if p["trigger"] == "request" else ("system",)
-            rule("57", kind in allowed, "actor.kind")
+            rule("78", kind in allowed, "actor.kind")
         for i, r in enumerate(items):
             at = f"payload.ranges[{i}]"
             failure = r.get("failure")
             if isinstance(failure, dict):
                 seq, check = failure.get("seq"), failure.get("check")
                 if check in EVENT_CHECKS or check in RANGE_CHECKS:
-                    rule("58.seq", (seq is not None) == (check in EVENT_CHECKS), f"{at}.failure.seq")
+                    rule("79.seq", (seq is not None) == (check in EVENT_CHECKS), f"{at}.failure.seq")
                 bounds = (r.get("from_seq"), seq, r.get("to_seq"))
                 if all(is_integer(b) for b in bounds):
-                    rule("58.inside", bounds[0] <= bounds[1] <= bounds[2], f"{at}.failure.seq")
-            rule("58.to_hash", failure is not None or r.get("to_hash") is not None, f"{at}.to_hash")
+                    rule("79.inside", bounds[0] <= bounds[1] <= bounds[2], f"{at}.failure.seq")
+            rule("79.to_hash", failure is not None or r.get("to_hash") is not None, f"{at}.to_hash")
         if p["result"] in ("pass", "fail"):
             passed = all(r.get("failure") is None for r in items)
-            rule("59", (p["result"] == "pass") == passed, "payload.result")
+            rule("80", (p["result"] == "pass") == passed, "payload.result")
     return out
 
 
@@ -1035,9 +1243,37 @@ def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[
     return []
 
 
+def envelope_violations(draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§3's envelope with the `client` actor (rules 66 and 67): `on_behalf_of` is a member of a
+    `client` actor only, so no other actor's canonical form changes."""
+    actor = draft.get("actor")
+    named = isinstance(actor, dict) and "on_behalf_of" in actor
+    seen = {**draft, "actor": {k: v for k, v in actor.items() if k != "on_behalf_of"}} if named else draft
+    out = type_violations(CONTROL_ENVELOPE, seen, "", skip)
+    if out:
+        return out
+    client = actor["kind"] == "client"
+    if named and not client and "rule.66.extra" not in skip:
+        return [Violation("rule.66.extra", "schema", "actor.on_behalf_of")]
+    if client and not named and "rule.66.missing" not in skip:
+        return [Violation("rule.66.missing", "schema", "actor.on_behalf_of")]
+    if client and named:
+        out = type_violations(IDENT_T, actor["on_behalf_of"], "actor.on_behalf_of", skip)
+        if out and "loose.actor.on_behalf_of" not in skip:
+            return out
+    if client and actor["build"] is not None and "rule.67" not in skip:
+        return [Violation("rule.67", "schema", "actor.build")]
+    return []
+
+
+def human(actor: dict) -> str:
+    """The person behind an actor (§3): a client's `on_behalf_of`, anyone else's `id`."""
+    return actor["on_behalf_of"] if actor["kind"] == "client" else actor["id"]
+
+
 def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violation]:
     """Every rule a §9.2 draft breaks, in the journal's check order (spec §9.1, §9.2)."""
-    out = type_violations(ENVELOPE, draft, "", skip)
+    out = envelope_violations(draft, skip)
     if out:
         return out
     if draft["envelope_version"] != 1:
@@ -1053,6 +1289,9 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         return [Violation("stream", "non_canonical", "stream_id")]
     if stream[0] not in kinds:
         return [Violation("stream", "wrong_stream", "event_type")]
+    if draft["actor"]["kind"] == "client" and "rule.68" not in skip:
+        if stream[0] != "ctl" or event_type not in CLIENT_EVENTS:
+            return [Violation("rule.68", "schema", "actor.kind")]
     if draft["actor"]["kind"] in ("system", "agent") and draft["actor"]["build"] is None:
         out.append(Violation("actor", "schema", "actor.build"))
     refs = draft["config_refs"]

@@ -34,9 +34,11 @@ from pathlib import Path
 import account
 import approval
 import audit
+import clients
 import control
 import research
 import risk_state
+import workspace
 import yaml
 from common import (
     BOOL,
@@ -3508,6 +3510,8 @@ def render(
     research_section: dict,
     account_section: dict,
     approval_section: dict,
+    workspace_section: dict,
+    client_section: dict,
     audit_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
@@ -3521,6 +3525,8 @@ def render(
             "research": research_section,
             "account_stream": account_section,
             "approval_answers": approval_section,
+            "workspace_api": workspace_section,
+            "client_actor": client_section,
             "records_access": audit_section,
         },
         Dumper=Dumper,
@@ -3565,6 +3571,8 @@ def main(argv: list[str] | None = None) -> int:
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
     approval_section = approval.build_section()
+    workspace_section = workspace.build_section()
+    client_section = clients.build_section()
     audit_section = audit.build_section()
 
     problems = check_chain(section, v3)
@@ -3583,6 +3591,10 @@ def main(argv: list[str] | None = None) -> int:
     problems += account.run_mutants(account_section)
     problems += approval.check_section(approval_section)
     problems += approval.run_mutants(approval_section)
+    problems += workspace.check_section(workspace_section)
+    problems += workspace.run_mutants(workspace_section)
+    problems += clients.check_section(client_section)
+    problems += clients.run_mutants(client_section)
     problems += audit.check_section(audit_section)
     problems += audit.run_mutants(audit_section)
     for problem in problems:
@@ -3600,6 +3612,8 @@ def main(argv: list[str] | None = None) -> int:
         research_section,
         account_section,
         approval_section,
+        workspace_section,
+        client_section,
         audit_section,
     )
     reread = yaml.safe_load(rendered)
@@ -3612,6 +3626,8 @@ def main(argv: list[str] | None = None) -> int:
         or research.check_section(reread["research"])
         or account.check_section(reread["account_stream"])
         or approval.check_section(reread["approval_answers"])
+        or workspace.check_section(reread["workspace_api"])
+        or clients.check_section(reread["client_actor"])
         or audit.check_section(reread["records_access"])
     ):
         print(
@@ -3656,6 +3672,12 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(approval_section['drafts'])} approval-answer drafts, {len(approval_section['invalid_drafts'])} invalid and "
         f"{len(approval_section['valid_drafts'])} valid; {len(approval.VALIDATOR_MUTANTS)} validator and "
         f"{len(approval.vector_mutants(approval_section))} vector mutants caught; "
+        f"{len(workspace_section['drafts'])} workspace API drafts, {len(workspace_section['invalid_drafts'])} invalid and "
+        f"{len(workspace_section['valid_drafts'])} valid; {len(workspace.VALIDATOR_MUTANTS)} validator and "
+        f"{len(workspace.vector_mutants(workspace_section))} vector mutants caught; "
+        f"{len(client_section['drafts'])} client drafts, {len(client_section['invalid_drafts'])} invalid and "
+        f"{len(client_section['valid_drafts'])} valid; {len(clients.VALIDATOR_MUTANTS)} validator and "
+        f"{len(clients.vector_mutants(client_section))} vector mutants caught; "
         f"{len(audit_section['drafts'])} records-access drafts, {len(audit_section['invalid_drafts'])} invalid and "
         f"{len(audit_section['valid_drafts'])} valid; {len(audit.VALIDATOR_MUTANTS)} validator and "
         f"{len(audit.vector_mutants(audit_section))} vector mutants caught"

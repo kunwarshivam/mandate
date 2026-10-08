@@ -179,7 +179,7 @@ Owned by the [identity spec](identity.md). What the API requires of it:
    CLI. DEC-436 item 17 asks only about a session past its absolute lifetime.
 4. Every journaled event names the principal in `actor`. A user is `{kind: "user", id}`. A client
    is `{kind: "client", id: <client id>}`, with the human it acts for named beside it as
-   `on_behalf_of` (journal change; DEC-436 item 9; the coordinator's settlement X2 on #560). A
+   `on_behalf_of` (journal spec §3, DEC-671; DEC-436 item 9; the coordinator's settlement X2 on #560). A
    client is never recorded as a `user`, so the runtime's check 3 refuses a client's answer from the
    record alone. Wherever a rule compares humans (check 7's "not the mandate's author", mandate
    spec §5.8's requester, identity spec ID-6), a `client` actor counts as its `on_behalf_of` user,
@@ -387,10 +387,10 @@ define yet; §11's E10-15 adds them before the operation ships.
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
-| Create a draft | `POST /mandate-drafts` | `MandateDraftSaved` (journal change) | From a description, the three goal answers (A0, E10-7), a template, or a base version. Returns `draft_id` and its `etag` |
+| Create a draft | `POST /mandate-drafts` | `MandateDraftSaved` (journal spec §9.8) | From a description, the three goal answers (A0, E10-7), a template, or a base version. Returns `draft_id` and its `etag` |
 | Read, list drafts | `GET /mandate-drafts/{id}`, `GET /mandate-drafts` | — | With provenance per path (mandate spec §2.1) |
 | Save a draft | `PUT /mandate-drafts/{id}` with `If-Match` | `MandateDraftSaved` | Form and YAML are two views of this one document (FR-3.2). Stale `If-Match`: `stale_base` |
-| Compile | `POST /mandate-drafts/{id}/compile` | The compiler's `ModelInvocationRecorded` on the control stream (journal change) | Asynchronous job. Fills only `user_stated` and `platform_proposed` values, never `auto` or a delegation (V-022, V-038). Output failing the schema is `compile_failed` with the description kept (A2) |
+| Compile | `POST /mandate-drafts/{id}/compile` | The compiler's `ModelInvocationRecorded` on the control stream (journal spec §9.8) | Asynchronous job. Fills only `user_stated` and `platform_proposed` values, never `auto` or a delegation (V-022, V-038). Output failing the schema is `compile_failed` with the description kept (A2) |
 | Validate | `POST /mandate-drafts/{id}/validate` | — | Schema, V-rules, the policy hierarchy; returns violations and warnings with each warning's code (A4). Writes nothing |
 | Create a version | `POST /mandate-drafts/{id}/versions` | `MandateVersionCreated` | Requires a passing validation. Canonicalizes and hashes (mandate spec §9.1); records provenance, validation results, the classification against the base version, and the diff (§10) |
 | Read a version | `GET /mandate-versions/{hash}` | — | The stored canonical document and its records |
@@ -443,17 +443,17 @@ define yet; §11's E10-15 adds them before the operation ships.
 | List, read connections | `GET /connections`, `GET /connections/{id}` | — | Opaque id, broker, environment, scopes, the 1× check, data profile, restrictions, agents granted, loss carry (O4). **References only**: no account number, key, or token (API-11) |
 | Connect | `POST /connections/oauth/start`, then the broker redirects to `GET /connections/oauth/callback` | `ConnectionEstablished` | Step-up before start. PKCE and a single-use `state`; the token exchange goes straight to the vault; scopes beyond trading reject the connection (FR-2.2). Flow details are the connections spec's |
 | Revoke | `POST /connections/{id}/revoke` | `ConnectionRevoked` | Step-up. Refused while any agent on it holds positions or is not stopped: without the connection nothing can exit or re-protect, so an ordinary revoke is not risk reduction. For a credential the owner believes is compromised, use the next row |
-| Revoke now, on compromise | `POST /connections/{id}/revoke` with `compromised: true` | `OwnerCommandIssued` (`kill_switch`, connection scope), then `ConnectionRevoked` (reason `compromised`, journal change), in one batch | §5.6. Never waits on positions: the kill switch runs first in the same command, then the credential is revoked |
+| Revoke now, on compromise | `POST /connections/{id}/revoke` with `compromised: true` | `OwnerCommandIssued` (`kill_switch`, connection scope), then `ConnectionRevoked` (reason `compromised`, journal spec §9.9), in one batch | §5.6. Never waits on positions: the kill switch runs first in the same command, then the credential is revoked |
 | Policies | `GET`, `PUT /policies/workspace` | `PolicyChanged` | A value looser than its parent is refused naming the nearest ancestor (FR-1.5); the response lists agents made nonconforming (X1). Step-up |
 | Members | `GET /members`, `POST /invitations`, `PATCH`, `DELETE /members/{id}` | Identity spec's events (journal change) | Removing a member ends their sessions and tokens at once |
-| Clients | `GET /clients`, `POST /clients`, `DELETE /clients/{id}` | `ClientConnected`, `ClientRevoked` (journal change) | Create needs step-up and shows the scopes in words (E10-8); revoke needs none |
+| Clients | `GET /clients`, `POST /clients`, `DELETE /clients/{id}` | `ClientConnected`, `ClientRevoked` (journal spec §9.9) | Create needs step-up and shows the scopes in words (E10-8); revoke needs none |
 
 ### 4.6 Owner requests, the dry run, and the chat thread
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | Dry run | `POST /agents/{id}/dry-run` | `RecordsAccessed` | DEC-190: the decision (`auto`, `ask`, `deny`) and the gate's reason code for a described order, with the client ceiling for a client. Places nothing, creates no approval |
-| Owner request | `POST /agents/{id}/requests` | `OwnerRequestSubmitted` (journal change) | An instrument, side, and optional size the owner or client asks for. The runtime copies it to its builder, which sizes, clips, and classifies it as for any proposal (rule 4); `requested_by` from the channel (API-6) |
+| Owner request | `POST /agents/{id}/requests` | `OwnerRequestSubmitted` (journal spec §9.8) | An instrument, side, and optional size the owner or client asks for. The runtime copies it to its builder, which sizes, clips, and classifies it as for any proposal (rule 4); `requested_by` from the channel (API-6) |
 | Chat | `POST /agents/{id}/chat`, `GET .../chat` | The model call, on the agent stream | A reply is quoted model output (API-18). When a message asks for an action, deterministic code returns a card: an owner request with the builder's proposal, gate verdict, and autonomy outcome, or a draft version that opens A6. Sending the card is a separate call carrying its `card_digest` (D14, DEC-192) |
 
 ### 4.7 Read models
@@ -535,8 +535,8 @@ else `step_up_required`. While the control stream is frozen (journal spec §11),
 refused with `control_stream_frozen`; the API-7 operations, including §4.4's reducing shortcuts,
 are still recorded.
 
-It then commits `MandateConfirmed` with the agent link (journal change: `agent_id` and
-`base_version`, DEC-436 item 14). Response `202`:
+It then commits `MandateConfirmed` version 2 with the agent link, `agent_id` and `base_version`
+(journal spec §9.8, DEC-436 item 14). Response `202`:
 
 | Member | Meaning |
 |---|---|
@@ -779,7 +779,9 @@ risk-reducing call never consults one (API-7, API-8).
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
 | Read-model projections | **Planned** (E11-9) |
 | Journal queries, trace, exports over the API | **Planned** (E12-6) |
-| Journal events this spec needs (`MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, `OwnerRequestSubmitted`, `hold_openings`, client events) | **Planned** (E10-15, journal spec change first) |
+| Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.19 §9.8, DEC-670); `mandate-journal` registration planned (E10-15) |
+| The `client` actor, `ConnectionRevoked`'s reason, and the client events | **Specified** (journal spec v0.20 §3 and §9.9, DEC-671); `mandate-journal` registration planned (E10-15) |
+| `hold_openings` and `lift_hold` | **Planned** (E10-15, journal spec change first) |
 | Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
 
 ---

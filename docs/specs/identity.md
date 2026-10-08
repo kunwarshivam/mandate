@@ -722,11 +722,12 @@ control streams, so each workspace's records are complete on their own.
   so mandate §6.4 check 3 ("the response's actor is a `user` in `autonomy.approval.approvers`")
   refuses a client's answer from the record alone, with no extra rule. `DecisionMade`'s `client_id`
   and `requested_by` stay as they are and must agree with the actor.
-- **Owed edits, gating clients.** Journal §3 adds `client` to the closed `actor.kind` set and
-  `on_behalf_of` to `actor` (null for every other kind except the host CLI, §6.4), and the mandate
-  spec's independence checks compare humans (§8.2). Both land in E9-9's tests PR, and no client
-  token is issued, in any environment, before they do (E9-9 precedes E10-6), so the record never
-  holds a client under the old kind set.
+- **Owed edits, gating clients.** Journal §3 adds `client` to the closed `actor.kind` set, with
+  `on_behalf_of` as a member of a `client` actor only, absent from every other kind; that is journal
+  spec v0.20 (DEC-671). The host CLI's `system` actor (§6.4) gains `on_behalf_of` with
+  `HostCliRegistered`. The mandate spec's independence checks compare humans (§8.2). The journal's
+  code for both lands in E9-9's tests PR, and no client token is issued, in any environment, before
+  it does (E9-9 precedes E10-6), so the record never holds a client under the old kind set.
 - Every committed event names its session as an opaque reference (`session_ref`), so a revoked or
   stolen session's actions can be listed afterwards.
 
