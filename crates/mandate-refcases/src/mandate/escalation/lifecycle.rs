@@ -1094,11 +1094,11 @@ fn extra_fault(name: &str, want: Option<&Value>, got: Option<&Value>) -> Option<
 fn unstated_fault(event_type: &str, name: &str, got: &Value) -> Option<String> {
     let null_unless_stated =
         event_type == "ApprovalResponded" && NULL_UNLESS_STATED.contains(&name);
-    let unstated = format!("the runtime wrote `{name}`, which the case does not state");
     match got {
         Value::Null if null_unless_stated => None,
-        _ if null_unless_stated => Some(format!("{unstated}, as {got:?} rather than `null`")),
-        _ => Some(unstated),
+        _ => Some(format!(
+            "the runtime wrote `{name}`, which the case does not state, as {got:?}"
+        )),
     }
 }
 
