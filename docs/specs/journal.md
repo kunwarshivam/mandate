@@ -1640,15 +1640,19 @@ its stream, and each `ConnectionCredentialRotated`. Each account-stream record c
 since the stream exists before the connection is established.
 
 **The connect sequence** (connections spec §5.2). The connection manager assigns the connection's
-`connection_id` and `account_ref` when the connect starts. The connecting executor opens the account
-stream `acct:{workspace_id}:{account_ref}` with `StreamOpened`, runs §8.1 checks 1, 2, 3, and 7
-against the credential in the vault, and journals `ConnectionChecked` (occasion `connect`) there.
+`connection_id` and `account_ref` when the connect starts. For an OAuth connect, the token-exchange
+process (connections spec §5.2 step 4, DEC-821 item 2) redeems the code and stores the token in the
+vault; it appends nothing to the journal. The connecting executor, started only once a credential is
+stored, opens the account stream `acct:{workspace_id}:{account_ref}` with `StreamOpened`, runs §8.1
+checks 1, 2, 3, and 7 against the credential in the vault, using only reads and, for a paper
+connection, only paper hosts, and journals `ConnectionChecked` (occasion `connect`) there.
 It stores the broker's account id in the personal-data vault and records only that reference
 (`account_pii_ref`, §6.4), never the id. The control services read that record, have the vault
 compute the account fingerprint from the reference (connections spec §3.1; they receive only the
 keyed hash), complete check 3 against the connection's record and run check 4 (uniqueness), and
 append `ConnectionEstablished` version 2, whose `causation_id` is that `ConnectionChecked` (rule
-63). Before appending, they confirm it is on the stream `account_ref` names, has the same
+63), only after the passing results are journaled. The control services are the API process, which
+never calls the broker (connections spec §5.2). Before appending, they confirm it is on the stream `account_ref` names, has the same
 `connection_id`, an occasion of `connect` (or `reconnect`), every result `passed`, and, for an MCP
 connection, the `contract` result. The executor then copies the establishment onto its stream
 (rule 68): until that copy, the stream is `connecting`, and the executor may only run and record
@@ -1660,8 +1664,8 @@ when the executor's check failed, and `null` when the control services refused (
 fingerprint comparison, `account_mismatch`, or check 4) or when no check refused at all: the
 teardown of connections spec §5.2 step 6, after the deadline (`timeout`), on an API restart past
 it (`restart_past_deadline`), after an executor restarted with no token to check
-(`executor_stopped`), or when the executor failed to start after the vault write (`start_failed`,
-step 3), with `check` `null` (rules 54 and 65). Its account stream is an orphan: its
+(`executor_stopped`), or when no executor was started (`start_failed`: the token-exchange process or
+the executor failed to start after the vault write, step 3, or the exchange stored no token, step 4), with `check` `null` (rules 54 and 65). Its account stream is an orphan: its
 `account_ref` is never bound, nothing is written to it again, and it is kept like every stream,
 under §6.2's retention, because it records the refusal's evidence. The executor that opened it has
 exited, and its writer epoch is never reused (§5.1).
