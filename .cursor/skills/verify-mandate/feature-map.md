@@ -1134,7 +1134,9 @@ proves each pending test fails on them (DEC-110).
 - **Spec:** backlog E2-4; trading domain spec §1 principle 2, §2.2, §4.2, §4.3, §4.5, §8.5; DEC-82,
   DEC-89, DEC-91; `docs/project/tasks/E2-4-sessions-and-corporate-actions.md`.
 - **Code:** `crates/mandate-time/src/session.rs` and `crates/mandate-time/data/us-equities.calendar`
-  (the NYSE calendar 2018 to 2028, four sessions per trading day); `mandate-marketdata`:
+  (the NYSE calendar 2018 to 2028, four sessions per trading day, and
+  `last_completed_regular_session`, the one answer the shell's dataset check and the E15-13 model
+  host share); `mandate-marketdata`:
   - `crates/mandate-marketdata/src/model/corporate_action.rs`: splits, dividends, other actions,
     and point-in-time adjustment through `mandate_num::SplitRatio::mark`;
   - `crates/mandate-marketdata/src/alpaca.rs` and `client.rs`: `/v1/corporate-actions`;
@@ -1147,7 +1149,8 @@ proves each pending test fails on them (DEC-110).
   `mandate-cli`: `crates/mandate-cli/src/inspect.rs` (classes, adjusted prices, and the action
   list in the report) and `crates/mandate-cli/src/download.rs` (the actions line).
 - **Tests:**
-  - `crates/mandate-time/tests/session.rs`: typed NYSE closure lists and its own DST rule;
+  - `crates/mandate-time/tests/session.rs`: typed NYSE closure lists and its own DST rule, and a
+    hand-written table of last completed sessions;
   - `crates/mandate-marketdata/tests/venue.rs`: its own 2026 schedule oracle;
   - `crates/mandate-marketdata/tests/inspect.rs`: hand-built datasets, and a per-slot oracle
     for stretches;

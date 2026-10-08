@@ -978,3 +978,119 @@ proptest! {
         }
     }
 }
+
+/// The last completed regular session at `now`, recomputed by hand from NYSE's published schedule:
+/// 16:00 New York is 20:00 UTC in daylight time and 21:00 UTC in standard time, and an early close's
+/// 13:00 is 17:00 or 18:00 UTC. Each case carries the reason its answer is what it is.
+#[test]
+fn the_last_completed_regular_session_is_the_newest_whose_close_is_not_after_now() {
+    let calendar = us();
+    let cases = [
+        (
+            "2026-10-07T19:59:59.999999999Z",
+            Some("2026-10-06"),
+            "a weekday one nanosecond before its 16:00 EDT close names the day before",
+        ),
+        (
+            "2026-10-07T20:00:00.000000000Z",
+            Some("2026-10-07"),
+            "a weekday at its 16:00 EDT close names itself, the close being exclusive",
+        ),
+        (
+            "2026-10-08T03:00:00.000000000Z",
+            Some("2026-10-07"),
+            "the evening after a close, already the next day in UTC, names that close's day",
+        ),
+        (
+            "2026-10-05T14:00:00.000000000Z",
+            Some("2026-10-02"),
+            "a Monday before its close names the previous Friday",
+        ),
+        (
+            "2026-10-03T16:00:00.000000000Z",
+            Some("2026-10-02"),
+            "a Saturday names the Friday before it",
+        ),
+        (
+            "2025-11-27T21:00:00.000000000Z",
+            Some("2025-11-26"),
+            "Thanksgiving, closed, names the Wednesday before it",
+        ),
+        (
+            "2025-11-28T17:59:59.999999999Z",
+            Some("2025-11-26"),
+            "the day after Thanksgiving before its 13:00 EST early close skips the closed holiday",
+        ),
+        (
+            "2025-11-28T18:00:00.000000000Z",
+            Some("2025-11-28"),
+            "the day after Thanksgiving at its 13:00 EST early close names itself",
+        ),
+        (
+            "2025-11-28T20:00:00.000000000Z",
+            Some("2025-11-28"),
+            "15:00 EST on an early-close day, before the usual close, names the early-closed day",
+        ),
+        (
+            "2025-11-30T15:00:00.000000000Z",
+            Some("2025-11-28"),
+            "the Sunday after an early close names the early-closed Friday",
+        ),
+        (
+            "2025-12-01T20:59:59.999999999Z",
+            Some("2025-11-28"),
+            "a Monday one nanosecond before its 16:00 EST close names the Friday before",
+        ),
+        (
+            "2025-12-01T21:00:00.000000000Z",
+            Some("2025-12-01"),
+            "a Monday at its 16:00 EST close names itself",
+        ),
+        (
+            "2025-12-26T14:00:00.000000000Z",
+            Some("2025-12-24"),
+            "the morning after Christmas names Christmas Eve's early close",
+        ),
+        (
+            "2018-01-02T20:59:59.999999999Z",
+            None,
+            "before the range's first regular close, 2018-01-01 being closed, nothing has completed",
+        ),
+        (
+            "2018-01-02T21:00:00.000000000Z",
+            Some("2018-01-02"),
+            "the range's first regular close names its day",
+        ),
+        (
+            "2017-12-29T21:00:00.000000000Z",
+            None,
+            "a clock before the range names no session",
+        ),
+    ];
+    for (instant, expected, why) in cases {
+        assert_eq!(
+            calendar.last_completed_regular_session(at(instant)),
+            Ok(expected.map(date)),
+            "{instant}: {why}"
+        );
+    }
+}
+
+/// The answer comes from the calendar it is asked of, not the checked-in one: on a calendar that
+/// closes 2026-09-24 early, 17:00 UTC (13:00 EDT) has completed that day, which the checked-in
+/// calendar, with a full day there, does not say until 20:00 UTC.
+#[test]
+fn the_last_completed_regular_session_reads_the_calendar_it_is_asked_of() {
+    let early = parse("early_close 2026-09-24 13:00 17:00 test\n").unwrap();
+    let now = at("2026-09-24T17:00:00.000000000Z");
+    assert_eq!(
+        early.last_completed_regular_session(now),
+        Ok(Some(date("2026-09-24"))),
+        "a parsed early close ends the regular session at 13:00 EDT"
+    );
+    assert_eq!(
+        us().last_completed_regular_session(now),
+        Ok(Some(date("2026-09-23"))),
+        "the checked-in calendar has a full day on 2026-09-24"
+    );
+}
