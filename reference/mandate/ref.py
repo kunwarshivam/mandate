@@ -244,12 +244,35 @@ def tripwire_errors(m):
             return {"V-044"}
     return set()
 
-def worst_case(m):
+STOP_LIMIT_FIELD = {1: "crypto_stop_limit_offset", 2: "stop_limit_offset"}
+PAPER_STOP_LIMIT_CLASSES = ["crypto"]
+
+def stop_limit_offset(p, m):
+    """DEC-539 item 5: version 1's `crypto_stop_limit_offset` reads as version 2's `stop_limit_offset`."""
+    return p[STOP_LIMIT_FIELD[m["mandate_schema_version"]]]
+
+def upcast(m):
+    """A version-1 document read as version 2 (DEC-539 item 5): only the protection field's name changes."""
+    if m["mandate_schema_version"] == 2:
+        return m
+    out = copy.deepcopy(m)
+    out["mandate_schema_version"] = 2
+    out["protection"]["stop_limit_offset"] = out["protection"].pop("crypto_stop_limit_offset")
+    return out
+
+def stop_limit_protected(m, ctx):
+    """V-008 and W-002 (DEC-539 items 2 and 3): whether any asset class the mandate may hold is protected by a
+    stop-limit under its connection's profile. `stop_limit_asset_classes` is that explicit input; absent, it is the
+    paper connection's profile, where only crypto is (trading spec §5.2)."""
+    classes = (ctx or {}).get("stop_limit_asset_classes", PAPER_STOP_LIMIT_CLASSES)
+    return any(c in classes for c in m["universe"]["asset_classes"])
+
+def worst_case(m, ctx=None):
     r, p = m["risk"], m["protection"]
     A = D(m["capital"]["allocation_usd"])
     pos = min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * A)
-    crypto = "crypto" in m["universe"]["asset_classes"]
-    stop = (D(p["stop_distance"]) + (D(p["crypto_stop_limit_offset"] or 0) if crypto else 0)) if p["enabled"] else None
+    offset = D(stop_limit_offset(p, m) or 0) if stop_limit_protected(m, ctx) else D(0)
+    stop = (D(p["stop_distance"]) + offset) if p["enabled"] else None
     return {"one_position_at_stop_usd": norm(pos * stop) if stop is not None else None,
             "daily_loss_budget_usd": norm(D(r["max_daily_loss"]) * A),
             "flatten_trigger_loss_usd": norm(D(r["max_drawdown"]) * A),
@@ -336,9 +359,9 @@ def semantic(m, ctx):
             errs.add("V-007")
     p = m["protection"]
     if p["enabled"]:
-        if "crypto" in u["asset_classes"] and p["crypto_stop_limit_offset"] is None:
+        if stop_limit_protected(m, ctx) and stop_limit_offset(p, m) is None:
             errs.add("V-008")
-    elif p["stop_distance"] is not None or p["take_profit_distance"] is not None or p["crypto_stop_limit_offset"] is not None:
+    elif p["stop_distance"] is not None or p["take_profit_distance"] is not None or stop_limit_offset(p, m) is not None:
         errs.add("V-008")
     sms = m["behavior"]["signal_models"]
     rule_ids = [x["id"] for x in m["autonomy"]["rules"]]
@@ -440,7 +463,7 @@ def semantic(m, ctx):
         errs.add("V-032")
     if ctx.get("eligibility_failures"):
         warns.add("W-001")
-    wc = worst_case(m)
+    wc = worst_case(m, ctx)
     if wc["one_position_at_stop_usd"] is not None and D(wc["one_position_at_stop_usd"]) > D(wc["daily_loss_budget_usd"]):
         warns.add("W-002")
     if not p["enabled"]:
@@ -1796,6 +1819,8 @@ def classify_tripwires(ot, nt):
 
 def classify(old, new):
     res = set()
+    if old["mandate_schema_version"] != new["mandate_schema_version"]:
+        old, new = upcast(old), upcast(new)
     paths = list(diff_paths(old, new))
     if "/environment" not in paths and "/connection_id" not in paths and pinning_switch(old, new, paths):
         return "risk_reducing", paths
@@ -1842,7 +1867,7 @@ def classify(old, new):
             res.add(classify_autonomy(old["autonomy"], new["autonomy"]))
         elif p == "/goal/end_date":
             res.add("increasing" if b is None or (a is not None and b > a) else "reducing")
-        elif p == "/protection/crypto_stop_limit_offset":
+        elif p in ("/protection/crypto_stop_limit_offset", "/protection/stop_limit_offset"):
             res.add("increasing" if b is not None and (a is None or D(b) > D(a)) else "reducing")
         elif p == "/protection/enabled":
             res.add("increasing" if not b else "reducing")

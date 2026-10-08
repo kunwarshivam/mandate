@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.6 (the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | v0.7 (schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10, E17 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
@@ -20,6 +20,16 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.7 ([DEC-539](../project/decisions/DEC-539.md), the founder's decision of 2026-10-08):** mandate
+  schema version 2 renames `protection.crypto_stop_limit_offset` to `protection.stop_limit_offset`,
+  one offset for every protective stop-limit the platform places, whatever the asset class. V-008
+  requires it when protection is enabled and any asset class the mandate may hold is protected by a
+  stop-limit under its connection's capability profile (trading spec §5.2), which validation now
+  reads as an explicit input (§4). W-002 adds it for those positions. Classification is unchanged in
+  meaning (§9.2). A version-1 document reads `crypto_stop_limit_offset` as `stop_limit_offset`, so
+  every existing case is unchanged and a move from version 1 to 2 classifies only the values that
+  changed. Family K, MC-K01 to MC-K11, is added (§11): schema, semantic and change cases of its own,
+  pending until the code reads version 2.
 - **v0.6, amended ([DEC-536](../project/decisions/DEC-536.md), under DEC-176):** §6.2 gains step 5c, the policy overlay of §4.3,
   which applies last and names itself `policy_overlay` only when it changed the decision: while the
   confirmed version is `policy_nonconforming` it denies an opening or an increase ([DEC-534](../project/decisions/DEC-534.md)
@@ -362,7 +372,7 @@ decimal strings; the schema gives each field's bounds.
 
 | Path | Meaning |
 |---|---|
-| `mandate_schema_version`, `source_text_ref` | System fields: `1`; artifact hash of the user's description (or `null`) |
+| `mandate_schema_version`, `source_text_ref` | System fields: `2` (`1` is still read, its `crypto_stop_limit_offset` as `stop_limit_offset`, DEC-539); artifact hash of the user's description (or `null`) |
 | `name` | Agent name (lowercase, hyphens) |
 | `environment`, `connection_id` | `paper` or `live`; the broker connection. Immutable across versions |
 | `capital.allocation_usd` | The agent's capital allocation A (§5.1) |
@@ -379,7 +389,7 @@ decimal strings; the schema gives each field's bounds.
 | `behavior.research` | The research agent's envelope fields: `interval_s` (how often it may propose), `cost_cap_usd_per_day` (DEC-120), `max_revisions_per_lineage` (DEC-111). Null exactly when no model admits (V-036) |
 | `behavior.cadence` | Scheduled interval and the event sources that trigger evaluation |
 | `behavior.sizing` | Sizing method, entry and exit thresholds, rebalance band (§8.3) |
-| `protection` | Resting protection: stop and take-profit distances as fractions of entry price; crypto stop-limit offset as a fraction of the stop price |
+| `protection` | Resting protection: stop and take-profit distances as fractions of entry price; `stop_limit_offset`, how far below the stop price a protective stop-limit's limit sits, as a fraction of the stop price, for every stop-limit protection (DEC-539) |
 | `risk.*` | Limits, timings, and `scale_action` (§5) |
 | `autonomy.rules[]`, `default`, `approval` | Autonomy rules and approval settings (§6) |
 | `autonomy.admission` | Ceiling on the autonomy decision for the first order in a newly admitted instrument (§6.2); platform default `ask` |
@@ -442,7 +452,8 @@ A mandate is valid when it passes the JSON Schema, every V-rule, and the policy 
 Besides the document, validation reads: the account's equity and the other active agents' allocations
 on it, the validation date, the signal-model registry, each field's provenance, the workspace's users
 and approvers, the disclosures accepted, the instrument groups and other agents' claims, the
-connection's environment and loss carry, the eligibility failures, the previous version and the
+connection's environment and loss carry, the asset classes its capability profile protects with a
+stop-limit (trading spec §5.2; V-008, W-002), the eligibility failures, the previous version and the
 agent's current `mandate_version` (V-047), and the effective policy values (§4.3),
 `independent_approval_required` among them.
 Failures return all violated codes. Warnings (§4.2) do not block, but each must be acknowledged
@@ -458,7 +469,7 @@ and is recorded in `MandateConfirmed`.
 | V-005 | `leveraged_etps_enabled = true` requires `leveraged_etp_disclosure_version`, a `DisclosureAccepted` by the owner (with step-up) for exactly that version, and policy allowing it (§4.3). A new disclosure version makes leveraged-ETP openings inactive until the owner accepts it |
 | V-006 | No pinned instrument's **instrument group** (trading spec §7.1) is claimed by another agent on the account. Admissions are checked again at runtime (§8.5) |
 | V-007 | Each signal model's id, version, and content hash are registered together; parameters are exactly the model's declared parameters and match its parameter schema |
-| V-008 | If protection is enabled and `universe.asset_classes` contains `crypto`, `crypto_stop_limit_offset` is set. If protection is disabled, `stop_distance`, `take_profit_distance`, and `crypto_stop_limit_offset` are null |
+| V-008 | If protection is enabled and any of `universe.asset_classes` is one the connection's capability profile protects with a stop-limit (trading spec §5.2: crypto on Alpaca; US equities on Robinhood), `stop_limit_offset` is set. If protection is disabled, `stop_distance`, `take_profit_distance`, and `stop_limit_offset` are null ([DEC-539](../project/decisions/DEC-539.md) item 2) |
 | V-009 | Set-like arrays are sorted and unique (§3); rule ids are unique |
 | V-010 | Ladder `at` strictly increasing; actions in non-decreasing severity (`scale_sizes`, `exits_only`, `flatten_and_pause`); `factor` set for `scale_sizes` and null otherwise |
 | V-011 | Exactly one `flatten_and_pause` rung, last, with `at = max_drawdown` |
@@ -496,7 +507,7 @@ and is recorded in `MandateConfirmed`.
 | Code | Warning |
 |---|---|
 | W-001 | An instrument fails the eligibility floor at validation time (the gate enforces at runtime) |
-| W-002 | Worst-case loss of one full position at its stop exceeds the daily loss budget: min(`max_position_usd`, `max_position_fraction` × A) × (`stop_distance` + crypto offset if crypto) > `max_daily_loss` × A |
+| W-002 | Worst-case loss of one full position at its stop exceeds the daily loss budget: min(`max_position_usd`, `max_position_fraction` × A) × (`stop_distance` + `stop_limit_offset` if any of `universe.asset_classes` is protected by a stop-limit, as V-008 reads it) > `max_daily_loss` × A (DEC-539 item 3) |
 | W-003 | Protection is disabled: no resting protective orders at the broker |
 | W-005 | A rule follows a catch-all rule (`purpose in [increase, open]`) and can never match |
 | W-006 | `autonomy.admission` is `auto` with a research agent configured: the agent will open positions in instruments the owner has not seen. The screen names the eligibility floor, `max_instruments`, and the position and daily-loss limits as what still bounds them |
@@ -1614,7 +1625,7 @@ invalid (V-031).
 | **Unpinning** (`universe.pinned` true → false) | Increasing: it lets the platform admit instruments the owner did not choose. Needs step-up (DEC-121) |
 | `universe.asset_classes` | Increasing if any class is added; otherwise reducing |
 | `behavior.research` set from null | Increasing (the research agent may now admit); cleared to null is reducing |
-| `protection.crypto_stop_limit_offset` | Increasing if newly set or larger; reducing if cleared (crypto left `asset_classes`) or smaller |
+| `protection.stop_limit_offset` (version 1: `crypto_stop_limit_offset`) | Increasing if newly set or larger; reducing if cleared (no asset class needs it any more) or smaller. A version-1 document is read as version 2 before the two are compared (DEC-539 items 4 and 5) |
 | `autonomy.admission` | Part of the autonomy row: reducing only if it becomes stricter (auto → ask → deny) |
 | `end_date` | Increasing if later or removed (null); reducing if earlier |
 | `leveraged_etps_enabled` on, `protection.enabled` off | Increasing (the reverse is reducing) |
@@ -1659,7 +1670,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 443 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 454 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1689,6 +1700,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Tripwires | MC-W01 to MC-W57 | Schema rejects (an unknown metric, `paused`, no threshold, 0, 21 tripwires); V-044's order, ids, and threshold bounds at and past each edge; a proposed tripwire confirmed and not; V-042 when a version removes or adds one; the §9.2 row for each change; and, as `kind: tripwire` folds of account-stream inputs, firing at and short of each metric's threshold, a winning exit and a buy in a streak, a buy's fees, the risk-day reset, re-entry, arming, a threshold lowered to the count reached, a fired tripwire removed, softened, and tightened, refused and valid acknowledgments and the fresh count after them, two firings on one fill, a metric changed, a late fill, the half-even tie, a streak across midnight, a refused acknowledgment's assertion replayed, independent approval refusing the requester, a missing requester, and a missing user, binding at the request and at processing, and accepting a second user, the decisions with a delegation before and after a firing, and, as `kind: risk_state` cases, an allocation increase rejected while an `exits_only` and an `end_delegations` tripwire is fired (MI-7), the second across a risk day ([DEC-187](../project/04-decision-log.md#decisions), [DEC-350](../project/decisions/DEC-350.md) to [DEC-352](../project/decisions/DEC-352.md)) |
 | Escalation | MC-E01 to MC-E32 | As `kind: escalation` cases (§6.1, §6.4, MI-21 to MI-25): a timely grant acts with the bound order; a skip, the timeout, lateness at the deadline and by the folded clock; a response copied once; the content hash; every non-`user` actor and an unlisted user; step-up missing, 301 s stale, reused, and `cli_confirm` on `live`; re-validation's version, mode, `deny`, and another trigger; drift at and beyond the band, with no mark, and crypto's 200 bp; the ask budget across the DST change, a skip's and a timeout's suppression; quiet hours for `cli_inbox`, for a push in both DST states, and read as New York wall time rather than UTC; and a grant batched with a cancellation ([DEC-173](../project/04-decision-log.md#decisions), [DEC-280](../project/04-decision-log.md#decisions)) |
 | Change | MC-C01 to MC-C48 | Every classification row, including rule addition, removal, and reordering, the pinning switch, pinning a mandate that had no research agent, the research fields, and the admission ceiling |
+| Stop-limit offset | MC-K01 to MC-K11 | Mandate schema version 2 ([DEC-539](../project/decisions/DEC-539.md)): its field name in schema cases, V-008 and W-002 on a profile that protects equities with a stop-limit (`stop_limit_asset_classes` in the validation context) and on one that does not, version 1's field read as version 2's, and the version-1-to-2 move in change cases |
 
 ## 12. Open questions
 

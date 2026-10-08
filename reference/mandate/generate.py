@@ -1,4 +1,4 @@
-"""Generates docs/specs/reference-cases/mandate.yaml for mandate spec v0.6."""
+"""Generates docs/specs/reference-cases/mandate.yaml for mandate spec v0.7."""
 import copy, json
 from collections import Counter
 import yaml
@@ -6,7 +6,7 @@ from ref import *  # noqa: F401,F403
 from ref import D, ROOT
 from bases import *  # noqa: F401,F403
 
-doc = {"version": 4, "spec": "docs/specs/mandate.md (v0.6)",
+doc = {"version": 4, "spec": "docs/specs/mandate.md (v0.7)",
        "schemas": ["schemas/mandate.schema.json", "schemas/policy.schema.json"],
        "harness_defaults": {"mark_max_age_s": 120, "hard_trigger_multiple": "1.25", "stagger_window_s": 900},
        "bases": {n: {"mandate": m, "canonical_sha256": version(m)} for n, m in BASES.items()},
@@ -66,6 +66,10 @@ S = [
     ("MC-S30", "max_revisions_per_lineage above 10", "research_equity", [rep("/behavior/research/max_revisions_per_lineage", 11)], False),
     ("MC-S31", "Research interval below 300 s", "research_equity", [rep("/behavior/research/interval_s", 60)], False),
 ]
+def to_v2(offset):
+    """Schema version 2 (DEC-539): `crypto_stop_limit_offset` becomes `stop_limit_offset`."""
+    return [rep("/mandate_schema_version", 2), {"op": "remove", "path": "/protection/crypto_stop_limit_offset"},
+            {"op": "add", "path": "/protection/stop_limit_offset", "value": offset}]
 for cid, title, base, patch, ok in S:
     m = apply_patch(MB[base], patch)
     assert V.is_valid(m) == ok, (cid, [e.message for e in V.iter_errors(m)])
@@ -231,12 +235,13 @@ SEM += [
      "btc_accumulator", FEWER_ORDERS,
      dict(LONE_UNDER_POLICY, previous_version=OVER_SCHEMA, current_mandate_version=version(OVER_SCHEMA))),
 ]
+STOP_LIMIT_EQUITIES = {"stop_limit_asset_classes": ["crypto", "us_equity"]}
 for cid, title, base, patch, ctx in SEM:
     m = apply_patch(MB[base], patch)
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
     errs, warns = semantic(m, dict(CTX, **ctx))
     cases.append({"id": cid, "kind": "semantic", "title": title, "base": base, "patch": patch, "context": ctx,
-                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
 
 # =========================================================== C. policy
 POL = [
@@ -749,6 +754,7 @@ derived("research_equity_no_agent", "research_equity",
 derived("research_equity_two_classes", "research_equity",
         [rep("/universe/asset_classes", ["crypto", "us_equity"]), rep("/protection/crypto_stop_limit_offset", "0.005")],
         "adds crypto to the allowed asset classes")
+derived("btc_accumulator_v2", "btc_accumulator", to_v2("0.005"), "schema version 2 (DEC-539)")
 derived("btc_accumulator_with_deny", "btc_accumulator",
         [{"op": "add", "path": "/autonomy/rules/2", "value": {"id": "deny_big_low", "when": {"field": "order_usd", "op": "gt", "value": "800"}, "then": "deny"}}],
         "adds rule deny_big_low at index 2")
@@ -826,6 +832,44 @@ for cid, title, base, patch in CH:
     if got != "invalid":
         e["step_up_required"] = got == "risk_increasing"
     cases.append({"id": cid, "kind": "change", "title": title, "base": base, "patch": patch, "expect": e})
+
+# =========================================================== K2. one stop-limit offset (DEC-539)
+# Family K is its own until the code reads schema version 2: families S, V and C are counted and must all pass.
+K = [
+    ("MC-K01", "schema", "Version 2 names the offset stop_limit_offset", "btc_accumulator", to_v2("0.005"), {}),
+    ("MC-K02", "schema", "Version 2 with version 1's field name", "btc_accumulator", [rep("/mandate_schema_version", 2)], {}),
+    ("MC-K03", "schema", "Version 1 with version 2's field name", "btc_accumulator", to_v2("0.005")[1:], {}),
+    ("MC-K04", "semantic", "Version 2: crypto with protection but no stop-limit offset", "btc_accumulator", to_v2(None), {}),
+    ("MC-K05", "semantic", "Equities on a profile that protects them with a stop-limit need the offset",
+     "two_stock_swing", to_v2(None), STOP_LIMIT_EQUITIES),
+    ("MC-K06", "semantic", "With the offset set, it passes and the worst case adds it", "two_stock_swing", to_v2("0.01"),
+     STOP_LIMIT_EQUITIES),
+    ("MC-K07", "semantic", "An equity mandate on a profile with OCO and bracket passes without an offset", "two_stock_swing",
+     to_v2(None), {}),
+    ("MC-K08", "semantic", "Version 1's crypto_stop_limit_offset is read as the offset, so it passes", "two_stock_swing",
+     [rep("/protection/crypto_stop_limit_offset", "0.01")], STOP_LIMIT_EQUITIES),
+    ("MC-K09", "change", "Raise the stop-limit offset", "btc_accumulator_v2", [rep("/protection/stop_limit_offset", "0.01")], {}),
+    ("MC-K10", "change", "Move to version 2 with a smaller offset (version 1 reads as version 2)", "btc_accumulator",
+     to_v2("0.004"), {}),
+    ("MC-K11", "change", "Move to version 2 with the same offset", "btc_accumulator", to_v2("0.005"), {}),
+]
+for cid, kind, title, base, patch, ctx in K:
+    old = MB[base]
+    m = apply_patch(old, patch)
+    if kind == "schema":
+        cases.append({"id": cid, "kind": kind, "title": title, "base": base, "patch": patch,
+                      "expect": {"schema_valid": V.is_valid(m)}})
+        continue
+    assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
+    if kind == "semantic":
+        errs, warns = semantic(m, dict(CTX, **ctx))
+        cases.append({"id": cid, "kind": kind, "title": title, "base": base, "patch": patch, "context": ctx,
+                      "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
+    else:
+        got, paths = classify(old, m)
+        cases.append({"id": cid, "kind": kind, "title": title, "base": base, "patch": patch,
+                      "expect": {"classification": got, "changed_paths": paths, "old_version": version(old),
+                                 "new_version": version(m), "step_up_required": got == "risk_increasing"}})
 
 # =========================================================== L. research agent: admission, lineage, expiry
 TH_NOW = "2026-09-22T14:00:00.000000000Z"
