@@ -3251,7 +3251,6 @@ fn a_terminal_entry_oco_covers_its_own_fill_not_the_room() {
 /// `max_unprotected_s` after its partial fill (backlog: "E7-4 (stream K), E4 from E7-4 slice 7's
 /// second tests correction", DEC-521 item 3).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_second_brackets_end_leaves_the_first_brackets_interval_bounded() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3364,7 +3363,6 @@ fn a_second_brackets_end_leaves_the_first_brackets_interval_bounded() {
 /// bracket, must end the interval of the bracket the OCO protects, not the first bracket's
 /// (backlog: "E7-4 (stream K), E4 from E7-4 slice 7's second tests correction", DEC-521 item 3).
 #[test]
-#[ignore = "pending E7-4"]
 fn an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_bounded() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

@@ -2989,6 +2989,8 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   bracket's interval. The cases are `hand::a_second_brackets_end_leaves_the_first_brackets_interval_bounded`
   and `hand::an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_bounded`,
   which the fix takes live with their `BEHAVIOUR_ONLY_TESTS` rows; the property goes live with #668.
+  Done by E4's fix: each interval carries its bracket entry, and both the end that names a bracket
+  and the acknowledgment of the OCO placed for one close only that bracket's interval.
 - **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
   ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
   while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on
