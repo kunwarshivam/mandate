@@ -1,7 +1,7 @@
 # Owlhead design history
 
 The dated record of founder feedback and the decisions it led to, moved out of
-[DESIGN.md](../DESIGN.md) under DEC-502. New entries are one line each: the date, what was asked,
+[DESIGN.md](../DESIGN.md) under DEC-511. New entries are one line each: the date, what was asked,
 and the DEC. Detail belongs in the decision file.
 
 - **2026-09-28, first look rejected.** PR #253's first screenshots (a generic card dashboard) were rejected by the founder as too plain.

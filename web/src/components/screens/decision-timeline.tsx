@@ -32,7 +32,7 @@ export function tally(decisions: GateDecision[]): string {
  * off one hairline by the agent's owl, with the action, the gate's verdict in words, who and when, and
  * one line of why: the rule that held it, or else what happened next. The verdict sits first, in
  * one column of one width on every row, so it never wraps and the eye reads it down the list
- * (DEC-503); it wears no meaning colour.
+ * (DEC-512); it wears no meaning colour.
  */
 export function DecisionTimeline({ ws, decisions }: { ws: Workspace; decisions: GateDecision[] }) {
   return (

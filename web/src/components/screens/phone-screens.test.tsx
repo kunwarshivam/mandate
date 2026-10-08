@@ -46,7 +46,7 @@ describe("Home on a phone", () => {
     expect(shownOnDesktop(needsYou())).toBe(true);
   });
 
-  it("lists the requests first, soonest deadline first, each with the static time it is skipped at, then the agents' conditions, one line per agent and condition and no feed (DEC-504)", () => {
+  it("lists the requests first, soonest deadline first, each with the static time it is skipped at, then the agents' conditions, one line per agent and condition and no feed (DEC-513)", () => {
     const ws = buildWorkspace("approvals");
     const stale = buildWorkspace("stale");
     render(

@@ -239,7 +239,7 @@ function eggRects(rows: readonly string[]): OwlRect[] {
 const HATCH_MS = 600;
 
 /**
- * A new agent's owl hatching, once, when the runtime has recorded it (DEC-505): the egg parts along
+ * A new agent's owl hatching, once, when the runtime has recorded it (DEC-514): the egg parts along
  * its crack, the top half lifting away and the bottom half sinking, and the owl rises into place
  * over 600ms. It answers the owner's act of creating the agent, never plays again, and under
  * reduced motion the owl is simply there.

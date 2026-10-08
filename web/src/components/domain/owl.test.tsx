@@ -9,7 +9,7 @@ import { AgentOwl, FEATHERS, HatchingOwl, Owl, beakFor, moodFor, owlRows, owlSha
 const MODES: AgentMode[] = ["normal", "exits_only", "paused", "stopped"];
 
 describe("an agent's owl", () => {
-  it("hatches once from an egg on its own grid, and under reduced motion is simply there (DEC-505)", () => {
+  it("hatches once from an egg on its own grid, and under reduced motion is simply there (DEC-514)", () => {
     const { container, unmount } = render(<HatchingOwl seed={AGENT_IDS.btc} className="size-16" />);
     const hatch = container.querySelector("[data-slot=hatch]")!;
     expect(hatch.querySelector("[data-slot=owl]")).toHaveAttribute("data-mood", "awake");

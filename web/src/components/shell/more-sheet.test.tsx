@@ -43,7 +43,7 @@ describe("what the phone reaches (DEC-207)", () => {
     expect(moreGroups("auditor").flatMap((g) => g.links.map((l) => l.href))).not.toContain("/audit");
   });
 
-  it("groups Approvals and Alerts, then Positions, Audit and Settings, in that order, and lists no screen still to come (DEC-504)", () => {
+  it("groups Approvals and Alerts, then Positions, Audit and Settings, in that order, and lists no screen still to come (DEC-513)", () => {
     const groups = moreGroups("owner");
     const labels = groups.map((g) => g.label);
     const hrefs = groups.flatMap((g) => g.links.map((l) => l.href));
@@ -60,7 +60,7 @@ describe("what the phone reaches (DEC-207)", () => {
 describe("the More sheet", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("opens from the fourth tab with Approvals and Alerts first, then Search, then every other screen, and the account and workspace at the foot (DEC-504)", () => {
+  it("opens from the fourth tab with Approvals and Alerts first, then Search, then every other screen, and the account and workspace at the foot (DEC-513)", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const more = within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "More" });
     const sheet = openMore();

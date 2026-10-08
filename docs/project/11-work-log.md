@@ -22,15 +22,15 @@ claim issue or the decision file, not here.
 - A red check that is merged over hides the failures behind it (#363 hid sixteen); nothing merges
   red.
 - A fixture is a story and must be consistent with itself; a scenario that edits state and not its
-  path shows the seam (DEC-504, `market.test.ts`).
-- A test pins an invariant the spec states, not the current rendering (DEC-502).
+  path shows the seam (DEC-513, `market.test.ts`).
+- A test pins an invariant the spec states, not the current rendering (DEC-511).
 
 ## Sessions
 
 - **2026-10-07 to 10-08, the design conversation and plan.** The founder reviewed the web app from
   screenshots of every screen and scenario; thirty findings, a direction and one plan of action
-  items (`web/design/`). DEC-502 split `web/DESIGN.md` into principles, a reference and a history
-  and set the test rule; DEC-503 to DEC-506 landed the state system, the cutting pass, the owls and
+  items (`web/design/`). DEC-511 split `web/DESIGN.md` into principles, a reference and a history
+  and set the test rule; DEC-512 to DEC-515 landed the state system, the cutting pass, the owls and
   the first pass on Home, fifteen commits on #669. Next: a faster process once #669 merges, and the
   plan's process and codebase items.
 
@@ -461,9 +461,9 @@ record.
 5. **ADR-0003's remaining code stories** (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5), each under
    the DEC-77 sequence with its own claim issue.
 6. **The web UI review of 2026-10-07** (`web/design/review-2026-10-07.md`, thirty findings from
-   screenshots of every screen and scenario on fixture data). DEC-502 split `web/DESIGN.md` into
+   screenshots of every screen and scenario on fixture data). DEC-511 split `web/DESIGN.md` into
    principles, a reference and a history, and set the rule that a test pins an invariant, not the
-   look. In order: the test sort DEC-502 item 5 calls for (its own change); the quick fixes (items
+   look. In order: the test sort DEC-511 item 5 calls for (its own change); the quick fixes (items
    9, 14, 16, 19, 29); the cutting pass (items 3, 4, 8, 17, 28); then the owls, Needs you and the
    headroom hero (items 1, 2, 5, 6), each with its DEC. The founder's direction for the product
    and the website beyond the review (the premise, the craft standard, the three moments, the

@@ -82,7 +82,7 @@ export function verdictLabel(decision: GateDecision): string {
 }
 
 /**
- * The word a decision wears in a list (DEC-503): an allow the mandate turned into a request reads
+ * The word a decision wears in a list (DEC-512): an allow the mandate turned into a request reads
  * "Asked you", so "Allowed" beside an action only ever means the gate passed it and it went out.
  */
 export function verdictBadge(decision: GateDecision): string {

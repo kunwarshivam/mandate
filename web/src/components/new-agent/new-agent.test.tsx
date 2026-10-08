@@ -471,7 +471,7 @@ describe("creating it", () => {
     expect(progress()).toHaveTextContent("Agent 4 is running on paper.");
     expect(progress()).toHaveTextContent("Recorded in the journal at 14:05:20 ET, as version 1.");
     expect(progress()!.querySelector("[data-slot=owl]")).toHaveAttribute("data-mood", "awake");
-    expect(progress()!.querySelector("[data-slot=hatch] [data-slot=egg]"), "the owl hatches once, answering the owner's act (DEC-505)").not.toBeNull();
+    expect(progress()!.querySelector("[data-slot=hatch] [data-slot=egg]"), "the owl hatches once, answering the owner's act (DEC-514)").not.toBeNull();
     expect(within(progress()!).getByRole("link", { name: "Open Agent 4" })).toHaveAttribute("href", `/agents/${d.agentId}`);
 
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 2));

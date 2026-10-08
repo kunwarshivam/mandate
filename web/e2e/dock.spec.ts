@@ -128,7 +128,7 @@ test("the menus open, move and close from the keyboard, and focus comes back to 
   await expect(more).toBeFocused();
 });
 
-test("every built screen is one press or one menu away, and no screen still to come has a door (DEC-504)", async ({ page }) => {
+test("every built screen is one press or one menu away, and no screen still to come has a door (DEC-513)", async ({ page }) => {
   await open(page, "/");
   const reached = new Set(await dock(page).locator(":scope > a").evaluateAll((els) => els.map((el) => el.getAttribute("href"))));
   for (const menu of ["More"]) {

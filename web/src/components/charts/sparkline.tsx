@@ -3,7 +3,7 @@ import type { Point } from "@/fixtures/market";
 
 /**
  * Today's equity as one line, scaled to its own range so a quiet day still shows its shape, with
- * the daily loss limit as the pale volt region below it (DEC-506): the region rises into view as the
+ * the daily loss limit as the pale volt region below it (DEC-515): the region rises into view as the
  * agent nears its limit, and sits as a sliver at the foot while the limit is far below. A line
  * drawn far above a distant dashed rule read as broken. It stretches to its column and keeps its
  * strokes hairline-true. Decoration: `label` says it.

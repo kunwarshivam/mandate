@@ -35,7 +35,7 @@ export function alertLines(ws: Workspace): AlertLine[] {
 }
 
 /**
- * What Needs you lists under the requests (DEC-504): the agents' conditions, one line per agent and
+ * What Needs you lists under the requests (DEC-513): the agents' conditions, one line per agent and
  * condition with every instrument it covers in one pair of brackets, and no feed. A degraded feed is
  * the status strip's and the Alerts screen's to say, and it asks nothing of the owner.
  */

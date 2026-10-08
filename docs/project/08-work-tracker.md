@@ -25,7 +25,7 @@ Open PRs and claim issues on GitHub are the live record of who holds what.
 | M5 Agent runtime and risk | In progress: the runtime and kill switches, the mandate document (validation, policy, change classification), the risk state and ladder, the gate with the US account rules, eligibility, conduct controls and restrictions, autonomy and the order builder, delegations, the client ceiling, the review date, V-047 | Tripwires (E6-13: MC-W01 to MC-W57) in the DEC-77 sequence; the Proposed readings under Waiting on the founder |
 | M6 Alpaca connector (paper) and recovery | In progress: the executor's intent, state machine and reconciliation; the protective-exit slices 1 to 6; the agent-, control- and account-stream schemas | The tracer (E7-7): #598 through its gates, then the one external order under DEC-450; E7-9's implementation |
 | M7 Escalation v0 | In progress: `mandate-approval` (E8-1 to E8-3), the runtime's approval path, owner commands, the MC-E lifecycle driver | The CLI's `clap` wiring of the inbox and owner commands; email and one chat channel; MC-E01, E06, E17 to E24, E29 |
-| M9 Web app (started early, DEC-200) | On fixtures: the shell, Home, agents, approvals, Messages and the copilot, the set-up chat, sign-in, the landing page; the design plan's first five decisions (DEC-502 to DEC-506) on #669 | `web/design/plan.md`, every unticked item, in its order; then the connection to a deployment |
+| M9 Web app (started early, DEC-200) | On fixtures: the shell, Home, agents, approvals, Messages and the copilot, the set-up chat, sign-in, the landing page; the design plan's first five decisions (DEC-511 to DEC-515) on #669 | `web/design/plan.md`, every unticked item, in its order; then the connection to a deployment |
 | M8, M10 to M13 | Planned; the design layer drafted (DEC-431 to DEC-443) | ADR-0003's code stories (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5) |
 
 **Reference cases.** Journal 46 of 46. Trading domain 13 of 26 cases plus four variants; the rest
@@ -33,7 +33,7 @@ wait on the executor stories (E7-2 to E7-5) and the founder's DEC-129 items. Man
 the rest on E6-13, E8-3, E8-8 and DEC-444's harness. `crates/mandate-refcases/status.toml` is the
 record.
 
-**Open PRs.** #669 (the design plan, DEC-502 to DEC-506), #662 (E5-8 implementation), #647 (the
+**Open PRs.** #669 (the design plan, DEC-511 to DEC-515), #662 (E5-8 implementation), #647 (the
 xtask reference checks, DEC-493), #514 (DEC-422, amends trading spec §5.4), #603 (the tracer's
 paper assembly). Each merges on green CI and an independent review on a different model (DEC-79).
 
@@ -41,7 +41,7 @@ paper assembly). Each merges on green CI and an independent review on a differen
 
 1. **Merge #669**, then revise the development process (the founder, 2026-10-08: the process has
    become the bottleneck): one branch per plan item; `npm run shots` and a golden-path contact
-   sheet so review is visual; the test sort DEC-502 item 5 calls for; a lighter path for
+   sheet so review is visual; the test sort DEC-511 item 5 calls for; a lighter path for
    reversible product changes. Decisions already taken may be revised.
 2. **The tracer (E7-7).** #598 through its full local check, green CI and review; then the one
    external order only with explicit founder confirmation, paper-only credentials and a

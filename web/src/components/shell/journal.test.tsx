@@ -63,7 +63,7 @@ describe("Stop sheet", () => {
 });
 
 describe("command palette", () => {
-  it("opens on ⌘K with Go to first and Stop… as the last command, under Safety (DEC-504), and Stop… opens the sheet", () => {
+  it("opens on ⌘K with Go to first and Stop… as the last command, under Safety (DEC-513), and Stop… opens the sheet", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     act(() => {
       fireEvent.keyDown(window, { key: "k", metaKey: true });

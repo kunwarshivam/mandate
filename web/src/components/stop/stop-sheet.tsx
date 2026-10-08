@@ -25,7 +25,7 @@ type Tone = "ink" | "outline";
 /**
  * Pausing is ink, like a paused agent. The kill switch is `KillSwitchButton`, the only crimson. The
  * account's three choices share one weight, an outlined row each, so the most drastic is not also
- * the loudest (DEC-506): pausing comes first and reads first.
+ * the loudest (DEC-515): pausing comes first and reads first.
  */
 const TONE: Record<Tone, string> = {
   ink: "bg-ink text-ink-foreground hover:bg-ink/85",

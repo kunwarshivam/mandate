@@ -19,7 +19,7 @@ import { StopButton } from "./stop-control";
 /** The screens that sit on the dock itself, in order; every other screen is one menu away. */
 export const DOCK_LINKS = ["home", "messages", "approvals", "alerts", "agents", "positions"] as const;
 
-/** One menu, More, holds every listed screen that is not on the dock (DEC-504 folded Audit into it). */
+/** One menu, More, holds every listed screen that is not on the dock (DEC-513 folded Audit into it). */
 export type DockMenu = "more";
 
 export function menuFor(group: ScreenGroup): DockMenu {

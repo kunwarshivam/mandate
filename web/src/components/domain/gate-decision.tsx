@@ -10,7 +10,7 @@ import { STRETCHED_LINK } from "./positions";
 export const VERDICT_COLUMN = "[--verdict-w:5.75rem]";
 
 /**
- * The gate's verdict as one chip in one style everywhere (DEC-503): a quiet chip on the well for an
+ * The gate's verdict as one chip in one style everywhere (DEC-512): a quiet chip on the well for an
  * allow that went out, and an ink ring for everything that did not (asked you, not allowed, held,
  * waiting). It takes the verdict column's width and never wraps; it carries no meaning colour.
  */

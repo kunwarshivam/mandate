@@ -12,9 +12,9 @@ the owl, the rules and the record.
 
 ## A. Process (done or in flight)
 
-- [x] DESIGN.md holds principles; the rendering and the history move to `web/design/` (DEC-502,
+- [x] DESIGN.md holds principles; the rendering and the history move to `web/design/` (DEC-511,
       #669).
-- [ ] **Test sort** (DEC-502 item 5). Loosen look-pinning tests to the invariant they protect,
+- [ ] **Test sort** (DEC-511 item 5). Loosen look-pinning tests to the invariant they protect,
       remove the ones that only notice the look changed, keep every safety and compliance test
       exactly as it is. Its own PR.
 - [ ] **A weekly critique.** Screenshots of every screen; one question: what is the worst thing on
@@ -26,7 +26,7 @@ the owl, the rules and the record.
       Linear (speed and keyboard), Bloomberg (density without clutter), Things (calm states), Arc
       (character without jokes), the Macintosh HIG of 1992 (consistency). Nothing else on the
       list; a proposal that cites none of them is suspect.
-- [ ] **A craft checklist in CI.** Not look-pinning tests (DEC-502) but the mechanical rules that
+- [ ] **A craft checklist in CI.** Not look-pinning tests (DEC-511) but the mechanical rules that
       make "best": the 8px grid, the type scale only, contrast, 44px targets, no orphan word in a
       heading, no string outside the voice file.
 
@@ -56,34 +56,34 @@ the owl, the rules and the record.
 ## C. The cutting pass (one PR, no new rules)
 
 - [x] **One status badge system.** One chip, one width, first in its row, and "Asked you" distinct
-      from "Allowed", so "Allowed" only ever means the gate passed it. (R-3, DEC-503)
+      from "Allowed", so "Allowed" only ever means the gate passed it. (R-3, DEC-512)
 - [x] **One provenance tag style.** Five short words ("You said", "You entered", "Template",
       "Proposed", "Default") in two shapes, the same on the mandate page and in the set-up summary.
-      (R-22, DEC-504)
+      (R-22, DEC-513)
 - [x] **Less fine print.** One "Fixture data" tag per screen: the chart footer, the Positions
       screen and the More sheet dropped theirs. The as-of line and the simulated notes stay as
-      disclosures. (R-4, DEC-504)
+      disclosures. (R-4, DEC-513)
 - [x] **Remove the unbuilt.** No dock, menu, sheet or palette lists a screen that is not built; the
-      index pages name what is coming in one line. (R-17, DEC-504)
+      index pages name what is coming in one line. (R-17, DEC-513)
 - [x] **Less chrome.** The breadcrumb folds nothing on top-level screens; the paper badge sits in
       the header and on record screens only; Audit folded into More and Connections off the dock.
-      (R-8, DEC-504)
+      (R-8, DEC-513)
 - [ ] **The set-up summary, short first.** The six sentences and the three dollar losses, then
       Create agent; the thirty rows folded under "Everything it will hold to"; the hash in a
       footnote. (R-28) Waits on counsel: the rows are what the passkey confirms, and DEC-477
       flags accepting proposed limits in bulk as compliance question 23.
 - [x] **Messages columns.** The rail shows from 80rem, so between 64 and 80rem the thread has the
-      room. (R-15, DEC-504)
+      room. (R-15, DEC-513)
 - [ ] **Phone chart.** No axis on phones; levels as hairlines with the label at the right edge.
       (R-20) Waits on a decision: the axis is a canvas option, and the phone rule allows no script
       media query (DEC-207); either the rule takes a stated exception for canvas or the chart
       clips its axis by CSS.
 - [x] **Phone More sheet order.** Approvals and Alerts first, then Search, then the rest; account
-      and workspace at the bottom with the theme. (R-21, DEC-504)
+      and workspace at the bottom with the theme. (R-21, DEC-513)
 - [x] **Needs you holds requests and the agents' conditions.** No feed lines (the strip and
-      Alerts carry them); one line per agent and condition, not per instrument. (R-11, DEC-504)
+      Alerts carry them); one line per agent and condition, not per instrument. (R-11, DEC-513)
 - [x] **The palette's first row.** Go to first, the agents, then Safety with "Stop…" last. (R-18,
-      DEC-504)
+      DEC-513)
 - [ ] **One request, one place.** An approval appears as a page, a card in the thread and a row
       in Needs you; one representation that the others link to.
 - [ ] **Lists are the product.** The agent rows, the approvals and the decisions share one row
@@ -91,24 +91,24 @@ the owl, the rules and the record.
 
 ## D. The state system (DEC)
 
-- [x] **Modes named by what the agent may do:** Trading, Selling only, Paused, Stopped. (DEC-503)
-- [x] **The mode chip is a dot and a word**, never a checkbox glyph. (R-8, DEC-503)
+- [x] **Modes named by what the agent may do:** Trading, Selling only, Paused, Stopped. (DEC-512)
+- [x] **The mode chip is a dot and a word**, never a checkbox glyph. (R-8, DEC-512)
 - [x] **Restrictions on a row are one line**, with detail on hover and on the agent page, not
-      full-sentence pills that triple the row. (R-10, DEC-503)
+      full-sentence pills that triple the row. (R-10, DEC-512)
 - [ ] **Three nouns on the owner's screens:** agent, rules, account. Deployment, workspace,
       connection, environment stay in audit and settings.
 
 ## E. The owls (DEC)
 
 - [x] **One pixel grid.** Owls draw only at 16, 32, 48, 64 or 80px, where a sprite pixel is whole
-      (the 24, 28 and 56px owls are gone); the icons were on the grid already. (R-8, DEC-505)
+      (the 24, 28 and 56px owls are gone); the icons were on the grid already. (R-8, DEC-514)
 - [x] **Four frames per owl.** Already shipped (DEC-217, `owl-sprite.ts`): eyes open when
       trading, lidded on selling only, asleep with a "z" when paused, shut when stopped; nothing
       follows P&L. The review missed it because every fixture agent was trading. (R-1)
 - [x] **One distinguishing feature per agent.** Already shipped: ears and markings come from the
       agent's ID (`owlShape`), so the silhouettes differ in greyscale.
 - [x] **The hatch.** When the runtime records a new agent its owl hatches from an egg once, 600ms;
-      under reduced motion it is simply there. (DEC-505)
+      under reduced motion it is simply there. (DEC-514)
 - [x] **Silence as a feature.** Already shipped: the all-clear is the brand owl and "All clear.
       Nothing needs you."
 - [ ] **One era of type on the landing page:** the Pixelify wordmark, not the figlet ASCII. Waits
@@ -117,23 +117,23 @@ the owl, the rules and the record.
 ## F. Home and the agent page (DEC)
 
 - [x] **Needs you in the volt card at every width**, with the deadline as a fixed time, so the
-      one thing asking for the owner is the one tinted thing on the screen. (R-2, DEC-506) Still
+      one thing asking for the owner is the one tinted thing on the screen. (R-2, DEC-515) Still
       open: when something needs the owner, Needs you as the screen itself, the rest quieter.
 - [ ] **The mandate becomes the agent page.** The ladder and the headroom as the main column, the
       chart inside it. (R-6) Done: "Equity now" is a marked row, no longer a filled block that read
-      as a button. (R-22, DEC-506)
+      as a button. (R-22, DEC-515)
 - [ ] **The mandate you can feel.** Scrub the chart and the headroom bars move; drag a limit line
       and a sentence says what would have happened last week under that rule, from the journal,
       never a forecast.
 - [x] **Agent-row sparklines** scaled to their own range with the loss limit as the pale volt
-      region below the line, rising into view as the agent nears it. (R-5, DEC-506)
+      region below the line, rising into view as the agent nears it. (R-5, DEC-515)
 - [ ] **The agent's diary.** Activity in the first person, from the journal, deterministic, no
       model.
 - [ ] **"Try to change it" on every real record**, with the owner's own data.
 - [ ] **The deadline as a sand clock:** a pixel hourglass that is simply there, the same at nine
       minutes and one.
 - [x] **The Stop sheet's three account choices at one weight**, outlined rows, with Close
-      everything's list behind its confirmation on the record screen. (R-13, DEC-506) Still open:
+      everything's list behind its confirmation on the record screen. (R-13, DEC-515) Still open:
       the switch-under-a-cover drawing.
 - [ ] **Unreachable deployment:** screens that need it greyed; Stop opens straight onto "reach the
       broker directly". (R-12)
@@ -221,7 +221,7 @@ process is revised, and decisions already taken may be revised with it.
   itself. Ask of every idea: would it still work on a bad day with real money?
 - **Cut before you add.** The product's weaknesses were duplicates and unbuilt doors, not missing
   features. A cutting pass makes a clean canvas; decoration on a cluttered one is noise.
-- **A test pins an invariant, not the look** (DEC-502). Feedback that became a measurement that
+- **A test pins an invariant, not the look** (DEC-511). Feedback that became a measurement that
   became a test is how the rules file outran the product.
 - **A fixture is a story and must be consistent with itself.** The drawdown scenario edited the
   agent's state and left its orders and prices telling the old story; the chart showed the seam.

@@ -78,7 +78,7 @@ function linkOf(s: Screen): MoreLink {
 /**
  * Every listed screen a role may open that is not on its tabs, in the order of `SCREENS`, under the
  * group labels the dock uses; Audit and Settings open with their overview, which stays even while
- * every screen under it is still to come, since the overview names what is coming (DEC-504).
+ * every screen under it is still to come, since the overview names what is coming (DEC-513).
  */
 export function moreGroups(role: Role): MoreGroup[] {
   const onTabs = new Set(phoneTabs(role).map((t) => t.href));

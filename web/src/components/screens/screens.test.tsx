@@ -142,7 +142,7 @@ describe("D1 dashboard", () => {
     expect(main()).toHaveTextContent(/Stale: as of 14:02:11, 3 min ago/);
   });
 
-  it("names a paused agent's restriction on its row in one line, since when, with what it blocks and how it ends behind it, not inline (DEC-503)", () => {
+  it("names a paused agent's restriction on its row in one line, since when, with what it blocks and how it ends behind it, not inline (DEC-512)", () => {
     renderScreen("/", <DashboardScreen />, "paused");
     const restrictions = within(main()).getByLabelText("Restrictions");
     expect(restrictions.tagName).toBe("P");

@@ -151,7 +151,7 @@ A repeat address counts as stored, so the form never says whether someone is alr
 The visual system is the calm, consumer-grade redesign of DEC-204: one hero number per screen, a
 scrubbable equity chart at the centre, generous space, few boxes, soft corners, two densities (calm
 and dense), in Ink and Ultramarine (DEC-205), light or dark, and with no gamification. `web/DESIGN.md` holds the rules, the tokens and the do and don't list, and
-`web/design/reference.md` how each surface is drawn (DEC-502); `web/PRODUCT.md` holds the audience, voice, and the safety
+`web/design/reference.md` how each surface is drawn (DEC-511); `web/PRODUCT.md` holds the audience, voice, and the safety
 rules that constrain visuals. `/design` (not linked from the navigation) renders the tokens with
 their OKLCH values and computed contrast, the type scale, the spacing in both densities, the radius scale,
  every state treatment, the components, and motion samples.

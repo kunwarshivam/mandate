@@ -28,7 +28,7 @@ function sectionOf(s: Screen): string {
   return DOCKED[s.key] ?? "More";
 }
 
-/** Only a built screen has a door on the dock (DEC-504); one still to come marks nothing current. */
+/** Only a built screen has a door on the dock (DEC-513); one still to come marks nothing current. */
 const ROUTES: [string, string][] = [
   ...SCREENS.filter((s) => s.built).map((s): [string, string] => [s.href, sectionOf(s)]),
   [SECTION_INDEX.audit.href, "More"],

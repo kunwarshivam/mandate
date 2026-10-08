@@ -125,7 +125,7 @@ three things no brokerage or trading bot has:
     jokes), the Macintosh HIG of 1992 (consistency). Nothing else on the list.
 17. **Five people, watched.** No telemetry by design, so five owners, twenty minutes each, say
     nothing, write down where they hesitate.
-18. **A design engineer's checklist in CI.** Not look-pinning tests (DEC-502) but the craft rules:
+18. **A design engineer's checklist in CI.** Not look-pinning tests (DEC-511) but the craft rules:
     the 8px grid, the type scale only, contrast, targets, no orphan words in headings, no string
     outside the voice file.
 19. **A golden path.** One ten-minute journey (sign in, set up an agent, see it ask, approve, read

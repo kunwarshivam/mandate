@@ -25,7 +25,7 @@ interface CommandGroup {
 }
 
 /**
- * ⌘K. Go to comes first and "Stop…" last, under Safety, for a role that may stop (DEC-504): first in
+ * ⌘K. Go to comes first and "Stop…" last, under Safety, for a role that may stop (DEC-513): first in
  * the list it read as the default act, and it is on every screen already. Titles come from the screen
  * list and from owner-given agent labels only: model output never becomes a command title. Nothing
  * typed here is kept; there are no recents. From `lg` the trigger is a wide bar, centred in the

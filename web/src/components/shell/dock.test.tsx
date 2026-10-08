@@ -22,7 +22,7 @@ async function openMenu(name: string) {
 }
 
 describe("the desktop dock", () => {
-  it("labels every item under its icon: the everyday screens in order, then the More menu; no unbuilt screen has a door (DEC-504)", () => {
+  it("labels every item under its icon: the everyday screens in order, then the More menu; no unbuilt screen has a door (DEC-513)", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const names = (els: HTMLElement[]) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent);
     expect(within(dock()).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/", "/messages", "/approvals", "/alerts", "/agents", "/positions"]);
@@ -81,7 +81,7 @@ describe("the desktop dock", () => {
     expect(within(dock()).getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "true");
   });
 
-  it("marks More current on any audit screen, and the screen inside the menu; an audit screen still to come has no menu item (DEC-504)", async () => {
+  it("marks More current on any audit screen, and the screen inside the menu; an audit screen still to come has no menu item (DEC-513)", async () => {
     setPathname("/audit/decisions");
     renderWithRuntime(<AppShell>{null}</AppShell>);
     expect(within(dock()).getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "true");

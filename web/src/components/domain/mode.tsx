@@ -9,7 +9,7 @@ import { type RestrictionSource, SOURCE_LABEL, describeRestriction } from "@/lib
 
 /**
  * Trading is quiet; selling only is outlined in ink (half stopped); paused and stopped are solid
- * ink. The word carries the mode and a dot marks it as a state (DEC-503): never a glyph that reads
+ * ink. The word carries the mode and a dot marks it as a state (DEC-512): never a glyph that reads
  * as a control, so no colour has to carry it either.
  */
 export const MODE_FIELD: Record<AgentMode, string> = {

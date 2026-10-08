@@ -7,7 +7,7 @@ direction: Calm, in Ink and Volt, light and dark (DEC-204, DEC-205, DEC-214)
 # Owlhead design system
 
 The principles and tokens of the Owlhead web app: what must hold on every screen, and the values the
-tokens take. It is short on purpose ([DEC-502](../docs/project/decisions/DEC-502.md)): the
+tokens take. It is short on purpose ([DEC-511](../docs/project/decisions/DEC-511.md)): the
 rendering of each surface, component and page is described in
 [design/reference.md](design/reference.md), and the dated record of founder feedback in
 [design/history.md](design/history.md). A rule here is binding; a sentence in the reference says how
@@ -138,14 +138,14 @@ One line each; the reference has the rest.
   their own shapes.
 - **Icons** (DEC-478). Pixelarticons at 24 or 48px, one import per icon; Phosphor and Lucide are
   lint-banned in app code.
-- **Owls** (DEC-217, DEC-505). A 16-pixel sprite whose ears and markings come from the agent's ID
+- **Owls** (DEC-217, DEC-514). A 16-pixel sprite whose ears and markings come from the agent's ID
   and whose eyes say its mode and nothing else; drawn only at 16, 32, 48, 64 or 80px, where a sprite
   pixel is whole, so the owls and the icons share one pixel grid. A new agent's owl hatches once,
   when the runtime records it; under reduced motion it is simply there.
 - **Stop control and sheet** (DEC-206). The octagon pill, quiet or loud; one sheet for every opener,
   Pause before Stop before Close everything.
 - **Kill-switch button.** The only thing that draws crimson.
-- **Mode chip, verdict chip, source tag, provenance** (DEC-503). A mode is named by what the agent
+- **Mode chip, verdict chip, source tag, provenance** (DEC-512). A mode is named by what the agent
   may do (Trading, Selling only, Paused, Stopped) and drawn as a dot and a word, never a glyph that
   reads as a control: Trading on the well, Selling only ringed in ink, Paused and Stopped solid ink.
   A gate's verdict is one chip in one width, first in its row; "Asked you" is distinct from
@@ -198,4 +198,4 @@ decision recorded as a DEC). Founder feedback goes to [design/history.md](design
 line; what it changed goes to the reference. A test pins what this file states and nothing more:
 the invariant ("the owner's request comes before the chart on a phone"), not the current rendering
 (a height at four viewports). Measurements that only describe today's look belong in the reference,
-and a test of them is a test that notices the look changed, which is not a defect (DEC-502).
+and a test of them is a test that notices the look changed, which is not a defect (DEC-511).

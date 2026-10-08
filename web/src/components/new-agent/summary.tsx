@@ -31,7 +31,7 @@ export const LEGEND = "Marked Proposed or Default: set by Owlhead to fit inside 
 export const GAP_NOTE = "Price gaps and exit prices can make any of these losses larger. You gave the last one; Owlhead worked out the others from it.";
 const NOT_ENFORCED_WHY = "No limit can check this, so it isn't enforced. The agent gets it as a note.";
 
-/** The same words as the mandate page's provenance badges (DEC-504), on what the owner did not say. */
+/** The same words as the mandate page's provenance badges (DEC-513), on what the owner did not say. */
 const TAG: Record<Provenance, string | null> = {
   user_stated: null,
   user_entered: null,

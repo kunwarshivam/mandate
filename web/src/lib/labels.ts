@@ -1,6 +1,6 @@
 import type { AgentMode, ApprovalStatus, CancelReason, ChangeClass, OrderState, Provenance, Purpose, RiskFigure } from "@/fixtures/types";
 
-/** A mode is named by what the agent may do (DEC-503), so "Trading" needs no "Selling only" beside it to be understood. */
+/** A mode is named by what the agent may do (DEC-512), so "Trading" needs no "Selling only" beside it to be understood. */
 export const MODE_LABEL: Record<AgentMode, string> = {
   normal: "Trading",
   exits_only: "Selling only",
@@ -15,7 +15,7 @@ export const MODE_MEANING: Record<AgentMode, string> = {
   stopped: "Ended. Places no orders.",
 };
 
-/** Mandate spec §2.1, in short words (DEC-504). A dashed badge marks what the platform, not the owner, authored. */
+/** Mandate spec §2.1, in short words (DEC-513). A dashed badge marks what the platform, not the owner, authored. */
 export const PROVENANCE_LABEL: Record<Provenance, string> = {
   user_stated: "You said",
   user_entered: "You entered",
