@@ -699,7 +699,7 @@ enough:
    `refresh_failed`, §12.1), but is not a deprovision signal (§11.1), so route 2 stays open.
    A session the outage left reduction-only has no idle limit for pause and the kill switch, and
    those requests count as activity; a later granted refresh restores it to a full session only if
-   its idle timeout has not lapsed since its last admitted request, and otherwise ends it
+   its idle timeout has not lapsed since its last admitted request, and otherwise ends it (`expired`)
    ([DEC-816](../project/decisions/DEC-816.md) item 8).
 2. **Workspace-local passkey.** The workspace deployment verifies a fresh passkey assertion
    against the public keys it holds (§6.1) and opens a *reduction-only session*: pause and kill
@@ -973,7 +973,7 @@ them to journal §9 with schemas (DEC-437 item 9):
 | `MemberDeactivated`, `MemberReactivated`, `MemberRemoved` | member, by whom, reason code |
 | `CredentialEnrolled`, `CredentialRemoved` | member, credential (opaque reference, never the key), kind, enrolment cool-off end |
 | `SessionOpened` | member, session (opaque), method, device (opaque), `first_seen_device` (true when the principal has not used the device before); the subject event of the notifications spec's `new_device` kind |
-| `SessionRevoked` | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `refresh_failed`, `admin`; `refresh_failed` is a refresh the provider answered with neither a grant nor a deprovision signal, §6.4 route 1; `deactivated` is a session closed because its principal's last membership that reached a scope in the deployment ended, §5.2 step 2); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
+| `SessionRevoked` | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `refresh_failed`, `expired`, `admin`; `expired` is a session ended by its idle or absolute limit, §6.2 and §6.4 route 1; `refresh_failed` is a refresh the provider answered with neither a grant nor a deprovision signal, §6.4 route 1; `deactivated` is a session closed because its principal's last membership that reached a scope in the deployment ended, §5.2 step 2); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
 | `ClientConnected`, `ClientRevoked` | client id, user, scopes, step-up evidence |
 | `ServiceAccountIssued`, `ServiceAccountRevoked` | account, scopes, workspaces, expiry, issuing user |
 | `HostCliRegistered`, `HostCliRevoked` | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence |
