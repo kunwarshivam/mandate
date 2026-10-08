@@ -3,3 +3,4 @@
 mod errors;
 mod grant;
 mod hosts;
+mod record;

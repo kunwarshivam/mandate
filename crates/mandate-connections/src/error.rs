@@ -1,4 +1,7 @@
-//! Why a connect step refused. No variant carries a credential, a code, or broker text (CN-1).
+//! Why a connect step refused. No variant carries a credential, a code, or broker text (CN-1),
+//! and none carries an account fingerprint: errors reach API responses (API-11).
+
+use crate::record::ConnectionId;
 
 /// A refusal from the connect core.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -23,6 +26,20 @@ pub enum ConnectError {
     VaultUnavailable,
     #[error("the token endpoint failed")]
     EndpointFailed,
+    #[error("the account is already connected as {existing:?}")]
+    AlreadyConnected { existing: ConnectionId },
+    #[error("a reconnect must keep its connection's broker and environment")]
+    ReconnectMismatch,
+    #[error("the account fingerprint key is being rotated; connects resume when it finishes")]
+    FingerprintRotating,
+    #[error("a connection id is 1 to 64 of A-Z, a-z, 0-9, _ and -")]
+    InvalidConnectionId,
+    #[error("an account reference is a ULID")]
+    InvalidAccountRef,
+    #[error("a personal-data reference is 1 to 64 of A-Z, a-z, 0-9, _ and -")]
+    InvalidPiiRef,
+    #[error("the connection record's {member} breaks connections spec §3 to §6")]
+    InvalidRecord { member: &'static str },
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -41,6 +58,13 @@ impl ConnectError {
             Self::CodeMissing => "code_missing",
             Self::VaultUnavailable => "vault_unavailable",
             Self::EndpointFailed => "endpoint_failed",
+            Self::AlreadyConnected { .. } => "already_connected",
+            Self::ReconnectMismatch => "reconnect_mismatch",
+            Self::FingerprintRotating => "fingerprint_rotating",
+            Self::InvalidConnectionId => "invalid_connection_id",
+            Self::InvalidAccountRef => "invalid_account_ref",
+            Self::InvalidPiiRef => "invalid_pii_ref",
+            Self::InvalidRecord { .. } => "invalid_record",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }
