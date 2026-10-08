@@ -484,7 +484,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 |---|---|---|
 | Streams | `GET /journal/streams` | The workspace's streams and heads |
 | Events | `GET /journal/streams/{stream_id}/events?after_seq=&limit=` | API-15: `seq` order, each event's canonical body bytes as base64, `hash`, and `prev_hash`; the cursor is the last `seq` |
-| One event | `GET /journal/events/{event_id}` | With its artifacts' refs |
+| One event | `GET /journal/events/{event_id}` | With its artifacts' refs. An event authorized from a session's roles snapshot during a membership-store outage shows its `membership_unverified: true` (identity spec §4.5), and the web audit trail displays it |
 | Timeline | `GET /agents/{id}/timeline?types=&from=&to=` | J1: merged from the agent and account streams, with one cursor per stream; display order by `recorded_at` for readability only (journal spec §2) |
 | Causal trace | `GET /journal/events/{event_id}/trace` | J2: the `causation_id` chain back to observations; model output as quoted, attributed content |
 | Gate decision | `GET /journal/events/{event_id}/gate` | J6: every check with reason code, rule-set version, quotes and marks used |

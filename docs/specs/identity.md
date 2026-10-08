@@ -348,7 +348,13 @@ new refusal. If the session record cannot be read either, the request is refused
 could be journaled anyway (workspace API §7). The ID-3 and ID-5 fuzz assert, across the whole
 risk-reducing set with an injected membership-store outage, that `membership_unavailable` never
 occurs, that each such operation commits with `membership_unverified: true`, and that no
-operation outside the set commits during the outage.
+operation outside the set commits during the outage. **A deactivation always wins over the
+snapshot:** the E9-7 and E9-8 tests owe `a_deactivated_member_is_refused_through_an_outage`, which
+deactivates a member and then injects a membership-store outage and asserts that the member's
+sessions and client tokens are refused, because their revocation, like a role change's snapshot
+rewrite, shares one transaction with `MemberDeactivated` or `MemberRoleChanged`. **The audit view
+shows the gap:** `membership_unverified: true` stays in the journaled record, and the workspace
+API's audit read model (§4.8) and the web audit trail display it (owed by those lanes).
 
 **`TenantContext`** ([DEC-642](../project/decisions/DEC-642.md)). Only the authorization step
 constructs one, and only when it authorizes a permission at a workspace's scope; an org-scope
@@ -606,7 +612,11 @@ enough:
    a 5xx answer), the session keeps the pause and kill-switch permissions, and only those, until its
    absolute lifetime ends. When the provider **answers and refuses** (`invalid_grant`, a revoked or
    disabled subject, a back-channel logout), that is a deprovision, not an outage: the session ends at
-   once with every permission (§11.1). Only a transport-level failure or a 5xx keeps anything.
+   once with every permission (§11.1). Only a transport-level failure, a 5xx, a 408, or a 429 keeps
+   anything: a 408 or a 429 is neither a deprovision signal nor a successful refresh, so it counts
+   as an outage and the session keeps pause and the kill switch only (lane B2's reading under
+   DEC-176, rule 3). Every other 4xx is a refusal and ends the session; the deprovision signals
+   that also block route 2 stay exactly those §11.1 lists.
 2. **Workspace-local passkey.** The workspace deployment verifies a fresh passkey assertion
    against the public keys it holds (§6.1) and opens a *reduction-only session*: pause and kill
    switch, nothing else, 15 minutes. No identity provider, global control plane, or model is
