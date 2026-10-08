@@ -1299,6 +1299,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-canon",
+ "mandate-domain",
  "mandate-executor",
  "mandate-num",
  "mandate-time",
@@ -1401,6 +1402,7 @@ name = "mandate-domain"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "proptest",
  "thiserror",
 ]
 
@@ -1411,6 +1413,7 @@ dependencies = [
  "mandate-accounting",
  "mandate-approval",
  "mandate-canon",
+ "mandate-domain",
  "mandate-journal",
  "mandate-num",
  "mandate-risk",
