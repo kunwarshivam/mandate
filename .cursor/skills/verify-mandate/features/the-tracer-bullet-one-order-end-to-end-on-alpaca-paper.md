@@ -25,8 +25,9 @@ crates.
   registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`),
   and the policy set and model registry that govern the run, DEC-534 (tests in
   `crates/mandate-shell/tests/governance.rs`);
-  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed E7-7 AAPL artifacts and
-  binds the bytes it checked, reads the GET-only broker preflight (including the trailing window's
+  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed artifacts and binds the
+  bytes it checked (`Artifacts::from_registered` takes them from the confirmed version and the
+  registered objects instead of files, Q1; tests in `crates/mandate-shell/tests/registered.rs`), reads the GET-only broker preflight (including the trailing window's
   IEX minute bars, DEC-471) and the liquidity facts into one `PaperFacts` snapshot, refuses any
   missing, stale, or ambiguous fact or a non-clean account, and assembles the trusted run and
   executor contexts from that snapshot alone (DEC-470); `src/adapters.rs` the production adapters:
