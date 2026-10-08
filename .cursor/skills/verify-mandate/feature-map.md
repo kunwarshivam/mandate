@@ -1050,12 +1050,12 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-webpush/src/lib.rs` (`build_request`, `encrypt`, `vapid_authorization`,
   `Subscription`, `PushEndpoint`, `VapidSubject`, the `SecureRandom` and `VapidSigner` traits, and
   `NoticeClass`'s fixed urgency and TTL) and `crates/mandate-webpush/src/payload.rs` (the closed
-  `PushPlaintext` and `PushText`), stubbed but for the closed tables.
+  `PushPlaintext` and `PushText`), implemented.
 - **Tests:** `crates/mandate-webpush/src/tests.rs`, with the published vectors and their fixtures in
   `crates/mandate-webpush/tests/vectors/mod.rs` (DEC-794): the RFC 8291 §5 and RFC 8188 §3.1 vectors
   byte-exact, a receiver-side decrypt oracle, an ES256 check of the VAPID token against the
   signer's public key, the size cap, refusals, and properties for the opaque payload and the
-  token's expiry, pending E8-14 but for the live closed-tables test.
+  token's expiry, all live.
 - **Run:** `cargo nextest run -p mandate-webpush`; `cargo xtask ci pending`.
 
 ## The CLI's Postgres control journal (E10-16, P0)

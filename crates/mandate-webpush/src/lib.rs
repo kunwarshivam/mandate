@@ -31,7 +31,13 @@
 
 mod payload;
 
-use p256::PublicKey;
+use aes_gcm::Aes128Gcm;
+use aes_gcm::aead::{Aead, KeyInit};
+use base64ct::{Base64UrlUnpadded, Encoding};
+use hkdf::Hkdf;
+use p256::elliptic_curve::sec1::ToSec1Point;
+use p256::{PublicKey, SecretKey};
+use sha2::Sha256;
 
 pub use payload::{PushPlaintext, PushText};
 
@@ -41,8 +47,16 @@ pub const MAX_BODY_LEN: usize = 512;
 /// The octets every record holds: the plaintext, its delimiter `0x02`, then zeros (DEC-790 item 2).
 pub const PADDED_RECORD_LEN: usize = 128;
 
+/// The record size written in the header, RFC 8291 §4's 4096.
+const RECORD_SIZE: u32 = 4096;
+
 /// How far after `now` the VAPID token expires: 12 hours, inside RFC 8292's 24 (DEC-790 item 4).
 pub const VAPID_LIFETIME_S: u64 = 43_200;
+
+const KEY_INFO: &[u8] = b"WebPush: info\0";
+const CEK_INFO: &[u8] = b"Content-Encoding: aes128gcm\0";
+const NONCE_INFO: &[u8] = b"Content-Encoding: nonce\0";
+const JWT_HEADER: &str = r#"{"typ":"JWT","alg":"ES256"}"#;
 
 /// Why no request could be built. `code()` is stable and carries no input.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -151,7 +165,6 @@ pub struct PushEndpoint {
     origin_len: usize,
 }
 
-/// Prints no part of the address (NT-2, DEC-790 item 6).
 impl std::fmt::Debug for PushEndpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("PushEndpoint(..)")
@@ -160,14 +173,36 @@ impl std::fmt::Debug for PushEndpoint {
 
 impl PushEndpoint {
     pub fn parse(url: &str) -> Result<Self, WebPushError> {
-        let _ = url;
-        Err(WebPushError::Unimplemented { story: "E8-14" })
+        let rest = url
+            .strip_prefix("https://")
+            .ok_or(WebPushError::InvalidEndpoint)?;
+        let host = rest.split('/').next().unwrap_or_default();
+        let plain = url
+            .bytes()
+            .all(|b| b.is_ascii_graphic() && b != b'"' && b != b'\\');
+        if host.is_empty() || host.contains('@') || !plain {
+            return Err(WebPushError::InvalidEndpoint);
+        }
+        Ok(Self {
+            url: url.to_owned(),
+            origin_len: "https://".len().saturating_add(host.len()),
+        })
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.url
+    }
+
+    /// `https://<host>[:port]`, the VAPID audience.
+    #[must_use]
+    pub fn origin(&self) -> &str {
+        self.url.get(..self.origin_len).unwrap_or_default()
     }
 }
 
 /// A browser's push subscription: where to send, and the keys to encrypt to.
 #[derive(Clone)]
-#[expect(dead_code, reason = "E8-14 builds it")]
 pub struct Subscription {
     endpoint: PushEndpoint,
     p256dh: PublicKey,
@@ -177,8 +212,23 @@ pub struct Subscription {
 impl Subscription {
     /// From the subscription's endpoint and its decoded `p256dh` and `auth` keys.
     pub fn new(endpoint: PushEndpoint, p256dh: &[u8], auth: &[u8]) -> Result<Self, WebPushError> {
-        let _ = (endpoint, p256dh, auth);
-        Err(WebPushError::Unimplemented { story: "E8-14" })
+        if p256dh.len() != 65 {
+            return Err(WebPushError::InvalidKey);
+        }
+        let p256dh = PublicKey::from_sec1_bytes(p256dh).map_err(|_| WebPushError::InvalidKey)?;
+        let auth = auth
+            .try_into()
+            .map_err(|_| WebPushError::InvalidAuthSecret)?;
+        Ok(Self {
+            endpoint,
+            p256dh,
+            auth,
+        })
+    }
+
+    #[must_use]
+    pub fn endpoint(&self) -> &PushEndpoint {
+        &self.endpoint
     }
 }
 
@@ -188,8 +238,17 @@ pub struct VapidSubject(String);
 
 impl VapidSubject {
     pub fn parse(uri: &str) -> Result<Self, WebPushError> {
-        let _ = uri;
-        Err(WebPushError::Unimplemented { story: "E8-14" })
+        let rest = uri
+            .strip_prefix("mailto:")
+            .or_else(|| uri.strip_prefix("https://"))
+            .ok_or(WebPushError::InvalidSubject)?;
+        let plain = uri
+            .bytes()
+            .all(|b| b.is_ascii_graphic() && b != b'"' && b != b'\\');
+        if rest.is_empty() || !plain {
+            return Err(WebPushError::InvalidSubject);
+        }
+        Ok(Self(uri.to_owned()))
     }
 }
 
@@ -217,16 +276,15 @@ pub fn build_request(
     now_unix_s: u64,
     random: &mut dyn SecureRandom,
 ) -> Result<PushRequest, WebPushError> {
-    let _ = (
-        subscription,
-        plaintext,
-        class,
-        signer,
-        subject,
-        now_unix_s,
-        random,
-    );
-    Err(WebPushError::Unimplemented { story: "E8-14" })
+    let body = encrypt(subscription, plaintext, random)?;
+    let authorization = vapid_authorization(subscription.endpoint(), subject, signer, now_unix_s)?;
+    Ok(PushRequest {
+        endpoint: subscription.endpoint().as_str().to_owned(),
+        ttl_s: class.ttl_s(),
+        urgency: class.urgency(),
+        authorization,
+        body,
+    })
 }
 
 /// The `aes128gcm` body for `plaintext`, padded to [`PADDED_RECORD_LEN`].
@@ -235,24 +293,41 @@ pub fn encrypt(
     plaintext: &PushPlaintext,
     random: &mut dyn SecureRandom,
 ) -> Result<Vec<u8>, WebPushError> {
-    let _ = (subscription, plaintext, random);
-    Err(WebPushError::Unimplemented { story: "E8-14" })
+    seal(
+        subscription,
+        plaintext.as_bytes(),
+        Some(PADDED_RECORD_LEN),
+        random,
+    )
 }
 
 /// RFC 8291 §3: an ephemeral key, then a salt, both drawn in that order from `random`.
-#[cfg_attr(not(test), expect(dead_code, reason = "E8-14's encrypt calls it"))]
 fn seal(
     subscription: &Subscription,
     plaintext: &[u8],
     pad_to: Option<usize>,
     random: &mut dyn SecureRandom,
 ) -> Result<Vec<u8>, WebPushError> {
-    let _ = (subscription, plaintext, pad_to, random);
-    Err(WebPushError::Unimplemented { story: "E8-14" })
+    let mut scalar = [0u8; 32];
+    random.fill(&mut scalar)?;
+    let mut salt = [0u8; 16];
+    random.fill(&mut salt)?;
+    let ephemeral = SecretKey::from_slice(&scalar).map_err(|_| WebPushError::Random)?;
+    let as_public = sec1(&ephemeral.public_key());
+    let ua_public = sec1(&subscription.p256dh);
+    let shared = p256::ecdh::diffie_hellman(
+        ephemeral.to_nonzero_scalar(),
+        subscription.p256dh.as_affine(),
+    );
+    let key_info = [KEY_INFO, &ua_public, &as_public].concat();
+    let mut ikm = [0u8; 32];
+    Hkdf::<Sha256>::new(Some(&subscription.auth), shared.raw_secret_bytes())
+        .expand(&key_info, &mut ikm)
+        .map_err(|_| WebPushError::Random)?;
+    aes128gcm(&ikm, &salt, &as_public, plaintext, pad_to)
 }
 
 /// RFC 8188 §2: one record, the last, so its delimiter is `0x02`.
-#[cfg_attr(not(test), expect(dead_code, reason = "E8-14's seal calls it"))]
 fn aes128gcm(
     ikm: &[u8],
     salt: &[u8],
@@ -260,8 +335,35 @@ fn aes128gcm(
     plaintext: &[u8],
     pad_to: Option<usize>,
 ) -> Result<Vec<u8>, WebPushError> {
-    let _ = (ikm, salt, keyid, plaintext, pad_to);
-    Err(WebPushError::Unimplemented { story: "E8-14" })
+    let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
+    let mut cek = [0u8; 16];
+    let mut nonce = [0u8; 12];
+    hk.expand(CEK_INFO, &mut cek)
+        .map_err(|_| WebPushError::Random)?;
+    hk.expand(NONCE_INFO, &mut nonce)
+        .map_err(|_| WebPushError::Random)?;
+    let mut record = plaintext.to_vec();
+    record.push(2);
+    if let Some(len) = pad_to {
+        if record.len() > len {
+            return Err(WebPushError::TooLarge);
+        }
+        record.resize(len, 0);
+    }
+    let sealed = Aes128Gcm::new_from_slice(&cek)
+        .map_err(|_| WebPushError::Random)?
+        .encrypt(&nonce.into(), record.as_slice())
+        .map_err(|_| WebPushError::TooLarge)?;
+    let idlen = u8::try_from(keyid.len()).map_err(|_| WebPushError::InvalidKey)?;
+    let body = [salt, &RECORD_SIZE.to_be_bytes(), &[idlen], keyid, &sealed].concat();
+    if body.len() > MAX_BODY_LEN {
+        return Err(WebPushError::TooLarge);
+    }
+    Ok(body)
+}
+
+fn sec1(key: &PublicKey) -> Vec<u8> {
+    key.to_sec1_point(false).as_bytes().to_vec()
 }
 
 /// `vapid t=<JWT>, k=<public key>` (RFC 8292 §3), with `aud` the endpoint's origin.
@@ -271,8 +373,25 @@ pub fn vapid_authorization(
     signer: &dyn VapidSigner,
     now_unix_s: u64,
 ) -> Result<String, WebPushError> {
-    let _ = (endpoint, subject, signer, now_unix_s);
-    Err(WebPushError::Unimplemented { story: "E8-14" })
+    let exp = now_unix_s
+        .checked_add(VAPID_LIFETIME_S)
+        .ok_or(WebPushError::Clock)?;
+    let claims = format!(
+        r#"{{"aud":"{}","exp":{exp},"sub":"{}"}}"#,
+        endpoint.origin(),
+        subject.0
+    );
+    let signing_input = format!(
+        "{}.{}",
+        Base64UrlUnpadded::encode_string(JWT_HEADER.as_bytes()),
+        Base64UrlUnpadded::encode_string(claims.as_bytes())
+    );
+    let signature = signer.sign_es256(signing_input.as_bytes())?;
+    Ok(format!(
+        "vapid t={signing_input}.{}, k={}",
+        Base64UrlUnpadded::encode_string(&signature),
+        Base64UrlUnpadded::encode_string(&signer.public_key())
+    ))
 }
 
 #[cfg(test)]
