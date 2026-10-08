@@ -1333,6 +1333,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-authn"
+version = "0.0.0"
+dependencies = [
+ "base64 0.23.1",
+ "mandate-time",
+ "proptest",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-backtest"
 version = "0.0.0"
 dependencies = [
