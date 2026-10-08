@@ -510,7 +510,9 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
   loopback), `crates/mandate-mcp/src/tests/budget.rs` (an oracle that steps one refill period at a
   time), `crates/mandate-mcp/src/tests/server.rs` (the scripted loopback server),
-  `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/errors.rs`.
+  `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/bounds.rs` (sessions,
+  redirects, timeouts, the exit budget, and a canary in server text),
+  `crates/mandate-mcp/src/tests/errors.rs`.
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
 
 ## Risk gate
