@@ -148,7 +148,7 @@ allowed_external = ["thiserror"]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["anyhow", "clap", "serde", "tokio", "toml"]
+allowed_external = ["anyhow", "clap", "secrecy", "serde", "tokio", "toml"]
 
 [crates.mandate-executor]
 layer = 6
