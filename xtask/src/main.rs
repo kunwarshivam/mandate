@@ -304,11 +304,12 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
 fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()> {
     shellcheck_scripts(&root.join(".github/scripts"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
+    live_feature_in(root)?;
     workspace_checks()
 }
 
 /// The lint job's checks over the Cargo and uv workspaces in the current directory: fmt, clippy
-/// `-D warnings`, crate layering, the `live` feature, markers, saved proptest seeds, the feature map, typos, and ruff.
+/// `-D warnings`, crate layering, markers, saved proptest seeds, the feature map, typos, and ruff.
 fn workspace_lint() -> Result<()> {
     sh("cargo", &["fmt", "--all", "--check"])?;
     sh(
@@ -324,7 +325,6 @@ fn workspace_lint() -> Result<()> {
         ],
     )?;
     layers()?;
-    live_feature()?;
     markers()?;
     proptest_seeds()?;
     feature_map()?;
@@ -1287,16 +1287,32 @@ fn feature_map() -> Result<()> {
     report(problems, "feature-map")
 }
 
-/// One file CI runs, a workflow or a script, by its path in the repository, with its text.
+/// One file that decides a build CI runs (a workflow, a script, a composite action, or the cargo
+/// configuration), by its path in the repository, with its text.
 struct CiFile {
     path: String,
     text: String,
 }
 
-/// Every workflow and script under `.github`, the files that decide which builds CI runs.
+/// Every file that decides which builds CI runs: workflows, scripts and composite actions under
+/// `.github`, and `.cargo/config.toml`, whose aliases and `rustflags` change what a cargo command
+/// builds. Each directory and the configuration file may be absent.
 fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
-    let mut files = files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])?;
-    files.extend(files_by_extension(&root.join(".github/scripts"), &["sh"])?);
+    let mut files = Vec::new();
+    for (dir, extensions) in [
+        (".github/workflows", &["yml", "yaml"][..]),
+        (".github/scripts", &["sh"][..]),
+        (".github/actions", &["yml", "yaml"][..]),
+    ] {
+        let dir = root.join(dir);
+        if dir.is_dir() {
+            files.extend(files_by_extension(&dir, extensions)?);
+        }
+    }
+    let cargo_config = root.join(".cargo/config.toml");
+    if cargo_config.is_file() {
+        files.push(cargo_config);
+    }
     files
         .into_iter()
         .map(|file| {
@@ -1313,12 +1329,18 @@ fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
 }
 
 fn live_feature() -> Result<()> {
+    live_feature_in(Path::new("."))
+}
+
+/// [`live_feature_problems`] over the repository at `root`: its layering policy, its Cargo
+/// workspace, and its [`ci_files`]. The lint job runs it on the repository it is given.
+fn live_feature_in(root: &Path) -> Result<()> {
     eprintln!("    live-feature: checking that only the runner may build `live` (ES-23, DEC-529)");
-    let policy: Layers = toml::from_str(&fs::read_to_string("xtask/layers.toml")?)
+    let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)
         .context("parsing xtask/layers.toml")?;
-    let files = ci_files(Path::new("."))?;
+    let files = ci_files(root)?;
     report(
-        live_feature_problems(&policy, &metadata()?, &files)?,
+        live_feature_problems(&policy, &metadata_in(root)?, &files)?,
         "live-feature",
     )
 }
@@ -1393,10 +1415,16 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
     for file in ci {
         for (index, line) in file.text.lines().enumerate() {
             let at = format!("{}:{}", file.path, index.saturating_add(1));
-            match live_flag(line, runner) {
+            match live_flag(line, runner, file.path.ends_with(".cargo/config.toml")) {
                 LiveFlag::Absent => {}
                 LiveFlag::AllFeatures => problems.push(format!(
                     "{at}: `--all-features` would build the `{LIVE}` feature"
+                )),
+                LiveFlag::Cfg => problems.push(format!(
+                    "{at}: sets a feature through `--cfg feature=…`, which bypasses `--features`"
+                )),
+                LiveFlag::Unreadable => problems.push(format!(
+                    "{at}: a feature list the shell expands (`$` or a backtick) cannot be checked"
                 )),
                 LiveFlag::CompileOnly if !compile_only_seen => compile_only_seen = true,
                 LiveFlag::CompileOnly => problems.push(format!(
@@ -1414,53 +1442,115 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
 /// The cargo feature that holds the live hosts (ES-23, DEC-529 item 3).
 const LIVE: &str = "live";
 
-/// What one line of a workflow or script does with the `live` feature.
-#[derive(Debug, PartialEq, Eq)]
+/// What one line of a workflow, script or cargo configuration does with the `live` feature, worst
+/// first: a line holding several commands takes the worst of theirs.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 enum LiveFlag {
-    /// The line passes neither `live` nor `--all-features`.
-    Absent,
+    /// `live` passed to anything but the one compile-only form.
+    Build,
     /// `--all-features`, which turns `live` on wherever it is declared.
     AllFeatures,
+    /// `--cfg feature=…`, which sets a feature without `--features`.
+    Cfg,
+    /// A feature list the shell expands, so what it names cannot be read.
+    Unreadable,
     /// `cargo check -p <runner>` with `live`: the one form CI may run, which builds nothing it
     /// could run.
     CompileOnly,
-    /// `live` passed to anything else.
-    Build,
+    /// The line passes neither `live` nor a way around naming it.
+    Absent,
 }
 
-/// Reads one line as a shell command: `--features <list>`, `--features=<list>` and `-F <list>`
-/// name features, separated by commas, with quotes stripped.
-fn live_flag(line: &str, runner: Option<&str>) -> LiveFlag {
-    let tokens: Vec<&str> = line
-        .split_whitespace()
-        .map(|token| token.trim_matches(|c| c == '"' || c == '\''))
+/// Judges each command of `line` on its own, splitting it on `&&`, `||`, `;` and `|`, and keeps
+/// the worst verdict. Feature flags are read only on a cargo command: one that names `cargo`, or
+/// any line of the cargo configuration, whose aliases and flags are cargo's own; `-F` belongs to
+/// other tools elsewhere (`gh api -F`).
+fn live_flag(line: &str, runner: Option<&str>, cargo_config: bool) -> LiveFlag {
+    line.replace("&&", "\n")
+        .replace("||", "\n")
+        .replace([';', '|'], "\n")
+        .lines()
+        .map(|command| command_live_flag(command, runner, cargo_config))
+        .min()
+        .unwrap_or(LiveFlag::Absent)
+}
+
+/// Reads one command: `--features <list>`, `--features=<list>`, `-F <list>` and `-F<list>` name
+/// features, a quoted list may span words, and items split on commas and spaces, each matched
+/// after any `<crate>/` or `<crate>?/` prefix.
+fn command_live_flag(command: &str, runner: Option<&str>, cargo_config: bool) -> LiveFlag {
+    let words: Vec<&str> = command.split_whitespace().collect();
+    let unquoted: Vec<String> = words
+        .iter()
+        .map(|word| word.replace(['"', '\'', '\\'], ""))
         .collect();
-    if tokens.contains(&"--all-features") {
+    if unquoted.iter().any(|word| word.contains("feature=")) {
+        return LiveFlag::Cfg;
+    }
+    if unquoted.iter().any(|word| word == "--all-features") {
         return LiveFlag::AllFeatures;
     }
+    if !cargo_config && !unquoted.iter().any(|word| word == "cargo") {
+        return LiveFlag::Absent;
+    }
     let mut lists = Vec::new();
-    for (index, token) in tokens.iter().enumerate() {
-        if let Some(list) = token.strip_prefix("--features=") {
-            lists.push(list);
-        } else if (*token == "--features" || *token == "-F")
-            && let Some(list) = tokens.get(index.saturating_add(1))
+    let mut index = 0;
+    while let Some(word) = words.get(index) {
+        let start = if let Some(list) = word.strip_prefix("--features=") {
+            Some((list, index))
+        } else if let Some(list) = word.strip_prefix("-F").filter(|list| !list.is_empty()) {
+            Some((list, index))
+        } else if *word == "--features" || *word == "-F" {
+            words
+                .get(index.saturating_add(1))
+                .map(|list| (*list, index.saturating_add(1)))
+        } else {
+            None
+        };
+        index = index.saturating_add(1);
+        let Some((first, at)) = start else {
+            continue;
+        };
+        let mut list = first.to_owned();
+        let mut end = at;
+        if let Some(quote) = first
+            .chars()
+            .next()
+            .filter(|c| matches!(c, '"' | '\'' | '`'))
         {
-            lists.push(list);
+            while !(list.len() > 1 && list.ends_with(quote)) {
+                end = end.saturating_add(1);
+                let Some(next) = words.get(end) else {
+                    break;
+                };
+                list.push(' ');
+                list.push_str(next);
+            }
         }
+        index = index.max(end.saturating_add(1));
+        lists.push(list);
+    }
+    if lists.iter().any(|list| list.contains(['$', '`'])) {
+        return LiveFlag::Unreadable;
     }
     let passes_live = lists
         .iter()
-        .flat_map(|list| list.split(','))
-        .any(|feature| feature == LIVE);
+        .flat_map(|list| list.split([',', ' ']))
+        .map(|item| item.trim_matches(|c| c == '"' || c == '\''))
+        .any(|item| item.rsplit('/').next() == Some(LIVE));
     if !passes_live {
         return LiveFlag::Absent;
     }
-    let checks = tokens.windows(2).any(|pair| pair == ["cargo", "check"]);
-    let package = tokens
+    let checks = unquoted
+        .windows(2)
+        .any(|pair| pair[0] == "cargo" && pair[1] == "check");
+    let package = unquoted
         .windows(2)
         .find(|pair| pair[0] == "-p" || pair[0] == "--package")
-        .map(|pair| pair[1]);
-    let whole_workspace = tokens.contains(&"--workspace") || tokens.contains(&"--all");
+        .map(|pair| pair[1].as_str());
+    let whole_workspace = unquoted
+        .iter()
+        .any(|word| word == "--workspace" || word == "--all");
     match (checks, package, runner) {
         (true, Some(package), Some(runner)) if package == runner && !whole_workspace => {
             LiveFlag::CompileOnly
@@ -6417,6 +6507,7 @@ jq -r "$filter" "$src"
         if root.exists() {
             fs::remove_dir_all(&root)?;
         }
+        fixture_workspace(&root)?;
         let scripts = root.join(".github/scripts");
         let workflows = root.join(".github/workflows");
         fs::create_dir_all(&scripts)?;
@@ -6702,6 +6793,230 @@ jq -r "$filter" "$src"
         let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
         let problems = live_feature_problems(&policy, &metadata_in(&root)?, &ci_files(&root)?)?;
         assert_eq!(problems, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// Each way a line can build or run `live` while looking like the compile-only form, or
+    /// without naming `live` the plain way, is refused once, naming the file and line (#738
+    /// review, finding 1): a second command after `&&`, `||`, `;` or `|` is judged on its own; a
+    /// `<crate>/live` or `<crate>?/live` feature; a list split on spaces; `-Flive`; a feature list
+    /// the shell expands (`$` or a backtick), which cannot be read; and `--cfg feature="live"`,
+    /// which sets the feature without `--features`.
+    #[test]
+    fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let allowed = [
+            "cargo check -p the-runner -Flive",
+            "cargo check -p the-runner --features the-runner/live",
+            "cargo check -p the-runner --features 'other live'",
+        ];
+        for line in allowed {
+            let files = [ci_file(".github/workflows/ci.yml", line)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{line}"
+            );
+        }
+        let refused = [
+            "cargo check -p the-runner --features live && cargo run -p the-runner --features live",
+            "cargo check -p the-runner --features live || cargo build -p the-runner -F live",
+            "cargo check -p the-runner --features live; cargo test -p the-runner --features live",
+            "cargo check -p the-runner --features live | cargo run -p the-runner --features=live",
+            "cargo run -p a-lib --features the-runner/live",
+            "cargo check -p a-lib --features the-runner?/live",
+            "cargo build -p the-runner --features \"other live\"",
+            "cargo build -p the-runner -Flive",
+            "cargo check -p the-runner --features $FEATURES",
+            "cargo check -p the-runner --features `cat features.txt`",
+            "RUSTFLAGS=\"--cfg feature=\\\"live\\\"\" cargo build -p the-runner",
+            "cargo rustc -p the-runner -- --cfg 'feature=\"live\"'",
+            "rustflags = [\"--cfg\", 'feature=\"live\"']",
+            "ship = \"run -p the-runner --features live\"",
+        ];
+        for line in refused {
+            let files = [ci_file(".cargo/config.toml", &format!("[alias]\n{line}\n"))];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".cargo/config.toml:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A marked crate that is not a workspace member is no runner, so even the compile-only form
+    /// naming it is refused, beside the membership problem (#738 review, finding 2: the
+    /// membership test of the runner).
+    #[test]
+    fn a_marked_crate_outside_the_workspace_compiles_nothing() -> Result<()> {
+        let crates = vec![member("a-lib", &[]), member("a-tool", &[])];
+        let files = [ci_file(
+            ".github/workflows/ci.yml",
+            "      - run: cargo check -p the-runner --features live",
+        )];
+        let problems = live_feature_problems(&live_policy(), &workspace(crates), &files)?;
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains(".github/workflows/ci.yml:1")),
+            "the compile-only line is refused: {problems:?}"
+        );
+        Ok(())
+    }
+
+    /// Only the runner's own features are read for a feature that turns `live` on: another
+    /// crate's feature naming its own `live` is not counted twice beside its declaration, and a
+    /// runner feature that enables something other than `live` is no problem (#738 review,
+    /// finding 2: the two conditions of the runner's own feature check).
+    #[test]
+    fn only_the_runner_s_own_features_turn_its_live_on() -> Result<()> {
+        let policy = live_policy();
+        let crates = vec![
+            with_features(member(RUNNER, &[]), &[("live", &[])]),
+            with_features(member("a-lib", &[]), &[("live", &[]), ("go", &["live"])]),
+        ];
+        let problems = live_feature_problems(&policy, &workspace(crates), &[])?;
+        assert_eq!(problems.len(), 1, "only the declaration: {problems:?}");
+        let crates = vec![with_features(
+            member(RUNNER, &[]),
+            &[("live", &["a-tool/fast"]), ("other", &["a-tool/fast"])],
+        )];
+        assert_eq!(
+            live_feature_problems(&policy, &workspace(crates), &[])?,
+            Vec::<String>::new(),
+            "runner features that enable something else"
+        );
+        Ok(())
+    }
+
+    /// The files the check reads are every file that decides a build: workflows (`.yml` and
+    /// `.yaml`), scripts, composite actions under `.github/actions`, and `.cargo/config.toml`
+    /// (aliases and `rustflags`); a repository without the optional ones reads the rest (#738
+    /// review, finding 4).
+    #[test]
+    fn ci_files_reads_every_file_that_decides_a_build() -> Result<()> {
+        let root = env::temp_dir().join(format!("mandate-xtask-ci-files-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        let write = |path: &str| -> Result<()> {
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(file, "x\n")?;
+            Ok(())
+        };
+        write(".github/workflows/a.yml")?;
+        let only_workflows = ci_files(&root)
+            .map(|files| files.into_iter().map(|file| file.path).collect::<Vec<_>>());
+        for path in [
+            ".github/workflows/b.yaml",
+            ".github/scripts/c.sh",
+            ".github/actions/d/action.yml",
+            ".github/actions/e/action.yaml",
+            ".cargo/config.toml",
+            ".github/pull_request_template.md",
+        ] {
+            write(path)?;
+        }
+        let mut read: Vec<String> = ci_files(&root)?.into_iter().map(|file| file.path).collect();
+        fs::remove_dir_all(&root).ok();
+        read.sort();
+        assert_eq!(
+            only_workflows?,
+            [".github/workflows/a.yml"],
+            "the optional directories may be absent"
+        );
+        assert_eq!(
+            read,
+            [
+                ".cargo/config.toml",
+                ".github/actions/d/action.yml",
+                ".github/actions/e/action.yaml",
+                ".github/scripts/c.sh",
+                ".github/workflows/a.yml",
+                ".github/workflows/b.yaml",
+            ]
+        );
+        Ok(())
+    }
+
+    /// A minimal Cargo workspace with one crate, `a`, and its layering policy, under `root`, so
+    /// the lint job's checks that read the workspace can run there.
+    fn fixture_workspace(root: &Path) -> Result<()> {
+        fs::create_dir_all(root.join("a/src"))?;
+        fs::create_dir_all(root.join("xtask"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"a\"]\nresolver = \"3\"\n",
+        )?;
+        fs::write(
+            root.join("a/Cargo.toml"),
+            "[package]\nname = \"a\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )?;
+        fs::write(root.join("a/src/lib.rs"), "//! A fixture crate.\n")?;
+        fs::write(
+            root.join("Cargo.lock"),
+            "version = 4\n\n[[package]]\nname = \"a\"\nversion = \"0.0.0\"\n",
+        )?;
+        fs::write(
+            root.join("xtask/layers.toml"),
+            concat!(
+                "impure_crates = []\n\n",
+                "[crates.a]\nlayer = 1\nsafety_critical = false\npure = false\n",
+            ),
+        )?;
+        Ok(())
+    }
+
+    /// The lint job runs the live-feature check over its own repository (#738 review, finding
+    /// 2): a fixture workspace with a clean workflow passes, and a workflow that runs `live`
+    /// fails the job naming the check, before the workspace checks run.
+    #[test]
+    fn the_lint_job_runs_the_live_feature_check_on_its_repository() -> Result<()> {
+        let root = env::temp_dir().join(format!("mandate-xtask-lint-live-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fixture_workspace(&root)?;
+        let workflows = root.join(".github/workflows");
+        fs::create_dir_all(&workflows)?;
+        fs::create_dir_all(root.join(".github/scripts"))?;
+        let workflow = |run: &str| {
+            format!(
+                "on: push\njobs:\n  check:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: {run}\n"
+            )
+        };
+        fs::write(workflows.join("ci.yml"), workflow("cargo check -p a"))?;
+        let clean = lint(&root, || Ok(())).map_err(|err| format!("{err:#}"));
+        fs::write(
+            workflows.join("ci.yml"),
+            workflow("cargo run -p a --features live"),
+        )?;
+        let reached = Cell::new(false);
+        let planted = lint(&root, || {
+            reached.set(true);
+            Ok(())
+        })
+        .map_err(|err| format!("{err:#}"))
+        .err();
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(clean, Ok(()), "a clean fixture workspace passes");
+        assert!(
+            planted
+                .as_deref()
+                .is_some_and(|err| err.contains("live-feature")),
+            "a workflow that runs `live` fails the lint job naming the check, got {planted:?}"
+        );
+        assert!(
+            !reached.get(),
+            "the workspace checks run only after it passes"
+        );
         Ok(())
     }
 }
