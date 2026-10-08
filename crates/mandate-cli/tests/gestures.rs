@@ -25,7 +25,8 @@ use std::process::Command as Process;
 use clap::Parser;
 use clap::error::ErrorKind;
 use double::{AGENT, CONTROL, FixedIds, Journal, at, owner, stream};
-use mandate_canon::{Digest, parse, to_canonical};
+use mandate_artifacts_fs::FsArtifactStore;
+use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_cli::control::{ControlJournal, Now};
 use mandate_cli::gestures::{
     AgentCommand, ConfirmArgs, CreateArgs, DeployArgs, Shown, VersionCommand, confirm, create,
@@ -35,7 +36,9 @@ use mandate_cli::postgres::{JournalArgs, read_stream};
 use mandate_cli::register::OwnerArgs;
 use mandate_cli::version;
 use mandate_cli::{Cli, Command};
-use mandate_journal::{AppendOutcome, ArtifactStore, StreamId};
+use mandate_journal::{
+    AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId,
+};
 use mandate_journal_pg::APP_ROLE;
 use support::{TestDb, URL_VAR};
 
@@ -343,7 +346,8 @@ fn url_password() -> Option<String> {
 
 /// The binary opens `ctl:ws1`, registers SPY and the host's model, then creates the SPY mandate's
 /// version, shows and types its confirmation code, and shows and types the deployment code. A
-/// shown code commits nothing; each typed one commits one event. Nothing printed names the DSN.
+/// shown code commits nothing; each typed one commits one event with an assertion of its own.
+/// Nothing printed names the DSN.
 #[test]
 #[ignore = "pending E10-16"]
 fn the_binary_creates_confirms_and_deploys_in_postgres() {
@@ -434,5 +438,16 @@ fn the_binary_creates_confirms_and_deploys_in_postgres() {
         "AgentDeployed",
     ];
     assert_eq!(types, expected);
+    let files = FsArtifactStore::open(&store).unwrap();
+    let assertion = |row: &StoredEvent| {
+        let body = parse(&row.body).unwrap();
+        let record = body.get("payload").and_then(|p| p.get("record_ref"));
+        let record = ArtifactRef::parse(record.and_then(Value::as_str).unwrap()).unwrap();
+        let record = parse(&files.read_artifact(&record).unwrap()).unwrap();
+        let step_up = record.get("step_up").and_then(|s| s.get("assertion_id"));
+        step_up.and_then(Value::as_str).unwrap().to_owned()
+    };
+    let minted = [assertion(&rows[4]), assertion(&rows[5])];
+    assert_ne!(minted[0], minted[1], "each gesture mints its own assertion");
     std::fs::remove_dir_all(root).ok();
 }
