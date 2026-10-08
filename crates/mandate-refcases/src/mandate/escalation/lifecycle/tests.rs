@@ -1,8 +1,9 @@
 //! The map's own pieces, on inputs no reference case reaches: a name bound twice or missing, a
 //! reference mark or a quorum with a member too many, a cause record of the right type and the
 //! wrong reason, a handoff no record authorises, a member supplied with no value, an unstated
-//! answer member the runtime writes with a value, and an intent whose step reads another mandate
-//! version than its request bound.
+//! answer member the runtime writes with a value, a re-validation's label under every
+//! re-classification, and an intent whose step reads another mandate version than its request
+//! bound.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -14,8 +15,8 @@ use mandate_runtime::{
 use serde_json::json;
 
 use super::{
-    As, Asked, NULL_UNLESS_STATED, Ran, Shell, bind, extra_fault, handoffs, member, object,
-    seconds, strip, text, translate, unstated_fault, unstated_quorum,
+    As, Asked, NULL_UNLESS_STATED, Ran, Shell, bind, decided_by_now, extra_fault, handoffs, member,
+    object, seconds, strip, text, translate, unstated_fault, unstated_quorum,
 };
 use crate::ensure;
 
@@ -391,6 +392,66 @@ fn a_judged_grant_states_its_quorum() -> Result<(), String> {
     ] {
         ensure(unstated_quorum(&unjudged).is_none(), || {
             format!("{unjudged} failed with no `quorum`")
+        })?;
+    }
+    Ok(())
+}
+
+/// DEC-533 item 4: `decided_by_now` is an `ask`'s own label, and `null` for an `auto`, a `deny` or
+/// an `ask` with no label; that value is the one expected when the runtime writes none or another.
+/// DEC-830 item 2: the one superseded value the runtime wrote before E8-3, the label whatever the
+/// decision or `""` with none, also passes. Any third value fails.
+#[test]
+fn decided_by_now_is_the_ask_label_or_null() -> Result<(), String> {
+    let label = |by: &str| text(by);
+    let cases = [
+        (
+            json!({"decision": "auto", "by": null}),
+            Value::Null,
+            label(""),
+            vec![label("rule:big_order")],
+        ),
+        (
+            json!({"decision": "auto", "by": "rule:other"}),
+            Value::Null,
+            label("rule:other"),
+            vec![label(""), label("rule:big_order")],
+        ),
+        (
+            json!({"decision": "deny", "by": "rule:no_more"}),
+            Value::Null,
+            label("rule:no_more"),
+            vec![label(""), label("rule:other")],
+        ),
+        (
+            json!({"decision": "ask", "by": "rule:big_order"}),
+            label("rule:big_order"),
+            label("rule:big_order"),
+            vec![Value::Null, label(""), label("rule:other")],
+        ),
+        (
+            json!({"decision": "ask", "by": null}),
+            Value::Null,
+            label(""),
+            vec![label("rule:other")],
+        ),
+    ];
+    for (classification, spec, superseded, others) in cases {
+        for got in [&spec, &superseded] {
+            let want = decided_by_now(&classification, Some(got))?;
+            ensure(&want == got, || {
+                format!("{classification}: {got:?} failed, {want:?} expected")
+            })?;
+        }
+        for got in others.iter().chain([&Value::Bool(false)]) {
+            let want = decided_by_now(&classification, Some(got))?;
+            ensure(want == spec && &want != got, || {
+                format!("{classification}: {got:?} expects {want:?}, not {spec:?}")
+            })?;
+        }
+        let none = decided_by_now(&classification, None)?;
+        ensure(none == spec, || {
+            format!("{classification}: none written expects {none:?}, not {spec:?}")
         })?;
     }
     Ok(())

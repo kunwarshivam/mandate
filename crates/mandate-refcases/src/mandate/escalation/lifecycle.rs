@@ -24,7 +24,9 @@
 //! member is journal spec §9.7's (DEC-533 item 3): an `ApprovalResponded` writes `quorum`,
 //! `separation_of_duties` and `delegation` always, `null` where nothing was judged, so a case that
 //! leaves one unstated reads it as absent or `null`, never as a value; and a step whose grant check 7
-//! judged (rule 48) must state its `quorum`. The step's other effects, the
+//! judged (rule 48) must state its `quorum`. A re-validation's `decided_by_now` is §9.7's (DEC-533
+//! item 4), or until E8-3's writer lands the superseded value the runtime writes (DEC-830). The
+//! step's other effects, the
 //! deadline timer and the opaque notification, are `mandate-runtime`'s own tests' to pin (DEC-317
 //! item 5).
 //!
@@ -850,10 +852,10 @@ impl Shell {
             .as_ref()
             .ok_or_else(|| "a re-validation outside a response".to_owned())?;
         let canon = |value: &Json, path: &str| at(value, path).and_then(to_canon).map(Some);
-        let label = match at(now, "classification.by")? {
-            Json::Null => text(""),
-            by => to_canon(by)?,
-        };
+        let label = decided_by_now(
+            at(now, "classification")?,
+            draft.payload.get("decided_by_now"),
+        )?;
         let m_req = match at(bound, "reference_mark")? {
             Json::Null => Value::Null,
             mark => to_canon(at(mark, "price")?)?,
@@ -1098,6 +1100,23 @@ fn unstated_fault(event_type: &str, name: &str, got: &Value) -> Option<String> {
         _ if null_unless_stated => Some(format!("{unstated}, as {got:?} rather than `null`")),
         _ => Some(unstated),
     }
+}
+
+/// The `decided_by_now` a re-validation records for the step's re-classification: journal spec
+/// §9.7's (DEC-533 item 4), the `ask`'s own label, or `null` when it is not an `ask` or its label is
+/// empty. Until E8-3's writer lands, the runtime writes the superseded value instead, the label the
+/// re-classification gave whatever its decision, `""` with none, and that one value also passes
+/// (DEC-830 item 2); no third value does.
+fn decided_by_now(classification: &Json, got: Option<&Value>) -> Result<Value, String> {
+    let by = optional_text(classification, "by")?.unwrap_or_default();
+    let superseded = text(&by);
+    if got == Some(&superseded) {
+        return Ok(superseded);
+    }
+    Ok(match str_at(classification, "decision")? {
+        "ask" if !by.is_empty() => superseded,
+        _ => Value::Null,
+    })
 }
 
 /// A case's `ApprovalResponded` whose grant check 7 judged (journal spec §9.7 rule 48: `approved`,
