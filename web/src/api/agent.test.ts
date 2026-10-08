@@ -89,8 +89,23 @@ function bodiesOf(agent: Agent, environment: Environment) {
       marks_freshness: null,
       disclosures: [],
     },
-    version: { ...envelope(watermark(`ctl:${WS}`, 9)), mandate_version: a.mandate_version, mandate: agent.mandate, provenance: agent.provenance },
+    version: {
+      ...example("mandate-version"),
+      ...envelope(watermark(`ctl:${WS}`, 9)),
+      mandate_version: a.mandate_version,
+      mandate: agent.mandate,
+      provenance: agent.provenance.map((p) => ({ path: p.path, source: p.provenance, quote: p.quote ?? null, value: valueAt(agent.mandate, p.path) })),
+    },
   };
+}
+
+/** The value at a JSON Pointer (RFC 6901) in a document. */
+function valueAt(doc: unknown, pointer: string): unknown {
+  return pointer
+    .split("/")
+    .slice(1)
+    .map((t) => t.replace(/~1/g, "/").replace(/~0/g, "~"))
+    .reduce<unknown>((at, token) => (at !== null && typeof at === "object" ? (at as Record<string, unknown>)[token] : undefined), doc);
 }
 
 function decodeAll(bodies: ReturnType<typeof bodiesOf>): AgentReads {
@@ -142,6 +157,18 @@ describe("decoding the agent read models (§4.10)", () => {
     expect(decodePositions(example("positions"), "").ok).toBe(true);
     expect(decodeOrders(example("orders"), "").ok).toBe(true);
     expect(decodePnl(example("pnl"), "").ok).toBe(true);
+    expect(decodeMandateVersion(example("mandate-version"), "").ok).toBe(true);
+  });
+
+  it.skip("pending E11-9: a provenance source outside mandate spec §2.1 is refused", () => {
+    const body = example("mandate-version");
+    const provenance = structuredClone(body.provenance) as Array<Record<string, unknown>>;
+    provenance[0].source = "model_guessed";
+    expect(decodeMandateVersion({ ...body, provenance }, "")).toMatchObject({ ok: false, issue: { path: "/provenance/0/source", problem: "unknown_enum_value" } });
+  });
+
+  it.skip("pending E11-9: a document that is not a mandate is refused", () => {
+    expect(decodeMandateVersion({ ...example("mandate-version"), mandate: { name: "x" } }, "").ok).toBe(false);
   });
 
   it.skip("pending E11-9: an order state outside the closed set is refused, never mapped to a known one", () => {

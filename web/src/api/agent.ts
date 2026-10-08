@@ -69,15 +69,23 @@ export interface PnlReadModel {
   disclosures: Array<{ document: string; version: string }>;
 }
 
+/** `read-models/mandate-common` `ProvenanceEntry` (mandate spec §2.1): one path's source and the value it was recorded with. */
+export interface ProvenanceEntry {
+  path: string;
+  source: FieldProvenance["provenance"];
+  quote: string | null;
+  value: unknown;
+}
+
 /**
- * `GET /mandate-versions/{hash}` (spec §4.1): the canonical document and its provenance. Its read-model
- * schema is not written yet; this is the shape DEC-737 proposes.
+ * `read-models/mandate-version` (spec §4.1): the canonical document and its records. The agent
+ * view reads the document and its provenance; the other members are the confirmation screens'.
  */
 export interface MandateVersionReadModel {
   served_at: Timestamp;
   mandate_version: string;
   mandate: Mandate;
-  provenance: FieldProvenance[];
+  provenance: ProvenanceEntry[];
 }
 
 export interface AgentReads {
