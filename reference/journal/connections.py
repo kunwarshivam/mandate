@@ -16,7 +16,6 @@ import copy
 from common import change, delete
 from control import (
     ACCOUNT_STREAM_REF,
-    REFUSING_CHECKS,
     EXECUTOR,
     SERVICES,
     STREAM,
@@ -79,7 +78,7 @@ def base_drafts() -> dict[str, dict]:
     owner = {"user": OWNER, "step_up": dict(STEP_UP)}
     passed = [
         {"check": c, "result": "passed", "reason": None}
-        for c in ("account", "account_status", "environment", "one_x", "scope")
+        for c in ("account", "environment", "scope")
     ]
     return {
         "established_v2": envelope(
@@ -228,7 +227,7 @@ def result(check: str, outcome: str = "passed", reason=None) -> dict:
 def results(*extra: str, **failed: str) -> list[dict]:
     """Every check the executor always runs, plus `extra`, in byte order; `failed` maps a check to
     the reason it failed with."""
-    checks = sorted({"account", "account_status", "environment", "one_x", "scope", *extra})
+    checks = sorted({"account", "environment", "scope", *extra})
     return [result(c, "failed", failed[c]) if c in failed else result(c) for c in checks]
 
 
@@ -333,7 +332,7 @@ def invalid_drafts() -> list[dict]:
             "checked_out_of_order",
             "rule 57: strictly ascending",
             chk,
-            [change("payload.results", [result("environment"), *results()[:2], *results()[3:]])],
+            [change("payload.results", [result("environment"), result("account"), result("scope")])],
             "non_canonical",
             "payload.results",
         ),
@@ -359,23 +358,23 @@ def invalid_drafts() -> list[dict]:
             chk,
             [change("payload.results", [*results(), result("uniqueness")])],
             "non_canonical",
-            "payload.results[5].check",
+            "payload.results[3].check",
         ),
         invalid(
             "failed_without_a_reason",
             "rule 58",
             chk,
-            [change("payload.results", [*results()[:2], result("environment", "failed"), *results()[3:]])],
+            [change("payload.results", [result("account"), result("environment", "failed"), result("scope")])],
             "schema",
-            "payload.results[2].reason",
+            "payload.results[1].reason",
         ),
         invalid(
             "passed_with_a_reason",
             "rule 58",
             chk,
-            [change("payload.results", [*results()[:4], result("scope", "passed", "fund_movement")])],
+            [change("payload.results", [*results()[:2], result("scope", "passed", "fund_movement")])],
             "schema",
-            "payload.results[4].reason",
+            "payload.results[2].reason",
         ),
         invalid(
             "failed_with_another_checks_reason",
@@ -433,7 +432,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "refused_for_one_x",
-            "§9.12: checks 5 and 6 never refuse a connection",
+            "§9.12: checks 5 and 6 come from AccountStateObserved and never refuse a connection",
             ref,
             [change("payload.check", "one_x")],
             "non_canonical",
@@ -516,12 +515,6 @@ def valid_drafts() -> list[dict]:
                 change("payload.account_pii_ref", None),
                 change("pii_refs", []),
             ],
-        ),
-        valid(
-            "connected_without_one_x",
-            "§9.12: a failed check 5 or 6 is journaled and the connection still connects",
-            chk,
-            [change("payload.results", results(one_x="not_one_x", account_status="restricted"))],
         ),
         valid(
             "checked_for_a_reauthorization",
@@ -675,15 +668,6 @@ def sequences() -> list[dict]:
             (1, "66"),
         ),
         sequence(
-            "suspension_cleared_while_margin_is_on",
-            "rule 66: checks 5 and 6 act through their own paths, not the connection's state",
-            [
-                moved(1, "active", "suspended", "authorization_failed"),
-                checked(2, *results(one_x="not_one_x")),
-                moved(3, "suspended", "suspended", "condition_cleared", record_id(2)),
-            ],
-        ),
-        sequence(
             "suspension_cleared_by_a_failed_check",
             "rule 66",
             [
@@ -772,8 +756,7 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
             owner = cid if owner is None else owner
             if cid != owner and "stream.66.one_connection" not in skip:
                 return i, "66"
-            refusing = [r for r in p.get("results", []) if r["check"] in REFUSING_CHECKS or "stream.66.refusing" in skip]
-            if kind == "ConnectionChecked" and all(r["result"] == "passed" for r in refusing):
+            if kind == "ConnectionChecked" and all(r["result"] == "passed" for r in p["results"]):
                 passing.add(d["event_id"])
             if kind != "ConnectionStateChanged":
                 continue
@@ -898,7 +881,6 @@ STREAM_MUTANTS = (
     "stream.66.cleared",
     "stream.66.passing",
     "stream.66.one_connection",
-    "stream.66.refusing",
 )
 
 

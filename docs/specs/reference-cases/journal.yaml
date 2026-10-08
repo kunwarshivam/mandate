@@ -10455,13 +10455,7 @@ connections:
         - check: account
           result: passed
           reason: null
-        - check: account_status
-          result: passed
-          reason: null
         - check: environment
-          result: passed
-          reason: null
-        - check: one_x
           result: passed
           reason: null
         - check: scope
@@ -11651,12 +11645,6 @@ connections:
       - check: account
         result: passed
         reason: null
-      - check: account_status
-        result: passed
-        reason: null
-      - check: one_x
-        result: passed
-        reason: null
       - check: scope
         result: passed
         reason: null
@@ -11676,13 +11664,7 @@ connections:
       - check: account
         result: passed
         reason: null
-      - check: account_status
-        result: passed
-        reason: null
       - check: environment
-        result: passed
-        reason: null
-      - check: one_x
         result: passed
         reason: null
       - check: scope
@@ -11701,16 +11683,10 @@ connections:
       - check: account
         result: passed
         reason: null
-      - check: account_status
-        result: passed
-        reason: null
       - check: contract
         result: passed
         reason: null
       - check: environment
-        result: passed
-        reason: null
-      - check: one_x
         result: passed
         reason: null
     expect:
@@ -11726,13 +11702,7 @@ connections:
       - check: account
         result: passed
         reason: null
-      - check: account_status
-        result: passed
-        reason: null
       - check: environment
-        result: passed
-        reason: null
-      - check: one_x
         result: passed
         reason: null
       - check: scope
@@ -11744,7 +11714,7 @@ connections:
     expect:
       outcome: Invalid
       reason: non_canonical
-      path: payload.results[5].check
+      path: payload.results[3].check
   - name: failed_without_a_reason
     clause: rule 58
     base_draft: checked_start
@@ -11754,14 +11724,8 @@ connections:
       - check: account
         result: passed
         reason: null
-      - check: account_status
-        result: passed
-        reason: null
       - check: environment
         result: failed
-        reason: null
-      - check: one_x
-        result: passed
         reason: null
       - check: scope
         result: passed
@@ -11769,7 +11733,7 @@ connections:
     expect:
       outcome: Invalid
       reason: schema
-      path: payload.results[2].reason
+      path: payload.results[1].reason
   - name: passed_with_a_reason
     clause: rule 58
     base_draft: checked_start
@@ -11779,13 +11743,7 @@ connections:
       - check: account
         result: passed
         reason: null
-      - check: account_status
-        result: passed
-        reason: null
       - check: environment
-        result: passed
-        reason: null
-      - check: one_x
         result: passed
         reason: null
       - check: scope
@@ -11794,7 +11752,7 @@ connections:
     expect:
       outcome: Invalid
       reason: schema
-      path: payload.results[4].reason
+      path: payload.results[2].reason
   - name: failed_with_another_checks_reason
     clause: 'rule 58: the reason belongs to its check'
     base_draft: checked_start
@@ -11804,13 +11762,7 @@ connections:
       - check: account
         result: failed
         reason: tools_missing
-      - check: account_status
-        result: passed
-        reason: null
       - check: environment
-        result: passed
-        reason: null
-      - check: one_x
         result: passed
         reason: null
       - check: scope
@@ -11957,13 +11909,7 @@ connections:
       - check: account
         result: failed
         reason: account_unreadable
-      - check: account_status
-        result: passed
-        reason: null
       - check: environment
-        result: passed
-        reason: null
-      - check: one_x
         result: passed
         reason: null
       - check: scope
@@ -11984,7 +11930,7 @@ connections:
       reason: schema
       path: payload.account_pii_ref
   - name: refused_for_one_x
-    clause: '§9.12: checks 5 and 6 never refuse a connection'
+    clause: '§9.12: checks 5 and 6 come from AccountStateObserved and never refuse a connection'
     base_draft: refused_scope
     changes:
     - path: payload.check
@@ -12067,16 +12013,10 @@ connections:
       - check: account
         result: passed
         reason: null
-      - check: account_status
-        result: passed
-        reason: null
       - check: contract
         result: failed
         reason: contract_drift
       - check: environment
-        result: passed
-        reason: null
-      - check: one_x
         result: passed
         reason: null
       - check: scope
@@ -12093,13 +12033,7 @@ connections:
       - check: account
         result: failed
         reason: account_unreadable
-      - check: account_status
-        result: passed
-        reason: null
       - check: environment
-        result: passed
-        reason: null
-      - check: one_x
         result: passed
         reason: null
       - check: scope
@@ -12109,29 +12043,6 @@ connections:
       value: null
     - path: pii_refs
       value: []
-    expect:
-      outcome: Valid
-  - name: connected_without_one_x
-    clause: '§9.12: a failed check 5 or 6 is journaled and the connection still connects'
-    base_draft: checked_start
-    changes:
-    - path: payload.results
-      value:
-      - check: account
-        result: passed
-        reason: null
-      - check: account_status
-        result: failed
-        reason: restricted
-      - check: environment
-        result: passed
-        reason: null
-      - check: one_x
-        result: failed
-        reason: not_one_x
-      - check: scope
-        result: passed
-        reason: null
     expect:
       outcome: Valid
   - name: checked_for_a_reauthorization
@@ -12739,13 +12650,7 @@ connections:
         - check: account
           result: passed
           reason: null
-        - check: account_status
-          result: passed
-          reason: null
         - check: environment
-          result: passed
-          reason: null
-        - check: one_x
           result: passed
           reason: null
         - check: scope
@@ -12809,58 +12714,6 @@ connections:
       code: connection_lifecycle_mismatch
       index: 1
       rule: '66'
-  - name: suspension_cleared_while_margin_is_on
-    clause: 'rule 66: checks 5 and 6 act through their own paths, not the connection''s state'
-    records:
-    - base_draft: state_degraded
-      changes:
-      - path: event_id
-        value: 01J8Z4S01A0000000000000000
-      - path: payload.from
-        value: active
-      - path: payload.to
-        value: suspended
-      - path: payload.reason
-        value: authorization_failed
-      - path: causation_id
-        value: null
-    - base_draft: checked_start
-      changes:
-      - path: event_id
-        value: 01J8Z4S02A0000000000000000
-      - path: payload.occasion
-        value: reauthorize
-      - path: payload.results
-        value:
-        - check: account
-          result: passed
-          reason: null
-        - check: account_status
-          result: passed
-          reason: null
-        - check: environment
-          result: passed
-          reason: null
-        - check: one_x
-          result: failed
-          reason: not_one_x
-        - check: scope
-          result: passed
-          reason: null
-    - base_draft: state_degraded
-      changes:
-      - path: event_id
-        value: 01J8Z4S03A0000000000000000
-      - path: payload.from
-        value: suspended
-      - path: payload.to
-        value: suspended
-      - path: payload.reason
-        value: condition_cleared
-      - path: causation_id
-        value: 01J8Z4S02A0000000000000000
-    expect:
-      outcome: Valid
   - name: suspension_cleared_by_a_failed_check
     clause: rule 66
     records:
@@ -12887,13 +12740,7 @@ connections:
         - check: account
           result: failed
           reason: account_mismatch
-        - check: account_status
-          result: passed
-          reason: null
         - check: environment
-          result: passed
-          reason: null
-        - check: one_x
           result: passed
           reason: null
         - check: scope
@@ -12930,13 +12777,7 @@ connections:
         - check: account
           result: passed
           reason: null
-        - check: account_status
-          result: passed
-          reason: null
         - check: environment
-          result: passed
-          reason: null
-        - check: one_x
           result: passed
           reason: null
         - check: scope

@@ -337,14 +337,11 @@ CHECK_REASONS = {
     "account": ("account_unreadable", "account_mismatch", "not_dedicated"),
     "uniqueness": ("already_connected",),
     "contract": ("tools_missing", "contract_drift"),
-    "one_x": ("not_one_x",),
-    "account_status": ("restricted",),
 }
 ALL_CHECK_REASONS = tuple(r for reasons in CHECK_REASONS.values() for r in reasons)
-# Checks 5 and 6 never refuse a connection (connections spec §8.1): they are journaled, not refused.
-REFUSING_CHECKS = ("scope", "environment", "account", "uniqueness", "contract")
-EXECUTOR_CHECKS = ("account", "account_status", "contract", "environment", "one_x", "scope")
-REQUIRED_CHECKS = ("account", "account_status", "environment", "one_x", "scope")
+REFUSING_CHECKS = tuple(CHECK_REASONS)
+EXECUTOR_CHECKS = ("account", "contract", "environment", "scope")
+REQUIRED_CHECKS = ("account", "environment", "scope")
 CONNECTION_STATES = ("active", "degraded", "suspended")
 DEGRADING = ("network_errors", "rate_headroom", "contract_drift")
 SUSPENDING = ("authorization_failed", "credential_expired", "refresh_failed", "check_failed", "lease_expired")

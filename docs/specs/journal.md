@@ -24,7 +24,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `ConnectionRevoked`, with the same broker, environment, and `account_ref`, keep one
   `account_ref` and one account stream to one connection, and let the owner's acknowledgment
   return a connection to `active` only after its cause cleared, a suspension only on a credential
-  that passed every check that can refuse one. The connection's owner checks them
+  that passed every check. The connection's owner checks them
   before appending, and §11's new `connection_lifecycle_mismatch` checks every range. No rule
   refuses a `ConnectionRevoked`. The vectors gain a generated, additive `connections` section and
   stay version 3.
@@ -1585,19 +1585,23 @@ exists before the connection is established.
 
 **The connect sequence** (connections spec §5.2). The connection manager assigns the connection's
 `connection_id` and `account_ref` when the connect starts. The connecting executor opens the account
-stream `acct:{workspace_id}:{account_ref}` with `StreamOpened`, runs §8.1 checks 1, 2, 3, 5, 6,
-and 7 against the credential in the vault, and journals `ConnectionChecked` (occasion `connect`)
-there. It stores the broker's account id in the personal-data vault and records only that
+stream `acct:{workspace_id}:{account_ref}` with `StreamOpened`, runs §8.1 checks 1, 2, 3, and 7
+against the credential in the vault, and journals `ConnectionChecked` (occasion `connect`) there. It stores the broker's account id in the personal-data vault and records only that
 reference (`account_pii_ref`, §6.4), never the id. The control services read that record, have the
 vault compute the account fingerprint from the reference (connections spec §3.1; they receive only
 the keyed hash), complete check 3 against the connection's record and run check 4 (uniqueness), and
 append `ConnectionEstablished` version 2, whose `causation_id` is that `ConnectionChecked` (rule
 63). Before appending, they confirm it is on the stream `account_ref` names, has the same
-`connection_id`, an occasion of `connect` or `reconnect`, and that checks 1, 2, 3, and 7 all
-`passed`; a failed check 5 or 6 never refuses a connection (connections spec §8.1: connected, agents
-not deployable). A record on another stream is not something §11 can check, so the writer does. A
+`connection_id`, an occasion of `connect` or `reconnect`, and every result `passed`. Checks 5 and 6
+are read from `AccountStateObserved` and never refuse a connection (connections spec §8.1:
+connected, agents not deployable, status shown). A record on another stream is not something §11 can check, so the writer does. A
 refusal by either side is `ConnectionRefused`, whose `causation_id` is the failed
 `ConnectionChecked` when the executor's check failed.
+
+**A refused connect's account stream** is an orphan: its `account_ref` is never bound, and nothing
+is written to it again. It is kept like every stream, under §6.2's retention, because it records
+the refusal's evidence. The executor that opened it has exited, and its writer epoch is never
+reused (§5.1).
 
 **A `causation_id` may name an event on another stream** (§3: it is an event ID). The connect
 sequence uses it from the control stream to the account stream, as §2's copies use it the other way.
@@ -1636,8 +1640,7 @@ credential was deleted from the vault before this record is written.
 
 **`ConnectionCredentialRotated`** on the control stream: the owner replaced the credential of a
 connection that is not revoked, and checks 1 to 4 and 7 passed against it. Its `causation_id` is
-the executor's `ConnectionChecked` with occasion `reauthorize` in which checks 1, 2, 3, and 7
-`passed` (rule 63),
+the executor's `ConnectionChecked` with occasion `reauthorize` and every result `passed` (rule 63),
 which the control services confirm as for `ConnectionEstablished`. Check 3 compares the account the
 new credential reaches with the connection's fingerprint, so the replacement is the same account;
 the connection keeps its `connection_id`, and with it its `broker`, `environment`, and `account_ref`
@@ -1653,7 +1656,7 @@ requires a `condition_cleared` that names a passing check, then the owner's ackn
 | `user` | `text` | The owner who replaced it (opaque) |
 | `step_up` | As `ConnectionEstablished`'s | Never `null` (identity spec ID-4: changing a connection) |
 
-**`ConnectionChecked`** on the account stream: the executor's §8.1 checks 1, 2, 3, 5, 6, and 7, at a
+**`ConnectionChecked`** on the account stream: the executor's §8.1 checks 1, 2, 3, and 7, at a
 connect, a reconnect, or a credential replacement (before the control stream records it), at each
 executor start, and daily. Check 4 is the control services' alone, and so is check 3's fingerprint
 comparison, made from `account_pii_ref`.
@@ -1662,13 +1665,13 @@ comparison, made from `account_pii_ref`.
 |---|---|---|
 | `connection_id` | `id` | The connection the checks are for: rule 66 |
 | `occasion` | `connect` \| `reconnect` \| `reauthorize` \| `executor_start` \| `daily` | |
-| `results` | `[{check: scope \| environment \| account \| one_x \| account_status \| contract, result: passed \| failed, reason: (see the reasons table)?}]` | Every check run: rules 57 and 58. `uniqueness` is the control services' (connections spec §8.1) |
+| `results` | `[{check: scope \| environment \| account \| contract, result: passed \| failed, reason: (see the reasons table)?}]` | Every check run: rules 57 and 58. `uniqueness` is the control services' (connections spec §8.1) |
 | `account_pii_ref` | `id?` | The personal-data vault reference of the broker account id the credential reaches (§6.4), never the id; `null` exactly when the account could not be read: rule 62 |
 | `risk_clock` | `risk_clock` | |
 
-Checks 5 (1× buying power, `one_x`) and 6 (account status) are journaled here with the rest, as
-connections spec §8.1 asks, and never refuse a connection or move its state: trading spec §7.2 and
-§7.3 act on them through `AccountStateObserved`, which records the multiplier and status they read.
+Checks 5 (1× buying power) and 6 (account status) are not here: `AccountStateObserved` (§9)
+journals the multiplier and the status they read, trading spec §7.2 and §7.3 act on them, and
+neither refuses a connection or moves its state.
 
 **`ConnectionStateChanged`** on the account stream: the connection's state (connections spec §9.1)
 on the executor's side. A connection is `active` when its account stream opens. `connecting` leaves
@@ -1717,8 +1720,6 @@ and rule 58 (`ConnectionChecked`).
 | `account` | `account_unreadable` (the account could not be read), `account_mismatch` (another account than the connection names, by fingerprint), `not_dedicated` (for Robinhood, not the dedicated agentic account) |
 | `uniqueness` | `already_connected` (CN-5) |
 | `contract` | `tools_missing` (an allowlisted tool is absent), `contract_drift` (the pinned hash differs) |
-| `one_x` | `not_one_x` (margin enabled with no enforced 1× cap, FR-2.6). Journaled, never refused |
-| `account_status` | `restricted` (a status trading spec §7.3 restricts). Journaled, never refused |
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 
@@ -1728,8 +1729,8 @@ and rule 58 (`ConnectionChecked`).
 56. `ConnectionCredentialRotated` and `ConnectionCredentialRefreshed`: `scopes` strictly ascending
     by bytes (`non_canonical` at `payload.scopes`), as rule 19.
 57. `ConnectionChecked`: `results` strictly ascending by `check` bytes, so no check is listed twice
-    (`non_canonical` at `payload.results`), and it includes `scope`, `environment`, `account`,
-    `one_x`, and `account_status` (`payload.results`). `contract` is listed for an MCP connection only, which the record cannot
+    (`non_canonical` at `payload.results`), and it includes `scope`, `environment`, and `account`
+    (`payload.results`). `contract` is listed for an MCP connection only, which the record cannot
     show, so its absence is not refused.
 58. `ConnectionChecked`: in each result, `reason` is non-null exactly when `result` is `failed`, and
     then belongs to `check` (`payload.results[i].reason`).
@@ -1768,9 +1769,9 @@ own stream:
     stream's previous `ConnectionStateChanged` left, or `active` when there is none; `acknowledged`
     follows a `condition_cleared`, with no other state change between them; and a
     `condition_cleared` out of `suspended` names as its `causation_id` an earlier `ConnectionChecked`
-    on the stream in which checks 1, 2, 3, and 7 all `passed`. The owner's acknowledgment never
-    lifts a cause that has not cleared, and a suspended connection clears only on a credential that
-    passed every check that can refuse one.
+    on the stream whose every result is `passed`. The owner's acknowledgment never lifts a cause
+    that has not cleared, and a suspended connection clears only on a credential that passed every
+    check.
 
 No rule here refuses a `ConnectionRevoked`, so §5.6's compromised revocation, whose kill switch
 shares its batch, is never held by one.
