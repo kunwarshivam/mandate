@@ -79,6 +79,13 @@ fi
 say "The cloudflared service"
 put_file /etc/systemd/system/cloudflared.service 0644 root:root <"$DEPLOY_DIR/systemd/cloudflared.service"
 run systemctl daemon-reload
+# The unit denies all egress but loopback (DEC-822 item 5); the tunnel's edge is the one thing it
+# may reach. Cloudflare publishes these two names for the tunnel's connections (port 7844).
+if [ "$DRY_RUN" = 1 ]; then
+  bash "$DEPLOY_DIR/allow-egress.sh" --dry-run cloudflared region1.v2.argotunnel.com region2.v2.argotunnel.com
+else
+  bash "$DEPLOY_DIR/allow-egress.sh" cloudflared region1.v2.argotunnel.com region2.v2.argotunnel.com
+fi
 run systemctl enable --now cloudflared.service
 run systemctl restart cloudflared.service
 echo "check it: systemctl status cloudflared; the dashboard shows the tunnel as HEALTHY"

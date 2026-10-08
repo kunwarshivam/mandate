@@ -449,7 +449,8 @@ struct Finding {
 /// so that this source matches no rule. The palette rows prove the "Web palette ramp references"
 /// exception (the `lapis` token names contain "api"): the ramp row is allowed in the design-source
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
-/// reported too.
+/// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
+/// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -465,6 +466,11 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let palette = "web/src/lib/palette.ts";
     let ramp = "  \"lapis-soft\": \"ultramarine-100\",";
     let palette_key = format!("  \"api-key\": \"{page}\",");
+    let hex = "CC94B39C77AE7342A68B89628A682D308D4E5E73";
+    let bootstrap = "deploy/bootstrap.sh";
+    let fingerprint = format!("CLOUDFLARE_FINGERPRINT={hex}");
+    let not_fingerprint = format!("CLOUDFLARE_KEY={hex}");
+    let cloudflare = Some("cloudflare-api-key");
     vec![
         (fixture("page-1.json"), json.clone(), None),
         (fixture("requests.txt"), query.clone(), None),
@@ -487,6 +493,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (palette.to_owned(), ramp.to_owned(), None),
         ("stray-palette.ts".to_owned(), ramp.to_owned(), generic),
         (palette.to_owned(), palette_key, generic),
+        (bootstrap.to_owned(), fingerprint.clone(), None),
+        ("stray-fingerprint.sh".to_owned(), fingerprint, cloudflare),
+        (bootstrap.to_owned(), not_fingerprint, cloudflare),
     ]
 }
 

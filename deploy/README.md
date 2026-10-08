@@ -9,7 +9,8 @@ The founder runs everything here; agents never get host access. The order of the
 
 | File | What it does |
 |---|---|
-| `bootstrap.sh` | PostgreSQL 18 from apt.postgresql.org, with its key checked by fingerprint, listening on localhost only. Creates the `owlhead` database, the journal's two roles, the `owlhead_api` login role, and the `journal` schema, then applies `../migrations/`. Creates the API's system user and directories, installs the API unit (not started) and the backup timer, and copies `api.env.example` to `/etc/owlhead/api.env` if that file is absent |
+| `bootstrap.sh` | PostgreSQL 18 from apt.postgresql.org, with its key checked by fingerprint, listening on localhost only. Creates the `owlhead` database, the journal's two roles, the `owlhead_api` login role, and the `journal` schema, then applies `../migrations/`. Creates the API's system user and directories, installs the API unit (not started) and the backup timer, and copies `api.env.example` to `/etc/owlhead/api.env` if that file is absent. Last, hardens SSH: the admin user `owlhead_admin` and an `sshd_config.d` drop-in (keys only, no root login) |
+| `allow-egress.sh` | Adds the addresses of the named hosts to one unit's outbound allow list, as a systemd drop-in. See *Egress* below |
 | `install-cloudflared.sh` | cloudflared from pkg.cloudflare.com, its key pinned by fingerprint, and the tunnel as a service. The token is checked for shape and read without echo into the credential `/etc/owlhead/credentials/tunnel-token` (0600), which the unit loads with `LoadCredential=` |
 | `set-secrets.sh` | Makes the vault's two keys and the session key with openssl, straight into `/etc/owlhead/credentials/` (0600), asks for the Alpaca client id and fills it into both env files, and, once V1 is installed, pipes the client secret into the vault's import. It never prints a value or puts one on a command line |
 | `backup.sh` | Installed as `/usr/local/sbin/owlhead-backup`: after a disk-space check, a nightly `pg_dump` and a tarball of `/var/lib/owlhead` (the artifact store and the vault), 14 days kept. A failure runs `owlhead-backup-failed.service`, which logs an error-priority line |
@@ -23,6 +24,13 @@ The founder runs everything here; agents never get host access. The order of the
 | `lib.sh` | Shared helpers. Every change goes through `run` or `put_file`, so `--dry-run` prints the plan and changes nothing |
 
 ## Choices worth knowing
+
+- **Vault key, two files.** DEC-822 item 4 lists three values outside the vault: "the vault key",
+  the session signing key, and the tunnel token. The vault key is one kind of secret held as two
+  files, one per purpose ([DEC-692](../docs/project/decisions/DEC-692.md) item 2:
+  `vault-pending-key` and `vault-token-key`, "together DEC-822's single vault key"). That adds no
+  kind of secret outside the vault, so the count of kinds is still three. The reading was recorded
+  there under DEC-176 and was not repeated.
 
 - **No database password.** The API connects over the Unix socket as `owlhead_api` by peer
   authentication (the bootstrap checks `pg_hba.conf` still has its `local all all peer` rule), so
@@ -97,6 +105,74 @@ The founder runs everything here; agents never get host access. The order of the
   deleted leaves nothing in the database. Only the cold segments and anchors (journal spec §6.2,
   §10, §11) show that, and they are not on this host yet.
 
+## Egress (DEC-822 item 5)
+
+Every service unit sets `IPAddressDeny=any` and `IPAddressAllow=localhost`, so a service reaches
+only loopback unless a drop-in adds more. Postgres is reached over its Unix socket, which no IP rule
+touches. `allow-egress.sh` writes the drop-in, one unit at a time, from the names a founder step
+gives it:
+
+| Unit | Outbound allowed |
+|---|---|
+| `owlhead-api` | loopback, plus the Supabase project host's addresses (OIDC and JWKS, DEC-820), set in FOUNDER-STEPS step 10 |
+| `owlhead-executor` | loopback only until the live lane sets the hosts DEC-821 allows (Alpaca's OAuth and paper API) with `allow-egress.sh owlhead-executor <hosts>`. The template is never enabled by bootstrap |
+| `cloudflared` | loopback, plus the addresses of `region1.v2.argotunnel.com` and `region2.v2.argotunnel.com`, set by `install-cloudflared.sh` |
+| backup units | loopback only |
+
+The runtime, when it joins this host, gets a unit copied from the API's with no `allow-egress.sh`
+call: no route to a broker or the internet.
+
+**Residual.** systemd filters by address, not by name or port. The allowed addresses are what each
+name resolves to when `allow-egress.sh` runs; Supabase and Cloudflare sit behind CDNs, so a name
+can later resolve elsewhere, and a service then fails to connect until the script is run again.
+That fails closed. It also allows every port at an allowed address, and the addresses of a CDN
+serve other tenants. Port-level or name-level egress would need a host firewall (nftables) or a
+proxy, which this PR does not add. A founder-visible check: `systemctl show owlhead-api -p
+IPAddressAllow -p IPAddressDeny`.
+
+## SSH (DEC-822 items 6 and 7)
+
+`bootstrap.sh` ends by creating `owlhead_admin` (in group `sudo`, with passwordless `sudo`, since the
+account has no password and logs in by key only) and giving it the key Hetzner put in root's
+`authorized_keys`. It then writes `/etc/ssh/sshd_config.d/00-owlhead.conf`:
+
+- `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `AuthenticationMethods publickey`;
+- `PermitRootLogin no` and `AllowUsers owlhead_admin`;
+- `MaxAuthTries 3`, `X11Forwarding no`.
+
+The `00-` prefix makes it win over cloud-init's `50-cloud-init.conf`, since sshd keeps the first value
+it reads. The script stops before touching SSH if the admin has no key, checks the file with `sshd
+-t`, and reads the effective settings back with `sshd -T`. Unattended security updates are enabled
+in the same script, and the provider firewall is the only inbound path (FOUNDER-STEPS step 3).
+
+## The kill switch without Cloudflare (DEC-822 item 6)
+
+The web app's pause and kill switch go through Cloudflare. The fallback needs only SSH:
+
+```bash
+ssh owlhead_admin@<IP>
+sudo -u owlhead_api mandate agent pause <AGENT> --workspace <WORKSPACE> --user <USER> \
+  --journal 'postgresql://owlhead_api@localhost/owlhead?host=/var/run/postgresql' \
+  --store /var/lib/owlhead/artifacts
+sudo -u owlhead_api mandate agent kill --help     # the scope flags: agent, connection, or workspace
+```
+
+The CLI commits one control-stream event per command ([the CLI module](../crates/mandate-cli/src/agent.rs):
+`pause` needs no code; a kill switch is never refused for a missing code). The login is by peer
+authentication on the Unix socket as `owlhead_api`, so no password is involved. FOUNDER-STEPS step 16
+rehearses it once.
+
+## Deferred
+
+- **The CLI's `pause` and `kill` subcommands are not in the binary yet.** `crates/mandate-cli` has
+  the code (`agent.rs`) but its `agent` subcommand offers only `deploy` today. The fallback above is
+  documented as the intended path, and step 16 fails closed: the rehearsal does not pass until
+  `mandate agent --help` lists `pause` and `kill`. The exact flags of `kill` are then read from
+  `--help`, not from this file. Nothing in this PR can rehearse it, because agents have no host.
+- **Egress by name or port** (see *Egress*): not expressible in systemd units.
+- **A live deployment** needs a new decision for the kill switch and for Cloudflare's place in
+  front of the API (DEC-822 item 6).
+
 ## Restore after losing the VM or a bad migration
 
 On a fresh host (after losing the VM) or on the same one (after a bad migration), as root, with
@@ -129,6 +205,6 @@ restore instead, run only the last line on the newest dump: an image is crash-co
   lists it): strict mode in every script, the env files 0600 root:root, the API unit's loopback
   bind and hardening, PostgreSQL on localhost only, the API role's minimal grants, the tunnel token
   never shown, names-only `api.env.example`, the restore check's head comparison, and the backup
-  covering the vault. Each has a seeded bug the test shows caught.
+  covering the vault, default-deny egress in every service unit, and the sshd settings. Each has a seeded bug the test shows caught.
 - **Dry run.** `bash bootstrap.sh --dry-run` and `bash install-cloudflared.sh --dry-run` run
   without root and print every command, file, and SQL statement they would apply.

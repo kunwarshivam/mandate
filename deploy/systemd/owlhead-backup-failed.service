@@ -5,4 +5,5 @@ Description=Report a failed Owlhead backup
 
 [Service]
 Type=oneshot
+IPAddressDeny=any
 ExecStart=/usr/bin/systemd-cat -t owlhead-backup -p err /bin/echo "owlhead backup FAILED; see: journalctl -u owlhead-backup.service"

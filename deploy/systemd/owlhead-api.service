@@ -31,6 +31,12 @@ RestartSec=2s
 ReadWritePaths=/var/lib/owlhead/artifacts /var/lib/owlhead/vault/pending /var/lib/owlhead/vault/tokens
 UMask=0027
 
+# Default-deny egress (DEC-822 item 5): only loopback (Postgres's socket needs no IP at all). The
+# Supabase host the API needs for OIDC and JWKS (DEC-820) is added per host by
+# deploy/allow-egress.sh as a drop-in, never in this file.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
 # Hardening.
 NoNewPrivileges=yes
 CapabilityBoundingSet=

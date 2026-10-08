@@ -26,7 +26,8 @@ issue, or the repository.
      SSH stops answering, update this rule in the console, or use the server's *Console* button
      (a browser terminal that needs no SSH);
    - no other inbound rule;
-   - leave outbound open. The tunnel, apt, and Alpaca are all outbound.
+   - leave outbound open. The tunnel, apt, and Alpaca are all outbound; the services' own units deny
+     all but the hosts each needs (step 10).
 4. **Server.** Under *Servers → Add server*:
    - pick a location;
    - image: **Ubuntu 24.04**;
@@ -44,7 +45,7 @@ issue, or the repository.
 5. **Log in and update.**
 
    ```bash
-   ssh root@<IP>
+   ssh root@<IP>      # the last time: bootstrap (step 7) turns root login off
    apt-get update && apt-get -y upgrade
    reboot            # only if the upgrade asks for it; then ssh in again
    ```
@@ -76,9 +77,27 @@ issue, or the repository.
    - the nightly backup timer;
    - `/etc/owlhead/api.env` and `/etc/owlhead/executor.env`, waiting for their secrets.
 
+   - SSH hardening (DEC-822 item 7): the admin user `owlhead_admin`, which gets the SSH key you gave
+     Hetzner, and a drop-in `/etc/ssh/sshd_config.d/00-owlhead.conf` that turns off passwords and
+     root login and lets only `owlhead_admin` in.
+
    It is safe to run again.
 
+   **Before you close the root session,** open a second terminal on your laptop and check that the
+   admin login works:
+
+   ```bash
+   ssh owlhead_admin@<IP> sudo true
+   ```
+
+   If it fails, fix it from the root session (or the Hetzner *Console* button) before you leave:
+   root login is now off. From here on, log in as `owlhead_admin` and run the host commands with
+   `sudo` (`sudo -i` gives a root shell).
+
 ## C. The API binary
+
+Root login is off from here on. Every command below that is "on the host" is run as
+`owlhead_admin` after `sudo -i`, which gives a root shell with `/root/owlhead` as its home.
 
 8. **Install the binaries**, once the API lane says the build is ready. Copy these onto the host
    (x86_64 Linux builds):
@@ -89,9 +108,9 @@ issue, or the repository.
    then.
 
    ```bash
-   scp mandate-api-server mandate root@<IP>:/tmp/
-   ssh root@<IP>
-   install -o root -g root -m 0755 /tmp/mandate-api-server /tmp/mandate /usr/local/bin/
+   scp mandate-api-server mandate owlhead_admin@<IP>:/tmp/
+   ssh owlhead_admin@<IP>
+   sudo install -o root -g root -m 0755 /tmp/mandate-api-server /tmp/mandate /usr/local/bin/
    rm /tmp/mandate-api-server /tmp/mandate
    ```
 
@@ -121,7 +140,18 @@ issue, or the repository.
    them once; clear the screen after.
 
    Check the files with `ls -l /etc/owlhead/credentials`: each is `root root` and `-rw-------`.
-10. **Start the API and check it answers locally:**
+10. **Allow the API's one outbound host, then start it and check it answers locally.** The API unit
+    denies all outbound traffic but loopback (DEC-822 item 5). Give it the host of your Supabase
+    project (DEC-820), which it needs to verify sign-ins; use the host name only, for example
+    `abcd1234.supabase.co`:
+
+    ```bash
+    cd /root/owlhead/deploy
+    bash allow-egress.sh owlhead-api <supabase-project-host>
+    ```
+
+    Run it again if sign-in later stops working with a network error: the unit allows the
+    addresses the name had when you ran it (see *Egress* in [README.md](README.md)). Then:
 
     ```bash
     systemctl enable --now owlhead-api
@@ -146,6 +176,7 @@ issue, or the repository.
     bash install-cloudflared.sh
     ```
 
+    The script also allows the tunnel's two Cloudflare edge names outbound (the unit denies the rest).
     The dashboard should show the tunnel as *Healthy*.
 13. **Public hostname.** On the tunnel, add a public hostname (its *Public Hostname* or *Routes*
     tab):
@@ -183,6 +214,33 @@ issue, or the repository.
 
     To restore for real, after losing the VM or a bad migration, follow *Restore after losing the
     VM or a bad migration* in [README.md](README.md).
+
+## G. The kill switch without Cloudflare (DEC-822 item 6)
+
+Cloudflare sits in front of the API. If Cloudflare or its account has a problem, the web app cannot
+reach pause or the kill switch. The fallback needs neither: the `mandate` CLI on the host, over
+SSH. Try it once now, before any agent runs, and again after any change to the CLI or the host.
+
+16. **Rehearse the fallback.** From your laptop, which needs no Cloudflare:
+
+    ```bash
+    ssh owlhead_admin@<IP>
+    sudo -u owlhead_api mandate agent --help          # lists pause and kill
+    ```
+
+    Then, with your workspace id, your owner id, and a test agent's id (the commands and flags are
+    in [README.md](README.md), *The kill switch without Cloudflare*):
+
+    ```bash
+    sudo -u owlhead_api mandate agent pause <AGENT> --workspace <WORKSPACE> --user <USER> \
+      --journal 'postgresql://owlhead_api@localhost/owlhead?host=/var/run/postgresql' \
+      --store /var/lib/owlhead/artifacts
+    ```
+
+    The rehearsal passes only when `mandate agent --help` lists `pause` and `kill` and the pause
+    commits. **If `--help` lists no `pause` or `kill`, the rehearsal has failed:** the binary on the
+    host predates the CLI's control commands, and the web app is then the only way to pause. Say so
+    in the lane's tracker and do not start an agent on this host until it passes.
 
 ## What each backup covers
 

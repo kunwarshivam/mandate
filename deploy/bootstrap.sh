@@ -8,7 +8,9 @@
 # It installs PostgreSQL 18 from apt.postgresql.org (localhost only), creates the database, its
 # roles and schema, applies migrations/, creates the API's system user and directories, installs
 # the executor unit template, the backup timer, and /etc/owlhead/api.env and executor.env from
-# their examples if absent, and the empty /etc/owlhead/credentials/ (0700). It never writes a
+# their examples if absent, and the empty /etc/owlhead/credentials/ (0700). Last, it hardens SSH
+# (DEC-822 item 7): the admin user owlhead_admin gets root's authorized key, and an sshd_config.d
+# drop-in turns off passwords and root login. It never writes a
 # secret: set-secrets.sh and install-cloudflared.sh make the credentials on the host, last.
 #
 # Two service users (DEC-692): owlhead_api runs the API (the control services), owlhead_exec the
@@ -36,6 +38,10 @@ EXEC_USER=owlhead_exec
 ART_GROUP=owlhead_art
 ARTIFACTS=/var/lib/owlhead/artifacts
 VAULT=/var/lib/owlhead/vault
+ADMIN_USER=owlhead_admin
+ADMIN_KEYS="/home/$ADMIN_USER/.ssh/authorized_keys"
+SSHD_DROPIN=/etc/ssh/sshd_config.d/00-owlhead.conf
+SUDOERS=/etc/sudoers.d/90-owlhead-admin
 
 if [ ! -d "$MIGRATIONS_DIR" ]; then
   echo "no migrations directory at $MIGRATIONS_DIR; copy migrations/ beside deploy/ or set MIGRATIONS_DIR" >&2
@@ -187,8 +193,57 @@ done
 run systemctl daemon-reload
 run systemctl enable --now owlhead-backup.timer
 
+say "SSH: keys only, and a non-root admin user (DEC-822 item 7)"
+if ! id -u "$ADMIN_USER" >/dev/null 2>&1; then
+  run useradd --create-home --shell /bin/bash --groups sudo "$ADMIN_USER"
+fi
+run install -d -o "$ADMIN_USER" -g "$ADMIN_USER" -m 0700 "/home/$ADMIN_USER/.ssh"
+if [ "$DRY_RUN" = 1 ]; then
+  echo "+ copy root's authorized_keys (the key given to Hetzner) to $ADMIN_KEYS, if that file is empty"
+elif [ ! -s "$ADMIN_KEYS" ]; then
+  if [ ! -s /root/.ssh/authorized_keys ]; then
+    echo "root has no authorized_keys to give $ADMIN_USER; root login stays on. Add your public key to $ADMIN_KEYS and run again" >&2
+    exit 1
+  fi
+  install -o "$ADMIN_USER" -g "$ADMIN_USER" -m 0600 /root/.ssh/authorized_keys "$ADMIN_KEYS"
+fi
+if [ "$DRY_RUN" = 0 ] && [ ! -s "$ADMIN_KEYS" ]; then
+  echo "$ADMIN_KEYS is empty; root login stays on. Add your public key and run again" >&2
+  exit 1
+fi
+echo "$ADMIN_USER ALL=(ALL) NOPASSWD:ALL" | put_file "$SUDOERS" 0440 root:root
+run visudo -cf "$SUDOERS" || { rm -f "$SUDOERS"; exit 1; }
+if [ "$DRY_RUN" = 0 ] && ! grep -qE '^Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' /etc/ssh/sshd_config; then
+  echo "/etc/ssh/sshd_config does not include sshd_config.d; stopping before changing SSH" >&2
+  exit 1
+fi
+put_file "$SSHD_DROPIN" 0644 root:root <<SSHD
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+PermitRootLogin no
+AllowUsers $ADMIN_USER
+X11Forwarding no
+MaxAuthTries 3
+SSHD
+run sshd -t
+run systemctl try-reload-or-restart ssh
+if [ "$DRY_RUN" = 0 ]; then
+  effective="$(sshd -T)"
+  for setting in "passwordauthentication no" "permitrootlogin no" "kbdinteractiveauthentication no"; do
+    if ! grep -qx "$setting" <<<"$effective"; then
+      echo "sshd does not report '$setting'; another file wins over $SSHD_DROPIN. Fix it before closing this session" >&2
+      exit 1
+    fi
+  done
+fi
+
 say "Done"
 cat <<'NEXT'
+Root SSH login is now off. BEFORE closing this session, open a second terminal and check
+`ssh owlhead_admin@<IP> sudo true` works; from now on log in as owlhead_admin and use sudo.
+
 Next (deploy/FOUNDER-STEPS.md): copy the API binary to /usr/local/bin/mandate-api-server, run
 `bash set-secrets.sh`, then `systemctl enable --now owlhead-api`. The API unit does not start
 until the binary exists.

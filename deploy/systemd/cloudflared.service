@@ -26,6 +26,10 @@ ProtectControlGroups=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 RestrictNamespaces=yes
 LockPersonality=yes
+# Default-deny egress (DEC-822 item 5): loopback (the API at 127.0.0.1:8080, and the resolver stub),
+# plus Cloudflare's edge, which deploy/allow-egress.sh adds as a drop-in.
+IPAddressDeny=any
+IPAddressAllow=localhost
 SystemCallArchitectures=native
 
 [Install]

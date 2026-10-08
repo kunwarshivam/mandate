@@ -277,7 +277,8 @@ def no_cross_group(f: dict[str, str]) -> list[str]:
             problems.append(line.strip())
         if "gpasswd" in line and line.strip() != 'run gpasswd --add "$user" "$ART_GROUP"':
             problems.append(line.strip())
-        if "useradd" in line and "--groups" in line and '--groups "$ART_GROUP"' not in line:
+        admin = line.strip() == 'run useradd --create-home --shell /bin/bash --groups sudo "$ADMIN_USER"'
+        if "useradd" in line and "--groups" in line and '--groups "$ART_GROUP"' not in line and not admin:
             problems.append(line.strip())
     if "ART_GROUP=owlhead_art" not in text:
         problems.append("the shared group is not owlhead_art")
@@ -332,7 +333,76 @@ def keys_pinned(f: dict[str, str]) -> list[str]:
     return problems
 
 
+SERVICE_UNITS = (
+    "systemd/owlhead-api.service",
+    "systemd/owlhead-executor.service",
+    "systemd/cloudflared.service",
+    "systemd/owlhead-backup.service",
+    "systemd/owlhead-backup-failed.service",
+)
+
+
+def egress_denied(f: dict[str, str]) -> list[str]:
+    """DEC-822 item 5: every service unit denies all outbound traffic and allows at most loopback,
+    never a wide range; the units that need a remote host get it from allow-egress.sh's drop-in,
+    which only ever adds `IPAddressAllow=` lines and never lifts the deny."""
+    problems = []
+    unit_files = [name for name in f if name.startswith("systemd/") and name.endswith(".service")]
+    if sorted(unit_files) != sorted(SERVICE_UNITS):
+        problems.append(f"a service unit this check does not know: {sorted(set(unit_files) ^ set(SERVICE_UNITS))}")
+    for name in unit_files:
+        lines = f[name].splitlines()
+        if lines.count("IPAddressDeny=any") != 1:
+            problems.append(f"{name} lacks IPAddressDeny=any")
+        allowed = [l for l in lines if l.startswith("IPAddressAllow=")]
+        if any(l != "IPAddressAllow=localhost" for l in allowed):
+            problems.append(f"{name} allows more than loopback: {allowed}")
+        if re.search(r"^IPAddressDeny=\s*$", f[name], re.M):
+            problems.append(f"{name} resets IPAddressDeny=")
+    script = f["allow-egress.sh"]
+    if "IPAddressDeny" in "\n".join(l for l in script.splitlines() if not l.lstrip().startswith("#")):
+        problems.append("allow-egress.sh touches IPAddressDeny")
+    if script.count("IPAddressAllow=") != 1 or "[Service]" not in script:
+        problems.append("allow-egress.sh writes something other than IPAddressAllow lines")
+    if "owlhead-api | owlhead-executor | cloudflared)" not in script:
+        problems.append("allow-egress.sh names units other than the three that need a host")
+    return problems
+
+
+def sshd_hardened(f: dict[str, str]) -> list[str]:
+    """DEC-822 item 7: bootstrap writes an sshd drop-in that wins over cloud-init's (a 00- name) with
+    keys only, no root login, and one allowed admin user; it creates that user with a key first,
+    validates the file, reloads sshd, and reads the effective settings back."""
+    text = f["bootstrap.sh"]
+    drop = re.search(r"put_file \"\$SSHD_DROPIN\" 0644 root:root <<SSHD\n(.*?)\nSSHD\n", text, re.S)
+    settings = drop.group(1).splitlines() if drop else []
+    wanted = (
+        "PasswordAuthentication no",
+        "KbdInteractiveAuthentication no",
+        "AuthenticationMethods publickey",
+        "PermitRootLogin no",
+        "AllowUsers $ADMIN_USER",
+    )
+    problems = [f"sshd drop-in lacks: {w}" for w in wanted if w not in settings]
+    problems += [f"sshd drop-in loosens: {l}" for l in settings if re.match(r"(PasswordAuthentication|PermitRootLogin|PermitEmptyPasswords|PermitUserEnvironment)\s+(yes|without-password|prohibit-password)", l)]
+    for line in (
+        "SSHD_DROPIN=/etc/ssh/sshd_config.d/00-owlhead.conf",
+        "ADMIN_USER=owlhead_admin",
+        "run sshd -t",
+        "run systemctl try-reload-or-restart ssh",
+        'for setting in "passwordauthentication no" "permitrootlogin no" "kbdinteractiveauthentication no"; do',
+    ):
+        if line not in [l.strip() for l in text.splitlines()]:
+            problems.append(f"bootstrap.sh lacks: {line}")
+    keys_check = text.find('echo "$ADMIN_KEYS is empty')
+    if keys_check == -1 or text.find("put_file \"$SSHD_DROPIN\"") < keys_check:
+        problems.append("bootstrap.sh writes the sshd drop-in before it checks the admin has a key")
+    return problems
+
+
 CHECKS = (
+    egress_denied,
+    sshd_hardened,
     no_side_doors,
     units_umask,
     no_cross_group,
@@ -363,6 +433,20 @@ def test_the_committed_files_hold(check):
 
 
 SEEDED = (
+    ("systemd/owlhead-api.service", "IPAddressDeny=any\n", "", egress_denied),
+    ("systemd/owlhead-executor.service", "IPAddressDeny=any\n", "IPAddressDeny=\n", egress_denied),
+    ("systemd/cloudflared.service", "IPAddressAllow=localhost\n", "IPAddressAllow=localhost\nIPAddressAllow=0.0.0.0/0\n", egress_denied),
+    ("systemd/owlhead-backup.service", "IPAddressDeny=any\n", "", egress_denied),
+    ("systemd/owlhead-backup-failed.service", "IPAddressDeny=any\n", "", egress_denied),
+    ("allow-egress.sh", "  printf '[Service]\\n'\n", "  printf '[Service]\\nIPAddressDeny=\\n'\n", egress_denied),
+    ("allow-egress.sh", "owlhead-api | owlhead-executor | cloudflared)", "owlhead-api | owlhead-executor | cloudflared | owlhead-backup)", egress_denied),
+    ("bootstrap.sh", "PasswordAuthentication no\n", "PasswordAuthentication yes\n", sshd_hardened),
+    ("bootstrap.sh", "PermitRootLogin no\n", "PermitRootLogin prohibit-password\n", sshd_hardened),
+    ("bootstrap.sh", "AllowUsers $ADMIN_USER\n", "", sshd_hardened),
+    ("bootstrap.sh", "AuthenticationMethods publickey\n", "", sshd_hardened),
+    ("bootstrap.sh", "SSHD_DROPIN=/etc/ssh/sshd_config.d/00-owlhead.conf", "SSHD_DROPIN=/etc/ssh/sshd_config.d/99-owlhead.conf", sshd_hardened),
+    ("bootstrap.sh", "run sshd -t\n", "", sshd_hardened),
+    ("bootstrap.sh", 'for setting in "passwordauthentication no" "permitrootlogin no" "kbdinteractiveauthentication no"; do', 'for setting in "passwordauthentication no"; do', sshd_hardened),
     ("bootstrap.sh", 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"', 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"\nrun chmod 0777 "$VAULT"', no_side_doors),
     ("bootstrap.sh", 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"', 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"\nrun chown -R owlhead_api /var/lib/owlhead', no_side_doors),
     ("bootstrap.sh", 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"', 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"\nrun setfacl -m u:owlhead_api:r "$VAULT/tokens"', no_side_doors),
