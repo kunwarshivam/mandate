@@ -209,9 +209,11 @@ crate to `mandate-run` waits until after the live run.
 **Critical path.** The paper path's E1b → G1 (one tests PR, one implementation PR) → the
 rehearsal → the live run. Everything else runs beside the paper path.
 
-## Schedule: everything by Monday 2026-10-26
+## Schedule: a target of Monday 2026-10-26
 
-The founder needs everything done a week before 2026-11-02. Working back from that:
+The founder's deadline is 2026-11-02. This schedule targets everything done a week earlier,
+by Monday 2026-10-26, as requested in this brief's session on 2026-10-08, so a slip still lands
+before the deadline. Working back from that target:
 
 | Date | What is done |
 |---|---|
