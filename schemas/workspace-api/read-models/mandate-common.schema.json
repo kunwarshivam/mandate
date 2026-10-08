@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/mandate-common.schema.json",
+  "title": "Mandate authoring definitions",
+  "description": "Shared by the mandate draft, validation, version, diff, and confirmation read models: docs/specs/workspace-api.md §4.1, §4.10; mandate spec §2.1, §4.2, §4.3, §7, §9.2 (DEC-742). Definitions only.",
+  "$defs": {
+    "Pointer": { "type": "string", "pattern": "^(/[^/]*)+$" },
+    "Source": { "enum": ["user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default"] },
+    "Value": {
+      "description": "A value of the mandate document as it stands at a path: a string (decimals in canonical form), an integer, a boolean, null, an object, or an array. Never a JSON float.",
+      "type": ["string", "integer", "boolean", "null", "object", "array"]
+    },
+    "ProvenanceEntry": {
+      "description": "Mandate spec §2.1: one path's source, recorded in MandateVersionCreated. `quote` is the owner's own words for a user_stated path, else null. `value` is the value at the path when the source was recorded (§10: every platform_proposed value and what was proposed). The conditions encode V-020's platform-default list (§7), V-022 and MI-12 (every `auto` and every delegation is user_entered), and V-038 (no proposed pinned instrument, environment, or connection).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "source", "quote", "value"],
+      "properties": {
+        "path": { "$ref": "#/$defs/Pointer" },
+        "source": { "$ref": "#/$defs/Source" },
+        "quote": { "type": ["string", "null"], "minLength": 1 },
+        "value": { "$ref": "#/$defs/Value" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "source": { "const": "user_stated" } } },
+          "then": { "properties": { "quote": { "type": "string" } } },
+          "else": { "properties": { "quote": { "type": "null" } } }
+        },
+        {
+          "if": {
+            "anyOf": [
+              { "properties": { "path": { "pattern": "^/autonomy/delegations(/|$)" } } },
+              { "properties": { "value": { "const": "auto" } } },
+              { "properties": { "value": { "type": "object", "required": ["then"], "properties": { "then": { "const": "auto" } } } } },
+              { "properties": { "value": { "type": "array", "contains": { "type": "object", "required": ["then"], "properties": { "then": { "const": "auto" } } } } } },
+              { "properties": { "value": { "type": "object", "anyOf": [
+                { "required": ["default"], "properties": { "default": { "const": "auto" } } },
+                { "required": ["admission"], "properties": { "admission": { "const": "auto" } } },
+                { "required": ["delegations"], "properties": { "delegations": { "type": "array", "minItems": 1 } } },
+                { "required": ["rules"], "properties": { "rules": { "type": "array", "contains": { "type": "object", "required": ["then"], "properties": { "then": { "const": "auto" } } } } } }
+              ] } } }
+            ]
+          },
+          "then": { "properties": { "source": { "const": "user_entered" } } }
+        },
+        {
+          "if": { "properties": { "source": { "const": "platform_proposed" } } },
+          "then": { "properties": { "path": { "not": { "pattern": "^/(environment|connection_id|universe/pinned_instruments)(/|$)" } } } }
+        },
+        {
+          "if": { "properties": { "source": { "const": "platform_default" } } },
+          "then": {
+            "properties": {
+              "path": { "pattern": "^/(name|notifications(/.*)?|environment|autonomy/approval/on_timeout|autonomy/approval/approvers(/.*)?|autonomy/default|autonomy/admission|autonomy/review_by|universe/leveraged_etps_enabled|universe/leveraged_etp_disclosure_version)$" }
+            },
+            "allOf": [
+              { "if": { "properties": { "path": { "const": "/environment" } } }, "then": { "properties": { "value": { "const": "paper" } } } },
+              { "if": { "properties": { "path": { "const": "/autonomy/approval/on_timeout" } } }, "then": { "properties": { "value": { "const": "skip" } } } },
+              { "if": { "properties": { "path": { "enum": ["/autonomy/default", "/autonomy/admission"] } } }, "then": { "properties": { "value": { "const": "ask" } } } },
+              { "if": { "properties": { "path": { "const": "/universe/leveraged_etps_enabled" } } }, "then": { "properties": { "value": { "const": false } } } },
+              { "if": { "properties": { "path": { "const": "/universe/leveraged_etp_disclosure_version" } } }, "then": { "properties": { "value": { "type": "null" } } } }
+            ]
+          }
+        }
+      ]
+    },
+    "NotEnforced": {
+      "description": "Mandate spec §7: a constraint in the owner's description that the mandate cannot express, quoted in the owner's own words. It reaches models only as description text and is shown as not enforced.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quote"],
+      "properties": { "quote": { "type": "string", "minLength": 1 } }
+    },
+    "TemplateRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": { "id": { "$ref": "../common.schema.json#/$defs/Id" }, "version": { "type": "string", "pattern": "^[A-Za-z0-9._+-]{1,64}$" } }
+    },
+    "Warning": {
+      "description": "Mandate spec §4.2. Each is acknowledged on its own (A4). `message` is deterministic text, never model text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "path", "message"],
+      "properties": {
+        "code": { "enum": ["W-001", "W-002", "W-003", "W-005", "W-006"] },
+        "path": { "oneOf": [{ "$ref": "#/$defs/Pointer" }, { "type": "null" }] },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "PolicyLevel": { "enum": ["platform", "organization", "workspace", "mandate"] },
+    "Violation": {
+      "description": "A4: a violated V-rule, or a policy key whose value breaks its nearest ancestor (mandate spec §4.3). `message` is deterministic text.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "code", "path", "message"],
+          "properties": {
+            "kind": { "const": "rule" },
+            "code": { "type": "string", "pattern": "^V-0[0-9]{2}$" },
+            "path": { "oneOf": [{ "$ref": "#/$defs/Pointer" }, { "type": "null" }] },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "key", "level", "value", "ancestor_level", "ancestor_value", "path", "message"],
+          "properties": {
+            "kind": { "const": "policy" },
+            "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+            "level": { "enum": ["organization", "workspace", "mandate"] },
+            "value": { "type": ["string", "integer", "boolean"] },
+            "ancestor_level": { "enum": ["platform", "organization", "workspace"] },
+            "ancestor_value": { "type": ["string", "integer", "boolean"] },
+            "path": { "oneOf": [{ "$ref": "#/$defs/Pointer" }, { "type": "null" }] },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "WorstCase": {
+      "description": "Mandate spec §4.2's dollar figures: one position's loss at its stop, the daily loss budget, the loss at which the agent flattens (max_drawdown × A), and the lifetime floor loss. Gaps and exit pricing can exceed each; the screen says so.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["position_loss_at_stop_usd", "daily_loss_budget_usd", "flatten_loss_usd", "lifetime_floor_loss_usd"],
+      "properties": {
+        "position_loss_at_stop_usd": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "daily_loss_budget_usd": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "flatten_loss_usd": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "lifetime_floor_loss_usd": { "$ref": "../common.schema.json#/$defs/Decimal" }
+      }
+    },
+    "Disclosure": {
+      "description": "A disclosure named by document and version, never drafted text (AGENTS.md rule 9).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document", "version"],
+      "properties": { "document": { "$ref": "../common.schema.json#/$defs/Id" }, "version": { "$ref": "../common.schema.json#/$defs/ContentRef" } }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+[
+  {"label": "an unconfirmed version", "set": {"/confirmation": null}},
+  {"label": "a later reducing version confirmed without step-up", "set": {"/previous": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "/classification": "risk_reducing", "/confirmation/step_up": false}}
+]

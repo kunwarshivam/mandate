@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/mandate-confirmation.schema.json",
+  "title": "GET /mandate-versions/{hash}/confirmation",
+  "description": "A5's deterministic data: provenance badges (each path's source; platform defaults and proposals are marked from it), warnings to acknowledge, the worst-case dollar figures, the unasked dollars (DEC-189), the crypto gap disclosure when crypto is allowed (trading spec §5.4), whether a research agent is configured (DEC-126's statement), the constraints not enforced, and screen_digest, which the confirm call returns (§5.1). Step-up is required to deploy a new mandate and for a risk-increasing version (mandate spec §9.2). docs/specs/workspace-api.md §4.1, §4.10 (DEC-742).",
+  "type": "object",
+  "required": ["as_of", "mandate_version", "agent_id", "base_version", "classification", "applies", "step_up_required", "screen_digest", "provenance", "warnings", "worst_case", "unasked_usd", "asset_classes", "crypto_gap_disclosure", "research_agent", "not_enforced"],
+  "properties": {
+    "as_of": { "$ref": "../common.schema.json#/$defs/AsOf" },
+    "mandate_version": { "$ref": "../common.schema.json#/$defs/ContentRef" },
+    "agent_id": { "oneOf": [{ "$ref": "../common.schema.json#/$defs/Id" }, { "type": "null" }] },
+    "base_version": { "oneOf": [{ "$ref": "../common.schema.json#/$defs/ContentRef" }, { "type": "null" }] },
+    "classification": { "oneOf": [{ "$ref": "agent.schema.json#/$defs/ChangeClass" }, { "type": "null" }] },
+    "applies": { "enum": ["now", "next_safe_point"] },
+    "step_up_required": { "type": "boolean" },
+    "screen_digest": { "$ref": "../common.schema.json#/$defs/ContentRef" },
+    "provenance": { "type": "array", "items": { "$ref": "mandate-common.schema.json#/$defs/ProvenanceEntry" } },
+    "warnings": { "type": "array", "items": { "$ref": "mandate-common.schema.json#/$defs/Warning" } },
+    "worst_case": { "$ref": "mandate-common.schema.json#/$defs/WorstCase" },
+    "unasked_usd": {
+      "description": "DEC-189: the order value the agent could submit today without an ask once this version applies. Display only.",
+      "$ref": "../common.schema.json#/$defs/Decimal"
+    },
+    "asset_classes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["crypto", "us_equity"] } },
+    "crypto_gap_disclosure": { "oneOf": [{ "$ref": "mandate-common.schema.json#/$defs/Disclosure" }, { "type": "null" }] },
+    "research_agent": { "type": "boolean" },
+    "not_enforced": { "type": "array", "items": { "$ref": "mandate-common.schema.json#/$defs/NotEnforced" } }
+  },
+  "unevaluatedProperties": false,
+  "allOf": [
+    { "$ref": "../envelope.schema.json#/$defs/Envelope" },
+    {
+      "if": { "properties": { "base_version": { "type": "null" } } },
+      "then": { "properties": { "classification": { "type": "null" }, "step_up_required": { "const": true }, "applies": { "const": "now" } } },
+      "else": { "properties": { "classification": { "type": "string" } } }
+    },
+    {
+      "if": { "properties": { "classification": { "const": "risk_increasing" } } },
+      "then": { "properties": { "step_up_required": { "const": true }, "applies": { "const": "next_safe_point" } } }
+    },
+    {
+      "if": { "properties": { "classification": { "enum": ["risk_reducing", "neutral"] } } },
+      "then": { "properties": { "applies": { "const": "now" } } }
+    },
+    {
+      "if": { "properties": { "asset_classes": { "contains": { "const": "crypto" } } } },
+      "then": { "properties": { "crypto_gap_disclosure": { "$ref": "mandate-common.schema.json#/$defs/Disclosure" } } },
+      "else": { "properties": { "crypto_gap_disclosure": { "type": "null" } } }
+    }
+  ]
+}

@@ -574,13 +574,56 @@ that §4.9 maps here has a schema home, or is a value the client derives:
 | `Agent.positions` (`Position`, `Protection`, `InstrumentRef`) | `positions`; `mark_as_of` is `mark_freshness.observed_at`. Adds `broker_freshness` and `protection.unprotected_since` (§4.7's unprotected intervals) |
 | `Agent.orders`, `past_orders`, `fills` (`WorkingOrder`, `PastOrder`, `Fill`) | `orders`; `PastOrder.note` is deterministic text from the closing event, never model text |
 | `Agent.pnl_total`, `pnl_today`, `realized_pnl` | `pnl`, with `unrealized_pnl`, `marks_freshness`, and disclosures by document and version (rule 9). `agents` and `dashboard` repeat the first two per agent |
-| `Agent.mandate`, `Agent.provenance` | `GET /mandate-versions/{hash}` (§4.1): `mandate` is a [mandate schema](../../schemas/mandate.schema.json) document; the response shape, provenance included, is E10-11's |
+| `Agent.mandate`, `Agent.provenance` (`FieldProvenance`) | `mandate-version` (below): `mandate` is a [mandate schema](../../schemas/mandate.schema.json) document; each provenance entry adds the `value` at its path, and `quote` is `null` where the fixture omits it |
 | `ActiveRestriction.symbol` | Always present, `null` for an agent-wide restriction |
 | What a restriction blocks and how it lifts (brief §4.3), limit headroom in dollars | **Derived** by the client from the closed `RestrictionCode`, `state`, and the mandate (`web/src/lib/restrictions.ts`, `limits.ts`) |
 | `Workspace.now`, `status`, `scenario`, `journal` | **Derived** or fixture-only: the client's clock, whether the API answers, and the scenario switch, which a production build never has |
 
 `GateDecision` and `TimelineEvent` (§4.8), and the approvals, alerts, and connections routes, are
 not in this part.
+
+**Mandate authoring** ([DEC-742](../project/decisions/DEC-742.md)): the read shapes behind §4.1 and
+A2 to A6. The request bodies (draft create and save, confirm) are §5.1's and belong with the other
+commands.
+
+| Route (§4.1) | Schema (`read-models/`) |
+|---|---|
+| `GET /mandate-drafts/{id}` | `mandate-draft.schema.json`: the document as saved, each path's provenance, the `etag` for `If-Match`, the compiler's state, and the constraints flagged not enforced |
+| `POST /mandate-drafts/{id}/validate` (result) | `mandate-validation.schema.json`: violations (a V-rule, or a policy key with its value and the nearest ancestor it breaks) and warnings with their codes |
+| `GET /mandate-versions/{hash}` | `mandate-version.schema.json`: the canonical document and its `MandateVersionCreated` and `MandateConfirmed` records |
+| `GET /mandate-versions/{hash}/diff` | `mandate-diff.schema.json`: each changed path with its classification, the version's classification, and when it applies |
+| `GET /mandate-versions/{hash}/confirmation` | `mandate-confirmation.schema.json`: provenance, warnings, worst-case figures, the unasked dollars, the crypto gap disclosure, the research-agent statement, the constraints not enforced, and `screen_digest` |
+
+`mandate-common.schema.json` holds what these share. Each rule below is a schema condition, so a
+response that breaks it fails the schema:
+
+1. **Provenance** (mandate spec §2.1, §7).
+   - A `user_stated` path carries the owner's quoted span, and no other source carries a quote.
+   - No `auto` and no delegation is anything but `user_entered`: not proposed, stated, from a
+     template, or defaulted (V-022, MI-12).
+   - `universe.pinned_instruments`, `environment`, and `connection_id` are never
+     `platform_proposed` (V-038).
+   - A `platform_default` is only on a §7 field, with its listed value: `paper`, `skip`, `ask`,
+     leveraged ETPs off (V-020).
+   - Each entry carries the `value` at its path (§10), so these rules read the value and not only
+     the source.
+2. **The three answers** (E10-7). A draft whose origin is the three answers has
+   `capital.allocation_usd`, the goal, and `capital.max_loss_from_allocation` as `user_stated`.
+3. **Compiled drafts.** A draft the compiler finished passes the mandate schema; a saved draft may
+   not yet, and validation says why.
+4. **Validation.** A draft is valid exactly when nothing is violated. Each warning is
+   acknowledged on its own.
+5. **Classification and application** (mandate spec §2.2, §9.2).
+   - A version is risk-increasing if any changed path is, otherwise risk-reducing if any is,
+     otherwise neutral.
+   - An increasing version applies at the next safe point; a reducing or neutral version applies
+     now.
+   - Every applied version cancels pending approvals.
+6. **Step-up and disclosures.**
+   - A new mandate and a risk-increasing version require step-up.
+   - The crypto gap disclosure is present exactly when crypto is an allowed asset class.
+   - Disclosures are named by document and version, never drafted text (AGENTS.md rule 9).
+   - No profit estimate, scorecard, or model text appears (DEC-126, FR-8.4, API-18).
 
 ---
 
@@ -859,6 +902,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
 | Read-model projections | **Planned** (E11-9) |
 | Read-model response schemas, part 1 (§4.10, `schemas/workspace-api/read-models/`) | **Exists** as schemas and examples (DEC-741); served by E11-9 |
+| Mandate authoring read shapes (§4.10, `read-models/mandate-*.schema.json`) | **Exists** as schemas and examples (DEC-742); served by E10-11 |
 | Journal queries, trace, exports over the API | **Planned** (E12-6) |
 | Journal events this spec needs (`MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, `OwnerRequestSubmitted`, `hold_openings`, client events) | **Planned** (E10-15, journal spec change first) |
 | Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
@@ -868,7 +912,8 @@ risk-reducing call never consults one (API-7, API-8).
 ## 10. Decisions
 
 Recorded in [DEC-436](../project/decisions/DEC-436.md), except §4.10's read-model response shapes, which
-are [DEC-741](../project/decisions/DEC-741.md), on the shared value types of
+are [DEC-741](../project/decisions/DEC-741.md) and, for mandate authoring,
+[DEC-742](../project/decisions/DEC-742.md), on the shared value types of
 [DEC-740](../project/decisions/DEC-740.md) (both Accepted, additive engineering readings under DEC-176).
 DEC-436's items 1 to 16 and 19 to 21 are reversible
 engineering readings an agent accepts (DEC-79, DEC-176): each adds no trading rule, or only tightens

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/mandate-diff.schema.json",
+  "title": "GET /mandate-versions/{hash}/diff?against={hash}",
+  "description": "A6: every changed path with its mandate spec §9.2 classification; the version's classification (increasing if any path is, else reducing if any is, else neutral); when it applies (now for reducing and neutral, at the next safe point for increasing, §2.2); and whether pending approvals will be canceled and re-proposed. docs/specs/workspace-api.md §4.1, §4.10 (DEC-742).",
+  "type": "object",
+  "required": ["as_of", "mandate_version", "against", "classification", "applies", "cancels_pending_approvals", "changes"],
+  "properties": {
+    "as_of": { "$ref": "../common.schema.json#/$defs/AsOf" },
+    "mandate_version": { "$ref": "../common.schema.json#/$defs/ContentRef" },
+    "against": { "$ref": "../common.schema.json#/$defs/ContentRef" },
+    "classification": { "$ref": "agent.schema.json#/$defs/ChangeClass" },
+    "applies": { "enum": ["now", "next_safe_point"] },
+    "cancels_pending_approvals": { "const": true, "description": "Mandate spec §2.2: every applied version cancels pending approvals, at once or when it applies." },
+    "changes": { "type": "array", "minItems": 1, "items": { "$ref": "agent.schema.json#/$defs/MandateChange" } }
+  },
+  "unevaluatedProperties": false,
+  "allOf": [
+    { "$ref": "../envelope.schema.json#/$defs/Envelope" },
+    {
+      "if": { "properties": { "changes": { "contains": { "properties": { "classification": { "const": "risk_increasing" } } } } } },
+      "then": { "properties": { "classification": { "const": "risk_increasing" } } },
+      "else": {
+        "if": { "properties": { "changes": { "contains": { "properties": { "classification": { "const": "risk_reducing" } } } } } },
+        "then": { "properties": { "classification": { "const": "risk_reducing" } } },
+        "else": { "properties": { "classification": { "const": "neutral" } } }
+      }
+    },
+    {
+      "if": { "properties": { "classification": { "const": "risk_increasing" } } },
+      "then": { "properties": { "applies": { "const": "next_safe_point" } } },
+      "else": { "properties": { "applies": { "const": "now" } } }
+    }
+  ]
+}

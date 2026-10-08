@@ -1,0 +1,16 @@
+[
+  {"label": "a new mandate without step-up", "set": {"/step_up_required": false}},
+  {"label": "a risk-increasing version without step-up", "set": {"/agent_id": "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "/base_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "/classification": "risk_increasing", "/applies": "next_safe_point", "/step_up_required": false}},
+  {"label": "a risk-increasing version applied now", "set": {"/agent_id": "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "/base_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "/classification": "risk_increasing", "/applies": "now"}},
+  {"label": "crypto without the gap disclosure (trading §5.4)", "set": {"/crypto_gap_disclosure": null}},
+  {"label": "a gap disclosure as drafted text (rule 9)", "set": {"/crypto_gap_disclosure": "A stop-limit may not fill on a gap."}},
+  {"label": "a gap disclosure without crypto", "set": {"/asset_classes": ["us_equity"]}},
+  {"label": "a proposed auto default (V-022)", "set": {"/provenance/10": {"path": "/autonomy/default", "source": "platform_proposed", "quote": null, "value": "auto"}}},
+  {"label": "a proposed environment (V-038)", "set": {"/provenance/11/source": "platform_proposed"}},
+  {"label": "no screen digest (§5.1)", "remove": ["/screen_digest"]},
+  {"label": "unasked dollars as a JSON number (DEC-189)", "set": {"/unasked_usd": 900}},
+  {"label": "a profit estimate (DEC-126)", "set": {"/expected_return": "0.12"}},
+  {"label": "a scorecard (FR-8.4)", "set": {"/scorecard": {"win_rate": "0.6"}}},
+  {"label": "model text outside QuotedContent (API-18)", "set": {"/summary": "This mandate looks sensible."}},
+  {"label": "a missing worst-case figure", "remove": ["/worst_case/flatten_loss_usd"]}
+]

@@ -1,0 +1,17 @@
+{
+  "api_version": "v1",
+  "build": "sha256:4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+  "served_at": "2026-09-21T13:24:12.000000000Z",
+  "as_of": [],
+  "draft_id": "drf_01JB3E1Q8Z2X4C6V8B0N2M4K6J",
+  "etag": "e3b0c44298fc1c14",
+  "valid": true,
+  "violations": [],
+  "warnings": [
+    {
+      "code": "W-002",
+      "path": "/risk/max_daily_loss",
+      "message": "One full position's loss at its stop ($850.00) is more than the daily loss budget ($200.00)."
+    }
+  ]
+}

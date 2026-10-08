@@ -1,0 +1,10 @@
+[
+  {"label": "E10-7: the three answers stated, the rest proposed", "set": {"/origin": "three_answers", "/provenance/1/source": "user_stated", "/provenance/1/quote": "I can stand to lose a thousand"}},
+  {"label": "MI-12: an auto rule the owner entered", "set": {"/provenance/-": {"path": "/autonomy/rules/2", "source": "user_entered", "quote": null, "value": {"id": "routine", "when": {"field": "purpose", "op": "in", "value": ["increase", "open"]}, "then": "auto"}}}},
+  {"label": "§7: a proposed tripwire", "set": {"/provenance/-": {"path": "/autonomy/tripwires/0", "source": "platform_proposed", "quote": null, "value": {"id": "fast_loss"}}}},
+  {"label": "§7: a proposed ask rule", "set": {"/provenance/-": {"path": "/autonomy/rules/0", "source": "platform_proposed", "quote": null, "value": {"id": "large_orders", "then": "ask"}}}},
+  {"label": "§7: approvers by platform default", "set": {"/provenance/-": {"path": "/autonomy/approval/approvers", "source": "platform_default", "quote": null, "value": ["role:approver"]}}},
+  {"label": "A2: compile failed, nothing used", "set": {"/compile_state": "compile_failed", "/document": null}},
+  {"label": "a draft from a base version", "set": {"/origin": "base_version", "/base_version": "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee"}},
+  {"label": "a saved draft that does not yet pass the schema", "set": {"/compile_state": "not_compiled", "/document": {"name": "btc-accumulator"}}}
+]

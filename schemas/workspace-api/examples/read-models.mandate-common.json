@@ -1,0 +1,85 @@
+{
+  "Pointer": ["/capital/allocation_usd", "/autonomy/rules/2/then"],
+  "Source": ["user_stated", "platform_default"],
+  "Value": ["10000", 50, false, null, {"a": 1}, ["crypto"]],
+  "ProvenanceEntry": [
+    {
+      "path": "/capital/allocation_usd",
+      "source": "user_stated",
+      "quote": "put $10,000 of paper money on it",
+      "value": "10000"
+    },
+    {"path": "/capital/max_loss_from_allocation", "source": "user_entered", "quote": null, "value": "0.1"},
+    {"path": "/goal/target_qty", "source": "user_stated", "quote": "build up to 0.15 BTC", "value": "0.15"},
+    {
+      "path": "/goal/max_avg_price",
+      "source": "user_stated",
+      "quote": "never pay more than $58k on average",
+      "value": "58000"
+    },
+    {"path": "/goal/max_spend_usd", "source": "platform_proposed", "quote": null, "value": "9000"},
+    {
+      "path": "/universe/pinned_instruments",
+      "source": "user_stated",
+      "quote": "only bitcoin",
+      "value": [{"asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001", "symbol": "BTC/USD", "asset_class": "crypto"}]
+    },
+    {"path": "/protection/stop_distance", "source": "template_structure", "quote": null, "value": "0.08"},
+    {"path": "/risk/max_order_usd", "source": "user_entered", "quote": null, "value": "1000"},
+    {"path": "/risk/max_daily_loss", "source": "platform_proposed", "quote": null, "value": "0.02"},
+    {
+      "path": "/risk/drawdown_ladder",
+      "source": "template_structure",
+      "quote": null,
+      "value": [
+        {"at": "0.03", "action": "scale_sizes", "factor": "0.5"},
+        {"at": "0.06", "action": "exits_only", "factor": null},
+        {"at": "0.08", "action": "flatten_and_pause", "factor": null}
+      ]
+    },
+    {"path": "/autonomy/default", "source": "platform_default", "quote": null, "value": "ask"},
+    {"path": "/environment", "source": "platform_default", "quote": null, "value": "paper"}
+  ],
+  "NotEnforced": [{"quote": "avoid buying right before big Fed announcements"}],
+  "TemplateRef": [{"id": "tpl_accumulate", "version": "1.0.0"}],
+  "Warning": [
+    {
+      "code": "W-002",
+      "path": "/risk/max_daily_loss",
+      "message": "One full position's loss at its stop ($850.00) is more than the daily loss budget ($200.00)."
+    }
+  ],
+  "PolicyLevel": ["workspace"],
+  "Violation": [
+    {
+      "kind": "rule",
+      "code": "V-002",
+      "path": "/capital/allocation_usd",
+      "message": "Other agents' allocations plus this one exceed the account's equity."
+    },
+    {
+      "kind": "policy",
+      "key": "max_daily_loss",
+      "level": "mandate",
+      "value": "0.05",
+      "ancestor_level": "workspace",
+      "ancestor_value": "0.03",
+      "path": "/risk/max_daily_loss",
+      "message": "The daily loss limit is above the workspace's limit of 3%."
+    }
+  ],
+  "WorstCase": [
+    {
+      "position_loss_at_stop_usd": "850",
+      "daily_loss_budget_usd": "200",
+      "flatten_loss_usd": "800",
+      "lifetime_floor_loss_usd": "1000"
+    }
+  ],
+  "Disclosure": [
+    {
+      "document": "crypto_stop_limit_gap",
+      "version": "sha256:8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b"
+    }
+  ]
+}

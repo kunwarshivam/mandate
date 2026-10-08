@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/mandate-draft.schema.json",
+  "title": "GET /mandate-drafts/{id}",
+  "description": "A2, A3: a draft as saved, with each path's provenance (mandate spec §2.1), its etag for If-Match (§4.1, API-19), the compiler's state, and the constraints flagged not enforced (§7). The document may not yet pass the mandate schema; validation says (§4.1). For a draft from the three goal answers (E10-7), the allocation, the goal, and the loss limit are user_stated with their quoted spans. docs/specs/workspace-api.md §4.1, §4.10 (DEC-742).",
+  "type": "object",
+  "required": ["draft_id", "etag", "origin", "base_version", "template", "source_text", "compile_state", "document", "provenance", "not_enforced", "updated_at"],
+  "properties": {
+    "as_of": { "$ref": "../common.schema.json#/$defs/AsOf" },
+    "draft_id": { "$ref": "../common.schema.json#/$defs/Id" },
+    "etag": { "$ref": "../common.schema.json#/$defs/Id" },
+    "origin": { "enum": ["three_answers", "description", "template", "base_version"] },
+    "base_version": { "oneOf": [{ "$ref": "../common.schema.json#/$defs/ContentRef" }, { "type": "null" }] },
+    "template": { "oneOf": [{ "$ref": "mandate-common.schema.json#/$defs/TemplateRef" }, { "type": "null" }] },
+    "source_text": {
+      "description": "The owner's description as a stored artifact, or null when there is none.",
+      "oneOf": [{ "$ref": "../common.schema.json#/$defs/ContentRef" }, { "type": "null" }]
+    },
+    "compile_state": { "enum": ["not_compiled", "compiling", "compiled", "compile_failed"] },
+    "document": {
+      "description": "The draft mandate document, or null before the compiler has produced one. A compiled draft passes schemas/mandate.schema.json (A2: output failing the schema is compile_failed).",
+      "type": ["object", "null"]
+    },
+    "provenance": { "type": "array", "items": { "$ref": "mandate-common.schema.json#/$defs/ProvenanceEntry" } },
+    "not_enforced": { "type": "array", "items": { "$ref": "mandate-common.schema.json#/$defs/NotEnforced" } },
+    "updated_at": { "$ref": "../common.schema.json#/$defs/Timestamp" }
+  },
+  "unevaluatedProperties": false,
+  "allOf": [
+    { "$ref": "../envelope.schema.json#/$defs/Envelope" },
+    {
+      "if": { "properties": { "compile_state": { "const": "compiled" } } },
+      "then": { "properties": { "document": { "$ref": "https://mandate.dev/schemas/mandate/1" } } }
+    },
+    {
+      "if": { "properties": { "origin": { "const": "base_version" } } },
+      "then": { "properties": { "base_version": { "$ref": "../common.schema.json#/$defs/ContentRef" } } },
+      "else": { "properties": { "base_version": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "origin": { "const": "template" } } },
+      "then": { "properties": { "template": { "$ref": "mandate-common.schema.json#/$defs/TemplateRef" } } }
+    },
+    {
+      "if": { "properties": { "origin": { "const": "three_answers" } } },
+      "then": {
+        "properties": {
+          "provenance": {
+            "allOf": [
+              { "contains": { "properties": { "path": { "const": "/capital/allocation_usd" }, "source": { "const": "user_stated" } } } },
+              { "contains": { "properties": { "path": { "pattern": "^/goal(/|$)" }, "source": { "const": "user_stated" } } } },
+              { "contains": { "properties": { "path": { "const": "/capital/max_loss_from_allocation" }, "source": { "const": "user_stated" } } } }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

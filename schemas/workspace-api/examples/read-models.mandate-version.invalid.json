@@ -1,0 +1,10 @@
+[
+  {"label": "a first version with a classification", "set": {"/classification": "neutral"}},
+  {"label": "a later version without one", "set": {"/previous": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}},
+  {"label": "a risk-increasing version confirmed without step-up", "set": {"/previous": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "/classification": "risk_increasing", "/confirmation/step_up": false}},
+  {"label": "a document that fails the mandate schema", "set": {"/mandate/environment": "prod"}},
+  {"label": "a proposed pinned instrument (V-038)", "set": {"/provenance/5/source": "platform_proposed", "/provenance/5/quote": null}},
+  {"label": "a confirmation without its screen (§10)", "remove": ["/confirmation/screen"]},
+  {"label": "a scorecard (FR-8.4)", "set": {"/scorecard": {"win_rate": "0.6"}}},
+  {"label": "no watermarks (API-14)", "set": {"/as_of": []}}
+]

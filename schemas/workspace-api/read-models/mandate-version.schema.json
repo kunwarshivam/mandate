@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/mandate-version.schema.json",
+  "title": "GET /mandate-versions/{hash}",
+  "description": "A stored version: the canonical document (schemas/mandate.schema.json) and its records from MandateVersionCreated (provenance per path, template, policy sets, warnings, worst-case figures, classification against the previous version) and, once confirmed, MandateConfirmed (confirmed paths, the rendered screen and UI build, warnings acknowledged, whether step-up was given). Mandate spec §2.1, §9.1, §10. docs/specs/workspace-api.md §4.1, §4.10 (DEC-742).",
+  "type": "object",
+  "required": ["as_of", "mandate_version", "mandate", "created_at", "previous", "classification", "template", "source_text", "policy_sets", "provenance", "warnings", "worst_case", "not_enforced", "confirmation"],
+  "properties": {
+    "as_of": { "$ref": "../common.schema.json#/$defs/AsOf" },
+    "mandate_version": { "$ref": "../common.schema.json#/$defs/ContentRef" },
+    "mandate": { "$ref": "https://mandate.dev/schemas/mandate/1" },
+    "created_at": { "$ref": "../common.schema.json#/$defs/Timestamp" },
+    "previous": { "oneOf": [{ "$ref": "../common.schema.json#/$defs/ContentRef" }, { "type": "null" }] },
+    "classification": { "oneOf": [{ "$ref": "agent.schema.json#/$defs/ChangeClass" }, { "type": "null" }] },
+    "template": { "oneOf": [{ "$ref": "mandate-common.schema.json#/$defs/TemplateRef" }, { "type": "null" }] },
+    "source_text": { "oneOf": [{ "$ref": "../common.schema.json#/$defs/ContentRef" }, { "type": "null" }] },
+    "policy_sets": { "type": "array", "items": { "$ref": "../common.schema.json#/$defs/ContentRef" } },
+    "provenance": { "type": "array", "items": { "$ref": "mandate-common.schema.json#/$defs/ProvenanceEntry" } },
+    "warnings": { "type": "array", "items": { "$ref": "mandate-common.schema.json#/$defs/Warning" } },
+    "worst_case": { "$ref": "mandate-common.schema.json#/$defs/WorstCase" },
+    "not_enforced": { "type": "array", "items": { "$ref": "mandate-common.schema.json#/$defs/NotEnforced" } },
+    "confirmation": {
+      "description": "MandateConfirmed, or null while the version is unconfirmed.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confirmed_at", "confirmed_paths", "screen", "ui_build", "warnings_acknowledged", "step_up"],
+          "properties": {
+            "confirmed_at": { "$ref": "../common.schema.json#/$defs/Timestamp" },
+            "confirmed_paths": { "type": "array", "minItems": 1, "items": { "$ref": "mandate-common.schema.json#/$defs/Pointer" } },
+            "screen": { "$ref": "../common.schema.json#/$defs/ContentRef" },
+            "ui_build": { "$ref": "../common.schema.json#/$defs/ContentRef" },
+            "warnings_acknowledged": { "type": "array", "items": { "enum": ["W-001", "W-002", "W-003", "W-005", "W-006"] } },
+            "step_up": { "type": "boolean" }
+          }
+        },
+        { "type": "null" }
+      ]
+    }
+  },
+  "unevaluatedProperties": false,
+  "allOf": [
+    { "$ref": "../envelope.schema.json#/$defs/Envelope" },
+    {
+      "if": { "properties": { "previous": { "type": "null" } } },
+      "then": { "properties": { "classification": { "type": "null" } } },
+      "else": { "properties": { "classification": { "type": "string" } } }
+    },
+    {
+      "if": { "properties": { "classification": { "const": "risk_increasing" }, "confirmation": { "type": "object" } } },
+      "then": { "properties": { "confirmation": { "properties": { "step_up": { "const": true } } } } }
+    }
+  ]
+}

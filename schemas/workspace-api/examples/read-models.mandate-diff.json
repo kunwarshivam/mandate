@@ -1,0 +1,22 @@
+{
+  "api_version": "v1",
+  "build": "sha256:4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+  "served_at": "2026-09-21T13:24:12.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "recorded_at": "2026-09-21T13:24:10.000000000Z"
+    }
+  ],
+  "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+  "against": "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee",
+  "classification": "risk_increasing",
+  "applies": "next_safe_point",
+  "cancels_pending_approvals": true,
+  "changes": [
+    {"path": "/notifications/quiet_hours/start", "from": "22:30", "to": "23:00", "classification": "neutral"},
+    {"path": "/risk/max_order_usd", "from": "1000", "to": "1200", "classification": "risk_increasing"}
+  ]
+}

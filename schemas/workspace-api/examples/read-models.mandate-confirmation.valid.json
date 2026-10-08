@@ -1,0 +1,5 @@
+[
+  {"label": "a reducing version for a deployed agent, no step-up", "set": {"/agent_id": "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "/base_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "/classification": "risk_reducing", "/applies": "now", "/step_up_required": false}},
+  {"label": "an equities-only mandate without the crypto disclosure", "set": {"/asset_classes": ["us_equity"], "/crypto_gap_disclosure": null}},
+  {"label": "with a research agent", "set": {"/research_agent": true}}
+]

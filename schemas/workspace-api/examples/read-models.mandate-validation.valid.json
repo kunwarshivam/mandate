@@ -1,0 +1,4 @@
+[
+  {"label": "a policy violation naming its nearest ancestor", "set": {"/valid": false, "/violations": [{"kind": "policy", "key": "max_daily_loss", "level": "mandate", "value": "0.05", "ancestor_level": "workspace", "ancestor_value": "0.03", "path": "/risk/max_daily_loss", "message": "The daily loss limit is above the workspace's limit of 3%."}]}},
+  {"label": "no warnings", "set": {"/warnings": []}}
+]

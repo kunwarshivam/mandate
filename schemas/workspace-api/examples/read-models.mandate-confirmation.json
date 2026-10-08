@@ -1,0 +1,79 @@
+{
+  "api_version": "v1",
+  "build": "sha256:4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+  "served_at": "2026-09-21T13:24:12.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "recorded_at": "2026-09-21T13:24:10.000000000Z"
+    }
+  ],
+  "mandate_version": "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee",
+  "agent_id": null,
+  "base_version": null,
+  "classification": null,
+  "applies": "now",
+  "step_up_required": true,
+  "screen_digest": "sha256:3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e",
+  "provenance": [
+    {
+      "path": "/capital/allocation_usd",
+      "source": "user_stated",
+      "quote": "put $10,000 of paper money on it",
+      "value": "10000"
+    },
+    {"path": "/capital/max_loss_from_allocation", "source": "user_entered", "quote": null, "value": "0.1"},
+    {"path": "/goal/target_qty", "source": "user_stated", "quote": "build up to 0.15 BTC", "value": "0.15"},
+    {
+      "path": "/goal/max_avg_price",
+      "source": "user_stated",
+      "quote": "never pay more than $58k on average",
+      "value": "58000"
+    },
+    {"path": "/goal/max_spend_usd", "source": "platform_proposed", "quote": null, "value": "9000"},
+    {
+      "path": "/universe/pinned_instruments",
+      "source": "user_stated",
+      "quote": "only bitcoin",
+      "value": [{"asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001", "symbol": "BTC/USD", "asset_class": "crypto"}]
+    },
+    {"path": "/protection/stop_distance", "source": "template_structure", "quote": null, "value": "0.08"},
+    {"path": "/risk/max_order_usd", "source": "user_entered", "quote": null, "value": "1000"},
+    {"path": "/risk/max_daily_loss", "source": "platform_proposed", "quote": null, "value": "0.02"},
+    {
+      "path": "/risk/drawdown_ladder",
+      "source": "template_structure",
+      "quote": null,
+      "value": [
+        {"at": "0.03", "action": "scale_sizes", "factor": "0.5"},
+        {"at": "0.06", "action": "exits_only", "factor": null},
+        {"at": "0.08", "action": "flatten_and_pause", "factor": null}
+      ]
+    },
+    {"path": "/autonomy/default", "source": "platform_default", "quote": null, "value": "ask"},
+    {"path": "/environment", "source": "platform_default", "quote": null, "value": "paper"}
+  ],
+  "warnings": [
+    {
+      "code": "W-002",
+      "path": "/risk/max_daily_loss",
+      "message": "One full position's loss at its stop ($850.00) is more than the daily loss budget ($200.00)."
+    }
+  ],
+  "worst_case": {
+    "position_loss_at_stop_usd": "850",
+    "daily_loss_budget_usd": "200",
+    "flatten_loss_usd": "800",
+    "lifetime_floor_loss_usd": "1000"
+  },
+  "unasked_usd": "900",
+  "asset_classes": ["crypto"],
+  "crypto_gap_disclosure": {
+    "document": "crypto_stop_limit_gap",
+    "version": "sha256:8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b"
+  },
+  "research_agent": false,
+  "not_enforced": [{"quote": "avoid buying right before big Fed announcements"}]
+}

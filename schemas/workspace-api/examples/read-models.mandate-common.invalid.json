@@ -1,0 +1,63 @@
+{
+  "Value": [
+    0.5,
+    1.5
+  ],
+  "Source": [
+    "model_proposed"
+  ],
+  "Violation": [
+    {
+      "kind": "rule",
+      "code": "V2",
+      "path": null,
+      "message": "x"
+    },
+    {
+      "kind": "policy",
+      "key": "k",
+      "level": "platform",
+      "value": "1",
+      "ancestor_level": "platform",
+      "ancestor_value": "1",
+      "path": null,
+      "message": "x"
+    },
+    {
+      "kind": "policy",
+      "key": "max_daily_loss",
+      "level": "mandate",
+      "value": "0.05",
+      "ancestor_value": "0.03",
+      "path": null,
+      "message": "x"
+    },
+    {
+      "kind": "policy",
+      "key": "max_daily_loss",
+      "level": "mandate",
+      "value": "0.05",
+      "ancestor_level": "workspace",
+      "path": null,
+      "message": "x"
+    }
+  ],
+  "Warning": [
+    {
+      "code": "W-004",
+      "path": null,
+      "message": "x"
+    }
+  ],
+  "NotEnforced": [
+    {
+      "quote": ""
+    }
+  ],
+  "Disclosure": [
+    {
+      "document": "x",
+      "text": "y"
+    }
+  ]
+}

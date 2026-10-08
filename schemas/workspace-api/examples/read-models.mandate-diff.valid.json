@@ -1,0 +1,4 @@
+[
+  {"label": "a reducing version applies now", "set": {"/changes": [{"path": "/risk/max_order_usd", "from": "1200", "to": "1000", "classification": "risk_reducing"}, {"path": "/name", "from": "a", "to": "b", "classification": "neutral"}], "/classification": "risk_reducing", "/applies": "now"}},
+  {"label": "a neutral version applies now", "set": {"/changes": [{"path": "/name", "from": "a", "to": "b", "classification": "neutral"}], "/classification": "neutral", "/applies": "now"}}
+]

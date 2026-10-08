@@ -1,0 +1,8 @@
+[
+  {"label": "§9.2: an increasing path in a reducing version", "set": {"/classification": "risk_reducing", "/applies": "now"}},
+  {"label": "§9.2: neutral paths called reducing", "set": {"/changes": [{"path": "/name", "from": "a", "to": "b", "classification": "neutral"}], "/classification": "risk_reducing", "/applies": "now"}},
+  {"label": "§2.2: an increasing version applied now", "set": {"/applies": "now"}},
+  {"label": "§2.2: pending approvals kept", "set": {"/cancels_pending_approvals": false}},
+  {"label": "a diff with no changes", "set": {"/changes": []}},
+  {"label": "an unclassified path", "remove": ["/changes/0/classification"]}
+]
