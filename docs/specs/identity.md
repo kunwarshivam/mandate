@@ -320,7 +320,8 @@ opened in, its kind, and its **roles snapshot**: the principal's effective roles
 and its organization (a client token's record: its user's), each with its cool-off end, as of the
 last successful membership read; cool-off is evaluated at use (§8.3), so a stale snapshot is only
 ever narrower. A route-2 session takes its snapshot from the passkey's row in the credential table
-(§3.3), which carries its member's roles snapshot. `MemberDeactivated` revokes every session and
+(§3.3), which carries a roles snapshot per (credential, workspace): enrolment writes it, and
+reactivation un-suspends the credential and rewrites it in the same transaction. `MemberDeactivated` revokes every session and
 client token of the member, and suspends the member's passkey credentials, in the same
 transaction (§5.2 step 2), and `MemberRoleChanged` rewrites the member's session, token, and
 credential snapshots in the same transaction (§5.2), so a snapshot is never wider than the
@@ -622,15 +623,9 @@ enough:
    a 5xx answer), the session keeps the pause and kill-switch permissions, and only those, until its
    absolute lifetime ends. When the provider **answers and refuses** (`invalid_grant`, a revoked or
    disabled subject, a back-channel logout), that is a deprovision, not an outage: the session ends at
-   once with every permission (§11.1). Only a transport-level failure, a 5xx, a 408, or a 429 keeps
-   anything. A 408 or a 429 is neither a deprovision signal nor a successful refresh, and it is
-   bounded (lane B2's reading under DEC-176, rule 3; it only tightens "until its absolute
-   lifetime" and adds no trading risk): the session drops to reduction-only for at most 15 minutes,
-   route 2's window, or until the next refresh attempt that gets a definite answer. A success
-   restores the full session; a refusal ends it; if the 15 minutes pass with no definite answer, it
-   ends, and route 2 stays open to the member throughout. A transport failure or a 5xx keeps the
-   rule above. Every other 4xx is a refusal and ends the session; the deprovision signals that also
-   block route 2 stay exactly those §11.1 lists.
+   once with every permission (§11.1). Only a transport-level failure or a 5xx keeps anything. A 408
+   or 429 ends the session like any other non-5xx answer, but is not a deprovision signal (§11.1),
+   so route 2 stays open.
 2. **Workspace-local passkey.** The workspace deployment verifies a fresh passkey assertion
    against the public keys it holds (§6.1) and opens a *reduction-only session*: pause and kill
    switch, nothing else, 15 minutes. No identity provider, global control plane, or model is
@@ -931,7 +926,7 @@ control streams, so each workspace's records are complete on their own.
 | **Malicious org admin** | Loosens org policy, makes themselves owner, removes the owner | Org policy loosening needs step-up and is journaled; a loosened policy affects running agents only through a conforming version the operator confirms (mandate §4.3); only an org owner grants the owner role; removing the last owner is refused; every change alerts the owners |
 | **Stale session after deactivation** | A departed employee's open tab keeps acting | Blocked: membership re-checked on every request, uncached (§6.2); streams close within 60 s (ID-3) |
 | **Departed employee still in the customer's IdP** | Signs in again | The workspace membership is deactivated, so sign-in reaches nothing (ID-3) |
-| **Departed employee disabled in the IdP, membership not yet deactivated** | Keeps an open tab and uses pause or the kill switch | Blocked: the IdP's refusal is a deprovision signal, which ends the session with every permission and blocks the local passkey route (§6.4, §11.1); only an unreachable IdP keeps reduction permissions, and a 408 or 429 keeps them for at most 15 minutes (§6.4 route 1) |
+| **Departed employee disabled in the IdP, membership not yet deactivated** | Keeps an open tab and uses pause or the kill switch | Blocked: the IdP's refusal is a deprovision signal, which ends the session with every permission and blocks the local passkey route (§6.4, §11.1); only an unreachable IdP keeps reduction permissions |
 | **OIDC misconfiguration** | Wrong audience, `alg: none`, a different tenant of the same IdP, unverified email matching an invitation, open redirect after sign-in | Each refused: signature, issuer, audience, expiry, and nonce are checked against the configured issuer only; `email_verified` is required for address matching; `next` is a same-origin path only (DEC-211). Configuring SSO needs step-up and is journaled |
 | **IdP compromised (customer's)** | Mints a token for an admin | Gets a session; still needs that admin's passkey for any step-up action. Disclosed: the IdP is the customer's trust root for sign-in |
 | **Owner-connected agent with stolen tokens** | Replays the token from another machine | Blocked by DPoP: without the client's key the token is useless (§6.3). With the key too: it can propose and request as the client, every request passes builder, gate, and autonomy (DEC-141); it cannot approve, confirm, step up, stop, release, or change connections (ID-11); new openings it asks for are never `auto` (MI-30). The owner revokes it at once |
