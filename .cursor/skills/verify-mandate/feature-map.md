@@ -1323,7 +1323,9 @@ proves each pending test fails on them (DEC-110).
   WebAuthn challenge, `consume`, `reverify`, `StepUpRefusal`), over `mandate-identity`'s
   `PrincipalId`, `WorkspaceId`, `AssertionId`, `StepUpActionKind`, `StepUpMethod`, and
   `StepUpEvidence`.
-- **Tests:** `crates/mandate-passkey/tests/stepup_api.rs` (the refusal codes).
+- **Tests:** `crates/mandate-passkey/tests/stepup_api.rs` (the refusal codes) and
+  `tests/consume_properties.rs` (the refusal is the first injected failure in DEC-662's order),
+  with the fixture in `tests/stepup/mod.rs`. Pending E9-4.
 - **Run:** `cargo nextest run -p mandate-passkey`.
 
 ## Identity: roles, the permission matrix, and the authorization step (E9-2)
