@@ -1666,6 +1666,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-vault-local"
+version = "0.0.0"
+dependencies = [
+ "secrecy",
+ "thiserror",
+]
+
+[[package]]
 name = "md-5"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
