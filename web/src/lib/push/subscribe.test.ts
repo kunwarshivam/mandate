@@ -4,7 +4,7 @@ import { PUSH_WORKER_PATH, type PushBrowser, allowedPushEndpoint, subscribeToPus
 
 /**
  * E8-14 S8d: permission, registration and subscription, with a fake browser (notifications spec
- * §4.6). The allowlist table is DEC-792's (#833), as notifications spec §4.6 states it (#827).
+ * §4.6). The allowlist table is DEC-792's, as notifications spec §4.6 states it; both are in #827.
  */
 
 const VAPID = "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
