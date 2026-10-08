@@ -249,8 +249,9 @@ reaches that connection's broker hosts.
 6. **Teardown, the only exit from `connecting` other than step 5.** The connection manager tears a
    pending connection down when any check refuses, or when no passing results arrive within the
    code's lifetime plus one minute (Proposed: 11 minutes). Teardown:
-   - deletes the vault entry (code or token) and the personal-data entry of the account id, both
-     under the pending connection's paths (infrastructure §3.1);
+   - deletes the vault entry (code or token) under the pending connection's path (infrastructure
+     §3.1). The account id stays in the personal-data vault until its retention ends and it is
+     erased with `PersonalDataErased` (journal §6.4);
    - revokes the client-secret grant and stops the executor;
    - journals `ConnectionRefused` (refusal or timeout) on the control stream, without the token
      (CN-10).
