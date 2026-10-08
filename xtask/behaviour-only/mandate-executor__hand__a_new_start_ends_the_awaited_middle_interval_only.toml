@@ -1,9 +1,0 @@
-file = "crates/mandate-executor/tests/hand.rs"
-test = "a_new_start_ends_the_awaited_middle_interval_only"
-reason = """
-Defect E4b (backlog: "E7-4 (stream K), E4b from E4's fix"; DEC-521 item 3): while a bracket's
-OCO awaits its acknowledgment, a later bracket's start ends the first open interval in the
-instrument rather than the awaited one. This case puts the awaited interval between two others,
-so ending the latest open one fails it too (#771 review). It reaches no stub and fails on that
-behaviour until E4b's fix deletes this file with its `#[ignore]` line.
-"""

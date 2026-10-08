@@ -3198,10 +3198,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   awaited set rather than adding to it. #771's review added two tests before the fix: a hand case
   with the awaited interval between two others (`a_new_start_ends_the_awaited_middle_interval_only`)
   and a property lead where the awaited interval is the first open one and another is the latest
-  (`AWAITED_FIRST_LEAD`), so a fix that ends the latest open interval fails both. A fourth minor
-  from that review: the fix's match lets an unbracketed open interval (an exit's or a
-  re-placement's) be ended for any awaited bracket OCO; no script here has reached it yet, so pin
-  it with a case if one does.
+  (`AWAITED_FIRST_LEAD`), so a fix that ends the latest open interval fails both. Done by E4b's
+  fix: that arm ends the open interval of a bracket whose OCO's acknowledgment was awaited (or an
+  unbracketed one), never another bracket's; `no_interval_exceeds_the_limit_without_an_alert` and
+  both hand cases are live again. The three minors stay open, with a fourth from that review: the
+  fix's match lets an unbracketed open interval (an exit's or a re-placement's) be ended for any
+  awaited bracket OCO; no script here has reached it yet, so pin it with a case if one does.
 - **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
   ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
   while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on
