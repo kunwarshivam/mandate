@@ -1319,9 +1319,12 @@ fn feature_map() -> Result<()> {
 
 /// One file CI runs, a workflow or a script, by its path in the repository, with its text.
 struct CiFile {
-    #[expect(
-        dead_code,
-        reason = "read by live_feature_problems in X1's implementation (E7-26)"
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by live_feature_problems in X1's implementation (E7-26)"
+        )
     )]
     path: String,
     #[expect(
@@ -2556,7 +2559,13 @@ const STUB_MARKERS: [&str; 5] = [
 /// exit's rest and `re_cover` each size protection on a position that includes a working bracket's
 /// filled shares, which its held legs will cover. They reach no stub and fail on that sizing until
 /// E1's fix deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 19] = [
+///
+/// The 2 `xtask` rows are X1's (E7-26; #738 review, findings 2 and 4): they drive the lint job and
+/// `ci_files` over fixture repositories, which the live-feature check's stub is not on the path
+/// of, so they fail on what today's code does: the lint job does not yet run the check, and
+/// `ci_files` neither reads `.github/actions` and `.cargo/config.toml` nor tolerates an absent
+/// directory. X1's implementation deletes both rows with their `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 21] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2629,6 +2638,14 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 19] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_re_cover_leaves_a_held_brackets_shares_to_its_legs",
+    ),
+    (
+        "xtask/src/main.rs",
+        "tests::ci_files_reads_every_file_that_decides_a_build",
+    ),
+    (
+        "xtask/src/main.rs",
+        "tests::the_lint_job_runs_the_live_feature_check_on_its_repository",
     ),
 ];
 
@@ -6903,6 +6920,7 @@ jq -r "$filter" "$src"
         if root.exists() {
             fs::remove_dir_all(&root)?;
         }
+        fixture_workspace(&root)?;
         let scripts = root.join(".github/scripts");
         let workflows = root.join(".github/workflows");
         fs::create_dir_all(&scripts)?;
@@ -7193,6 +7211,243 @@ jq -r "$filter" "$src"
         let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
         let problems = live_feature_problems(&policy, &metadata_in(&root)?, &ci_files(&root)?)?;
         assert_eq!(problems, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// Each way a line can build or run `live` while looking like the compile-only form, or
+    /// without naming `live` the plain way, is refused once, naming the file and line (#738
+    /// review, finding 1): a second command after `&&`, `||`, `;` or `|` is judged on its own; a
+    /// `<crate>/live` or `<crate>?/live` feature; a list split on spaces; `-Flive`; a feature list
+    /// the shell expands (`$` or a backtick), which cannot be read; and `--cfg feature="live"`,
+    /// which sets the feature without `--features`. A flag right after a list, a lone opening
+    /// quote, `--all` and `--workspace` are read too, and a quoted list ends at its closing quote,
+    /// so a flag inside it and a `$` after it are not read as features (#738's mutants).
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let allowed = [
+            "cargo check -p the-runner -Flive",
+            "cargo check -p the-runner --features the-runner/live",
+            "cargo check -p the-runner --features 'other live'",
+            "cargo check -p the-runner --features \"other\" --target $TARGET",
+            "cargo build -p a-lib --features \"other --features=live\"",
+        ];
+        for line in allowed {
+            let files = [ci_file(".github/workflows/ci.yml", line)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{line}"
+            );
+        }
+        let refused = [
+            "cargo check -p the-runner --features live && cargo run -p the-runner --features live",
+            "cargo check -p the-runner --features live || cargo build -p the-runner -F live",
+            "cargo check -p the-runner --features live; cargo test -p the-runner --features live",
+            "cargo check -p the-runner --features live | cargo run -p the-runner --features=live",
+            "cargo run -p a-lib --features the-runner/live",
+            "cargo check -p a-lib --features the-runner?/live",
+            "cargo build -p the-runner --features \"other live\"",
+            "cargo build -p the-runner -Flive",
+            "cargo check -p the-runner --features $FEATURES",
+            "cargo check -p the-runner --features `cat features.txt`",
+            "RUSTFLAGS=\"--cfg feature=\\\"live\\\"\" cargo build -p the-runner",
+            "cargo rustc -p the-runner -- --cfg 'feature=\"live\"'",
+            "rustflags = [\"--cfg\", 'feature=\"live\"']",
+            "ship = \"run -p the-runner --features live\"",
+            "cargo build -p the-runner --features other -F live",
+            "cargo build -p the-runner --features \" live\"",
+            "cargo check -p the-runner --all --features live",
+            "cargo check -p the-runner --workspace --features live",
+        ];
+        for line in refused {
+            let files = [ci_file(".cargo/config.toml", &format!("[alias]\n{line}\n"))];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".cargo/config.toml:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A marked crate that is not a workspace member is no runner, so even the compile-only form
+    /// naming it is refused, beside the membership problem (#738 review, finding 2: the
+    /// membership test of the runner).
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn a_marked_crate_outside_the_workspace_compiles_nothing() -> Result<()> {
+        let crates = vec![member("a-lib", &[]), member("a-tool", &[])];
+        let files = [ci_file(
+            ".github/workflows/ci.yml",
+            "      - run: cargo check -p the-runner --features live",
+        )];
+        let problems = live_feature_problems(&live_policy(), &workspace(crates), &files)?;
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains(".github/workflows/ci.yml:1")),
+            "the compile-only line is refused: {problems:?}"
+        );
+        Ok(())
+    }
+
+    /// Only the runner's own features are read for a feature that turns `live` on: another
+    /// crate's feature naming its own `live` is not counted twice beside its declaration, and a
+    /// runner feature that enables something other than `live` is no problem (#738 review,
+    /// finding 2: the two conditions of the runner's own feature check).
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn only_the_runner_s_own_features_turn_its_live_on() -> Result<()> {
+        let policy = live_policy();
+        let crates = vec![
+            with_features(member(RUNNER, &[]), &[("live", &[])]),
+            with_features(member("a-lib", &[]), &[("live", &[]), ("go", &["live"])]),
+        ];
+        let problems = live_feature_problems(&policy, &workspace(crates), &[])?;
+        assert_eq!(problems.len(), 1, "only the declaration: {problems:?}");
+        let crates = vec![with_features(
+            member(RUNNER, &[]),
+            &[("live", &["a-tool/fast"]), ("other", &["a-tool/fast"])],
+        )];
+        assert_eq!(
+            live_feature_problems(&policy, &workspace(crates), &[])?,
+            Vec::<String>::new(),
+            "runner features that enable something else"
+        );
+        Ok(())
+    }
+
+    /// The files the check reads are every file that decides a build: workflows (`.yml` and
+    /// `.yaml`), scripts, composite actions under `.github/actions`, and `.cargo/config.toml`
+    /// (aliases and `rustflags`); a repository without the optional ones reads the rest (#738
+    /// review, finding 4).
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn ci_files_reads_every_file_that_decides_a_build() -> Result<()> {
+        let root = env::temp_dir().join(format!("mandate-xtask-ci-files-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        let write = |path: &str| -> Result<()> {
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(file, "x\n")?;
+            Ok(())
+        };
+        write(".github/workflows/a.yml")?;
+        let only_workflows = ci_files(&root)
+            .map(|files| files.into_iter().map(|file| file.path).collect::<Vec<_>>());
+        for path in [
+            ".github/workflows/b.yaml",
+            ".github/scripts/c.sh",
+            ".github/actions/d/action.yml",
+            ".github/actions/e/action.yaml",
+            ".cargo/config.toml",
+            ".github/pull_request_template.md",
+        ] {
+            write(path)?;
+        }
+        let mut read: Vec<String> = ci_files(&root)?.into_iter().map(|file| file.path).collect();
+        fs::remove_dir_all(&root).ok();
+        read.sort();
+        assert_eq!(
+            only_workflows?,
+            [".github/workflows/a.yml"],
+            "the optional directories may be absent"
+        );
+        assert_eq!(
+            read,
+            [
+                ".cargo/config.toml",
+                ".github/actions/d/action.yml",
+                ".github/actions/e/action.yaml",
+                ".github/scripts/c.sh",
+                ".github/workflows/a.yml",
+                ".github/workflows/b.yaml",
+            ]
+        );
+        Ok(())
+    }
+
+    /// A minimal Cargo workspace with one crate, `a`, and its layering policy, under `root`, so
+    /// the lint job's checks that read the workspace can run there.
+    fn fixture_workspace(root: &Path) -> Result<()> {
+        fs::create_dir_all(root.join("a/src"))?;
+        fs::create_dir_all(root.join("xtask"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"a\"]\nresolver = \"3\"\n",
+        )?;
+        fs::write(
+            root.join("a/Cargo.toml"),
+            "[package]\nname = \"a\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )?;
+        fs::write(root.join("a/src/lib.rs"), "//! A fixture crate.\n")?;
+        fs::write(
+            root.join("Cargo.lock"),
+            "version = 4\n\n[[package]]\nname = \"a\"\nversion = \"0.0.0\"\n",
+        )?;
+        fs::write(
+            root.join("xtask/layers.toml"),
+            concat!(
+                "impure_crates = []\n\n",
+                "[crates.a]\nlayer = 1\nsafety_critical = false\npure = false\n",
+            ),
+        )?;
+        Ok(())
+    }
+
+    /// The lint job runs the live-feature check over its own repository (#738 review, finding
+    /// 2): a fixture workspace with a clean workflow passes, and a workflow that runs `live`
+    /// fails the job naming the check, before the workspace checks run.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn the_lint_job_runs_the_live_feature_check_on_its_repository() -> Result<()> {
+        let root = env::temp_dir().join(format!("mandate-xtask-lint-live-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fixture_workspace(&root)?;
+        let workflows = root.join(".github/workflows");
+        fs::create_dir_all(&workflows)?;
+        fs::create_dir_all(root.join(".github/scripts"))?;
+        let workflow = |run: &str| {
+            format!(
+                "on: push\njobs:\n  check:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: {run}\n"
+            )
+        };
+        fs::write(workflows.join("ci.yml"), workflow("cargo check -p a"))?;
+        let clean = lint(&root, || Ok(())).map_err(|err| format!("{err:#}"));
+        fs::write(
+            workflows.join("ci.yml"),
+            workflow("cargo run -p a --features live"),
+        )?;
+        let reached = Cell::new(false);
+        let planted = lint(&root, || {
+            reached.set(true);
+            Ok(())
+        })
+        .map_err(|err| format!("{err:#}"))
+        .err();
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(clean, Ok(()), "a clean fixture workspace passes");
+        assert!(
+            planted
+                .as_deref()
+                .is_some_and(|err| err.contains("live-feature")),
+            "a workflow that runs `live` fails the lint job naming the check, got {planted:?}"
+        );
+        assert!(
+            !reached.get(),
+            "the workspace checks run only after it passes"
+        );
         Ok(())
     }
 }
