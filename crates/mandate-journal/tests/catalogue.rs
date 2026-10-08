@@ -1291,7 +1291,6 @@ fn a_provenance_entry_refuses_an_unlisted_member() {
 /// §9.7's three records are catalogued on their one stream with the configuration they name, and
 /// closed there: a payload §9.7 does not list is refused `schema`, never `unknown_schema`.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_approval_answers_are_catalogued_and_closed_on_their_streams() {
     for (event_type, home, refs) in CLOSED_BY_SECTION_9_7 {
         for kind in [ACCT, AGENT, CTL, CLOCK] {

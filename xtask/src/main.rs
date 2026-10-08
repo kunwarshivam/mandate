@@ -2289,18 +2289,39 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The three rows for journal spec v0.17 §9.7's records are J2's (DEC-533). They check
-/// `Draft::parse`, the journal's existing draft check, against §9.7's vectors and its catalogue.
-/// There is no stub to stop at: until J2's implementation catalogues and closes the three records,
-/// the journal answers `unknown_event_type` or `unknown_schema`, which is the behaviour they fail
-/// on. J2's implementation deletes the three rows with the `#[ignore]` lines.
+/// Three more are E7-4's, let past the kill switch's stub by slice 7 (#668; DEC-485 item 17), each
+/// failing on behaviour the slice does not own:
+/// - `protective_sell_quantity_never_exceeds_the_position_in_any_script` (defect E1): an exit is
+///   submitted beside a bracket's just-activated legs, leaving protection of 2 against a position
+///   of 1 (backlog: "E7-4 (stream K), E1 from E7-4 slice 7's tests correction", DEC-506).
+/// - `no_resting_order_is_submitted_inside_an_unprotected_interval` (defect E2): an opening rests
+///   while protection is cancelled for an exit (backlog: "E7-4 (stream K), E2 from E7-4 slice 7's
+///   tests correction", DEC-506 item 8).
+/// - `hand::an_owner_exit_outside_the_session_prices_from_the_confirmed_bid` (DEC-485 item 11):
+///   outside the regular session a confirmed owner's flatten is queued for the session at the
+///   floor rather than sold in extended hours from the confirmed bid. A loud stub there would fail
+///   the whole step that prices the close: the switch's own step where nothing needs cancelling
+///   first, so its mode and record would never be journaled (`AGENTS.md` rule 13: the kill switch
+///   is always available), or the step confirming the protection's cancel, leaving the position
+///   unprotected and unsold. The session slice deletes this row with the extended-hours path.
+///
+/// Two more `properties` rows went back to pending in #668's round 2, failing on executor defects
+/// at random seeds the pinned one missed; each property's scripts now lead with its defect's shape
+/// (`STEP_BESIDE_LEAD`, `AWAITED_LEAD`), so it fails at every seed until the fix lands:
+/// - `no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` (defect E5b): the exit
+///   ladder steps a rung the broker has not yet acknowledged, asking its cancel, and another exit
+///   goes beside that cancel (backlog: "E7-4 (stream K), E5b from #668's round-2 review").
+/// - `no_interval_exceeds_the_limit_without_an_alert` (defect E4b): while a bracket's OCO awaits
+///   its acknowledgment, a new interval's start ends the first open interval rather than the
+///   awaited one, so the bound alerts late (E4b, from #698's review; its backlog row comes with
+///   E4b's tests PR).
 ///
 /// The two rows for journal spec v0.18's `policy_overlay` label are J3's (DEC-536). They check
 /// `Draft::parse`, the journal's existing draft check, against the vectors' `policy_overlay`
 /// section. There is no stub to stop at: until J3's implementation adds the label, the journal
 /// answers `non_canonical`, which is the behaviour they fail on. J3's implementation deletes the
 /// two rows with the `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 11] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2315,16 +2336,24 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
         "every_unprotected_interval_has_a_journaled_start_and_end",
     ),
     (
-        "crates/mandate-journal/tests/approval_answers.rs",
-        "every_approval_answer_base_and_valid_draft_parses",
+        "crates/mandate-executor/tests/properties.rs",
+        "protective_sell_quantity_never_exceeds_the_position_in_any_script",
     ),
     (
-        "crates/mandate-journal/tests/approval_answers.rs",
-        "every_invalid_approval_answer_is_refused_with_its_reason_at_its_path",
+        "crates/mandate-executor/tests/properties.rs",
+        "no_resting_order_is_submitted_inside_an_unprotected_interval",
     ),
     (
-        "crates/mandate-journal/tests/catalogue.rs",
-        "the_approval_answers_are_catalogued_and_closed_on_their_streams",
+        "crates/mandate-executor/tests/hand.rs",
+        "an_owner_exit_outside_the_session_prices_from_the_confirmed_bid",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_interval_exceeds_the_limit_without_an_alert",
     ),
     (
         "crates/mandate-journal/tests/policy_overlay.rs",

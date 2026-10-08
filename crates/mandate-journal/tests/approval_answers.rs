@@ -62,7 +62,6 @@ fn draft(section: &Value, case: &Value) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E8-3"]
 fn every_approval_answer_base_and_valid_draft_parses() {
     let section = section();
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
@@ -89,7 +88,6 @@ fn every_approval_answer_base_and_valid_draft_parses() {
 }
 
 #[test]
-#[ignore = "pending E8-3"]
 fn every_invalid_approval_answer_is_refused_with_its_reason_at_its_path() {
     let section = section();
     let invalid = list(&section, "invalid_drafts");
