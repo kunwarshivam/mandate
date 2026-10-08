@@ -6,8 +6,8 @@ Run from the repository root, in the reference environment:
 
 Each mutant changes one constraint of one schema file: it drops a required member, a value of an
 enum, a `const`, `additionalProperties` or `unevaluatedProperties`, a pattern, a bound, a branch of
-a `oneOf`, a `then` or `else`, or an `allOf` entry. The shared checker (`check_examples.py`) then
-runs over a copy of the tree. A mutant it still passes is a survivor: an example is missing. The
+a `oneOf`, a `then` or `else`, an `allOf` entry, or an `x-api7-lenient` flag. The checkers
+(`check_examples.py`, `check_planned.py`, `check_lenient.py`) then run over a copy of the tree. A mutant it still passes is a survivor: an example is missing. The
 sweep fails on any survivor not listed in `DELIBERATE` with its reason; `--all` prints them all.
 """
 
@@ -25,6 +25,8 @@ FILES = [
     "envelope.schema.json",
     *sorted(f"commands/{p.name}" for p in (HERE / "commands").glob("*.schema.json")),
 ]
+
+CHECKERS = ["check_examples.py", "check_planned.py", "check_lenient.py"]
 
 # Survivors that no example can kill, each with its reason.
 DELIBERATE: dict[str, str] = {
@@ -107,7 +109,10 @@ def survivors(show_all: bool) -> list[str]:
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "schemas"
         shutil.copytree(ROOT / "schemas", tree)
-        checker = tree / "workspace-api/check_examples.py"
+        shutil.copytree(ROOT / "docs/specs", Path(tmp) / "docs/specs")
+        (Path(tmp) / "docs/project").mkdir(parents=True)
+        shutil.copy(ROOT / "docs/project/06-backlog-v1.md", Path(tmp) / "docs/project")
+        checkers = [tree / f"workspace-api/{c}" for c in CHECKERS]
         for name in FILES:
             target = tree / "workspace-api" / name
             original = json.loads((HERE / name).read_text(encoding="utf-8"))
@@ -115,13 +120,15 @@ def survivors(show_all: bool) -> list[str]:
                 doc = copy.deepcopy(original)
                 mutate(doc)
                 target.write_text(json.dumps(doc), encoding="utf-8")
-                run = subprocess.run(
-                    [sys.executable, "-I", str(checker)],
-                    capture_output=True,
-                    text=True,
-                    check=False,
+                caught = any(
+                    subprocess.run(
+                        [sys.executable, "-I", str(checker)],
+                        capture_output=True,
+                        check=False,
+                    ).returncode
+                    for checker in checkers
                 )
-                if run.returncode == 0:
+                if not caught:
                     found.append(f"{name}{label}")
             target.write_text(json.dumps(original), encoding="utf-8")
     if show_all:

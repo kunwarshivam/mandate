@@ -100,7 +100,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 | **API-3** | **Journal before effect.** Every call that can change what an agent, connection, policy, member, client, or approval may do commits its control-stream event (`Committed` or `AlreadyCommitted`, journal spec §5.1), with the caller's identity in `actor`, before it reports success and before anything acts on it. The API writes no agent or account stream | Fault injection: fail the append at every step; no stream owner ever sees an effect without its control-stream cause, and no response says `recorded` without a committed event |
 | **API-4** | **Idempotent.** Every mutating call carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
 | **API-5** | **The envelope changes only by a confirmed version.** No call changes an envelope field of a deployed agent except confirming a mandate version, by a **user** with the role for it. The server computes the classification itself (mandate spec §9.2) and requires step-up when it is risk-increasing; a client's claimed classification is never used (rule 11) | Fuzz random envelope edits through every operation; an oracle that diffs the confirmed documents shows every change came through a `MandateConfirmed` by a user, with step-up whenever its own §9.2 verdict is increasing |
-| **API-6** | **A client is owner input, never the owner.** A client token reaches only the operations of §3.8. `requested_by` is set from the authenticated channel, never from the request body (mandate spec §6.2 step 5a); a request body naming `requested_by`, or any member its schema does not name, is refused `invalid` and journals nothing (DEC-681 item 6). A client can never confirm a version, answer an approval, create, widen, or pick a delegation, connect or revoke a connection, change a member, policy, or client, export, or use pause, resume, Stop, release, owner exit, acknowledgment, or the kill switch (DEC-141, DEC-185, DEC-191) | The route matrix for the client principal; a test that a client request carrying `requested_by: owner` in its body is refused `invalid` and commits nothing |
+| **API-6** | **A client is owner input, never the owner.** A client token reaches only the operations of §3.8. `requested_by` is set from the authenticated channel and never read from a request body (mandate spec §6.2 step 5a). A body naming `requested_by`, or any member its schema does not name, is refused `invalid` and journals nothing on a strict operation; on an API-7-lenient operation (§5) the member is dropped and listed in `dropped`, and the command still commits (DEC-681 item 6, DEC-682 item 27). A client can never confirm a version, answer an approval, create, widen, or pick a delegation, connect or revoke a connection, change a member, policy, or client, export, or use pause, resume, Stop, release, owner exit, acknowledgment, or the kill switch (DEC-141, DEC-185, DEC-191) | The route matrix for the client principal; a test that a client's owner request carrying `requested_by: owner` is refused `invalid` and commits nothing, and that a client's hold carrying it returns `202` with `dropped: ["/requested_by"]` and is journaled as `client` |
 | **API-7** | **Risk reduction is never blocked by the API.** Pause, holding new openings, the kill switch at any scope (including the kill-switch half of a revoke on compromise, §5.6), an owner exit, Skip on an approval, ending a delegation, and away mode (the **API-7 operations**) are refused only for a failed authentication (including the CSRF check of §3.3 item 1), a role that may not act, or a malformed request. Never for a rate limit, a quota, a stale or missing read model, missing step-up (except where mandate spec §6.1 requires it, below), a runtime, model, market-data, or global-control-plane outage, a pending approval, or a frozen control stream (journal spec §11). A kill switch or owner exit without valid step-up is still recorded and still stops or routes (mandate spec §6.1, DEC-158 option (c)) | A test per operation with every one of those conditions injected; each still commits its event. Resume, Stop, and acknowledgment are not risk reduction and may be refused without step-up, as mandate spec §6.1 says |
 | **API-8** | **The kill-switch path needs only the API, its authentication, and Postgres.** Pause and the kill switch read no read model, call no model, runtime, market-data service, global control plane, or telemetry, and run on a reserved worker and database-connection pool that other traffic cannot exhaust (infrastructure §3.6) | A test with the model gateway, read-model tables, runtime, and metrics exporter all unavailable and every ordinary worker busy: the kill switch commits within its bound |
 | **API-9** | **Tenants never see each other.** Every resource lives under one workspace. A principal reaches only workspaces it belongs to. An id from another workspace, or one that does not exist, returns the same 404. No response, error, log line, metric label, or notification carries another workspace's data | Cross-workspace tests at the route, database (row-level security), and artifact layers (OPS-6); a test that the 404 bodies and timings for "foreign" and "absent" match |
@@ -200,13 +200,17 @@ Owned by the [identity spec](identity.md). What the API requires of it:
    with `credentials: include`; DEC-682 item 32):
    - Only the exact configured app origin is allowed: no wildcard and no reflected `Origin`. Its
      responses carry `Access-Control-Allow-Origin` with that origin,
-     `Access-Control-Allow-Credentials: true`, and `Vary: Origin`. Any other origin gets no CORS
-     header.
+     `Access-Control-Allow-Credentials: true`, and `Vary: Origin`, error responses (401, 403, and
+     every other problem) included. Any other origin gets no CORS header.
+   - The app origin must be same-site with the API: a subdomain of the same registrable domain,
+     so the `SameSite=Strict` cookie is sent. The app is served on `app.owlhead.ai`; an origin on
+     another site, such as `*.workers.dev`, can never work.
    - A preflight `OPTIONS` allows the methods `GET`, `POST`, `PUT`, `DELETE`, and `PATCH`, and the
      headers `Content-Type`, `Idempotency-Key`, `If-Match`, and `X-Mandate-Request`, with
      `Access-Control-Max-Age: 600`. A preflight is never authenticated and reads no data (API-1's
      exemption).
-   - Exposed headers: `ETag`, `Location`, `Retry-After`, and the version headers of §3.2.
+   - Exposed headers: `ETag`, `Location`, and `Retry-After`. (§3.2's version and build are body
+     members, not headers.)
    - The session cookie is host-only, `__Host-` prefixed, `Secure`, `HttpOnly`, `SameSite=Strict`,
      and `Path=/`.
 
@@ -559,6 +563,11 @@ dropped member's JSON pointer in `dropped`. An owner exit's bid confirmation is 
 any part is missing or unparsable, every part sent is dropped and equities wait for the session.
 This applies to pause, holding new openings, the kill switch, an owner exit, Skip, ending a
 delegation, and away mode; an `approved` and every other operation is judged strictly.
+- A pause or hold body that is not JSON at all is read as `{}`, with `dropped: [""]`.
+- A workspace-scope kill switch naming a non-null `scope.id` has the id dropped and listed.
+- Skip's `content_hash` stays strict: an answer binds what was shown (API-12).
+- Idempotency (API-4) compares the members kept, not those dropped: a repeat that differs only in
+  a dropped member is the same call.
 
 ### 5.1 Confirm a mandate version
 

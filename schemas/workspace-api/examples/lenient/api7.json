@@ -1,5 +1,5 @@
 {
-  "description": "API-7 leniency (DEC-682 item 27): what the server does with each body of an API-7 operation. `accept` lists the members it drops; `refuse` names the problem code. These cases are the server's (A2's tests read them), not the strict schemas', which describe what a client should send.",
+  "description": "API-7 leniency (DEC-682 item 27): what the server does with each body of an API-7 operation. `accept` lists the members it drops; `refuse` names the problem code. These cases are the server's (A2's tests read them), not the strict schemas', which describe what a client should send. A body given as a string is the raw request body, not JSON. `principal` is `user` unless it says `client`.",
   "cases": [
     {
       "operation": "pause",
@@ -23,11 +23,6 @@
       "accept": [
         "/requested_by"
       ]
-    },
-    {
-      "operation": "pause",
-      "body": "not json",
-      "refuse": "invalid"
     },
     {
       "operation": "hold",
@@ -121,16 +116,6 @@
         "scope": {
           "kind": "organization",
           "id": null
-        }
-      },
-      "refuse": "invalid"
-    },
-    {
-      "operation": "kill_switch",
-      "body": {
-        "scope": {
-          "kind": "workspace",
-          "id": "ws_1"
         }
       },
       "refuse": "invalid"
@@ -234,6 +219,60 @@
         "record": "x",
         "step_up": null,
         "delegation": null
+      },
+      "refuse": "invalid"
+    },
+    {
+      "operation": "pause",
+      "body": "not json",
+      "accept": [
+        ""
+      ]
+    },
+    {
+      "operation": "hold",
+      "body": "",
+      "accept": [
+        ""
+      ]
+    },
+    {
+      "operation": "hold",
+      "principal": "client",
+      "body": {
+        "requested_by": "owner"
+      },
+      "accept": [
+        "/requested_by"
+      ]
+    },
+    {
+      "operation": "kill_switch",
+      "body": {
+        "scope": {
+          "kind": "workspace",
+          "id": "ws_1"
+        }
+      },
+      "accept": [
+        "/scope/id"
+      ]
+    },
+    {
+      "operation": "kill_switch",
+      "body": "not json",
+      "refuse": "invalid"
+    },
+    {
+      "operation": "owner_exit",
+      "body": "not json",
+      "refuse": "invalid"
+    },
+    {
+      "operation": "respond_approval",
+      "body": {
+        "verdict": "skipped",
+        "content_hash": "not a hash"
       },
       "refuse": "invalid"
     }

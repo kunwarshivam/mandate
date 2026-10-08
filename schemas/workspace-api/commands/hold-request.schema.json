@@ -16,6 +16,6 @@
       ]
     }
   },
-  "description": "POST /agents/{agent_id}/hold (\u00a74.2, DEC-191): no step-up, API-7. {} is valid. API-7 leniency (DEC-682 item 27): this schema is what a client should send; the server is lenient. No member is strict: an omitted, unknown, or unparsable `record` (or any other member) is dropped. The 202 lists every dropped member's JSON pointer in `dropped`.",
+  "description": "POST /agents/{agent_id}/hold (\u00a74.2, DEC-191): no step-up, API-7. {} is valid. API-7 leniency (DEC-682 item 27): this schema is what a client should send; the server is lenient. No member is strict: an omitted, unknown, or unparsable `record` (or any other member) is dropped. The 202 lists every dropped member's JSON pointer in `dropped`. A body that is not JSON at all is read as {} with dropped [\"\"] (DEC-682 item 27).",
   "x-api7-lenient": true
 }
