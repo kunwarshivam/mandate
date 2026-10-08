@@ -17,7 +17,7 @@
 #
 # Planned crates and layers, created only when a story needs them:
 #   0  mandate-num, mandate-time, mandate-canon
-#   1  mandate-domain, mandate-approval, mandate-liquidity (pure cores over layer-0 values;
+#   1  mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
 #      mandate-authn (E9-1, DEC-650): token verification and sessions as pure functions, with the
 #      issuer's keys and the clock handed in, so it never fetches a key or reads a clock
@@ -108,6 +108,12 @@ layer = 1
 safety_critical = true
 pure = true
 allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
+
+[crates.mandate-identity]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
 
 [crates.mandate-passkey]
 layer = 2

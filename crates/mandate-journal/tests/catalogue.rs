@@ -22,6 +22,7 @@ const CLOCK: &str = "clock";
 
 /// Journal spec §9, with §2's copies into account streams: `ClockAdvanced`, and `OwnerAcknowledged`
 /// as a risk input (mandate spec §5.2, DEC-81).
+/// `OwnerAlertSent` and the notice stream's records are DEC-720's, written out in `tests/notices.rs`.
 const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("StreamOpened", &[ACCT, AGENT, CTL, CLOCK], &[]),
     ("IntentReceived", &[ACCT], &[MAN]),
@@ -89,7 +90,6 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("ConnectionEstablished", &[CTL], &[]),
     ("ConnectionRevoked", &[CTL], &[]),
     ("DisclosureAccepted", &[CTL], &[]),
-    ("OwnerAlertSent", &[CTL], &[]),
     ("OwnerAcknowledged", &[ACCT, CTL], &[]),
     ("ConfigSnapshotRegistered", &[CTL], &[]),
     ("SurveillanceReportGenerated", &[CTL], &[RULE]),
@@ -1341,7 +1341,6 @@ fn the_approval_answers_are_catalogued_and_closed_on_their_streams() {
 /// the control stream and is catalogued on the account stream too, where only the executor's
 /// version-2 copy is registered, so a version-1 draft there is `unknown_schema`.
 #[test]
-#[ignore = "pending E7-17"]
 fn the_connection_records_are_catalogued_and_closed_on_their_streams() {
     for (event_type, homes) in CLOSED_BY_E7_17 {
         for kind in [ACCT, AGENT, CTL, CLOCK] {
