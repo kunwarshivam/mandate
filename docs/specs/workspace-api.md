@@ -502,7 +502,13 @@ control-stream writer appends it before anything is served (API-16). The payload
 the `Id`, `EventId`, `Timestamp`, `Decimal`, and `ContentRef` of
 `schemas/workspace-api/common.schema.json`. Every response carries `as_of`, an `AsOf`: one
 `Watermark` `{stream_id, seq, hash, recorded_at}` per stream it read. Every union is tagged by a
-`kind` member and every enum here is closed (§3.2). The JSON Schemas of the trace, the gate view,
+`kind` member and every enum here is closed (§3.2).
+
+**Hash forms.** An event's own chain hashes are bare: every `hash` and `prev_hash` of a page item,
+a trace node, a gate view, or a JSON or CSV view row, and the `hash` of a stream `head`, is 64
+lowercase hex exactly as journal spec §3 and the body re-hash give it. Everything else is a
+`sha256:` `ContentRef`: the `hash` of an `as_of` `Watermark` (the same digest, with the API adding
+the prefix), `manifest_hash`, `artifact_ref`, `content_hash`, and every `config_refs` value. The JSON Schemas of the trace, the gate view,
 exports, and verification follow under `schemas/workspace-api/audit/`. The timeline's response
 schema is the agent-timeline read model's (`schemas/workspace-api/read-models/`), and the timeline
 rules below are its semantics.
@@ -555,7 +561,7 @@ includes the journal) and gets 403. A principal with no membership in the path's
 | `events` | Up to `limit` events with `after_seq < seq ≤ head.seq`, in ascending `seq`. Each is `{seq, event_id, event_type, recorded_at, prev_hash, hash, body}`: `body` is the stored canonical body bytes (journal spec §6.1), standard base64 with padding (RFC 4648 §4); `hash` and `prev_hash` are 64 lowercase hex, as journal spec §3. The other members repeat the body for convenience; the body is what a client checks |
 | `next_after_seq` | The last returned `seq`, or `after_seq` when `events` is empty; the next page's cursor |
 | `at_head` | `true` when the page ends at `head.seq` |
-| `as_of` | API-14's watermark for this stream: the `head` |
+| `as_of` | API-14's `AsOf` for this stream: one `Watermark` with the `head`'s `seq` and `recorded_at` and its `hash` as a `sha256:` ref |
 
 - `after_seq` is an integer from 0 to 2^53 − 1, default 0. `limit` is an integer from 1 to 1,000,
   default 100. Outside those bounds, or not an integer, is 422 `invalid`; a value is never clamped.
