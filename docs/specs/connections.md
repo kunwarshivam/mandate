@@ -1,10 +1,10 @@
-# Broker Connections Spec (v0.1, draft)
+# Broker Connections Spec (v0.2, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed |
+| **Status** | Draft v0.2, not yet reviewed (v0.2: §4, §6.2, §6.6 and §12 from Robinhood's published contract, [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md)) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-441](../project/decisions/DEC-441.md) (items 1 to 14, 21, and 23 Accepted by the agent; items 15 to 20 and 22 Proposed for the founder); [DEC-690](../project/decisions/DEC-690.md) (Alpaca's documentation read for U-A1 to U-A5; items 1 to 5 and 8 to 10 Accepted, items 6 and 7 Proposed) |
+| **Decisions** | [DEC-441](../project/decisions/DEC-441.md) (items 1 to 14, 21, and 23 Accepted by the agent; items 15 to 20 and 22 Proposed for the founder); [DEC-529](../project/decisions/DEC-529.md) (founder, Accepted 2026-10-08: the founder's one live Robinhood order); [DEC-531](../project/decisions/DEC-531.md) (capability profiles); [DEC-690](../project/decisions/DEC-690.md) (Alpaca's documentation read for U-A1 to U-A5; items 1 to 5 and 8 to 10 Accepted, items 6 and 7 Proposed) |
 | **Backlog** | E7-1, E7-6, E7-11 to E7-18 ([backlog](../project/06-backlog-v1.md#e7-alpaca-connector-and-recovery)); E16-1 for Kraken |
 | **Safety-critical** | Yes: broker connectors, OAuth scopes, key-permission checks, and credential handling (`AGENTS.md`, "Safety-critical paths") |
 
@@ -23,6 +23,7 @@ their rules hold. The API routes that start a connection are the workspace API s
 
 ## Contents
 
+0. Change history
 1. Scope
 2. Invariants
 3. The connection object
@@ -38,6 +39,17 @@ their rules hold. The API routes that start a connection are the workspace API s
 13. Open questions
 
 ---
+
+## 0. Change history
+
+- **v0.2:** §4's Robinhood column, §6.2's mapping, and §6.6's status column are filled from
+  Robinhood's published tool contract ([robinhood-contract.md](../project/tasks/robinhood-contract.md),
+  E7-15); §4's capability table is the connector's capability profile (trading spec §5.2,
+  [DEC-531](../project/decisions/DEC-531.md)). §6.2 maps `GetOrderByClientId` to the shared
+  list-and-match fallback, and §12 records how [DEC-529](../project/decisions/DEC-529.md) reads
+  DEC-441 items 10, 15 to 17 and 20 for the founder's one live order. A pre-trade alert refuses
+  only an opening or an increase (`AGENTS.md` rule 13). Customers stay blocked.
+- **v0.1:** first draft (DEC-441).
 
 ## 1. Scope
 
@@ -135,23 +147,24 @@ does in `mandate-alpaca`'s `record` module.
 
 Every connector implements `mandate-executor`'s `BrokerConnector` trait: one request in, one
 outcome or a `ConnectorError` out (`Unknown`, `Unreadable`, `NotSent`). The executor never learns
-which broker it talks to. A connector also declares a **capability table** that the trading spec's
-order policy (§5.1) is checked against at deployment: an agent whose mandate needs a capability the
-connection lacks is not deployable.
+which broker it talks to. A connector also declares a **capability profile** (trading spec §5.2,
+[DEC-531](../project/decisions/DEC-531.md)) that the trading spec's order policy (§5.1) is
+intersected with at deployment: an agent whose mandate needs a capability the connection lacks is
+not deployable. The table below summarizes each connector's profile and the facts beside it.
 
 | Capability | Alpaca paper (keys, Phase 1) | Alpaca live and paper (OAuth, M8) | Robinhood Agentic (MCP, M8) | Kraken Derivatives US (E16) |
 |---|---|---|---|---|
 | Authentication | API key and secret, local config outside the repo (ES-19) | OAuth 2 authorization code with the platform's client secret, single-use `state`, `env` always set; PKCE not documented by Alpaca, so sent but never relied on (§5.5) | OAuth through Robinhood login at its MCP server (OD-12) | API key; permissions queried from the venue |
 | Paper environment | Yes | Yes | **No.** Paper stage is the simulated broker with Robinhood's rules (DEC-124) | Demo environment |
 | Asset classes in v1 | US equities, ETFs, crypto spot (DEC-24) | Same | US equities and crypto spot; options excluded (DEC-24) | Perpetuals (Phase 3) |
-| Client order id, idempotent | Yes (`client_order_id`) | Yes | **Unknown (U-R1)** | To confirm |
-| Query by client order id | Yes | Yes | **Unknown (U-R2)** | To confirm |
-| Limit, stop-limit, GTC | Yes (trading §5.2) | Yes | **Unknown (U-R3)** | To confirm |
-| OCO or bracket | Yes | Yes | **Unknown (U-R4)** | Not applicable |
-| Account restriction signal | Status flags and rejects (trading §7.3) | Same | **Unknown (U-R6)** | To confirm |
-| 1× check (FR-2.6) | `multiplier` | Same: `multiplier` is readable with no extra scope (U-A5, answered, §5.5); changing it needs `account:write`, never requested | **Unknown (U-R7)** | Margin by design; E16 |
-| Activities for reconciliation | `/v2/account/activities` | Same | **Unknown (U-R8)** | To confirm |
-| Fund-movement permission | None used; the crate has no such endpoint | **Not shown absent (U-A2 open, §5.5)**: live is refused (CN-2); paper records and discloses it | Must be absent from the tool list (CN-2) | Queried per key |
+| Client order id, idempotent | Yes (`client_order_id`) | Yes | **`ref_id`**, deduplicated by Robinhood; what a retry returns is unknown (U-R1) | To confirm |
+| Query by client order id | Yes | Yes | **No** (U-R2): the shared list-and-match fallback (§6.2) | To confirm |
+| Limit, stop-limit, GTC | Yes (trading §5.2) | Yes | **Yes** for equities; limit quantities in whole shares (U-R3). Crypto unknown | To confirm |
+| OCO or bracket | Yes | Yes | **No** (U-R4): one resting GTC stop-limit (trading §5.4) | Not applicable |
+| Account restriction signal | Status flags and rejects (trading §7.3) | Same | `review_equity_order` pre-trade alerts; status fields and error codes unknown (U-R6) | To confirm |
+| 1× check (FR-2.6) | `multiplier` | Same: `multiplier` is readable with no extra scope (U-A5, answered, §5.5); changing it needs `account:write`, never requested | **No margin field** (U-R7); for DEC-529's order, the founder's attestation | Margin by design; E16 |
+| Activities for reconciliation | `/v2/account/activities` | Same | Orders, positions, tax lots; no deposit, withdrawal or dividend feed (U-R8) | To confirm |
+| Fund-movement permission | None used; the crate has no such endpoint | **Not shown absent (U-A2 open, §5.5)**: live is refused (CN-2); paper records and discloses it | None in the tool list (U-R11); a tool list that gains one is refused (CN-2) | Queried per key |
 | Rate limits | Broker-published | Same | **Unknown (U-R9)** | To confirm |
 
 A capability marked **Unknown** is treated as **absent** until it is confirmed in writing and
@@ -385,19 +398,27 @@ Robinhood's server; nothing outside the connector knows MCP exists.
 
 | `BrokerRequest` (executor) | MCP mapping |
 |---|---|
-| `Submit` | The allowlisted order tool for the asset class, with the account id pinned to the agentic account and our client order id if the contract supports one (U-R1) |
-| `Cancel` | The allowlisted cancel tool, by broker order id looked up from our record |
-| `GetOrderByClientId` | Query by client order id (U-R2); otherwise see §6.6 |
-| `ListOpenOrders`, `ListPositions`, `GetAccount`, `ListActivities` | Allowlisted read tools, filtered to the agentic account (CN-8) |
+| `Submit` | `review_equity_order`, then `place_equity_order`, with `account_number` the founder-typed agentic account and `ref_id` derived deterministically from the journaled intent's idempotency key, never omitted. A pre-trade alert refuses an opening or an increase before the place. For a sell or a protective order the alert is journaled and the order is placed anyway, so the broker accepts or rejects it (`AGENTS.md` rule 13); C1's tests pin that an alert on the protective stop-limit does not refuse it. An unparsable or unexpected answer to the place is `Unknown`, never rejected and never re-sent |
+| `Cancel` | `cancel_equity_order`, by the broker `order_id` from our record |
+| `GetOrderByClientId` | Not offered (U-R2). The shared fallback ([DEC-529](../project/decisions/DEC-529.md) item 4), used only when the account ledger shows the account dedicated to one agent: `get_equity_orders` with the intent's `symbol`, `placed_agent` `agentic`, and `created_at_gte` the intent's `OrderSubmitted` time less a fixed margin, all pages; exactly one record matching side, type, quantity, limit price and time in force (and `ref_id`, if records carry it) is adopted and followed by `order_id`; zero or several leave the order `Unknown` (trading §5.3 rule 9). The connector never re-sends on its own |
+| `ListOpenOrders`, `ListPositions`, `GetAccount` | `get_equity_orders`, `get_equity_positions`, `get_accounts`, `get_portfolio`, filtered to the agentic account (CN-8) |
+| `ListActivities` | No feed in the contract (U-R8) |
 | `CancelAll`, `ClosePosition` | Only if the contract offers an account-scoped equivalent; otherwise the kill switch cancels and sells order by order, which trading §5.5 already does for agent scope |
 | `AcknowledgeReplace` | Not applicable unless Robinhood replaces orders itself |
+
+Robinhood's `state` reads as: `new`, `queued`, `confirmed`, `partially_filled` working;
+`unconfirmed` working, never absent; `filled` filled; `cancelled` cancelled with any filled
+quantity; `rejected`, `failed` rejected and `voided` cancelled, each re-read once by `order_id`
+before the intent closes; any other value `Unknown`.
 
 Rules for the MCP client:
 
 1. **Transport.** The streamable HTTP transport to Robinhood's published endpoint only, pinned by
    host; no redirects; TLS verified; no other MCP server is ever configured for a broker connection.
-2. **Tool allowlist.** The connector calls only the tools it was built for: order placement and
-   cancel for equities and crypto spot, and the reads above. It never calls options, option
+2. **Tool allowlist.** The connector calls only the tools it was built for: today the nine of
+   the contract's allowlist (`get_accounts`, `get_portfolio`, `get_equity_positions`,
+   `get_equity_quotes`, `get_equity_tradability`, `get_equity_orders`, `review_equity_order`,
+   `place_equity_order`, `cancel_equity_order`); crypto tools join when a story needs them. It never calls options, option
    exercise, watchlist, alert, scan, or any write tool outside that list, even though the token may
    allow them (CN-9).
 3. **Contract pinning.** At connect, at each session start, and at each health check, the connector
@@ -432,7 +453,7 @@ told at connect that the agentic account must not be shared with another agent.
 | What | How | Who acts |
 |---|---|---|
 | Terms and beta status | The terms text the owner saw is hashed into `terms_version` at connect. A change found in the published terms is reviewed before the next connect | Founder (legal text, DEC-79) |
-| Whether one platform may act for many customers | Written answer from Robinhood before E7-6 builds (DEC-441 item 15) | Founder |
+| Whether one platform may act for many customers | Written answer from Robinhood before any customer connects (DEC-441 item 15; the founder's own order is excepted, DEC-529 item 5) | Founder |
 | Tool contract | `contract_hash` checked at each session and health check (§6.2 rule 3) | Connector; drift halts openings |
 | Rate limits | Observed limits and throttle responses counted per connection; the executor's order-rate limit (trading §9.7) is set below the published limit with headroom | Connector |
 | Customer responsibility statement | Shown to the owner at connect and in the disclosure (compliance question 32) | Founder with counsel |
@@ -450,22 +471,24 @@ was not processed.
 
 None of these may be learned by calling Robinhood with a real account: there is no test
 environment, and an agent never touches a live account (rule 8). They come from Robinhood's
-published documentation or a written answer to the founder.
+published documentation or a written answer to the founder. The status column is from Robinhood's
+published tool contract as of 2026-10-08 ([robinhood-contract.md](../project/tasks/robinhood-contract.md),
+which gives each answer's source); "from contract" is not a written answer.
 
-| ID | Question | If the answer is no or unknown |
-|---|---|---|
-| U-R1 | Do order tools accept a client order id, and is a retry with the same id idempotent? | **E7-6's order path is not built** (DEC-441 item 10). Journal before acting holds, but crash recovery cannot tell a lost submit from an absent one without it; the founder decides |
-| U-R2 | Can an order be queried by that id? | As U-R1 |
-| U-R3 | Limit, stop-limit, GTC, and extended-hours flags for equities; limit and stop-limit for crypto | Missing types make the mandate's order policy undeployable on Robinhood |
-| U-R4 | OCO or bracket orders, or at least a resting stop-limit | Without OCO, protection needs the founder's decision (DEC-441 item 17). With no resting stop at all, no protected equity mandate can deploy on Robinhood |
-| U-R5 | Token lifetime, refresh, and how revocation shows | Treated as short-lived: re-check before every session |
-| U-R6 | Account status fields and restriction rejects | Unrecognized status is `blocked` (trading §7.3 row 1; principle 3) |
-| U-R7 | Margin and 1× status | Paused and prompted (FR-2.6) |
-| U-R8 | Fills, fees, dividends, deposits, and withdrawals as an activity feed | Reconciliation (trading §11) cannot run; not deployable |
-| U-R9 | Rate limits | §6.5's conservative default |
-| U-R10 | Platform terms: one platform acting for many customers; data use; attribution | DEC-441 item 15 |
-| U-R11 | Whether the tool list or the token can move funds out | If yes, refused (CN-2) |
-| U-R12 | Whether the session can be restricted to the agentic account | If not, CN-8's filtering is the control, and the owner is told the token can read every account |
+| ID | Question | Status | If the answer is no or unknown |
+|---|---|---|---|
+| U-R1 | Do order tools accept a client order id, and is a retry with the same id idempotent? | **In part from contract:** `ref_id`, deduplicated by Robinhood; what a retry returns, the window and the scope need a written answer | Customers: **E7-6's order path is not built for them** (DEC-441 item 10). DEC-529's order: `ref_id` from the intent's key, never re-sent (DEC-529 item 4) |
+| U-R2 | Can an order be queried by that id? | **Absent from contract**; whether records carry `ref_id` needs a written answer | As U-R1; DEC-529's order uses §6.2's list-and-match |
+| U-R3 | Limit, stop-limit, GTC, and extended-hours flags for equities; limit and stop-limit for crypto | Equities **from contract** (limit, stop-limit, gfd, gtc; extended hours limit only); crypto open | Missing types make the mandate's order policy undeployable on Robinhood |
+| U-R4 | OCO or bracket orders, or at least a resting stop-limit | Resting GTC stop-limit **from contract**; OCO and bracket placement **absent** from the tool list | One GTC stop-limit for the whole position (trading §5.4; DEC-529 item 7 for DEC-529's order). With no resting stop at all, no protected equity mandate can deploy on Robinhood |
+| U-R5 | Token lifetime, refresh, and how revocation shows | **Open** | Treated as short-lived: re-check before every session |
+| U-R6 | Account status fields and restriction rejects | **In part:** `review_equity_order`'s pre-trade alerts; status fields and error codes open | An alert refuses an opening or an increase before the place; a sell or protective order is placed anyway, with the alert journaled (rule 13). An unrecognized status is `blocked` (trading §7.3 row 1; principle 3) |
+| U-R7 | Margin and 1× status | **Open:** no margin field in the contract | Paused and prompted (FR-2.6); DEC-529's order rests on the founder's attestation (DEC-529 item 11) |
+| U-R8 | Fills, fees, dividends, deposits, and withdrawals as an activity feed | **In part:** orders, positions and tax lots; no deposit, withdrawal or dividend feed; fill fields unpublished | Reconciliation (trading §11) cannot run; not deployable for customers. DEC-529's order on a flat, dedicated account compares the order's state and filled quantity and the position |
+| U-R9 | Rate limits | **Open** | §6.5's conservative default |
+| U-R10 | Platform terms: one platform acting for many customers; data use; attribution | **Open**; `placed_agent` `agentic` shows attribution | DEC-441 item 15; it does not block DEC-529's order (DEC-529 item 5) |
+| U-R11 | Whether the tool list or the token can move funds out | **No fund-movement tool** in the list; the token's scope beyond the tools is open | If yes, refused (CN-2) |
+| U-R12 | Whether the session can be restricted to the agentic account | **Not restricted for reads** (from contract) | CN-8's filtering is the control, and the owner is told the token can read every account |
 
 ## 7. Kraken Derivatives US (later)
 
@@ -635,6 +658,26 @@ environment.
 | 19 | Verifying the account holder is the workspace user | No name matching in v1; owner attestation with step-up; counsel to confirm |
 | 20 | Robinhood customer-responsibility and data-scope disclosures | Counsel drafts the text (compliance question 32) before any Robinhood connection |
 | 22 | If every Alpaca token reaches both environments, so item 21 blocks Alpaca OAuth entirely | Accept such a token only with the executor bound to its own environment's host, no live host outside production, egress limited to that host, and the token's breadth journaled and disclosed to the owner |
+
+**The founder's one live order** ([DEC-529](../project/decisions/DEC-529.md), founder, Accepted
+2026-10-08) reads these items for that order only, on the founder's own Robinhood agentic account;
+each stays in force for every customer connection:
+
+- **Item 10:** half met (`ref_id` yes, query by it no); §6.2's list-and-match with no re-send
+  resolves it for DEC-529's order (DEC-529 item 4). Customers wait for U-R1 and U-R2.
+- **Item 15:** does not block the founder's own order (DEC-529 item 5); it blocks every customer
+  connection in any environment until Robinhood answers in writing.
+- **Item 16:** fixtures are synthesized from the published contract only; nothing is recorded from
+  a real account (DEC-529 item 6).
+- **Item 17:** one resting GTC stop-limit for the whole position after the entry fills completely
+  (DEC-529 item 7; trading §5.4).
+- **Item 20:** does not apply to the founder's own account (DEC-529 item 8).
+- **CN-3 and ES-23:** the runner's `live` cargo feature adds Robinhood's published MCP host to a
+  build the founder makes locally from `main`; the default build has no live host (DEC-529 item 3).
+  The connection the founder records through the CLI is spent once an order it placed fills, wholly or partly, or its answer is lost and the order is `Unknown`, until the founder reconciles it (DEC-529 item 1). "Unspent" is checked only
+  when the version is confirmed and deployed and when the runner starts. A spent connection never
+  carries a second opening, but the agent deployed on it keeps `cli_confirm` for owner exits, pause,
+  stop, acknowledgments and grants until its account is flat (rule 13).
 
 ## 13. Open questions
 
