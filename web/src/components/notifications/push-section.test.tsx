@@ -19,7 +19,7 @@ function browser(permission: NotificationPermission): PushBrowser {
 }
 
 describe("PushSection", () => {
-  it.skip("pending E8-14: turns on notifications and says so, sending the subscription to the given sender", async () => {
+  it("turns on notifications and says so, sending the subscription to the given sender", async () => {
     const send = vi.fn(async () => {});
     render(<PushSection vapidPublicKey={VAPID} send={send} browser={browser("granted")} />);
     fireEvent.click(screen.getByRole("button", { name: "Turn on notifications" }));
@@ -28,7 +28,7 @@ describe("PushSection", () => {
     expect(screen.queryByText(/Fixture/)).toBeNull();
   });
 
-  it.skip("pending E8-14: says what to do when the browser blocks notifications, and sends nothing", async () => {
+  it("says what to do when the browser blocks notifications, and sends nothing", async () => {
     const send = vi.fn(async () => {});
     render(<PushSection vapidPublicKey={VAPID} send={send} browser={browser("denied")} />);
     fireEvent.click(screen.getByRole("button", { name: "Turn on notifications" }));
@@ -36,12 +36,12 @@ describe("PushSection", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it.skip("pending E8-14: labels the fixture sender as not live (DEC-200 item 6)", () => {
+  it("labels the fixture sender as not live (DEC-200 item 6)", () => {
     render(<PushSection vapidPublicKey={VAPID} browser={browser("granted")} />);
     expect(screen.getByText("Fixture: this build does not send the subscription anywhere yet.")).toBeInTheDocument();
   });
 
-  it.skip("pending E8-14: is off without the deployment's VAPID key, and never asks the browser", () => {
+  it("is off without the deployment's VAPID key, and never asks the browser", () => {
     const requestPermission = vi.fn(async () => "granted" as const);
     const register = vi.fn(async () => ({}));
     const send = vi.fn(async () => {});

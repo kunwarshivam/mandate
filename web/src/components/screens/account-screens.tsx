@@ -15,6 +15,7 @@ import { useCan } from "@/lib/roles";
 import { type Screen, decisionHref, screensIn } from "@/lib/screens";
 import { useSession } from "@/lib/session";
 import { PasskeysSection } from "@/components/auth/passkeys-section";
+import { PushSection } from "@/components/notifications/push-section";
 import { ComingSoon } from "./coming-soon";
 import { Panel, Section, WorkspaceGate } from "./common";
 
@@ -133,6 +134,13 @@ export function RegistryScreen({ screen }: { screen: Screen }) {
           </div>
         ) : (
           <ComingSoon purpose={screen.purpose} />
+        );
+      case "settings-notifications":
+        return (
+          <div className="grid gap-(--section-gap)">
+            <PushSection />
+            <ComingSoon purpose={screen.purpose} />
+          </div>
         );
       case "audit-decisions":
         return (
