@@ -1,7 +1,8 @@
 // Pending tests for web/ (DEC-750). A test written before its story is `it.skip("pending <story>: …")`
 // and must fail at a stub that throws `new Error("Unimplemented: <story>")`. This script fails when:
-//   - any `.skip` is not `it.skip` or `test.skip` titled "pending <story>: …" (describe.skip included),
-//     or a test is `.todo`;
+//   - any `.skip` is not `it.skip` or `test.skip` titled "pending <story>: …" (describe.skip and
+//     `.skip.each` included), or a test is skipped any other way (skipIf, runIf, todo, fails, only,
+//     xit, xtest, xdescribe, a computed member), or two pending tests in one file share a title;
 //   - a pending test passes when un-skipped, or fails without its stub's own report.
 // It un-skips each pending test in a temporary copy of its file, runs the copies with Vitest, and
 // deletes them. Run it as `npm run pending`.
@@ -16,6 +17,13 @@ const SRC = join(WEB, "src");
 const COPY_SUFFIX = ".pending-unskip.test";
 const SKIP = /\.\s*skip\b/g;
 const SKIP_ONCE = /^\.\s*skip\b/;
+/** Ways to not run a test that this script cannot prove fail at a stub; each is refused outright. */
+const UNPROVABLE = [
+  { pattern: /\.\s*(skipIf|runIf)\b/g, message: "no conditional skip or run; skip a test only as it.skip(\"pending <story>: …\")" },
+  { pattern: /\.\s*(todo|fails|only)\b/g, message: "no .todo, .fails or .only; write the test and skip it as pending" },
+  { pattern: /(^|[^\w$.])(xit|xtest|xdescribe)\s*\(/g, message: "no xit, xtest or xdescribe; skip a test only as it.skip(\"pending <story>: …\")" },
+  { pattern: /\[\s*["'`](skip|skipIf|runIf|todo|fails|only)["'`]\s*\]/g, message: "no computed skip; skip a test only as it.skip(\"pending <story>: …\")" },
+];
 const PENDING_SKIP = /\b(it|test)\s*\.\s*skip\s*\(\s*(["'])pending ([A-Z][0-9]+[a-z]?-[0-9]+[a-z]?): ((?:(?!\2)[^\\]|\\.)*)\2/y;
 
 function testFiles() {
@@ -48,8 +56,16 @@ for (const file of testFiles()) {
     }
     found.push({ index: match.index, story: pendingMatch[3], title: `pending ${pendingMatch[3]}: ${pendingMatch[4]}`, line: lineOf(text, match.index) });
   }
-  for (const match of text.matchAll(/\b(it|test)\s*\.\s*todo\b/g)) {
-    problems.push(`${rel}:${lineOf(text, match.index)}: no .todo; write the test and skip it as pending (DEC-750)`);
+  for (const { pattern, message } of UNPROVABLE) {
+    for (const match of text.matchAll(pattern)) {
+      const at = match.index + (match[0].length - match[0].trimStart().length);
+      problems.push(`${rel}:${lineOf(text, at)}: ${message} (DEC-750)`);
+    }
+  }
+  const titles = new Set();
+  for (const f of found) {
+    if (titles.has(f.title)) problems.push(`${rel}:${f.line}: "${f.title}" is a second pending test with the same title`);
+    titles.add(f.title);
   }
   if (found.length === 0) continue;
   for (const f of [...found].reverse()) {

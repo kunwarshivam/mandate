@@ -1,8 +1,9 @@
 /**
  * A fixture-backed stand-in for the workspace API: a `fetch` implementation for tests and for
  * `npm run dev`. It answers from `src/fixtures/` in the shapes of the workspace API spec, keeps
- * commands in memory by idempotency key (API-4), and plays the `unreachable` and `result-unknown`
- * scenarios as a network that does not answer.
+ * commands in memory by idempotency key and route (API-4), plays `unreachable` as a network that
+ * does not answer, and `result-unknown` as commands recorded whose answer is lost, so a later status
+ * poll finds them (spec §5.5).
  */
 import { OPERATIONS, isIdempotencyKey, type Fetch } from "./client";
 import type { Watermark } from "./types";
@@ -109,12 +110,15 @@ export function createMockServer(options: MockServerOptions): MockServer {
   const fetch: Fetch = async (input, init) => {
     const method = (init.method ?? "GET").toUpperCase();
     if (scenario === "unreachable") throw new TypeError("Failed to fetch");
-    if (scenario === "result-unknown" && method === "POST") throw new TypeError("The deployment took the request and never answered");
     const url = new URL(input, "http://mock.invalid");
     if (!url.pathname.startsWith(`${prefix}/`)) return problem(404, "not_found", "none");
     const route = url.pathname.slice(prefix.length);
     if (method === "GET") return get(route);
-    if (method === "POST") return post(route, new Headers(init.headers), typeof init.body === "string" ? init.body : "");
+    if (method === "POST") {
+      const answer = post(route, new Headers(init.headers), typeof init.body === "string" ? init.body : "");
+      if (scenario === "result-unknown") throw new TypeError("The deployment recorded the request and the answer was lost");
+      return answer;
+    }
     return problem(404, "not_found", "none");
   };
 

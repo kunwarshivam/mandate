@@ -165,6 +165,8 @@ async function parseBody(response: Response): Promise<unknown> {
   }
 }
 
+const UNREADABLE: DecodeIssue = { path: "", problem: "wrong_type", value: null, allowed: null };
+
 function networkError(effect: Effect): ApiError {
   return { code: "network", effect, status: null, event_id: null, retryable: true, violations: [], decode: null };
 }
@@ -201,7 +203,19 @@ function fillRoute(route: string, params: Record<string, string>): `/${string}` 
 
 export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
   const { workspaceId, fetch, baseUrl = "", newKey = newIdempotencyKey, onUnauthenticated } = options;
-  const schema: CommonSchema = { ...PROSE_SCHEMA, ...options.schema };
+  const schema: CommonSchema = {
+    envelope: options.schema?.envelope ?? PROSE_SCHEMA.envelope,
+    problem: options.schema?.problem ?? PROSE_SCHEMA.problem,
+  };
+
+  /** A decoder that throws is an answer the client could not read, never an exception out of a call. */
+  function decodeProblem(body: unknown): ProblemFields | null {
+    try {
+      return schema.problem(body);
+    } catch {
+      return null;
+    }
+  }
   if (!WORKSPACE_ID.test(workspaceId)) throw new Error("not a workspace id");
 
   const path = (route: `/${string}`) => `/v1/workspaces/${workspaceId}${route}`;
@@ -219,11 +233,17 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     }
     const body = await parseBody(response);
     if (!response.ok) {
-      const error = problemError(response.status, schema.problem(body), "none");
+      const doc = decodeProblem(body);
+      const error = doc ? problemError(response.status, doc, "none") : invalidResponse(response.status, "none", UNREADABLE, null);
       noteAuth(error);
       return { ok: false, error };
     }
-    const head = schema.envelope(body, "");
+    let head: ReturnType<CommonSchema["envelope"]>;
+    try {
+      head = schema.envelope(body, "");
+    } catch {
+      head = { ok: false, issue: UNREADABLE };
+    }
     if (!head.ok) return { ok: false, error: invalidResponse(response.status, "none", head.issue, null) };
     const value = decoder(body, "");
     if (!value.ok) return { ok: false, error: invalidResponse(response.status, "none", value.issue, null) };
@@ -260,7 +280,8 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     }
     const body = await parseBody(response);
     if (!response.ok) {
-      const error = problemError(response.status, schema.problem(body), "unknown");
+      const doc = decodeProblem(body);
+      const error = doc ? problemError(response.status, doc, "unknown") : invalidResponse(response.status, "unknown", UNREADABLE, null);
       noteAuth(error);
       return { ok: false, error, command };
     }

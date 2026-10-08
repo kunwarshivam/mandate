@@ -31,10 +31,20 @@ export const decimal: Decoder<string> = (value, path) => {
   return isCanonicalDecimal(value) ? ok(value) : fail(path, "not_canonical", value);
 };
 
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/** Years 1970 to 9999, real calendar days, hours 00–23, minutes and seconds 00–59 (journal spec §4.7). */
+function inCalendar(text: string): boolean {
+  const [year, month, day, hour, minute, second] = [text.slice(0, 4), text.slice(5, 7), text.slice(8, 10), text.slice(11, 13), text.slice(14, 16), text.slice(17, 19)].map(Number);
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const days = month === 2 && leap ? 29 : DAYS_IN_MONTH[month - 1];
+  return year >= 1970 && month >= 1 && month <= 12 && day >= 1 && day <= days && hour <= 23 && minute <= 59 && second <= 59;
+}
+
 /** A journal spec §4.7 timestamp: UTC, nine fractional digits, `Z`. */
 export const timestamp: Decoder<string> = (value, path) => {
   if (typeof value !== "string") return fail(path, "wrong_type");
-  return TIMESTAMP.test(value) ? ok(value) : fail(path, "not_canonical", value);
+  return TIMESTAMP.test(value) && inCalendar(value) ? ok(value) : fail(path, "not_canonical", value);
 };
 
 export const contentRef: Decoder<ContentRef> = (value, path) => {

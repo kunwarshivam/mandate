@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
-import { OPERATIONS, createWorkspaceClient, isIdempotencyKey, newIdempotencyKey, type Fetch } from "./client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as clientModule from "./client";
+import { CSRF_HEADER, OPERATIONS, createWorkspaceClient, isIdempotencyKey, newIdempotencyKey, type ClientOptions, type Fetch, type ProblemFields } from "./client";
+import * as decodeModule from "./decode";
 import { decimal, object, closedEnum } from "./decode";
+import * as mockServerModule from "./mock-server";
+import * as typesModule from "./types";
 import type { KillSwitchRequest, Operation } from "./types";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
@@ -10,6 +14,7 @@ const EVENT = "01J9ZQ4M5KQ3W8X2Y7V6T5R4S3";
 
 interface Call {
   url: string;
+  credentials: RequestCredentials | undefined;
   method: string;
   headers: Headers;
   body: string | null;
@@ -26,7 +31,7 @@ function problem(status: number, members: Record<string, unknown>): Response {
 function fake(answer: (call: Call) => Response | Promise<Response>) {
   const calls: Call[] = [];
   const fetch: Fetch = async (input, init) => {
-    const call = { url: input, method: init.method ?? "GET", headers: new Headers(init.headers), body: typeof init.body === "string" ? init.body : null };
+    const call = { url: input, credentials: init.credentials, method: init.method ?? "GET", headers: new Headers(init.headers), body: typeof init.body === "string" ? init.body : null };
     calls.push(call);
     return answer(call);
   };
@@ -36,7 +41,7 @@ function fake(answer: (call: Call) => Response | Promise<Response>) {
 let keys = 0;
 const newKey = () => `test-key-${String(++keys).padStart(8, "0")}`;
 
-function client(answer: (call: Call) => Response | Promise<Response>, extra: { onUnauthenticated?: () => void } = {}) {
+function client(answer: (call: Call) => Response | Promise<Response>, extra: Pick<ClientOptions, "onUnauthenticated" | "schema"> = {}) {
   const f = fake(answer);
   return { api: createWorkspaceClient({ workspaceId: WS, fetch: f.fetch, newKey, ...extra }), calls: f.calls };
 }
@@ -160,10 +165,10 @@ describe("command outcomes (spec §3.5, §5, API-13)", () => {
   it("pending E11-9: decodes a problem document to code and effect, keeping an unknown code", async () => {
     const violations = [{ path: "/scope/id", code: "invalid", message: "Not an id" }];
     const cases = [
-      { status: 409, code: "idempotency_conflict", effect: "none", retryable: false },
+      { status: 409, code: "idempotency_conflict", effect: "none", retryable: false, event_id: null as string | null },
       { status: 422, code: "invalid", effect: "none", retryable: false, violations },
       { status: 503, code: "journal_unavailable", effect: "none", retryable: true },
-      { status: 401, code: "step_up_required", effect: "recorded", retryable: false, event_id: EVENT },
+      { status: 401, code: "step_up_required", effect: "none", retryable: false },
       { status: 409, code: "added_in_v1_3", effect: "none", retryable: false },
     ];
     for (const c of cases) {
@@ -267,6 +272,13 @@ describe("authentication (spec §3.3, §3.5)", () => {
     expect(onUnauthenticated).toHaveBeenCalledTimes(1);
   });
 
+  it("pending E11-9: decodes a 401 on a command to unauthenticated with effect none and tells the app once", async () => {
+    const onUnauthenticated = vi.fn();
+    const { api } = client(() => problem(401, { code: "unauthenticated", effect: "none", retryable: false }), { onUnauthenticated });
+    expect(await api.send(api.prepareKillSwitch(workspaceKill))).toMatchObject({ ok: false, error: { code: "unauthenticated", effect: "none", status: 401 } });
+    expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+  });
+
   it("pending E11-9: never signs the owner out for step_up_required", async () => {
     const onUnauthenticated = vi.fn();
     const { api } = client(() => problem(401, { code: "step_up_required", effect: "none", retryable: false }), { onUnauthenticated });
@@ -279,11 +291,40 @@ describe("authentication (spec §3.3, §3.5)", () => {
     await api.send(api.prepare("pause", PARAMS, {}));
     await api.read("/dashboard", equity);
     expect(calls.every((c) => c.headers.get("Authorization") === null)).toBe(true);
+    expect(calls.map((c) => `${c.method} ${c.credentials}`)).toEqual(["POST same-origin", "GET same-origin"]);
+  });
+
+  it("pending E11-9: sends X-Mandate-Request: 1 on every command, the kill switch included (spec §3.3, DEC-681)", async () => {
+    const { api, calls } = client(accepted);
+    for (const operation of ALL) await api.send(api.prepare(operation, PARAMS, {}));
+    await api.send(api.prepareKillSwitch(workspaceKill));
+    expect(CSRF_HEADER).toBe("X-Mandate-Request");
+    expect(calls.map((c) => c.headers.get("X-Mandate-Request"))).toEqual(calls.map(() => "1"));
+  });
+
+  it("pending E11-9: decodes 403 forbidden with effect none as nothing recorded, never unknown", async () => {
+    const { api } = client(() => problem(403, { code: "forbidden", effect: "none", retryable: false }));
+    expect(await api.send(api.prepareKillSwitch(workspaceKill))).toMatchObject({ ok: false, error: { code: "forbidden", effect: "none", status: 403, retryable: false } });
   });
 });
 
 describe("no order ticket (DEC-528)", () => {
-  const ORDERISH = /order|buy|sell|trade|place|ticket|request/i;
+  const ORDERISH = /order|buy|sell|trade|place|ticket|request|submit|execute|fill|position/i;
+  const EXPORTS = {
+    client: ["CSRF_HEADER", "OPERATIONS", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
+    decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
+    "mock-server": ["createMockServer"],
+    types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
+  };
+  const MODULES = { client: clientModule, decode: decodeModule, "mock-server": mockServerModule, types: typesModule };
+
+  it("exports exactly the allowed names from every client module, none of them order-placing", () => {
+    for (const [name, module] of Object.entries(MODULES)) {
+      const exported = Object.keys(module).sort();
+      expect(exported, name).toEqual(EXPORTS[name as keyof typeof EXPORTS]);
+      expect(exported.filter((e) => ORDERISH.test(e)), name).toEqual([]);
+    }
+  });
 
   it("pending E11-9: exposes no order-placing method or operation", () => {
     const { api } = client(accepted);
@@ -293,7 +334,7 @@ describe("no order ticket (DEC-528)", () => {
     }
     expect([...members].filter((name) => ORDERISH.test(name))).toEqual([]);
     expect(ALL.filter((op) => ORDERISH.test(op))).toEqual([]);
-    expect(Object.values(OPERATIONS).filter((route) => /\/orders|\/requests/.test(route))).toEqual([]);
+    expect(Object.values(OPERATIONS).filter((route) => /\/(orders|requests|positions|fills|trades)\b/.test(route))).toEqual([]);
   });
 
   it("pending E11-9: refuses an operation outside its table at runtime", () => {
@@ -303,6 +344,13 @@ describe("no order ticket (DEC-528)", () => {
 });
 
 describe("the kill switch (spec §5.4, rule 13)", () => {
+  it("pending E11-9: sends exactly the request it was given, live and with a record", async () => {
+    const { api, calls } = client(accepted);
+    const record = { artifact: `sha256:${"aa".repeat(32)}`, ui_build: `sha256:${"bb".repeat(32)}` } as const;
+    await api.send(api.prepareKillSwitch({ scope: { kind: "connection", id: "con_01" }, environment_shown: "live", owner_exit: null, record, step_up: null }));
+    expect(calls[0].body).toBe(JSON.stringify({ scope: { kind: "connection", id: "con_01" }, environment_shown: "live", owner_exit: null, record, step_up: null }));
+  });
+
   it("pending E11-9: sends with record null before any read has loaded", async () => {
     const { api, calls } = client((call) => {
       if (call.method !== "POST") throw new TypeError("reads are down");
@@ -329,5 +377,64 @@ describe("the kill switch (spec §5.4, rule 13)", () => {
     await api.send(command);
     expect(calls[1].headers.get("Idempotency-Key")).toBe(calls[0].headers.get("Idempotency-Key"));
     expect(JSON.parse(calls[1].body ?? "").scope).toEqual({ kind: "agent", id: "agt_01" });
+  });
+});
+
+describe("idempotency keys come from the CSPRNG (spec §3.4)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("pending E11-9: draws every key from crypto.getRandomValues", () => {
+    const random = vi.spyOn(globalThis.crypto, "getRandomValues").mockImplementation((array) => {
+      if (array instanceof Uint8Array) array.fill(0);
+      return array;
+    });
+    const mathRandom = vi.spyOn(Math, "random");
+    const a = newIdempotencyKey();
+    const b = newIdempotencyKey();
+    expect(random).toHaveBeenCalled();
+    expect(mathRandom).not.toHaveBeenCalled();
+    expect(isIdempotencyKey(a)).toBe(true);
+    expect(b).toBe(a);
+  });
+});
+
+describe("problem defaults (spec §3.5)", () => {
+  it("pending E11-9: defaults retryable from the effect when the problem omits it", async () => {
+    const cases = [
+      { effect: "none", retryable: false },
+      { effect: "recorded", retryable: false },
+      { effect: "unknown", retryable: true },
+    ];
+    for (const c of cases) {
+      const { api } = client(() => problem(409, { code: "some_code", effect: c.effect }));
+      expect(await api.send(api.prepare("pause", PARAMS, {})), c.effect).toMatchObject({ ok: false, error: { effect: c.effect, retryable: c.retryable } });
+    }
+  });
+});
+
+describe("the common-schema seam", () => {
+  const conflict = () => problem(409, { code: "idempotency_conflict", effect: "none", retryable: false });
+  const stated = (fields: Partial<ProblemFields>): ProblemFields => ({ code: null, effect: null, event_id: null, retryable: null, violations: [], ...fields });
+
+  it("pending E11-9: makes a command unknown when a custom problem decoder states no effect", async () => {
+    const { api } = client(conflict, { schema: { problem: () => stated({ code: "idempotency_conflict" }) } });
+    expect(await api.send(api.prepare("pause", PARAMS, {}))).toMatchObject({ ok: false, error: { code: "idempotency_conflict", effect: "unknown" } });
+  });
+
+  it("pending E11-9: makes a command unknown, never a rejection, when a custom decoder throws", async () => {
+    const throwing = () => {
+      throw new Error("generated decoder failed");
+    };
+    const failing = client(conflict, { schema: { problem: throwing } });
+    await expect(failing.api.send(failing.api.prepare("pause", PARAMS, {}))).resolves.toMatchObject({ ok: false, error: { effect: "unknown" } });
+    const reads = client(() => json(200, { api_version: "1", as_of: [MARK], equity: "1", mode: "normal" }), { schema: { envelope: throwing } });
+    await expect(reads.api.read("/dashboard", equity)).resolves.toMatchObject({ ok: false, error: { code: "invalid_response", effect: "none" } });
+  });
+
+  it("pending E11-9: keeps a default when the schema leaves a member undefined", async () => {
+    const { api } = client(conflict, { schema: { problem: undefined, envelope: undefined } });
+    expect(await api.send(api.prepare("pause", PARAMS, {}))).toMatchObject({ ok: false, error: { code: "idempotency_conflict", effect: "none" } });
   });
 });

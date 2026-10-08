@@ -15,8 +15,13 @@ const kill: KillSwitchRequest = { scope: { kind: "workspace", id: null }, enviro
 let keys = 0;
 function setup(scenario: Scenario = "normal") {
   const server = createMockServer({ workspaceId: WS, scenario });
-  const api = createWorkspaceClient({ workspaceId: WS, fetch: server.fetch, newKey: () => `mock-key-${String(++keys).padStart(8, "0")}` });
-  return { server, api };
+  const sent: Headers[] = [];
+  const fetch: typeof server.fetch = (input, init) => {
+    sent.push(new Headers(init.headers));
+    return server.fetch(input, init);
+  };
+  const api = createWorkspaceClient({ workspaceId: WS, fetch, newKey: () => `mock-key-${String(++keys).padStart(8, "0")}` });
+  return { server, api, sent };
 }
 
 function post(server: ReturnType<typeof setup>["server"], path: string, body: unknown, key: string | null) {
@@ -83,10 +88,33 @@ describe("the fixture-backed mock server", () => {
     expect(await api.send(api.prepareKillSwitch(kill))).toMatchObject({ ok: false, error: { code: "network", effect: "unknown" } });
   });
 
-  it("pending E11-9: plays result-unknown as commands taken and never answered", async () => {
+  it("pending E11-9: plays result-unknown as commands recorded and never answered, found by a later status poll", async () => {
     const { server, api } = setup("result-unknown");
     expect((await api.read("/health", health)).ok).toBe(true);
     expect(await api.send(api.prepare("pause", { agent: "agt_01" }, { record: null }))).toMatchObject({ ok: false, error: { effect: "unknown" } });
-    expect(server.recorded()).toHaveLength(0);
+    expect(server.recorded()).toHaveLength(1);
+    expect(await api.commandStatus(server.recorded()[0].event_id)).toMatchObject({ ok: true, value: { phase: "recorded" } });
+  });
+
+  it("pending E11-9: treats the same key on another route as another command", async () => {
+    const { server } = setup();
+    const key = "shared-key-000000001";
+    const pause = await (await post(server, "/agents/agt_01/pause", { record: null }, key)).json();
+    const resume = await (await post(server, "/agents/agt_01/resume", { record: null }, key)).json();
+    expect(server.recorded()).toHaveLength(2);
+    expect(resume.command_id).not.toBe(pause.command_id);
+  });
+
+  it("pending E11-9: answers 404 for the status of an event it never recorded", async () => {
+    const { api } = setup();
+    expect(await api.commandStatus("01J9ZQ4M5KQ3W8X2Y7V6T5R4S3")).toMatchObject({ ok: false, error: { code: "not_found", effect: "none", status: 404 } });
+  });
+
+  it("pending E11-9: is reached with no bearer token", async () => {
+    const { api, sent } = setup();
+    await api.read("/health", health);
+    await api.send(api.prepareKillSwitch(kill));
+    expect(sent).toHaveLength(2);
+    expect(sent.every((h) => h.get("Authorization") === null)).toBe(true);
   });
 });
