@@ -321,8 +321,9 @@ crates.
   registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`),
   and the policy set and model registry that govern the run, DEC-534 (tests in
   `crates/mandate-shell/tests/governance.rs`);
-  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed E7-7 AAPL artifacts and
-  binds the bytes it checked, reads the GET-only broker preflight (including the trailing window's
+  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed artifacts and binds the
+  bytes it checked (`Artifacts::from_registered` takes them from the confirmed version and the
+  registered objects instead of files, Q1; tests in `crates/mandate-shell/tests/registered.rs`), reads the GET-only broker preflight (including the trailing window's
   IEX minute bars, DEC-471) and the liquidity facts into one `PaperFacts` snapshot, refuses any
   missing, stale, or ambiguous fact or a non-clean account, and assembles the trusted run and
   executor contexts from that snapshot alone (DEC-470); `src/adapters.rs` the production adapters:
@@ -1100,7 +1101,7 @@ proves each pending test fails on them (DEC-110).
 - **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
   takes the stream's latest confirmed version and a code bound to the agent and the version, and
   commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
-  stubbed; `crates/mandate-cli/tests/deploy.rs`, pending E10-16, over a control stream seeded in
+  on `version.rs`'s checks; `crates/mandate-cli/tests/deploy.rs`, over a control stream seeded in
   §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
   force; every refusal code, each writing nothing; a failing store committing nothing.
   `cargo nextest run -p mandate-cli --test deploy`.
