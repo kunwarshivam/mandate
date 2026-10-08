@@ -29,6 +29,7 @@
 /crates/mandate-artifacts-fs/ @kunwarshivam
 /crates/mandate-domain/     @kunwarshivam
 /crates/mandate-approval/   @kunwarshivam
+/crates/mandate-passkey/    @kunwarshivam
 /crates/mandate-cli/        @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
 /crates/mandate-accounting/ @kunwarshivam
@@ -46,5 +47,6 @@
 /crates/mandate-liquidity/  @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
 /crates/mandate-mcp/        @kunwarshivam
+/crates/mandate-vault-local/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-modelhost/  @kunwarshivam
