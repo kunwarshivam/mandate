@@ -23849,6 +23849,46 @@
     }
    },
    {
+    "name": "lift_copied_without_its_command",
+    "clause": "rule 80: a lift's copy names its command",
+    "base_draft": "lifted",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "copy_with_a_null_hold",
+    "clause": "§9.10 types: `held` is a boolean on every version-2 copy",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "restriction_changed"
+     },
+     {
+      "path": "causation_id",
+      "value": null
+     },
+     {
+      "path": "payload.held",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.held"
+    }
+   },
+   {
     "name": "resume_copied_without_its_command",
     "clause": "rule 80: every owner copy at version 2",
     "base_draft": "lifted",
@@ -24368,7 +24408,122 @@
     "expect": []
    },
    {
-    "name": "two_violations_and_only_the_first_reported",
+    "name": "a_version_1_record_after_a_first_copy",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused"
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "a_lift_then_a_copy_that_holds_nothing",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "normal",
+       "reason": "owner_lift_hold",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_lift_then_a_copy_that_keeps_the_hold",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "normal",
+       "reason": "owner_lift_hold",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused",
+       "held": true
+      }
+     }
+    ],
+    "expect": [
+     2
+    ]
+   },
+   {
+    "name": "the_carried_hold_is_the_expected_one_not_the_written_one",
     "from_seq": 1,
     "anchor": null,
     "events": [
@@ -24407,16 +24562,91 @@
      }
     ],
     "expect": [
+     1
+    ]
+   },
+   {
+    "name": "two_violations_and_only_the_first_reported",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": [
      1,
      2
+    ]
+   },
+   {
+    "name": "a_hold_whose_held_contradicts_its_reason",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": true
+      }
+     }
+    ],
+    "expect": [
+     0
     ]
    },
    {
     "name": "a_later_range_launders_a_dropped_hold",
     "from_seq": 40,
     "anchor": {
-     "held": true,
-     "v2_before": true
+     "v2_before": true,
+     "held": true
     },
     "events": [
      {
@@ -24439,8 +24669,8 @@
     "name": "a_later_range_starts_with_version_1_after_a_version_2",
     "from_seq": 40,
     "anchor": {
-     "held": false,
-     "v2_before": true
+     "v2_before": true,
+     "held": false
     },
     "events": [
      {
@@ -24462,8 +24692,8 @@
     "name": "a_later_range_whose_predecessor_was_not_held",
     "from_seq": 40,
     "anchor": {
-     "held": false,
-     "v2_before": true
+     "v2_before": true,
+     "held": false
     },
     "events": [
      {
@@ -24481,11 +24711,11 @@
     "expect": []
    },
    {
-    "name": "a_later_range_carries_its_anchor",
+    "name": "a_later_range_carries_the_hold_of_a_copy",
     "from_seq": 40,
     "anchor": {
-     "held": true,
-     "v2_before": true
+     "v2_before": true,
+     "held": true
     },
     "events": [
      {
@@ -24508,6 +24738,37 @@
        "reason": "owner_resume",
        "lifecycle": "normal",
        "held": true
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_later_range_with_no_version_2_before",
+    "from_seq": 40,
+    "anchor": {
+     "v2_before": false
+    },
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused"
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
       }
      }
     ],
@@ -24605,7 +24866,7 @@
     "expect": []
    },
    {
-    "name": "an_unanchored_range_opens_with_a_copy_and_fails_closed",
+    "name": "an_unanchored_range_opens_with_a_held_copy_and_fails_closed",
     "from_seq": 40,
     "anchor": null,
     "events": [
@@ -24618,6 +24879,27 @@
        "reason": "restriction_changed",
        "lifecycle": "normal",
        "held": true
+      }
+     }
+    ],
+    "expect": [
+     0
+    ]
+   },
+   {
+    "name": "an_unanchored_range_opens_with_a_clear_copy_and_fails_closed",
+    "from_seq": 40,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
       }
      }
     ],
