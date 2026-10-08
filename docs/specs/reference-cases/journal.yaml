@@ -12016,6 +12016,228 @@ workspace_api:
       outcome: Invalid
       reason: schema
       path: payload.tokens.cached
+  - name: rule_55_refuses_agent
+    clause: 'rule 55: a agent actor'
+    base_draft: draft_created
+    changes:
+    - path: actor
+      value:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    - path: artifact_refs
+      value:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_55_refuses_broker
+    clause: 'rule 55: a broker actor'
+    base_draft: draft_created
+    changes:
+    - path: actor
+      value:
+        kind: broker
+        id: broker_01
+        version: '1'
+        build: null
+    - path: artifact_refs
+      value:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_55_refuses_platform_operator
+    clause: 'rule 55: a platform_operator actor'
+    base_draft: draft_created
+    changes:
+    - path: actor
+      value:
+        kind: platform_operator
+        id: op_01
+        version: '1'
+        build: null
+    - path: artifact_refs
+      value:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_61_refuses_agent
+    clause: 'rule 61: a agent actor'
+    base_draft: compile_ok
+    changes:
+    - path: actor
+      value:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    - path: artifact_refs
+      value:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      - sha256:8888888888888888888888888888888888888888888888888888888888888888
+      - sha256:9999999999999999999999999999999999999999999999999999999999999999
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_61_refuses_broker
+    clause: 'rule 61: a broker actor'
+    base_draft: compile_ok
+    changes:
+    - path: actor
+      value:
+        kind: broker
+        id: broker_01
+        version: '1'
+        build: null
+    - path: artifact_refs
+      value:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      - sha256:8888888888888888888888888888888888888888888888888888888888888888
+      - sha256:9999999999999999999999999999999999999999999999999999999999999999
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_61_refuses_platform_operator
+    clause: 'rule 61: a platform_operator actor'
+    base_draft: compile_ok
+    changes:
+    - path: actor
+      value:
+        kind: platform_operator
+        id: op_01
+        version: '1'
+        build: null
+    - path: artifact_refs
+      value:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      - sha256:8888888888888888888888888888888888888888888888888888888888888888
+      - sha256:9999999999999999999999999999999999999999999999999999999999999999
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_63_refuses_agent
+    clause: 'rule 63: a agent actor'
+    base_draft: confirmed_v2
+    changes:
+    - path: actor
+      value:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:2222222222222222222222222222222222222222222222222222222222222222
+      - sha256:7777777777777777777777777777777777777777777777777777777777777777
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_63_refuses_broker
+    clause: 'rule 63: a broker actor'
+    base_draft: confirmed_v2
+    changes:
+    - path: actor
+      value:
+        kind: broker
+        id: broker_01
+        version: '1'
+        build: null
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:2222222222222222222222222222222222222222222222222222222222222222
+      - sha256:7777777777777777777777777777777777777777777777777777777777777777
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_63_refuses_platform_operator
+    clause: 'rule 63: a platform_operator actor'
+    base_draft: confirmed_v2
+    changes:
+    - path: actor
+      value:
+        kind: platform_operator
+        id: op_01
+        version: '1'
+        build: null
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:2222222222222222222222222222222222222222222222222222222222222222
+      - sha256:7777777777777777777777777777777777777777777777777777777777777777
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_64_refuses_agent
+    clause: 'rule 64: a agent actor'
+    base_draft: request_owner
+    changes:
+    - path: actor
+      value:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_64_refuses_broker
+    clause: 'rule 64: a broker actor'
+    base_draft: request_owner
+    changes:
+    - path: actor
+      value:
+        kind: broker
+        id: broker_01
+        version: '1'
+        build: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: rule_64_refuses_platform_operator
+    clause: 'rule 64: a platform_operator actor'
+    base_draft: request_owner
+    changes:
+    - path: actor
+      value:
+        kind: platform_operator
+        id: op_01
+        version: '1'
+        build: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
   - name: draft_wrong_stream
     clause: '§9.8: a draft is a control-stream record'
     base_draft: draft_created
@@ -14066,6 +14288,115 @@ client_actor:
       value: []
     expect:
       outcome: Valid
+  kill_switch:
+    envelope_version: 1
+    environment: paper
+    event_id: 01J8Z5C2B000000000000000C6
+    stream_id: ctl:ws_01J8Z2
+    event_type: OwnerCommandIssued
+    schema_version: 1
+    event_time: '2026-10-08T15:00:00.000000000Z'
+    clock_source: local
+    causation_id: null
+    correlation_id: null
+    actor:
+      kind: user
+      id: user_owner_01
+      version: '1'
+      build: null
+    config_refs: {}
+    payload:
+      agent: null
+      command: kill_switch
+      scope: connection
+      subject: conn_01
+      release: null
+      warning_shown: null
+      bid: null
+      bid_size: null
+      floor: null
+      user: user_owner_01
+      submitted_at: 1791470000
+      step_up: null
+    artifact_refs: []
+    pii_refs: []
+  valid_batches:
+  - name: the_kill_switch_then_its_revocation
+    clause: 'rule 69: one batch, the connection''s kill switch first (workspace API §5.6)'
+    drafts:
+    - kill_switch: true
+      changes: []
+    - base_draft: revoked_compromised
+      changes: []
+    expect:
+      outcome: Committed
+  invalid_batches:
+  - name: a_revocation_naming_another_event
+    clause: 'rule 69: the cause is the kill switch, not any event'
+    drafts:
+    - kill_switch: true
+      changes: []
+    - base_draft: revoked_compromised
+      changes:
+      - path: causation_id
+        value: 01J8Z5C2C000000000000000C7
+    expect: &id006
+      outcome: Invalid
+      draft_index: 1
+      reason: schema
+      path: causation_id
+  - name: a_revocation_after_a_workspace_kill_switch
+    clause: 'rule 69: the kill switch is at the connection''s scope, not a wider one'
+    drafts:
+    - kill_switch: true
+      changes:
+      - path: payload.scope
+        value: workspace
+    - base_draft: revoked_compromised
+      changes: []
+    expect: *id006
+  - name: a_revocation_after_another_connections_kill_switch
+    clause: 'rule 69: the kill switch is this connection''s'
+    drafts:
+    - kill_switch: true
+      changes:
+      - path: payload.subject
+        value: conn_02
+    - base_draft: revoked_compromised
+      changes: []
+    expect: *id006
+  - name: a_revocation_after_a_pause
+    clause: 'rule 69: the command is a kill switch'
+    drafts:
+    - kill_switch: true
+      changes:
+      - path: payload.command
+        value: pause
+    - base_draft: revoked_compromised
+      changes: []
+    expect: *id006
+  - name: a_revocation_alone
+    clause: 'rule 69: the kill switch is in the same batch'
+    drafts:
+    - base_draft: revoked_compromised
+      changes: []
+    expect:
+      outcome: Invalid
+      draft_index: 0
+      reason: schema
+      path: causation_id
+  - name: a_revocation_before_its_kill_switch
+    clause: 'rule 69: the kill switch is earlier in the batch'
+    drafts:
+    - base_draft: revoked_compromised
+      changes: []
+    - kill_switch: true
+      changes: []
+    expect:
+      outcome: Invalid
+      draft_index: 0
+      reason: schema
+      path: causation_id
 hold:
   spec: docs/specs/journal.md v0.21 §9.10 (DEC-672)
   drafts:
@@ -14087,11 +14418,18 @@ hold:
         build: null
       config_refs: {}
       payload:
-        agent_id: agent_a
+        agent: agent_a
         command: hold_openings
+        scope: agent
+        subject: agent_a
+        release: null
+        warning_shown: null
+        bid: null
+        bid_size: null
+        floor: null
+        user: user_owner_01
         submitted_at: 1791475200
         step_up: null
-        user: user_owner_01
       artifact_refs: []
       pii_refs: []
     lift:
@@ -14112,14 +14450,21 @@ hold:
         build: null
       config_refs: {}
       payload:
-        agent_id: agent_a
+        agent: agent_a
         command: lift_hold
+        scope: agent
+        subject: agent_a
+        release: null
+        warning_shown: null
+        bid: null
+        bid_size: null
+        floor: null
+        user: user_owner_01
         submitted_at: 1791475260
         step_up:
           assertion_id: assert_owner_09
           authenticated_at: 1791475190
           method: cli_confirm
-        user: user_owner_01
       artifact_refs: []
       pii_refs: []
     held:
@@ -14196,26 +14541,26 @@ hold:
       artifact_refs: []
       pii_refs: []
   invalid_drafts:
-  - name: hold.agent_id.kind
+  - name: hold.agent.kind
     clause: §9.10 types
     base_draft: hold
     changes:
-    - path: payload.agent_id
+    - path: payload.agent
       value: 7
     expect:
       outcome: Invalid
       reason: schema
-      path: payload.agent_id
-  - name: hold.agent_id.form
+      path: payload.agent
+  - name: hold.agent.form
     clause: §9.10 types
     base_draft: hold
     changes:
-    - path: payload.agent_id
+    - path: payload.agent
       value: agent a
     expect:
       outcome: Invalid
       reason: non_canonical
-      path: payload.agent_id
+      path: payload.agent
   - name: hold.command.kind
     clause: §9.10 types
     base_draft: hold
@@ -14236,6 +14581,66 @@ hold:
       outcome: Invalid
       reason: non_canonical
       path: payload.command
+  - name: hold.scope.kind
+    clause: §9.10 types
+    base_draft: hold
+    changes:
+    - path: payload.scope
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.scope
+  - name: hold.scope.form
+    clause: §9.10 types
+    base_draft: hold
+    changes:
+    - path: payload.scope
+      value: connection
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.scope
+  - name: hold.subject.kind
+    clause: §9.10 types
+    base_draft: hold
+    changes:
+    - path: payload.subject
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.subject
+  - name: hold.subject.form
+    clause: §9.10 types
+    base_draft: hold
+    changes:
+    - path: payload.subject
+      value: agent a
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.subject
+  - name: hold.release.kind
+    clause: §9.10 types
+    base_draft: hold
+    changes:
+    - path: payload.release
+      value: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.release
+  - name: hold.bid.kind
+    clause: §9.10 types
+    base_draft: hold
+    changes:
+    - path: payload.bid
+      value: '101.5'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.bid
   - name: hold.submitted_at.kind
     clause: §9.10 types
     base_draft: hold
@@ -14276,16 +14681,16 @@ hold:
       outcome: Invalid
       reason: non_canonical
       path: payload.user
-  - name: hold.agent_id.null
+  - name: hold.agent.null
     clause: §9.10 types
     base_draft: hold
     changes:
-    - path: payload.agent_id
+    - path: payload.agent
       value: null
     expect:
       outcome: Invalid
       reason: schema
-      path: payload.agent_id
+      path: payload.agent
   - name: hold.command.null
     clause: §9.10 types
     base_draft: hold
@@ -14296,6 +14701,26 @@ hold:
       outcome: Invalid
       reason: schema
       path: payload.command
+  - name: hold.scope.null
+    clause: §9.10 types
+    base_draft: hold
+    changes:
+    - path: payload.scope
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.scope
+  - name: hold.subject.null
+    clause: §9.10 types
+    base_draft: hold
+    changes:
+    - path: payload.subject
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.subject
   - name: hold.submitted_at.null
     clause: §9.10 types
     base_draft: hold
@@ -14320,12 +14745,12 @@ hold:
     clause: §9.10 closed
     base_draft: hold
     changes:
-    - path: payload.agent_id
+    - path: payload.agent
       delete: true
     expect:
       outcome: Invalid
       reason: schema
-      path: payload.agent_id
+      path: payload.agent
   - name: hold.extra
     clause: §9.10 closed
     base_draft: hold
@@ -14727,6 +15152,16 @@ hold:
       outcome: Invalid
       reason: schema
       path: payload.user
+  - name: hold_for_another_agent
+    clause: 'rule 76: an agent-scope command''s subject is its agent'
+    base_draft: hold
+    changes:
+    - path: payload.subject
+      value: agent_b
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.subject
   - name: hold_with_step_up
     clause: 'rule 77: a hold needs no step-up and carries none'
     base_draft: hold

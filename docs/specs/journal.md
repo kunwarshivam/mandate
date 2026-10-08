@@ -339,16 +339,19 @@ their second party. Checked at append, after the envelope's types (reason `schem
 
 66. `on_behalf_of` is present exactly when `kind` is `client`, and is then an `id`
     (`actor.on_behalf_of`; a well-typed string of the wrong form is `non_canonical`). Every other
-    actor is exactly as before. The host CLI's `system` actor with `on_behalf_of` (identity spec
+    actor is exactly as before. The API sets it from the client's token, which names a user, so it
+    is never the client's own `id`. The host CLI's `system` actor with `on_behalf_of` (identity spec
     §6.4) is not admitted by this version; the change that adds `HostCliRegistered` widens this rule.
 67. A `client` actor's `build` is `null` (`actor.build`): a client is external.
 68. A `client` actor is on the control stream, on `MandateDraftSaved`, `OwnerRequestSubmitted`,
     `RecordsAccessed`, or `OwnerCommandIssued` only (`actor.kind`), reported before the payload is
     read. These are its `propose`, `request`, `read` and `dry_run`, and `hold` scopes (workspace API
-    §3.8); rule 75 confines its `OwnerCommandIssued` to `hold_openings`. Whatever else identity spec
-    ID-11 forbids a client (confirming, approving, acknowledging, pausing and every other owner
-    command, connections, membership) is refused at append, and check 3 refuses an approval again
-    at the runtime.
+    §3.8); rule 75 confines its `OwnerCommandIssued` to `hold_openings`. `RecordsAccessed`'s
+    payload is not closed yet (the audit lane closes it); rule 68 admits a client on it at append,
+    but a client's read is journaled only once that schema exists, and it must use this actor
+    shape. Whatever else identity spec ID-11 forbids a client (confirming, approving,
+    acknowledging, pausing and every other owner command, connections, membership) is refused at
+    append, and check 3 refuses an approval again at the runtime.
 
 ## 4. Canonical serialization
 
@@ -1777,9 +1780,14 @@ stays registered and unchanged (§8); the workspace API writes version 2.
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 
 69. `ConnectionRevoked` version 2: `causation_id` is non-null exactly when `reason` is
-    `compromised` (`causation_id`). A compromised revocation names the connection-scope kill switch
-    (`OwnerCommandIssued`) committed before it in the same batch (workspace API §5.6), so the
-    record shows the kill switch ran first; an ordinary revoke has no cause.
+    `compromised` (`causation_id`); an ordinary revoke has no cause. A compromised revocation's
+    `causation_id` names an `OwnerCommandIssued` earlier in the same `append` batch whose `command`
+    is `kill_switch`, whose `scope` is `connection`, and whose `subject` is the revoked
+    `connection_id` (`causation_id`, as rule 45 checks its pair inside one batch). So the record
+    shows this connection's kill switch ran first (workspace API §5.6), and a revocation citing any
+    other event, a wider kill switch, or a cause outside its batch is refused. These are the
+    members the CLI writes on a kill switch today; no §11 check repeats the clause, since a range
+    never splits a batch.
 70. `ConnectionRevoked` version 2: the actor is a `user` (`actor.kind`).
 71. `ClientConnected`: `scopes` and `agents` are non-empty (the first that is empty).
 72. `ClientConnected`: `scopes` and `agents` are each strictly ascending by bytes (`non_canonical`
@@ -1803,16 +1811,22 @@ The hold is owner state beside the lifecycle of §9.1's `AgentModeChanged`: it s
 resume, and a restriction lifting, so the agent stream records it on every mode change. Closed as
 §9.7's records are; times are integer risk-clock seconds as §9.7's are (DEC-533 item 2).
 
-**`OwnerCommandIssued`**, for `hold_openings` and `lift_hold` only. The other commands' members are
-not closed here (M7's agent-commands slice closes them); rules 68 and 75 apply to every command.
+**`OwnerCommandIssued`**, for `hold_openings` and `lift_hold` only. The members, in order, are
+the ones the CLI already writes for every owner command (`mandate-cli`'s `agent::issued`), so the
+other commands close later (M7's agent-commands slice) without a member renamed; here the Stop's
+and the owner exit's members are always `null`. Rules 68 and 75 apply to every command.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `agent_id` | `id` | |
+| `agent` | `id` | The agent held or released |
 | `command` | `hold_openings` \| `lift_hold` | |
+| `scope` | `agent` | A hold is per agent |
+| `subject` | `id` | The scope's subject, the agent itself: rule 76 |
+| `release`, `warning_shown` | `null` | A Stop's release choice and warning; none here |
+| `bid`, `bid_size`, `floor` | `null` | An owner exit's confirmed bid; none here |
+| `user` | `text` | The human who asked (opaque): rule 76 |
 | `submitted_at` | `integer` | The risk-clock second it was committed at |
 | `step_up` | `{assertion_id: text, authenticated_at: integer, method: text}?` | A lift's evidence, judged by the runtime; `null` for a hold: rule 77 |
-| `user` | `text` | The human who asked (opaque): rule 76 |
 
 **`AgentModeChanged`** version 2 on the agent stream: version 1's members, with the reasons
 `owner_hold` and `owner_lift_hold`, then `held`. Version 1 stays registered and unchanged (§8), and
@@ -1832,7 +1846,8 @@ stream only (rule 26). A lift whose step-up does not count is refused like a res
 
 75. `OwnerCommandIssued`: the actor is a `user` or, for `hold_openings` only, a `client`
     (`actor.kind`). A client never lifts a hold, pauses, resumes, or stops (identity spec ID-11).
-76. `OwnerCommandIssued`: `user` is the actor's human (§3) (`payload.user`).
+76. `OwnerCommandIssued`: `user` is the actor's human (§3) (`payload.user`), and `subject` is
+    `agent` (`payload.subject`).
 77. `OwnerCommandIssued`: a `hold_openings` has a `null` `step_up` (`payload.step_up`). A hold only
     reduces risk, so it needs none (`AGENTS.md` rule 2), and a client never presents one.
 78. `AgentModeChanged` version 2: `held` is true when `reason` is `owner_hold` and false when it is

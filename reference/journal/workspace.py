@@ -61,6 +61,17 @@ PRICE_TABLE = "sha256:" + "b" * 64
 ASSET = "0f9e7d3c-5b1a-4c2e-8f6d-9a8b7c6d5e4f"
 DEADLINE = "2026-10-08T14:00:30.000000000Z"
 COMPLETED = "2026-10-08T14:00:12.500000000Z"
+AGENT_ACTOR = {"kind": "agent", "id": AGENT, "version": "0.1.0", "build": "sha256:" + "c" * 64}
+BROKER = {"kind": "broker", "id": "broker_01", "version": "1", "build": None}
+OPERATOR = {"kind": "platform_operator", "id": "op_01", "version": "1", "build": None}
+OTHER_ACTORS = {"agent": AGENT_ACTOR, "broker": BROKER, "platform_operator": OPERATOR}
+# Each actor rule, the base it is judged on, and the kinds besides those its own cases already cover.
+ACTOR_RULES = (
+    ("55", "draft_created", ("agent", "broker", "platform_operator")),
+    ("61", "compile_ok", ("agent", "broker", "platform_operator")),
+    ("63", "confirmed_v2", ("agent", "broker", "platform_operator")),
+    ("64", "request_owner", ("agent", "broker", "platform_operator")),
+)
 NOTHING_SENT = {
     "response_ref": None,
     "reported_identity": None,
@@ -279,6 +290,23 @@ def member_drafts() -> list[dict]:
     return out
 
 
+def actor_drafts() -> list[dict]:
+    """Every actor kind a rule refuses, not only `system` and `user`, so a rule read as "not the
+    system" or "not a user" is caught."""
+    return [
+        invalid(
+            f"rule_{number}_refuses_{kind}",
+            f"rule {number}: a {kind} actor",
+            base,
+            [change("actor", dict(OTHER_ACTORS[kind]))],
+            "schema",
+            "actor.kind",
+        )
+        for number, base, kinds in ACTOR_RULES
+        for kind in kinds
+    ]
+
+
 def invalid_drafts() -> list[dict]:
     """Each draft breaks exactly one rule, or the rules its `also` lists; together they cover every
     §9.8 member type and rule."""
@@ -288,6 +316,7 @@ def invalid_drafts() -> list[dict]:
     req = "request_owner"
     return [
         *member_drafts(),
+        *actor_drafts(),
         invalid(
             "draft_wrong_stream",
             "§9.8: a draft is a control-stream record",
@@ -764,6 +793,10 @@ VALIDATOR_MUTANTS = (
     "rule.62.moved",
     "rule.63",
     "rule.64.actor",
+    "rule.55.not_system_only",
+    "rule.61.not_user_only",
+    "rule.63.not_system_only",
+    "rule.64.not_system_only",
     "rule.64.requested_by",
     "rule.64.client_id",
     "rule.65",

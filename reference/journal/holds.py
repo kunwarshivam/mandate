@@ -71,13 +71,32 @@ def envelope(name, event_type, actor, payload, causation=None, version=1, stream
     }
 
 
+def command(name: str, submitted_at: int, step_up) -> dict:
+    """An agent-scope command with the CLI's members (`agent::issued`): the bid and release members
+    are an owner exit's and a Stop's, so they are `null` here."""
+    return {
+        "agent": AGENT,
+        "command": name,
+        "scope": "agent",
+        "subject": AGENT,
+        "release": None,
+        "warning_shown": None,
+        "bid": None,
+        "bid_size": None,
+        "floor": None,
+        "user": OWNER,
+        "submitted_at": submitted_at,
+        "step_up": step_up,
+    }
+
+
 def mode(from_, to, reason, lifecycle, held) -> dict:
     return {"from": from_, "to": to, "reason": reason, "lifecycle": lifecycle, "held": held}
 
 
 def base_drafts() -> dict[str, dict]:
-    hold = {"agent_id": AGENT, "command": "hold_openings", "submitted_at": SUBMITTED_AT, "step_up": None, "user": OWNER}
-    lift = {"agent_id": AGENT, "command": "lift_hold", "submitted_at": SUBMITTED_AT + 60, "step_up": dict(STEP_UP), "user": OWNER}
+    hold = command("hold_openings", SUBMITTED_AT, None)
+    lift = command("lift_hold", SUBMITTED_AT + 60, dict(STEP_UP))
     refused = {"command": "lift_hold", "reason": "step_up_stale", "effective_at": "2026-10-08T16:06:00.000000000Z"}
     agent = {"stream": AGENT_STREAM, "version": 2}
     return {
@@ -103,8 +122,12 @@ def valid(name, clause, base, changes):
 
 MEMBER_CASES = {
     "hold": (
-        ("agent_id", 7, "agent a"),
+        ("agent", 7, "agent a"),
         ("command", 7, "pause"),
+        ("scope", 7, "connection"),
+        ("subject", 7, "agent a"),
+        ("release", True, None),
+        ("bid", "101.5", None),
         ("submitted_at", "2026-10-08T16:00:00.000000000Z", None),
         ("step_up", "cli_confirm", None),
         ("user", 7, ""),
@@ -122,11 +145,11 @@ MEMBER_CASES = {
         ("effective_at", 1791475560, "2026-10-08T16:06:00Z"),
     ),
 }
-# `held` on a hold's copy is rule 78's and `user` rule 76's, at the member's own path with the same
+# `held` on a hold's copy is rule 78's, and `user` and `subject` rule 76's, at the member's own path with the same
 # reason, so a mistyped or `null` value is refused identically whether or not its type is checked.
-RULE_TYPED = ("held", "user")
+RULE_TYPED = ("held", "user", "subject")
 NULLED = {
-    "hold": ("agent_id", "command", "submitted_at", "user"),
+    "hold": ("agent", "command", "scope", "subject", "submitted_at", "user"),
     "held": ("from", "to", "reason", "lifecycle", "held"),
     "lift_refused": ("command", "reason", "effective_at"),
 }
@@ -233,6 +256,14 @@ def invalid_drafts() -> list[dict]:
             [change("actor", dict(CLIENT)), change("payload.user", "client_01")],
             "schema",
             "payload.user",
+        ),
+        invalid(
+            "hold_for_another_agent",
+            "rule 76: an agent-scope command's subject is its agent",
+            "hold",
+            [change("payload.subject", "agent_b")],
+            "schema",
+            "payload.subject",
         ),
         invalid(
             "hold_with_step_up",
@@ -420,6 +451,8 @@ VALIDATOR_MUTANTS = (
     "rule.75",
     "rule.75.client_lifts",
     "rule.76",
+    "rule.76.subject",
+    "types.null",
     "rule.77",
     "rule.78",
     "rule.79",

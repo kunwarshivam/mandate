@@ -528,9 +528,171 @@ def valid_drafts() -> list[dict]:
     ]
 
 
+# --------------------------------------------------------------------------- rule 69's batches
+
+KILL_SWITCH_DRAFT = {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": KILL_SWITCH,
+    "stream_id": STREAM,
+    "event_type": "OwnerCommandIssued",
+    "schema_version": 1,
+    "event_time": AT,
+    "clock_source": "local",
+    "causation_id": None,
+    "correlation_id": None,
+    "actor": dict(USER),
+    "config_refs": {},
+    "payload": {
+        "agent": None,
+        "command": "kill_switch",
+        "scope": "connection",
+        "subject": "conn_01",
+        "release": None,
+        "warning_shown": None,
+        "bid": None,
+        "bid_size": None,
+        "floor": None,
+        "user": OWNER,
+        "submitted_at": 1791470000,
+        "step_up": None,
+    },
+    "artifact_refs": [],
+    "pii_refs": [],
+}
+OTHER_EVENT = "01J8Z5C2C000000000000000C7"
+
+
+def batch_case(name: str, clause: str, members: list[dict], expect: dict) -> dict:
+    return {"name": name, "clause": clause, "drafts": members, "expect": expect}
+
+
+def kill(*changes: dict) -> dict:
+    return {"kill_switch": True, "changes": list(changes)}
+
+
+def revoked(*changes: dict) -> dict:
+    return {"base_draft": "revoked_compromised", "changes": list(changes)}
+
+
+def valid_batches() -> list[dict]:
+    return [
+        batch_case(
+            "the_kill_switch_then_its_revocation",
+            "rule 69: one batch, the connection's kill switch first (workspace API §5.6)",
+            [kill(), revoked()],
+            {"outcome": "Committed"},
+        ),
+    ]
+
+
+def invalid_batches() -> list[dict]:
+    invalid_at = {"outcome": "Invalid", "draft_index": 1, "reason": "schema", "path": "causation_id"}
+    return [
+        batch_case(
+            "a_revocation_naming_another_event",
+            "rule 69: the cause is the kill switch, not any event",
+            [kill(), revoked(change("causation_id", OTHER_EVENT))],
+            invalid_at,
+        ),
+        batch_case(
+            "a_revocation_after_a_workspace_kill_switch",
+            "rule 69: the kill switch is at the connection's scope, not a wider one",
+            [kill(change("payload.scope", "workspace")), revoked()],
+            invalid_at,
+        ),
+        batch_case(
+            "a_revocation_after_another_connections_kill_switch",
+            "rule 69: the kill switch is this connection's",
+            [kill(change("payload.subject", "conn_02")), revoked()],
+            invalid_at,
+        ),
+        batch_case(
+            "a_revocation_after_a_pause",
+            "rule 69: the command is a kill switch",
+            [kill(change("payload.command", "pause")), revoked()],
+            invalid_at,
+        ),
+        batch_case(
+            "a_revocation_alone",
+            "rule 69: the kill switch is in the same batch",
+            [revoked()],
+            {"outcome": "Invalid", "draft_index": 0, "reason": "schema", "path": "causation_id"},
+        ),
+        batch_case(
+            "a_revocation_before_its_kill_switch",
+            "rule 69: the kill switch is earlier in the batch",
+            [revoked(), kill()],
+            {"outcome": "Invalid", "draft_index": 0, "reason": "schema", "path": "causation_id"},
+        ),
+    ]
+
+
+def batch_drafts(section: dict, case: dict) -> list[dict]:
+    out = []
+    for member in case["drafts"]:
+        if member.get("kill_switch"):
+            draft = copy.deepcopy(section["kill_switch"])
+        else:
+            draft = copy.deepcopy(section["drafts"][member["base_draft"]])
+        for item in member["changes"]:
+            draft_change(draft, item)
+        out.append(draft)
+    return out
+
+
+def rule69(drafts: list[dict], skip: frozenset[str] = frozenset()) -> list[tuple[str, str, int]]:
+    """Rule 69's batch clause: a compromised revocation names, as `causation_id`, an
+    `OwnerCommandIssued` earlier in its batch that is a kill switch at the scope of the connection
+    it revokes. Answers every failure as `(reason, path, draft_index)`."""
+    out = []
+    for i, draft in enumerate(drafts):
+        if draft["event_type"] != "ConnectionRevoked" or draft["schema_version"] != 2:
+            continue
+        if draft["payload"]["reason"] != "compromised":
+            continue
+        earlier = drafts if "rule.69.batch_order" in skip else drafts[:i]
+        cause = next((d for d in earlier if d["event_id"] == draft["causation_id"]), None)
+        ok = cause is not None or "rule.69.batch_present" in skip
+        if cause is not None:
+            p = cause["payload"]
+            checks = (
+                ("command", cause["event_type"] == "OwnerCommandIssued" and p.get("command") == "kill_switch"),
+                ("scope", p.get("scope") == "connection"),
+                ("subject", p.get("subject") == draft["payload"]["connection_id"]),
+            )
+            ok = all(holds or f"rule.69.batch_{name}" in skip for name, holds in checks)
+        if not ok:
+            out.append(("schema", "causation_id", i))
+    return out
+
+
+BATCH_MUTANTS = (
+    "rule.69.batch_present",
+    "rule.69.batch_order",
+    "rule.69.batch_command",
+    "rule.69.batch_scope",
+    "rule.69.batch_subject",
+)
+
+
+def batch_problems(section: dict, skip: frozenset[str] = frozenset()) -> list[str]:
+    problems = []
+    for case in section["valid_batches"]:
+        got = rule69(batch_drafts(section, case), skip)
+        if got:
+            problems.append(found("batches", f"{case['name']}: expected Committed, got {got}"))
+    for case in section["invalid_batches"]:
+        want = case["expect"]
+        got = rule69(batch_drafts(section, case), skip)
+        if got != [(want["reason"], want["path"], want["draft_index"])]:
+            problems.append(found("batches", f"{case['name']}: expected {want}, got {got}"))
+    return problems
+
+
 # --------------------------------------------------------------------------- independent oracles
 
-ORACLE_CHECKS = ("drafts.valid", "drafts.human", "drafts.kill_switch", "invalid_drafts", "valid_drafts")
+ORACLE_CHECKS = ("drafts.valid", "drafts.human", "drafts.kill_switch", "batches", "invalid_drafts", "valid_drafts")
 
 
 def found(check: str, message: str) -> str:
@@ -583,6 +745,7 @@ def check_section(section: dict) -> list[str]:
         accepted.append((case["name"], draft))
     for name, draft in accepted:
         problems += human_problems(name, draft)
+    problems += batch_problems(section)
     return problems
 
 
@@ -590,6 +753,7 @@ def check_section(section: dict) -> list[str]:
 
 VALIDATOR_MUTANTS = (
     "rule.55",
+    "rule.55.client_origin",
     "rule.64.requested_by",
     "rule.64.client_id",
     "rule.66.extra",
@@ -652,6 +816,11 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             ),
         ),
         (
+            "a valid batch's kill switch is an agent's",
+            "batches",
+            mutated(lambda s: s["kill_switch"]["payload"].update(scope="agent")),
+        ),
+        (
             "an invalid draft's expectation differs",
             "invalid_drafts",
             mutated(lambda s: case(s, "invalid_drafts", "client_with_a_build")["expect"].update(path="actor.kind")),
@@ -678,6 +847,9 @@ def run_mutants(section: dict) -> list[str]:
             caught |= bool(got) if want is None else not reported(got, want)
         if not caught:
             escaped.append(f"client validator mutant {mutant}")
+    for mutant in BATCH_MUTANTS:
+        if not batch_problems(section, frozenset([mutant])):
+            escaped.append(f"client batch mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if not any(c == check for _, c, _ in registered):
@@ -695,4 +867,7 @@ def build_section() -> dict:
         "drafts": base_drafts(),
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
+        "kill_switch": copy.deepcopy(KILL_SWITCH_DRAFT),
+        "valid_batches": valid_batches(),
+        "invalid_batches": invalid_batches(),
     }
