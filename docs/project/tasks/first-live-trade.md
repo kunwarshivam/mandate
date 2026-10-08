@@ -27,7 +27,7 @@ the live order itself and the few narrowings it needs. **Until the founder accep
 every slice except the live run is still built, because each is product work; nothing live is
 run.**
 
-This path needs the [first paper trade](first-paper-trade.md)'s runner (E1a, E1b) and its manual
+This path needs the [first paper trade](first-paper-trade.md)'s runner (E1a, E1b, built generic) and its manual
 run (E2).
 
 ## Story
@@ -78,8 +78,8 @@ oracle is shown to fail on a seeded bug before it is trusted.
 - **Reference cases:** none move; every passing case stays passing.
 - **Crates in scope:** `mandate-executor` (the profile type, protection and reconciliation read
   it), `mandate-builder` (quantity form from the profile), `mandate-alpaca` (declares its
-  profile), `mandate-paper` (generalized into the runner, then renamed `mandate-run` in its own
-  rename PR), `mandate-cli` (connection record, inbox wiring, `live` acceptance), and three new
+  profile), `mandate-paper` (the runner, generic from the paper path's E1a; renamed after the
+  live run), `mandate-cli` (connection record, inbox wiring, `live` acceptance), and three new
   crates: `mandate-mcp` (E7-16), `mandate-robinhood` (E7-6) and `mandate-rh-sim` (E7-25).
 - **Out of scope:** `mandate-risk` and `mandate-runtime` (used, not changed), the vault, E9-4,
   the full connection manager, crypto, options, extended hours, `web/`.
@@ -102,7 +102,7 @@ oracle is shown to fail on a seeded bug before it is trusted.
 | MCP client, allowlist, contract hash, OAuth (`auth` module) | **new** `mandate-mcp` | 6 | Knows nothing of brokers or orders (connections spec §6.2) |
 | Simulated Robinhood: the published contract over loopback MCP, with Robinhood's rules | **new** `mandate-rh-sim` | tool | DEC-124's paper stage and E7-16's fixture server |
 | Connection record, inbox and grant commands | `mandate-cli` | 7 | The founder's CLI plays the connection and deployment manager in Phase 1 |
-| The runner for any environment and broker | `mandate-paper`, then renamed `mandate-run` | 9 | One runner; the `live` feature holds the live hosts |
+| The runner for any environment and broker | `mandate-paper` (renamed after the live run) | 9 | One runner; the `live` feature holds the live hosts |
 
 **Founder review.** New crates add `xtask/layers.toml`, `CODEOWNERS` and `Cargo.toml` entries;
 the OAuth slice adds a `docs/dependencies.md` row; each PR names it under "Decisions needed".
@@ -171,11 +171,11 @@ Robinhood code.
 | CN-8 ↔ `get_accounts` | Reads | Other accounts dropped | Yes, by C2 |
 | DEC-124 ↔ the rehearsal | Founder's run | Simulated stage first | Yes, R0 |
 
-## Slices, in four parallel lanes
+## Slices, in parallel lanes
 
 T is a tests PR and I its implementation PR (DEC-77); D docs; SP a protected spec PR the founder
 approves. **Now** means it can start today, beside the paper path. Lanes touch different crates,
-so four builders can work at once; only reviews and merges are one at a time.
+so six builders can work at once; reviews run in parallel across lanes and merges one at a time.
 
 | # | Lane | Story | Kind | Crate | What | After | Now? | Estimate |
 |---|---|---|---|---|---|---|---|---|
@@ -190,38 +190,66 @@ so four builders can work at once; only reviews and merges are one at a time.
 | S1 | Robinhood | E7-25 | T, I | **new** `mandate-rh-sim` | The contract's rules as a pure core: types, quantity forms, `gfd`/`gtc`, regular hours, `agentic_allowed`, `ref_id` dedup, the ten states, cancel refused when terminal, `review` alerts, scripted fills and faults | — | **now** | T 250–350, I 250–350 |
 | S2 | Robinhood | E7-25 | T, I | `mandate-rh-sim` | Loopback MCP server over S1, injection and extra-tool variants, a lost-answer fault, a binary for the rehearsal | S1, M1 | **now** | T 200–300, I 200–300 |
 | C1 | Robinhood | E7-6 | T, I | **new** `mandate-robinhood` | Its profile; `Submit` → `review_equity_order` then `place_equity_order` with the derived `ref_id`; `Cancel`; the state mapping | M2, S1, B1 | **now** | T 300–400, I 250–350 |
-| C2 | Robinhood | E7-6 | T, I | `mandate-robinhood` | Reads filtered to the agentic account (CN-8); account fingerprint | C1 | **now** | T 250–350, I 200–300 |
-| K1 | Live | E7-11, M7 | T, I | `mandate-cli` | `connection record` (a live Robinhood `ConnectionEstablished`, scopes the allowlist, the account number by reference, the 1× attestation) and the `inbox` and `grant` commands (M7's clap remainder) | the paper path's D2 | after D2 | T 300–400, I 250–350 |
-| G1 | Live | E7-26 | T, I | `mandate-paper` → `mandate-run` | Environment and broker from the confirmed mandate and its connection record; the `live` feature; LT-1's build test; `cli_confirm` accepted on live for a founder-recorded connection (DEC-529 item 3) | E1a, E1b, K1, C2, O1 | no | T 300–400, I 250–350 |
-| G2 | Live | E7-26 | T, I | `mandate-run` | `ask` openings wait for the grant (LT-4); the quote cross-check; bounded reads until LT-10; then `journal export` | G1, B2, B3 | no | T 250–350, I 200–300 |
-| R0 | — | — | run, then D | — | The founder's rehearsal and live run (below); a docs PR records the evidence | G2, E2, DEC-529 accepted | no | — |
+| C2 | Robinhood | E7-6 | T, I | `mandate-robinhood` | Reads filtered to the agentic account (CN-8). The account fingerprint (CN-5) follows after the live run: one connection needs no duplicate check | C1 | **now** | T 200–300, I 150–250 |
+| K1a | Live | M7 | T, I | `mandate-cli` | The `inbox` and `grant` commands (M7's clap remainder) over the existing approval path | — | **now** | T 200–300, I 200–300 |
+| K1b | Live | E7-11 | T, I | `mandate-cli` | `connection record`: a Robinhood `ConnectionEstablished` (scopes the allowlist, the account number by reference, the 1× attestation), and `live` accepted by `version confirm` and `agent deploy` for that connection only (DEC-529 item 3) | the paper path's P0 | as soon as P0 merges | T 200–300, I 150–250 |
+| G1 | Live | E7-26 | T, I | the runner (`mandate-paper`) | The connector chosen from the connection record and the environment from the confirmed mandate; the `live` feature and LT-1's build test; `ask` openings wait for the grant (LT-4); the quote cross-check | E1b, K1a, K1b, C2, O1, B2, B3 | no | T 300–400, I 250–350 |
+| R0 | — | — | run, then D | — | The founder's rehearsal and live run (below); a docs PR records the evidence | G1, the paper path's E2, DEC-529 accepted | no | — |
 
-The rename of `mandate-paper` to `mandate-run` is its own small PR after G1, with no behavior
-change.
+**The paper runner is built generic from the start.** The paper path's E1a and E1b build the
+runner so it takes the connector from a `BrokerConnector` chosen by the connection record and
+the environment from the mandate, with Alpaca paper as the only connector compiled by default.
+That is the same work as an Alpaca-only runner, and it removes a whole generalization slice from
+this path's tail. The coordinator applies it to the paper brief's E1a and E1b. Renaming the
+crate to `mandate-run` waits until after the live run.
 
-**Totals.** 30 PRs (one docs, one spec, 14 tests and 14 implementation PRs, one rename),
-about 6,500 to 9,500 changed lines. Twenty-two of them (SP1 and the B, M, S and C lanes) start
-now.
+**Totals.** 27 PRs (one docs, one spec, 13 tests and 12 implementation PRs), about 6,000 to
+8,500 changed lines. All but G1 start now or as soon as P0 merges.
 
-**Critical path.** The paper path's E1b and D2 → K1 → G1 → G2 → R0. Everything else runs beside
-the paper path and finishes before G1 needs it if four builders take the B, M, S and C lanes now.
+**Critical path.** The paper path's E1b → G1 (one tests PR, one implementation PR) → the
+rehearsal → the live run. Everything else runs beside the paper path.
 
-**Estimate.** The four "now" lanes are 3 to 6 merges each; at the recent two to three review
-rounds per safety-critical PR they finish in **about 7 to 9 working days** (about 2026-10-19),
-close to when the paper path's E1b and D2 land. K1, G1 and G2 are six serial merges after that,
-**about 4 to 6 working days**. That puts the live run at **2026-10-27 to 2026-11-02**. What it
-needs to hold: four builders from tomorrow; the founder approves SP1 and answers DEC-529 within
-two days; the paper path lands E1b, D2 and E2 by about 2026-10-20; and reviews keep moving one
-at a time without a fourth round. The likeliest slip is the paper path; the next is OAuth
-discovery at Robinhood's server, if it needs something the published MCP authorization flow
-does not describe (a stop condition).
+## Schedule: everything by Monday 2026-10-26
+
+The founder needs everything done a week before 2026-11-02. Working back from that:
+
+| Date | What is done |
+|---|---|
+| Fri 2026-10-09 | The founder answers DEC-529 and approves SP1. The coordinator adds the backlog rows, applies the generic runner to the paper brief, and starts six builders: the B, M, S and C lanes, K1a, and O1 |
+| Fri 2026-10-16 | Every "now" tests PR merged; B1, M1, S1, C1 and K1a implementations merged. The paper path's E1b merged (its own brief's target) |
+| Tue 2026-10-20 | Every "now" implementation merged; K1b merged; the paper path's E2 run done. G1's tests PR merged |
+| Wed 2026-10-21 | G1's implementation merged. The path is complete in code |
+| Thu 2026-10-22 | The founder's rehearsal against `mandate-rh-sim` (R0 steps 1 and 2) |
+| Fri 2026-10-23 | The live run (R0 steps 3 to 8) |
+| Mon 2026-10-26 | Buffer: a second live attempt if Friday's model said `Flat` or the gate refused, and R0's evidence PR merged. **Everything done** |
+
+**What it takes, and the decisions I made to get there:**
+
+- **Six builders from 2026-10-09**, one per lane plus K1a and O1. Every "now" slice touches its
+  own crate, so they do not collide.
+- **Reviews run in parallel across lanes; merges stay one at a time.** At one review at a time,
+  27 PRs plus the paper path's remaining ones cannot finish by 2026-10-21. Each review is still
+  independent and on a different model, and each pair is still tests first (DEC-77).
+- **A tests PR and its implementation PR can be open together**, with the implementation
+  rebased after the tests merge, as long as the tests PR's pending tests are shown failing on
+  its stubs first. This saves a review cycle per pair without weakening DEC-77.
+- **Cut, not deferred into a hack:** the account fingerprint (CN-5, needed only once there is a
+  second connection) and the crate rename. Both follow the live run as normal stories.
+- **The founder's answers by 2026-10-09.** DEC-529 and SP1 gate only G1 and the live run, but a
+  late answer moves the whole tail.
+
+**Risks, in order:** the paper path slipping past 2026-10-20 (the one thing this path cannot
+absorb; the 2026-10-26 buffer is one trading day); OAuth discovery at Robinhood's server needing
+something the published MCP authorization flow does not describe (a stop condition, found by
+O1's tests against the published flow, so it surfaces by about 2026-10-14); and a model that says
+`Flat` on both 2026-10-23 and 2026-10-26, which nobody works around (DEC-475).
 
 ### The founder's run (R0)
 
 Only the founder runs it, on their own machine, with their own login; no agent runs any step or
 sees its output during the run (`AGENTS.md` rule 8).
 
-1. Build `mandate-run` with `--features live` from a commit on `main`, and `mandate-rh-sim`.
+1. Build `mandate-paper` with `--features live` from a commit on `main`, and `mandate-rh-sim`.
 2. **Rehearsal (DEC-124).** Start `mandate-rh-sim`; record a connection to it, register, confirm
    and deploy a rehearsal mandate on a separate journal; run the whole flow, including the
    grant, the fill, the stop, and a restart that sends nothing; then `journal export` and
@@ -261,7 +289,7 @@ sees its output during the run (`AGENTS.md` rule 8).
   broker rules as capability profiles.
 - The `ref_id` derivation: a UUID version 8 from SHA-256 (`mandate-canon`) of the intent's
   idempotency key; C1 records it.
-- One runner for every environment (`mandate-run`), not a live binary; the confirmation is the
+- One runner for every environment, built generic in the paper path's E1a, not a live binary; the confirmation is the
   approval flow (DEC-529 item 1).
 - E9-4 stays off this path: the approval record's method field lets it replace `cli_confirm`
   without rework.
