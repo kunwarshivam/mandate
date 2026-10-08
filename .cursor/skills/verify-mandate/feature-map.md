@@ -1079,13 +1079,13 @@ proves each pending test fails on them (DEC-110).
 - **Code:** `crates/mandate-cli/src/version.rs` (`create`, which stores the canonical document and
   its record and commits `MandateVersionCreated`, every envelope path `user_entered`; `confirm`,
   which takes the code bound to the version, checks every V-rule but V-002 and the registered
-  instrument snapshots, and commits `MandateConfirmed`; both paper only), stubbed.
-- **Tests:** `crates/mandate-cli/tests/version.rs`, pending E10-16: payloads and records written
+  instrument snapshots, and commits `MandateConfirmed`; both paper only).
+- **Tests:** `crates/mandate-cli/tests/version.rs`: payloads and records written
   out from the vectors' shapes and read back through `Draft::parse`; the stream folded with
   `JournaledFact::from_record` and `ValidationContext::from_journal`, leaving only V-001 and V-002;
-  every refusal code, each writing nothing; a failing store committing nothing. The SPY mandate is
+  every refusal code, each writing nothing; a store failing at each write committing nothing. The SPY mandate is
   `crates/mandate-cli/tests/fixtures/spy_mandate.json`.
-- **Run:** `cargo nextest run -p mandate-cli --test version`; `cargo xtask ci pending`.
+- **Run:** `cargo nextest run -p mandate-cli --test version`.
 - **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
   takes the stream's latest confirmed version and a code bound to the agent and the version, and
   commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
