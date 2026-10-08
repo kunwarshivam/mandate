@@ -2456,13 +2456,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
 /// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
 /// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
-///
-/// The 3 `mandate-journal` rows are E7-17's (DEC-800, journal spec v0.19 §9.8): they check
-/// `Draft::parse`, the journal's existing check, so there is no stub for them to stop at. Today
-/// the journal answers `unknown_event_type`, `wrong_stream`, or `unknown_schema` for the
-/// connection records, which is what they fail on (DEC-137). E7-17's implementation deletes the
-/// rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 16] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2511,18 +2505,6 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 16] = [
     (
         "crates/mandate-runtime/tests/answer_records.rs",
         "decided_by_now_is_null_unless_the_reclassification_asks",
-    ),
-    (
-        "crates/mandate-journal/tests/catalogue.rs",
-        "the_connection_records_are_catalogued_and_closed_on_their_streams",
-    ),
-    (
-        "crates/mandate-journal/tests/connections.rs",
-        "every_connection_base_and_valid_draft_parses",
-    ),
-    (
-        "crates/mandate-journal/tests/connections.rs",
-        "every_invalid_connection_draft_is_refused_with_its_reason_at_its_path",
     ),
 ];
 

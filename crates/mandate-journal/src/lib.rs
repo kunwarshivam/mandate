@@ -23,6 +23,7 @@ use mandate_time::UtcNanos;
 mod agent;
 mod artifact;
 mod catalogue;
+mod connections;
 mod control;
 mod draft;
 mod merkle;
