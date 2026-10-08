@@ -2,16 +2,28 @@
 
 | | |
 |---|---|
-| **Status** | v0.18 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.19 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, and `approval_answers` section of §9.7; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, and `records_access` section of §9.8; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.19 ([DEC-780](../project/decisions/DEC-780.md)):** §9.8 closes the control stream's
+  `RecordsAccessed`, `ExportCreated`, and `VerificationRun` at schema version 1, with rules 54 to
+  59, from the members their §9 rows list (accessor and scope; export manifest; scope and result).
+  Each names what it covers as stream ranges of the writer's own workspace, bounded by event hashes,
+  and nothing else: no instrument, order, position, or mandate content. Two types join §9.1's:
+  `stream_id` (§2's form) and `event_hash` (§3's 64 lowercase hex, which is not a `ref` and so is
+  not listed in `artifact_refs`). Rule 54 refuses a range on another workspace's stream. The
+  examination bundle (§12), which may carry resolved identities, is not an `ExportCreated` form at
+  this version. §7 now says a read or export is journaled before it is served, as API-16 already
+  does for exports. The vectors gain a generated `records_access` section and stay version 3.
+  - **Order of the changes (ES-22).** Spec and vectors first; `mandate-journal` registers the three
+    schemas in E12-3's tests PR and implementation PR, so no Rust test reads the new section yet.
 - **v0.18 ([DEC-536](../project/decisions/DEC-536.md)):** `DecisionMade`'s `decided_by` may be
   `policy_overlay`, for a decision the effective policy changed at
   [mandate spec §6.2 step 5c](mandate.md#62-evaluation): an `auto` it narrowed to `ask` because the
@@ -434,7 +446,7 @@ anchors reveal only hashes.
 | Platform staff (managed mode) | **Break-glass only**, with customer approval, journaled to a stream the customer can read |
 
 Every read of records outside normal product views and every export is journaled (`RecordsAccessed`,
-`ExportCreated`). In hybrid mode the platform receives anchors (hashes) only.
+`ExportCreated`; §9.8) before it is served. In hybrid mode the platform receives anchors (hashes) only.
 
 ## 8. Replay, snapshots, and versioning
 
@@ -535,9 +547,9 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 | `ConfigSnapshotRegistered` | — | configuration kind (fee, calendar, instrument snapshot, rule set, mandate), content hash |
 | `SurveillanceReportGenerated`, `BacktestRunRecorded` | rule | period, report (artifact), breaches; data snapshot, code build, configuration, results, paper/live/backtest marker |
 | `PlatformOperatorAction` | — | action (stop, global kill switch, acceptable-use action, `model_withdrawn` with model and reason, `research_thesis_halt` with the instrument and optionally the research agent's pinned content hash, [DEC-100](../project/04-decision-log.md#decisions)), operator (opaque), approval |
-| `AnchorComputed`, `VerificationRun`, `IntegrityIncidentRecorded` | — | leaves, root, timestamp token (artifact); scope and result; last good hash and anchor |
+| `AnchorComputed`, `VerificationRun`, `IntegrityIncidentRecorded` | — | leaves, root, timestamp token (artifact); scope and result, closed in §9.8; last good hash and anchor |
 | `SegmentExported`, `SegmentEvicted`, `RetentionExtended`, `LegalHoldChanged` | — | manifest hash, range, retain-until, hold |
-| `KeyRotated`, `KeyRevoked`, `RecordsAccessed`, `ExportCreated`, `PersonalDataErased` | — | key version; accessor (opaque), scope; export manifest; subject reference |
+| `KeyRotated`, `KeyRevoked`, `RecordsAccessed`, `ExportCreated`, `PersonalDataErased` | — | key version; accessor (opaque), scope; export manifest; subject reference. `RecordsAccessed` and `ExportCreated` are closed in §9.8 |
 
 **Scheduler stream:** `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`,
 `ClockToleranceExceeded`.
@@ -1547,6 +1559,112 @@ with every value compared.
     `m_now` are non-null, each
     reported at itself; and |`m_now` − `m_req`| × 10 000 ≤ `band_bp` × `m_req`, on exact decimals
     (`payload.m_now`).
+
+### 9.8 Records access, export, and verification records ([DEC-780](../project/decisions/DEC-780.md))
+
+The control stream's records of who read the records outside the product views, what was exported,
+and what was verified (§7, §11, §12), closed at schema version 1 as §9.7's records are: every listed
+member is present, `null` only where the type is nullable, and any extra member is refused. §9.1's
+types apply, with two more below. The rules number on from §9.7's. None of the three names a
+configuration.
+
+**Writers.** The control stream's single writer, workspace services (§2), appends all three. The
+workspace API's control-stream writer appends a `RecordsAccessed` or an `ExportCreated` before it
+serves the records or the export ([workspace API spec](workspace-api.md) §4.8, API-16), so a read
+or export that cannot be journaled is not served. It appends a `VerificationRun` for a verification
+a principal requested (`POST /verifications`) once the run ends and before its result is served.
+Workspace services append one for each scheduled run of §11 and for a restore drill's run. The
+`actor` is the principal that asked: a `user`, a service account (`system`, its opaque ID), or, for
+a scheduled run, the verifying process (`system`). Every identifier is opaque (§6.4).
+
+**What they carry.** A payload names streams by §2's identifiers, positions by `seq`, and contents
+by hash: stream ranges, event hashes, artifact references, check codes, and opaque IDs. It never
+carries an instrument, an order, a position, a quantity, a price, or mandate content, so a record of
+an audit read discloses nothing the read itself did not authorize. **Tenant isolation:** every range
+names a stream of the control stream's own workspace (rule 54). A trace that follows a
+`causation_id` lists every stream it read and never follows one into another workspace's stream; a
+request that would reach one is answered as absent ([workspace API spec](workspace-api.md) API-9)
+and journals nothing about that stream.
+
+**Types.**
+
+| Type | Values | Refused as |
+|---|---|---|
+| `stream_id` | §2's form: `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`, `clock:{workspace_id}`, or `ntf:{workspace_id}`, each segment `[A-Za-z0-9_-]+` | As `id` |
+| `event_hash` | 64 lowercase hex: an event's `hash` or `prev_hash` (§3). It is not a `ref`, so it is not listed in `artifact_refs` | As `id` |
+
+**`range`**, the unit every record covers: one stream's events from `from_seq` to `to_seq`, both
+included.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `stream_id` | `stream_id` | The stream: rule 54 |
+| `from_seq`, `to_seq` | `integer` | The first and last `seq` covered |
+| `prev_hash` | `event_hash` | The hash before `from_seq`: the trusted start (§11), 64 zeros for seq 1 |
+| `to_hash` | `event_hash` | The hash of the event at `to_seq`, the head the read or export reflects (workspace API API-14) |
+
+**`RecordsAccessed`**: a read outside the product views, journaled before it is served (§7).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `accessor` | `text` | The principal that read (opaque): rule 55. A client is its own accessor ([workspace API spec](workspace-api.md) §3.8) |
+| `operation` | `id` | The workspace API operation that read, by name ([workspace API spec](workspace-api.md) §4) |
+| `ranges` | `[range]` | Every stream range the response was built from, with the hashes it reflects |
+
+**`ExportCreated`**: an export (§12), journaled before it is served (API-16). Its `event_id` is the
+export's ID.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `form` | `canonical` \| `json_view` \| `csv_view` | The canonical export, or a derived view of one. The examination bundle is not a form at this version |
+| `ranges` | `[range]` | The ranges exported; for the canonical form, each range's trusted start and head as its manifest records them |
+| `manifest` | `ref` | The canonical export's manifest (§12), stored as an artifact; for a view, the manifest of the canonical export it is derived from |
+| `view` | `ref?` | The view's bytes, stored as an artifact: rule 56 |
+
+**`VerificationRun`**: one run of §11's verification and its result.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `trigger` | `startup` \| `segment_export` \| `weekly` \| `request` \| `restore_drill` | Why it ran: §11's schedule, a principal's request, or a restore drill: rule 57 |
+| `ranges` | `[checked_range]` | Every range verified, each with its own result |
+| `result` | `pass` \| `fail` | Rule 59 |
+
+A `checked_range` is a `range` whose `to_hash` is `event_hash?` (the head the run verified, or
+`null` when a failure left none: rule 58), followed by:
+
+| Member | Type | Meaning |
+|---|---|---|
+| `failure` | `{check, seq: integer?}?` | The first failure §11 reports for the range, or `null`. `check` is one of §11's codes: `non_canonical`, `column_mismatch`, `seq_gap`, `rehash_mismatch`, `prev_hash_mismatch`, `artifact_missing`, `artifact_mismatch`, `anchor_head_mismatch`, `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`, `segment_gap`, `intent_action_mismatch`, `mode_event_mismatch`; `seq` is where it was reported, for a per-event check the position walked (the previous `seq` plus 1, or `from_seq` first), whatever the body there says: rule 58 |
+
+A verification a principal requested for an export names that export's `ExportCreated` as its
+`causation_id`. A failed run does not repair anything and does not replace §11's incident path:
+`IntegrityIncidentRecorded` still records it.
+
+**Consistency rules** (reason `schema`; the path is the member named):
+
+54. Every record's `ranges` is non-empty (`payload.ranges`). Each range, in array order, with its
+    clauses in this order, at `payload.ranges[i].<member>`:
+    its `stream_id`'s `{workspace_id}` segment equals the envelope `stream_id`'s (`stream_id`), so
+    no record names another workspace's stream; `from_seq` is at least 1 (`from_seq`); `to_seq` is
+    at least `from_seq` (`to_seq`); `prev_hash` is 64 zeros exactly when `from_seq` is 1
+    (`prev_hash`); and after the first range, its `stream_id` sorts after the previous range's by
+    bytes, or equals it with a `from_seq` greater than the previous range's `to_seq` (`stream_id`),
+    so ranges are ordered and never overlap.
+55. `RecordsAccessed`: `accessor` equals the envelope's `actor.id` (`payload.accessor`), and
+    `actor.kind` is neither `agent` nor `broker` (`actor.kind`).
+56. `ExportCreated`: `actor.kind` is `user` or `system` (`actor.kind`), and `view` is non-null
+    exactly when `form` is `json_view` or `csv_view` (`payload.view`).
+57. `VerificationRun`: `actor.kind` is `system`, or, for a `request`, `user` or `system`
+    (`actor.kind`).
+58. `VerificationRun`: each range, in array order, at `payload.ranges[i].<member>`: a non-null
+    `failure`'s `seq` is non-null exactly when its check is reported at an event (§11's per-event
+    checks 1 to 6, `anchor_head_mismatch` at the anchored `seq`, `intent_action_mismatch`, and
+    `mode_event_mismatch`) and null for `anchor_root_mismatch`, `tsa_token_invalid`,
+    `segment_manifest_mismatch`, and `segment_gap` (`failure.seq`); a non-null `seq` lies from
+    `from_seq` to `to_seq` (`failure.seq`); and `to_hash` is non-null when `failure` is null
+    (`to_hash`).
+59. `VerificationRun`: `result` is `pass` exactly when every range's `failure` is null
+    (`payload.result`).
 
 ## 10. Anchoring
 

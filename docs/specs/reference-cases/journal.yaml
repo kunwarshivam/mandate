@@ -56,6 +56,12 @@
 # companion rebuilds, which a resubmission after a confirmed absence sends again under the same id
 # (§5.7). `valid_batches` and `invalid_batches` are rule 45's batch cases; each member of their
 # `drafts` is built like a draft case, and an invalid one is refused whole at `draft_index`.
+#
+# `records_access` (spec v0.19 §9.8, DEC-780) is generated and checked the same way, by
+# reference/journal/audit.py. `drafts` are named base drafts of `RecordsAccessed`, `ExportCreated`,
+# and `VerificationRun` on the control stream; each invalid or valid draft names its base by
+# `base_draft`. A change inside a range replaces the whole `payload.ranges`, so every change sets a
+# top-level payload member; an expected `path` may still name a member inside a range.
 
 version: 3
 hash_algorithm: sha256
@@ -10331,5 +10337,1767 @@ approval_answers:
     - path: artifact_refs
       value:
       - sha256:1111111111111111111111111111111111111111111111111111111111111111
+    expect:
+      outcome: Valid
+records_access:
+  spec: docs/specs/journal.md v0.19 §9.8 (DEC-780)
+  drafts:
+    records_read:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3R1A000000000000000R1
+      stream_id: ctl:ws_01J8Z2
+      event_type: RecordsAccessed
+      schema_version: 1
+      event_time: '2026-09-21T15:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_auditor_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        accessor: user_auditor_01
+        operation: journal_events
+        ranges:
+        - stream_id: agent:ws_01J8Z2:agent_a
+          from_seq: 12
+          to_seq: 30
+          prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+          to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+      artifact_refs: []
+      pii_refs: []
+    export_canonical:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3R2A000000000000000R2
+      stream_id: ctl:ws_01J8Z2
+      event_type: ExportCreated
+      schema_version: 1
+      event_time: '2026-09-21T15:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_auditor_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        form: canonical
+        ranges:
+        - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          from_seq: 1
+          to_seq: 40
+          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        - stream_id: agent:ws_01J8Z2:agent_a
+          from_seq: 12
+          to_seq: 30
+          prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+          to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        - stream_id: ctl:ws_01J8Z2
+          from_seq: 1
+          to_seq: 9
+          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        manifest: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+        view: null
+      artifact_refs:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      pii_refs: []
+    export_view:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3R3A000000000000000R3
+      stream_id: ctl:ws_01J8Z2
+      event_type: ExportCreated
+      schema_version: 1
+      event_time: '2026-09-21T15:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z3R2A000000000000000R2
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_auditor_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        form: csv_view
+        ranges:
+        - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          from_seq: 1
+          to_seq: 40
+          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        manifest: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+        view: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      artifact_refs:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      - sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      pii_refs: []
+    verification_pass:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3R4A000000000000000R4
+      stream_id: ctl:ws_01J8Z2
+      event_type: VerificationRun
+      schema_version: 1
+      event_time: '2026-09-21T15:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        trigger: weekly
+        ranges:
+        - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          from_seq: 1
+          to_seq: 40
+          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+          failure: null
+        - stream_id: agent:ws_01J8Z2:agent_a
+          from_seq: 12
+          to_seq: 30
+          prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+          to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          failure: null
+        - stream_id: ctl:ws_01J8Z2
+          from_seq: 1
+          to_seq: 9
+          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+          failure: null
+        result: pass
+      artifact_refs: []
+      pii_refs: []
+    verification_fail:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3R5A000000000000000R5
+      stream_id: ctl:ws_01J8Z2
+      event_type: VerificationRun
+      schema_version: 1
+      event_time: '2026-09-21T15:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z3R2A000000000000000R2
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        trigger: request
+        ranges:
+        - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          from_seq: 1
+          to_seq: 40
+          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          to_hash: null
+          failure:
+            check: rehash_mismatch
+            seq: 17
+        - stream_id: ctl:ws_01J8Z2
+          from_seq: 1
+          to_seq: 9
+          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+          failure: null
+        result: fail
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: records_read.accessor.kind
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.accessor
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.accessor
+  - name: records_read.accessor.form
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.accessor
+      value: ''
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.accessor
+  - name: records_read.operation.kind
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.operation
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.operation
+  - name: records_read.operation.form
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.operation
+      value: journal events
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.operation
+  - name: records_read.ranges.kind
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value: all
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges
+  - name: records_read.ranges[0].stream_id.kind
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: 7
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].stream_id
+  - name: records_read.ranges[0].stream_id.form
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:only_one_segment
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.ranges[0].stream_id
+  - name: records_read.ranges[0].from_seq.kind
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: '12'
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].from_seq
+  - name: records_read.ranges[0].to_seq.kind
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: '30'
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].to_seq
+  - name: records_read.ranges[0].prev_hash.kind
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: 7
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].prev_hash
+  - name: records_read.ranges[0].prev_hash.form
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.ranges[0].prev_hash
+  - name: records_read.ranges[0].to_hash.kind
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].to_hash
+  - name: records_read.ranges[0].to_hash.form
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: sha256:3333333333333333333333333333333333333333333333333333333333333333
+    - path: artifact_refs
+      value:
+      - sha256:3333333333333333333333333333333333333333333333333333333333333333
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.ranges[0].to_hash
+  - name: export_canonical.form.kind
+    clause: §9.8 types
+    base_draft: export_canonical
+    changes:
+    - path: payload.form
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.form
+  - name: export_canonical.form.form
+    clause: §9.8 types
+    base_draft: export_canonical
+    changes:
+    - path: payload.form
+      value: examination_bundle
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.form
+  - name: export_canonical.manifest.kind
+    clause: §9.8 types
+    base_draft: export_canonical
+    changes:
+    - path: payload.manifest
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.manifest
+  - name: export_canonical.manifest.form
+    clause: §9.8 types
+    base_draft: export_canonical
+    changes:
+    - path: payload.manifest
+      value: sha256:EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.manifest
+  - name: export_view.view.kind
+    clause: §9.8 types
+    base_draft: export_view
+    changes:
+    - path: payload.view
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.view
+  - name: export_view.view.form
+    clause: §9.8 types
+    base_draft: export_view
+    changes:
+    - path: payload.view
+      value: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.view
+  - name: verification_fail.trigger.kind
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.trigger
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.trigger
+  - name: verification_fail.trigger.form
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.trigger
+      value: hourly
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.trigger
+  - name: verification_fail.result.kind
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.result
+      value: true
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.result
+  - name: verification_fail.result.form
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.result
+      value: failed
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.result
+  - name: verification_fail.ranges[0].to_hash.kind
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: 7
+        failure:
+          check: rehash_mismatch
+          seq: 17
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].to_hash
+  - name: verification_fail.ranges[0].to_hash.form
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444
+
+          '
+        failure:
+          check: rehash_mismatch
+          seq: 17
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.ranges[0].to_hash
+  - name: verification_fail.ranges[0].failure.kind
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure: rehash_mismatch
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure
+  - name: verification_fail.ranges[0].failure.check.kind
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: 7
+          seq: 17
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.check
+  - name: verification_fail.ranges[0].failure.check.form
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: chain_broken
+          seq: 17
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.ranges[0].failure.check
+  - name: verification_fail.ranges[0].failure.seq.kind
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: rehash_mismatch
+          seq: '17'
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.seq
+  - name: records_read.accessor.null
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.accessor
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.accessor
+  - name: records_read.operation.null
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.operation
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.operation
+  - name: records_read.ranges.null
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges
+  - name: records_read.ranges[0].stream_id.null
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: null
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].stream_id
+  - name: records_read.ranges[0].from_seq.null
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: null
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].from_seq
+  - name: records_read.ranges[0].to_seq.null
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: null
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].to_seq
+  - name: records_read.ranges[0].prev_hash.null
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: null
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].prev_hash
+  - name: records_read.ranges[0].to_hash.null
+    clause: §9.8 types
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].to_hash
+  - name: export_canonical.form.null
+    clause: §9.8 types
+    base_draft: export_canonical
+    changes:
+    - path: payload.form
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.form
+  - name: export_canonical.manifest.null
+    clause: §9.8 types
+    base_draft: export_canonical
+    changes:
+    - path: payload.manifest
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.manifest
+  - name: verification_fail.trigger.null
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.trigger
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.trigger
+  - name: verification_fail.result.null
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.result
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.result
+  - name: verification_fail.ranges[0].failure.check.null
+    clause: §9.8 types
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: null
+          seq: 17
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.check
+  - name: records_read.missing
+    clause: §9.8 closed
+    base_draft: records_read
+    changes:
+    - path: payload.accessor
+      delete: true
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.accessor
+  - name: records_read.extra
+    clause: §9.8 closed
+    base_draft: records_read
+    changes:
+    - path: payload.instrument
+      value: x
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: export_canonical.missing
+    clause: §9.8 closed
+    base_draft: export_canonical
+    changes:
+    - path: payload.form
+      delete: true
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.form
+  - name: export_canonical.extra
+    clause: §9.8 closed
+    base_draft: export_canonical
+    changes:
+    - path: payload.instrument
+      value: x
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: export_view.missing
+    clause: §9.8 closed
+    base_draft: export_view
+    changes:
+    - path: payload.form
+      delete: true
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      - sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.form
+  - name: export_view.extra
+    clause: §9.8 closed
+    base_draft: export_view
+    changes:
+    - path: payload.instrument
+      value: x
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      - sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: verification_pass.missing
+    clause: §9.8 closed
+    base_draft: verification_pass
+    changes:
+    - path: payload.trigger
+      delete: true
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.trigger
+  - name: verification_pass.extra
+    clause: §9.8 closed
+    base_draft: verification_pass
+    changes:
+    - path: payload.instrument
+      value: x
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: verification_fail.missing
+    clause: §9.8 closed
+    base_draft: verification_fail
+    changes:
+    - path: payload.trigger
+      delete: true
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.trigger
+  - name: verification_fail.extra
+    clause: §9.8 closed
+    base_draft: verification_fail
+    changes:
+    - path: payload.instrument
+      value: x
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: range_missing_member
+    clause: §9.8 closed
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].to_hash
+  - name: range_extra_member
+    clause: §9.8 closed
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        quantity: '1'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].quantity
+  - name: failure_extra_member
+    clause: §9.8 closed
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: rehash_mismatch
+          seq: 17
+          detail: x
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.detail
+  - name: read_wrong_stream
+    clause: '§9.8: the records are control-stream records'
+    base_draft: records_read
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: export_refs_not_listed
+    clause: '§3: `artifact_refs` lists the manifest and the view'
+    base_draft: export_view
+    changes:
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: artifact_refs
+      path: artifact_refs
+  - name: read_nothing
+    clause: 'rule 54: at least one range'
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value: []
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges
+  - name: read_another_workspace
+    clause: 'rule 54: tenant isolation (workspace API API-9)'
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z9:01J8Z9ACCT00000000000000A1
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].stream_id
+  - name: export_another_workspace_second
+    clause: 'rule 54: every range, not only the first'
+    base_draft: export_canonical
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+      - stream_id: agent:ws_01J8Z9:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[1].stream_id
+  - name: verify_another_workspace_control
+    clause: 'rule 54: the control stream of another workspace'
+    base_draft: verification_pass
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        failure: null
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        failure: null
+      - stream_id: ctl:ws_01J8Z9
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[2].stream_id
+  - name: range_from_seq_zero
+    clause: 'rule 54: seq starts at 1'
+    base_draft: export_canonical
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 0
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].from_seq
+      also:
+      - reason: schema
+        path: payload.ranges[0].prev_hash
+  - name: range_reversed
+    clause: 'rule 54: `to_seq` is at least `from_seq`'
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 11
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].to_seq
+  - name: range_from_one_not_genesis
+    clause: 'rule 54: seq 1 follows 64 zeros'
+    base_draft: export_canonical
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].prev_hash
+  - name: range_genesis_not_from_one
+    clause: 'rule 54: only seq 1 follows 64 zeros'
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].prev_hash
+  - name: ranges_out_of_order
+    clause: 'rule 54: ranges sort by stream'
+    base_draft: export_canonical
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A0
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[1].stream_id
+  - name: ranges_overlap
+    clause: 'rule 54: two ranges of one stream never overlap'
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 30
+        to_seq: 31
+        prev_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        to_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[1].stream_id
+  - name: ranges_repeat
+    clause: 'rule 54: one range listed twice'
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - &id005
+        stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+      - *id005
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[1].stream_id
+  - name: read_accessor_not_the_reader
+    clause: 'rule 55: the accessor is the actor'
+    base_draft: records_read
+    changes:
+    - path: payload.accessor
+      value: user_owner_01
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.accessor
+  - name: read_by_an_agent
+    clause: 'rule 55: an agent runtime reads no records outside the product views'
+    base_draft: records_read
+    changes:
+    - path: actor
+      value: &id006
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    - path: payload.accessor
+      value: agent_a
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: export_by_an_agent
+    clause: 'rule 56: a user or a service account exports'
+    base_draft: export_canonical
+    changes:
+    - path: actor
+      value: *id006
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: canonical_with_a_view
+    clause: 'rule 56: a view exactly for a view form'
+    base_draft: export_canonical
+    changes:
+    - path: payload.view
+      value: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      - sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.view
+  - name: view_without_its_bytes
+    clause: rule 56
+    base_draft: export_view
+    changes:
+    - path: payload.view
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.view
+  - name: scheduled_run_by_a_user
+    clause: 'rule 57: a scheduled run is the verifier''s own'
+    base_draft: verification_pass
+    changes:
+    - path: actor
+      value: &id008
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: requested_run_by_an_agent
+    clause: rule 57
+    base_draft: verification_fail
+    changes:
+    - path: actor
+      value: *id006
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: event_check_without_its_seq
+    clause: 'rule 58: a per-event check names its seq'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: rehash_mismatch
+          seq: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.seq
+  - name: range_check_with_a_seq
+    clause: 'rule 58: a range check names no seq'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: anchor_root_mismatch
+          seq: 17
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.seq
+  - name: failure_after_the_range
+    clause: 'rule 58: the seq lies in the range'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: rehash_mismatch
+          seq: 41
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.seq
+  - name: failure_before_the_range
+    clause: 'rule 58: the seq lies in the range'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: rehash_mismatch
+          seq: 0
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.seq
+  - name: passed_range_without_its_head
+    clause: 'rule 58: a passed range names the head it verified'
+    base_draft: verification_pass
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        failure: null
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: null
+        failure: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[1].to_hash
+  - name: fail_reported_as_pass
+    clause: rule 59
+    base_draft: verification_fail
+    changes:
+    - path: payload.result
+      value: pass
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.result
+  - name: pass_reported_as_fail
+    clause: rule 59
+    base_draft: verification_pass
+    changes:
+    - path: payload.result
+      value: fail
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.result
+  valid_drafts:
+  - name: read_one_event
+    clause: 'rule 54: a range of one event'
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 12
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: read_two_ranges_of_one_stream
+    clause: 'rule 54: disjoint ranges of one stream, adjacent included'
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 31
+        to_seq: 31
+        prev_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        to_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: read_by_a_service_account
+    clause: 'rule 55: a service account is a `system` actor (identity spec §3.1)'
+    base_draft: records_read
+    changes:
+    - path: actor
+      value: &id007
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    - path: payload.accessor
+      value: control_services
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: read_scheduler_and_notice_streams
+    clause: '§9.8 types: every stream type of §2'
+    base_draft: records_read
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: clock:ws_01J8Z2
+        from_seq: 1
+        to_seq: 3
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+      - stream_id: ntf:ws_01J8Z2
+        from_seq: 4
+        to_seq: 5
+        prev_hash: '7777777777777777777777777777777777777777777777777777777777777777'
+        to_hash: '8888888888888888888888888888888888888888888888888888888888888888'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: json_view
+    clause: rule 56
+    base_draft: export_view
+    changes:
+    - path: payload.form
+      value: json_view
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      - sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    expect:
+      outcome: Valid
+  - name: export_by_a_service_account
+    clause: rule 56
+    base_draft: export_canonical
+    changes:
+    - path: actor
+      value: *id007
+    - path: artifact_refs
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Valid
+  - name: requested_run_by_a_service_account
+    clause: rule 57
+    base_draft: verification_fail
+    changes:
+    - path: actor
+      value: *id007
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: requested_run_passed
+    clause: rules 57 and 59
+    base_draft: verification_pass
+    changes:
+    - path: actor
+      value: *id008
+    - path: payload.trigger
+      value: request
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: restore_drill_failed_on_a_range_check
+    clause: 'rules 58 and 59: a range check names no seq and may keep its head'
+    base_draft: verification_fail
+    changes:
+    - path: actor
+      value: *id007
+    - path: payload.trigger
+      value: restore_drill
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        failure:
+          check: anchor_root_mismatch
+          seq: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: failure_at_the_first_event
+    clause: 'rule 58: the range''s own bounds are inside'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: prev_hash_mismatch
+          seq: 1
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: failure_at_the_last_event
+    clause: rule 58
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: seq_gap
+          seq: 40
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
     expect:
       outcome: Valid
