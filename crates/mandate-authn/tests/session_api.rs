@@ -26,6 +26,7 @@ fn a_refresh_secret_prints_nothing_and_each_end_reason_has_its_spec_code() {
         EndReason::Deprovisioned,
         EndReason::RefreshFailed,
         EndReason::RefreshReuse,
+        EndReason::Expired,
         EndReason::Admin,
     ]
     .map(EndReason::code);
@@ -37,6 +38,7 @@ fn a_refresh_secret_prints_nothing_and_each_end_reason_has_its_spec_code() {
             "deprovisioned",
             "refresh_failed",
             "refresh_reuse",
+            "expired",
             "admin"
         ]
     );

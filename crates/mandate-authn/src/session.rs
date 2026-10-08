@@ -124,6 +124,9 @@ pub enum EndReason {
     RefreshFailed,
     /// A rotated refresh token was presented again: the whole family is revoked.
     RefreshReuse,
+    /// The idle timeout or the absolute lifetime passed, or a granted refresh found an outage
+    /// session's idle timeout lapsed (DEC-816 item 8).
+    Expired,
     Admin,
 }
 
@@ -136,6 +139,7 @@ impl EndReason {
             Self::Deprovisioned => "deprovisioned",
             Self::RefreshFailed => "refresh_failed",
             Self::RefreshReuse => "refresh_reuse",
+            Self::Expired => "expired",
             Self::Admin => "admin",
         }
     }
@@ -195,15 +199,10 @@ pub enum SessionRefusal {
     /// A time this transition would compute is outside the clock's range.
     #[error("the session's times cannot be represented")]
     Unrepresentable,
-    /// The session ended.
+    /// The session ended. The call that ends it returns this too, and so does every later one;
+    /// the caller journals the reason once, when [`SessionRecord::ended`] first turns `Some`.
     #[error("the session has ended")]
     Ended { reason: EndReason },
-    /// The idle timeout passed since the last request.
-    #[error("the session timed out")]
-    IdleExpired,
-    /// The absolute lifetime passed.
-    #[error("the session reached its absolute lifetime")]
-    AbsoluteExpired,
     /// The access token expired; a refresh is needed.
     #[error("the access token has expired")]
     AccessExpired,
@@ -279,7 +278,9 @@ impl SessionRecord {
         todo!()
     }
 
-    /// Admits `request` at `now`, and on success counts it as activity for the idle timeout.
+    /// Admits `request` at `now`, and on success counts it as activity for the idle timeout. A
+    /// request at or after the absolute lifetime, or a full session's idle timeout, ends the
+    /// session with [`EndReason::Expired`] (DEC-816 item 8).
     pub fn authorize(&mut self, _request: Request, _now: UtcNanos) -> Result<(), SessionRefusal> {
         Err(SessionRefusal::Unimplemented { story: "E9-1" })
     }
@@ -288,7 +289,9 @@ impl SessionRecord {
     /// `next` when it grants. A rotated token presented again ends the session with
     /// [`EndReason::RefreshReuse`]; a deprovision signal ends it with
     /// [`EndReason::Deprovisioned`], and any other answer that is not an outage with
-    /// [`EndReason::RefreshFailed`].
+    /// [`EndReason::RefreshFailed`]. A refresh at or after the absolute lifetime or a full
+    /// session's idle timeout, or a grant to an outage session whose idle timeout lapsed, ends it
+    /// with [`EndReason::Expired`] (DEC-816 item 8).
     pub fn refresh(
         &mut self,
         _presented: &RefreshSecret,
