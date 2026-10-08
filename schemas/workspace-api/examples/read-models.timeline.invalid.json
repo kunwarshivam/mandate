@@ -9,7 +9,80 @@
   {
     "label": "an event type with a trailing newline",
     "set": {
-      "/events/0/event_type": "FillApplied\n"
+      "/events/2/event_type": "FillApplied\n"
+    },
+    "remove": []
+  },
+  {
+    "label": "a gate entry without its summary",
+    "set": {},
+    "remove": [
+      "/events/1/gate"
+    ]
+  },
+  {
+    "label": "a gate summary on a fill entry",
+    "set": {
+      "/events/2/gate": {
+        "verdict": "allow",
+        "reason_code": null,
+        "action": {
+          "side": "buy",
+          "qty": "3",
+          "symbol": "XYZ",
+          "limit_price": "140.95",
+          "purpose": "increase"
+        }
+      }
+    },
+    "remove": []
+  },
+  {
+    "label": "a verdict outside the closed set",
+    "set": {
+      "/events/1/gate/verdict": "approve"
+    },
+    "remove": []
+  },
+  {
+    "label": "an allow with a reason code",
+    "set": {
+      "/events/1/gate/reason_code": "max_order_size"
+    },
+    "remove": []
+  },
+  {
+    "label": "a deny without a reason code",
+    "set": {
+      "/events/1/gate/verdict": "deny"
+    },
+    "remove": []
+  },
+  {
+    "label": "a gate quantity as a number (§3.1)",
+    "set": {
+      "/events/1/gate/action/qty": 2
+    },
+    "remove": []
+  },
+  {
+    "label": "a gate entry of another event type",
+    "set": {
+      "/events/1/event_type": "DecisionMade"
+    },
+    "remove": []
+  },
+  {
+    "label": "model text in a gate summary (API-18)",
+    "set": {
+      "/events/1/gate/rationale": "momentum looks strong"
+    },
+    "remove": []
+  },
+  {
+    "label": "a gate kind on an entry with no summary",
+    "set": {
+      "/events/0/kind": "gate"
     },
     "remove": []
   },

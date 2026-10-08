@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/timeline.schema.json",
   "title": "Agent timeline",
-  "description": "GET /agents/{id}/timeline?types=&from=&to= (§4.8, J1): merged from the agent and account streams, one cursor per stream, displayed by recorded_at. DEC-735.",
+  "description": "GET /agents/{id}/timeline?types=&from=&to= (§4.8, J1): merged from the agent and account streams, one cursor per stream, displayed by recorded_at. Entries are a union tagged by kind; a gate entry carries the decision's summary. DEC-735.",
   "type": "object",
   "allOf": [
     {
@@ -19,52 +19,7 @@
     "events": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": [
-          "event_id",
-          "stream_id",
-          "seq",
-          "recorded_at",
-          "event_type",
-          "kind",
-          "text"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "event_id": {
-            "$ref": "../common.schema.json#/$defs/EventId"
-          },
-          "stream_id": {
-            "$ref": "../common.schema.json#/$defs/Watermark/properties/stream_id"
-          },
-          "seq": {
-            "$ref": "../common.schema.json#/$defs/Watermark/properties/seq"
-          },
-          "recorded_at": {
-            "$ref": "../common.schema.json#/$defs/Timestamp"
-          },
-          "event_type": {
-            "type": "string",
-            "pattern": "^[A-Z][A-Za-z]+$"
-          },
-          "kind": {
-            "enum": [
-              "fill",
-              "order",
-              "mode",
-              "approval",
-              "gate",
-              "protection",
-              "reconciliation",
-              "version"
-            ]
-          },
-          "text": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Deterministic words built from the event's own members; never model output (API-18)."
-          }
-        }
+        "$ref": "#/$defs/TimelineEvent"
       }
     },
     "cursors": {
@@ -95,5 +50,193 @@
       "$ref": "../common.schema.json#/$defs/AsOf"
     }
   },
-  "unevaluatedProperties": false
+  "unevaluatedProperties": false,
+  "$defs": {
+    "TimelineEvent": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/GateEntry"
+        },
+        {
+          "$ref": "#/$defs/OtherEntry"
+        }
+      ]
+    },
+    "GateEntry": {
+      "type": "object",
+      "description": "A gate decision, with its summary; event_id links to its full record.",
+      "required": [
+        "event_id",
+        "stream_id",
+        "seq",
+        "recorded_at",
+        "text",
+        "event_type",
+        "kind",
+        "gate"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        },
+        "stream_id": {
+          "$ref": "../common.schema.json#/$defs/Watermark/properties/stream_id"
+        },
+        "seq": {
+          "$ref": "../common.schema.json#/$defs/Watermark/properties/seq"
+        },
+        "recorded_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Deterministic words built from the event's own members; never model output (API-18)."
+        },
+        "event_type": {
+          "const": "GateDecided"
+        },
+        "kind": {
+          "const": "gate"
+        },
+        "gate": {
+          "$ref": "#/$defs/GateSummary"
+        }
+      }
+    },
+    "OtherEntry": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "stream_id",
+        "seq",
+        "recorded_at",
+        "text",
+        "event_type",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        },
+        "stream_id": {
+          "$ref": "../common.schema.json#/$defs/Watermark/properties/stream_id"
+        },
+        "seq": {
+          "$ref": "../common.schema.json#/$defs/Watermark/properties/seq"
+        },
+        "recorded_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Deterministic words built from the event's own members; never model output (API-18)."
+        },
+        "event_type": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z]+$"
+        },
+        "kind": {
+          "enum": [
+            "fill",
+            "order",
+            "mode",
+            "approval",
+            "protection",
+            "reconciliation",
+            "version"
+          ]
+        }
+      }
+    },
+    "GateSummary": {
+      "type": "object",
+      "description": "The gate's decision in brief (§4.8): verdict, the reason code of a deny or defer (null for an allow), and the action judged. The full per-check record is GET /journal/events/{event_id}/gate (J6), linked by the entry's event_id.",
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "allow"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason_code": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "reason_code": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "verdict",
+        "reason_code",
+        "action"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {
+          "enum": [
+            "allow",
+            "deny",
+            "defer"
+          ]
+        },
+        "reason_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "action": {
+          "type": "object",
+          "required": [
+            "side",
+            "qty",
+            "symbol",
+            "limit_price",
+            "purpose"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "side": {
+              "enum": [
+                "buy",
+                "sell"
+              ]
+            },
+            "qty": {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            "symbol": {
+              "type": "string",
+              "pattern": "^[A-Z0-9./-]{1,24}$"
+            },
+            "limit_price": {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            "purpose": {
+              "enum": [
+                "open",
+                "increase",
+                "discretionary_exit",
+                "owner_exit",
+                "risk_exit",
+                "protective"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
 }

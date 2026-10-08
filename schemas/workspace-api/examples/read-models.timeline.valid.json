@@ -1,0 +1,10 @@
+[
+  {
+    "label": "a deny with its reason code",
+    "set": {
+      "/events/1/gate/verdict": "deny",
+      "/events/1/gate/reason_code": "max_order_size"
+    },
+    "remove": []
+  }
+]
