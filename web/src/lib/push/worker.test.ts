@@ -19,28 +19,59 @@ const ORIGIN = "https://app.owlhead.invalid";
 
 type Shown = { title: string; options: { body: string; tag: string; data: unknown } };
 
+/** Everything the worker must never touch (P5): each records the call and throws. */
+const FORBIDDEN = ["fetch", "caches", "indexedDB", "XMLHttpRequest", "navigator", "importScripts", "localStorage"] as const;
+
+function tripwires(tripped: string[]) {
+  const wire = (name: string): unknown =>
+    new Proxy(function () {}, {
+      get: (_, key) => {
+        tripped.push(`${name}.${String(key)}`);
+        throw new Error(`the worker touched ${name}`);
+      },
+      apply: () => {
+        tripped.push(name);
+        throw new Error(`the worker called ${name}`);
+      },
+      construct: () => {
+        tripped.push(name);
+        throw new Error(`the worker constructed ${name}`);
+      },
+    });
+  return Object.fromEntries(FORBIDDEN.map((name) => [name, wire(name)]));
+}
+
 function load() {
   const listeners = new Map<string, (event: unknown) => void>();
   const shown: Shown[] = [];
   const opened: string[] = [];
   const waits: Promise<unknown>[] = [];
+  const shownPromises: Promise<unknown>[] = [];
+  const openPromises: Promise<unknown>[] = [];
+  const tripped: string[] = [];
+  const wires = tripwires(tripped);
   const self = {
+    ...wires,
     location: { origin: ORIGIN },
     addEventListener: (type: string, listener: (event: unknown) => void) => listeners.set(type, listener),
     registration: {
       showNotification: (title: string, options: Shown["options"]) => {
         shown.push({ title, options });
-        return Promise.resolve();
+        const p = Promise.resolve();
+        shownPromises.push(p);
+        return p;
       },
     },
     clients: {
       openWindow: (url: string) => {
         opened.push(url);
-        return Promise.resolve(null);
+        const p = Promise.resolve(null);
+        openPromises.push(p);
+        return p;
       },
     },
   };
-  new Function("self", SOURCE)(self);
+  new Function("self", ...FORBIDDEN, SOURCE)(self, ...FORBIDDEN.map((name) => wires[name]));
   const push = (raw: string | null) =>
     listeners.get("push")?.({
       data: raw === null ? null : { text: () => raw },
@@ -54,7 +85,7 @@ function load() {
     });
     return closed;
   };
-  return { listeners, shown, opened, push, click };
+  return { listeners, shown, opened, waits, shownPromises, openPromises, tripped, push, click };
 }
 
 describe("the push service worker", () => {
@@ -65,9 +96,11 @@ describe("the push service worker", () => {
 
   it.skip("pending E8-14: shows the fixed sentence for each of the four text keys, and nothing of the payload but the notice as tag", () => {
     for (const [key, text] of Object.entries(TEXTS)) {
-      const { shown, push } = load();
+      const { shown, waits, shownPromises, tripped, push } = load();
       push(JSON.stringify({ notice: HEX, text: key }));
       expect(shown).toEqual([{ title: "Owlhead", options: { body: text, tag: HEX, data: { notice: HEX } } }]);
+      expect(waits).toEqual(shownPromises);
+      expect(tripped).toEqual([]);
     }
   });
 
@@ -91,17 +124,28 @@ describe("the push service worker", () => {
       JSON.stringify({ notice: `../${HEX.slice(3)}`, text: "brief_ready" }),
       JSON.stringify({ notice: 7, text: "brief_ready" }),
       JSON.stringify({ notice: HEX, text: ["brief_ready"] }),
+      `{"notice":"${"0".repeat(32)}","notice":"${HEX}","text":"brief_ready"}`,
+      `{"notice":"${HEX}","text":"brief_ready","text":"approval_needed"}`,
+      `\uFEFF{"notice":"${HEX}","text":"brief_ready"}`,
+      ` {"notice":"${HEX}","text":"brief_ready"}`,
+      `{"notice":"${HEX}","text":"brief_ready"}\n`,
+      `{ "notice": "${HEX}", "text": "brief_ready" }`,
+      `{"text":"brief_ready","notice":"${HEX}"}`,
+      `{"notice":"${HEX}","text":"brief_ready"}${" ".repeat(10_000)}`,
+      "x".repeat(100_000),
     ];
     for (const raw of refused) {
-      const { shown, push } = load();
+      const { shown, waits, tripped, push } = load();
       push(raw);
-      expect(shown, String(raw)).toEqual([]);
+      expect(shown, String(raw).slice(0, 80)).toEqual([]);
+      expect(waits).toEqual([]);
+      expect(tripped).toEqual([]);
     }
   });
 
   it.skip("pending E8-14: shows only the four sentences whatever arrives (NT-1, fuzzed)", () => {
     const allowed = new Set(Object.values(TEXTS));
-    const { shown, push } = load();
+    const { shown, tripped, push } = load();
     let seed = 20261008;
     const next = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31);
     const pieces = ['{"notice":"', HEX, '","text":"', "approval_needed", "brief", '"}', ",", '"x":1', "\\u0000", "<script>"];
@@ -112,6 +156,7 @@ describe("the push service worker", () => {
       if (i % 10 === 0) push(JSON.stringify({ notice: HEX, text: keys[next() % keys.length] }));
     }
     expect(shown.length).toBeGreaterThanOrEqual(200);
+    expect(tripped).toEqual([]);
     for (const { title, options } of shown) {
       expect(title).toBe("Owlhead");
       expect(allowed.has(options.body)).toBe(true);
@@ -120,12 +165,25 @@ describe("the push service worker", () => {
   });
 
   it.skip("pending E8-14: opens only <origin>/n/<notice> on a tap, and nothing for a notification without a valid notice (NT-4)", () => {
-    const { opened, click } = load();
-    expect(click({ notice: HEX })).toBe(true);
+    const { opened, waits, openPromises, tripped, click } = load();
+    expect(click({ notice: HEX, url: "https://evil.example/", href: "/x", origin: "https://evil.example" })).toBe(true);
     expect(opened).toEqual([`${ORIGIN}/n/${HEX}`]);
-    for (const data of [null, {}, { notice: "https://evil.example/" }, { notice: `${HEX}?t=1` }, { notice: 1 }]) {
+    expect(waits).toEqual(openPromises);
+    for (const data of [
+      null,
+      {},
+      { notice: "https://evil.example/" },
+      { notice: `${HEX}?t=1` },
+      { notice: 1 },
+      { notice: HEX.toUpperCase() },
+      { notice: "01J9ZQ8V3W5X7Y9A1B3C5D7E9F" },
+      { url: `/n/${HEX}` },
+    ]) {
       click(data);
     }
     expect(opened).toEqual([`${ORIGIN}/n/${HEX}`]);
+    expect(waits).toEqual(openPromises);
+    expect(tripped).toEqual([]);
   });
+
 });

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { PUSH_WORKER_PATH, type PushBrowser, subscribeToPush, subscriptionJson, vapidKeyBytes } from "./subscribe";
+import { afterEach, beforeEach } from "vitest";
+import { PUSH_WORKER_PATH, type PushBrowser, allowedPushEndpoint, subscribeToPush, subscriptionJson, vapidKeyBytes } from "./subscribe";
 
-/** E8-14 S8d: permission, registration and subscription, with a fake browser (notifications spec §4.6). */
+/**
+ * E8-14 S8d: permission, registration and subscription, with a fake browser (notifications spec
+ * §4.6). The allowlist table is DEC-792's (#833), as notifications spec §4.6 states it (#827).
+ */
 
 const VAPID = "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
 const SUBSCRIPTION = {
@@ -68,5 +72,78 @@ describe("subscribing to push", () => {
     expect(bytes?.length).toBe(65);
     expect(bytes?.[0]).toBe(4);
     expect(subscriptionJson({ ...SUBSCRIPTION, expirationTime: 1, extra: "x" })).toEqual(SUBSCRIPTION);
+  });
+
+  it.skip("pending E8-14: accepts an endpoint only on the browsers' push services, and sends nothing otherwise (DEC-792)", async () => {
+    const allowed = [
+      "https://fcm.googleapis.com/fcm/send/abc",
+      "https://fcm.googleapis.com:443/fcm/send/abc",
+      "https://updates.push.services.mozilla.com/wpush/v2/abc",
+      "https://web.push.apple.com/QGv",
+      "https://a.b.push.apple.com/QGv",
+      "https://wns2-x.notify.windows.com/w/?token=abc",
+      "https://wns2-xyz.notify.windows.com/w/?token=abc",
+    ];
+    const refused = [
+      "https://evil.example/",
+      "https://fcm.googleapis.com.evil.example/x",
+      "https://evilfcm.googleapis.com/x",
+      "https://push.apple.com.evil.example/x",
+      "https://push.apple.com/x",
+      "https://notify.windows.com/x",
+      "https://evilpush.apple.com/x",
+      "https://fcm.googleapis.com:8443/x",
+      "https://u:p@fcm.googleapis.com/x",
+      "https://fcm.googleapis.com@evil.example/x",
+      "https://1.2.3.4/x",
+      "https://[::1]/x",
+      "https://android.googleapis.com/x",
+      "http://fcm.googleapis.com/x",
+      "https://FCM.googleapis.com/x",
+      "https://fcm.googleapis.com./x",
+      "https://xn--fcm-0na.googleapis.com/x",
+      "https://fcm%2Egoogleapis.com/x",
+      "https://fcm.googleapis.com\\@evil.example/x",
+      " https://fcm.googleapis.com/x",
+      "https://xn--web-0na.push.apple.com/x",
+      "https://a..push.apple.com/x",
+      "https://-a.push.apple.com/x",
+      "https://a-.notify.windows.com/x",
+    ];
+    for (const endpoint of allowed) {
+      expect(allowedPushEndpoint(endpoint), endpoint).toBe(true);
+      const send = vi.fn(async () => {});
+      expect(await subscribeToPush(VAPID, send, browser("granted", { endpoint, keys: SUBSCRIPTION.keys }).fake), endpoint).toEqual({ kind: "subscribed" });
+      expect(send).toHaveBeenCalledWith({ endpoint, keys: SUBSCRIPTION.keys });
+    }
+    for (const endpoint of refused) {
+      expect(allowedPushEndpoint(endpoint), endpoint).toBe(false);
+      expect(subscriptionJson({ endpoint, keys: SUBSCRIPTION.keys }), endpoint).toBeNull();
+      const send = vi.fn(async () => {});
+      expect(await subscribeToPush(VAPID, send, browser("granted", { endpoint, keys: SUBSCRIPTION.keys }).fake), endpoint).toEqual({ kind: "failed" });
+      expect(send).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe("the subscription stays out of the console (NT-2)", () => {
+  const methods = ["log", "info", "warn", "error", "debug", "trace"] as const;
+  let spies: ReturnType<typeof vi.spyOn>[] = [];
+  beforeEach(() => {
+    spies = methods.map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
+  });
+  afterEach(() => spies.forEach((spy) => spy.mockRestore()));
+
+  it.skip("pending E8-14: writes no endpoint or key to the console on any path", async () => {
+    const leaky = new Error(`push failed for ${SUBSCRIPTION.endpoint} ${SUBSCRIPTION.keys.auth}`);
+    await subscribeToPush(VAPID, async () => {}, browser("granted").fake);
+    await subscribeToPush(VAPID, async () => {}, browser("granted", { endpoint: SUBSCRIPTION.endpoint, keys: { p256dh: "a b", auth: SUBSCRIPTION.keys.auth } }).fake);
+    await subscribeToPush(VAPID, async () => Promise.reject(leaky), browser("granted").fake);
+    const throwing: PushBrowser = { ...browser("granted").fake, serviceWorker: { register: async () => Promise.reject(leaky) } };
+    await subscribeToPush(VAPID, async () => {}, throwing);
+    const written = spies.flatMap((spy) => spy.mock.calls.map((args: unknown[]) => args.map((a: unknown) => String(a instanceof Error ? `${a.message}${a.stack}` : JSON.stringify(a))).join(" ")));
+    for (const secret of ["push.services.mozilla.com", SUBSCRIPTION.keys.p256dh, SUBSCRIPTION.keys.auth]) {
+      expect(written.filter((line) => line.includes(secret))).toEqual([]);
+    }
   });
 });

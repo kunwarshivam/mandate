@@ -33,6 +33,27 @@ type PushManagerLike = {
   subscribe(options: { userVisibleOnly: true; applicationServerKey: Uint8Array<ArrayBuffer> }): Promise<{ toJSON(): unknown }>;
 };
 
+/**
+ * The browsers' push services a subscription may point at (DEC-792): an exact host, or `*.` and a
+ * domain, which matches a proper subdomain at any depth and never the domain itself.
+ */
+export const PUSH_SERVICE_HOSTS = [
+  "fcm.googleapis.com",
+  "updates.push.services.mozilla.com",
+  "*.push.apple.com",
+  "*.notify.windows.com",
+] as const;
+
+/**
+ * Whether `endpoint` is `https` on port 443, with no user information, and a lowercase ASCII host
+ * on `PUSH_SERVICE_HOSTS`; an IP literal, a trailing dot, an IDN label, or percent-encoding in the
+ * host never matches (notifications spec §4.6).
+ */
+export function allowedPushEndpoint(endpoint: string): boolean {
+  void endpoint;
+  throw new Error("Unimplemented: E8-14");
+}
+
 /** The VAPID public key as the 65 octets of an uncompressed P-256 point, or null. */
 export function vapidKeyBytes(key: string): Uint8Array<ArrayBuffer> | null {
   void key;
