@@ -27,6 +27,7 @@ mandate-mcp = { path = "crates/mandate-mcp", version = "0.0.0" }
 mandate-connections = { path = "crates/mandate-connections", version = "0.0.0" }
 mandate-vault-local = { path = "crates/mandate-vault-local", version = "0.0.0" }
 mandate-modelhost = { path = "crates/mandate-modelhost", version = "0.0.0" }
+mandate-notify = { path = "crates/mandate-notify", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-passkey = { path = "crates/mandate-passkey", version = "0.0.0" }
 mandate-risk = { path = "crates/mandate-risk", version = "0.0.0" }
