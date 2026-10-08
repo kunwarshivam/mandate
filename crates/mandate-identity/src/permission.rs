@@ -37,6 +37,7 @@ pub enum Permission {
     RevokeClient,
     OwnPasskey,
     NotificationAddress,
+    ListOwnNotificationAddresses,
     ListOwnMemberships,
     Leave,
     OrgPolicyTighten,
