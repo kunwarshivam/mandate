@@ -156,6 +156,8 @@ SCHEMAS[("acct", "OwnerCommandRefused")] = REFUSAL
 SCHEMAS[("agent", "OwnerCommandRefused")] = REFUSAL
 
 REQUIRED_REFS = {
+    "ApprovalResponded": ("mandate_version",),
+    "ApprovalRevalidated": ("mandate_version",),
     "AgentDeployed": ("mandate_version",),
     "AgentStopped": ("mandate_version",),
     "MandateVersionApplied": ("mandate_version",),
@@ -264,6 +266,68 @@ THESIS = rec(
 )
 SCHEMAS[("agent", "ThesisProposed")] = THESIS
 SCHEMAS[("agent", "ThesisRevised")] = THESIS
+
+# §9.7 (DEC-533): the owner's approval answer and the runtime's two records of it. Times are integer
+# risk-clock seconds, as §9.6's `ApprovalRequested.deadline` is, so their step-up evidence is not
+# §9.2's `STEP_UP`, whose `authenticated_at` is a timestamp (DEC-533 item 2).
+NULL = T("null")
+ANSWER_STEP_UP = rec(("assertion_id", STR), ("authenticated_at", INT), ("method", STR))
+ADMISSION_REASONS = (
+    "not_pending",
+    "late",
+    "not_an_approver",
+    "not_delivered",
+    "content_mismatch",
+    "step_up_missing",
+    "step_up_stale",
+    "step_up_reused",
+    "step_up_method",
+    "duplicate_approver",
+    "not_independent",
+)
+# Mandate spec §6.4: a skip runs checks 1 to 5 only.
+SKIP_REASONS = ADMISSION_REASONS[:5]
+QUORUM_REASONS = ("duplicate_approver", "not_independent")
+DRIFT_BANDS = (100, 200)
+SCHEMAS[("ctl", "ApprovalResponseSubmitted")] = rec(
+    ("agent", IDENT_T),
+    ("approval", ULID),
+    ("verdict", one_of("approved", "skipped")),
+    ("content_hash", REF),
+    ("submitted_at", INT),
+    ("step_up", opt(ANSWER_STEP_UP)),
+    ("responder", STR),
+    ("role", one_of("approver")),
+)
+SCHEMAS[("agent", "ApprovalResponded")] = rec(
+    ("approval", ULID),
+    ("verdict", one_of("approved", "skipped")),
+    ("responder", STR),
+    ("role", one_of("approver")),
+    ("result", one_of("admitted", "counted", "refused")),
+    ("reason", opt(one_of(*ADMISSION_REASONS))),
+    ("effective_at", INT),
+    ("step_up", opt(ANSWER_STEP_UP)),
+    ("quorum", opt(rec(("independent", BOOL), ("required", INT)))),
+    ("separation_of_duties", NULL),
+    ("delegation", NULL),
+)
+SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
+    ("approval", ULID),
+    ("result", one_of("act", "skip")),
+    ("reason", opt(STR)),
+    ("mandate_version_bound", REF),
+    ("mandate_version_now", REF),
+    ("mode", one_of("normal", "exits_only", "paused", "stopped")),
+    ("instrument_restricted", BOOL),
+    ("decided_by_bound", STR),
+    ("decided_by_now", opt(STR)),
+    ("dry_run", one_of("allow", "deny")),
+    ("dry_run_reason", opt(STR)),
+    ("m_req", opt(DEC)),
+    ("m_now", opt(DEC)),
+    ("band_bp", INT),
+)
 
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
@@ -420,7 +484,12 @@ def nested_record(path: str) -> str:
 
 
 def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> list[Violation]:
-    """`type_violations` with §9.2's two new types: `pointer` and `date` (refused as `id` is)."""
+    """`type_violations` with §9.2's two new types: `pointer` and `date` (refused as `id` is), and
+    §9.7's `null`."""
+    if ty.kind == "null":
+        if value is None or "types.null" in skip:
+            return []
+        return [Violation("types", "schema", path)]
     if ty.kind == "risk_clock":
         if value is None and "types.risk_clock_nullable" in skip:
             return []
@@ -654,7 +723,68 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("44.uncovered", False, "schema", "payload.uncovered")
         if p["acknowledged"] is not None and action != "unprotected_end":
             rule("44.acknowledged", False, "schema", "payload.acknowledged")
+    out += answer_violations(event_type, draft, skip)
     return out
+
+
+def answer_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.7's rules 46 to 49 and 51 to 53, on a well-typed payload (rule 50 is a copy rule)."""
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    if event_type == "ApprovalResponseSubmitted":
+        rule("46", p["responder"] == draft["actor"]["id"], "payload.responder")
+    if event_type == "ApprovalResponded":
+        refused = p["result"] == "refused"
+        rule("47", (p["reason"] is not None) == refused, "payload.reason")
+        judged = p["verdict"] == "approved" and (
+            p["result"] in ("admitted", "counted") or p["reason"] in QUORUM_REASONS
+        )
+        rule("48", (p["quorum"] is not None) == judged, "payload.quorum")
+        if p["verdict"] == "skipped":
+            rule("49.counted", p["result"] != "counted", "payload.result")
+            if p["reason"] is not None:
+                rule("49.reason", p["reason"] in SKIP_REASONS, "payload.reason")
+    if event_type == "ApprovalRevalidated":
+        rule("51", (p["reason"] is not None) == (p["result"] == "skip"), "payload.reason")
+        rule("52", (p["dry_run_reason"] is not None) == (p["dry_run"] == "deny"), "payload.dry_run_reason")
+        band = p["band_bp"] in DRIFT_BANDS
+        rule("53.band", band, "payload.band_bp")
+        if p["result"] == "act" and band:
+            failed = act_failure(p, skip)
+            if failed:
+                rule(f"53.{failed}", False, f"payload.{failed}")
+    return out
+
+
+def act_failure(p: dict, skip: frozenset[str]) -> str | None:
+    """Rule 53: the first member of an `act` that shows a check failed, in the rule's order."""
+    marks = p["m_req"] is not None and p["m_now"] is not None
+    inside = False
+    if marks:
+        m_req, m_now = Decimal(p["m_req"]), Decimal(p["m_now"])
+        drift = abs(m_now - m_req) * 10000
+        bound = p["band_bp"] * m_req
+        inside = drift < bound if "boundary.rule_53_strict" in skip else drift <= bound
+    checks = (
+        ("mandate_version_now", p["mandate_version_now"] == p["mandate_version_bound"]),
+        ("mode", p["mode"] == "normal"),
+        ("instrument_restricted", p["instrument_restricted"] is False),
+        ("decided_by_now", p["decided_by_now"] in (None, p["decided_by_bound"])),
+        ("dry_run", p["dry_run"] == "allow"),
+        ("m_req", p["m_req"] is not None),
+        ("m_now", p["m_now"] is not None),
+    )
+    for member, holds in checks:
+        if not holds and f"rule.53.{member}" not in skip:
+            return member
+    if marks and not inside and "rule.53.m_now_drift" not in skip:
+        return "m_now"
+    return None
 
 
 def instant_nanos(text: str) -> int:
@@ -751,8 +881,11 @@ def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
 
 
 def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """Rule 27: an `OwnerCommandRefused` names the owner input it refused (reason `schema`)."""
+    """Rule 27: an `OwnerCommandRefused` names the owner input it refused, and §9.7's rule 50: an
+    `ApprovalResponded` names the answer it copies (reason `schema`)."""
     kind = draft["stream_id"].split(":")[0]
+    if event_type == "ApprovalResponded" and draft["causation_id"] is None and "rule.50" not in skip:
+        return [Violation("rule.50", "schema", "causation_id")]
     if (
         event_type == "OwnerCommandRefused"
         and draft["causation_id"] is None
