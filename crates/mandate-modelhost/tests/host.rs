@@ -20,6 +20,21 @@ fn a_refusal_names_the_failed_check_and_no_value() {
     assert_eq!(Refusal::ParamValue { key }.to_string(), bounds);
 }
 
+/// The content hash `quant.ma_crossover` 1.0.0 is pinned to (DEC-504 item 2, DEC-518 item 1),
+/// computed from M2's bytes of the two files it lists. An edit to either file, the crossover in
+/// `mandate-backtest` or the model's own host file, fails this test: the model must take a new
+/// version, with a new pinned hash, before its code can change.
+const PINNED_1_0_0: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
+
+/// A model whose code changed cannot keep its version (DEC-504 item 2), so its hash is a literal
+/// here rather than whatever the build gives.
+#[test]
+fn quant_ma_crossover_1_0_0_keeps_its_pinned_content_hash() {
+    let hash = content(ID, VERSION).map(|c| c.hash.to_hex());
+    let why = "a listed file changed: give the model a new version and pin its new hash";
+    assert_eq!(hash, Ok(PINNED_1_0_0.to_owned()), "{why}");
+}
+
 /// DEC-504 item 2 and DEC-518: the host computes the content object from the bytes it was built
 /// with, so it equals the object written from the files on disk; it has content for no other model.
 #[test]
