@@ -1952,7 +1952,11 @@ proptest! {
     /// resolved by the order's own terminal state on the journal, or, for a protective order, by
     /// the `ProtectionChanged` that records it cancelled — never by the request being accepted.
     /// Two rulings bound the wait. Rule 5's wait ends when the cancel is journaled overdue
-    /// (`cancel_overdue`, DEC-160 (7), (13), (18)). And an entry that turns terminal partly
+    /// (`cancel_overdue`, DEC-160 (7), (13), (18)), and an exit never waits twice on the same
+    /// submission of an opening: once that opening's wait went overdue, even before its cancel
+    /// could be asked (an unacknowledged opening is queried, never cancelled blind), a cancel asked
+    /// later for the same submission holds no sell; a resubmission starts the wait afresh. And an
+    /// entry that turns terminal partly
     /// filled, "after that cancel or by any other path", gets its OCO for the filled quantity
     /// (DEC-346 item 6), so a protective submission does not wait on any buy's cancel, plain or
     /// bracket (DEC-521 item 2). A plain buy that fills only adds to the position. A bracket
@@ -1980,6 +1984,7 @@ proptest! {
         let mut instrument_of: BTreeMap<String, String> = BTreeMap::new();
         let mut outstanding: BTreeMap<String, String> = BTreeMap::new();
         let mut buys: BTreeSet<String> = BTreeSet::new();
+        let mut overdue_submissions: BTreeSet<String> = BTreeSet::new();
         for effect in &run.effects {
             if let Effect::Broker(BrokerRequest::Submit(order)) = effect
                 && order.side == mandate_accounting::Side::Buy
@@ -1991,6 +1996,7 @@ proptest! {
                     let name = field(draft, "instrument_id").or(field(draft, "instrument"));
                     if let (Some(id), Some(name)) = (field(draft, "client_order_id"), name) {
                         instrument_of.insert(id.to_owned(), name.to_owned());
+                        overdue_submissions.remove(id);
                     }
                 }
                 Effect::Journal(draft)
@@ -2004,11 +2010,16 @@ proptest! {
                 }
                 Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
                     let id = client_order_id.as_str().to_owned();
-                    let name = instrument_of.get(&id).cloned().unwrap_or_default();
-                    outstanding.insert(id, name);
+                    if !(buys.contains(&id) && overdue_submissions.contains(&id)) {
+                        let name = instrument_of.get(&id).cloned().unwrap_or_default();
+                        outstanding.insert(id, name);
+                    }
                 }
                 Effect::Journal(draft) if draft.event_type == "OrderStateChanged" => {
                     let overdue = draft.payload.get("cancel_overdue") == Some(&Value::Bool(true));
+                    if overdue && let Some(id) = field(draft, "client_order_id") {
+                        overdue_submissions.insert(id.to_owned());
+                    }
                     if (overdue
                         || field(draft, "state")
                             .and_then(shadow_state)
