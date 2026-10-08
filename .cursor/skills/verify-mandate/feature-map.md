@@ -1198,7 +1198,10 @@ proves each pending test fails on them (DEC-110).
   with the crossover itself in `crates/mandate-backtest/src/strategy/ma_crossover.rs`.
 - **Tests:** `crates/mandate-modelhost/tests/host.rs` (the content object against canonical JSON
   written by hand from the files on disk, the output mapping, `as_of` on early closes, weekends and
-  a given calendar), with fixtures in `tests/common/mod.rs`. Pending until M2.
+  a given calendar) and `crates/mandate-modelhost/tests/refusals.rs` (one refusal per failed check
+  in the brief's order, each refusal's stable code, FT-4 over random identity changes, and the
+  signal against an `i128` oracle with determinism), with fixtures in `tests/common/mod.rs`.
+  Pending until M2.
 - **Run:** `cargo nextest run -p mandate-modelhost`; the pending tests with
   `cargo nextest run -p mandate-modelhost --run-ignored only`.
 
