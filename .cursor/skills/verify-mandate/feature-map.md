@@ -490,14 +490,16 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 
 ## MCP transport for broker connectors (E7-16)
 
-- **Spec:** `docs/specs/connections.md` §6.2 rules 1 and 4, CN-9; DEC-441 item 8; slice M1 of the
-  first-live-trade brief (#706).
+- **Spec:** `docs/specs/connections.md` §6.2 rules 1 and 4, §6.5 (the reserved exit budget), CN-9;
+  DEC-441 item 8; slice M1 of the first-live-trade brief (#706).
 - **Code:** `mandate-mcp`: `crates/mandate-mcp/src/endpoint.rs` (`PinnedEndpoint`: `https` on the
   pinned host only, plain `http` only to a loopback literal in the crate's own test build),
-  `crates/mandate-mcp/src/error.rs` (`McpError`, and `ServerText`, which has no `Display` and whose
-  `Debug` withholds what the server sent).
+  `crates/mandate-mcp/src/budget.rs` (`RateBudget`: the ordinary bucket and the reserved one only
+  risk-reducing calls draw on), `crates/mandate-mcp/src/error.rs` (`McpError`, and `ServerText`,
+  which has no `Display` and whose `Debug` withholds what the server sent).
 - **Tests:** in-crate, because loopback is accepted only in the crate's test build:
-  `crates/mandate-mcp/src/tests/endpoint.rs`, `crates/mandate-mcp/src/tests/errors.rs`.
+  `crates/mandate-mcp/src/tests/endpoint.rs`, `crates/mandate-mcp/src/tests/budget.rs` (an oracle
+  that steps one refill period at a time), `crates/mandate-mcp/src/tests/errors.rs`.
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
 
 ## Risk gate

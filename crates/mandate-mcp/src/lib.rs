@@ -16,7 +16,7 @@
 //!   own test build. Redirects are never followed: a `3xx` is [`McpError::Redirected`].
 //! - **JSON-RPC 2.0 over streamable HTTP**, with the `Mcp-Session-Id` the server assigns carried
 //!   on every later request, and the answer read as one JSON body or as server-sent events.
-//! - **Bounded**: connect and request timeouts, a cap on the answer's size, and a `RateBudget`
+//! - **Bounded**: connect and request timeouts, a cap on the answer's size, and a [`RateBudget`]
 //!   whose reserved bucket only risk-reducing calls draw on, so reads can never starve a cancel
 //!   or an exit (`AGENTS.md` rule 13, connections spec §6.5).
 //! - **Server text stays opaque.** Results and error details are [`ServerText`], which has no
@@ -25,9 +25,11 @@
 //!
 //! No credential passes through this slice; the OAuth token is E7-24's.
 
+mod budget;
 mod endpoint;
 mod error;
 
+pub use budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
 pub use endpoint::PinnedEndpoint;
 pub use error::{McpError, ServerText};
 
