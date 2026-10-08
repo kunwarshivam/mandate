@@ -9,7 +9,7 @@
 //! A profile is validated once, at [`CapabilityProfile::new`], and hashed over its canonical
 //! object through `mandate-canon` (journal spec §4), so a broker rule that changes is a new hash.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value};
 
@@ -64,13 +64,24 @@ pub enum Retry {
     Unknown,
 }
 
+impl Retry {
+    /// Whether an order whose answer was lost may be sent again with the same client order id
+    /// without first learning what became of it. Only [`Retry::Idempotent`] may: the broker then
+    /// refuses the second order rather than taking it.
+    pub fn may_resend_blindly(self) -> bool {
+        matches!(self, Self::Idempotent)
+    }
+}
+
 /// What the broker offers for an order of one type and one quantity form (DEC-630 item 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cell {
     pub order_type: OrderType,
     pub quantity_form: QuantityForm,
     pub times_in_force: BTreeSet<TimeInForce>,
-    /// The protective forms an order of this type and quantity form may be placed in.
+    /// The protective forms an order of this type and quantity form may be sent as: a bracket's
+    /// entry, an OCO's parent (its take-profit), or the one resting stop-limit. Never the forms it
+    /// may only be a leg of; each form fixes its own legs (DEC-630 item 1).
     pub protection_forms: BTreeSet<ProtectionForm>,
 }
 
@@ -91,11 +102,17 @@ pub struct Idempotency {
     pub query_by_client_order_id: bool,
 }
 
+/// Where one cell sits: its row's asset class and session, then its order type and quantity
+/// form.
+type Place = (AssetClass, MarketSession, OrderType, QuantityForm);
+
 /// A validated profile with its canonical object and that object's hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityProfile {
     canonical: Value,
     content_hash: Digest,
+    idempotency: Idempotency,
+    cells: BTreeMap<Place, Cell>,
 }
 
 impl CapabilityProfile {
@@ -121,9 +138,29 @@ impl CapabilityProfile {
     pub fn content_hash(&self) -> Digest {
         self.content_hash
     }
+
+    /// The broker's idempotency members. A re-send reads [`Retry::may_resend_blindly`], never
+    /// the variant itself.
+    pub fn idempotency(&self) -> Idempotency {
+        self.idempotency
+    }
+
+    /// The one cell for an order of this type and quantity form in this asset class and session.
+    /// An order the profile does not list is refused [`ProfileError::NotOffered`], so a missing
+    /// cell is never read as "anything goes" (DEC-630 item 9).
+    pub fn cell(
+        &self,
+        asset_class: AssetClass,
+        session: MarketSession,
+        order_type: OrderType,
+        quantity_form: QuantityForm,
+    ) -> Result<&Cell, ProfileError> {
+        let _ = (&self.cells, asset_class, session, order_type, quantity_form);
+        Err(ProfileError::Unimplemented)
+    }
 }
 
-/// Why a declared profile is refused.
+/// Why a declared profile is refused, or a read of it finds no cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ProfileError {
     /// The stubs of this story's tests PR return it (DEC-77). Like `DomainError::Unimplemented`,
@@ -144,6 +181,8 @@ pub enum ProfileError {
     NoTimeInForce,
     #[error("only a broker with a client order id can deduplicate or be queried by it")]
     ClaimWithoutClientId,
+    #[error("the broker's profile lists no such order")]
+    NotOffered,
     /// A member name the canonical grammar refuses (journal spec §4), which only a change to
     /// this file could introduce.
     #[error("the canonical object could not be built")]
@@ -162,6 +201,7 @@ impl ProfileError {
             Self::DuplicateCell => "profile_duplicate_cell",
             Self::NoTimeInForce => "profile_no_time_in_force",
             Self::ClaimWithoutClientId => "profile_claim_without_client_id",
+            Self::NotOffered => "profile_not_offered",
             Self::NonCanonical => "profile_non_canonical",
         }
     }
