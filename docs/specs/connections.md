@@ -201,6 +201,12 @@ holds a vault lease for one connection and that connection's broker hosts.
    control stream's writer, appends `ConnectionEstablished` (journal §9.2) once it reads them.
    The executor then runs as the account's executor.
 
+**The redirect URI is fixed:** `https://api.owlhead.ai/v1/oauth/alpaca/callback` (DEC-820's
+domain). A registered URI cannot carry a workspace id, so the callback sits outside the
+`/v1/workspaces/{workspace_id}` prefix; the workspace, user, environment, and PKCE verifier are
+bound server-side to the single-use `state` (workspace API spec §4.5). A hybrid or on-prem
+deployment would need its own registered URI; that is open (§13).
+
 **Not buildable yet.** U-A4 is open (§5.5), so DEC-441 item 21 refuses every Alpaca OAuth grant,
 paper included. And Alpaca's token endpoint is on its live host (`api.alpaca.markets`), which no
 non-production build compiles in (ES-23), so even a paper grant cannot be exchanged outside
@@ -549,6 +555,8 @@ Until then no Alpaca OAuth grant is accepted in any environment.
 
 1. U-A2, U-A3, U-A4, and PKCE (Alpaca; U-A1 and U-A5 answered, §5.5) and U-R1 to U-R12
    (Robinhood), above. The Alpaca ones need Alpaca's written answer (DEC-690 item 10).
+5. The OAuth redirect URI for a hybrid or on-prem deployment, which would need its own
+   registration with Alpaca (§5.2).
 2. Answered in §3: a reconnect is a second `ConnectionEstablished` for the same `connection_id`,
    valid only after its `ConnectionRevoked`; the rule is a journal spec change (E7-17).
 3. Whether cross-deployment duplicate detection (CN-5) is worth a fingerprint registry in the
