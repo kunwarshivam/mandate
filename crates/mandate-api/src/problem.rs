@@ -3,10 +3,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Unimplemented;
-use crate::wire::{Decimal, EventId};
+use crate::wire::{Decimal, EventId, Id, Ref};
 
 /// One error response. `title` is generic text fixed by `code`, never content (rule 6, API-10);
-/// `event_id` is present exactly when `effect` is not [`Effect::None`].
+/// `event_id` is always a member, null exactly when `effect` is [`Effect::None`], so a body that
+/// omits it is refused rather than read as null; `current_base` is a member exactly when `code` is
+/// [`ProblemCode::StaleBase`] (§3.5: "the body names the current base", API-19).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Problem {
@@ -16,29 +18,45 @@ pub struct Problem {
     pub code: ProblemCode,
     pub title: String,
     pub effect: Effect,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub event_id: Option<EventId>,
     pub retryable: bool,
     pub violations: Vec<Violation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_base: Option<CurrentBase>,
+}
+
+/// The base now in force that a `stale_base` refusal names: a draft's or version's content
+/// reference, or the id of the object whose base moved (`envelope.schema.json#/$defs/Problem`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CurrentBase {
+    Ref(Ref),
+    Id(Id),
 }
 
 impl Problem {
     /// The problem for `code`: the status §3.5's table gives it, the type URI
     /// `https://mandate.dev/problems/<code>`, a title fixed by the code that names no content, no
     /// violations, and `retryable` for `journal_unavailable` and `rate_limited` only, with
-    /// `membership_unavailable` once #766's codes are served (DEC-681 items 9 and 11).
+    /// `membership_unavailable` once #766's codes are served (DEC-681 items 9 and 11). The title
+    /// is the one `envelope.schema.json` pins for the code.
     ///
     /// # Errors
     /// [`ProblemError::EventIdMismatch`] for an `event_id` with [`Effect::None`], or none with
     /// `recorded` or `unknown`; [`ProblemError::EffectNotAllowed`] for an effect the code cannot
     /// carry: every code is refused before anything is written except `step_up_required` and
     /// `control_stream_frozen`, which may refuse the second half of a batch whose kill switch was
-    /// recorded (§5.6), and no code yet reports `unknown` (DEC-681 item 11).
+    /// recorded (§5.6), and only `outcome_unknown`, once served, reports `unknown`, and only that
+    /// (DEC-681 item 11); [`ProblemError::CurrentBaseMismatch`] for a `current_base` with a code
+    /// other than `stale_base`, or none with `stale_base`.
     pub fn of(
         code: ProblemCode,
         effect: Effect,
         event_id: Option<EventId>,
+        current_base: Option<CurrentBase>,
     ) -> Result<Self, ProblemError> {
-        let _ = (code, effect, event_id);
+        let _ = (code, effect, event_id, current_base);
         Err(ProblemError::Unimplemented(Unimplemented))
     }
 }
@@ -95,20 +113,30 @@ pub enum Violation {
         key: String,
         level: PolicyLevel,
         value: PolicyValue,
-        ancestor_level: PolicyLevel,
+        ancestor_level: AncestorLevel,
         ancestor_value: PolicyValue,
         message: String,
     },
 }
 
-/// Mandate spec §4.3's hierarchy, top to bottom.
+/// The level whose value is looser than its ancestor's: any level of mandate spec §4.3's hierarchy
+/// but the platform's, which has no ancestor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyLevel {
-    Platform,
     Organization,
     Workspace,
     Mandate,
+}
+
+/// The nearest ancestor that sets the value: any level of mandate spec §4.3's hierarchy but the
+/// mandate's, which is never an ancestor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AncestorLevel {
+    Platform,
+    Organization,
+    Workspace,
 }
 
 /// A value as §4.3 compares it: a number, a permission or requirement, or a set's sorted members.
@@ -129,4 +157,6 @@ pub enum ProblemError {
     EventIdMismatch,
     #[error("this code cannot carry this effect")]
     EffectNotAllowed,
+    #[error("current_base must be present exactly when the code is stale_base")]
+    CurrentBaseMismatch,
 }

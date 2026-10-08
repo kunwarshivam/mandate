@@ -1117,7 +1117,10 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-api/src/idempotency.rs` (the key and the derived event id). Stubbed.
 - **Tests:** `crates/mandate-api/tests/contract.rs`, pending E10-10: §3.5's statuses parsed from the
   spec; §3.4's ids against a `sha2` and Crockford oracle; scalars as canonical strings, a JSON
-  number in a decimal refused; the problem's closed enums spelled as the spec spells them.
+  number in a decimal refused; the problem's closed enums spelled as the spec spells them, its
+  per-code titles pinned, `current_base` exactly for `stale_base`, `outcome_unknown` carrying only
+  `unknown`. Live: the problem's and the policy violation's serde shapes (`event_id` a required
+  member, the two policy levels).
 - **Run:** `cargo nextest run -p mandate-api --run-ignored all` (fails at the stubs until E10-10).
 
 ## Reference-case harness
