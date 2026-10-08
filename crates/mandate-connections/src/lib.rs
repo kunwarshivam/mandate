@@ -17,13 +17,15 @@
 //! - [`grant`] checks the granted scopes, in the connection's executor process.
 //! - [`record`] is the connection record and the account-fingerprint uniqueness check, kept by the
 //!   **connection manager, in the API process** (E7-11).
+//! - [`checks`] runs the permission checks (E7-12), in the **connection's executor process**.
 //! - [`hosts`] is the guard every outbound Alpaca request passes. The only request to the live
 //!   host that can exist is [`hosts::LiveTokenRequest`], `POST /oauth/token` (DEC-821 item 2).
 //!   Every other request is a [`hosts::PaperRequest`], which can address only the paper host.
 //!
 //! The `state` and authorization URL (API process), and the code exchange and vault (executor
-//! process), follow in the next D2 slices. The permission checks (E7-12) are added beside these.
+//! process), follow in the next D2 slices.
 
+pub mod checks;
 pub mod error;
 pub mod grant;
 pub mod hosts;

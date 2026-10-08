@@ -31,6 +31,7 @@ fn every_error_has_its_stable_code() {
             ConnectError::InvalidRecord { member: "scopes" },
             "invalid_record",
         ),
+        (ConnectError::CheckRefused, "check_refused"),
         (
             ConnectError::Unimplemented { story: "E10-13" },
             "unimplemented",

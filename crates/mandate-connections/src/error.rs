@@ -40,6 +40,8 @@ pub enum ConnectError {
     InvalidPiiRef,
     #[error("the connection record's {member} breaks connections spec §3 to §6")]
     InvalidRecord { member: &'static str },
+    #[error("a permission check refused the credential")]
+    CheckRefused,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -65,6 +67,7 @@ impl ConnectError {
             Self::InvalidAccountRef => "invalid_account_ref",
             Self::InvalidPiiRef => "invalid_pii_ref",
             Self::InvalidRecord { .. } => "invalid_record",
+            Self::CheckRefused => "check_refused",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }
