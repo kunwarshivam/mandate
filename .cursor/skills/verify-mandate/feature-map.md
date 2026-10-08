@@ -1135,8 +1135,8 @@ proves each pending test fails on them (DEC-110).
   DEC-89, DEC-91; `docs/project/tasks/E2-4-sessions-and-corporate-actions.md`.
 - **Code:** `crates/mandate-time/src/session.rs` and `crates/mandate-time/data/us-equities.calendar`
   (the NYSE calendar 2018 to 2028, four sessions per trading day, and
-  `last_completed_regular_session`, the one answer the shell's dataset check and the E15-13 model
-  host share); `mandate-marketdata`:
+  `last_completed_regular_session`, the one answer for the shell's dataset check and the E15-13
+  model host to share, refusing a clock past the range, DEC-513); `mandate-marketdata`:
   - `crates/mandate-marketdata/src/model/corporate_action.rs`: splits, dividends, other actions,
     and point-in-time adjustment through `mandate_num::SplitRatio::mark`;
   - `crates/mandate-marketdata/src/alpaca.rs` and `client.rs`: `/v1/corporate-actions`;
