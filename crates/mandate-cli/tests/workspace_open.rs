@@ -16,16 +16,17 @@ mod conformance;
 mod support;
 
 use std::path::{Path, PathBuf};
-use std::process::Command as Process;
+use std::process::{Command as Process, Output};
 
 use clap::Parser;
 use clap::error::ErrorKind;
 use mandate_canon::{Value, parse};
+use mandate_cli::control::ControlJournal;
 use mandate_cli::control::{Now, Submitted};
-use mandate_cli::postgres::{JournalArgs, read_stream};
+use mandate_cli::postgres::{JournalArgs, PgControlJournal, read_stream};
 use mandate_cli::workspace::{OpenArgs, WorkspaceCommand, open};
 use mandate_cli::{Cli, Command};
-use mandate_journal::StreamId;
+use mandate_journal::{AppendOutcome, StoredEvent, StreamId};
 use mandate_journal_pg::APP_ROLE;
 use mandate_time::UtcNanos;
 use support::{TestDb, URL_VAR};
@@ -125,16 +126,84 @@ fn a_bad_workspace_or_an_unreachable_journal_is_refused_without_a_database() {
 }
 
 /// A DSN acting as the application role in `db`'s schema.
-fn dsn(db: &TestDb) -> String {
+fn dsn_of(db: &TestDb) -> String {
     let url = std::env::var(URL_VAR).unwrap();
     let joiner = if url.contains('?') { '&' } else { '?' };
     let options = format!("-c%20search_path%3D{}%20-c%20role%3D{APP_ROLE}", db.schema);
     format!("{url}{joiner}options={options}")
 }
 
+/// The password and the host in `MANDATE_PG_URL`, which no output may show (`AGENTS.md` rule 7).
+fn dsn_parts() -> Vec<String> {
+    let url = std::env::var(URL_VAR).unwrap_or_default();
+    let Some((credentials, location)) = url
+        .split_once("://")
+        .and_then(|(_, rest)| rest.split_once('@'))
+    else {
+        return Vec::new();
+    };
+    let password = credentials.split_once(':').map(|(_, p)| p.to_owned());
+    let host = location.split(['/', ':', '?']).next().map(str::to_owned);
+    [password, host]
+        .into_iter()
+        .flatten()
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// Runs the binary; neither of its outputs shows a part of the DSN.
+fn mandate(argv: &[&str]) -> Output {
+    let run = Process::new(env!("CARGO_BIN_EXE_mandate"))
+        .args(argv)
+        .output()
+        .unwrap();
+    for part in dsn_parts() {
+        for (name, out) in [("stdout", &run.stdout), ("stderr", &run.stderr)] {
+            let shown = String::from_utf8_lossy(out);
+            assert!(
+                !shown.contains(&part),
+                "{argv:?}: {name} shows a DSN part: {shown}"
+            );
+        }
+    }
+    run
+}
+
+fn open_with(dsn: &str, workspace: &str, store: &Path) -> Output {
+    let store = store.to_str().unwrap();
+    mandate(&[
+        "workspace",
+        "open",
+        "--workspace",
+        workspace,
+        "--journal",
+        dsn,
+        "--store",
+        store,
+    ])
+}
+
+fn rows(dsn: &str, stream: &str) -> Vec<StoredEvent> {
+    read_stream(&dsn.into(), &StreamId::parse(stream).unwrap()).unwrap()
+}
+
+/// Refused with `code`, nothing on stdout.
+fn refused(run: &Output, code: &str) {
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(!run.status.success() && run.stdout.is_empty(), "{stderr}");
+    assert!(stderr.contains(code), "{stderr}");
+}
+
+/// `ctl:ws9`'s opener in paper as another writer drafts it: the journal vectors' event id, not the
+/// one the CLI derives.
+const FOREIGN: &str = r#"{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Y0A0A000000000000000S1","event_time":"2026-09-20T13:00:00.000000000Z","event_type":"StreamOpened","payload":{"stream_type":"control","workspace_id":"ws9"},"pii_refs":[],"schema_version":1,"stream_id":"ctl:ws9"}"#;
+const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-10-05T13:30:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","symbol":"SPY"}"#;
+
 /// The binary opens `ctl:ws1` with exactly the vectors' opener in paper, printing one line that
-/// names the event and its `seq`; a second run is refused `workspace_already_open`, prints
-/// nothing, and appends nothing.
+/// names the event and its `seq`, under an id derived from what it commits, so a fresh database
+/// gets the same one. A stream that holds any event, its own opener or another writer's, is refused
+/// `workspace_already_open`, with nothing printed, appended, or created. A second workspace opens
+/// its own stream, and D1b's `config register` appends to the opened one.
 #[test]
 #[ignore = "pending E10-16"]
 fn the_binary_opens_the_control_stream_once() {
@@ -142,29 +211,13 @@ fn the_binary_opens_the_control_stream_once() {
     let Some(db) = TestDb::new() else {
         return;
     };
-    let (dsn, store) = (dsn(&db), scratch("binary"));
-    let mandate = |workspace: &str| {
-        let argv = [
-            "workspace",
-            "open",
-            "--workspace",
-            workspace,
-            "--journal",
-            &dsn,
-        ];
-        Process::new(env!("CARGO_BIN_EXE_mandate"))
-            .args(argv)
-            .args(["--store", store.to_str().unwrap()])
-            .output()
-            .unwrap()
-    };
-    let first = mandate("ws1");
+    let (dsn, store, elsewhere) = (dsn_of(&db), scratch("binary"), scratch("binary-elsewhere"));
+    let first = open_with(&dsn, "ws1", &store);
     let stderr = String::from_utf8_lossy(&first.stderr);
     assert!(first.status.success() && stderr.is_empty(), "{stderr}");
-    let ctl = StreamId::parse("ctl:ws1").unwrap();
-    let rows = read_stream(&dsn.as_str().into(), &ctl).unwrap();
-    let [row] = rows.as_slice() else {
-        panic!("one event: {rows:?}")
+    let opened = rows(&dsn, "ctl:ws1");
+    let [row] = opened.as_slice() else {
+        panic!("one event: {opened:?}")
     };
     let stdout = String::from_utf8(first.stdout).unwrap();
     let lines: Vec<&str> = stdout.lines().collect();
@@ -172,10 +225,12 @@ fn the_binary_opens_the_control_stream_once() {
         panic!("one line: {stdout:?}")
     };
     let words: Vec<&str> = line.split_whitespace().collect();
+    let seq = row.seq.to_string();
     assert!(
-        words.contains(&row.event_id.as_str()) && words.contains(&"1"),
+        words.contains(&row.event_id.as_str()) && words.contains(&seq.as_str()),
         "{line}"
     );
+    assert_eq!(seq, "1");
     assert!(!line.contains("postgres://"), "{line}");
     let body = parse(&row.body).unwrap();
     let text = |path: &[&str]| {
@@ -196,18 +251,75 @@ fn the_binary_opens_the_control_stream_once() {
     }
     let payload = body.get("payload").and_then(Value::as_object).unwrap();
     assert_eq!(payload.len(), 2, "the payload is exactly the two members");
-    let again = mandate("ws1");
-    let stderr = String::from_utf8_lossy(&again.stderr);
-    assert!(
-        !again.status.success() && again.stdout.is_empty(),
-        "{stderr}"
+    refused(
+        &open_with(&dsn, "ws1", &elsewhere),
+        "workspace_already_open",
     );
-    assert!(stderr.contains("workspace_already_open"), "{stderr}");
-    assert_eq!(read_stream(&dsn.as_str().into(), &ctl).unwrap().len(), 1);
-    let other = mandate("ws2");
+    assert_eq!(rows(&dsn, "ctl:ws1").len(), 1);
+    let target = JournalArgs {
+        journal: dsn.as_str().into(),
+        store: store.clone(),
+    };
+    let mut writer = PgControlJournal::open(&target).unwrap();
+    let ws9 = StreamId::parse("ctl:ws9").unwrap();
+    let epoch = writer.take_ownership(&ws9).unwrap();
+    let seeded = writer.append(&ws9, 0, epoch, now().at, &[FOREIGN.as_bytes()]);
     assert!(
-        other.status.success(),
-        "another workspace opens its own stream"
+        matches!(seeded, Ok(AppendOutcome::Committed(_))),
+        "{seeded:?}"
     );
-    std::fs::remove_dir_all(store).ok();
+    refused(
+        &open_with(&dsn, "ws9", &elsewhere),
+        "workspace_already_open",
+    );
+    assert_eq!(
+        rows(&dsn, "ctl:ws9").len(),
+        1,
+        "another writer's opener stays alone"
+    );
+    assert!(!elsewhere.exists(), "a refusal creates no store");
+    let other = open_with(&dsn, "ws2", &store);
+    let stderr = String::from_utf8_lossy(&other.stderr);
+    assert!(other.status.success() && stderr.is_empty(), "{stderr}");
+    if let Some(fresh) = TestDb::new() {
+        let again = dsn_of(&fresh);
+        assert!(open_with(&again, "ws1", &elsewhere).status.success());
+        let derived = rows(&again, "ctl:ws1").pop().map(|r| r.event_id);
+        assert_eq!(
+            derived.as_ref(),
+            Some(&row.event_id),
+            "the id is derived, not drawn"
+        );
+    }
+    let spy = store.join("spy.json");
+    std::fs::write(&spy, SPY).unwrap();
+    let registered = mandate(&[
+        "config",
+        "register",
+        "--kind",
+        "instrument_snapshot",
+        spy.to_str().unwrap(),
+        "--workspace",
+        "ws1",
+        "--user",
+        "u1",
+        "--journal",
+        &dsn,
+        "--store",
+        store.to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8_lossy(&registered.stderr);
+    assert!(registered.status.success(), "{stderr}");
+    let stream = rows(&dsn, "ctl:ws1");
+    let shape: Vec<(u64, &str)> = stream
+        .iter()
+        .map(|r| (r.seq, r.event_type.as_str()))
+        .collect();
+    assert_eq!(
+        shape,
+        [(1, "StreamOpened"), (2, "ConfigSnapshotRegistered")]
+    );
+    for made in [store, elsewhere] {
+        std::fs::remove_dir_all(made).ok();
+    }
 }
