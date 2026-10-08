@@ -24,7 +24,6 @@ fn refused(change: impl FnOnce(&mut Ceremony)) -> Result<Credential, Refusal> {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_es256_passkey_enrols_with_none_attestation() {
     let authenticator = Authenticator::new(Alg::Es256);
     let registration = authenticator.register(&Ceremony::create(&CHALLENGE));
@@ -32,7 +31,6 @@ fn an_es256_passkey_enrols_with_none_attestation() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_ed25519_passkey_enrols_with_its_counter_and_backup_eligibility() {
     let authenticator = Authenticator::new(Alg::Ed25519);
     let mut ceremony = Ceremony::create(&CHALLENGE);
@@ -46,14 +44,12 @@ fn an_ed25519_passkey_enrols_with_its_counter_and_backup_eligibility() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_get_ceremony_is_not_an_enrolment() {
     let result = refused(|c| c.kind = "webauthn.get".to_owned());
     assert_eq!(result, Err(Refusal::ClientDataType));
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn another_challenge_is_refused() {
     let padded = format!("{}=", common::b64url(&CHALLENGE));
     let standard_alphabet = common::b64url(&CHALLENGE)
@@ -66,7 +62,6 @@ fn another_challenge_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_origin_that_only_shares_the_prefix_is_refused() {
     for origin in [
         "https://app.owlhead.ai.evil.example",
@@ -85,7 +80,6 @@ fn an_origin_that_only_shares_the_prefix_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_cross_origin_ceremony_is_refused() {
     assert_eq!(
         refused(|c| c.cross_origin = Some(true)),
@@ -94,7 +88,6 @@ fn a_cross_origin_ceremony_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn another_rp_id_hash_is_refused() {
     for rp_id in ["owlhead.ai", "api.owlhead.ai", "evil.example"] {
         let result = refused(|c| c.rp_id = rp_id.to_owned());
@@ -103,27 +96,23 @@ fn another_rp_id_hash_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn enrolment_without_user_presence_or_verification_is_refused() {
     assert_eq!(refused(|c| c.flags &= !UP), Err(Refusal::UserNotPresent));
     assert_eq!(refused(|c| c.flags &= !UV), Err(Refusal::UserNotVerified));
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn backup_state_without_backup_eligibility_is_refused() {
     assert_eq!(refused(|c| c.flags |= BS), Err(Refusal::BackupFlags));
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn authenticator_data_without_a_credential_is_refused() {
     let result = refused(|c| c.flags &= !AT);
     assert_eq!(result, Err(Refusal::AuthenticatorDataMalformed));
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn bytes_after_the_public_key_need_the_extension_flag_and_a_map() {
     let authenticator = Authenticator::new(Alg::Es256);
     let key = authenticator.cose_key();
@@ -157,7 +146,6 @@ fn bytes_after_the_public_key_need_the_extension_flag_and_a_map() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn only_none_attestation_with_an_empty_statement_is_accepted() {
     let authenticator = Authenticator::new(Alg::Es256);
     let ceremony = Ceremony::create(&CHALLENGE);
@@ -185,7 +173,6 @@ fn only_none_attestation_with_an_empty_statement_is_accepted() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn malformed_cbor_is_refused() {
     let authenticator = Authenticator::new(Alg::Es256);
     let ceremony = Ceremony::create(&CHALLENGE);
@@ -219,7 +206,6 @@ fn malformed_cbor_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn only_es256_on_p256_and_eddsa_on_ed25519_keys_are_accepted() {
     let authenticator = Authenticator::new(Alg::Es256);
     let PublicKeyParts { x, y } = PublicKeyParts::of(&authenticator);

@@ -28,7 +28,6 @@ fn refused(change: impl FnOnce(&mut Ceremony)) -> Result<Verified, Refusal> {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn es256_and_ed25519_assertions_verify_and_return_the_new_counter() {
     for alg in [Alg::Es256, Alg::Ed25519] {
         let authenticator = Authenticator::new(alg);
@@ -46,26 +45,22 @@ fn es256_and_ed25519_assertions_verify_and_return_the_new_counter() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_assertion_without_user_verification_is_refused() {
     assert_eq!(refused(|c| c.flags &= !UV), Err(Refusal::UserNotVerified));
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_assertion_without_user_presence_is_refused() {
     assert_eq!(refused(|c| c.flags &= !UP), Err(Refusal::UserNotPresent));
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_create_ceremony_is_not_an_assertion() {
     let result = refused(|c| c.kind = "webauthn.create".to_owned());
     assert_eq!(result, Err(Refusal::ClientDataType));
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_challenge_that_is_not_the_issued_one_is_refused() {
     let padded = format!("{}=", common::b64url(&CHALLENGE));
     let standard_alphabet = common::b64url(&CHALLENGE)
@@ -84,7 +79,6 @@ fn a_challenge_that_is_not_the_issued_one_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_origin_that_only_shares_the_prefix_is_refused() {
     for origin in [
         "https://app.owlhead.ai.evil.example",
@@ -101,7 +95,6 @@ fn an_origin_that_only_shares_the_prefix_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_cross_origin_assertion_is_refused_and_an_absent_flag_is_not() {
     assert_eq!(
         refused(|c| c.cross_origin = Some(true)),
@@ -111,7 +104,6 @@ fn a_cross_origin_assertion_is_refused_and_an_absent_flag_is_not() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_assertion_for_another_rp_id_is_refused() {
     for rp_id in ["owlhead.ai", "evil.owlhead.ai", "evil.example"] {
         let result = refused(|c| c.rp_id = rp_id.to_owned());
@@ -134,7 +126,6 @@ fn good_client_data() -> String {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn client_data_that_is_not_the_expected_object_is_refused() {
     let good = good_client_data();
     let challenge = format!(r#""challenge":"{}","#, common::b64url(&CHALLENGE));
@@ -192,7 +183,6 @@ fn authenticator_data_shorter_than_its_header_is_malformed() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn attested_data_or_unflagged_trailing_bytes_are_refused() {
     let authenticator = Authenticator::new(Alg::Es256);
     let credential = authenticator.credential(4);
@@ -212,7 +202,6 @@ fn attested_data_or_unflagged_trailing_bytes_are_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn backup_eligibility_never_changes_after_enrolment() {
     let authenticator = Authenticator::new(Alg::Es256);
     let mut ceremony = Ceremony::get(&CHALLENGE, 5);
@@ -237,7 +226,6 @@ fn backup_eligibility_never_changes_after_enrolment() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_assertion_naming_another_credential_is_refused() {
     let authenticator = Authenticator::new(Alg::Es256);
     let mut assertion = authenticator.assert(&Ceremony::get(&CHALLENGE, 5));
@@ -249,7 +237,6 @@ fn an_assertion_naming_another_credential_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_signature_by_another_key_is_refused() {
     for alg in [Alg::Es256, Alg::Ed25519] {
         let enrolled = Authenticator::new(alg);
@@ -265,7 +252,6 @@ fn a_signature_by_another_key_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_counter_that_does_not_rise_is_refused() {
     let authenticator = Authenticator::new(Alg::Ed25519);
     for (stored, presented) in [(5, 4), (5, 5), (5, 0), (1, 0)] {
@@ -280,7 +266,6 @@ fn a_counter_that_does_not_rise_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_rising_counter_or_one_never_kept_is_accepted() {
     let authenticator = Authenticator::new(Alg::Ed25519);
     for (stored, presented) in [(0, 0), (0, 1), (u32::MAX - 1, u32::MAX)] {

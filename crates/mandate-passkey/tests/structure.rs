@@ -31,7 +31,6 @@ fn registration(authenticator: &Authenticator, key: &[u8], extensions: &[u8]) ->
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_credential_id_has_one_to_1023_bytes() {
     for (length, accepted) in [(0, false), (1, true), (1023, true), (1024, false)] {
         let mut authenticator = Authenticator::new(Alg::Es256);
@@ -51,7 +50,6 @@ fn a_credential_id_has_one_to_1023_bytes() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn cbor_nests_at_most_eight_levels_below_the_outermost_item() {
     let authenticator = Authenticator::new(Alg::Ed25519);
     let nested = |levels: usize| {
@@ -66,7 +64,6 @@ fn cbor_nests_at_most_eight_levels_below_the_outermost_item() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn booleans_null_and_arrays_are_read_and_tags_and_floats_are_not() {
     let authenticator = Authenticator::new(Alg::Ed25519);
     let key = authenticator.cose_key();
@@ -93,7 +90,6 @@ fn booleans_null_and_arrays_are_read_and_tags_and_floats_are_not() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_longer_length_form_reads_like_the_shortest() {
     let authenticator = Authenticator::new(Alg::Es256);
     let ceremony = Ceremony::create(&CHALLENGE);
@@ -126,7 +122,6 @@ fn a_longer_length_form_reads_like_the_shortest() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_eddsa_key_needs_the_okp_key_type_and_the_ed25519_curve() {
     let authenticator = Authenticator::new(Alg::Ed25519);
     let PublicKey::Ed25519 { x } = authenticator.public_key() else {
