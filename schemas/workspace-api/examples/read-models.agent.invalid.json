@@ -15,5 +15,8 @@
   {"label": "a first version with changes", "set": {"/versions/0/changes": [{"path": "/risk/max_order_usd", "from": "1", "to": "2", "classification": "risk_increasing"}]}},
   {"label": "an untagged application", "set": {"/versions/0/application": {"at": "2026-09-21T13:30:00.000000000Z", "approvals_canceled": 0}}},
   {"label": "no versions", "set": {"/versions": []}},
-  {"label": "a timestamp with an offset", "set": {"/deployed_at": "2026-09-21T09:30:00-04:00"}}
+  {"label": "a timestamp with an offset", "set": {"/deployed_at": "2026-09-21T09:30:00-04:00"}},
+  {"label": "empty watermarks on a read (API-14)", "set": {"/as_of": []}},
+  {"label": "no served_at", "remove": ["/served_at"]},
+  {"label": "no watermarks (§6.1)", "remove": ["/as_of"]}
 ]

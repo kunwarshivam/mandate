@@ -8,5 +8,8 @@
   {"label": "an account number in an instrument (API-11)", "set": {"/positions/0/instrument/account_number": "123456789"}},
   {"label": "an uppercase asset id", "set": {"/positions/0/instrument/asset_id": "7B4A1C2E-1111-4A2B-9C3D-000000000001"}},
   {"label": "a scorecard (FR-8.4)", "set": {"/positions/0/scorecard": {"hit_rate": "0.7"}}},
-  {"label": "an unknown protection kind", "set": {"/positions/0/protection/kind": "trailing"}}
+  {"label": "an unknown protection kind", "set": {"/positions/0/protection/kind": "trailing"}},
+  {"label": "empty watermarks on a read (API-14)", "set": {"/as_of": []}},
+  {"label": "no served_at", "remove": ["/served_at"]},
+  {"label": "no watermarks (§6.1)", "remove": ["/as_of"]}
 ]

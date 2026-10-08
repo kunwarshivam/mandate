@@ -7,6 +7,7 @@
   "type": "object",
   "required": ["agents", "open_approvals", "unread_alerts", "recent_decisions"],
   "properties": {
+    "as_of": { "$ref": "../common.schema.json#/$defs/AsOf", "description": "API-14: a read model names every stream it read, so its watermarks are never empty." },
     "agents": { "type": "array", "items": { "$ref": "agents.schema.json#/$defs/AgentSummary" } },
     "open_approvals": { "type": "integer", "minimum": 0 },
     "unread_alerts": { "type": "integer", "minimum": 0 },

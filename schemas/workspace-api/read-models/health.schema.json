@@ -7,6 +7,7 @@
   "type": "object",
   "required": ["market_data", "broker", "deployment", "relay"],
   "properties": {
+    "as_of": { "$ref": "../common.schema.json#/$defs/AsOf", "description": "API-14: a read model names every stream it read, so its watermarks are never empty." },
     "market_data": { "$ref": "#/$defs/Component" },
     "broker": { "$ref": "#/$defs/Component" },
     "deployment": { "$ref": "#/$defs/Component" },

@@ -3,5 +3,7 @@
   {"label": "a component without freshness (API-14)", "remove": ["/relay/freshness"]},
   {"label": "an unknown state", "set": {"/deployment/state": "degraded"}},
   {"label": "no watermarks (§6.1)", "remove": ["/as_of"]},
-  {"label": "an extra member", "set": {"/region": "us-east"}}
+  {"label": "an extra member", "set": {"/region": "us-east"}},
+  {"label": "empty watermarks on a read (API-14)", "set": {"/as_of": []}},
+  {"label": "no served_at", "remove": ["/served_at"]}
 ]

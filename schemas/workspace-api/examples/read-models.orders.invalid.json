@@ -8,5 +8,8 @@
   {"label": "an account number on a fill (API-11)", "set": {"/fills/0/account_number": "123456789"}},
   {"label": "model text on an order (API-18)", "set": {"/orders/0/rationale": "momentum is strong"}},
   {"label": "a past order without its note", "remove": ["/past_orders/0/note"]},
-  {"label": "a time in force the venue spec lacks", "set": {"/orders/0/time_in_force": "ioc"}}
+  {"label": "a time in force the venue spec lacks", "set": {"/orders/0/time_in_force": "ioc"}},
+  {"label": "empty watermarks on a read (API-14)", "set": {"/as_of": []}},
+  {"label": "no served_at", "remove": ["/served_at"]},
+  {"label": "no watermarks (§6.1)", "remove": ["/as_of"]}
 ]

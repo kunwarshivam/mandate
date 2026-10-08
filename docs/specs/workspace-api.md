@@ -524,7 +524,10 @@ nothing above. Where this section and a schema differ, the schema is the defect.
 
 Value types (`Decimal`, `Timestamp`, `ContentRef`, `Id`, `AssetId`, `EventId`, `Watermark`, `AsOf`,
 `Freshness`, `QuotedContent`) are `common.schema.json`'s (DEC-740). The members every response
-carries (`Envelope`, including `as_of`) and the problem document (§3.5) are `envelope.schema.json`'s.
+carries (`Envelope`: `api_version`, `build`, `served_at`, `as_of`) and the problem document (§3.5)
+are `envelope.schema.json`'s. The envelope allows an empty `as_of` for a response that reads no
+stream. Every read model narrows it to one or more watermarks, so a read always names what it
+reflects (API-14).
 
 **Rules every shape keeps:**
 
@@ -547,8 +550,8 @@ carries (`Envelope`, including `as_of`) and the problem document (§3.5) are `en
    - each health component (an `ok` component is never stale).
 
    `stale` is the server's judgment against the limit `limit_source` names, and the value is still
-   returned (API-14). `age_seconds` is the age when the body was built; a client showing a cached
-   body adds the time since it fetched it.
+   returned (API-14). `age_seconds` is measured to the envelope's `served_at`, so a client can
+   check it; a client showing a cached body adds the time since `served_at`.
 4. **Order states.** `orders` holds trading-domain spec §5.7's non-final states and `past_orders`
    its final ones. `Unknown` is a working state of its own, served as `Unknown`, shown as unknown,
    and never mapped to another state.

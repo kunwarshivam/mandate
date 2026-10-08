@@ -7,6 +7,7 @@
   "type": "object",
   "required": ["agent_id", "environment", "simulated", "pnl_total", "pnl_today", "realized_pnl", "unrealized_pnl", "marks_freshness", "disclosures"],
   "properties": {
+    "as_of": { "$ref": "../common.schema.json#/$defs/AsOf", "description": "API-14: a read model names every stream it read, so its watermarks are never empty." },
     "agent_id": { "$ref": "../common.schema.json#/$defs/Id" },
     "environment": { "$ref": "agent.schema.json#/$defs/Environment" },
     "simulated": { "type": "boolean" },
