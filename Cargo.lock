@@ -1400,6 +1400,8 @@ dependencies = [
 name = "mandate-connections"
 version = "0.0.0"
 dependencies = [
+ "mandate-time",
+ "secrecy",
  "thiserror",
 ]
 
