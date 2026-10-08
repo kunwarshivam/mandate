@@ -1078,8 +1078,9 @@ after U-A1 to U-A5 are recorded.
   `xtask` email-footer check (DEC-700 item 4) exists, runs in `cargo xtask ci fast`'s lint, and is
   shown to fail on a planted third mail transport and on a planted deny-listed mail crate (`lettre`)
   outside the founder-only transport while the general footer is unresolved.
-- **E8-12 (Must, M7; SC)** As an approver, I want one chat channel (spec §4.5), Slack or Telegram
-  per DEC-438 item 20. *Accepted when:* NT-1's canary test passes; every inbound message, button, or
+- **E8-12 (Deferred: not in v1; SC)** As an approver, I want one chat channel (spec §4.5). The
+  founder did not take DEC-438 item 20 (2026-10-08, DEC-824): v1 has no chat channel, and Telegram
+  at M10 is a later option. If it is built, *accepted when:* NT-1's canary test passes; every inbound message, button, or
   callback leaves the control stream unchanged (NT-3); the webhook URL or bot token is read only
   from the vault and appears in no log (rule 7). For Telegram (spec §4.5, DEC-700 item 2): a linking
   code is refused once 10 minutes have passed since it was shown; it is spent by the first message

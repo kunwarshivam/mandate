@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft v0.2: round 1's minors fixed (E8-16, freeze rule); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); the rest of items 19 to 26 Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent) |
 | **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
@@ -47,7 +47,7 @@ cross-plane attacker list. §8 lists the contracts this spec needs from each.
 | Area | What this spec decides |
 |---|---|
 | Notices | Every outbound notice: approval requests and reminders; alerts for risk limits and tripwires, kill switches, unprotected intervals and stalled exits, reconciliation mismatches, account restrictions, faults that pause an agent; identity and account-security notices (a new credential, a recovery, a role grant, a deactivation, break-glass, a risk-increasing version, a new connection, going live, a new delegation, a newly connected client); spend caps and other information; the daily brief |
-| Channels | Pull channels (`cli_inbox`, `web_inbox`); push channels (email and one chat channel at M7, web push at M10, SMS and phone later under E8-7); native mobile push later ([DEC-19](../project/04-decision-log.md#decisions)) |
+| Channels | Pull channels (`cli_inbox`, `web_inbox`); push channels (email at M7, web push at M10, SMS and phone later under E8-7; chat is not in v1, DEC-824); native mobile push later ([DEC-19](../project/04-decision-log.md#decisions)) |
 | Payloads | The exact bytes that may leave the workspace deployment, and how that is enforced |
 | Delivery | The dispatcher, the provider interface, retries, bounces, receipts, coalescing, rate limits, quiet hours, unsubscribe |
 | Relay | The notification relay in the global control plane ([HLD §4](../HLD.md#global-control-plane-thin)) |
@@ -221,8 +221,8 @@ user with no address on any push channel still has the pull channels.
 | `cli_inbox` | Pull | The founder's CLI reading the journal | Built (M7, E8-1 to E8-3) | Delivered in the request's own batch, never suppressed (DEC-156 item 6) |
 | `web_inbox` | Pull | The web app's inbox and alerts center (G5) | M9 | Same rule as `cli_inbox`: the list is the journal, read through the workspace API |
 | `email` | Push | From the workspace deployment to a mail provider | M7 | §4.4 |
-| `slack` or `telegram` | Push | From the workspace deployment to the chat provider | M7: one of them (DEC-438 item 20) | §4.5. Outbound only |
-| `web_push` | Push | The workspace deployment, directly or through the relay, to the browser's push service | M10 | §4.6 |
+| `slack` or `telegram` | Push | From the workspace deployment to the chat provider | Not in v1: DEC-438 item 20 is not taken (the founder, 2026-10-08 (DEC-824)); chat is in the backlog, Telegram at M10 a later option | §4.5. Outbound only |
+| `web_push` | Push | The workspace deployment, directly or through the relay, to the browser's push service | M10 (DEC-438 item 19, the founder, 2026-10-08 (DEC-824)) | §4.6. Our own self-hosted relay and VAPID keys, no vendor (DEC-438 item 22); the VAPID subject is `mailto:push@notify.owlhead.ai` |
 | `sms`, `phone` | Push | A messaging provider | E8-7 (P1) | Same payload rule; phone reads the text aloud |
 | Native mobile push | Push | The relay to Apple's and Google's push services | After v1 (DEC-19) | Needs the relay's app credentials |
 
@@ -687,7 +687,7 @@ deterministic fixture, so every id-dependent test replays.
 | Delivery records | `ApprovalDelivered` written by the runtime; `OwnerAlertSent` catalogued but **not written by anything**: executor alerts reach only the tracer's report today; no notice stream | E8-9 has each stream owner write `OwnerAlertSent`; E8-10 adds the notice stream and writes every outcome (NT-8) |
 | Dispatcher | None. The shell collects alerts into the tracer report | E8-10: `mandate-dispatcher`, its own process with its own stream, over `mandate-notify`'s pure core |
 | Identity and account-security notices | None; the identity events are proposed in #556 | E8-10 issues them once E9-7 journals the events |
-| Email, chat | None | E8-11, E8-12 (M7). Email has only the recorded-fixture transport and the founder-only SMTP transport, bound to the one founder address in the deployment's configuration, until counsel's general footer (§4.4, DEC-820) |
+| Email, chat | None | E8-11 (M7); E8-12, chat, is deferred: v1 has no chat channel (the founder, 2026-10-08 (DEC-824)). Email has only the recorded-fixture transport and the founder-only SMTP transport, bound to the one founder address in the deployment's configuration, until counsel's general footer (§4.4, DEC-820) |
 | Web push, relay | None; the relay is an HLD box | E8-14 (M10) |
 | Deep-link landing | None; the web app renders fixtures (DEC-200) | E8-13 (M9/M10), with the workspace API and identity specs |
 | SMS, phone, escalation chain | None | E8-7 |
@@ -705,9 +705,13 @@ readings the agent accepted; most only tighten what the specs already say. v0.2'
 founder's (DEC-79: spending, vendors, legal wording, or a new restriction). The founder decided
 items 21 (the sender is the founder's own SMTP submission account), 23 (`notify.owlhead.ai`, with
 SPF, DKIM, and DMARC `p=reject`), and 24 for mail to the founder's own address only (the footer above) in [DEC-820](../project/decisions/DEC-820.md). Items
-19, 20, 22, 25, 26, and item 24 for any other recipient, stay Proposed; until each is decided, the
-most conservative option holds: `cli_inbox` and mail to the founder's own address only, no vendor,
-no spend.
+The founder also decided, on 2026-10-08 (DEC-824): item 19's staging is accepted; item 22 is
+accepted, so web push runs through our own self-hosted relay with our own VAPID keys and no vendor;
+item 20 is not taken, so v1 has no chat channel (its channels are email, `web_inbox`, and web push,
+with `cli_inbox`), chat goes to the backlog, and Telegram at M10 stays a later option; and item 25
+is accepted but built after the demo as its own story, since it needs a mandate spec change. Item
+26, and item 24 for any other recipient, stay Proposed; until each is decided, the most
+conservative option holds.
 
 ---
 
