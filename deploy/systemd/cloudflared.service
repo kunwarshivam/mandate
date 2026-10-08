@@ -1,0 +1,31 @@
+# Cloudflare Tunnel `owlhead-api` (DEC-822 item 2), installed by deploy/install-cloudflared.sh.
+# The tunnel token is read from /etc/owlhead/cloudflared.env (root:root 0600), never from this
+# world-readable unit or a command line. The public hostname api.owlhead.ai and its target,
+# http://127.0.0.1:8080, are set in the Cloudflare dashboard.
+[Unit]
+Description=Cloudflare Tunnel for the Owlhead API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+EnvironmentFile=/etc/owlhead/cloudflared.env
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+Restart=on-failure
+RestartSec=5s
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

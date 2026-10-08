@@ -1,0 +1,60 @@
+# The workspace API (DEC-822). This unit is also the template the runtime and executor units copy:
+# change Description, User and Group, ExecStart, EnvironmentFile and the bind, and keep every
+# hardening line below unless a service shows it needs one relaxed (and says why in a comment).
+#
+# It does not start until /usr/local/bin/mandate-api-server exists. It reads its settings and
+# secrets from /etc/owlhead/api.env (root:root 0600; systemd reads it before dropping to the user).
+[Unit]
+Description=Owlhead workspace API
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+ConditionPathExists=/usr/local/bin/mandate-api-server
+
+[Service]
+Type=simple
+User=owlhead_api
+Group=owlhead_api
+EnvironmentFile=/etc/owlhead/api.env
+# Loopback only: Cloudflare's tunnel is the only way in (DEC-822 item 2).
+Environment=MANDATE_API_BIND=127.0.0.1:8080
+ExecStart=/usr/local/bin/mandate-api-server
+Restart=on-failure
+RestartSec=2s
+
+# State: /var/lib/owlhead (the artifact store); nothing else is writable.
+StateDirectory=owlhead
+StateDirectoryMode=0700
+UMask=0077
+
+# Hardening.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SocketBindAllow=tcp:8080
+SocketBindDeny=any
+
+[Install]
+WantedBy=multi-user.target

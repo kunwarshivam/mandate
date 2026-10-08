@@ -1,0 +1,161 @@
+# Founder steps: the demo API host
+
+These are your steps, in order, to bring up the API host for the demo ([DEC-822](../docs/project/decisions/DEC-822.md),
+pending on PR #762). This means one Hetzner CX22 with Ubuntu 24.04, behind a Cloudflare Tunnel, serving
+`api.owlhead.ai`. Do each step only when you reach it. Agents never get access to the host,
+Hetzner, or Cloudflare. Never paste a secret, a token, or the server's IP address into chat, an
+issue, or the repository.
+
+`<IP>` below stands for the server's IP address. Keep it on your machine.
+
+## A. Hetzner Cloud console
+
+1. **Project.** Create a project named `owlhead`.
+2. **SSH key.** Under *Security → SSH keys*, add your public key, for example
+   `~/.ssh/id_ed25519.pub`. If you have none, create one with `ssh-keygen -t ed25519`.
+3. **Firewall.** Under *Firewalls*, create `owlhead-ssh`:
+   - one inbound rule: TCP port 22, source your own IP address (a `/32`);
+   - no other inbound rule;
+   - leave outbound open. The tunnel, apt, and Alpaca are all outbound.
+4. **Server.** Under *Servers → Add server*:
+   - pick a location;
+   - image: **Ubuntu 24.04**;
+   - type: **CX22** (shared vCPU, x86, 2 vCPU, 4 GB). Check the price shown;
+   - SSH key: the one from step 2. Set no root password;
+   - firewall: `owlhead-ssh`;
+   - **Backups: on**;
+   - name: `owlhead-api`.
+
+   Create it, then note its IP address on your machine only.
+
+## B. First login and the bootstrap
+
+5. **Log in and update.**
+
+   ```bash
+   ssh root@<IP>
+   apt-get update && apt-get -y upgrade
+   reboot            # only if the upgrade asks for it; then ssh in again
+   ```
+
+6. **Copy the runbook to the host.** Run this from your laptop, in a checkout of the repository
+   at `main`. The host needs no GitHub access.
+
+   ```bash
+   ssh root@<IP> mkdir -p /root/owlhead
+   scp -r deploy migrations root@<IP>:/root/owlhead/
+   ```
+
+7. **Bootstrap.** On the host, preview it first, then run it:
+
+   ```bash
+   cd /root/owlhead/deploy
+   bash bootstrap.sh --dry-run | less
+   bash bootstrap.sh
+   ```
+
+   This installs and configures:
+   - PostgreSQL 18, listening on localhost only;
+   - the `owlhead` database and its roles, with the migrations applied;
+   - the `owlhead_api` user;
+   - the API service, installed but not started;
+   - the nightly backup timer;
+   - an empty `/etc/owlhead/api.env`.
+
+   It is safe to run again.
+
+## C. The API binary
+
+8. **Install the binaries**, once the API lane says the build is ready. Copy these onto the host
+   (x86_64 Linux builds):
+   - `mandate-api-server` (the API);
+   - `mandate` (the CLI, used for restore checks).
+
+   ```bash
+   scp mandate-api-server mandate root@<IP>:/tmp/
+   ssh root@<IP>
+   install -o root -g root -m 0755 /tmp/mandate-api-server /tmp/mandate /usr/local/bin/
+   rm /tmp/mandate-api-server /tmp/mandate
+   ```
+
+## D. Secrets, last, then the first start
+
+9. **Fill `/etc/owlhead/api.env`** on the host. Each line in it says what goes there.
+
+   ```bash
+   openssl rand -base64 32   # run twice: one value for the session key, one for the vault key
+   nano /etc/owlhead/api.env
+   ```
+
+   - `MANDATE_API_DATABASE_URL`: the value written in the file's comment. It has no password.
+   - `MANDATE_API_SESSION_SIGNING_KEY` and `MANDATE_VAULT_KEY`: the two random values. Also
+     keep the vault key in your password manager: losing it loses every stored connection.
+   - `ALPACA_OAUTH_CLIENT_ID` and `ALPACA_OAUTH_CLIENT_SECRET`: from Alpaca's OAuth app page
+     (paper, DEC-821).
+
+   Check that it is still `root root` and `-rw-------` with `ls -l /etc/owlhead/api.env`.
+10. **Start the API and check it answers locally:**
+
+    ```bash
+    systemctl enable --now owlhead-api
+    systemctl status owlhead-api --no-pager
+    curl -i http://127.0.0.1:8080/
+    journalctl -u owlhead-api -n 50 --no-pager   # if it did not start
+    ```
+
+## E. Cloudflare Tunnel, only once the API answers
+
+11. **Create the tunnel.** `owlhead.ai` must already be a zone in your Cloudflare account.
+    - In the Cloudflare dashboard, go to *Zero Trust → Networks → Tunnels → Create a tunnel →
+      Cloudflared*, and name it `owlhead-api`.
+    - On the *Install and run a connector* page, copy only the token: the long string after
+      `service install` in the command shown. Do not run that command.
+12. **Run the connector on the host.** Paste the token when the script asks for it; it does not
+    echo.
+
+    ```bash
+    cd /root/owlhead/deploy
+    bash install-cloudflared.sh
+    ```
+
+    The dashboard should show the tunnel as *Healthy*.
+13. **Public hostname.** In the tunnel's *Public Hostname* tab, add:
+    - subdomain `api`, domain `owlhead.ai`;
+    - service type **HTTP**, URL **`127.0.0.1:8080`**. Use `127.0.0.1`, not `localhost`: the API
+      listens on IPv4 loopback only, and `localhost` can resolve to IPv6 first.
+
+    Saving creates the `api.owlhead.ai` DNS record. Check it from your laptop with
+    `curl -i https://api.owlhead.ai/`.
+
+## F. Backups, then a restore check
+
+14. **Run one backup now** and confirm the timer is set:
+
+    ```bash
+    systemctl start owlhead-backup.service
+    ls -l /var/backups/owlhead
+    systemctl list-timers owlhead-backup.timer --no-pager
+    ```
+
+15. **Prove the backup restores.** Do this now, then monthly:
+
+    ```bash
+    cd /root/owlhead/deploy
+    bash restore-check.sh /var/backups/owlhead/owlhead-<stamp>.dump /var/backups/owlhead/artifacts-<stamp>.tar.gz
+    ```
+
+    It restores into a scratch database and runs `mandate journal verify` on every stream. The
+    run passes only if it ends with `restore check passed`.
+
+## What each backup covers
+
+- **Nightly local backup** (`owlhead-backup.timer`, 03:30 UTC, 14 days kept): a consistent
+  `pg_dump` of the database and a tarball of the artifact store, in `/var/backups/owlhead`. It
+  protects against a bad migration, a mistaken delete, or a damaged table. It is on the same disk,
+  so it does not protect against losing the VM.
+- **Hetzner Backups** (daily, 7 kept): an image of the whole disk, taken while the server runs.
+  This covers losing the VM, and it includes the local backups above. A database restored from
+  the image is crash-consistent, so after such a restore, run the restore check on the newest
+  local dump.
+- **Neither is off-site** beyond Hetzner's own storage. An off-site copy comes before any customer
+  data.
