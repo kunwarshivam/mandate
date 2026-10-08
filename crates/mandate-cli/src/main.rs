@@ -22,14 +22,19 @@ fn today_utc() -> anyhow::Result<Date> {
     Ok(UtcNanos::from_parts(secs, 0)?.date())
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> anyhow::Result<()> {
+/// Synchronous, so a command that blocks on its journal's own runtime never runs inside another
+/// (DEC-522); `download` builds the one runtime it needs.
+fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Download(args) => {
             let plan = download::plan(&args, today_utc()?)?;
             let http = AlpacaDataHttp::new(Credentials::from_env()?)?;
             let client = Client::new(http, TokioPause);
-            download::run(&plan, &client, &mut io::stdout().lock()).await?;
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("starting the download's runtime")?;
+            runtime.block_on(download::run(&plan, &client, &mut io::stdout().lock()))?;
             Ok(())
         }
         Command::Inspect(args) => {
