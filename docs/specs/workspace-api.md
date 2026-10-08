@@ -272,7 +272,8 @@ client (DEC-141), SA service account, HC host CLI (identity spec §6.4 route 3),
 inside an approved break-glass window (identity spec §10.3). There is no inheritance from org roles:
 acting in a workspace needs a membership in it (identity spec §4.1). The HC and PO principals do not
 call this API: the host CLI appends on site (DEC-436 item 3), and a platform operator acts through
-break-glass. Their columns are printed so the copy stays exact.
+break-glass. Their columns are printed so the copy stays exact. The cells read by identity spec
+§4.2's grammar, and a refused authorization returns identity spec §4.5's codes (DEC-641, DEC-643).
 
 | Permission | S | OO | OA | Bill | WA | Op | Ap | Vi | Au | Cl | SA | HC | PO |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|

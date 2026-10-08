@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.1, draft for review ([DEC-437](../project/decisions/DEC-437.md)). Round 2. Items 1 to 14 of DEC-437 are agent readings; items 15 to 21 are Proposed and wait for the founder |
+| **Status** | v0.2 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md)). Items 1 to 14 of DEC-437 are agent readings; items 15 to 21 are Proposed and wait for the founder |
 | **Implements** | [HLD §4](../HLD.md#4-architecture) (org directory, workspace deployment, deployment modes) and [§8](../HLD.md#8-multi-tenancy-and-security); PRD [FR-1.1 to FR-1.6](../product/04-prd-v1.md#61-identity-and-tenancy); backlog E9 |
 | **Depends on** | [Mandate spec §4.3, V-047, §6.1, §6.4, §6.5](mandate.md#43-policy-hierarchy-dec-51-dec-98); [journal spec §2, §3, §6.4, §7](journal.md#3-event-envelope); [infrastructure design §5, OPS-6](../design/infrastructure.md#5-secrets-and-the-vault); [inference spec INF-9, INF-11](inference.md#2-invariants); [DEC-141](../project/04-decision-log.md#decisions), [DEC-211](../project/04-decision-log.md#decisions), [DEC-411](../project/decisions/DEC-411.md) |
 | **Read by** | The workspace services API spec (`docs/specs/workspace-api.md`, DEC-436), the notifications spec (`docs/specs/notifications.md`, DEC-438), and the threat model (`docs/security/threat-model.md`, DEC-439), all drafted in parallel. They take roles, principals, and step-up from here |
@@ -17,7 +17,7 @@ spec says what has to be true before workspace services will commit one.
 1. [Scope](#1-scope)
 2. [Invariants](#2-invariants)
 3. [Principals, organizations, and workspaces](#3-principals-organizations-and-workspaces)
-4. [Roles and permissions](#4-roles-and-permissions)
+4. [Roles and permissions](#4-roles-and-permissions), with the authorization step (§4.5)
 5. [Membership lifecycle](#5-membership-lifecycle)
 6. [Authentication and sessions](#6-authentication-and-sessions)
 7. [Step-up](#7-step-up)
@@ -75,7 +75,7 @@ is trusted (§14, E9-11).
 | ID | Invariant | Source | Test |
 |---|---|---|---|
 | **ID-1** | **Every action is attributed.** Every mutation workspace services accept, and every event they commit to the control stream, carries the authenticated principal (`actor.kind`, opaque `actor.id`) and the session it came through. The principal comes from the authenticated channel, never from the request body. Nothing anonymous is committed | Journal §3; HLD §8 "Agent identity" | A fuzz of API calls with forged `actor`, `user`, `responder`, and `workspace_id` fields in bodies asserts every committed event's actor equals the oracle's record of who authenticated |
-| **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some role the principal holds through an `active` membership in that scope has the permission in §4.2's matrix, or, for a principal that holds no membership (a client, a service account, the host CLI, a platform operator in break-glass), when its own column has it within that column's stated scope. Everything else is denied, including a permission the matrix leaves blank | §4 | An exhaustive test over every (role set or non-member principal kind, permission, scope) triple against a table parsed from §4.2 itself, not from the code |
+| **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some role the principal holds through an `active` membership in that scope has the permission in §4.2's matrix, or, for a principal that holds no membership (a client, a service account, the host CLI, a platform operator in break-glass), when its own column has it within that column's stated scope. Everything else is denied, including a permission the matrix leaves blank. It covers exactly the rows the matrix names (DEC-641 item 5) | §4 | An exhaustive test over every (role set or non-member principal kind, permission, scope) triple against a table parsed from §4.2 itself, by the grammar of §4.2, not from the code |
 | **ID-3** | **Only an active member reaches a workspace.** A principal with no `active` membership in workspace W can neither read nor write W. A deactivation applies to every request authorized after it commits, and open streams (server-sent events, websockets) of that principal in W close within 60 s | §5 | A fuzz interleaving requests with membership changes; the oracle replays `Member*` events and asserts no request authorized after a deactivation succeeded, and every stream closed within the bound |
 | **ID-4** | **Step-up where risk can grow.** These need valid step-up (§7): confirming a risk-increasing mandate version, deploying (going live or paper), approving under policy (mandate §6.4 check 6), granting a delegation, connecting or changing a connection, revoking a connection, re-enabling a halted scope if DEC-437 item 21 creates one (§4.4), resume, Stop, acknowledgments (mandate §6.1), owner exits, accepting a disclosure (V-005), loosening a policy, granting a role, connecting a client, enrolling a step-up credential, and break-glass | FR-1.4; mandate §6.1 | A table test per command: with each failure mode (missing, stale, reused, wrong method, wrong action digest, wrong principal) the command is refused and nothing else is committed |
 | **ID-5** | **Never for risk reduction.** No step-up, session freshness, or identity-provider round trip is required to pause, to engage a kill switch at any scope (its stop and flatten; only its extra privileges need step-up, mandate §6.1), to skip an approval, to tighten a policy, to remove or narrow a delegation, or to revoke a client. Automated exits, protective orders, and risk exits involve no principal at all | `AGENTS.md` rules 2, 3, 13; MI-23 | With step-up absent, stale, and with the identity provider unreachable, each of these commits, and the kill switch stops and flattens |
@@ -233,6 +233,31 @@ it names; outside such a window a platform operator has no permission at all (ID
 | Approve a break-glass request (§10.3) | S | ✓ | | | ✓ | | | | | | | | |
 | Restart a process; read verification results (break-glass operational set, §10.3) | | | | | | | | | | | | | ✓ |
 
+**Reading the matrix** ([DEC-641](../project/decisions/DEC-641.md)). The ID-2 test parses this
+table, so its cells follow a closed grammar, and any other text is a spec defect the test fails on:
+
+- **S cell:** blank (no step-up), `S` (step-up for every use), `S for invite` (only an invitation
+  needs it; deactivating or removing a member does not), or `S for grant` (only a grant needs it;
+  removing a role does not).
+- **Principal cells:** blank (denied); `✓` (granted); `own` (granted for the principal's own
+  credential only); `✓ (propose only)` (granted; confirming is its own row); `✓ (org)` (granted
+  at org scope only); `✓ (not owner)` (granted, except that granting or removing the org owner
+  role is refused `owner_role_reserved`).
+- **Column scopes:** OO, OA, and Bill apply only at an organization's scope, through an org
+  membership; WA, Op, Ap, Vi, and Au only at a workspace's scope, through that workspace's
+  membership (§4.1: no inheritance either way). Cl applies only in the one workspace its token
+  names, and only while its user holds an active membership there whose effective roles grant
+  the same row. SA applies only in the workspaces it names, HC only in its own deployment's
+  workspace, and PO only in the workspace of a break-glass window in force; none of the four
+  applies at org scope.
+- **Effective roles:** only `active` and `cooling_off` memberships reach a scope (§5.1), and a
+  role still in its cool-off (§8.3) grants nothing.
+- **Inactive rows:** a row whose permission applies only if a Proposed decision creates its state
+  (re-enabling a halted scope, DEC-437 item 21) is refused to everyone, `inactive_permission`,
+  until that decision is accepted and the row's text edited.
+- **Rows, not routes:** ID-2 covers exactly these rows (E9-12 item 2). An operation with no row
+  and no mapping in workspace API §3.7 has no route until a row is added.
+
 Notes:
 
 - **Pause by approvers** is PX-11 (b). Stop and flattening stay with operators and admins.
@@ -267,6 +292,40 @@ member re-enables the scope with step-up, journaled. That is a new state that tr
 mandate §6.1 do not have, so it waits for the founder and for those specs to be edited in the same
 change. Until then no halted state is enforced, and the matrix row for re-enabling a scope is
 inactive.
+
+### 4.5 The authorization step
+
+`authorize(principal, memberships, scope, permission)` applies §4.2 by its grammar and nothing
+else. The memberships are those read, uncached, from the workspace's own store for this request
+(§6.2); for a client they are its user's.
+
+**`TenantContext`** ([DEC-642](../project/decisions/DEC-642.md)). Only the authorization step
+constructs one, and only when it authorizes a permission at a workspace's scope; an org-scope
+authorization yields none. Its fields are private, and it has no public constructor, no `Default`,
+no deserializer, and no `Clone`. It carries the workspace and its organization, the authenticated
+principal (ID and kind), and the one permission authorized. Every store, cache, queue, journal,
+and vault API over a workspace's data takes a `&TenantContext` and reads the workspace from it;
+none takes a bare workspace ID (ID-8). A context lives for one request and is never stored or
+serialized.
+
+**Role changes.** A grant or removal of roles, and a deactivation, pass the same step for their
+row, then: no change grants or removes a role of its own author (ID-13; a member leaves by
+deactivating their own membership, which needs no row); only an org owner grants or removes the
+org owner role; and the last-owner and last-admin rules of §5.2 hold on the state after the change.
+
+**Refusals** ([DEC-643](../project/decisions/DEC-643.md)), each with a stable code:
+
+| Code | When | Workspace API (§3.5) |
+|---|---|---|
+| `no_membership` | No membership reaching the scope; a non-member principal outside its column's scope; a principal kind with no column | 404 `not_found` (API-9) |
+| `forbidden` | The scope is reached, but no effective role or column grants the row | 403 `forbidden` |
+| `inactive_permission` | The row is inactive (§4.2, "Reading the matrix") | 403 `forbidden` |
+| `own_roles` | A change grants or removes a role of its own author (ID-13) | 403, code `own_roles` |
+| `owner_role_reserved` | A principal other than an org owner grants or removes the org owner role | 403, code `owner_role_reserved` |
+| `last_owner`, `last_admin` | The change leaves no `active` org owner, or no `active` workspace admin (§5.2) | 409, the code itself |
+
+Step-up is not judged here: an authorization carries the row's step-up requirement, and §7
+verifies the evidence.
 
 ---
 
@@ -400,6 +459,14 @@ path). This spec therefore has workspace services act as a WebAuthn relying part
 right, holding the public keys of each member's passkeys, while the sign-in provider stays a
 replaceable OIDC issuer. Which provider that is for managed mode at launch, and whether passkeys
 are enrolled once (with the workspace) or twice, is DEC-437 item 15 (Proposed).
+
+**Interim reading of item 15** ([DEC-640](../project/decisions/DEC-640.md)), until the founder
+decides: the managed sign-in provider (Supabase Auth, DEC-211) is one OIDC issuer, whose tokens
+workspace services verify against the keys it publishes, selected by `kid` from the configured
+issuer only, with asymmetric algorithms only (RS256, PS256, ES256, EdDSA; never `none`, an `HS*`
+algorithm, or a key the token carries itself). Workspace services are the WebAuthn relying party
+for passkey sign-in, step-up, and §6.4 route 2, so a passkey is enrolled once, with the workspace.
+Nothing is bought; every environment stays `paper`, and a `live` step-up is refused.
 
 ### 6.2 Sessions
 
@@ -787,6 +854,14 @@ cool-off (item 4); action-bound step-up (item 5); the risk-reduction path (item 
 (item 7); clients are their user (item 8); the membership events owed to the journal (item 9);
 the `client` actor kind with `on_behalf_of` (item 10); revoking a connection needs step-up (item 11); last
 owner and last admin refusals (item 12); organization deletion (item 13); the E9 rows (item 14).
+
+**v0.2's readings (agent, DEC-79, DEC-176)**, each tightening only, for the code of E9-1, E9-2, and
+E9-8: the interim reading of item 15 (asymmetric-only OIDC verification; workspace services as the
+WebAuthn relying party; no spending), [DEC-640](../project/decisions/DEC-640.md); the matrix's cell
+grammar, column scopes, inactive rows, and ID-2 scoped to the rows the matrix names (E9-12 item 2),
+[DEC-641](../project/decisions/DEC-641.md); the `TenantContext` contract,
+[DEC-642](../project/decisions/DEC-642.md); and the authorization step's refusal codes,
+[DEC-643](../project/decisions/DEC-643.md).
 
 **Proposed for the founder** (spending, legal text, a safety rule, or a question already put to the founder):
 
