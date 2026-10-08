@@ -86,13 +86,16 @@ fn tracer() -> Result<Report, ShellError> {
         },
     )?;
     let recorded_at = now()?;
-    let liquidity =
-        liquidity_facts(&args.dataset, &broker.minute_bars, recorded_at).map_err(|cause| {
-            ShellError::Refused {
-                stage: Stage::MarketData,
-                cause,
-            }
-        })?;
+    let liquidity = liquidity_facts(
+        artifacts.production_identity().symbol,
+        &args.dataset,
+        &broker.minute_bars,
+        recorded_at,
+    )
+    .map_err(|cause| ShellError::Refused {
+        stage: Stage::MarketData,
+        cause,
+    })?;
     let agent = deployment_input.deployment().agent.clone();
     let contexts = load_contexts_with_clock(
         &artifacts,
