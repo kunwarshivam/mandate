@@ -308,7 +308,7 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
 }
 
 /// The lint job's checks over the Cargo and uv workspaces in the current directory: fmt, clippy
-/// `-D warnings`, crate layering, markers, saved proptest seeds, the feature map, typos, and ruff.
+/// `-D warnings`, crate layering, the `live` feature, markers, saved proptest seeds, the feature map, typos, and ruff.
 fn workspace_lint() -> Result<()> {
     sh("cargo", &["fmt", "--all", "--check"])?;
     sh(
@@ -324,6 +324,7 @@ fn workspace_lint() -> Result<()> {
         ],
     )?;
     layers()?;
+    live_feature()?;
     markers()?;
     proptest_seeds()?;
     feature_map()?;
@@ -617,13 +618,6 @@ struct Package {
     targets: Vec<Target>,
     /// The package's `[features]`: each name with what it enables.
     #[serde(default)]
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by live_feature_problems in X1's implementation (E7-26)"
-        )
-    )]
     features: BTreeMap<String, Vec<String>>,
 }
 
@@ -634,13 +628,6 @@ struct Dependency {
     path: Option<PathBuf>,
     /// The features this dependency turns on in the crate it names.
     #[serde(default)]
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by live_feature_problems in X1's implementation (E7-26)"
-        )
-    )]
     features: Vec<String>,
 }
 
@@ -750,13 +737,6 @@ struct CratePolicy {
     /// The one crate that may declare a `live` cargo feature: the deployment runner (ES-23 as
     /// DEC-529 item 3 narrows it). No crate is marked until the runner's G1a slice marks it.
     #[serde(default)]
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by live_feature_problems in X1's implementation (E7-26)"
-        )
-    )]
     live_feature: bool,
 }
 
@@ -1309,15 +1289,7 @@ fn feature_map() -> Result<()> {
 
 /// One file CI runs, a workflow or a script, by its path in the repository, with its text.
 struct CiFile {
-    #[expect(
-        dead_code,
-        reason = "read by live_feature_problems in X1's implementation (E7-26)"
-    )]
     path: String,
-    #[expect(
-        dead_code,
-        reason = "read by live_feature_problems in X1's implementation (E7-26)"
-    )]
     text: String,
 }
 
@@ -1358,8 +1330,143 @@ fn live_feature() -> Result<()> {
 /// never passes `--all-features`, and passes `live` only in at most one `cargo check` of the
 /// marked crate, so the feature compiles but no live build is ever produced or run.
 fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Result<Vec<String>> {
-    let _ = (policy, meta, ci);
-    bail!("live_feature_problems is not yet implemented (E7-26, X1)")
+    let mut problems = Vec::new();
+    let packages = workspace_packages(meta);
+    let names: BTreeSet<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+    let marked: Vec<&str> = policy
+        .crates
+        .iter()
+        .filter(|(_, crate_policy)| crate_policy.live_feature)
+        .map(|(name, _)| name.as_str())
+        .collect();
+    if marked.len() > 1 {
+        let listed: Vec<String> = marked.iter().map(|name| format!("`{name}`")).collect();
+        problems.push(format!(
+            "{} are marked `live_feature`; at most one crate, the runner, may be",
+            listed.join(", ")
+        ));
+    }
+    for name in &marked {
+        if !names.contains(name) {
+            problems.push(format!(
+                "`{name}` is marked `live_feature` but is not a workspace member"
+            ));
+        }
+    }
+    let runner = match marked.as_slice() {
+        [only] if names.contains(only) => Some(*only),
+        _ => None,
+    };
+    for pkg in &packages {
+        let is_runner = runner == Some(pkg.name.as_str());
+        if pkg.features.contains_key(LIVE) && !is_runner {
+            problems.push(format!(
+                "`{}` declares a `{LIVE}` feature; only the crate marked `live_feature` may",
+                pkg.name
+            ));
+        }
+        for (feature, enables) in &pkg.features {
+            for enabled in enables {
+                let turns_on_own = is_runner && feature != LIVE && enabled == LIVE;
+                let turns_on_other = enabled
+                    .rsplit_once('/')
+                    .is_some_and(|(_, feature)| feature == LIVE);
+                if turns_on_own || turns_on_other {
+                    problems.push(format!(
+                        "`{}`'s feature `{feature}` turns on `{enabled}`; only an explicit \
+                         `--features {LIVE}` may",
+                        pkg.name
+                    ));
+                }
+            }
+        }
+        for dep in &pkg.dependencies {
+            if dep.features.iter().any(|f| f == LIVE) {
+                problems.push(format!(
+                    "`{}` turns on `{LIVE}` in its dependency on `{}`",
+                    pkg.name, dep.name
+                ));
+            }
+        }
+    }
+    let mut compile_only_seen = false;
+    for file in ci {
+        for (index, line) in file.text.lines().enumerate() {
+            let at = format!("{}:{}", file.path, index.saturating_add(1));
+            match live_flag(line, runner) {
+                LiveFlag::Absent => {}
+                LiveFlag::AllFeatures => problems.push(format!(
+                    "{at}: `--all-features` would build the `{LIVE}` feature"
+                )),
+                LiveFlag::CompileOnly if !compile_only_seen => compile_only_seen = true,
+                LiveFlag::CompileOnly => problems.push(format!(
+                    "{at}: a second compile-only `{LIVE}` job; CI may compile it once"
+                )),
+                LiveFlag::Build => problems.push(format!(
+                    "{at}: passes `{LIVE}` outside the one `cargo check -p <runner>` CI may run"
+                )),
+            }
+        }
+    }
+    Ok(problems)
+}
+
+/// The cargo feature that holds the live hosts (ES-23, DEC-529 item 3).
+const LIVE: &str = "live";
+
+/// What one line of a workflow or script does with the `live` feature.
+#[derive(Debug, PartialEq, Eq)]
+enum LiveFlag {
+    /// The line passes neither `live` nor `--all-features`.
+    Absent,
+    /// `--all-features`, which turns `live` on wherever it is declared.
+    AllFeatures,
+    /// `cargo check -p <runner>` with `live`: the one form CI may run, which builds nothing it
+    /// could run.
+    CompileOnly,
+    /// `live` passed to anything else.
+    Build,
+}
+
+/// Reads one line as a shell command: `--features <list>`, `--features=<list>` and `-F <list>`
+/// name features, separated by commas, with quotes stripped.
+fn live_flag(line: &str, runner: Option<&str>) -> LiveFlag {
+    let tokens: Vec<&str> = line
+        .split_whitespace()
+        .map(|token| token.trim_matches(|c| c == '"' || c == '\''))
+        .collect();
+    if tokens.contains(&"--all-features") {
+        return LiveFlag::AllFeatures;
+    }
+    let mut lists = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if let Some(list) = token.strip_prefix("--features=") {
+            lists.push(list);
+        } else if (*token == "--features" || *token == "-F")
+            && let Some(list) = tokens.get(index.saturating_add(1))
+        {
+            lists.push(list);
+        }
+    }
+    let passes_live = lists
+        .iter()
+        .flat_map(|list| list.split(','))
+        .any(|feature| feature == LIVE);
+    if !passes_live {
+        return LiveFlag::Absent;
+    }
+    let checks = tokens.windows(2).any(|pair| pair == ["cargo", "check"]);
+    let package = tokens
+        .windows(2)
+        .find(|pair| pair[0] == "-p" || pair[0] == "--package")
+        .map(|pair| pair[1]);
+    let whole_workspace = tokens.contains(&"--workspace") || tokens.contains(&"--all");
+    match (checks, package, runner) {
+        (true, Some(package), Some(runner)) if package == runner && !whole_workspace => {
+            LiveFlag::CompileOnly
+        }
+        _ => LiveFlag::Build,
+    }
 }
 
 /// Code spans that look like repository paths: no spaces or globs, starting at a known root.
@@ -6422,7 +6529,6 @@ jq -r "$filter" "$src"
     /// Only the marked runner may declare a `live` feature; any other crate that does is named
     /// (ES-23 as DEC-529 item 3 narrows it).
     #[test]
-    #[ignore = "pending E7-26"]
     fn only_the_marked_runner_may_declare_a_live_feature() -> Result<()> {
         let marked = live_policy();
         let mut crates = live_workspace();
@@ -6452,7 +6558,6 @@ jq -r "$filter" "$src"
 
     /// At most one crate is marked, and a marked crate must be a workspace member.
     #[test]
-    #[ignore = "pending E7-26"]
     fn at_most_one_member_crate_is_marked() -> Result<()> {
         let mut two = live_policy();
         if let Some(lib) = two.crates.get_mut("a-lib") {
@@ -6479,7 +6584,6 @@ jq -r "$filter" "$src"
     /// feature of another crate naming `<runner>/live` or `<runner>?/live`, and no dependency
     /// on the runner listing `live` among its features, whatever the dependency's kind.
     #[test]
-    #[ignore = "pending E7-26"]
     fn nothing_but_an_explicit_flag_turns_live_on() -> Result<()> {
         let policy = live_policy();
         let runner = |features: &[(&str, &[&str])]| with_features(member(RUNNER, &[]), features);
@@ -6528,7 +6632,6 @@ jq -r "$filter" "$src"
     /// compiles and nothing live is built, tested or run; `--all-features` is never allowed. Each
     /// refusal names the file and its line.
     #[test]
-    #[ignore = "pending E7-26"]
     fn ci_only_compiles_the_runner_with_live() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
@@ -6594,7 +6697,6 @@ jq -r "$filter" "$src"
     /// The repository as it stands: the policy, the workspace and every workflow and script
     /// pass, with no crate marked and no `live` feature anywhere.
     #[test]
-    #[ignore = "pending E7-26"]
     fn the_repository_has_no_live_build() -> Result<()> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
