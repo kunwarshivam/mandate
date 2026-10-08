@@ -10,7 +10,6 @@ use proptest::prelude::*;
 use serde_json::{Value, json};
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_audience_must_name_this_client_and_several_need_its_authorized_party() {
     let issuer = TestIssuer::new();
     let outcome = |claims: Value| check(&issuer, &issuer.token(Signer::Es256, &claims)).map(|_| ());
@@ -46,7 +45,6 @@ fn the_audience_must_name_this_client_and_several_need_its_authorized_party() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn expiry_and_not_before_hold_to_the_stated_skew() {
     let issuer = TestIssuer::new();
     let exp = NOW_S + LIFETIME_S;
@@ -70,7 +68,6 @@ fn expiry_and_not_before_hold_to_the_stated_skew() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_id_token_needs_the_sign_ins_nonce_and_an_access_token_needs_none() {
     let issuer = TestIssuer::new();
     let outcome = |claims: Value, kind| {
@@ -119,7 +116,6 @@ fn an_id_token_needs_the_sign_ins_nonce_and_an_access_token_needs_none() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_invitation_matches_only_a_verified_address_byte_for_byte() {
     let issuer = TestIssuer::new();
     let subject = |claims: Value| check(&issuer, &issuer.token(Signer::Es256, &claims)).unwrap();
@@ -140,7 +136,6 @@ fn an_invitation_matches_only_a_verified_address_byte_for_byte() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_empty_subject_and_an_unrepresentable_time_are_refused() {
     let issuer = TestIssuer::new();
     let outcome = |claims: Value| check(&issuer, &issuer.token(Signer::Es256, &claims)).map(|_| ());
@@ -170,7 +165,6 @@ fn an_empty_subject_and_an_unrepresentable_time_are_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_claim_of_another_json_type_is_malformed() {
     let issuer = TestIssuer::new();
     let outcome = |claims: Value| check(&issuer, &issuer.token(Signer::Es256, &claims)).map(|_| ());
@@ -197,7 +191,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
-    #[ignore = "pending E9-1"]
     fn a_token_verifies_exactly_inside_its_skewed_window(nbf in -400i64..400, exp in -400i64..400, now_s in -600i64..600, nanos in 0u32..1_000_000_000) {
         let issuer = TestIssuer::new();
         let claims = with_all(&[("nbf", json!(NOW_S + nbf)), ("exp", json!(NOW_S + exp))]);
