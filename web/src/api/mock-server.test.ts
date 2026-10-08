@@ -26,7 +26,7 @@ function post(server: ReturnType<typeof setup>["server"], path: string, body: un
 }
 
 describe("the fixture-backed mock server", () => {
-  it.skip("pending E11-9: serves health from the fixtures with canonical timestamps and watermarks", async () => {
+  it("pending E11-9: serves health from the fixtures with canonical timestamps and watermarks", async () => {
     const { api } = setup();
     const outcome = await api.read("/health", health);
     expect(outcome.ok).toBe(true);
@@ -35,7 +35,7 @@ describe("the fixture-backed mock server", () => {
     expect(outcome.value.market_data.as_of).toBe("2026-09-28T18:05:18.000000000Z");
   });
 
-  it.skip("pending E11-9: records a kill switch and reports it through command status", async () => {
+  it("pending E11-9: records a kill switch and reports it through command status", async () => {
     const { server, api } = setup();
     const sent = await api.send(api.prepareKillSwitch(kill));
     expect(sent).toMatchObject({ ok: true, effect: "recorded", accepted: { phase: "recorded", step_up_status: "missing" } });
@@ -45,7 +45,7 @@ describe("the fixture-backed mock server", () => {
     expect(await api.commandStatus(sent.accepted.event_id)).toMatchObject({ ok: true, value: { phase: "recorded", steps: [] } });
   });
 
-  it.skip("pending E11-9: resolves a repeated key to the first event and refuses a changed body", async () => {
+  it("pending E11-9: resolves a repeated key to the first event and refuses a changed body", async () => {
     const { server } = setup();
     const key = "repeat-key-000000001";
     const first = await (await post(server, "/kill-switch", kill, key)).json();
@@ -57,7 +57,7 @@ describe("the fixture-backed mock server", () => {
     expect(await changed.json()).toMatchObject({ code: "idempotency_conflict", effect: "none" });
   });
 
-  it.skip("pending E11-9: refuses a command without an Idempotency-Key, recording nothing", async () => {
+  it("pending E11-9: refuses a command without an Idempotency-Key, recording nothing", async () => {
     const { server } = setup();
     const answer = await post(server, "/kill-switch", kill, null);
     expect(answer.status).toBe(422);
@@ -65,7 +65,7 @@ describe("the fixture-backed mock server", () => {
     expect(server.recorded()).toHaveLength(0);
   });
 
-  it.skip("pending E11-9: answers 404 for an unknown route, another workspace, or any order route", async () => {
+  it("pending E11-9: answers 404 for an unknown route, another workspace, or any order route", async () => {
     const { server } = setup();
     for (const url of [`/v1/workspaces/${WS}/nothing-here`, "/v1/workspaces/ws_other/health"]) {
       const answer = await server.fetch(url, { method: "GET" });
@@ -77,13 +77,13 @@ describe("the fixture-backed mock server", () => {
     expect(server.recorded()).toHaveLength(0);
   });
 
-  it.skip("pending E11-9: plays unreachable as a network that never answers", async () => {
+  it("pending E11-9: plays unreachable as a network that never answers", async () => {
     const { api } = setup("unreachable");
     expect(await api.read("/health", health)).toMatchObject({ ok: false, error: { code: "network", effect: "none" } });
     expect(await api.send(api.prepareKillSwitch(kill))).toMatchObject({ ok: false, error: { code: "network", effect: "unknown" } });
   });
 
-  it.skip("pending E11-9: plays result-unknown as commands taken and never answered", async () => {
+  it("pending E11-9: plays result-unknown as commands taken and never answered", async () => {
     const { server, api } = setup("result-unknown");
     expect((await api.read("/health", health)).ok).toBe(true);
     expect(await api.send(api.prepare("pause", { agent: "agt_01" }, { record: null }))).toMatchObject({ ok: false, error: { effect: "unknown" } });
