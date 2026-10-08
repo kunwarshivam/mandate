@@ -80,7 +80,6 @@ const CANONICAL: &str = concat!(
 );
 
 #[test]
-#[ignore = "pending E7-23"]
 fn the_canonical_object_is_dec_630s_and_the_hash_is_its_sha256() {
     let profile = CapabilityProfile::new(2, rows(), IDEMPOTENCY).unwrap();
     assert_eq!(
@@ -94,7 +93,6 @@ fn the_canonical_object_is_dec_630s_and_the_hash_is_its_sha256() {
 type Edit = fn(&mut u32, &mut Vec<Row>, &mut Idempotency);
 
 #[test]
-#[ignore = "pending E7-23"]
 fn every_member_moves_the_hash() {
     let base = CapabilityProfile::new(2, rows(), IDEMPOTENCY)
         .unwrap()
@@ -166,7 +164,6 @@ fn every_member_moves_the_hash() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn each_defect_is_refused_with_its_own_reason() {
     let only = |cells: Vec<Cell>| {
         vec![Row {
@@ -331,7 +328,6 @@ fn valid_profile() -> impl Strategy<Value = (u32, Vec<Row>, Idempotency)> {
 
 proptest! {
     #[test]
-    #[ignore = "pending E7-23"]
     fn the_order_rows_and_cells_are_given_in_is_not_part_of_the_profile(
         (version, rows, idempotency) in valid_profile(),
         seed in any::<u64>(),

@@ -47,7 +47,6 @@ fn texts(cell: &Value, key: &str) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn alpaca_declares_trading_spec_5_2_and_dec_630s_object() {
     let profile = alpaca_profile().unwrap();
     assert_eq!(
@@ -58,7 +57,6 @@ fn alpaca_declares_trading_spec_5_2_and_dec_630s_object() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn a_fractional_or_notional_order_is_day_only_and_never_protective() {
     let profile = alpaca_profile().unwrap();
     let rows = profile
@@ -101,7 +99,6 @@ fn a_fractional_or_notional_order_is_day_only_and_never_protective() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn the_connector_hands_the_executor_its_profile_without_calling_the_broker() {
     let transport = FakeTransport::default();
     let client = TradingClient::new(
