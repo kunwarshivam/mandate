@@ -5,15 +5,17 @@
 //! the model registry is present and V-007 is checked (X-7). The connection is `paper` only when
 //! the stream holds no fact about it (DEC-505 item 3). Two phases, as the brief orders them: every
 //! check but V-002 before any credential is read, then V-002 on the equity the GET-only preflight
-//! read.
+//! read. Only phase 2 yields a `ValidationContext`, so a caller cannot skip V-002.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value};
-use mandate_journal::ArtifactSource;
+use mandate_domain::Environment;
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, get_artifact};
 use mandate_num::Usd;
-use mandate_spec::context::{AgentId, Membership};
-use mandate_spec::validate::Violation;
+use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
+use mandate_spec::document::ModelId;
+use mandate_spec::validate::{RegisteredModel, Violation, validate};
 use mandate_spec::{Mandate, ValidationContext};
 use mandate_time::Date;
 
@@ -35,13 +37,52 @@ pub struct RunFacts {
     pub membership: Membership,
 }
 
-/// The version a paper run deploys: its digest, the stored document that re-hashes to it, and the
-/// context every V-rule but V-002 passed in. Its equity is zero until [`Self::with_equity`].
+/// Phase 1's answer: the version a paper run deploys, the stored document that re-hashes to it,
+/// and what the fold found. Every V-rule but V-002 passed. It holds no usable context: only
+/// [`Self::with_equity`] gives one. Both phases' fields are private, so nothing outside this module
+/// can build, alter or recombine either phase's answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmedVersion {
-    pub version: Digest,
-    pub mandate: Mandate,
-    pub context: ValidationContext,
+    version: Digest,
+    mandate: Mandate,
+    context: Folded,
+    unpriced: ValidationContext,
+}
+
+/// What phase 1's fold found, to show before any credential is read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Folded {
+    /// The V-007 registry, never `None` on this path (X-7).
+    pub registry: Option<BTreeMap<ModelId, RegisteredModel>>,
+    /// The connection's environment V-001 compared (DEC-505 item 3).
+    pub connection_environment: Option<Environment>,
+}
+
+/// Phase 2's answer, the deployment input: the confirmed version and the context every V-rule,
+/// V-002 on the preflight's equity included, passed in. Only [`ConfirmedVersion::with_equity`]
+/// builds one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeploymentInput {
+    version: Digest,
+    mandate: Mandate,
+    context: ValidationContext,
+}
+
+impl DeploymentInput {
+    /// The deployed version's digest.
+    pub fn version(&self) -> Digest {
+        self.version
+    }
+
+    /// The stored document that re-hashes to [`Self::version`].
+    pub fn mandate(&self) -> &Mandate {
+        &self.mandate
+    }
+
+    /// The context every V-rule passed in, carrying the preflight's equity.
+    pub fn context(&self) -> &ValidationContext {
+        &self.context
+    }
 }
 
 /// Why no deployment input could be built. Each but V-002's is a refusal before any credential
@@ -96,8 +137,98 @@ pub fn confirmed_version(
     store: &dyn ArtifactSource,
     run: &RunFacts,
 ) -> Result<ConfirmedVersion, DeploymentRefusal> {
-    let _ = (records, store, run);
-    Err(DeploymentRefusal::Unimplemented { story: "E19-11" })
+    let mut ordered: Vec<&ControlRecord> = records.iter().collect();
+    ordered.sort_by_key(|record| record.seq);
+    let ours = |record: &ControlRecord| {
+        record.payload.get("agent_id").and_then(Value::as_str) == Some(run.agent.as_str())
+    };
+    let mut deployed = None;
+    for record in &ordered {
+        if ours(record) && record.event_type == "AgentDeployed" {
+            let version = record
+                .payload
+                .get("mandate_version")
+                .and_then(Value::as_str)
+                .and_then(ArtifactRef::parse)
+                .ok_or(DeploymentRefusal::Fold)?;
+            deployed = Some(Some(version));
+        } else if ours(record) && record.event_type == "AgentStopped" {
+            deployed = deployed.map(|_| None);
+        }
+    }
+    let version = match deployed {
+        None => return Err(DeploymentRefusal::NotDeployed),
+        Some(None) => return Err(DeploymentRefusal::Stopped),
+        Some(Some(version)) => version,
+    };
+    let bytes = get_artifact(store, &version).map_err(|error| match error {
+        ArtifactError::Missing => DeploymentRefusal::DocumentMissing,
+        ArtifactError::Corrupt => DeploymentRefusal::DocumentCorrupt,
+        ArtifactError::Unavailable => DeploymentRefusal::StoreUnavailable,
+    })?;
+    let value = mandate_canon::parse(&bytes).map_err(|_| DeploymentRefusal::DocumentUnreadable)?;
+    let mandate = Mandate::parse(&value).map_err(|_| DeploymentRefusal::DocumentUnreadable)?;
+    if mandate.environment == Environment::Live {
+        return Err(DeploymentRefusal::Live);
+    }
+    let documents = |digest: &Digest| {
+        get_artifact(store, &ArtifactRef::from_digest(*digest))
+            .into_iter()
+            .flat_map(|bytes| mandate_canon::parse(&bytes))
+            .next()
+    };
+    let connection = &mandate.connection_id;
+    let mut facts = Vec::new();
+    let mut named = false;
+    for record in &ordered {
+        let fact = JournaledFact::from_record(
+            &record.event_type,
+            &record.payload,
+            &documents,
+            Some(connection),
+        )
+        .map_err(|_| DeploymentRefusal::Fold)?;
+        if let Some(fact) = fact {
+            named |= matches!(
+                &fact,
+                JournaledFact::ConnectionEstablished { connection_id, .. }
+                    | JournaledFact::ConnectionRevoked { connection_id }
+                    if connection_id == connection
+            );
+            facts.push(fact);
+        }
+    }
+    let args = ContextArgs {
+        agent: run.agent.clone(),
+        connection_id: connection.clone(),
+        validation_date: run.validation_date,
+        membership: Some(run.membership),
+        independent_approval_required: false,
+        instrument_groups: BTreeMap::new(),
+        eligibility_failures: BTreeSet::new(),
+    };
+    let mut context = ValidationContext::from_journal(&mandate, args, &facts)
+        .map_err(|_| DeploymentRefusal::Fold)?;
+    if !named {
+        context.connection_environment = Some(Environment::Paper);
+    }
+    let mut violations = validate(&mandate, &context)
+        .map_err(|_| DeploymentRefusal::Fold)?
+        .violations;
+    violations.remove(&Violation::V002);
+    if !violations.is_empty() {
+        return Err(DeploymentRefusal::Violations(violations));
+    }
+    let folded = Folded {
+        registry: context.registry.clone(),
+        connection_environment: context.connection_environment,
+    };
+    Ok(ConfirmedVersion {
+        version: version.digest(),
+        mandate,
+        context: folded,
+        unpriced: context,
+    })
 }
 
 impl ConfirmedVersion {
@@ -111,16 +242,35 @@ impl ConfirmedVersion {
         &self.mandate
     }
 
-    /// The folded context.
-    pub fn context(&self) -> &ValidationContext {
+    /// What the fold found.
+    pub fn context(&self) -> &Folded {
         &self.context
     }
 
     /// Phase 2: V-002 on the account equity the run's GET-only preflight read from the broker,
-    /// which the returned context carries.
-    pub fn with_equity(self, account_equity_usd: Usd) -> Result<Self, DeploymentRefusal> {
-        let _ = (self, account_equity_usd);
-        Err(DeploymentRefusal::Unimplemented { story: "E19-11" })
+    /// which the returned context carries. The document must still re-hash to the version.
+    pub fn with_equity(
+        self,
+        account_equity_usd: Usd,
+    ) -> Result<DeploymentInput, DeploymentRefusal> {
+        let rehashed = self
+            .mandate
+            .version()
+            .map_err(|_| DeploymentRefusal::DocumentCorrupt)?;
+        if rehashed.digest() != self.version {
+            return Err(DeploymentRefusal::DocumentCorrupt);
+        }
+        let mut context = self.unpriced;
+        context.account_equity_usd = account_equity_usd;
+        let report = validate(&self.mandate, &context).map_err(|_| DeploymentRefusal::Fold)?;
+        if !report.violations.is_empty() {
+            return Err(DeploymentRefusal::Violations(report.violations));
+        }
+        Ok(DeploymentInput {
+            version: self.version,
+            mandate: self.mandate,
+            context,
+        })
     }
 }
 
