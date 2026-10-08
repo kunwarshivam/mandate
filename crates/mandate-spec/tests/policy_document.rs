@@ -3,7 +3,7 @@
 //! policy set is validated before its levels fold into §4.3's overlay, so nothing outside the
 //! schema reaches `check`.
 
-use mandate_canon::Value;
+use mandate_canon::{Object, Value};
 use mandate_spec::policy::{LevelName, PolicyKey, PolicyLevel, PolicyValue, parse_policy_set};
 use mandate_spec::{DecGrammar, ParseError, Pointer, SchemaDec, SpecError};
 
@@ -296,10 +296,28 @@ fn a_policy_set_reads_its_levels_in_order() {
         parse_policy_set(&json(&object(&[]))).map(|l| l.len()),
         Ok(0)
     );
-    let reversed = parse_policy_set(&json(&object(&[&workspace, &platform]))).err();
-    let twice = parse_policy_set(&json(&object(&[&platform, &platform]))).err();
-    for refusal in [reversed, twice] {
-        assert_eq!(refusal.map(|error| error.code()), Some("invalid_input"));
+    let organization = level("organization", "");
+    let full = parse_policy_set(&json(&object(&[&platform, &organization, &workspace]))).unwrap();
+    let names: Vec<LevelName> = full.iter().map(|level| level.name).collect();
+    let order = [
+        LevelName::Platform,
+        LevelName::Organization,
+        LevelName::Workspace,
+    ];
+    assert_eq!(names, order);
+    let refused = [
+        object(&[&workspace, &platform]),
+        object(&[&platform, &platform]),
+        object(&[&organization, &organization]),
+        object(&[&workspace, &organization]),
+    ];
+    for text in refused {
+        let refusal = parse_policy_set(&json(&text)).err();
+        assert_eq!(
+            refusal.map(|error| error.code()),
+            Some("invalid_input"),
+            "{text}"
+        );
     }
 }
 
@@ -335,6 +353,16 @@ fn a_policy_set_outside_its_shape_is_refused() {
             },
         ),
         (
+            good.replace(r#""kind":"policy_set","#, ""),
+            ParseError::MissingMember { path: at("/kind") },
+        ),
+        (
+            good.replace("[]", "[1]"),
+            ParseError::WrongType {
+                path: at("/levels/0"),
+            },
+        ),
+        (
             good.replace(r#""kind""#, r#""extra":1,"kind""#),
             ParseError::UnknownMember { path: at("/extra") },
         ),
@@ -348,5 +376,190 @@ fn a_policy_set_outside_its_shape_is_refused() {
     for (text, error) in rows {
         let refusal = parse_policy_set(&json(&text)).err();
         assert_eq!(refusal, Some(SpecError::Parse(error)), "{text}");
+    }
+}
+
+const POLICY_SCHEMA: &str = include_str!("../../../schemas/policy.schema.json");
+const MANDATE_SCHEMA: &str = include_str!("../../../schemas/mandate.schema.json");
+
+/// A JSON Schema read as canonical JSON: every member name becomes a canonical key, `$` as
+/// `dollar_` and each capital as `_` and its lower case (`$defs` is `dollar_defs`,
+/// `uniqueItems` is `unique_items`). Values, `$ref` targets among them, are left as written.
+fn schema(text: &str) -> Value {
+    let mut out = String::new();
+    let mut chars = text.char_indices().peekable();
+    while let Some((start, c)) = chars.next() {
+        if c != '"' {
+            out.push(c);
+            continue;
+        }
+        let mut end = start + 1;
+        let mut escaped = false;
+        for (index, c) in chars.by_ref() {
+            end = index;
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                break;
+            }
+        }
+        let body = &text[start + 1..end];
+        let is_key = text[end + 1..].trim_start().starts_with(':');
+        out.push('"');
+        if is_key {
+            for c in body.chars() {
+                if c == '$' {
+                    out.push_str("dollar_");
+                } else if c.is_ascii_uppercase() {
+                    out.push('_');
+                    out.push(c.to_ascii_lowercase());
+                } else {
+                    out.push(c);
+                }
+            }
+        } else {
+            out.push_str(body);
+        }
+        out.push('"');
+    }
+    json(&out)
+}
+
+fn member<'a>(value: &'a Value, name: &str) -> &'a Value {
+    value
+        .get(name)
+        .unwrap_or_else(|| panic!("the schema has `{name}`"))
+}
+
+fn object_of(value: &Value) -> &Object {
+    value.as_object().unwrap()
+}
+
+/// The decimal grammar a schema pattern is: each `$def` of the policy schema by its name, and the
+/// mandate schema's `fraction`, which `rebalance_band` repeats inline.
+fn grammar_of(pattern: &str, policy: &Value, mandate: &Value) -> DecGrammar {
+    let defs = [
+        ("positive_decimal", DecGrammar::PositiveDecimal),
+        ("open_fraction", DecGrammar::OpenFraction),
+        ("unit_positive", DecGrammar::UnitPositive),
+    ];
+    for (name, grammar) in defs {
+        let def = member(member(policy, "dollar_defs"), name);
+        if member(def, "pattern").as_str() == Some(pattern) {
+            return grammar;
+        }
+    }
+    let fraction = member(member(mandate, "dollar_defs"), "fraction");
+    assert_eq!(
+        member(fraction, "pattern").as_str(),
+        Some(pattern),
+        "a known grammar"
+    );
+    DecGrammar::Fraction
+}
+
+/// Every key, by the type `schemas/policy.schema.json` itself gives it: an integer accepted at
+/// both bounds and refused one past each (below a minimum above zero), or as a string; a flag as a
+/// string; a decimal as a JSON number or off its pattern; a set with an item off its enum, a
+/// repeated item, a non-string item, or not an array. The schema is read here, not retyped.
+#[test]
+#[ignore = "pending E7-19"]
+fn every_keys_schema_type_is_enforced() {
+    let policy = schema(POLICY_SCHEMA);
+    let mandate = schema(MANDATE_SCHEMA);
+    let keys = object_of(member(
+        member(member(&policy, "properties"), "values"),
+        "properties",
+    ));
+    assert_eq!(keys.len(), 40, "the schema's keys");
+    let mut probes = 0;
+    for (key, schema) in keys {
+        let key = key.as_str();
+        let path = |suffix: &str| at(&format!("/values/{key}{suffix}"));
+        let mut rows: Vec<(String, ParseError)> = Vec::new();
+        let mut accepted: Vec<String> = Vec::new();
+        let kind = schema.get("type").and_then(Value::as_str);
+        let reference = schema.get("dollar_ref").and_then(Value::as_str);
+        if kind == Some("integer") {
+            let min = member(schema, "minimum").as_int().unwrap();
+            let max = member(schema, "maximum").as_int().unwrap();
+            accepted.extend([min.to_string(), max.to_string()]);
+            rows.push((
+                (max + 1).to_string(),
+                ParseError::OutOfBounds { path: path("") },
+            ));
+            if min > 0 {
+                rows.push((
+                    (min - 1).to_string(),
+                    ParseError::OutOfBounds { path: path("") },
+                ));
+            }
+            rows.push((
+                format!(r#""{min}""#),
+                ParseError::WrongType { path: path("") },
+            ));
+        } else if kind == Some("boolean") {
+            accepted.extend(["true".to_owned(), "false".to_owned()]);
+            rows.push((
+                r#""true""#.to_owned(),
+                ParseError::WrongType { path: path("") },
+            ));
+        } else if reference == Some("#/$defs/set") {
+            let items = member(member(schema, "items"), "enum").as_array().unwrap();
+            let first = items[0].as_str().unwrap();
+            accepted.extend(["[]".to_owned(), format!(r#"["{first}"]"#)]);
+            rows.push((
+                r#"["zz"]"#.to_owned(),
+                ParseError::NotInEnum { path: path("/0") },
+            ));
+            rows.push((
+                format!(r#"["{first}","{first}"]"#),
+                ParseError::NotUnique { path: path("/1") },
+            ));
+            rows.push((
+                format!(r#""{first}""#),
+                ParseError::WrongType { path: path("") },
+            ));
+            rows.push(("[1]".to_owned(), ParseError::NotInEnum { path: path("/0") }));
+        } else {
+            let def = reference
+                .map(|name| member(member(&policy, "dollar_defs"), &name["#/$defs/".len()..]));
+            let pattern = member(def.unwrap_or(schema), "pattern").as_str().unwrap();
+            let grammar = grammar_of(pattern, &policy, &mandate);
+            rows.push((
+                "1".to_owned(),
+                ParseError::DecimalAsNumber { path: path("") },
+            ));
+            rows.push((
+                r#""1.0""#.to_owned(),
+                ParseError::OffGrammar {
+                    path: path(""),
+                    grammar,
+                },
+            ));
+        }
+        for value in accepted {
+            let text = document(&format!(r#""{key}":{value}"#));
+            let read = PolicyLevel::parse(&json(&text)).map(|level| level.values.len());
+            assert_eq!(read, Ok(1), "{text}");
+        }
+        for (value, error) in rows {
+            let text = document(&format!(r#""{key}":{value}"#));
+            assert_eq!(refused(&text), Some(SpecError::Parse(error)), "{text}");
+            probes += 1;
+        }
+    }
+    assert_eq!(probes, 12 * 2 + 6 + 6 + 5 * 4 + 17 * 2, "a probe per rule");
+}
+
+/// A document that is not an object is refused at the root.
+#[test]
+#[ignore = "pending E7-19"]
+fn a_document_that_is_not_an_object_is_refused() {
+    for text in ["[]", r#""workspace""#, "7"] {
+        let wrong = ParseError::WrongType { path: at("") };
+        assert_eq!(refused(text), Some(SpecError::Parse(wrong)), "{text}");
     }
 }
