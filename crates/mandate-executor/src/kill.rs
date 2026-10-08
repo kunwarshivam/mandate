@@ -1399,7 +1399,7 @@ mod tests {
     /// protected lots, is never the switch's. Neither the switch nor any step after it cancels it,
     /// it holds no flatten back, and the flatten sells agent-a's 10, not a share of agent-b's.
     #[test]
-    fn another_agents_accepted_order_is_never_the_switchs() -> Result<(), ExecutorError> {
+    fn another_agents_accepted_order_is_never_reached() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
