@@ -98,6 +98,29 @@ fn quantity_forms_sessions_and_text_follow_the_contract() -> Outcome {
             Err(QuantityForm),
         ),
         (
+            req(&[STOP_LIMIT[0], STOP_LIMIT[1], ("quantity", "1.5")]),
+            Err(QuantityForm),
+        ),
+        (
+            req(&[
+                ("type", "stop_market"),
+                ("limit_price", ""),
+                ("stop_price", "499"),
+                ("quantity", "1.5"),
+            ]),
+            Err(QuantityForm),
+        ),
+        (
+            req(&[
+                ("type", "stop_market"),
+                ("limit_price", ""),
+                ("stop_price", "499"),
+                ("quantity", ""),
+                ("dollar_amount", "100"),
+            ]),
+            Err(QuantityForm),
+        ),
+        (
             req(&[("ref_id", "zzzzzzzz-0000-4000-8000-000000000001")]),
             Err(Unreadable("ref_id")),
         ),
