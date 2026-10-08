@@ -15887,5 +15887,1708 @@
     }
    }
   ]
+ },
+ "broker_profile": {
+  "spec": "docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)",
+  "artifacts": [
+   {
+    "name": "alpaca",
+    "ref": "sha256:6408fbbc116a3cd591c9a0377079a6cac0104766974b60a93ab7b1f0b8b8315c",
+    "object": {
+     "kind": "broker_profile",
+     "profile_version": 1,
+     "rows": [
+      {
+       "asset_class": "us_equity",
+       "session": "regular",
+       "cells": [
+        {
+         "order_type": "limit",
+         "quantity_form": "fractional",
+         "times_in_force": [
+          "day"
+         ],
+         "protection_forms": []
+        },
+        {
+         "order_type": "limit",
+         "quantity_form": "notional",
+         "times_in_force": [
+          "day"
+         ],
+         "protection_forms": []
+        },
+        {
+         "order_type": "limit",
+         "quantity_form": "whole",
+         "times_in_force": [
+          "day",
+          "gtc"
+         ],
+         "protection_forms": [
+          "bracket",
+          "oco"
+         ]
+        },
+        {
+         "order_type": "market",
+         "quantity_form": "fractional",
+         "times_in_force": [
+          "day"
+         ],
+         "protection_forms": []
+        },
+        {
+         "order_type": "market",
+         "quantity_form": "notional",
+         "times_in_force": [
+          "day"
+         ],
+         "protection_forms": []
+        },
+        {
+         "order_type": "market",
+         "quantity_form": "whole",
+         "times_in_force": [
+          "day",
+          "gtc"
+         ],
+         "protection_forms": [
+          "bracket"
+         ]
+        },
+        {
+         "order_type": "stop",
+         "quantity_form": "fractional",
+         "times_in_force": [
+          "day"
+         ],
+         "protection_forms": []
+        },
+        {
+         "order_type": "stop",
+         "quantity_form": "notional",
+         "times_in_force": [
+          "day"
+         ],
+         "protection_forms": []
+        },
+        {
+         "order_type": "stop",
+         "quantity_form": "whole",
+         "times_in_force": [
+          "day",
+          "gtc"
+         ],
+         "protection_forms": []
+        },
+        {
+         "order_type": "stop_limit",
+         "quantity_form": "fractional",
+         "times_in_force": [
+          "day"
+         ],
+         "protection_forms": []
+        },
+        {
+         "order_type": "stop_limit",
+         "quantity_form": "notional",
+         "times_in_force": [
+          "day"
+         ],
+         "protection_forms": []
+        },
+        {
+         "order_type": "stop_limit",
+         "quantity_form": "whole",
+         "times_in_force": [
+          "day",
+          "gtc"
+         ],
+         "protection_forms": []
+        }
+       ]
+      }
+     ],
+     "idempotency": {
+      "client_order_id": true,
+      "retry": "idempotent",
+      "query_by_client_order_id": true
+     }
+    },
+    "canonical": "{\"idempotency\":{\"client_order_id\":true,\"query_by_client_order_id\":true,\"retry\":\"idempotent\"},\"kind\":\"broker_profile\",\"profile_version\":1,\"rows\":[{\"asset_class\":\"us_equity\",\"cells\":[{\"order_type\":\"limit\",\"protection_forms\":[],\"quantity_form\":\"fractional\",\"times_in_force\":[\"day\"]},{\"order_type\":\"limit\",\"protection_forms\":[],\"quantity_form\":\"notional\",\"times_in_force\":[\"day\"]},{\"order_type\":\"limit\",\"protection_forms\":[\"bracket\",\"oco\"],\"quantity_form\":\"whole\",\"times_in_force\":[\"day\",\"gtc\"]},{\"order_type\":\"market\",\"protection_forms\":[],\"quantity_form\":\"fractional\",\"times_in_force\":[\"day\"]},{\"order_type\":\"market\",\"protection_forms\":[],\"quantity_form\":\"notional\",\"times_in_force\":[\"day\"]},{\"order_type\":\"market\",\"protection_forms\":[\"bracket\"],\"quantity_form\":\"whole\",\"times_in_force\":[\"day\",\"gtc\"]},{\"order_type\":\"stop\",\"protection_forms\":[],\"quantity_form\":\"fractional\",\"times_in_force\":[\"day\"]},{\"order_type\":\"stop\",\"protection_forms\":[],\"quantity_form\":\"notional\",\"times_in_force\":[\"day\"]},{\"order_type\":\"stop\",\"protection_forms\":[],\"quantity_form\":\"whole\",\"times_in_force\":[\"day\",\"gtc\"]},{\"order_type\":\"stop_limit\",\"protection_forms\":[],\"quantity_form\":\"fractional\",\"times_in_force\":[\"day\"]},{\"order_type\":\"stop_limit\",\"protection_forms\":[],\"quantity_form\":\"notional\",\"times_in_force\":[\"day\"]},{\"order_type\":\"stop_limit\",\"protection_forms\":[],\"quantity_form\":\"whole\",\"times_in_force\":[\"day\",\"gtc\"]}],\"session\":\"regular\"}]}"
+   }
+  ],
+  "valid_drafts": {
+   "profile_registration": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Y0A2B000000000000000S4",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConfigSnapshotRegistered",
+    "schema_version": 3,
+    "event_time": "2026-09-20T13:06:30.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "kind": "broker_profile",
+     "content_hash": "sha256:6408fbbc116a3cd591c9a0377079a6cac0104766974b60a93ab7b1f0b8b8315c",
+     "model_id": null,
+     "model_version": null,
+     "params": [],
+     "admits_instruments": null
+    },
+    "artifact_refs": [
+     "sha256:6408fbbc116a3cd591c9a0377079a6cac0104766974b60a93ab7b1f0b8b8315c"
+    ],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "profile_registration_version_2",
+    "base": "profile_registration",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "reason": "non_canonical",
+     "path": "payload.kind"
+    }
+   },
+   {
+    "name": "profile_registration_version_1",
+    "base": "profile_registration",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "reason": "non_canonical",
+     "path": "payload.kind"
+    }
+   },
+   {
+    "name": "profile_registration_version_4",
+    "base": "profile_registration",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 4
+     }
+    ],
+    "expect": {
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "profile_registration_as_policy_set",
+    "base": "profile_registration",
+    "changes": [
+     {
+      "path": "payload.kind",
+      "value": "policy_set"
+     }
+    ],
+    "expect": {
+     "reason": "config_ref_kind",
+     "path": "payload.kind"
+    }
+   },
+   {
+    "name": "profile_registration_with_a_model_id",
+    "base": "profile_registration",
+    "changes": [
+     {
+      "path": "payload.model_id",
+      "value": "sm.trend"
+     }
+    ],
+    "expect": {
+     "reason": "schema",
+     "path": "payload.model_id"
+    }
+   }
+  ],
+  "missing_artifact": {
+   "base": "profile_registration",
+   "expect": {
+    "reason": "missing_artifact",
+    "path": "payload.content_hash"
+   }
+  },
+  "invalid_artifacts": [
+   {
+    "name": "profile_version_zero",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "profile_version",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "reason": "profile_version_zero"
+    }
+   },
+   {
+    "name": "no_rows",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": []
+     }
+    ],
+    "expect": {
+     "reason": "profile_no_rows"
+    }
+   },
+   {
+    "name": "empty_row",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": []
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "profile_empty_row"
+    }
+   },
+   {
+    "name": "duplicate_row",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket",
+           "oco"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ]
+       },
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket",
+           "oco"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "profile_duplicate_row"
+    }
+   },
+   {
+    "name": "duplicate_cell",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket",
+           "oco"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "profile_duplicate_cell"
+    }
+   },
+   {
+    "name": "no_time_in_force",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket",
+           "oco"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "profile_no_time_in_force"
+    }
+   },
+   {
+    "name": "cells_out_of_order",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket",
+           "oco"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "non_canonical"
+    }
+   },
+   {
+    "name": "times_in_force_out_of_order",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "gtc",
+           "day"
+          ],
+          "protection_forms": [
+           "bracket",
+           "oco"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "non_canonical"
+    }
+   },
+   {
+    "name": "a_claim_without_a_client_order_id",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "idempotency",
+      "value": {
+       "client_order_id": false,
+       "retry": "unknown",
+       "query_by_client_order_id": false
+      }
+     }
+    ],
+    "expect": {
+     "reason": "profile_claim_without_client_id"
+    }
+   },
+   {
+    "name": "robinhood_stop_market_spelling",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket",
+           "oco"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop_market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "schema"
+    }
+   },
+   {
+    "name": "a_gtc_expiry_member",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "gtc_expiry_days",
+      "value": 90
+     }
+    ],
+    "expect": {
+     "reason": "schema"
+    }
+   },
+   {
+    "name": "an_unknown_row_member",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket",
+           "oco"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ],
+        "venue": "xnys"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "schema"
+    }
+   },
+   {
+    "name": "an_unknown_cell_member",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": [],
+          "min_qty": "1"
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket",
+           "oco"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "schema"
+    }
+   },
+   {
+    "name": "a_wrong_kind",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "kind",
+      "value": "policy_set"
+     }
+    ],
+    "expect": {
+     "reason": "schema"
+    }
+   },
+   {
+    "name": "protection_forms_duplicated",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "oco",
+           "oco"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "non_canonical"
+    }
+   },
+   {
+    "name": "protection_forms_out_of_order",
+    "base": "alpaca",
+    "changes": [
+     {
+      "path": "rows",
+      "value": [
+       {
+        "asset_class": "us_equity",
+        "session": "regular",
+        "cells": [
+         {
+          "order_type": "limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "oco",
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "market",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": [
+           "bracket"
+          ]
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "fractional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "notional",
+          "times_in_force": [
+           "day"
+          ],
+          "protection_forms": []
+         },
+         {
+          "order_type": "stop_limit",
+          "quantity_form": "whole",
+          "times_in_force": [
+           "day",
+           "gtc"
+          ],
+          "protection_forms": []
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "reason": "non_canonical"
+    }
+   }
+  ]
  }
 }

@@ -21,7 +21,8 @@
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
 #      mandate-authn (E9-1, DEC-650): token verification and sessions as pure functions, with the
 #      issuer's keys and the clock handed in, so it never fetches a key or reads a clock
-#   2  mandate-journal, mandate-accounting
+#   2  mandate-journal, mandate-accounting, and mandate-passkey, the WebAuthn relying party
+#      (E9-1, DEC-660), which verifies and never signs
 #   3  mandate-spec
 #   4  mandate-risk
 #   5  mandate-builder
@@ -88,6 +89,12 @@ allowed_external = ["thiserror"]
 
 [crates.mandate-authn]
 layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
+
+[crates.mandate-passkey]
+layer = 2
 safety_critical = true
 pure = true
 allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
