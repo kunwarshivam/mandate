@@ -138,7 +138,7 @@ existing principal needs step-up with an existing credential, or recovery (§10.
 |---|---|---|---|
 | Org, workspace, user IDs; role names | Global directory and workspace | Global directory (IDs only) and workspace | Customer's |
 | Names, emails, IdP subjects | Personal-data vault in the workspace deployment | Customer's | Customer's |
-| Passkey public keys and credential IDs | Workspace deployment (and the managed sign-in provider, §6.1) | Customer's | Customer's |
+| Passkey public keys and credential IDs, each row with its member's roles snapshot (§4.5) | Workspace deployment (and the managed sign-in provider, §6.1) | Customer's | Customer's |
 | Sessions, refresh tokens | Workspace deployment | Customer's | Customer's |
 | Recovery-code hashes | Workspace deployment | Customer's | Customer's |
 | Step-up evidence and raw assertions | Control stream and artifacts | Customer's | Customer's |
@@ -316,11 +316,17 @@ test doubles live only behind `cfg(test)` or in `mandate-identity`'s dev-only te
 §6's code (`mandate-authn`), from the session record it reads for this request, and by test
 support; if that read fails there is no `Session`, and the request is refused before authorizing.
 It contributes the `session_ref` every committed event names (ID-1, §12.2), the workspace it was
-opened in, its kind, and its **roles snapshot**: the principal's memberships in that workspace and
-its organization (a client token's record: its user's), as of the last successful membership read.
-`MemberDeactivated` revokes every session and client token of the member in the same transaction
-(§5.2 step 2), and `MemberRoleChanged` rewrites the member's snapshots in the same transaction
-(§5.2), so a snapshot is never wider than the committed membership. A reduction-only session
+opened in, its kind, and its **roles snapshot**: the principal's effective roles in that workspace
+and its organization (a client token's record: its user's), each with its cool-off end, as of the
+last successful membership read; cool-off is evaluated at use (§8.3), so a stale snapshot is only
+ever narrower. A route-2 session takes its snapshot from the passkey's row in the credential table
+(§3.3), which carries its member's roles snapshot. `MemberDeactivated` revokes every session and
+client token of the member, and suspends the member's passkey credentials, in the same
+transaction (§5.2 step 2), and `MemberRoleChanged` rewrites the member's session, token, and
+credential snapshots in the same transaction (§5.2), so a snapshot is never wider than the
+committed membership in that workspace's store. Organization events are rewritten into each
+workspace's store as they arrive there (§12.1); in hybrid and on-prem deployments the snapshot and
+the live read are equally stale until then. A reduction-only session
 (§6.4: route 1 after the provider became unreachable, route 2) authorizes exactly these rows of
 §4.2: Pause; Kill switch, agent scope: engage; Kill switch, connection or workspace scope:
 engage; Kill switch, org scope: engage. "Kill switch, any scope: privileges beyond the stop" is not
@@ -329,10 +335,11 @@ when a refresh succeeds (it is a full session again) or the provider refuses one
 
 **A failed membership read** (DEC-642 item 10, an agent reading under DEC-176 on the
 coordinator's ruling). `membership_unavailable` is never the outcome of a risk-reducing operation
-(`AGENTS.md` rules 2, 3, 13). The risk-reducing rows are those of workspace API-7's operations:
-pause; holding new openings; an owner exit; Skip on an approval; removing or narrowing a
-delegation, and away mode; and engaging a kill switch at agent, connection or workspace, or org
-scope. When the live membership read fails on one of them, a
+(`AGENTS.md` rules 2, 3, 13). The risk-reducing rows are those of workspace API-7's operations,
+and ID-5's other never-gated reductions: pause; holding new openings; an owner exit; Skip on an
+approval; removing or narrowing a delegation, and away mode; engaging a kill switch at agent,
+connection or workspace, or org scope; revoking a client; and tightening a workspace's or an
+organization's policy. When the live membership read fails on one of them, a
 user's or a client's request is authorized from its session's roles snapshot against the same
 §4.2 row, by the same grammar, at the session's workspace or its organization; the context carries
 `membership_unverified`, and the committed event records `membership_unverified: true` beside its
@@ -346,12 +353,14 @@ needs no membership read; a reduction-only session cannot present step-up (§7.3
 make an owner exit, as before, while a full session or route 1 after a refresh can. That is not a
 new refusal. If the session record cannot be read either, the request is refused, and nothing
 could be journaled anyway (workspace API §7). The ID-3 and ID-5 fuzz assert, across the whole
-risk-reducing set with an injected membership-store outage, that `membership_unavailable` never
+risk-reducing set of user and client request operations with an injected membership-store
+outage, that `membership_unavailable` never
 occurs, that each such operation commits with `membership_unverified: true`, and that no
 operation outside the set commits during the outage. **A deactivation always wins over the
 snapshot:** the E9-7 and E9-8 tests owe `a_deactivated_member_is_refused_through_an_outage`, which
 deactivates a member and then injects a membership-store outage and asserts that the member's
-sessions and client tokens are refused, because their revocation, like a role change's snapshot
+sessions and client tokens are refused, and that a route-2 attempt with the member's passkey is
+refused too, because their revocation, like a role change's snapshot
 rewrite, shares one transaction with `MemberDeactivated` or `MemberRoleChanged`. **The audit view
 shows the gap:** `membership_unverified: true` stays in the journaled record, and the workspace
 API's audit read model (§4.8) and the web audit trail display it (owed by those lanes).
@@ -374,8 +383,9 @@ Cargo feature involved:
 - `SystemContext` and its only constructor live in their own crate, `mandate-identity-system`.
 - **An allowlist, not a denylist:** only the bootstrap crates of the agent runtime, the executor,
   and the scheduler may depend on `mandate-identity-system`; E9-8 creates those bootstrap crates.
-  `xtask/layers.toml` gains an `allowed_dependents` key that `cargo xtask layers` checks. That
-  check lands with E9-8, under a claim on `xtask`, which is shared, and does not run before.
+  `xtask/layers.toml` gains an `allowed_dependents` key that `cargo xtask layers` checks; the
+  same check restricts `mandate-identity-testkit` to `[dev-dependencies]`. That check lands with
+  E9-8, under a claim on `xtask`, which is shared, and does not run before.
 - **Two seals**, so no crate that builds sessions or memberships can mint a context:
   - `mandate-tenant` holds only the `Tenant` trait (re-exported as `mandate_identity::Tenant`) and
     its sealing supertrait. Its allowed dependents are `mandate-identity` and
@@ -613,10 +623,14 @@ enough:
    absolute lifetime ends. When the provider **answers and refuses** (`invalid_grant`, a revoked or
    disabled subject, a back-channel logout), that is a deprovision, not an outage: the session ends at
    once with every permission (§11.1). Only a transport-level failure, a 5xx, a 408, or a 429 keeps
-   anything: a 408 or a 429 is neither a deprovision signal nor a successful refresh, so it counts
-   as an outage and the session keeps pause and the kill switch only (lane B2's reading under
-   DEC-176, rule 3). Every other 4xx is a refusal and ends the session; the deprovision signals
-   that also block route 2 stay exactly those §11.1 lists.
+   anything. A 408 or a 429 is neither a deprovision signal nor a successful refresh, and it is
+   bounded (lane B2's reading under DEC-176, rule 3; it only tightens "until its absolute
+   lifetime" and adds no trading risk): the session drops to reduction-only for at most 15 minutes,
+   route 2's window, or until the next refresh attempt that gets a definite answer. A success
+   restores the full session; a refusal ends it; if the 15 minutes pass with no definite answer, it
+   ends, and route 2 stays open to the member throughout. A transport failure or a 5xx keeps the
+   rule above. Every other 4xx is a refusal and ends the session; the deprovision signals that also
+   block route 2 stay exactly those §11.1 lists.
 2. **Workspace-local passkey.** The workspace deployment verifies a fresh passkey assertion
    against the public keys it holds (§6.1) and opens a *reduction-only session*: pause and kill
    switch, nothing else, 15 minutes. No identity provider, global control plane, or model is
@@ -917,7 +931,7 @@ control streams, so each workspace's records are complete on their own.
 | **Malicious org admin** | Loosens org policy, makes themselves owner, removes the owner | Org policy loosening needs step-up and is journaled; a loosened policy affects running agents only through a conforming version the operator confirms (mandate §4.3); only an org owner grants the owner role; removing the last owner is refused; every change alerts the owners |
 | **Stale session after deactivation** | A departed employee's open tab keeps acting | Blocked: membership re-checked on every request, uncached (§6.2); streams close within 60 s (ID-3) |
 | **Departed employee still in the customer's IdP** | Signs in again | The workspace membership is deactivated, so sign-in reaches nothing (ID-3) |
-| **Departed employee disabled in the IdP, membership not yet deactivated** | Keeps an open tab and uses pause or the kill switch | Blocked: the IdP's refusal is a deprovision signal, which ends the session with every permission and blocks the local passkey route (§6.4, §11.1); only an unreachable IdP keeps reduction permissions |
+| **Departed employee disabled in the IdP, membership not yet deactivated** | Keeps an open tab and uses pause or the kill switch | Blocked: the IdP's refusal is a deprovision signal, which ends the session with every permission and blocks the local passkey route (§6.4, §11.1); only an unreachable IdP keeps reduction permissions, and a 408 or 429 keeps them for at most 15 minutes (§6.4 route 1) |
 | **OIDC misconfiguration** | Wrong audience, `alg: none`, a different tenant of the same IdP, unverified email matching an invitation, open redirect after sign-in | Each refused: signature, issuer, audience, expiry, and nonce are checked against the configured issuer only; `email_verified` is required for address matching; `next` is a same-origin path only (DEC-211). Configuring SSO needs step-up and is journaled |
 | **IdP compromised (customer's)** | Mints a token for an admin | Gets a session; still needs that admin's passkey for any step-up action. Disclosed: the IdP is the customer's trust root for sign-in |
 | **Owner-connected agent with stolen tokens** | Replays the token from another machine | Blocked by DPoP: without the client's key the token is useless (§6.3). With the key too: it can propose and request as the client, every request passes builder, gate, and autonomy (DEC-141); it cannot approve, confirm, step up, stop, release, or change connections (ID-11); new openings it asks for are never `auto` (MI-30). The owner revokes it at once |

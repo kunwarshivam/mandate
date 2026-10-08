@@ -237,7 +237,7 @@ Errors are RFC 9457 problem documents with these members:
 | `owner_role_reserved` | 403 | Someone other than an org owner grants or removes the org owner role (identity spec §4.5) |
 | `last_owner`, `last_admin` | 409 | The change leaves no `active` org owner or workspace admin (identity spec §5.2) |
 | `reduction_only` | 403 | A reduction-only session asks for anything but pause or a kill switch (identity spec §4.5, §6.4) |
-| `membership_unavailable` | 503 | The membership read failed on an operation that is not API-7's; nothing was authorized (identity spec §4.5); `retryable`. Never sent for an API-7 operation |
+| `membership_unavailable` | 503 | The membership read failed on an operation outside identity spec §4.5's risk-reducing set (API-7's operations, revoking a client, and tightening a policy); nothing was authorized; `retryable`. Never sent for an operation in that set |
 
 ### 3.6 Step-up
 
