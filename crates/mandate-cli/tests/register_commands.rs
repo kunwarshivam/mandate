@@ -92,7 +92,6 @@ fn refuses(code: &str, command: impl FnOnce(&mut Vec<u8>) -> anyhow::Result<Subm
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn the_owner_is_two_required_flags_and_always_paper() {
     let paper = Owner {
         workspace: "ws1".into(),
@@ -228,7 +227,6 @@ fn refusals_without_a_database(tag: &str) {
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn a_bad_owner_a_missing_file_or_a_bad_snapshot_is_refused_without_a_database() {
     refusals_without_a_database("refusals");
 }
@@ -274,7 +272,6 @@ fn printed(stdout: &str, row: &StoredEvent) {
 /// in paper, with each object in the store; a re-run of `model register` prints the event it
 /// found.
 #[test]
-#[ignore = "pending E10-16"]
 fn the_binary_registers_the_snapshot_and_the_model_in_postgres() {
     refusals_without_a_database("binary");
     let Some(db) = TestDb::new() else {
