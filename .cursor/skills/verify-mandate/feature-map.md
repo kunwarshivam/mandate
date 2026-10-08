@@ -1315,6 +1315,17 @@ proves each pending test fails on them (DEC-110).
   rule; no input panics).
 - **Run:** `cargo nextest run -p mandate-passkey`.
 
+## Action-bound step-up (E9-4)
+
+- **Spec:** identity spec §7.1 to §7.3 and §10.1's cool-off; mandate spec §6.1 (valid step-up);
+  workspace API spec §3.6 (the action kinds); DEC-662 (refusal codes and their order).
+- **Code:** `crates/mandate-passkey/src/stepup.rs` (`ChallengeRecord` and its canonical form and
+  WebAuthn challenge, `consume`, `reverify`, `StepUpRefusal`), over `mandate-identity`'s
+  `PrincipalId`, `WorkspaceId`, `AssertionId`, `StepUpActionKind`, `StepUpMethod`, and
+  `StepUpEvidence`.
+- **Tests:** `crates/mandate-passkey/tests/stepup_api.rs` (the refusal codes).
+- **Run:** `cargo nextest run -p mandate-passkey`.
+
 ## Identity: roles, the permission matrix, and the authorization step (E9-2)
 
 - **Spec:** identity spec §3 to §5, §4.2's matrix and its grammar (DEC-641), §4.5's authorization
