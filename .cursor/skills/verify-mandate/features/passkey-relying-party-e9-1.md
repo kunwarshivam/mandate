@@ -10,5 +10,8 @@
   RFC 8949 vectors and `ring`'s verifier; its keys are generated in the test, never a real
   authenticator, identity spec §1.3); `tests/enrol.rs` (enrolment: `none` attestation, the
   client data, the RP ID hash, the flags, the key types) and `tests/structure.rs` (credential ID
-  lengths, the CBOR subset, COSE key parameters). Pending E9-1.
+  lengths, the CBOR subset, COSE key parameters), `tests/verify.rs` (assertions: user
+  verification, the counter, the origin, the challenge, the RP ID hash, the signature) and
+  `tests/properties.rs` (a signed response verifies; any change to it is refused; the counter
+  rule; no input panics). Pending E9-1.
 - **Run:** `cargo nextest run -p mandate-passkey`.
