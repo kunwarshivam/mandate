@@ -287,7 +287,7 @@ Errors are RFC 9457 problem documents with these members:
 | `owner_role_reserved` | 403 | Someone other than an org owner grants or removes the org owner role (identity spec §4.5) |
 | `last_owner`, `last_admin` | 409 | The change leaves no `active` org owner or workspace admin (identity spec §5.2) |
 | `reduction_only` | 403 | A reduction-only session asks for anything but pause or a kill switch (identity spec §4.5, §6.4) |
-| `membership_unavailable` | 503 | The membership read failed on an operation outside identity spec §4.5's risk-reducing set (API-7's operations, revoking a client, and tightening a policy); nothing was authorized; `retryable`. Never sent for an operation in that set |
+| `membership_unavailable` | 503 | The membership read, or the membership-index read of `GET /v1/me/workspaces` (§4.10), failed on an operation outside identity spec §4.5's risk-reducing set (API-7's operations, revoking a client, and tightening a policy); nothing was authorized; `retryable`. Never sent for an operation in that set |
 | `outcome_unknown` | 503 | (planned: E10-10) The append's outcome could not be confirmed (an ambiguous commit, or `Fenced` during an upgrade, §7); `effect: unknown`, the derived `event_id` given, `retryable: false`. The client polls §5.5 with that `event_id` and never resends with a new key. A resend with the same key is still safe (API-4: it resolves to the original outcome), so `retryable: false` is a rule for the UI, not for correctness |
 
 ### 3.6 Step-up
@@ -299,8 +299,8 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   with that list: `confirm_version` (risk-increasing, a delegation grant included), `deploy`,
   `approve`, `connection` (connect, change, or revoke), `resume`, `stop`,
   `acknowledge`, `owner_exit`, `kill_switch_privilege`, `disclosure`, `policy_loosen`,
-  `member_invite`, `role_grant`, `client_connect`, `credential_enrol`, `break_glass_approve`, and
-  `lift_hold`. There is no kind for re-enabling a halted scope: the halted state is Proposed
+  `member_invite`, `role_grant`, `client_connect`, `credential_enrol`, `notification_address`,
+  `break_glass_approve`, and `lift_hold`. There is no kind for re-enabling a halted scope: the halted state is Proposed
   (DEC-437 item 21) and does not exist until the founder accepts it. API-17's test enumerates only
   the step-up actions this API serves: identity spec ID-4's list and the **S** cells of §3.7's
   workspace-scope rows. The org-scope **S** actions (SSO configuration, creating or archiving a
@@ -365,6 +365,9 @@ break-glass. Their columns are printed so the copy stays exact. The cells read b
 | Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
+| Add or remove one's own notification address (a push subscription; later an email address) | S | | | | own | own | own | own | own | | | | |
+| List one's own notification addresses (opaque references only) | | | | | own | own | own | own | own | | | | |
+| List one's own workspace memberships | | self | self | self | self | self | self | self | self | | | | |
 | Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
 | Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | | | |
@@ -391,6 +394,9 @@ How the API's operations map onto those rows:
 | Approve, Skip (§5.2) | Answer an approval, and listed in `autonomy.approval.approvers` (identity spec §4.1) |
 | Connect, revoke, revoke on compromise (§4.5) | Connect, change, or revoke a broker connection |
 | Policies, members, clients (§4.5) | The rows of the same names; a member deactivating their own membership is the leave row |
+| One's own workspaces, `GET /v1/me/workspaces` (identity spec §4.5) | List one's own workspace memberships |
+| One's own notification channels (a push subscription): set, remove | Add or remove one's own notification address |
+| One's own notification channels: list | List one's own notification addresses |
 | Owner request, dry run, chat (§4.6) | Make an owner request; dry run of a request; chat thread with the agent. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
 
 Separation of duties is enforced where the specs already enforce it: by the runtime at approval
@@ -436,7 +442,7 @@ shedding applies to the API-7 operations, which run on the reserved pool of API-
 
 ## 4. Resources and operations
 
-All paths are under `/v1/workspaces/{workspace_id}`. "Event" names the control-stream event the call
+Every path is under `/v1/workspaces/{workspace_id}` except those §4.10 lists: `/v1/me/*`, `/v1/reduction-sessions*`, and the OAuth callback of §4.5. "Event" names the control-stream event the call
 commits (journal spec §9). **Journal change** marks an event or member the journal spec does not
 define yet; §11's E10-15 adds them before the operation ships.
 
@@ -909,6 +915,19 @@ here, so replacing fixtures with calls changes no screen contract:
 | `GateDecision`, `TimelineEvent` | `GET /journal/events/{id}/gate`, `GET /agents/{id}/timeline` |
 | `Connection` | `GET /connections/{id}` |
 | `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`) | §5.5's phases; `undelivered` is `effect: none` |
+
+### 4.10 Routes outside the workspace prefix
+
+These routes name no `{workspace_id}`: each acts for the caller's own principal or session, so no
+workspace exists to name before it is authorized (identity spec §4.5, §6.4).
+
+| Operation | Method and path | Event | Notes |
+|---|---|---|---|
+| List one's own workspace memberships | `GET /v1/me/workspaces` | — | Authorized by the `self` row "List one's own workspace memberships" (identity spec §4.2): a full session of a user principal only. Returns the caller's `active` memberships as `{workspace_id, label, roles}` from the membership index, reading no workspace's data; absent and foreign workspaces look the same. A failed index read is `membership_unavailable` ([DEC-816](../project/decisions/DEC-816.md) item 1) |
+
+Owed to the identity spec's lanes, and listed so the prefix rule above is complete: `GET /v1/me/session`,
+`POST /v1/reduction-sessions/challenges`, and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
+they sit outside the matrix, DEC-816 item 7). Every failure of the last is the one answer, 401 `unauthenticated` (§3.5), with no distinguishing timing, and `GET /v1/oauth/alpaca/callback` (§4.5).
 
 ---
 

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.2 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md), and [DEC-832](../project/decisions/DEC-832.md)). Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by the founder in [DEC-820](../project/decisions/DEC-820.md) and applied by DEC-640; DEC-642 item 10 (a failed membership read never refuses a risk-reducing operation) is accepted by the founder, 2026-10-08; items 16 to 21 are Proposed and wait for the founder |
+| **Status** | v0.3 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md), and [DEC-832](../project/decisions/DEC-832.md); v0.3 adds one's own memberships and session, one's own notification address, principal scope, who may obtain a step-up challenge, reduction-only sessions' workspaces, and `refresh_failed`, [DEC-816](../project/decisions/DEC-816.md)). Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by the founder in [DEC-820](../project/decisions/DEC-820.md) and applied by DEC-640; DEC-642 item 10 (a failed membership read never refuses a risk-reducing operation) is accepted by the founder, 2026-10-08; items 16 to 21 are Proposed and wait for the founder |
 | **Implements** | [HLD §4](../HLD.md#4-architecture) (org directory, workspace deployment, deployment modes) and [§8](../HLD.md#8-multi-tenancy-and-security); PRD [FR-1.1 to FR-1.6](../product/04-prd-v1.md#61-identity-and-tenancy); backlog E9 |
 | **Depends on** | [Mandate spec §4.3, V-047, §6.1, §6.4, §6.5](mandate.md#43-policy-hierarchy-dec-51-dec-98); [journal spec §2, §3, §6.4, §7](journal.md#3-event-envelope); [infrastructure design §5, OPS-6](../design/infrastructure.md#5-secrets-and-the-vault); [inference spec INF-9, INF-11](inference.md#2-invariants); [DEC-141](../project/04-decision-log.md#decisions), [DEC-211](../project/04-decision-log.md#decisions), [DEC-411](../project/decisions/DEC-411.md) |
 | **Read by** | The workspace services API spec (`docs/specs/workspace-api.md`, DEC-436), the notifications spec (`docs/specs/notifications.md`, DEC-438), and the threat model (`docs/security/threat-model.md`, DEC-439), all drafted in parallel. They take roles, principals, and step-up from here |
@@ -75,13 +75,13 @@ is trusted (§14, E9-11).
 | ID | Invariant | Source | Test |
 |---|---|---|---|
 | **ID-1** | **Every action is attributed.** Every mutation workspace services accept, and every event they commit to the control stream, carries the authenticated principal (`actor.kind`, opaque `actor.id`) and the session it came through. The principal comes from the authenticated channel, never from the request body. Nothing anonymous is committed | Journal §3; HLD §8 "Agent identity" | A fuzz of API calls with forged `actor`, `user`, `responder`, and `workspace_id` fields in bodies asserts every committed event's actor equals the oracle's record of who authenticated |
-| **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some effective role the principal holds through a membership in that scope that reaches it (one that reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows) has the permission in §4.2's matrix, or, for a principal that holds no membership (a client, a service account, the host CLI, a platform operator in break-glass), when its own column has it within that column's stated scope. Everything else is denied, including a permission the matrix leaves blank. It covers exactly the rows the matrix names (DEC-641 item 6) | §4 | An exhaustive test over every (role set or non-member principal kind, permission, scope) triple against a table parsed from §4.2 itself, by the grammar of §4.2, not from the code |
+| **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some effective role the principal holds through a membership in that scope that reaches it (one that reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows) has the permission in §4.2's matrix, or, for a principal that holds no membership (a client, a service account, the host CLI, a platform operator in break-glass), when its own column has it within that column's stated scope, or, for a `self` row (principal scope, §4.5), when the principal is a user with a full session, whatever its memberships' states. Everything else is denied, including a permission the matrix leaves blank. It covers exactly the rows the matrix names (DEC-641 item 6) | §4 | An exhaustive test over every (role set or non-member principal kind, permission, scope) triple against a table parsed from §4.2 itself, by the grammar of §4.2, not from the code |
 | **ID-3** | **Only a member reaches a workspace.** A membership reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows (§5.1); a principal with no membership in workspace W that reaches it can neither read nor write W. A deactivation applies to every request authorized after it commits, and open streams (server-sent events, websockets) of that principal in W close within 60 s | §5 | A fuzz interleaving requests with membership changes; the oracle replays `Member*` events and asserts no request authorized after a deactivation succeeded, and every stream closed within the bound |
-| **ID-4** | **Step-up where risk can grow.** These need valid step-up (§7): confirming a risk-increasing mandate version, deploying (going live or paper), approving under policy (mandate §6.4 check 6), granting a delegation, connecting or changing a connection, revoking a connection, re-enabling a halted scope if DEC-437 item 21 creates one (§4.4), resume, Stop, acknowledgments (mandate §6.1), owner exits, accepting a disclosure (V-005), loosening a policy, granting a role, connecting a client, enrolling a step-up credential, and break-glass | FR-1.4; mandate §6.1 | A table test per command: with each failure mode (missing, stale, reused, wrong method, wrong action digest, wrong principal) the command is refused and nothing else is committed |
+| **ID-4** | **Step-up where risk can grow.** These need valid step-up (§7): confirming a risk-increasing mandate version, deploying (going live or paper), approving under policy (mandate §6.4 check 6), granting a delegation, connecting or changing a connection, revoking a connection, re-enabling a halted scope if DEC-437 item 21 creates one (§4.4), resume, Stop, acknowledgments (mandate §6.1), owner exits, accepting a disclosure (V-005), loosening a policy, granting a role, connecting a client, enrolling a step-up credential, adding or removing one's own notification address, and break-glass | FR-1.4; mandate §6.1 | A table test per command: with each failure mode (missing, stale, reused, wrong method, wrong action digest, wrong principal) the command is refused and nothing else is committed |
 | **ID-5** | **Never for risk reduction.** No step-up, session freshness, or identity-provider round trip is required to pause, to engage a kill switch at any scope (its stop and flatten; only its extra privileges need step-up, mandate §6.1), to skip an approval, to tighten a policy, to remove or narrow a delegation, or to revoke a client. Automated exits, protective orders, and risk exits involve no principal at all | `AGENTS.md` rules 2, 3, 13; MI-23 | With step-up absent, stale, and with the identity provider unreachable, each of these commits, and the kill switch stops and flattens |
 | **ID-6** | **Approver is not the requester.** Under the effective `independent_approval_required`, the user who grants, acknowledges, or approves (deployment, a risk-increasing change, a high-water-mark reset, loosening a latched floor, lifting a tripwire, an approval) is a different `user` principal from the requester and, for approvals, from the mandate's author. A client counts as the user named in its `on_behalf_of` (§12.2) and a service account as its issuing admin, so neither is ever the other party | Mandate §4.3, §6.4 check 7, §5.8, §6.7; E9-5 | A fuzz over principals, clients, and service accounts; the oracle maps each to its human and asserts no grant counted where the two humans match |
 | **ID-7** | **The user count is active humans.** `workspace_users` (the count V-047 and V-020 read) is the number of distinct `user` principals whose membership in the workspace is `active` and past its cool-off (§8.3) at the read. Invited, cooling-off, deactivated, and removed memberships, clients, service accounts, agents, and platform staff count zero. A count that cannot be read counts as one | V-047; DEC-411 item 2 | The oracle folds `Member*` events itself and is compared with the count validation reads, at validation and at application, over random membership histories |
-| **ID-8** | **Cross-tenant access is unrepresentable.** Every store, cache, queue, and journal API takes a `TenantContext` that only the authorization step can construct; no data API accepts a bare workspace ID. An org-scope authorization yields a sealed `OrgContext` and an `own` or leave row a sealed `PrincipalContext` (§4.5, DEC-832); neither is a workspace's context, an `OrgContext` reaches workspace data only by fanning out to one `TenantContext` per workspace that `authorize` enumerated from the store, and a `PrincipalContext` reaches only its own principal's credentials and membership. A request for W's data under another workspace's context fails at the type, at row-level security, at the journal stream prefix, at the messaging account, at the cache key, and at the vault namespace | HLD §8; OPS-6; INF-9 | Compile-fail tests for the type, including `org_context_cannot_be_constructed_outside_authorize`, `principal_context_cannot_be_constructed_outside_authorize`, `org_context_is_not_a_tenant`, and `own_credential_api_takes_no_principal_id` (E9-8); `org_fanout_workspaces_come_from_the_store` and `own_rows_reach_only_the_principals_own_data` (E9-2); cross-workspace attack tests at every layer listed in §9.1 (07, Isolation) |
+| **ID-8** | **Cross-tenant access is unrepresentable.** Every store, cache, queue, and journal API takes a `TenantContext` that only the authorization step can construct; no data API accepts a bare workspace ID. An org-scope authorization yields a sealed `OrgContext` and a `self`, `own`, or leave row a sealed `PrincipalContext` (§4.5, DEC-832, DEC-816 item 5); neither is a workspace's context, an `OrgContext` reaches workspace data only by fanning out to one `TenantContext` per workspace that `authorize` enumerated from the store, and a `PrincipalContext` reaches only its own principal's credentials and membership. A request for W's data under another workspace's context fails at the type, at row-level security, at the journal stream prefix, at the messaging account, at the cache key, and at the vault namespace | HLD §8; OPS-6; INF-9 | Compile-fail tests for the type, including `org_context_cannot_be_constructed_outside_authorize`, `principal_context_cannot_be_constructed_outside_authorize`, `org_context_is_not_a_tenant`, and `own_credential_api_takes_no_principal_id` (E9-8); `org_fanout_workspaces_come_from_the_store` and `own_rows_reach_only_the_principals_own_data` (E9-2); cross-workspace attack tests at every layer listed in §9.1 (07, Isolation) |
 | **ID-9** | **Secrets stay secret.** Session tokens, refresh tokens, recovery codes, OIDC client secrets, and WebAuthn challenges never appear in logs, metrics, traces, the journal, artifacts, or notifications. Recovery codes are stored only as salted slow hashes and shown once. No password is stored at all | `AGENTS.md` rules 6, 7; OPS-1 | The log-scan test with canary tokens through every authentication path; a test that the recovery-code table holds no plaintext |
 | **ID-10** | **An identity-provider outage never blocks risk reduction.** With the identity provider (ours or the customer's) and the global control plane unreachable, a member can still pause and engage a kill switch, through a session the outage interrupted, workspace-local passkey verification, or the host CLI's registered principal (§6.4). The workspace-held passkey verifier is not part of what DEC-437 item 15 leaves open | Rules 3, 13; OPS-4, OPS-12 | The kill-switch drill with the identity provider, the global control plane, and the model gateway all unreachable |
 | **ID-11** | **A client is never the human.** A client principal (DEC-141) is recorded as `actor.kind` `client` with `on_behalf_of` its user, never as a `user` (§12.2); it is scoped to one user in one workspace, holds a revocable sender-constrained token, and never approves, confirms a version, presents step-up, pauses (DEC-191), resumes, stops, releases, makes an owner exit, changes a connection, or changes a membership. Revoking it takes effect for every request authorized after the revocation commits | DEC-141 items 1 to 5; DEC-191; E10-6 | The ID-2 table run for the `client` principal; a test that a `client` actor's approval response is refused by mandate §6.4 check 3 from the record alone; a revocation race test as in ID-3 |
@@ -169,6 +169,17 @@ retail sign-up creates it).
 | Workspace | **Auditor** | Read records, verification, exports; nothing else | `info` only |
 | — | Client, service account, host CLI | — | None |
 
+**Where an org owner's notices land.** Notification addresses are per workspace (§4.2), and every
+inbox is read through a workspace, so in v0.3 an org owner or admin who holds no workspace
+membership receives no notice at all: a retail sign-up always holds one (§3.2), and a business
+org's owner who is to receive the identity and account-security notices of its workspaces (`role_granted`,
+`break_glass`, and the rest of §4.1's receive column) holds a workspace membership for it. An
+org-scope inbox, listing the notices addressed to one's org role, is owed by lane L3's follow-up to
+the notifications spec; an org-scope push address waits for a later proposal
+([DEC-816](../project/decisions/DEC-816.md) item 2). The E9-11 tests owe
+`every_org_owner_notice_has_a_deliverable_channel`: for an org owner who holds a workspace
+membership, each notice kind addressed to org owners reaches a channel of theirs.
+
 **Receiving is not acting** (notifications spec NT-11): a notice gives no permission, and the receive
 column only bounds who may be sent each class. An identity or account-security notice about a
 member also goes to that member.
@@ -223,6 +234,9 @@ it names; outside such a window a platform operator has no permission at all (ID
 | Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
+| Add or remove one's own notification address (a push subscription; later an email address) | S | | | | own | own | own | own | own | | | | |
+| List one's own notification addresses (opaque references only) | | | | | own | own | own | own | own | | | | |
+| List one's own workspace memberships | | self | self | self | self | self | self | self | self | | | | |
 | Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
 | Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | | | |
@@ -242,8 +256,14 @@ table, so its cells follow a closed grammar, and any other text is a spec defect
   needs it; deactivating or removing a member does not), or `S for grant` (only a grant needs it;
   removing a role does not).
 - **Principal cells:** blank (denied); `✓` (granted); `own` (granted for the principal's own
-  credential only, at the scope of any membership it holds that reaches that scope); `✓ (propose only)` (granted; confirming is its own row); `✓ (org)` (granted
-  at org scope only); `✓ (not owner)` (granted, except that granting or removing the org owner
+  credential, or its own notification addresses in that workspace, only, at the scope of any
+  membership it holds that reaches that scope); `✓ (propose only)` (granted; confirming is its own row); `✓ (org)` (granted
+  at org scope only); `self` (granted to a user principal, through a full session, for its own
+  data only, at **principal scope**: no workspace or organization, no membership read, and
+  whatever its memberships' states, so a member whose every role is still cooling off still
+  reaches it; the eight member columns of a `self` row are all `self` and every other column is
+  blank, and the parser asserts both; [DEC-816](../project/decisions/DEC-816.md) item 5);
+  `✓ (not owner)` (granted, except that granting or removing the org owner
   role is refused `owner_role_reserved`).
 - **Column scopes:** OO, OA, and Bill apply only at an organization's scope, through an org
   membership; WA, Op, Ap, Vi, and Au only at a workspace's scope, through that workspace's
@@ -262,6 +282,13 @@ table, so its cells follow a closed grammar, and any other text is a spec defect
   organization's. The last-owner and last-admin rules (§5.2) still apply to it.
 - **Rows, not routes:** ID-2 covers exactly these rows (E9-12 item 2). An operation with no row
   and no mapping in workspace API §3.7 has no route until a row is added.
+- **The authentication plane:** outside the matrix, and outside ID-2, are only the routes that
+  create, read, or end the caller's own session and authorize nothing else: sign-in and its
+  callback (§6.1), refresh and sign-out (§6.2), opening a reduction-only session
+  (`POST /v1/reduction-sessions/challenges` and `POST /v1/reduction-sessions`, §6.4 route 2), and
+  reading one's own session record (`GET /v1/me/session`, §4.5). Each reads or writes only the
+  caller's own session or credential record, and none yields a context or reaches workspace data
+  ([DEC-816](../project/decisions/DEC-816.md) item 7). Every other route needs a row.
 
 Notes:
 
@@ -316,15 +343,22 @@ test doubles live only behind `cfg(test)` or in `mandate-identity`'s dev-only te
 **The session.** `Session` is an authenticated-session type with private fields, built only by
 §6's code (`mandate-authn`), from the session record it reads for this request, and by test
 support; if that read fails there is no `Session`, and the request is refused before authorizing.
-It contributes the `session_ref` every committed event names (ID-1, §12.2), the workspace it was
-opened in, its kind, and its **roles snapshot**: the principal's effective roles in that workspace
-and its organization (a client token's record: its user's), each with its cool-off end, as of the
-last successful membership read; cool-off is evaluated at use (§8.3), so a stale snapshot is only
+It contributes the `session_ref` every committed event names (ID-1, §12.2), its kind, and its
+**roles snapshot**: for each workspace whose row in the principal's membership index (below)
+reaches its scope (`active` or `cooling_off`, §5.1), and each such workspace's organization, the
+principal's roles there, each with its cool-off end (a client
+token's record: its user's, in its one workspace). It is written when the session opens, and
+`MemberActivated` and `MemberReactivated` add to it in the same transaction, so a session's first
+request to any of its workspaces during an outage still finds a snapshot; cool-off is evaluated at use (§8.3), so a stale snapshot is only
 ever narrower. A route-2 session takes its snapshot from the passkey's row in the credential table
 (§3.3), which carries a roles snapshot per (credential, workspace): enrolment writes it, and
-reactivation un-suspends the credential and rewrites it in the same transaction. `MemberDeactivated` revokes every session and
-client token of the member, and suspends the member's passkey credentials, in the same
-transaction (§5.2 step 2), and `MemberRoleChanged` rewrites the member's session, token, and
+reactivation re-adds the credential's row for that workspace, with its snapshot, in the same transaction. A session is the
+deployment's, not one workspace's (§6.2), so a membership's end acts on that workspace only:
+`MemberDeactivated` and `MemberRemoved` remove that workspace from every session snapshot and
+every credential row of the member, revoke the member's client tokens in that workspace (a token
+names one workspace), and close the member's open streams in that workspace, in the same
+transaction (§5.2 step 2); the member's sessions keep serving their other workspaces. And
+`MemberRoleChanged` rewrites the member's session, token, and
 credential snapshots in the same transaction (§5.2), so a snapshot is never wider than the
 committed membership in that workspace's store. Organization events are rewritten into each
 workspace's store as they arrive there (§12.1); in hybrid and on-prem deployments the snapshot and
@@ -364,12 +398,56 @@ outage, that `membership_unavailable` never
 occurs, that each such operation commits with `membership_unverified: true`, and that no
 operation outside the set commits during the outage. **A deactivation always wins over the
 snapshot:** the E9-7 and E9-8 tests owe `a_deactivated_member_is_refused_through_an_outage`, which
-deactivates a member and then injects a membership-store outage and asserts that the member's
-sessions and client tokens are refused, and that a route-2 attempt with the member's passkey is
-refused too, because their revocation, like a role change's snapshot
-rewrite, shares one transaction with `MemberDeactivated` or `MemberRoleChanged`. **The audit view
+deactivates a member in workspace W1 only and then injects a membership-store outage, and asserts
+that in W1 the member's sessions, client tokens, and a route-2 attempt with the member's passkey
+are all refused, while in W2, where the member is still active, the same session is still
+served, because removing W1 from the snapshots, like a role change's snapshot rewrite, shares one
+transaction with `MemberDeactivated` or `MemberRoleChanged`. **The audit view
 shows the gap:** `membership_unverified: true` stays in the journaled record, and the workspace
 API's audit read model (§4.8) and the web audit trail display it (owed by those lanes).
+
+**Principal-scope rows** ([DEC-816](../project/decisions/DEC-816.md) items 1 and 5). The `self` row
+of §4.2 is authorized at principal scope: `authorize` is given the principal scope,
+reads no membership, yields no `TenantContext` (it yields a `PrincipalContext`, below), and grants the row to a user principal whose
+session is a full session (§6.2), and to no one else: a reduction-only session is refused
+`reduction_only`; a client, a service account, the host CLI, and a platform operator, whose
+columns are blank on a `self` row, are refused `forbidden`; and an agent or a process, which has
+no column, is refused `no_membership` (§4.5 refusals, DEC-643; owed to E9-2, the parser test
+`self_rows_refuse_reduction_only_forbidden_and_no_membership`). What the row reaches is the
+caller's own data, and the store enforces that as well as the step: every principal-scope table
+carries the principal's ID, with row-level security keyed on a per-transaction setting that only
+the authenticated session sets (§9.1), so a query can return only the caller's rows.
+
+A reduction-only session covering several workspaces (§6.4 route 2) authorizes in each only from
+that workspace's credential row: its four rows, and only where that row's roles grant them, so a
+passkey whose member is a viewer in a workspace obtains nothing there.
+
+**One's own memberships.** After sign-in the web app must learn which workspaces it may name in a
+path. `GET /v1/me/workspaces` is authorized by the "List one's own workspace memberships" row and
+reads one table only: the **membership index**, a per-principal table in the workspace
+deployment's store, one row per (principal, workspace) with `{workspace_id, label, state, roles
+with each role's effective-from instant}`, written in the same transaction as each `Member*` event
+of that workspace (§12.1) and as each change of the workspace's display label. The writer for
+workspace W writes only rows whose `workspace_id` is W; reads are limited to the caller's rows by
+row-level security on the principal. It answers with the
+rows whose state is `active`, each as `{workspace_id, label, roles}`, where `roles` are those whose
+effective-from instant is at or before the read (§8.3); a member whose roles are all still cooling
+off gets the workspace with no roles. The global directory is not read (ID-15: it holds no label
+or cool-off state). The answer lists the memberships held in this deployment only; another
+deployment's workspaces are not reachable from it (HLD §4). A workspace the caller is not an
+active member of, an absent one, and a foreign one are equally absent (ID-8). The E9-8 tests owe
+`no_principal_reads_the_membership_index_of_another`: user A's request returns none of user B's
+rows, whatever B's workspaces, with RLS on and with the query's own filter removed; and workspace
+W's writer cannot write a row of workspace V. If the index
+cannot be read, the route is refused `membership_unavailable` (503); it is not a risk-reducing
+operation. Pause and the kill switch never wait on it: the specified fallback is route 2 (§6.4),
+whose answer and `GET /v1/me/session` name the workspaces it covers. A list the web app kept
+from an earlier read is only a convenience.
+
+**One's own session.** `GET /v1/me/session`, on the authentication plane (§4.2), answered for
+any session about itself only and reading
+only that session's record, answers `{kind, expires_at}` and, for a reduction-only session, the
+workspaces it covers (§6.4 route 2), each as `{workspace_id, label}`.
 
 **`TenantContext`** ([DEC-642](../project/decisions/DEC-642.md)). Only the authorization step
 constructs one, and only when it authorizes a permission at a workspace's scope; an org-scope
@@ -417,13 +495,18 @@ is attributed to the principal, with an idempotency key derived from the request
 - **Hybrid and on-prem:** each deployment enumerates only the workspaces it hosts; reaching one
   hosted by an offline deployment is §16 question 5.
 
-**`PrincipalContext`, for one's own data** (DEC-832 item 7). An authorization of an `own` row
-(enrolling or removing one's own passkey) or of the leave row yields a `PrincipalContext`, sealed
-the same way, binding the authenticated principal's ID and the scope of the membership the row is
-used through. The credential-store APIs for one's own passkeys and the leave operation take only a
-`PrincipalContext` and read the subject from it; none takes a principal ID, a credential owner, or a
-member, so "own data only" holds by type. Its control-stream writes go through its scope's
-`TenantContext`; leaving an org membership is an org-scope change, the global control plane's.
+**`PrincipalContext`, for one's own data** (DEC-832 item 7; DEC-816 item 5). An authorization of
+a `self` row (principal scope), of an `own` row (one's own passkey; one's own notification
+addresses in a workspace), or of the leave row yields a `PrincipalContext`, sealed the same way,
+binding the authenticated principal's ID and, except on a `self` row, the scope of the membership
+the row is used through. The principal-scope tables' APIs (the membership index), the
+credential-store APIs for one's own passkeys, the notification-address APIs for one's own
+addresses, and the leave operation take only a `PrincipalContext` and read the subject from it;
+none takes a principal ID, a credential owner, or a member, so "own data only" holds by type as
+well as by the row-level security above. A `self` row's context reaches no workspace's data. An
+`own` or leave row's writes to a workspace (its control stream, its vault namespace) go through that
+workspace's `TenantContext`, bound to the same principal; leaving an org membership is an org-scope
+change, the global control plane's.
 
 **`SystemContext`** (DEC-642 items 5 to 8). The deployment's own background processes act with
 no request and no principal behind them (ID-5), yet nothing they commit is anonymous (ID-1). They
@@ -537,12 +620,25 @@ the effect it has on V-047 or on any mandate's approvers (DEC-437 item 17, Propo
 below). In order, workspace services:
 
 1. commit `MemberDeactivated`;
-2. revoke every session and client token of that principal in the workspace, in the same
-   transaction as step 1, and close its open streams within 60 s (ID-3);
-3. leave every committed event as it was. A response or command committed before step 1 was
+2. in the same transaction as step 1, remove the workspace from every session snapshot and
+   credential row of that principal, and revoke its client tokens in the workspace (§4.5); close
+   its open streams in the workspace within 60 s (ID-3). Its sessions keep serving its other
+   workspaces, and a session left with no workspace and no org membership that reaches a scope is
+   closed (`SessionRevoked` with reason `deactivated`);
+3. in the same transaction as step 1, remove the member's notification addresses in that workspace
+   (they are per workspace, held in its vault namespace, §9.1): one `NotificationAddressChanged`
+   with `action: removed` per address, raising no address-change notice (the remaining admins get
+   `member_deactivated`; owed to E9-7: `deactivation_removes_the_workspace_notification_addresses_in_one_transaction`).
+   These carry the same actor as the `MemberDeactivated` or `MemberRemoved` they ride in: on the
+   request path the authenticated principal, the deactivating admin or the member who left (§4.5);
+   when the separate process deactivates (a directory sync, SCIM, §11.1), `system`. No step-up
+   evidence is needed, since removing access needs none. A reactivated member starts with no
+   address in the workspace, and an in-app notice (`web_inbox`, a kind lane L3's notifications
+   follow-up names) tells them to add one;
+4. leave every committed event as it was. A response or command committed before step 1 was
    authorized when committed and is judged by the runtime as usual. One arriving after step 1 is
    refused at the API and never committed;
-4. alert the remaining admins (opaque, ID-14).
+5. alert the remaining admins (opaque, ID-14).
 
 **Effects on agents.** Deactivation changes no mandate. If the person was a listed approver, asks
 that need them cannot reach a quorum, time out, and are skipped (mandate §6.4, MI-21), which adds no
@@ -633,8 +729,11 @@ the RP ID matches.
 
 ### 6.2 Sessions
 
-A session is the workspace's record that a principal authenticated through a method at a time on a
-device. It is held server side; the browser holds only an opaque, `HttpOnly`, `Secure`,
+A session is the workspace deployment's record that a principal authenticated through a method at
+a time on a device. A **full session** is opened by sign-in (§6.1) and is not bound to one
+workspace: each request names its workspace in its path, and `authorize` reaches it through the
+membership read; the principal-scope rows (§4.5) need none. A **reduction-only session** (§6.4) is
+bound to the workspaces its credential covers. It is held server side; the browser holds only an opaque, `HttpOnly`, `Secure`,
 `SameSite=Strict` cookie, never a token in browser storage (as DEC-211 already does).
 
 | Limit | Retail (individual org) | Business org | Can the org change it? |
@@ -679,11 +778,33 @@ enough:
    absolute lifetime ends. When the provider **answers and refuses** (`invalid_grant`, a revoked or
    disabled subject, a back-channel logout), that is a deprovision, not an outage: the session ends at
    once with every permission (§11.1). Only a transport-level failure or a 5xx keeps anything. A 408
-   or 429 ends the session like any other non-5xx answer, but is not a deprovision signal (§11.1),
-   so route 2 stays open.
+   or 429 ends the session like any other non-5xx answer (`SessionRevoked` with reason
+   `refresh_failed`, §12.1; owed to E9-1: `any_other_answer_ends_the_session_with_every_permission`), but is not a deprovision signal (§11.1), so route 2 stays open.
+   A session the outage left reduction-only has no idle limit for pause and the kill switch, and
+   those requests count as activity; a later granted refresh restores it to a full session only if
+   its idle timeout has not lapsed since its last admitted request, and otherwise ends it (`expired`)
+   ([DEC-816](../project/decisions/DEC-816.md) item 8; owed to E9-1 in `mandate-authn`: `a_lapsed_idle_session_is_not_restored_by_a_granted_refresh`).
 2. **Workspace-local passkey.** The workspace deployment verifies a fresh passkey assertion
    against the public keys it holds (§6.1) and opens a *reduction-only session*: pause and kill
-   switch, nothing else, 15 minutes. No identity provider, global control plane, or model is
+   switch, nothing else, 15 minutes. `POST /v1/reduction-sessions/challenges` takes nothing and
+   returns a WebAuthn challenge; it is unauthenticated, so it is rate-limited per address and
+   device, and its challenges expire after 300 s and are kept only that long.
+   `POST /v1/reduction-sessions` takes the assertion, from a discoverable credential or from a
+   non-discoverable key whose credential ID the client supplies with it, so every key the
+   workspace holds can use this route, as before v0.3. Nothing
+   workspace-specific is read or returned before the assertion verifies (owed to E9-1:
+   `reduction_session_challenge_reads_and_returns_nothing_workspace_specific`). **No membership
+   oracle:** every failure of `POST /v1/reduction-sessions` (an unknown credential ID; a known one
+   whose row was removed or suspended; a bad signature; an expired or used challenge; a refused
+   subject) returns one identical answer, 401 `unauthenticated` with the same status, body and
+   headers, and no distinguishing timing, so the route does not reveal whether a credential exists
+   or its member was deactivated. It is rate-limited per address and per device, like the challenge
+   route (owed to E9-1: `reduction_session_failures_are_indistinguishable`). Whether this route
+   should serve discoverable credentials only is [DEC-833](../project/decisions/DEC-833.md), Proposed;
+   until the founder decides, it serves both. The session covers every
+   workspace in which the verified credential has a row (§4.5), each with that row's
+   roles snapshot, so no workspace is chosen, and its answer names them as `{workspace_id, label}`
+   ([DEC-816](../project/decisions/DEC-816.md) item 6). No identity provider, global control plane, or model is
    involved. It is refused to a principal whose identity-provider subject the workspace has seen
    refused (route 1's deprovision signal) since its last successful sign-in.
 3. **The host CLI** (hybrid and on-prem; Phase 1's control), for the same two commands. It acts as
@@ -726,8 +847,17 @@ passkey, within the last 300 seconds, for **this** action and no other.
 
 ### 7.2 Mechanics
 
-1. The client asks workspace services for a challenge, naming the action. Workspace services issue
-   a challenge record: `{challenge_id (ULID), workspace_id, principal_id, action_kind,
+1. The client asks workspace services for a challenge, naming the action. A challenge for an action
+   is authorized exactly as the §4.2 row that action needs ([DEC-816](../project/decisions/DEC-816.md)
+   item 3): a principal that may not perform the action cannot obtain a challenge for it, so a
+   client, a service account, the host CLI, and a platform operator, whose cells on every **S** row
+   are blank, never obtain one (owed to E9-4: `a_principal_who_may_not_act_cannot_obtain_a_challenge`), and a
+   reduction-only session is refused `reduction_only` (§7.3).
+   A challenge for a risk-reducing row (an owner exit, §4.5) takes the same path as the operation:
+   when the live membership read fails, it is authorized from the session's roles snapshot and
+   carries `membership_unverified`, so a membership outage never refuses it; the outage fuzz and
+   `a_deactivated_member_is_refused_through_an_outage` cover the challenge request too.
+   Workspace services issue a challenge record: `{challenge_id (ULID), workspace_id, principal_id, action_kind,
    action_digest, issued_at, expires_at = issued_at + 300 s}`. The `action_digest` is the SHA-256
    of the canonical action (journal §4): an approval's content hash (mandate §6.4), a version's
    hash, or a command's canonical body.
@@ -897,7 +1027,7 @@ As infrastructure §5.5 and journal §7 set it, and made exact here:
   sign-in.
 - Deprovisioning: the customer's IdP is the source of truth for who still works there. A
   **deprovision signal** (the IdP answers a refresh with `invalid_grant` or a disabled or revoked
-  subject, or sends a back-channel logout) ends every session of that subject in the workspace at
+  subject, or sends a back-channel logout) ends every session of that subject in the deployment at
   once, each journaled as `SessionRevoked` with reason `deprovisioned` (§12.1), with every permission,
   blocks §6.4 route 2 for it, and from that event alerts the workspace admins to
   deactivate the membership (opaque). An **unreachable** IdP is an outage, not a deprovision (§6.4
@@ -936,7 +1066,8 @@ them to journal §9 with schemas (DEC-437 item 9):
 | `MemberDeactivated`, `MemberReactivated`, `MemberRemoved` | member, by whom, reason code |
 | `CredentialEnrolled`, `CredentialRemoved` | member, credential (opaque reference, never the key), kind, enrolment cool-off end |
 | `SessionOpened` | member, session (opaque), method, device (opaque), `first_seen_device` (true when the principal has not used the device before); the subject event of the notifications spec's `new_device` kind |
-| `SessionRevoked` | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `admin`); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
+| `SessionRevoked` (reasons schema owed to E9-7) | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `refresh_failed`, `expired`, `admin`; `expired` is a session ended by its idle or absolute limit, §6.2 and §6.4 route 1; `refresh_failed` is a refresh the provider answered with neither a grant nor a deprovision signal, §6.4 route 1; `deactivated` is a session closed because its principal's last membership that reached a scope in the deployment ended, §5.2 step 2); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
+| `NotificationAddressChanged` | member, channel, action (`added`, `removed`), opaque address reference, step-up evidence for an add or a member's own removal (null when it rides a deactivation, §5.2); defined with lane L3's web-push routes (PR #827), the endpoint and keys only in the vault |
 | `ClientConnected`, `ClientRevoked` | client id, user, scopes, step-up evidence |
 | `ServiceAccountIssued`, `ServiceAccountRevoked` | account, scopes, workspaces, expiry, issuing user |
 | `HostCliRegistered`, `HostCliRevoked` | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence |
@@ -1057,6 +1188,15 @@ deployments the snapshot can be as wide as the live read. It is pinned by
 `a_deactivated_member_is_refused_through_an_outage` and by the audit display of
 `membership_unverified`. Only a new decision of the founder reverses it, which
 restores `membership_unavailable` on every row.
+
+**v0.3's readings (agent, DEC-79, DEC-176)**, each closing a gap other lanes hit, by the reading
+that adds no risk: the "List one's own workspace memberships" row, the membership index, and
+`GET /v1/me/workspaces` (§4.5); the "Add or remove one's own notification address" row, with
+step-up for both (ID-4); the `self` cell and principal scope, full sessions not bound to one
+workspace, and `GET /v1/me/session` (§4.2, §4.5, §6.2); a step-up challenge authorized as the row
+its action needs, through the snapshot for a risk-reducing row (§7.2 step 1); reduction-only
+sessions covering their credential's workspaces (§6.4 route 2); and the `refresh_failed` reason of
+`SessionRevoked` (§6.4 route 1, §12.1), [DEC-816](../project/decisions/DEC-816.md).
 
 **Proposed for the founder**, item 15 now decided (spending, legal text, a safety rule, or a question already put to the founder):
 
