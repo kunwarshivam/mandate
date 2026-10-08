@@ -57,19 +57,22 @@ the owl, the rules and the record.
 
 - [x] **One status badge system.** One chip, one width, first in its row, and "Asked you" distinct
       from "Allowed", so "Allowed" only ever means the gate passed it. (R-3, DEC-503)
-- [ ] **One provenance tag style.** "You said", "You entered", "From template", "Proposed by the
-      platform", "Platform default" are one idea in four styles. (R-22)
-- [ ] **Less fine print.** One status line per screen for the as-of time, the simulated note and
-      the fixture tag; required disclosures untouched. (R-4)
+- [x] **One provenance tag style.** Five short words ("You said", "You entered", "Template",
+      "Proposed", "Default") in two shapes, the same on the mandate page and in the set-up summary.
+      (R-22, DEC-504)
+- [x] **Less fine print.** One "Fixture data" tag per screen: the chart footer, the Positions
+      screen and the More sheet dropped theirs. The as-of line and the simulated notes stay as
+      disclosures. (R-4, DEC-504)
 - [x] **Remove the unbuilt.** No dock, menu, sheet or palette lists a screen that is not built; the
       index pages name what is coming in one line. (R-17, DEC-504)
-- [ ] **Less chrome.** The breadcrumb gone on top-level screens; the paper badge in the header
-      only, not in every title; Audit and Connections into More on desktop as on the phone. (R-8)
+- [x] **Less chrome.** The breadcrumb folds nothing on top-level screens; the paper badge sits in
+      the header and on record screens only; Audit folded into More and Connections off the dock.
+      (R-8, DEC-504)
 - [ ] **The set-up summary, short first.** The six sentences and the three dollar losses, then
       Create agent; the thirty rows folded under "Everything it will hold to"; the hash in a
       footnote. (R-28)
-- [ ] **Messages columns.** The thread is the widest column; the rail only above about 80rem.
-      (R-15)
+- [x] **Messages columns.** The rail shows from 80rem, so between 64 and 80rem the thread has the
+      room. (R-15, DEC-504)
 - [ ] **Phone chart.** No axis on phones; levels as hairlines with the label at the right edge.
       (R-20)
 - [x] **Phone More sheet order.** Approvals and Alerts first, then Search, then the rest; account
