@@ -7,11 +7,12 @@
 //! never writes an agent or account stream and never talks to a runtime or a broker (`AGENTS.md`
 //! rule 12). Its local checks are a convenience: the runtime makes every one of them again.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Duration;
 
 use mandate_canon::{Digest, Int, Key, Object, Value, parse, to_canonical};
-use mandate_journal::{AppendOutcome, Environment, Head, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, ArtifactRef, Environment, Head, StoredEvent, StreamId};
 use mandate_time::UtcNanos;
 
 /// The reads and the one append a command makes, with journal spec §5.1's append. The
@@ -645,9 +646,11 @@ pub(crate) fn commit(
     };
     key.push(("step_up", evidence));
     let payload = object(key)?;
+    let mut referenced = BTreeSet::new();
+    digest_refs(&payload, &mut referenced);
     let shape = Shape {
         schema_version: 1,
-        artifact_refs: Vec::new(),
+        artifact_refs: referenced.into_iter().collect(),
     };
     let bytes = draft(
         Writer::Owner,
@@ -660,6 +663,19 @@ pub(crate) fn commit(
         now,
     )?;
     settle(journal, &stream, event_id, repeat, &bytes, now)
+}
+
+/// Every digest reference `value` holds, at any depth: what the envelope's `artifact_refs` lists,
+/// sorted and each once (journal spec §3), such as an answer's `content_hash` (DEC-533 item 6).
+fn digest_refs(value: &Value, out: &mut BTreeSet<String>) {
+    match value {
+        Value::Str(s) if ArtifactRef::parse(s).is_some() => {
+            out.insert(s.clone());
+        }
+        Value::Array(items) => items.iter().for_each(|v| digest_refs(v, out)),
+        Value::Object(members) => members.values().for_each(|v| digest_refs(v, out)),
+        _ => {}
+    }
 }
 
 /// [`commit`] for an event whose payload is exactly the owner's choice, with no second and no
@@ -805,5 +821,25 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    /// The references an envelope lists are every digest reference in the payload, at any depth,
+    /// inside arrays as inside objects, sorted and each once; a lookalike is not one (journal spec
+    /// §3, DEC-533 item 6).
+    #[test]
+    fn the_listed_references_are_every_digest_reference_at_any_depth() {
+        let [a, b, c] = ["a", "b", "c"].map(|d| format!("sha256:{}", d.repeat(64)));
+        let payload = parse(
+            format!(
+                r#"{{"top":"{c}","nested":{{"list":["{a}",{{"deep":"{b}"}},"{c}"]}},
+                "upper":"sha256:{}","short":"sha256:abc","plain":"cli-0123","n":1}}"#,
+                "A".repeat(64)
+            )
+            .as_bytes(),
+        )
+        .unwrap_or(Value::Null);
+        let mut listed = BTreeSet::new();
+        digest_refs(&payload, &mut listed);
+        assert_eq!(listed.into_iter().collect::<Vec<_>>(), [a, b, c]);
     }
 }
