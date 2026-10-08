@@ -389,6 +389,7 @@ fn every_config_refusal_has_its_own_code() {
         (Refusal::SnapshotExtraMember, "snapshot_extra_member"),
         (Refusal::SnapshotWrongType { member }, "snapshot_wrong_type"),
         (Refusal::SnapshotValue { member }, "snapshot_value"),
+        (Refusal::RegistryMismatch, "registry_mismatch"),
     ];
     for (refusal, code) in rows {
         assert_eq!(refusal.code(), code, "{refusal:?}");

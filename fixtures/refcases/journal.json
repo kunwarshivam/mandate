@@ -3562,6 +3562,162 @@
    }
   ]
  },
+ "policy_overlay": {
+  "spec": "docs/specs/journal.md v0.18 §9.1 rules 5 and 7 (DEC-536)",
+  "base": "agent_stream",
+  "invalid_drafts": [
+   {
+    "name": "decision_overlay_on_auto",
+    "clause": "§9.1 rule 7; mandate spec §6.2 step 5c (DEC-536)",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.decided_by",
+      "value": "policy_overlay"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.decided_by"
+    }
+   },
+   {
+    "name": "decision_overlay_label_with_a_level",
+    "clause": "§9.1 rule 5",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.autonomy",
+      "value": "ask"
+     },
+     {
+      "path": "payload.decided_by",
+      "value": "policy_overlay:workspace"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.decided_by"
+    }
+   },
+   {
+    "name": "decision_overlay_after_a_denied_dry_run",
+    "clause": "§9.1 rule 5",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.dry_run",
+      "value": "deny"
+     },
+     {
+      "path": "payload.reason_code",
+      "value": "insufficient_buying_power"
+     },
+     {
+      "path": "payload.autonomy",
+      "value": null
+     },
+     {
+      "path": "payload.decided_by",
+      "value": "policy_overlay"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.decided_by"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "decision_overlay_narrows_auto_to_ask",
+    "clause": "§9.1 rule 7; mandate spec §6.2 step 5c (DEC-536)",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.autonomy",
+      "value": "ask"
+     },
+     {
+      "path": "payload.decided_by",
+      "value": "policy_overlay"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "decision_overlay_ask_suppressed",
+    "clause": "§9.1 rule 7; mandate spec §6.2 step 5c (DEC-536)",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.autonomy",
+      "value": "ask"
+     },
+     {
+      "path": "payload.ask_suppressed",
+      "value": "budget"
+     },
+     {
+      "path": "payload.decided_by",
+      "value": "policy_overlay"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "decision_overlay_denies_a_nonconforming_opening",
+    "clause": "§9.1 rule 7; DEC-534 item 2",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.autonomy",
+      "value": "deny"
+     },
+     {
+      "path": "payload.decided_by",
+      "value": "policy_overlay"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "decision_overlay_denies_a_client_request",
+    "clause": "§9.1 rule 7; DEC-534 item 2",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.requested_by",
+      "value": "client"
+     },
+     {
+      "path": "payload.client_id",
+      "value": "client_dots"
+     },
+     {
+      "path": "payload.autonomy",
+      "value": "deny"
+     },
+     {
+      "path": "payload.decided_by",
+      "value": "policy_overlay"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
+ },
  "control_stream": {
   "spec": "docs/specs/journal.md v0.7 §9.2 (DEC-261)",
   "stream_id": "ctl:ws_01J8Z2",

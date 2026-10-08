@@ -3142,6 +3142,19 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   which the fix takes live with their `BEHAVIOUR_ONLY_TESTS` rows; the property goes live with #668.
   Done by E4's fix: each interval carries its bracket entry, and both the end that names a bracket
   and the acknowledgment of the OCO placed for one close only that bracket's interval.
+- **E7-4 (stream K), E4b from E4's fix ([DEC-521](decisions/DEC-521.md) item 3, #698's review):
+  while a bracket's OCO awaits its acknowledgment, a new interval's start ends the first open
+  interval in the instrument, not the awaited one.** The fold's `unprotected_start` arm ends an
+  open interval when an acknowledgment is awaited, but picks the first open one in the instrument.
+  Hand case `hand::a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets`: bracket 1
+  partly fills at 10; bracket 2 partly fills at 20 and is cancelled at 30, so its OCO is awaited;
+  bracket 3 partly fills at 32 and ends bracket 1's interval, so nothing alerts at 70. Trading spec
+  §5.4 ("Bounded unprotected intervals"). Fix tests-first: key that arm, like E4's acknowledged
+  end, to the bracket whose awaited OCO it supersedes (`protected_entry()`), then delete the case's
+  `BEHAVIOUR_ONLY_TESTS` row and `#[ignore]` line. Minors from the same review, for the same PR or
+  the backlog: `interval_limit` marks the first open interval alerted, which can re-alert a later
+  one each tick; the fold's doc for these arms; and `awaiting.insert` replaces an instrument's
+  awaited set rather than adding to it.
 - **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
   ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
   while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on

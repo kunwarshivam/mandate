@@ -768,8 +768,9 @@ fn scripted_beside_a_step() -> impl Strategy<Value = Vec<Step>> {
 /// Defect E4b's shape (#668 round 2; backlog E4b), after the protected lead: a second CPHC
 /// bracket, a risk exit, a fill, a cancel confirmed and the waits that leave an OCO's
 /// acknowledgment awaited while a later interval starts, which ends the first open interval rather
-/// than the awaited one. It leads every script of the property it pins, which fails on it until
-/// E4b's fix.
+/// than the awaited one. The property it pins draws half its scripts from it and half from the
+/// wide protected search (#668 round 3, minor a), so it fails at every seed until E4b's fix and
+/// still searches widely after it.
 const AWAITED_LEAD: [Step; 8] = [
     Step::Intent {
         which: 3,
@@ -1987,7 +1988,9 @@ proptest! {
     /// interval's instrument and inside the interval.
     #[test]
     #[ignore = "pending E7-4"]
-    fn no_interval_exceeds_the_limit_without_an_alert(script in scripted_awaited()) {
+    fn no_interval_exceeds_the_limit_without_an_alert(
+        script in prop_oneof![scripted_awaited(), scripted_protected()],
+    ) {
         let run = play(&script);
         let accountant = ProtectionAccountant::of(&run.drafts);
         prop_assert!(
