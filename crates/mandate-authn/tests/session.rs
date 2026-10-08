@@ -33,7 +33,6 @@ fn ended(reason: EndReason) -> SessionRefusal {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn limits_default_by_org_kind_and_an_org_may_only_shorten_them() {
     let defaults = |kind| SessionLimits::resolve(kind, SessionPolicy::default()).unwrap();
     let retail = defaults(OrgKind::Individual);
@@ -63,7 +62,6 @@ fn limits_default_by_org_kind_and_an_org_may_only_shorten_them() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_access_token_lasts_five_minutes_and_a_granted_refresh_rotates_it() {
     assert_eq!(ACCESS_TOKEN_LIFETIME_S, 300);
     let mut s = open();
@@ -89,7 +87,6 @@ fn an_access_token_lasts_five_minutes_and_a_granted_refresh_rotates_it() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_idle_timeout_counts_from_the_last_admitted_request_and_the_absolute_from_the_opening() {
     let mut s = open();
     let mut token = 1;
@@ -151,7 +148,6 @@ fn the_idle_timeout_counts_from_the_last_admitted_request_and_the_absolute_from_
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_rotated_refresh_token_presented_again_revokes_the_whole_family() {
     let mut s = open();
     let first = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(300));

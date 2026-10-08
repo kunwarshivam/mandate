@@ -3,8 +3,12 @@
 //! randomness drew, and journals what each transition returns.
 
 use core::fmt;
+use std::collections::BTreeSet;
 
-use mandate_identity::{Membership, Session, SessionRef};
+use ring::digest::{SHA256, digest};
+
+use mandate_identity::{Membership, Session, SessionKind, SessionRef};
+use mandate_identity_seal::Seal;
 
 use crate::UtcNanos;
 
@@ -13,6 +17,11 @@ pub const ACCESS_TOKEN_LIFETIME_S: i64 = 300;
 
 /// How long a reduction-only session (§6.4 route 2) lasts, in seconds, from its opening.
 pub const REDUCTION_ONLY_LIFETIME_S: i64 = 900;
+
+const INDIVIDUAL_IDLE_S: i64 = 86_400;
+const INDIVIDUAL_ABSOLUTE_S: i64 = 604_800;
+const BUSINESS_IDLE_S: i64 = 3_600;
+const BUSINESS_ABSOLUTE_S: i64 = 43_200;
 
 /// The kind of organization a workspace belongs to, which sets its session defaults (§6.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,28 +42,41 @@ pub struct SessionPolicy {
 /// The idle and absolute limits a session runs under, never longer than its org kind's defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionLimits {
-    stub: (),
+    idle_s: i64,
+    absolute_s: i64,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
+/// One limit: the org's setting when it is positive and no longer than the default.
+fn shortened(default_s: i64, setting: Option<i64>) -> Result<i64, SessionRefusal> {
+    match setting {
+        None => Ok(default_s),
+        Some(s) if s > 0 && s <= default_s => Ok(s),
+        Some(_) => Err(SessionRefusal::LimitNotShortened),
+    }
+}
+
 impl SessionLimits {
     /// The limits for `kind` under `policy`. A setting longer than the default, or not positive,
     /// is refused: an organization may only shorten (§6.2).
-    pub fn resolve(_kind: OrgKind, _policy: SessionPolicy) -> Result<Self, SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+    pub fn resolve(kind: OrgKind, policy: SessionPolicy) -> Result<Self, SessionRefusal> {
+        let (idle_s, absolute_s) = match kind {
+            OrgKind::Individual => (INDIVIDUAL_IDLE_S, INDIVIDUAL_ABSOLUTE_S),
+            OrgKind::Business => (BUSINESS_IDLE_S, BUSINESS_ABSOLUTE_S),
+        };
+        Ok(Self {
+            idle_s: shortened(idle_s, policy.idle_s)?,
+            absolute_s: shortened(absolute_s, policy.absolute_s)?,
+        })
     }
 
     /// The idle timeout, in seconds.
     pub fn idle_s(&self) -> i64 {
-        todo!()
+        self.idle_s
     }
 
     /// The absolute lifetime, in seconds.
     pub fn absolute_s(&self) -> i64 {
-        todo!()
+        self.absolute_s
     }
 }
 
@@ -155,16 +177,18 @@ pub struct SubjectStanding {
     pub last_deprovision: Option<UtcNanos>,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "this method has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
 impl SubjectStanding {
     /// The standing after a session of this subject ended at `now` for `ended`: only
     /// [`EndReason::Deprovisioned`] records a deprovision signal; every other reason, a failed
     /// refresh included, leaves the standing as it was.
-    pub fn noting(self, _ended: Option<EndReason>, _now: UtcNanos) -> Self {
-        todo!()
+    pub fn noting(self, ended: Option<EndReason>, now: UtcNanos) -> Self {
+        match ended {
+            Some(EndReason::Deprovisioned) => Self {
+                last_deprovision: Some(now),
+                ..self
+            },
+            _ => self,
+        }
     }
 }
 
@@ -207,55 +231,128 @@ pub enum SessionRefusal {
     DeprovisionSeen,
 }
 
+/// A refresh token's SHA-256 digest, the only form a session keeps.
+type Digest = [u8; 32];
+
+fn digest_of(secret: &RefreshSecret) -> Digest {
+    let mut out = [0; 32];
+    out.copy_from_slice(digest(&SHA256, &secret.0).as_ref());
+    out
+}
+
+/// `t` plus `secs` seconds, or a refusal when the clock cannot hold it.
+fn plus(t: UtcNanos, secs: i64) -> Result<UtcNanos, SessionRefusal> {
+    t.secs()
+        .checked_add(secs)
+        .and_then(|s| UtcNanos::from_parts(s, t.nanos()).ok())
+        .ok_or(SessionRefusal::Unrepresentable)
+}
+
 /// One session's server-side record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRecord {
-    stub: (),
+    reach: Reach,
+    ended: Option<EndReason>,
+    idle_s: i64,
+    absolute_until: UtcNanos,
+    idle_until: UtcNanos,
+    access_until: UtcNanos,
+    /// The current refresh token's digest; `None` for a reduction-only session.
+    current: Option<Digest>,
+    /// Every digest rotated away, so presenting one again is detected as reuse.
+    rotated: BTreeSet<Digest>,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
 impl SessionRecord {
     /// Opens a full session at `now` after a sign-in, holding `refresh`'s digest as the current
     /// refresh token, with an access token lasting [`ACCESS_TOKEN_LIFETIME_S`].
     pub fn open(
-        _limits: SessionLimits,
-        _refresh: &RefreshSecret,
-        _now: UtcNanos,
+        limits: SessionLimits,
+        refresh: &RefreshSecret,
+        now: UtcNanos,
     ) -> Result<Self, SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+        Ok(Self {
+            reach: Reach::Full,
+            ended: None,
+            idle_s: limits.idle_s,
+            absolute_until: plus(now, limits.absolute_s)?,
+            idle_until: plus(now, limits.idle_s)?,
+            access_until: plus(now, ACCESS_TOKEN_LIFETIME_S)?,
+            current: Some(digest_of(refresh)),
+            rotated: BTreeSet::new(),
+        })
     }
 
     /// Opens a reduction-only session (§6.4 route 2) after the caller verified a fresh passkey
     /// assertion locally, unless a deprovision signal for the subject came at or after its last
     /// successful sign-in.
     pub fn open_reduction_only(
-        _standing: SubjectStanding,
-        _now: UtcNanos,
+        standing: SubjectStanding,
+        now: UtcNanos,
     ) -> Result<Self, SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+        if let Some(refusal) = standing.last_deprovision
+            && standing
+                .last_sign_in
+                .is_none_or(|sign_in| refusal >= sign_in)
+        {
+            return Err(SessionRefusal::DeprovisionSeen);
+        }
+        let until = plus(now, REDUCTION_ONLY_LIFETIME_S)?;
+        Ok(Self {
+            reach: Reach::ReductionOnly,
+            ended: None,
+            idle_s: REDUCTION_ONLY_LIFETIME_S,
+            absolute_until: until,
+            idle_until: until,
+            access_until: until,
+            current: None,
+            rotated: BTreeSet::new(),
+        })
     }
 
     /// How far the session reaches now.
     pub fn reach(&self) -> Reach {
-        todo!()
+        self.reach
     }
 
     /// Why the session ended, if it has.
     pub fn ended(&self) -> Option<EndReason> {
-        todo!()
+        self.ended
     }
 
     /// Whether a step-up may be presented through this session: only a full one (§7.3).
     pub fn can_present_step_up(&self) -> bool {
-        todo!()
+        self.reach == Reach::Full && self.ended.is_none()
+    }
+
+    /// The refusals every transition shares: an ended session, then the absolute lifetime.
+    fn live(&self, now: UtcNanos) -> Result<(), SessionRefusal> {
+        if let Some(reason) = self.ended {
+            return Err(SessionRefusal::Ended { reason });
+        }
+        if now >= self.absolute_until {
+            return Err(SessionRefusal::AbsoluteExpired);
+        }
+        Ok(())
     }
 
     /// Admits `request` at `now`, and on success counts it as activity for the idle timeout.
-    pub fn authorize(&mut self, _request: Request, _now: UtcNanos) -> Result<(), SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+    pub fn authorize(&mut self, request: Request, now: UtcNanos) -> Result<(), SessionRefusal> {
+        self.live(now)?;
+        if self.reach != Reach::Full {
+            return match request {
+                Request::Pause | Request::KillSwitch => Ok(()),
+                Request::Other => Err(SessionRefusal::RiskReductionOnly),
+            };
+        }
+        if now >= self.idle_until {
+            return Err(SessionRefusal::IdleExpired);
+        }
+        if now >= self.access_until {
+            return Err(SessionRefusal::AccessExpired);
+        }
+        self.idle_until = plus(now, self.idle_s)?;
+        Ok(())
     }
 
     /// Refreshes with the `presented` refresh token, given the provider's `answer`, rotating to
@@ -265,33 +362,84 @@ impl SessionRecord {
     /// [`EndReason::RefreshFailed`].
     pub fn refresh(
         &mut self,
-        _presented: &RefreshSecret,
-        _answer: ProviderAnswer,
-        _next: &RefreshSecret,
-        _now: UtcNanos,
+        presented: &RefreshSecret,
+        answer: ProviderAnswer,
+        next: &RefreshSecret,
+        now: UtcNanos,
     ) -> Result<Refreshed, SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+        self.live(now)?;
+        let Some(current) = self.current else {
+            return Err(SessionRefusal::NotRefreshable);
+        };
+        if self.reach == Reach::Full && now >= self.idle_until {
+            return Err(SessionRefusal::IdleExpired);
+        }
+        let presented = digest_of(presented);
+        if presented != current {
+            if self.rotated.contains(&presented) {
+                let reason = EndReason::RefreshReuse;
+                self.ended = Some(reason);
+                return Err(SessionRefusal::Ended { reason });
+            }
+            return Err(SessionRefusal::UnknownRefreshToken);
+        }
+        match answer {
+            ProviderAnswer::Granted => {
+                let access_until = plus(now, ACCESS_TOKEN_LIFETIME_S)?;
+                self.idle_until = plus(now, self.idle_s)?;
+                self.access_until = access_until;
+                self.rotated.insert(current);
+                self.current = Some(digest_of(next));
+                self.reach = Reach::Full;
+                Ok(Refreshed::Rotated {
+                    access_expires_at: access_until,
+                })
+            }
+            ProviderAnswer::Unreachable | ProviderAnswer::Status(500..=599) => {
+                self.reach = Reach::Outage;
+                Ok(Refreshed::Outage)
+            }
+            ProviderAnswer::Status(_) => {
+                let reason = EndReason::RefreshFailed;
+                self.ended = Some(reason);
+                Err(SessionRefusal::Ended { reason })
+            }
+            ProviderAnswer::Deprovision => {
+                let reason = EndReason::Deprovisioned;
+                self.ended = Some(reason);
+                Err(SessionRefusal::Ended { reason })
+            }
+        }
     }
 
     /// Admits `request` at `now` as [`SessionRecord::authorize`] does, and on success builds the
     /// identity session `authorize` in `mandate-identity` reads: this record's reference, its kind
-    /// ([`Reach::Full`] is `SessionKind::Full`; an outage and a reduction-only session are
-    /// `SessionKind::ReductionOnly`), and the roles snapshot the caller read for this request,
+    /// ([`Reach::Full`] is [`SessionKind::Full`]; an outage and a reduction-only session are
+    /// [`SessionKind::ReductionOnly`]), and the roles snapshot the caller read for this request,
     /// passed through as read. A refusal builds nothing, so the request gets no session (DEC-652
     /// item 9).
     pub fn admit(
         &mut self,
-        _request: Request,
-        _now: UtcNanos,
-        _reference: SessionRef,
-        _snapshot: Vec<Membership>,
+        request: Request,
+        now: UtcNanos,
+        reference: SessionRef,
+        snapshot: Vec<Membership>,
     ) -> Result<Session, SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+        self.authorize(request, now)?;
+        let kind = match self.reach {
+            Reach::Full => SessionKind::Full,
+            Reach::Outage | Reach::ReductionOnly => SessionKind::ReductionOnly,
+        };
+        Ok(Session::new(Seal::grant(), reference, kind, snapshot))
     }
 
     /// Ends the session for `reason`: sign-out, deactivation, a back-channel logout, or an admin.
     /// Returns the reason to journal, or `None` when it had already ended, so it is journaled once.
-    pub fn end(&mut self, _reason: EndReason) -> Option<EndReason> {
-        todo!()
+    pub fn end(&mut self, reason: EndReason) -> Option<EndReason> {
+        if self.ended.is_some() {
+            return None;
+        }
+        self.ended = Some(reason);
+        Some(reason)
     }
 }

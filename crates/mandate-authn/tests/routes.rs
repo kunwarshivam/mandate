@@ -35,7 +35,6 @@ fn ended(reason: EndReason) -> SessionRefusal {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_unreachable_provider_leaves_pause_and_the_kill_switch_until_the_absolute_lifetime() {
     for answer in [
         ProviderAnswer::Unreachable,
@@ -85,7 +84,6 @@ fn an_unreachable_provider_leaves_pause_and_the_kill_switch_until_the_absolute_l
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn any_other_answer_ends_the_session_with_every_permission() {
     let cases = [400, 401, 403, 404, 408, 429, 200, 204, 302, 499, 600]
         .map(|code| (ProviderAnswer::Status(code), EndReason::RefreshFailed))
@@ -126,7 +124,6 @@ fn any_other_answer_ends_the_session_with_every_permission() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn only_a_deprovision_signal_closes_the_local_passkey_route() {
     let signed_in = SubjectStanding {
         last_sign_in: Some(at(-DAY)),
@@ -169,7 +166,6 @@ fn only_a_deprovision_signal_closes_the_local_passkey_route() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_reduction_only_session_reaches_pause_and_the_kill_switch_for_fifteen_minutes() {
     assert_eq!(REDUCTION_ONLY_LIFETIME_S, 900);
     let standing = SubjectStanding {
@@ -303,7 +299,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     #[test]
-    #[ignore = "pending E9-1"]
     fn every_admission_follows_the_spec_rules_over_any_history(ops in prop::collection::vec(op(), 1..60)) {
         let (idle, absolute) = (HOUR, 12 * HOUR);
         let mut s = open();

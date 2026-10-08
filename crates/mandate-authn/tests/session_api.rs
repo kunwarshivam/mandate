@@ -7,7 +7,6 @@ use mandate_authn::{
 };
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_session_keeps_only_a_digest_of_its_refresh_token() {
     let limits = SessionLimits::resolve(OrgKind::Business, SessionPolicy::default()).unwrap();
     let now = UtcNanos::from_parts(1_800_000_000, 0).unwrap();
