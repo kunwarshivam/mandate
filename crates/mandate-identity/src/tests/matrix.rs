@@ -33,13 +33,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_time::UtcNanos;
 
 use crate::{
-    Authorized, Membership, MembershipLookup, MembershipState, Permission, Principal, PrincipalId,
-    PrincipalKind, Refusal, Role, Scope, Session, SessionKind, SessionRef, StepUp, WorkspaceId,
-    authorize,
+    Authorized, EveryWorkspace, Membership, MembershipLookup, MembershipState, OneWorkspace,
+    Permission, Principal, PrincipalId, PrincipalKind, Refusal, Role, Scope, Session, SessionKind,
+    SessionRef, StepUp, WorkspaceId, authorize,
 };
 
 use super::rows::{ORG_ROLES, OWED, RISK_REDUCING, ROLE_COLUMNS, ROWS};
-use super::{ByMember, Everything, Failing, O1, O2, W1, W2, W3, hosted_in, paired};
+use super::{ByMember, Everything, Failing, O1, O2, Unreadable, W1, W2, W3, hosted_in, paired};
 
 const SPEC: &str = include_str!("../../../../docs/specs/identity.md");
 
@@ -265,6 +265,17 @@ fn expected(
     if !paired(scope) {
         return Err(Refusal::NoMembership);
     }
+    expected_unpaired(row, principal, memberships, scope)
+}
+
+/// `expected` past its inactive-row and pair checks: what the memberships and the column say, with
+/// the scope's pair taken as the route names it.
+fn expected_unpaired(
+    row: &Row,
+    principal: &Principal,
+    memberships: &[Membership],
+    scope: Scope,
+) -> Expected {
     if scope == Scope::Principal {
         return match (row.self_row, principal) {
             (false, _) => Err(Refusal::NoMembership),
@@ -317,7 +328,12 @@ fn expected_in(
     scope: Scope,
     kind: SessionKind,
 ) -> Expected {
-    match expected(row, principal, ms, scope) {
+    reduction_limited(row, expected(row, principal, ms, scope), kind)
+}
+
+/// A reduction-only session's limit to its own rows, applied to an answer.
+fn reduction_limited(row: &Row, answer: Expected, kind: SessionKind) -> Expected {
+    match answer {
         Ok(_) if kind == SessionKind::ReductionOnly && !row.reduction => {
             Err(Refusal::ReductionOnly)
         }
@@ -829,7 +845,10 @@ fn org_fanout_workspaces_come_from_the_store() {
             true => org_context().into_workspace(&outage, workspace),
         };
         for workspace in [W1, W2] {
-            let tenant = into(workspace).unwrap();
+            let tenant = match into(workspace) {
+                Ok(OneWorkspace::Context(tenant)) => tenant,
+                other => panic!("{name} {workspace:?} gave {other:?}"),
+            };
             assert_eq!(
                 (
                     tenant.org(),
@@ -854,7 +873,7 @@ fn org_fanout_workspaces_come_from_the_store() {
         }
         for workspace in [W3, unhosted] {
             assert_eq!(
-                into(workspace).map(|t| t.workspace()),
+                into(workspace),
                 Err(Refusal::NoMembership),
                 "{name} {workspace:?}"
             );
@@ -868,7 +887,10 @@ fn org_fanout_workspaces_come_from_the_store() {
         Permission::KillSwitchOrg,
         now(),
     ) {
-        Ok(Authorized::Org { context, .. }) => context.into_every_workspace().unwrap(),
+        Ok(Authorized::Org { context, .. }) => match context.into_every_workspace() {
+            Ok(EveryWorkspace::Contexts(every)) => every,
+            other => panic!("the live every-workspace way gave {other:?}"),
+        },
         other => panic!("the org kill switch at O1 gave {other:?}"),
     };
     let reached: Vec<(WorkspaceId, PrincipalId, SessionRef, Permission)> = every
@@ -885,4 +907,201 @@ fn org_fanout_workspaces_come_from_the_store() {
             (W2, USER, SESSION, Permission::KillSwitchOrg),
         ]
     );
+}
+
+/// When a workspace's own record cannot be read, its pair cannot be checked (identity spec §4.5,
+/// DEC-832, `AGENTS.md` rule 13), ordered after an inactive row and before everything else: a row
+/// that is not risk-reducing is refused `membership_unavailable` for every principal kind, and a
+/// risk-reducing row never is. A user or a client is authorized from its session's roles snapshot
+/// as DEC-642 item 10 says, the snapshot entry's own pair standing in for the record, so a pair the
+/// snapshot does not hold reaches nothing; a service account, the host CLI, and a platform
+/// operator by their columns; each grant flagged `membership_unverified`; and a reduction-only
+/// session still reaches only its rows.
+#[test]
+#[ignore = "pending E9-2"]
+fn an_unreadable_workspace_record_never_refuses_risk_reduction() {
+    let rows = matrix();
+    let user = Principal::User { id: USER };
+    let client = Principal::Client {
+        id: OTHER,
+        on_behalf_of: USER,
+        workspace: W1,
+    };
+    let columns = [
+        Principal::ServiceAccount {
+            id: OTHER,
+            workspaces: BTreeSet::from([W1]),
+        },
+        Principal::HostCli {
+            id: OTHER,
+            workspace: W1,
+            on_behalf_of: DECOY,
+        },
+        Principal::PlatformOperator {
+            id: OTHER,
+            window: Some(W1),
+        },
+        Principal::Agent { id: OTHER },
+        Principal::Process { id: OTHER },
+    ];
+    let no_memberships: [Membership; 0] = [];
+    let role_sets = [
+        BTreeSet::new(),
+        BTreeSet::from([Role::Operator]),
+        BTreeSet::from([Role::WorkspaceAdmin, Role::Approver]),
+        Role::ALL.into_iter().collect(),
+    ];
+    let mut checked = 0u64;
+    for roles in role_sets {
+        let snapshot: Vec<Membership> =
+            memberships(USER, &roles, &BTreeSet::new(), MembershipState::Active)
+                .into_iter()
+                .filter(|m| m.member == USER)
+                .collect();
+        for kind_of_session in SESSION_KINDS {
+            let session = session(kind_of_session, snapshot.clone());
+            for row in &rows {
+                for scope in SCOPES
+                    .into_iter()
+                    .filter(|s| matches!(s, Scope::Workspace { .. }))
+                {
+                    for principal in [&user, &client].into_iter().chain(columns.iter()) {
+                        let ms: &[Membership] = match principal {
+                            Principal::User { .. } | Principal::Client { .. } => &snapshot,
+                            _ => &no_memberships,
+                        };
+                        let want = match (row.inactive, row.risk_reducing) {
+                            (true, _) => Err(Refusal::InactivePermission),
+                            (false, false) => Err(Refusal::MembershipUnavailable),
+                            (false, true) => reduction_limited(
+                                row,
+                                expected_unpaired(row, principal, ms, scope),
+                                kind_of_session,
+                            ),
+                        };
+                        let got = authorize(
+                            &Unreadable,
+                            principal,
+                            &session,
+                            scope,
+                            row.permission,
+                            now(),
+                        );
+                        if let Ok(a) = &got {
+                            carries(a, row, principal, scope, true);
+                        }
+                        assert_eq!(
+                            got.map(|a| a.step_up()),
+                            want,
+                            "{principal:?} {:?} at {scope:?} {kind_of_session:?} from {roles:?}",
+                            row.permission
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 5_000, "only {checked} cases checked");
+}
+
+/// The org kill switch's `OrgContext` at O1 for a user holding the org owner role there.
+fn org_kill_switch(lookup: &impl MembershipLookup, session: &Session) -> crate::OrgContext {
+    match authorize(
+        lookup,
+        &Principal::User { id: USER },
+        session,
+        Scope::Org(O1),
+        Permission::KillSwitchOrg,
+        now(),
+    ) {
+        Ok(Authorized::Org { context, .. }) => context,
+        other => panic!("the org kill switch at O1 gave {other:?}"),
+    }
+}
+
+/// The org owner's memberships: an active org owner role in O1, and nothing else.
+fn org_owner() -> Vec<Membership> {
+    vec![membership(
+        USER,
+        Scope::Org(O1),
+        MembershipState::Active,
+        &BTreeSet::from([Role::OrgOwner]),
+        &BTreeSet::new(),
+    )]
+}
+
+/// The one-workspace way never refuses for an outage (identity spec §4.5, DEC-832 item 4): an
+/// `OrgContext` built while nothing could be read carries no set and is flagged, and with the route
+/// workspace's own record unreadable too, every route workspace is pending, never `no_membership`
+/// and never granted unchecked, so one organization's kill switch cannot reach another's
+/// workspace; a context built live checks the route's workspace against its set alone, needing no
+/// record.
+#[test]
+#[ignore = "pending E9-2"]
+fn an_org_route_with_no_set_and_no_record_is_pending_never_refused() {
+    let ms = org_owner();
+    let unhosted = WorkspaceId(0x29);
+    for kind_of_session in SESSION_KINDS {
+        let session = session(kind_of_session, ms.clone());
+        for workspace in [W1, W2, W3, unhosted] {
+            let context = org_kill_switch(&Unreadable, &session);
+            assert_eq!(
+                (context.workspaces(), context.membership_unverified()),
+                (None, true),
+                "{kind_of_session:?}"
+            );
+            assert_eq!(
+                context.into_workspace(&Unreadable, workspace),
+                Ok(OneWorkspace::Pending),
+                "{kind_of_session:?} {workspace:?}"
+            );
+        }
+        for (workspace, in_set) in [(W1, true), (W2, true), (W3, false), (unhosted, false)] {
+            let got =
+                org_kill_switch(&ByMember(&ms), &session).into_workspace(&Unreadable, workspace);
+            match (in_set, got) {
+                (true, Ok(OneWorkspace::Context(t))) => assert_eq!(
+                    (
+                        t.org(),
+                        t.workspace(),
+                        t.principal(),
+                        t.membership_unverified()
+                    ),
+                    (O1, workspace, USER, false),
+                    "{kind_of_session:?}"
+                ),
+                (false, Err(Refusal::NoMembership)) => {}
+                (_, other) => panic!("{kind_of_session:?} {workspace:?} gave {other:?}"),
+            }
+        }
+    }
+}
+
+/// The every-workspace way during an outage (identity spec §4.5, DEC-832 item 5): with no set
+/// enumerated it answers `NoSetYet`, never a refusal, a caller-named set, or part of one; live, it
+/// answers exactly the store's set, unflagged.
+#[test]
+#[ignore = "pending E9-2"]
+fn every_workspace_has_no_set_during_an_outage_and_the_full_set_live() {
+    let ms = org_owner();
+    let session = session(SessionKind::Full, ms.clone());
+    assert_eq!(
+        org_kill_switch(&Failing, &session).into_every_workspace(),
+        Ok(EveryWorkspace::NoSetYet)
+    );
+    assert_eq!(
+        org_kill_switch(&Unreadable, &session).into_every_workspace(),
+        Ok(EveryWorkspace::NoSetYet)
+    );
+    match org_kill_switch(&ByMember(&ms), &session).into_every_workspace() {
+        Ok(EveryWorkspace::Contexts(every)) => assert_eq!(
+            every
+                .iter()
+                .map(|t| (t.org(), t.workspace(), t.membership_unverified()))
+                .collect::<Vec<_>>(),
+            vec![(O1, W1, false), (O1, W2, false)]
+        ),
+        other => panic!("the live every-workspace way gave {other:?}"),
+    }
 }

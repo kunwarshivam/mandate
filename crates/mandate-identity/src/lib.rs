@@ -382,7 +382,8 @@ pub enum Scope {
     /// ([`MembershipLookup::workspace_org`]) before anything else but an inactive row: a workspace
     /// this deployment does not host, or one under another organization, is refused
     /// `no_membership` for every principal kind (ID-8, DEC-832 item 2), and a context only ever
-    /// carries the pair the store holds.
+    /// carries the pair the store holds, unless the record could not be read; then only a
+    /// risk-reducing row is granted, its context flagged `membership_unverified` ([`authorize`]).
     Workspace {
         /// The workspace's organization.
         org: OrgId,
@@ -499,8 +500,10 @@ impl TenantContext {
         self.session
     }
 
-    /// Whether this risk-reducing row was authorized from the session's roles snapshot because the
-    /// membership read failed (identity spec §4.5, DEC-642 item 10); the committed event records it.
+    /// Whether this risk-reducing row was authorized without the store's answer: from the session's
+    /// roles snapshot because the membership read failed (identity spec §4.5, DEC-642 item 10), or,
+    /// when the workspace's own record could not be read, with its pair unchecked by the record
+    /// ([`authorize`]); the committed event records it.
     pub fn membership_unverified(&self) -> bool {
         self.membership_unverified
     }
@@ -599,23 +602,51 @@ impl OrgContext {
 
     /// The one-workspace way (DEC-832 item 3): the context for the route's `workspace`, only when it
     /// is in the enumerated set, or, with no set, when its own record names this organization;
-    /// otherwise `no_membership`.
+    /// otherwise `no_membership`. With no set and the record unreadable too, it is
+    /// [`OneWorkspace::Pending`], never a refusal: nothing establishes the route's workspace as this
+    /// organization's, and granting it unchecked would let one organization's kill switch reach
+    /// another's workspace, so the client retries it with the same idempotency key, showing it
+    /// pending, as DEC-832 item 4 retries a workspace not yet committed (identity spec §4.5).
     pub fn into_workspace(
         self,
         lookup: &impl MembershipLookup,
         workspace: WorkspaceId,
-    ) -> Result<TenantContext, Refusal> {
+    ) -> Result<OneWorkspace, Refusal> {
         let _ = (self, lookup, workspace);
         Err(Refusal::Unimplemented { story: "E9-2" })
     }
 
     /// The every-workspace way (DEC-832 items 3 and 5): one context per workspace of the enumerated
-    /// set, in the set's order, for a write one request makes to all of them. No route uses it
-    /// today; what it answers with no enumerated set is owed with the first route that does.
-    pub fn into_every_workspace(self) -> Result<Vec<TenantContext>, Refusal> {
+    /// set, in the set's order, for a write one request makes to all of them; never a set the caller
+    /// names and never part of one. With no enumerated set (built during a membership-store outage)
+    /// it is [`EveryWorkspace::NoSetYet`], not a refusal: the caller treats it as pending and
+    /// retries, never as a denial. No route calls it until a route story decides it (identity spec
+    /// §4.5); its `Err` is only this stub's.
+    pub fn into_every_workspace(self) -> Result<EveryWorkspace, Refusal> {
         let _ = self;
         Err(Refusal::Unimplemented { story: "E9-2" })
     }
+}
+
+/// What [`OrgContext::into_workspace`] yields when it refuses nothing.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OneWorkspace {
+    /// The route's workspace, which the enumerated set or its own record places in the organization.
+    Context(TenantContext),
+    /// Neither the enumerated set nor the workspace's own record could be read: not a refusal and
+    /// not a grant. The caller retries with the same idempotency key and reports the workspace
+    /// pending (DEC-832 item 4).
+    Pending,
+}
+
+/// What [`OrgContext::into_every_workspace`] yields when it refuses nothing.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EveryWorkspace {
+    /// One context per workspace of the set the store enumerated, in the set's order.
+    Contexts(Vec<TenantContext>),
+    /// The context was built during a membership-store outage, so no set was enumerated: never a
+    /// caller-named or partial set, and never a denial; the caller retries until a set is read.
+    NoSetYet,
 }
 
 /// What an authorization of one's own data yields (identity spec §4.5, DEC-832 item 7): an `own`
@@ -718,7 +749,8 @@ pub trait MembershipLookup: LookupSeal {
     /// The workspace's own record: the organization it names, or `None` when this deployment hosts
     /// no such workspace. [`authorize`] checks a [`Scope::Workspace`] pair with it, and an
     /// [`OrgContext`] built during a membership-store outage checks the route's workspace with it
-    /// (identity spec §4.5, DEC-832 item 4).
+    /// (identity spec §4.5, DEC-832 item 4). What a failure of it yields is [`authorize`]'s and
+    /// [`OrgContext::into_workspace`]'s to say; neither refuses a risk-reducing row for it.
     fn workspace_org(&self, workspace: WorkspaceId) -> Result<Option<OrgId>, LookupFailed>;
 }
 
@@ -1022,7 +1054,17 @@ impl Refusal {
 /// What it yields is sealed (DEC-642, DEC-832): a [`TenantContext`] for a workspace's scope, an
 /// [`OrgContext`] for an organization's, with the organization's workspaces read through `lookup`
 /// at this call, and a [`PrincipalContext`] for an `own`, leave, or `self` row. A
-/// [`Scope::Workspace`] whose pair the store does not hold is refused `no_membership`.
+/// [`Scope::Workspace`] whose pair the store does not hold is refused `no_membership`, after an
+/// inactive row and before anything else.
+///
+/// When the workspace's own record cannot be read ([`MembershipLookup::workspace_org`] fails), the
+/// pair cannot be checked: a row that is not risk-reducing is refused `membership_unavailable` for
+/// every principal kind, and a risk-reducing row is never refused for it (`AGENTS.md` rule 13). A
+/// user or a client is then authorized from its session's roles snapshot as DEC-642 item 10 says,
+/// the snapshot entry's own pair, which the store folded, standing in for the record; a service
+/// account, the host CLI, or a platform operator by its column, whose workspace its own
+/// registration, issuance, or window names; each context flagged `membership_unverified`
+/// (identity spec §4.5).
 pub fn authorize(
     lookup: &impl MembershipLookup,
     principal: &Principal,
