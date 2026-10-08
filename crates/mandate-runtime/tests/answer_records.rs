@@ -212,3 +212,41 @@ fn decided_by_now_is_null_unless_the_reclassification_asks() {
         }
     }
 }
+
+/// DEC-533 item 4 and DEC-830: an `ask` re-classification whose label is empty names no trigger,
+/// so `decided_by_now` is `null`, as for an `auto` or a `deny`, never the empty text (#782 review:
+/// the mutant that drops the empty-label guard in `asked_by` survived every other test).
+#[test]
+#[ignore = "pending E8-3"]
+fn an_ask_reclassification_with_an_empty_label_writes_a_null_decided_by_now() {
+    let (ids, gate) = (TestIds, AllowGate);
+    let mut view = universe(&["AAPL"]);
+    view.version = MANDATE_REF.to_owned();
+    let asking_plan = FixedPlan::opening(Autonomy::Ask);
+    let unlabelled_plan = FixedPlan {
+        decided_by: "",
+        ..FixedPlan::opening(Autonomy::Ask)
+    };
+    let asking = ports(&ids, &gate, &asking_plan, &view);
+    let unlabelled = ports(&ids, &gate, &unlabelled_plan, &view);
+    let (mut shell, asked) = asking_shell(&asking, Some(BOUND_LIMIT));
+    let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 30).event();
+    let ran = tail(&mut shell, &grant, &unlabelled);
+    let [revalidated] = records(&ran, "ApprovalRevalidated")[..] else {
+        panic!("one ApprovalRevalidated in {:?}", ran.draft_types())
+    };
+    assert_eq!(
+        revalidated.payload.get("decided_by_now"),
+        Some(&Value::Null),
+        "an empty ask label is written null: {:?}",
+        revalidated.payload
+    );
+    assert!(
+        revalidated
+            .payload
+            .get("decided_by_bound")
+            .is_some_and(|b| *b != Value::Null),
+        "the bound label is still the request's own: {:?}",
+        revalidated.payload
+    );
+}
