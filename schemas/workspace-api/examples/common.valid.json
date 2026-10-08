@@ -1,0 +1,74 @@
+{
+  "Decimal": [
+    "-0.5",
+    "10000000000000000000000000000",
+    "0.1234567890123456789012345678",
+    "10000000000000000000000000000"
+  ],
+  "Timestamp": [
+    "1970-01-01T00:00:00.000000000Z",
+    "9999-12-31T23:59:59.999999999Z",
+    "2024-02-29T00:00:00.000000000Z",
+    "2026-04-30T00:00:00.000000000Z"
+  ],
+  "Watermark": [
+    {
+      "stream_id": "ctl:ws_1",
+      "seq": 1842,
+      "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "recorded_at": "2026-09-28T18:05:19.000000000Z"
+    },
+    {
+      "stream_id": "clock:ws_1",
+      "seq": 1842,
+      "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "recorded_at": "2026-09-28T18:05:19.000000000Z"
+    },
+    {
+      "stream_id": "ntf:ws_1",
+      "seq": 1842,
+      "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "recorded_at": "2026-09-28T18:05:19.000000000Z"
+    },
+    {
+      "stream_id": "acct:ws_1:acc_1",
+      "seq": 1842,
+      "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "recorded_at": "2026-09-28T18:05:19.000000000Z"
+    },
+    {
+      "stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC",
+      "seq": 9007199254740991,
+      "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "recorded_at": "2026-09-28T18:05:19.000000000Z"
+    }
+  ],
+  "Freshness": [
+    {
+      "observed_at": "2026-09-28T18:05:18.000000000Z",
+      "stale": false,
+      "age_seconds": 0,
+      "limit_source": "data_profile.max_mark_age_s"
+    }
+  ],
+  "QuotedContent": [
+    {
+      "author": "owner_selected",
+      "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars",
+      "model_id": "a",
+      "model_version": "1.0.0",
+      "produced_at": "2026-09-28T18:04:58.000000000Z",
+      "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA",
+      "artifact": null
+    },
+    {
+      "author": "owner_selected",
+      "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars",
+      "model_id": "quant.momentum",
+      "model_version": "2024-10-22",
+      "produced_at": "2026-09-28T18:04:58.000000000Z",
+      "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA",
+      "artifact": null
+    }
+  ]
+}

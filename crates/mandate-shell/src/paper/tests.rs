@@ -1016,7 +1016,7 @@ fn the_gate_template_carries_the_snapshot_and_nothing_invented() -> Result<(), S
 fn each_fact_that_does_not_hold_refuses_the_assembly() -> Result<(), String> {
     type Breaks = fn(&mut PaperFacts) -> Result<(), String>;
     let account = "an active, unblocked paper account";
-    let asset = "the reviewed AAPL asset record";
+    let asset = "the bound instrument's asset record";
     let current_asset = "a current asset record";
     let quote = "a current, uncrossed IEX quote";
     let cases: [(&str, &str, Breaks); 18] = [
