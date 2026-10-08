@@ -217,12 +217,14 @@ fn the_latest_deployment_counts_and_its_document_must_be_stored_intact() {
     );
 }
 
-/// A path the owner did not confirm (V-020), a model registered under another hash or not at all
-/// (V-007), and a connection revoked or established as `live` (V-001) each refuse.
+/// A path the owner did not confirm (V-020; `/name`, which no other rule reads), a model
+/// registered under another hash or not at all (V-007), and a connection revoked or established as
+/// `live` (V-001) each refuse.
 #[test]
 #[ignore = "pending E19-11"]
 fn every_v_rule_the_stream_decides_refuses() {
-    let unconfirmed = Stream::of(&json(MANDATE), &ENVELOPE[1..]);
+    let but_name: Vec<&str> = ENVELOPE.into_iter().filter(|p| *p != "name").collect();
+    let unconfirmed = Stream::of(&json(MANDATE), &but_name);
     assert_eq!(
         unconfirmed.read().map(|_| ()),
         violations(&[Violation::V020])
