@@ -132,40 +132,148 @@ fn only_a_deprovision_signal_closes_the_local_passkey_route() {
         last_sign_in: Some(at(-DAY)),
         last_deprovision: None,
     };
-    for (answer, opens) in [
-        (ProviderAnswer::Status(429), true),
-        (ProviderAnswer::Status(408), true),
-        (ProviderAnswer::Status(400), true),
-        (ProviderAnswer::Deprovision, false),
+    for (answer, reason) in [
+        (ProviderAnswer::Status(429), EndReason::RefreshFailed),
+        (ProviderAnswer::Status(408), EndReason::RefreshFailed),
+        (ProviderAnswer::Status(400), EndReason::RefreshFailed),
+        (ProviderAnswer::Deprovision, EndReason::Deprovisioned),
     ] {
         let mut s = open();
-        assert!(
-            s.refresh(&secret(1), answer, &secret(2), at(300)).is_err(),
+        assert_eq!(
+            s.refresh(&secret(1), answer, &secret(2), at(300)),
+            Err(ended(reason)),
             "{answer:?}"
         );
-        let standing = signed_in.noting(s.ended(), at(300));
+        let standing = if answer == ProviderAnswer::Deprovision {
+            signed_in.saw_deprovision(at(300))
+        } else {
+            signed_in
+        };
         let route_two = SessionRecord::open_reduction_only(standing, at(301));
-        assert_eq!(route_two.is_ok(), opens, "{answer:?}");
-        if !opens {
+        if answer == ProviderAnswer::Deprovision {
             assert_eq!(route_two, Err(SessionRefusal::DeprovisionSeen));
+        } else {
+            assert!(
+                route_two.is_ok(),
+                "a refresh_failed leaves route 2 open: {answer:?}"
+            );
         }
     }
-    for reason in [
-        EndReason::SignOut,
-        EndReason::Deactivated,
-        EndReason::RefreshReuse,
-        EndReason::Admin,
+    let seen = signed_in.saw_deprovision(at(5));
+    assert_eq!(seen.last_deprovision, Some(at(5)));
+    assert_eq!(seen.last_sign_in, signed_in.last_sign_in);
+    let late_older = seen.saw_deprovision(at(2));
+    assert_eq!(
+        late_older.last_deprovision,
+        Some(at(5)),
+        "an older signal arriving late moves nothing back"
+    );
+    let signed_in_again = SubjectStanding {
+        last_sign_in: Some(at(10)),
+        ..seen
+    };
+    assert!(
+        SessionRecord::open_reduction_only(signed_in_again, at(11)).is_ok(),
+        "a later successful sign-in reopens route 2"
+    );
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_deprovision_signal_closes_route_two_whatever_any_session_is_doing() {
+    let signed_in = SubjectStanding {
+        last_sign_in: Some(at(-DAY)),
+        last_deprovision: None,
+    };
+    let mut signed_out = open();
+    assert_eq!(signed_out.end(EndReason::SignOut), Some(EndReason::SignOut));
+    let mut idle = open();
+    assert_eq!(
+        idle.authorize(Request::Pause, at(HOUR)),
+        Err(SessionRefusal::IdleExpired)
+    );
+    let mut lapsed = open();
+    assert_eq!(
+        lapsed.authorize(Request::Pause, at(12 * HOUR)),
+        Err(SessionRefusal::AbsoluteExpired)
+    );
+    let mut reused = open();
+    assert!(
+        reused
+            .refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(60))
+            .is_ok()
+    );
+    assert_eq!(
+        reused.refresh(&secret(1), ProviderAnswer::Granted, &secret(3), at(61)),
+        Err(ended(EndReason::RefreshReuse))
+    );
+    assert_eq!(signed_out.ended(), Some(EndReason::SignOut));
+    assert_eq!(
+        (idle.ended(), lapsed.ended()),
+        (None, None),
+        "a lapse ends nothing to journal"
+    );
+    assert_eq!(reused.ended(), Some(EndReason::RefreshReuse));
+    for name in [
+        "after sign-out",
+        "after an idle lapse",
+        "after an absolute lapse",
+        "after reuse",
+        "with no session at all",
     ] {
-        assert_eq!(
-            signed_in.noting(Some(reason), at(5)),
-            signed_in,
-            "{reason:?}"
-        );
+        let standing = signed_in.saw_deprovision(at(13 * HOUR));
+        let route_two = SessionRecord::open_reduction_only(standing, at(13 * HOUR + 1));
+        assert_eq!(route_two, Err(SessionRefusal::DeprovisionSeen), "{name}");
     }
-    assert_eq!(signed_in.noting(None, at(5)), signed_in);
-    let logged_out = signed_in.noting(Some(EndReason::Deprovisioned), at(5));
-    assert_eq!(logged_out.last_deprovision, Some(at(5)));
-    assert_eq!(logged_out.last_sign_in, signed_in.last_sign_in);
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn an_outage_restores_the_full_session_only_inside_the_idle_timeout() {
+    let mut quiet = open();
+    let outage = quiet.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300));
+    assert_eq!(outage, Ok(Refreshed::Outage));
+    assert_eq!(
+        quiet.authorize(Request::Pause, at(2 * HOUR)),
+        Ok(()),
+        "no idle limit on pause"
+    );
+    let mut lapsed = open();
+    assert_eq!(
+        lapsed.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300)),
+        Ok(Refreshed::Outage)
+    );
+    let restore = lapsed.refresh(&secret(1), ProviderAnswer::Granted, &secret(3), at(HOUR));
+    assert_eq!(
+        restore,
+        Err(SessionRefusal::IdleExpired),
+        "an hour since the last admitted request"
+    );
+    assert_eq!(lapsed.reach(), Reach::Outage, "the refusal narrows nothing");
+    assert_eq!(lapsed.authorize(Request::KillSwitch, at(HOUR + 1)), Ok(()));
+    let mut active = open();
+    assert_eq!(
+        active.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300)),
+        Ok(Refreshed::Outage)
+    );
+    assert_eq!(
+        active.authorize(Request::Pause, at(3_000)),
+        Ok(()),
+        "a pause counts as activity"
+    );
+    let restored = active.refresh(
+        &secret(1),
+        ProviderAnswer::Granted,
+        &secret(3),
+        at(3_000 + HOUR - 1),
+    );
+    assert_eq!(
+        restored,
+        Ok(Refreshed::Rotated {
+            access_expires_at: at(3_000 + HOUR - 1 + 300)
+        })
+    );
+    assert_eq!(active.reach(), Reach::Full);
 }
 
 #[test]
@@ -189,7 +297,7 @@ fn a_reduction_only_session_reaches_pause_and_the_kill_switch_for_fifteen_minute
         s.authorize(Request::KillSwitch, at(900)),
         Err(SessionRefusal::AbsoluteExpired)
     );
-    let refresh = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(10));
+    let refresh = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(899));
     assert_eq!(refresh, Err(SessionRefusal::NotRefreshable));
     assert_eq!(s.reach(), Reach::ReductionOnly, "nothing widens it");
     let never_refused = SubjectStanding {
@@ -282,11 +390,11 @@ impl Oracle {
         }
         let reducing = request != Request::Other;
         if self.outage {
-            return if reducing {
-                Ok(())
-            } else {
-                Err(SessionRefusal::RiskReductionOnly)
-            };
+            if !reducing {
+                return Err(SessionRefusal::RiskReductionOnly);
+            }
+            self.last_activity = now;
+            return Ok(());
         }
         if now - self.last_activity >= idle {
             return Err(SessionRefusal::IdleExpired);
@@ -303,6 +411,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     #[test]
+
     #[ignore = "pending E9-1"]
     fn every_admission_follows_the_spec_rules_over_any_history(ops in prop::collection::vec(op(), 1..60)) {
         let (idle, absolute) = (HOUR, 12 * HOUR);
@@ -334,6 +443,9 @@ proptest! {
                         Err(SessionRefusal::Ended { reason: EndReason::RefreshReuse })
                     } else {
                         match answer {
+                            ProviderAnswer::Granted if o.outage && now - o.last_activity >= idle => {
+                                Err(SessionRefusal::IdleExpired)
+                            }
                             ProviderAnswer::Granted => {
                                 o.issued += 1;
                                 o.outage = false;
