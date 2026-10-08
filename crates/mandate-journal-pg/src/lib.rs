@@ -634,7 +634,7 @@ async fn commit(tx: Transaction<'static, Postgres>, rows: Vec<StoredEvent>) -> A
 fn lost_a_race(e: &sqlx::Error) -> bool {
     e.as_database_error()
         .and_then(|e| e.code())
-        .is_some_and(|code| matches!(code.as_ref(), "23505" | "40001" | "40P01"))
+        .is_some_and(|code| matches!(code.as_ref(), "40001" | "23505" | "40P01"))
 }
 
 /// §11 checks 1 to 5 over `rows` from `start`. Artifact checks (6 and 7) need the artifact store,
