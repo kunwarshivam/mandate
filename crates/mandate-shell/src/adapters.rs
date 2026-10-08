@@ -71,7 +71,7 @@ use mandate_runtime::{
 use mandate_spec::document::ParamValue;
 use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
-use mandate_time::{Date, ExchangeCalendar, TradingCalendar, UtcNanos};
+use mandate_time::{Date, ExchangeCalendar, Session, TradingCalendar, UtcNanos};
 
 use crate::envelope::account_stream;
 use crate::error::Cause;
@@ -1081,16 +1081,31 @@ fn trusted(inspection: &Inspection, symbol: &str, now: UtcNanos) -> Result<(), C
 
 /// The newest US-equity regular session whose end is not after the injected run clock. Calendar
 /// data, session hours, holidays, and early closes all come from `mandate-time`; the shell invents
-/// none of them, and the session is `mandate-time`'s
-/// [`ExchangeCalendar::last_completed_regular_session`], the one the model host names too. A clock
-/// outside the calendar or before its first completed session is untrusted.
+/// none of them. A clock outside the calendar or before its first completed session is untrusted.
 fn latest_completed_equity_day(now: UtcNanos) -> Result<Date, Cause> {
-    let cannot_name = || untrusted("the equity calendar cannot name the last completed session");
-    ExchangeCalendar::us_equities()
-        .map_err(|_| cannot_name())?
-        .last_completed_regular_session(now)
-        .map_err(|_| cannot_name())?
-        .ok_or_else(cannot_name)
+    let calendar = ExchangeCalendar::us_equities()
+        .map_err(|_| untrusted("the equity calendar cannot name the last completed session"))?;
+    let mut day = calendar.valid_from();
+    let last = calendar.valid_to().min(now.date());
+    let mut completed = None;
+    while day <= last {
+        let sessions = calendar
+            .sessions(day)
+            .map_err(|_| untrusted("the equity calendar cannot name the last completed session"))?;
+        if sessions
+            .iter()
+            .any(|span| span.session() == Session::Regular && span.end() <= now)
+        {
+            completed = Some(day);
+        }
+        if day == last {
+            break;
+        }
+        day = day
+            .next()
+            .map_err(|_| untrusted("the equity calendar cannot name the last completed session"))?;
+    }
+    completed.ok_or_else(|| untrusted("the equity calendar cannot name the last completed session"))
 }
 
 /// Whether a split could have moved a close inside the span. Actions recorded for only part of the
