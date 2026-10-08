@@ -102,6 +102,20 @@ fn an_id_token_needs_the_sign_ins_nonce_and_an_access_token_needs_none() {
         outcome(with("nonce", Value::Null), TokenKind::AccessToken),
         Ok(())
     );
+    let shorter = &NONCE[..NONCE.len() - 1];
+    for near in [format!("{NONCE}x"), shorter.to_owned()] {
+        assert_eq!(
+            outcome(with("nonce", json!(near)), ID),
+            Err(Refusal::NonceMismatch),
+            "{near}"
+        );
+    }
+    let wrong = with("nonce", json!("other"));
+    assert_eq!(
+        outcome(wrong, TokenKind::AccessToken),
+        Ok(()),
+        "an access token's nonce is not read"
+    );
 }
 
 #[test]
@@ -123,6 +137,60 @@ fn an_invitation_matches_only_a_verified_address_byte_for_byte() {
     }
     let s = subject(with("email", Value::Null));
     assert_eq!(s.matches_invitation(EMAIL), Err(Refusal::EmailMismatch));
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn an_empty_subject_and_an_unrepresentable_time_are_refused() {
+    let issuer = TestIssuer::new();
+    let outcome = |claims: Value| check(&issuer, &issuer.token(Signer::Es256, &claims)).map(|_| ());
+    let malformed = Err(Refusal::Malformed {
+        part: TokenPart::Payload,
+    });
+    let no_sub = Err(Refusal::MissingClaim { claim: "sub" });
+    assert_eq!(
+        outcome(with("sub", json!(""))),
+        no_sub,
+        "present and non-empty"
+    );
+    for (key, value, expected) in [
+        ("exp", json!(i64::MAX), malformed.clone()),
+        (
+            "exp",
+            json!(9_223_372_036_854_775_808u64),
+            malformed.clone(),
+        ),
+        ("exp", json!(-1), malformed.clone()),
+        ("exp", json!(253_402_300_800i64), malformed.clone()),
+        ("exp", json!(0), Err(Refusal::Expired)),
+        ("nbf", json!(i64::MIN), malformed.clone()),
+    ] {
+        assert_eq!(outcome(with(key, value.clone())), expected, "{key} {value}");
+    }
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_claim_of_another_json_type_is_malformed() {
+    let issuer = TestIssuer::new();
+    let outcome = |claims: Value| check(&issuer, &issuer.token(Signer::Es256, &claims)).map(|_| ());
+    let malformed = Err(Refusal::Malformed {
+        part: TokenPart::Payload,
+    });
+    for (key, value) in [
+        ("aud", json!(7)),
+        ("aud", json!([7, AUDIENCE])),
+        ("azp", json!(7)),
+        ("nbf", json!("1800000000")),
+        ("exp", json!("1800000300")),
+        ("sub", json!(["a"])),
+    ] {
+        assert_eq!(
+            outcome(with(key, value.clone())),
+            malformed,
+            "{key} {value}"
+        );
+    }
 }
 
 proptest! {

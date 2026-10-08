@@ -28,6 +28,14 @@ fn a_malformed_or_critical_token_is_refused_by_the_part_it_breaks() {
         (format!("!{good}"), part(TokenPart::Header)),
         (raw("[1]", &claims().to_string()), part(TokenPart::Header)),
         (
+            raw(r#"{"alg":7,"kid":"es256-1"}"#, &claims().to_string()),
+            part(TokenPart::Header),
+        ),
+        (
+            raw(r#"{"alg":"ES256","kid":7}"#, &claims().to_string()),
+            part(TokenPart::Header),
+        ),
+        (
             raw(r#"{"alg":"ES256","alg":"none","kid":"es256-1"}"#, "{}"),
             part(TokenPart::Header),
         ),
@@ -124,6 +132,40 @@ fn the_key_set_keeps_only_usable_signing_keys_and_refuses_ambiguity() {
         Refusal::KeyNotFound
     );
     assert_eq!(parse(json!([es, es])), Err(SetupError::DuplicateKeyId));
+    let mut enc_twin = es.clone();
+    enc_twin["use"] = json!("enc");
+    let oct_twin = json!({"kty": "oct", "kid": "es256-1", "k": b64(b"shared")});
+    let kept = parse(json!([oct_twin, es, enc_twin])).unwrap();
+    assert!(
+        verify(&es_token, &config(), &kept, ID, now()).is_ok(),
+        "a left-out key sharing a kept key's kid is no duplicate"
+    );
+    let mut no_kid = es.clone();
+    no_kid.as_object_mut().unwrap().remove("kid");
+    let jwks = parse(json!([no_kid])).unwrap();
+    assert_eq!(
+        verify(&es_token, &config(), &jwks, ID, now()).unwrap_err(),
+        Refusal::KeyNotFound
+    );
+    for member in ["x", "y"] {
+        let mut missing = es.clone();
+        missing.as_object_mut().unwrap().remove(member);
+        assert_eq!(
+            parse(json!([missing])),
+            Err(SetupError::KeyMalformed),
+            "{member}"
+        );
+    }
+    let es_text = es.to_string();
+    let doubled_keys = format!(r#"{{"keys":[],"keys":[{es_text}]}}"#);
+    assert_eq!(Jwks::parse(&doubled_keys), Err(SetupError::JwksMalformed));
+    let doubled_kid = es_text.replacen('{', r#"{"kid":"other","#, 1);
+    let doubled = format!(r#"{{"keys":[{doubled_kid}]}}"#);
+    assert_eq!(
+        Jwks::parse(&doubled),
+        Err(SetupError::JwksMalformed),
+        "{doubled}"
+    );
     let mut short = issuer.jwk(Signer::Es256);
     short["x"] = json!(b64(&[1; 31]));
     assert_eq!(parse(json!([short])), Err(SetupError::KeyMalformed));
@@ -145,12 +187,17 @@ fn a_key_of_another_curve_or_a_weak_rsa_modulus_is_never_used() {
     let mut modulus = vec![0xff; 255];
     modulus.insert(0, 0x7f);
     weak["n"] = json!(b64(&modulus));
+    let mut huge = weak.clone();
+    let mut wide = vec![0xff; 1024];
+    wide.insert(0, 0x01);
+    huge["n"] = json!(b64(&wide));
     let oct = json!({"kty": "oct", "kid": "es256-1", "k": b64(b"shared")});
     let token = issuer.token(Signer::Es256, &claims());
     for (name, key) in [
         ("P-384", p384),
         ("X25519", x25519),
         ("RSA 2047", weak),
+        ("RSA 8193", huge),
         ("oct", oct),
     ] {
         let jwks = Jwks::parse(&json!({ "keys": [key] }).to_string()).unwrap();
@@ -217,6 +264,73 @@ fn a_header_in_any_but_strict_base64url_is_malformed() {
 
 #[test]
 #[ignore = "pending E9-1"]
+fn an_rs256_or_eddsa_signature_of_another_length_is_refused() {
+    let issuer = TestIssuer::new();
+    for signer in [Signer::Rs256, Signer::EdDsa] {
+        let token = issuer.token(signer, &claims());
+        let (input, sig) = token.rsplit_once('.').unwrap();
+        let raw = unb64(sig);
+        let short = format!("{input}.{}", b64(&raw[..raw.len() - 1]));
+        let long = format!("{input}.{}", b64(&[raw.as_slice(), &[0]].concat()));
+        for (name, bad) in [("short", short), ("long", long)] {
+            assert_eq!(
+                refused(&issuer, &bad),
+                Refusal::BadSignature,
+                "{signer:?} {name}"
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_signed_payload_or_a_signature_in_any_but_strict_base64url_is_malformed() {
+    let issuer = TestIssuer::new();
+    let header = "eyJhbGciOiJFUzI1NiIsImtpZCI6ImVzMjU2LTEifQ";
+    let payload = (0..3)
+        .map(|n| b64(with("pad", json!("p".repeat(n))).to_string().as_bytes()))
+        .find(|p| p.len() % 4 != 0)
+        .unwrap();
+    let good = issuer.sign_input(Signer::Es256, &format!("{header}.{payload}"));
+    assert!(check(&issuer, &good).is_ok());
+    let last = BASE64URL
+        .iter()
+        .position(|c| *c == *payload.as_bytes().last().unwrap())
+        .unwrap();
+    let flipped = format!(
+        "{}{}",
+        &payload[..payload.len() - 1],
+        BASE64URL[last ^ 1] as char
+    );
+    for bad in [
+        flipped,
+        format!("+{}", &payload[1..]),
+        format!("/{}", &payload[1..]),
+    ] {
+        let token = issuer.sign_input(Signer::Es256, &format!("{header}.{bad}"));
+        assert_eq!(
+            refused(&issuer, &token),
+            Refusal::Malformed {
+                part: TokenPart::Payload
+            },
+            "{bad}"
+        );
+    }
+    let (input, sig) = good.rsplit_once('.').unwrap();
+    for bad in [format!("+{}", &sig[1..]), format!("/{}", &sig[1..])] {
+        let token = format!("{input}.{bad}");
+        assert_eq!(
+            refused(&issuer, &token),
+            Refusal::Malformed {
+                part: TokenPart::Signature
+            },
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "pending E9-1"]
 fn a_segment_with_nonzero_trailing_bits_is_refused() {
     let issuer = TestIssuer::new();
     for signer in Signer::ALLOWED {
@@ -274,12 +388,12 @@ fn no_refusal_or_subject_prints_the_token_nonce_subject_or_a_key() {
     let issuer = TestIssuer::new();
     let good = issuer.token(Signer::Es256, &claims());
     let subject = check(&issuer, &good).unwrap();
-    let mut printed = vec![format!("{subject:?}")];
+    let shown = format!("{subject:?}");
     assert!(
-        printed[0].contains(ISSUER),
-        "a subject prints its issuer: {}",
-        printed[0]
+        shown.contains(ISSUER),
+        "a subject prints its issuer: {shown}"
     );
+    let mut printed = vec![shown];
     let tokens = [
         issuer.token(Signer::ImpostorEs256, &claims()),
         issuer.token(Signer::Es256, &with("iss", json!(OTHER_TENANT))),
@@ -290,14 +404,21 @@ fn no_refusal_or_subject_prints_the_token_nonce_subject_or_a_key() {
         format!("{good}.{NONCE}"),
         format!("{NONCE}.{SUBJECT}.{EMAIL}"),
     ];
+    let mut refusals = Vec::new();
     for token in &tokens {
         let refusal = check(&issuer, token).unwrap_err();
-        printed.push(format!("{refusal} {refusal:?} {}", refusal.code()));
+        refusals.push(format!("{refusal} {refusal:?} {}", refusal.code()));
     }
-    printed.push(format!(
+    refusals.push(format!(
         "{:?}",
         subject.matches_invitation(&format!("{EMAIL}x"))
     ));
+    for error in [
+        IssuerConfig::new("", &[AUDIENCE], &[Algorithm::Es256]).unwrap_err(),
+        Jwks::parse(&format!("{{\"keys\": \"{NONCE}\"}}")).unwrap_err(),
+    ] {
+        refusals.push(format!("{error} {error:?}"));
+    }
     printed.push(format!("{:?}", TokenKind::IdToken { nonce: NONCE }));
     let jwks = format!("{:?}", issuer.jwks());
     assert!(
@@ -305,23 +426,31 @@ fn no_refusal_or_subject_prints_the_token_nonce_subject_or_a_key() {
         "{jwks}"
     );
     printed.push(format!("{:?} {jwks}", config()));
-    for error in [
-        IssuerConfig::new("", &[AUDIENCE], &[Algorithm::Es256]).unwrap_err(),
-        Jwks::parse(&format!("{{\"keys\": \"{NONCE}\"}}")).unwrap_err(),
-    ] {
-        printed.push(format!("{error} {error:?}"));
-    }
-    let x = issuer.jwk(Signer::Es256)["x"].as_str().unwrap().to_owned();
-    let canaries = good
+    let key_text =
+        |signer: Signer, member: &str| issuer.jwk(signer)[member].as_str().unwrap().to_owned();
+    let secrets: Vec<String> = good
         .split('.')
         .map(str::to_owned)
-        .chain([NONCE, SUBJECT, EMAIL, "invitee", &x].map(str::to_owned));
-    for canary in canaries.collect::<Vec<_>>() {
-        for text in &printed {
+        .chain([NONCE, SUBJECT, EMAIL, "invitee"].map(str::to_owned))
+        .chain([
+            key_text(Signer::Es256, "x"),
+            key_text(Signer::Es256, "y"),
+            key_text(Signer::Rs256, "n"),
+            key_text(Signer::EdDsa, "x"),
+        ])
+        .collect();
+    let claims_seen = [OTHER_TENANT, AUDIENCE];
+    for text in printed.iter().chain(&refusals) {
+        for secret in &secrets {
             assert!(
-                !text.contains(&canary),
+                !text.contains(secret.as_str()),
                 "a printed outcome carries a canary: {text}"
             );
+        }
+    }
+    for text in &refusals {
+        for claim in claims_seen {
+            assert!(!text.contains(claim), "a refusal echoes a claim: {text}");
         }
     }
 }
