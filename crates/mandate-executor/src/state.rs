@@ -703,6 +703,7 @@ mod tests {
             ended_at: None,
             alerted: false,
             uncovered: false,
+            bracket: None,
         });
         state
             .positions
