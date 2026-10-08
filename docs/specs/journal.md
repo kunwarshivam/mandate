@@ -1814,7 +1814,12 @@ resume, and a restriction lifting, so the agent stream records it on every mode 
 **`OwnerCommandIssued`**, for `hold_openings` and `lift_hold` only. The members, in order, are
 the ones the CLI already writes for every owner command (`mandate-cli`'s `agent::issued`), so the
 other commands close later (M7's agent-commands slice) without a member renamed; here the Stop's
-and the owner exit's members are always `null`. Rules 68 and 75 apply to every command.
+and the owner exit's members are always `null`. **Every other command stays open at this
+version:** `append` catalogues `OwnerCommandIssued` on the control stream, reads its `command`
+(text, else `schema` at `payload.command`), refuses it from a client (rule 75), and judges nothing
+else about it. So a pause or a kill switch is recorded from any other principal, including the
+host CLI's `system` actor (identity spec §6.4), and is never refused for its members (`AGENTS.md`
+rule 13); rule 69's batch reads a kill switch's `command`, `scope`, and `subject` from it.
 
 | Member | Type | Meaning |
 |---|---|---|
@@ -1844,8 +1849,11 @@ stream only (rule 26). A lift whose step-up does not count is refused like a res
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 
-75. `OwnerCommandIssued`: the actor is a `user` or, for `hold_openings` only, a `client`
-    (`actor.kind`). A client never lifts a hold, pauses, resumes, or stops (identity spec ID-11).
+75. `OwnerCommandIssued`: a `client` actor's command is `hold_openings` (`actor.kind`): a client
+    never lifts a hold, pauses, resumes, stops, exits, or engages the kill switch (identity spec
+    ID-11, DEC-141 item 3). A `hold_openings` is a `user`'s or a `client`'s, and a `lift_hold` a
+    `user`'s (`actor.kind`). No other actor is constrained on another command, so the host CLI's
+    kill switch is never refused here.
 76. `OwnerCommandIssued`: `user` is the actor's human (§3) (`payload.user`), and `subject` is
     `agent` (`payload.subject`).
 77. `OwnerCommandIssued`: a `hold_openings` has a `null` `step_up` (`payload.step_up`). A hold only

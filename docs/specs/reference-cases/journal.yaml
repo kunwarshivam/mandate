@@ -14566,20 +14566,10 @@ hold:
     base_draft: hold
     changes:
     - path: payload.command
-      value: 7
+      value: true
     expect:
       outcome: Invalid
       reason: schema
-      path: payload.command
-  - name: hold.command.form
-    clause: §9.10 types
-    base_draft: hold
-    changes:
-    - path: payload.command
-      value: pause
-    expect:
-      outcome: Invalid
-      reason: non_canonical
       path: payload.command
   - name: hold.scope.kind
     clause: §9.10 types
@@ -15096,6 +15086,56 @@ hold:
       outcome: Invalid
       reason: schema
       path: actor.kind
+  - name: client_pauses
+    clause: 'rule 75: a client issues no command but a hold (DEC-191)'
+    base_draft: hold
+    changes:
+    - path: actor
+      value:
+        kind: client
+        id: client_01
+        version: '1'
+        build: null
+        on_behalf_of: user_owner_01
+    - path: payload.command
+      value: pause
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: client_kill_switch
+    clause: 'rule 75: the kill switch stays the human''s (DEC-141 item 3)'
+    base_draft: hold
+    changes:
+    - path: actor
+      value:
+        kind: client
+        id: client_01
+        version: '1'
+        build: null
+        on_behalf_of: user_owner_01
+    - path: payload.command
+      value: kill_switch
+    - path: payload.scope
+      value: connection
+    - path: payload.subject
+      value: conn_01
+    - path: payload.agent
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: open_command_without_a_command
+    clause: '§9.10: every command names itself'
+    base_draft: hold
+    changes:
+    - path: payload.command
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.command
   - name: hold_by_the_system
     clause: 'rule 75: a hold is a person''s command'
     base_draft: hold
@@ -15248,6 +15288,56 @@ hold:
       reason: schema
       path: causation_id
   valid_drafts:
+  - name: kill_switch_stays_open
+    clause: '§9.10: other commands are not closed here, and a kill switch is always recorded'
+    base_draft: hold
+    changes:
+    - path: actor
+      value:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+    - path: payload.command
+      value: kill_switch
+    - path: payload.scope
+      value: connection
+    - path: payload.subject
+      value: conn_01
+    - path: payload.agent
+      value: null
+    expect:
+      outcome: Valid
+  - name: host_cli_kill_switch
+    clause: '§9.10, rule 75: the host CLI''s `system` kill switch is never refused (rule 13)'
+    base_draft: hold
+    changes:
+    - path: actor
+      value:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    - path: payload.command
+      value: kill_switch
+    - path: payload.scope
+      value: connection
+    - path: payload.subject
+      value: conn_01
+    - path: payload.agent
+      value: null
+    expect:
+      outcome: Valid
+  - name: pause_with_any_members
+    clause: '§9.10: an open command''s other members are not judged here'
+    base_draft: hold
+    changes:
+    - path: payload.command
+      value: pause
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Valid
   - name: client_holds
     clause: 'rules 68, 75 and 76: a client may hold (DEC-191)'
     base_draft: hold

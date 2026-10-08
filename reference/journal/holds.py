@@ -123,7 +123,7 @@ def valid(name, clause, base, changes):
 MEMBER_CASES = {
     "hold": (
         ("agent", 7, "agent a"),
-        ("command", 7, "pause"),
+        ("command", True, None),
         ("scope", 7, "connection"),
         ("subject", 7, "agent a"),
         ("release", True, None),
@@ -226,6 +226,30 @@ def invalid_drafts() -> list[dict]:
             "actor.kind",
         ),
         invalid(
+            "client_pauses",
+            "rule 75: a client issues no command but a hold (DEC-191)",
+            "hold",
+            [change("actor", dict(CLIENT)), change("payload.command", "pause")],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "client_kill_switch",
+            "rule 75: the kill switch stays the human's (DEC-141 item 3)",
+            "hold",
+            [*kill_switch(CLIENT)],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "open_command_without_a_command",
+            "§9.10: every command names itself",
+            "hold",
+            [change("payload.command", 7)],
+            "schema",
+            "payload.command",
+        ),
+        invalid(
             "hold_by_the_system",
             "rule 75: a hold is a person's command",
             "hold",
@@ -324,8 +348,37 @@ def invalid_drafts() -> list[dict]:
     ]
 
 
+def kill_switch(actor: dict) -> list[dict]:
+    """The hold base turned into a connection kill switch, with the CLI's members."""
+    return [
+        change("actor", dict(actor)),
+        change("payload.command", "kill_switch"),
+        change("payload.scope", "connection"),
+        change("payload.subject", "conn_01"),
+        change("payload.agent", None),
+    ]
+
+
 def valid_drafts() -> list[dict]:
     return [
+        valid(
+            "kill_switch_stays_open",
+            "§9.10: other commands are not closed here, and a kill switch is always recorded",
+            "hold",
+            kill_switch(USER),
+        ),
+        valid(
+            "host_cli_kill_switch",
+            "§9.10, rule 75: the host CLI's `system` kill switch is never refused (rule 13)",
+            "hold",
+            kill_switch(SERVICES),
+        ),
+        valid(
+            "pause_with_any_members",
+            "§9.10: an open command's other members are not judged here",
+            "hold",
+            [change("payload.command", "pause"), change("payload.note", "x")],
+        ),
         valid(
             "client_holds",
             "rules 68, 75 and 76: a client may hold (DEC-191)",
@@ -408,6 +461,10 @@ def who_problems(name: str, draft: dict) -> list[str]:
     if draft["event_type"] != "OwnerCommandIssued":
         return []
     person = actor.get("on_behalf_of") if actor["kind"] == "client" else actor["id"]
+    if p["command"] not in ("hold_openings", "lift_hold"):
+        if actor["kind"] == "client":
+            return [found("drafts.who", f"{name}: a client issued {p['command']}")]
+        return []
     if p["command"] == "lift_hold" and actor["kind"] != "user":
         return [found("drafts.who", f"{name}: a lift by a {actor['kind']}")]
     if p["user"] != person:
@@ -450,6 +507,8 @@ def check_section(section: dict) -> list[str]:
 VALIDATOR_MUTANTS = (
     "rule.75",
     "rule.75.client_lifts",
+    "rule.75.client_commands",
+    "closed.owner_commands",
     "rule.76",
     "rule.76.subject",
     "types.null",

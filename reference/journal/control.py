@@ -1190,6 +1190,20 @@ def envelope_violations(draft: dict, skip: frozenset[str]) -> list[Violation]:
     return []
 
 
+def open_command_violations(draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.10: an `OwnerCommandIssued` whose command is not a hold command stays open until M7
+    closes it. Its `command` is read, and a client may issue none of them (rule 75); nothing else
+    about it is refused here, so a kill switch from any principal is always recorded."""
+    out = []
+    if not isinstance(draft["payload"].get("command"), str):
+        out.append(Violation("types", "schema", "payload.command"))
+    elif draft["actor"]["kind"] == "client" and "rule.75.client_commands" not in skip:
+        out.append(Violation("rule.75", "schema", "actor.kind"))
+    if "artifact_refs" not in skip and draft["artifact_refs"] != sorted(digest_strings(draft["payload"])):
+        out.append(Violation("artifact_refs", "artifact_refs", "artifact_refs"))
+    return out
+
+
 def human(actor: dict) -> str:
     """The person behind an actor (§3): a client's `on_behalf_of`, anyone else's `id`."""
     return actor["on_behalf_of"] if actor["kind"] == "client" else actor["id"]
@@ -1232,6 +1246,9 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     versions = VERSIONED_VERSIONS.get((stream[0], event_type), (1,))
     if draft["schema_version"] not in versions:
         return [*out, Violation("catalogue", "unknown_schema", "payload")]
+    command = draft["payload"].get("command") if isinstance(draft["payload"], dict) else None
+    if event_type == "OwnerCommandIssued" and command not in HOLD_COMMANDS and "closed.owner_commands" not in skip:
+        return out + open_command_violations(draft, skip)
     if (stream[0], event_type) in SCHEMAS and draft["schema_version"] == 1:
         schema = SCHEMAS[(stream[0], event_type)]
     else:
