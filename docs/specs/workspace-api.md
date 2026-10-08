@@ -622,7 +622,7 @@ returns `200` with `already_ended` and commits nothing.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `scope` | `{kind: "agent" \| "connection" \| "workspace", id}` | `id` is the agent or connection id, or `null` for the workspace. The organization scope is the client issuing one workspace-scope call per workspace, each journaled on its own (DEC-436 item 13) |
+| `scope` | `{kind: "agent" \| "connection" \| "workspace", id}` | `id` is the agent or connection id, or `null` for the workspace. The organization scope is the client issuing one workspace-scope call per workspace, each journaled on its own (DEC-436 item 13). Each such call is authorized at the organization's scope (identity spec §4.5, DEC-832): the route's workspace must be one of the organization's that the store lists, and the client retries each workspace until it reports the call committed |
 | `environment_shown` | `paper` \| `live` | What the screen said. Recorded; a mismatch never refuses |
 | `owner_exit` | `null` or `[{asset_id, bid, bid_size, quoted_at, floor}]` | The optional bid confirmation for equities outside the regular session (D10). Absent or stale, the switch still cancels and stops, and equity sells wait for the session |
 | `record` | record or `null` | The rendered D10 screen. Optional: Stop must work when the dashboard has not loaded (brief §5, rule 13 row) |
