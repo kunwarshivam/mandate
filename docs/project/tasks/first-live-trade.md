@@ -72,7 +72,7 @@ oracle is shown to fail on a seeded bug before it is trusted.
 | LT-2 | **No broker branch in shared code** (DEC-531). The builder, executor, gate and reconciliation never name a broker, and never read the asset class to learn a broker rule; a property test runs them against generated profiles and checks every order sent is one the profile allows. Reads of the asset class for **market** rules stay: the builder's closing-window check (`builder.rs`, US equities in the close window are marketable, a session rule) and the autonomy rule language's `asset_class` condition (`autonomy.rs`, the owner's policy). The executor's `asset_class == Crypto` choice of one stop-limit (`protection.rs`) is a **broker** rule and moves to the profile (B2a) |
 | LT-3 | **Policy and profile intersect, never override.** An order is sent only if both the platform policy (limit openings in the regular session, no short sale) and the profile allow it; an empty intersection is a refusal before the intent, never a fallback to another order type |
 | LT-4 | **One door, one grant.** An order reaches Robinhood only through `ProductionCycle::run`; with `ask` it is sent only after a grant whose content hash equals the hash of the request sent; any difference is a refusal with nothing sent |
-| LT-5 | **Journal before acting.** `OrderSubmitted`, carrying the deterministic `ref_id`, commits before `place_equity_order`; `review_equity_order` runs first and any pre-trade alert refuses |
+| LT-5 | **Journal before acting.** `OrderSubmitted`, carrying the deterministic `ref_id`, commits before `place_equity_order`; `review_equity_order` runs first; a pre-trade alert refuses an opening or an increase, while a sell or protective order is placed with the alert journaled (rule 13) |
 | LT-6 | **No re-send.** After a lost answer the order is `Unknown`; no second `place_equity_order` for that intent; recovery follows the profile (DEC-529 item 4); zero or several matches stay `Unknown` and block the instrument. The response shapes are assumed from the contract, so an unparsable or unexpected answer to a place call is `Unknown`, never treated as rejected and never re-sent |
 | LT-7 | **Only the agentic account** (CN-8). Every request names the recorded account; data about any other account is dropped in the connector before redaction, hashing or storage |
 | LT-8 | **Allowlist, pinned contract, pinned profile** (CN-2, CN-9). The connector calls only the nine allowlisted tools; a contract or profile hash that differs halts openings; a fund-movement tool refuses the connection |
@@ -177,15 +177,15 @@ Robinhood code.
 
 | Reference | Scope | Outcome | Matches? |
 |---|---|---|---|
-| Trading §5.2 "Alpaca capability matrix" ↔ DEC-531 | Every broker | Profiles as data | **No** until SP1 renames it and adds Robinhood's profile |
+| Trading §5.2 "Alpaca capability matrix" ↔ DEC-531 | Every broker | Profiles as data | Yes, by SP1 (trading spec v0.16) |
 | Executor `protection.rs` (`asset_class == Crypto` picks one stop-limit) ↔ DEC-531 item 2 | Protection | Strongest form the profile offers | **No**: B2a replaces the branch |
 | DEC-441 item 10 ↔ U-R1, U-R2 ↔ the contract | Idempotency | Submit with id, query by id | **No**: no query by `ref_id`; DEC-529 item 4 resolves it for this order only (B2b, C3) |
 | DEC-441 item 15 ↔ U-R10 | Platform terms | Written answer before any connection | Resolved for this order only by DEC-529 item 5; customers still blocked |
 | FR-2.6 (1× verified) ↔ U-R7 | Account | Margin field | **No** field; DEC-529 item 11's attestation for this order |
-| Trading §5.4 (OCO or bracket for equities) ↔ Robinhood's profile | Protection | One GTC stop-limit | **No**: SP1, DEC-529 item 7 (founder) |
-| Trading §4.2 (`sip` for live equities) | Live quote | Collar and risk mark | **No**: DEC-529 item 12, SP1 |
-| Trading §7.2 (account type and regime per broker) | Account | Robinhood rows | **No**: SP1 |
-| Mandate §6.1 `cli_confirm` paper only ↔ DEC-155 item 4 | Live grant | Method field | **No**: DEC-529 item 3, until E9-4 |
+| Trading §5.4 (OCO or bracket for equities) ↔ Robinhood's profile | Protection | One GTC stop-limit | Yes, by SP1 (DEC-529 item 7); the stop-limit's limit is `stop_limit_offset` (DEC-539) |
+| Trading §4.2 (`sip` for live equities) | Live quote | Collar and risk mark | Yes, by SP1 (DEC-529 item 12) |
+| Trading §7.2 (account type and regime per broker) | Account | Robinhood rows | Yes, by SP1 |
+| Mandate §6.1 `cli_confirm` paper only ↔ DEC-155 item 4 | Live grant | Method field | Yes, by SP1 (DEC-529 item 3), until E9-4 |
 | ES-23 ↔ the runner's `live` feature | Build | — | **No**: DEC-529 item 3; X1 adds the check ES-23 assumes |
 | Connections §6.2 rule 5 ↔ ES-23 numbers | Prices, quantities | Decimal strings via `mandate-num` | Yes |
 | CN-8 ↔ `get_accounts` | Reads | Other accounts dropped | Yes, by C2 |
