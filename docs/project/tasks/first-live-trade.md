@@ -1,4 +1,4 @@
-# Task: the first live trade (DEC-529, DEC-530): one order on the founder's own Robinhood account, on the product path
+# Task: the first live trade (DEC-529, DEC-531): one order on the founder's own Robinhood account, on the product path
 
 Agent task brief ([ADR-0001](../../adr/0001-engineering-setup.md) ES-15). One task implements one
 story; this brief is a **path brief** over the stories below, and each slice it lists is one
@@ -12,7 +12,7 @@ broker-specific rules in code, nothing built only for this order, every safety g
 
 So this path builds only things the product keeps:
 
-- **Broker rules are data** ([DEC-530](../decisions/DEC-530.md),
+- **Broker rules are data** ([DEC-531](../decisions/DEC-531.md),
   [ADR-0004](../../adr/0004-broker-capability-profiles.md)): Robinhood's connector declares a
   capability profile; the builder, protection and reconciliation read it. Alpaca moves onto the
   same profile first.
@@ -36,7 +36,7 @@ run (E2).
   [robinhood-contract.md](robinhood-contract.md)); E7-16 (the MCP client); E7-6 (the Robinhood
   connector, equities); E7-4 (protection read from the profile); E7-11 (its first slice: the
   connection record from the CLI); M7's remainder (the CLI inbox and grant commands); and new rows
-  the coordinator adds with the claim: **E7-23** (capability profiles, DEC-530), **E7-24** (the
+  the coordinator adds with the claim: **E7-23** (capability profiles, DEC-531), **E7-24** (the
   founder's OAuth login, session-only), **E7-25** (the simulated Robinhood server, DEC-124), and
   **E7-26** (the deployment runner for any environment and broker).
 - **Acceptance criteria (DEC-529 item 1):** one limit buy in the regular session on the founder's
@@ -49,7 +49,7 @@ run (E2).
   connections spec §2, §4, §6, §8, §9; trading-domain spec §4.2, §5.1 to §5.4, §7.1 to §7.3, §9,
   §11; mandate spec §6.1, V-001; journal spec §6.3, §6.4, §9.2.
 - **Decisions that apply:** DEC-36, DEC-77, DEC-79, DEC-124, DEC-155, DEC-176, DEC-441, DEC-470,
-  DEC-475, DEC-502, DEC-509, DEC-529, DEC-530.
+  DEC-475, DEC-502, DEC-509, DEC-529, DEC-531.
 
 ## Invariants first
 
@@ -59,7 +59,7 @@ oracle is shown to fail on a seeded bug before it is trusted.
 | # | Invariant |
 |---|---|
 | LT-1 | **No agent reaches Robinhood.** No test, CI job or agent run opens a connection to any Robinhood host. The default build contains no Robinhood host; only the runner's `live` feature adds the published MCP host. Every test runs against the simulated server on loopback |
-| LT-2 | **No broker branch in shared code** (DEC-530). The builder, executor, gate and reconciliation never name a broker, and never read the asset class to learn a broker rule; a property test runs them against generated profiles and checks every order sent is one the profile allows |
+| LT-2 | **No broker branch in shared code** (DEC-531). The builder, executor, gate and reconciliation never name a broker, and never read the asset class to learn a broker rule; a property test runs them against generated profiles and checks every order sent is one the profile allows |
 | LT-3 | **Policy and profile intersect, never override.** An order is sent only if both the platform policy (limit openings in the regular session, no short sale) and the profile allow it; an empty intersection is a refusal before the intent, never a fallback to another order type |
 | LT-4 | **One door, one grant.** An order reaches Robinhood only through `ProductionCycle::run`; with `ask` it is sent only after a grant whose content hash equals the hash of the request sent; any difference is a refusal with nothing sent |
 | LT-5 | **Journal before acting.** `OrderSubmitted`, carrying the deterministic `ref_id`, commits before `place_equity_order`; `review_equity_order` runs first and any pre-trade alert refuses |
@@ -159,8 +159,8 @@ Robinhood code.
 
 | Reference | Scope | Outcome | Matches? |
 |---|---|---|---|
-| Trading §5.2 "Alpaca capability matrix" ↔ DEC-530 | Every broker | Profiles as data | **No** until SP1 renames it and adds Robinhood's profile |
-| Executor `protection.rs` (`asset_class == Crypto` picks one stop-limit) ↔ DEC-530 item 2 | Protection | Strongest form the profile offers | **No**: B2 replaces the branch |
+| Trading §5.2 "Alpaca capability matrix" ↔ DEC-531 | Every broker | Profiles as data | **No** until SP1 renames it and adds Robinhood's profile |
+| Executor `protection.rs` (`asset_class == Crypto` picks one stop-limit) ↔ DEC-531 item 2 | Protection | Strongest form the profile offers | **No**: B2 replaces the branch |
 | DEC-441 item 10 ↔ U-R1, U-R2 ↔ the contract | Idempotency | Submit with id, query by id | **No**: no query by `ref_id`; DEC-529 item 4 (founder) |
 | Trading §5.4 (OCO or bracket for equities) ↔ Robinhood's profile | Protection | One GTC stop-limit | **No**: SP1, DEC-529 item 7 (founder) |
 | Trading §4.2 (`sip` for live equities) | Live quote | Collar and risk mark | **No**: DEC-529 item 12, SP1 |
@@ -179,7 +179,7 @@ so four builders can work at once; only reviews and merges are one at a time.
 
 | # | Lane | Story | Kind | Crate | What | After | Now? | Estimate |
 |---|---|---|---|---|---|---|---|---|
-| L0 | — | E7-15 | D | docs | This brief, DEC-529, DEC-530, ADR-0004, the contract | — | this PR | — |
+| L0 | — | E7-15 | D | docs | This brief, DEC-529, DEC-531, ADR-0004, the contract | — | this PR | — |
 | SP1 | — | E7-23 | SP | `docs/specs/` | Trading §5.2 as broker profiles with Robinhood's; §5.4, §4.2, §7.2 Robinhood rows; connections §4, §6.2, §6.6 from the contract; mandate §6.1 and V-001 per DEC-529 | — (DEC-529 parts wait for the founder) | **now** | 200–300 |
 | B1 | Profile | E7-23 | T, I | `mandate-executor`, `mandate-alpaca` | `CapabilityProfile` and its hash; `BrokerConnector::profile`; Alpaca declares §5.2; registered as `broker_profile` configuration | — | **now** (coordinate with the paper path's A1 in `mandate-alpaca`) | T 250–350, I 200–300 |
 | B2 | Profile | E7-23 | T, I | `mandate-executor` | Protection and reconciliation read the profile; the `asset_class == Crypto` branch goes; LT-2's property over generated profiles; LT-14 | B1 | **now** | T 250–350, I 200–300 |
@@ -257,7 +257,7 @@ sees its output during the run (`AGENTS.md` rule 8).
 
 ### Decided by agents
 
-- [DEC-530](../decisions/DEC-530.md) and [ADR-0004](../../adr/0004-broker-capability-profiles.md):
+- [DEC-531](../decisions/DEC-531.md) and [ADR-0004](../../adr/0004-broker-capability-profiles.md):
   broker rules as capability profiles.
 - The `ref_id` derivation: a UUID version 8 from SHA-256 (`mandate-canon`) of the intent's
   idempotency key; C1 records it.
@@ -294,7 +294,7 @@ Stop and write a decision rather than continuing if:
 
 ## Definition of done
 
-- [ ] DEC-529 accepted; SP1 merged; DEC-530's profiles in use by Alpaca and Robinhood.
+- [ ] DEC-529 accepted; SP1 merged; DEC-531's profiles in use by Alpaca and Robinhood.
 - [ ] No broker name or asset-class branch for a broker rule in the builder, executor, gate or
       reconciliation (LT-2).
 - [ ] The rehearsal against `mandate-rh-sim` ran clean, restart included.

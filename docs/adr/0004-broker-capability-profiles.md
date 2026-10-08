@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Status** | Accepted ([DEC-530](../project/decisions/DEC-530.md)) |
+| **Status** | Accepted ([DEC-531](../project/decisions/DEC-531.md)) |
 | **Date** | 2026-10-08 |
 | **Deciders** | An agent (Claude Code), under DEC-79, at the founder's direction of 2026-10-08 |
 
-Every ADR has a decision behind it; this one's is [DEC-530](../project/decisions/DEC-530.md).
+Every ADR has a decision behind it; this one's is [DEC-531](../project/decisions/DEC-531.md).
 
 ## Context
 
@@ -23,7 +23,7 @@ these must not become broker-specific code.
 ## Decision
 
 1. Each connector declares a typed, versioned **capability profile** of its broker's rules,
-   from the published contract only (DEC-530 items 1 and 4).
+   from the published contract only (DEC-531 items 1 and 4).
 2. Shared code (builder, executor protection, reconciliation, deployment validation) reads the
    profile and never branches on the broker, or on the asset class to learn a broker rule.
 3. Platform policy (`AGENTS.md` rules 12 and 13, the gate) stays separate; the builder
