@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/pause-request.schema.json",
+  "type": "object",
+  "required": [],
+  "additionalProperties": false,
+  "properties": {
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /agents/{agent_id}/pause (\u00a75.4): no step-up, API-7. {} is valid. API-7 leniency (DEC-682 item 27): this schema is what a client should send; the server is lenient. No member is strict: an omitted, unknown, or unparsable `record` (or any other member) is dropped. The 202 lists every dropped member's JSON pointer in `dropped`. A body that is not JSON at all is read as {} with dropped [\"\"] (DEC-682 item 27).",
+  "x-api7-lenient": true
+}
