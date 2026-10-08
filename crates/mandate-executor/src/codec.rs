@@ -5,7 +5,7 @@
 use mandate_accounting::Side;
 
 use crate::error::ExecutorError;
-use crate::types::{Mode, OrderState, OrderType, Purpose, TimeInForce};
+use crate::types::{Initiator, Mode, OrderState, OrderType, Purpose, TimeInForce};
 
 const STATES: [(OrderState, &str); 13] = [
     (OrderState::Intent, "intent"),
@@ -31,6 +31,12 @@ const PURPOSES: [(Purpose, &str); 7] = [
     (Purpose::DiscretionaryExit, "discretionary_exit"),
     (Purpose::Protective, "protective"),
     (Purpose::Flatten, "flatten"),
+];
+
+const INITIATORS: [(Initiator, &str); 3] = [
+    (Initiator::Owner, "owner"),
+    (Initiator::RiskLimit, "risk_limit"),
+    (Initiator::PlatformOperator, "platform_operator"),
 ];
 
 const MODES: [(Mode, &str); 4] = [
@@ -92,6 +98,11 @@ pub(crate) fn purpose_name(purpose: Purpose) -> &'static str {
 
 pub(crate) fn purpose_of(text: &str) -> Result<Purpose, ExecutorError> {
     value(&PURPOSES, text, "purpose")
+}
+
+/// The journal's name for who ordered a kill switch (journal spec §9's `initiator`).
+pub(crate) fn initiator_name(initiator: Initiator) -> &'static str {
+    name(&INITIATORS, initiator)
 }
 
 pub(crate) fn mode_name(mode: Mode) -> &'static str {

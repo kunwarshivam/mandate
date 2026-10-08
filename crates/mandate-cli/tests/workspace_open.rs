@@ -20,7 +20,7 @@ use std::process::{Command as Process, Output};
 
 use clap::Parser;
 use clap::error::ErrorKind;
-use mandate_canon::{Value, parse};
+use mandate_canon::{Digest, Value, parse};
 use mandate_cli::control::ControlJournal;
 use mandate_cli::control::{Now, Submitted};
 use mandate_cli::postgres::{JournalArgs, PgControlJournal, read_stream};
@@ -196,6 +196,26 @@ fn refused(run: &Output, code: &str) {
 /// `ctl:ws9`'s opener in paper as another writer drafts it: the journal vectors' event id, not the
 /// one the CLI derives.
 const FOREIGN: &str = r#"{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Y0A0A000000000000000S1","event_time":"2026-09-20T13:00:00.000000000Z","event_type":"StreamOpened","payload":{"stream_type":"control","workspace_id":"ws9"},"pii_refs":[],"schema_version":1,"stream_id":"ctl:ws9"}"#;
+/// `ctl:ws1`'s opener id, computed outside the crate: the first 128 bits of the SHA-256 of
+/// [`head_zero_id`]'s bound object for `ws1`, in 26 Crockford base-32 digits (DEC-290, #725
+/// review).
+const OPENED_WS1: &str = "5J6351ZKDB3RACMX704ADH8W7J";
+
+/// The id DEC-290 derives for `workspace`'s opener at head 0, recomputed here from the bound
+/// object written out as canonical JSON and an encoder of the test's own, not the CLI's `derive`.
+fn head_zero_id(workspace: &str) -> String {
+    const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let bound = format!(
+        r#"{{"control_head":"0","event_type":"StreamOpened","key":{{"stream_type":"control","workspace_id":"{workspace}"}},"stepped_up":false,"stream":"ctl:{workspace}"}}"#
+    );
+    let digest = Digest::of(bound.as_bytes());
+    let high = u128::from_be_bytes(digest.as_bytes()[..16].try_into().unwrap());
+    (0..26)
+        .rev()
+        .map(|digit| char::from(CROCKFORD[usize::try_from((high >> (5 * digit)) & 31).unwrap()]))
+        .collect()
+}
+
 const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-10-05T13:30:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","symbol":"SPY"}"#;
 
 /// The binary opens `ctl:ws1` with exactly the vectors' opener in paper, printing one line that
@@ -229,6 +249,11 @@ fn the_binary_opens_the_control_stream_once() {
         "{line}"
     );
     assert_eq!(seq, "1");
+    assert_eq!(
+        (row.event_id.as_str(), head_zero_id("ws1").as_str()),
+        (OPENED_WS1, OPENED_WS1),
+        "the opener's id is DEC-290's derivation at head 0"
+    );
     assert!(!line.contains("postgres://"), "{line}");
     let body = parse(&row.body).unwrap();
     let text = |path: &[&str]| {

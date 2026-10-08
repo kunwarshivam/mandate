@@ -20,6 +20,13 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-536](../project/decisions/DEC-536.md), under DEC-176):** §6.2 gains step 5c, the policy overlay of §4.3,
+  which applies last and names itself `policy_overlay` only when it changed the decision: while the
+  confirmed version is `policy_nonconforming` it denies an opening or an increase ([DEC-534](../project/decisions/DEC-534.md)
+  item 2), and otherwise it narrows an `auto` to `ask` when the effective `auto_allowed` is false.
+  §4.3 already required both; the step says where they apply and how the decision is labelled.
+  §6.4's `trigger.decided_by` gains the label, with `trigger.rule` `null`, and journal spec v0.18
+  adds it to `DecisionMade.decided_by`. Exits are untouched: step 3 decides them first.
 - **v0.6, amended ([DEC-445](../project/decisions/DEC-445.md) item 2):** §5.5's `trim_to_target`
   states the gate's order of operations: the agent's own non-protective sells resting in the
   instrument come off the excess before it is rounded up on the instrument's quantity grid
@@ -551,10 +558,11 @@ limits, never pre-filled as values.
 - **Policy changes** are journaled as `PolicyChanged` (level, diff, author, step-up evidence,
   affected agents). They apply to running agents at the next evaluation as an **overlay**: the
   stricter value governs, and `auto` evaluates as `ask` when `auto_allowed` becomes false, including
-  an `auto` a delegation produced (§6.5). A pending
+  an `auto` a delegation produced (§6.5); §6.2 step 5c applies it. A pending
   approval's quorum and independence follow the same overlay at §6.4 check 7, which only tightens
   what the request bound. Affected agents are flagged `policy_nonconforming` and their owners are
-  alerted; a conforming version is required before any risk-increasing change.
+  alerted; a conforming version is required before any risk-increasing change. Until one is
+  confirmed, §6.2 step 5c denies every opening and increase, and exits go through ([DEC-534](../project/decisions/DEC-534.md)).
 
 ## 5. Risk state and limits
 
@@ -852,6 +860,13 @@ stream with `causation_id` and judges it there; nothing the owner's client check
      by, the date has passed (`AGENTS.md` rule 3). Like the two ceilings before it, it names itself
      (`review_ceiling`) only when it changed the decision, so an `ask` keeps its own source and a
      `deny` its own.
+   - **5c. Policy overlay** (§4.3, [DEC-534](../project/decisions/DEC-534.md), [DEC-536](../project/decisions/DEC-536.md)). The effective policy applies last, so it only
+     tightens. While the confirmed version is `policy_nonconforming` (§4.3), the decision becomes
+     `deny`: no opening or increase runs until a conforming version is confirmed (DEC-534 item 2),
+     and exits, which step 3 already decided, are untouched. Otherwise, if the effective
+     `auto_allowed` is false, the decision becomes the stricter of the result so far and `ask`,
+     including an `auto` a delegation produced. Like the ceilings before it, it names itself
+     (`policy_overlay`) only when it changed the decision.
 6. `auto` → submit (the gate runs again at submission). `deny` → skip. `ask` → approval (§6.4).
 
 ### 6.3 Condition language
@@ -899,7 +914,7 @@ has exactly these keys, and everything an approver is shown comes from it:
 | Key | Content |
 |---|---|
 | `action` | `instrument`, `asset_class`, `side` (`buy`), `qty`, `limit` (the limit price), `order_usd` (limit price × quantity), and `purpose` |
-| `trigger` | `mandate_version`; `decided_by`, the label of what asked (`rule:<id>`, `default`, `admission_ceiling`, `client_ceiling`, or `review_ceiling`); `requested_by` (`agent`, `owner`, or `client`) and `client`, the name the owner gave the connected client when connecting it, or `null` unless `requested_by` is `client` (§6.2 step 5a; the approver is shown "Requested by your connected agent" with that name); and `rule`, the owner's confirmed rule `{id, when, then}` exactly as the mandate holds it, or `null` for `default`, `admission_ceiling`, `client_ceiling`, and `review_ceiling` |
+| `trigger` | `mandate_version`; `decided_by`, the label of what asked (`rule:<id>`, `default`, `admission_ceiling`, `client_ceiling`, `review_ceiling`, or `policy_overlay`); `requested_by` (`agent`, `owner`, or `client`) and `client`, the name the owner gave the connected client when connecting it, or `null` unless `requested_by` is `client` (§6.2 step 5a; the approver is shown "Requested by your connected agent" with that name); and `rule`, the owner's confirmed rule `{id, when, then}` exactly as the mandate holds it, or `null` for `default`, `admission_ceiling`, `client_ceiling`, `review_ceiling`, and `policy_overlay` |
 | `evidence` | `combined_score` as `{value, label}`, labeled "combined model score, not a probability of profit"; and `outputs`, one `{event_id, artifact, label}` per model output used (the artifact hash or `null`, and the author label below) |
 | `risk_impact` | One `{field, value, cap}` for each of `order_usd`, `position_usd_after`, `gross_usd_after`, `bought_today_usd`, `drawdown`, and `daily_pnl_fraction`: its §6.3 value at the request and the mandate cap it is measured against, respectively `max_order_usd`; min(`max_position_usd`, `max_position_fraction` × E); min(`max_gross_exposure_usd`, E); `null`; the lowest ladder rung's `at`; and `max_daily_loss` (§5.5, §8.3) |
 | `reference_mark` | The last `MarkUpdated` for the instrument as `{price, seq}`, or `null` |

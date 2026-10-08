@@ -24,7 +24,7 @@
 #   4  mandate-risk
 #   5  mandate-builder
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
-#      mandate-runtime
+#      mandate-runtime, mandate-mcp
 #   7  mandate-alpaca, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
@@ -39,6 +39,9 @@
 #      its hash from `mandate_modelhost::content()` and no caller supplies a hash; its
 #      `forbidden_internal` list keeps it from ever reaching mandate-alpaca, mandate-shell or
 #      mandate-paper, so the founder's CLI cannot place an order
+#   10 mandate-rh-sim, the simulated Robinhood broker (E7-25, DEC-124): above every product crate,
+#      so none can take it as a normal dependency and it stays out of every production graph,
+#      while the Robinhood connector's tests (C1) reach it as a dev-dependency
 #   tool  mandate-refcases, xtask
 
 impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
@@ -117,6 +120,12 @@ safety_critical = true
 pure = false
 allowed_external = ["libtest-mimic", "serde_json", "toml"]
 
+[crates.mandate-rh-sim]
+layer = 10
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-builder]
 layer = 5
 safety_critical = true
@@ -145,6 +154,14 @@ allowed_external = ["thiserror"]
 layer = 6
 safety_critical = false
 pure = false
+
+# The MCP client a broker connector uses inside itself (E7-16, connections spec §6.2): it knows
+# nothing of brokers or orders, so it sits beside the executor, below the connectors that use it.
+[crates.mandate-mcp]
+layer = 6
+safety_critical = true
+pure = false
+allowed_external = ["reqwest", "rustls", "serde", "serde_json", "thiserror"]
 
 [crates.mandate-journal-pg]
 layer = 6
