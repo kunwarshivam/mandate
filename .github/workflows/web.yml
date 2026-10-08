@@ -75,5 +75,8 @@ jobs:
         if: steps.app.outputs.present == 'true'
       - run: npm test --if-present
         if: steps.app.outputs.present == 'true'
+      # DEC-750: every pending test fails at its stub when un-skipped.
+      - run: npm run pending
+        if: steps.app.outputs.present == 'true'
       - run: npm run build
         if: steps.app.outputs.present == 'true'
