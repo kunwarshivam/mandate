@@ -1069,9 +1069,12 @@ after U-A1 to U-A5 are recorded.
   item 21; until the founder decides, the adapter runs against a recorded fixture only.
   *Accepted when:* NT-1's canary test passes on captured messages; links match
   `<origin>/n/<notice id>` (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider
-  configuration check; the `xtask` email-footer check of spec §4.4 (DEC-700 item 4) exists, runs in
-  `cargo xtask ci fast`'s lint, and is shown to fail on a planted second mail transport and on a
-  planted mail-sending dependency while `[[EMAIL-FOOTER]]` stands.
+  configuration check; the owner-only SMTP transport (spec §4.4, DEC-820 items 3 and 4) sends only to
+  the owner's address bound from the vault, with exactly `Sent by your Mandate workspace to its
+  owner.` as the footer, and a notice for any other recipient is refused `address_rejected` before
+  any connection; the `xtask` email-footer check (DEC-700 item 4) exists, runs in
+  `cargo xtask ci fast`'s lint, and is shown to fail on a planted third mail transport and on a
+  planted mail-sending dependency while the general footer is unresolved.
 - **E8-12 (Must, M7; SC)** As an approver, I want one chat channel (spec §4.5), Slack or Telegram
   per DEC-438 item 20. *Accepted when:* NT-1's canary test passes; every inbound message, button, or
   callback leaves the control stream unchanged (NT-3); the webhook URL or bot token is read only

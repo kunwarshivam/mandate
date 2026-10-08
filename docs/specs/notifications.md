@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft v0.2: round 1's minors fixed (E8-16, freeze rule); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 19 to 26 Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for owner-only mail decided by the founder in [DEC-820](../project/decisions/DEC-820.md); the rest of items 19 to 26 Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent) |
 | **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
@@ -280,27 +280,37 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 
 ### 4.4 Email
 
-- **Sender:** a fixed no-reply address on a sending subdomain of the product domain, with SPF, DKIM,
-  and DMARC `p=reject` (DEC-438 item 23). Replies go to a mailbox that discards them; nothing reads
+- **Sender:** a fixed no-reply address on `notify.owlhead.ai`, with SPF, DKIM, and DMARC `p=reject`
+  (DEC-438 item 23, decided in [DEC-820](../project/decisions/DEC-820.md) item 1). For the demo the mail goes out through the founder's
+  own SMTP submission account, whose credential lives only in the vault (rule 7; DEC-438 item 21,
+  decided in DEC-820 item 3); a transactional vendor comes before any customer mail and is a new
+  decision. Replies go to a mailbox that discards them; nothing reads
   a reply (NT-3).
 - **Subject:** the rendered text. **Body:** the rendered text, the sentence "Open Owlhead to see
   it.", the link, and the footer placeholder `[[EMAIL-FOOTER]]`, whose wording is the founder's and
-  counsel's (DEC-79). Plain text, plus HTML with no remote images, no tracking pixel, and no styling
+  counsel's (DEC-79). For mail addressed only to the owner's own address it resolves to exactly
+  `Sent by your Mandate workspace to its owner.` (DEC-820 item 4); for every other recipient it is
+  unresolved until counsel supplies the general footer and unsubscribe wording. Plain text, plus HTML with no remote images, no tracking pixel, and no styling
   fetched from elsewhere.
 - **Provider settings:** open and click tracking off, so the provider never rewrites the link
   through its own domain; message retention at the provider set to the minimum it offers.
 - **No greeting by name** (NT-1). The address is the only personal data the provider receives.
 - **Unsubscribe:** `List-Unsubscribe` appears only on `info` mail (the brief). §5.7.
-- **No mail leaves while the footer is a placeholder** (rung 2, DEC-700 item 4). While the email
-  template's footer is `[[EMAIL-FOOTER]]`, the only mail transport is the recorded-fixture
-  transport, which writes each rendered message to a test capture and sends nothing. E8-11 builds
-  the check that holds this, in the same change as the adapter: an `xtask` check, run by
-  `cargo xtask ci fast`'s lint, that fails when the email template in `mandate-notify` still holds
-  `[[EMAIL-FOOTER]]` and the workspace has any implementor of the mail transport trait other than
-  the recorded fixture, or any dependency on a mail-sending crate. The change that replaces the
-  placeholder with the wording DEC-438 item 24 leaves to the founder and counsel removes the check,
-  and it is that change alone that may add a transport reaching a mail server. `AGENTS.md`'s trust
-  ladder lists the check under "Checked" once it exists.
+- **No mail reaches anyone but the owner while the general footer is unresolved** (DEC-700 item 4,
+  DEC-820 item 4). Two transports may exist: the recorded-fixture transport, which writes each
+  rendered message to a test capture and sends nothing, and the owner-only SMTP transport. The
+  owner-only transport is bound at construction to the owner's own address, read from the vault,
+  and its send takes no recipient, so no other address can reach it (rung 1); a notice for any
+  other recipient is refused at the adapter as `permanent { address_rejected }` before any
+  connection, and journaled with no address (NT-2). E8-11's tests pin both: the owner-only
+  transport sends only to the bound address with exactly DEC-820's footer, and every other
+  recipient is refused. E8-11 also builds the check that holds this (rung 2), in the same change as
+  the adapter: an `xtask` check, run by `cargo xtask ci fast`'s lint, that fails while the general
+  footer is still `[[EMAIL-FOOTER]]` if the workspace has any implementor of the mail transport
+  trait other than those two, or any mail-sending crate outside the owner-only transport's own. The
+  change that supplies counsel's general footer removes the check, and only that change may add a
+  transport that can address anyone else. `AGENTS.md`'s trust ladder lists the check under
+  "Checked" once it exists.
 
 ### 4.5 Chat
 
@@ -661,7 +671,7 @@ deterministic fixture, so every id-dependent test replays.
 | Delivery records | `ApprovalDelivered` written by the runtime; `OwnerAlertSent` catalogued but **not written by anything**: executor alerts reach only the tracer's report today; no notice stream | E8-9 has each stream owner write `OwnerAlertSent`; E8-10 adds the notice stream and writes every outcome (NT-8) |
 | Dispatcher | None. The shell collects alerts into the tracer report | E8-10: `mandate-dispatcher`, its own process with its own stream, over `mandate-notify`'s pure core |
 | Identity and account-security notices | None; the identity events are proposed in #556 | E8-10 issues them once E9-7 journals the events |
-| Email, chat | None | E8-11, E8-12 (M7). Email has only the recorded-fixture transport while `[[EMAIL-FOOTER]]` stands (§4.4) |
+| Email, chat | None | E8-11, E8-12 (M7). Email has only the recorded-fixture transport and the owner-only SMTP transport until counsel's general footer (§4.4, DEC-820) |
 | Web push, relay | None; the relay is an HLD box | E8-14 (M10) |
 | Deep-link landing | None; the web app renders fixtures (DEC-200) | E8-13 (M9/M10), with the workspace API and identity specs |
 | SMS, phone, escalation chain | None | E8-7 |
@@ -676,8 +686,11 @@ readings the agent accepted; most only tighten what the specs already say. v0.2'
 [DEC-700](../project/decisions/DEC-700.md), with the code layout in
 [DEC-701](../project/decisions/DEC-701.md) and the notice id's source in
 [DEC-702](../project/decisions/DEC-702.md); each only tightens (DEC-176). Items 19 to 26 are the
-founder's (DEC-79: spending, vendors, legal wording, or a new restriction); until each is decided,
-the most conservative option holds: `cli_inbox` only, no vendor, no spend.
+founder's (DEC-79: spending, vendors, legal wording, or a new restriction). The founder decided
+items 21 (the sender is the founder's own SMTP submission account), 23 (`notify.owlhead.ai`, with
+SPF, DKIM, and DMARC `p=reject`), and 24 for owner-only mail (the footer above) in [DEC-820](../project/decisions/DEC-820.md). Items
+19, 20, 22, 25, 26, and item 24 for any other recipient, stay Proposed; until each is decided, the
+most conservative option holds: `cli_inbox` and owner-only mail, no vendor, no spend.
 
 ---
 
