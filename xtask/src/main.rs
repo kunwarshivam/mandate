@@ -2316,16 +2316,18 @@ const STUB_MARKERS: [&str; 5] = [
 ///   awaited one, so the bound alerts late (backlog: "E7-4 (stream K), E4b from E4's fix"). Its
 ///   scripts are now either that lead or the wide protected search, so the search stays reachable.
 ///
-/// One more `hand` row is defect E4b (backlog: "E7-4 (stream K), E4b from E4's fix"; DEC-521 item
-/// 3): while a second bracket's OCO awaits its acknowledgment, a third bracket's start ends the
-/// first open interval in the instrument rather than the awaited one. It reaches no stub and fails
-/// on that behaviour until E4b's fix deletes the row with its `#[ignore]` line.
+/// Two more `hand` rows are defect E4b (backlog: "E7-4 (stream K), E4b from E4's fix"; DEC-521
+/// item 3): while a bracket's OCO awaits its acknowledgment, a later bracket's start ends the first
+/// open interval in the instrument rather than the awaited one. The second case puts the awaited
+/// interval between two others, so ending the latest open one fails it too (#771 review). They
+/// reach no stub and fail on that behaviour until E4b's fix deletes the rows with their `#[ignore]`
+/// lines.
 ///
 /// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
 /// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
 /// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
 /// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 14] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2362,6 +2364,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_new_start_ends_the_awaited_middle_interval_only",
     ),
     (
         "crates/mandate-runtime/tests/answer_records.rs",
