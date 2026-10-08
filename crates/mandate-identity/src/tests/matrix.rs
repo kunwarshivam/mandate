@@ -8,7 +8,8 @@
 //!   only), `✓ (not owner)`, or `self`; each of the five after blank but `self` grants the row (the
 //!   owner-role exception of `✓ (not owner)` is `change_roles`'s, not `authorize`'s). A `self` row
 //!   has `self` in all eight member columns and blank in every other, and is granted only at
-//!   principal scope, to a user, with no membership read.
+//!   principal scope, to a user, with no membership read; there, an agent or a process, which has
+//!   no column, is refused `no_membership`, and every other kind `forbidden` (DEC-643).
 //! - **Column scopes:** OO, OA, Bill at an org's scope through an org membership; WA to Au at a
 //!   workspace's scope through its membership; Cl in its token's workspace, bounded by its user's
 //!   effective roles; SA in its named workspaces; HC in its own workspace; PO in its window's.
@@ -247,6 +248,9 @@ fn expected(
         return match (row.self_row, principal) {
             (false, _) => Err(Refusal::NoMembership),
             (true, Principal::User { .. }) => Ok(row.step_up),
+            (true, Principal::Agent { .. } | Principal::Process { .. }) => {
+                Err(Refusal::NoMembership)
+            }
             (true, _) => Err(Refusal::Forbidden),
         };
     }
@@ -476,6 +480,11 @@ fn the_matrix_parses_by_its_grammar_and_every_column_grants() {
         let parsed = rows.iter().filter(|r| named.contains(&r.permission));
         assert_eq!(parsed.count(), 1, "{name:?} matches exactly one parsed row");
     }
+    assert_eq!(
+        rows.iter().filter(|r| r.risk_reducing).count(),
+        RISK_REDUCING.len(),
+        "every risk-reducing name is the start of exactly one parsed row's text"
+    );
 }
 
 #[test]
@@ -503,9 +512,7 @@ fn id2_authorize_grants_exactly_the_matrix_for_every_role_set_kind_and_scope() {
                 let ms = memberships(USER, &roles, cooling, state);
                 let user = Principal::User { id: USER };
                 check(&rows, &user, &ByMember(&ms), &ms, &mut checked);
-                if matches!(state, MembershipState::Active | MembershipState::CoolingOff) {
-                    check(&rows, &user, &Everything(&ms), &ms, &mut checked);
-                }
+                check(&rows, &user, &Everything(&ms), &ms, &mut checked);
                 let client = Principal::Client {
                     id: OTHER,
                     on_behalf_of: USER,
