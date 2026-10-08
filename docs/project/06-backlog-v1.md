@@ -706,6 +706,14 @@ after U-A1 to U-A5 are recorded.
   `max_order_usd` exceeds §5.2's 200,000 USD is refused; every existing equity test still passes;
   and no crypto rule is relaxed (DEC-450 item 3). A gate check of the 200,000 USD cap is a later
   row.
+- **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
+  want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
+  so that a token that may reach both environments is on the record before it is used
+  ([DEC-821](decisions/DEC-821.md) item 4, DEC-441 item 22, spec §5.3; follows E7-17,
+  [DEC-800](decisions/DEC-800.md) item 14). *Accepted when:* a journal spec change after v0.20
+  defines the event that records, with the connection, whether the token may reach the other
+  environment, and the disclosure the owner confirmed, with vectors, tests first; and no Alpaca
+  OAuth connect appends `ConnectionEstablished` before that event.
 
 ### E8 Escalation and approvals
 
@@ -2600,12 +2608,14 @@ From E10-1's slice-V implementation (DEC-161):
     This follow-up row needs its own story id: its pins and stub cite E8-3, which
     `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
-    (HLD §8), as a new `schema_version` with its own vectors.
+    (HLD §8), as a new `schema_version` with its own vectors. Specified as version 2 in journal
+    §9.8 ([DEC-800](decisions/DEC-800.md) item 3); E7-1 writes it.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,
     which must name each action's members: the operator stop's subject, the global kill switch's
     scope, the acceptable-use action, and the row's "approval".
-  - **Proposed, item 10:** a clause binds an account stream to its connection, so that
-    `AccountSnapshotRecorded`'s fact needs no argument.
+  - **Item 10, closed by [DEC-800](decisions/DEC-800.md):** `ConnectionEstablished` version 2's
+    `account_ref` binds an account stream to its connection (journal §9.8); the mapping reads its
+    argument from that binding.
   - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** journal spec v0.8
     §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
     vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
