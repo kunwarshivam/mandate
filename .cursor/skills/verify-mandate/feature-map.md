@@ -119,7 +119,8 @@ every workspace crate and reference-case suite has an entry and that every path 
   order, the run's fills, orders, and observations), `crates/mandate-backtest/src/strategy.rs` (the
   strategy dispatch and the buy-and-hold benchmark),
   `crates/mandate-backtest/src/strategy/ma_crossover.rs` (the division-free moving-average
-  crossover, in its own file so DEC-504's content hash can list it; E15-13 M0),
+  crossover and the `Signal` it answers with, in one file so DEC-504's content hash can list it;
+  E15-13 M0),
   `crates/mandate-backtest/src/metrics.rs` (every figure of a block),
   `crates/mandate-backtest/src/report.rs` (both blocks, the input digests, the canonical bytes and
   their SHA-256). It drives `mandate-sim`'s fill model and `mandate-accounting`'s fold unchanged; the

@@ -4,7 +4,7 @@
 
 mod ma_crossover;
 
-pub use ma_crossover::StrategyConfig;
+pub use ma_crossover::{Signal, StrategyConfig};
 
 use crate::BacktestError;
 use mandate_accounting::AssetClass;
@@ -28,17 +28,6 @@ use mandate_sim::TimeInForce;
 pub enum Strategy {
     MovingAverageCrossover(StrategyConfig),
     BuyAndHold { collar: Bps },
-}
-
-/// What the strategy wants at a period's close.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Signal {
-    /// Hold a position: enter when flat, and never add.
-    Long,
-    /// Hold nothing: close the whole position when one is held.
-    Flat,
-    /// Not enough periods to decide yet, so nothing is submitted.
-    Undecided,
 }
 
 impl Strategy {

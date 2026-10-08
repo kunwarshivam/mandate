@@ -2,13 +2,24 @@
 //! implementation the backtest and the model host share, and the source file whose bytes the
 //! model's content hash lists ([DEC-504](../../../../docs/project/decisions/DEC-504.md) item 1,
 //! the [first paper trade brief](../../../../docs/project/tasks/first-paper-trade.md) slice M0).
-//! An edit here is an edit to the model.
+//! It holds everything the signal runs through, the [`Signal`] it answers with included, so the
+//! model's code is this one file. An edit here is an edit to the model.
 
 use core::cmp::Ordering;
 
-use super::Signal;
 use crate::BacktestError;
 use mandate_num::{Bps, NumError, Price, Ratio, Usd};
+
+/// What the strategy wants at a period's close.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Signal {
+    /// Hold a position: enter when flat, and never add.
+    Long,
+    /// Hold nothing: close the whole position when one is held.
+    Flat,
+    /// Not enough periods to decide yet, so nothing is submitted.
+    Undecided,
+}
 
 /// The moving-average crossover's parameters. The windows are counted in **periods**, not bars, and
 /// `collar` is how far from the signal period's close a limit is priced before it is put on the tick
@@ -24,7 +35,9 @@ pub struct StrategyConfig {
 impl StrategyConfig {
     /// `Long` when `fast_sum × slow_periods > slow_sum × fast_periods`, the division-free form of
     /// `fast_sum ÷ fast_periods > slow_sum ÷ slow_periods`, and `Flat` on equality or below.
-    pub(super) fn signal(&self, closes: &[Price]) -> Result<Signal, BacktestError> {
+    /// `Undecided` while `closes`, oldest first, holds fewer than `slow_periods` closes; the same
+    /// errors as [`Strategy::signal`](super::Strategy::signal).
+    pub fn signal(&self, closes: &[Price]) -> Result<Signal, BacktestError> {
         let (fast, slow) = self.windows()?;
         if closes.len() < slow {
             return Ok(Signal::Undecided);
