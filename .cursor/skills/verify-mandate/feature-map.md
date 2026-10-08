@@ -1319,6 +1319,11 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-authn/tests/boundaries.rs` (the 60 s skew, `exp` and `nbf` at the edges of the
   clock's range, a numeric `sub`, an empty `kid`, and the key set's exact `Debug`),
   all live.
+  Sessions (slice A2, DEC-652): `src/session.rs` (`SessionRecord`, `SessionLimits`,
+  `ProviderAnswer`, `EndReason`, `SubjectStanding`, and `admit`, which builds
+  `mandate_identity::Session` through the seal), stubbed; `crates/mandate-authn/tests/session_api.rs`
+  (a refresh secret's `Debug` and the `SessionRevoked` reason codes, live; the digest-only
+  record, pending).
 - **Run:** `cargo nextest run -p mandate-authn`.
 ## Identity: roles, the permission matrix, and the authorization step (E9-2)
 

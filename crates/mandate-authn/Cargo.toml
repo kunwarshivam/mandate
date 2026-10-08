@@ -11,6 +11,8 @@ workspace = true
 
 [dependencies]
 base64.workspace = true
+mandate-identity.workspace = true
+mandate-identity-seal.workspace = true
 mandate-time.workspace = true
 ring.workspace = true
 serde.workspace = true

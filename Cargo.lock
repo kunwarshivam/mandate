@@ -1337,6 +1337,8 @@ name = "mandate-authn"
 version = "0.0.0"
 dependencies = [
  "base64 0.23.1",
+ "mandate-identity",
+ "mandate-identity-seal",
  "mandate-time",
  "proptest",
  "ring",
