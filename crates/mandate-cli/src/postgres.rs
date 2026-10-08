@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_journal::{AppendOutcome, Head, StoredEvent, StreamId};
-use mandate_journal_pg::PgJournal;
+use mandate_journal_pg::{AppendError, PgJournal};
 use mandate_time::UtcNanos;
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use tokio::runtime::Runtime;
 
 use crate::control::{ControlError, ControlJournal};
@@ -43,25 +43,39 @@ impl PgControlJournal {
     /// [`ControlError::Journal`] for a DSN that does not parse or a store that cannot be opened. No
     /// message names the DSN.
     pub fn open(args: &JournalArgs) -> Result<Self, ControlError> {
-        let _ = args;
-        Err(ControlError::Unimplemented { story: "E10-16" })
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| ControlError::Journal("no runtime for the journal".to_owned()))?;
+        let journal = {
+            let _entered = runtime.enter();
+            PgJournal::from_dsn(args.journal.expose_secret())
+        }
+        .map_err(|_| ControlError::Journal("the journal DSN does not parse".to_owned()))?;
+        let store = FsArtifactStore::open(&args.store)
+            .map_err(|e| ControlError::Journal(format!("the artifact store: {}", e.code())))?;
+        Ok(Self {
+            journal,
+            store,
+            runtime,
+        })
     }
 }
 
 impl ControlJournal for PgControlJournal {
     fn rows(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, ControlError> {
-        let _ = (stream, &self.journal, &self.runtime);
-        Err(ControlError::Unimplemented { story: "E10-16" })
+        let rows = self.runtime.block_on(self.journal.rows(stream));
+        rows.map_err(|e| journal_error(e.code()))
     }
 
     fn head(&self, stream: &StreamId) -> Result<Head, ControlError> {
-        let _ = stream;
-        Err(ControlError::Unimplemented { story: "E10-16" })
+        let head = self.runtime.block_on(self.journal.head(stream));
+        head.map_err(|e| journal_error(e.code()))
     }
 
     fn take_ownership(&mut self, stream: &StreamId) -> Result<u64, ControlError> {
-        let _ = stream;
-        Err(ControlError::Unimplemented { story: "E10-16" })
+        let epoch = self.runtime.block_on(self.journal.take_ownership(stream));
+        epoch.map_err(|e| journal_error(e.code()))
     }
 
     fn append(
@@ -72,14 +86,29 @@ impl ControlJournal for PgControlJournal {
         recorded_at: UtcNanos,
         drafts: &[&[u8]],
     ) -> Result<AppendOutcome, ControlError> {
-        let _ = (stream, expected_head, writer_epoch);
-        let _ = (recorded_at, drafts, &self.store);
-        Err(ControlError::Unimplemented { story: "E10-16" })
+        let append = self.journal.append_with_config_artifacts(
+            stream,
+            expected_head,
+            writer_epoch,
+            recorded_at,
+            drafts,
+            &self.store,
+        );
+        self.runtime
+            .block_on(append)
+            .map_err(|AppendError::Integrity(e)| journal_error(e.code()))
     }
 
     fn wait(&mut self, delay: Duration) {
         std::thread::sleep(delay);
     }
+}
+
+/// A journal call that returned no answer, by its stable code (ADR-0001 ES-09), never the DSN: a
+/// read's or an ownership change's `PgError` code (`unavailable` or `integrity`), or the journal
+/// spec §11 check an append's stored bytes failed (DEC-520 item 1).
+fn journal_error(code: &str) -> ControlError {
+    ControlError::Journal(format!("the journal failed: {code}"))
 }
 
 #[cfg(test)]
