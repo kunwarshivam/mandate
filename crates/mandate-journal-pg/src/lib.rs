@@ -26,7 +26,8 @@ use std::collections::BTreeMap;
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::{
     AppendOutcome, ArtifactSource, Draft, Environment, EventCheck, EventFailure, Head, Invalid,
-    InvalidReason, StoredEvent, StreamId, TrustedStart, check_batch, seal, verify_events,
+    InvalidReason, StoredEvent, StreamId, TrustedStart, check_batch, config_artifact_refusal, seal,
+    verify_events,
 };
 use mandate_time::UtcNanos;
 use sqlx::migrate::{Migration, MigrationType, Migrator};
@@ -119,9 +120,6 @@ pub enum AppendError {
     /// Stored events the append had to read failed re-verification, and nothing was written.
     #[error(transparent)]
     Integrity(#[from] IntegrityError),
-    /// The DEC-77 stub of J0's tests PR: the implementation PR replaces it.
-    #[error("{story} has not been implemented yet")]
-    Unimplemented { story: &'static str },
 }
 
 /// How many times an append reruns after losing a race it cannot see before it starts: the same
@@ -197,30 +195,15 @@ impl PgJournal {
         recorded_at: UtcNanos,
         drafts: &[&[u8]],
     ) -> Result<AppendOutcome, IntegrityError> {
-        let batch = match validate(stream, drafts) {
-            Ok(batch) => batch,
-            Err(invalid) => return Ok(invalid),
-        };
-        let request = Request {
+        self.append_checking(
             stream,
             expected_head,
             writer_epoch,
             recorded_at,
-            batch: &batch,
-        };
-        for _ in 0..ATTEMPTS {
-            let mut tx = match self.pool.begin().await {
-                Ok(tx) => tx,
-                Err(_) => return Ok(AppendOutcome::Unavailable),
-            };
-            match request.run(&mut tx).await {
-                Ok(Step::Done(outcome)) => return outcome,
-                Ok(Step::Commit(rows)) => return Ok(commit(tx, rows).await),
-                Err(e) if lost_a_race(&e) => {}
-                Err(_) => return Ok(AppendOutcome::Unavailable),
-            }
-        }
-        Ok(AppendOutcome::Unavailable)
+            drafts,
+            None,
+        )
+        .await
     }
 
     /// [`append`](Self::append) for drafts whose configuration objects are read from `artifacts`:
@@ -239,9 +222,56 @@ impl PgJournal {
         drafts: &[&[u8]],
         artifacts: &(dyn ArtifactSource + Sync),
     ) -> Result<AppendOutcome, AppendError> {
-        let _ = (stream, expected_head, writer_epoch);
-        let _ = (recorded_at, drafts, artifacts);
-        Err(AppendError::Unimplemented { story: "E7-19" })
+        let artifacts = Some(artifacts);
+        let outcome = self
+            .append_checking(
+                stream,
+                expected_head,
+                writer_epoch,
+                recorded_at,
+                drafts,
+                artifacts,
+            )
+            .await?;
+        Ok(outcome)
+    }
+
+    /// Both appends: `artifacts` is where configuration objects are read, and `None` refuses every
+    /// draft that names one.
+    async fn append_checking(
+        &self,
+        stream: &StreamId,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[&[u8]],
+        artifacts: Option<&(dyn ArtifactSource + Sync)>,
+    ) -> Result<AppendOutcome, IntegrityError> {
+        let batch = match validate(stream, drafts) {
+            Ok(batch) => batch,
+            Err(invalid) => return Ok(invalid),
+        };
+        let request = Request {
+            stream,
+            expected_head,
+            writer_epoch,
+            recorded_at,
+            batch: &batch,
+            artifacts,
+        };
+        for _ in 0..ATTEMPTS {
+            let mut tx = match self.pool.begin().await {
+                Ok(tx) => tx,
+                Err(_) => return Ok(AppendOutcome::Unavailable),
+            };
+            match request.run(&mut tx).await {
+                Ok(Step::Done(outcome)) => return outcome,
+                Ok(Step::Commit(rows)) => return Ok(commit(tx, rows).await),
+                Err(e) if lost_a_race(&e) => {}
+                Err(_) => return Ok(AppendOutcome::Unavailable),
+            }
+        }
+        Ok(AppendOutcome::Unavailable)
     }
 
     /// Every event of `stream` in `seq` order, after checking the whole chain from seq 1 (journal
@@ -283,6 +313,8 @@ struct Request<'a> {
     writer_epoch: u64,
     recorded_at: UtcNanos,
     batch: &'a [Draft],
+    /// Where configuration objects are read; `None` refuses every draft that names one.
+    artifacts: Option<&'a (dyn ArtifactSource + Sync)>,
 }
 
 enum Step {
@@ -317,7 +349,11 @@ impl Request<'_> {
         if !found.is_empty() {
             return Ok(Step::Done(idempotent(self.batch, &found)));
         }
-        if let Some(refusal) = missing_config_artifact(self.batch) {
+        let refusal = match self.artifacts {
+            Some(artifacts) => config_artifact_refusal(self.batch, artifacts),
+            None => missing_config_artifact(self.batch),
+        };
+        if let Some(refusal) = refusal {
             return Ok(Step::Done(Ok(refusal)));
         }
 

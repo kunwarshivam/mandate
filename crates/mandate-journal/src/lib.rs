@@ -470,6 +470,25 @@ fn validate_config_artifacts(
     Ok(())
 }
 
+/// The refusal a batch owes for its configuration objects in `artifacts` (journal spec §9's
+/// append-time check, §11 check 6), or `None` when every object is present and as referenced. Every
+/// store applies it after idempotency and before fencing, so all give the same outcome.
+pub fn config_artifact_refusal(
+    batch: &[Draft],
+    artifacts: &dyn ArtifactSource,
+) -> Option<AppendOutcome> {
+    batch.iter().enumerate().find_map(|(index, draft)| {
+        match validate_config_artifacts(draft, artifacts) {
+            Ok(()) => None,
+            Err(ConfigArtifactFailure::Invalid(error)) => Some(AppendOutcome::Invalid {
+                draft: index,
+                error,
+            }),
+            Err(ConfigArtifactFailure::Unavailable) => Some(AppendOutcome::Unavailable),
+        }
+    })
+}
+
 /// An in-memory journal implementing the append protocol. Streams exist implicitly with head 0
 /// and writer epoch 0.
 #[derive(Debug, Default)]
@@ -593,27 +612,16 @@ impl MemoryJournal {
             );
         }
 
-        for (index, draft) in batch.iter().enumerate() {
-            let checked = match artifacts {
-                Some(source) => validate_config_artifacts(draft, source),
-                None => match draft.config_artifact_path() {
-                    Some(path) => Err(ConfigArtifactFailure::Invalid(Invalid::new(
-                        InvalidReason::MissingArtifact,
-                        path,
-                    ))),
-                    None => Ok(()),
-                },
-            };
-            match checked {
-                Ok(()) => {}
-                Err(ConfigArtifactFailure::Invalid(error)) => {
-                    return AppendOutcome::Invalid {
-                        draft: index,
-                        error,
-                    };
-                }
-                Err(ConfigArtifactFailure::Unavailable) => return AppendOutcome::Unavailable,
-            }
+        let refusal = match artifacts {
+            Some(source) => config_artifact_refusal(&batch, source),
+            None => batch.iter().enumerate().find_map(|(index, draft)| {
+                draft
+                    .config_artifact_path()
+                    .map(|path| invalid(index, InvalidReason::MissingArtifact, path))
+            }),
+        };
+        if let Some(refusal) = refusal {
+            return refusal;
         }
 
         let head = self.head(stream);
