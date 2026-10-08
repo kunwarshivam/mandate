@@ -560,9 +560,12 @@ below). In order, workspace services:
    and the member's notification addresses in that workspace (they are per workspace, held in its
    vault namespace, §9.1) are removed too, one `NotificationAddressChanged` with `action: removed`
    per address, in the same transaction, raising no address-change notice (the remaining admins get
-   `member_deactivated`). Like every write of the request path, these carry the authenticated
-   principal as actor: the deactivating admin, or the member who left (§4.5), never `system`, and
-   no step-up evidence, since removing access needs none;
+   `member_deactivated`). These carry the same actor as the `MemberDeactivated` or `MemberRemoved`
+   they ride in: on the request path the authenticated principal, the deactivating admin or the
+   member who left (§4.5); when the separate process deactivates (a directory sync, SCIM, §11.1),
+   `system`, in the same transaction there too. No step-up evidence is needed, since removing access
+   needs none. A reactivated member starts with no address in the workspace: the reactivation's
+   in-app notice (`web_inbox`) tells them to add one;
 3. leave every committed event as it was. A response or command committed before step 1 was
    authorized when committed and is judged by the runtime as usual. One arriving after step 1 is
    refused at the API and never committed;
@@ -981,6 +984,7 @@ them to journal §9 with schemas (DEC-437 item 9):
 | `CredentialEnrolled`, `CredentialRemoved` | member, credential (opaque reference, never the key), kind, enrolment cool-off end |
 | `SessionOpened` | member, session (opaque), method, device (opaque), `first_seen_device` (true when the principal has not used the device before); the subject event of the notifications spec's `new_device` kind |
 | `SessionRevoked` | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `refresh_failed`, `expired`, `admin`; `expired` is a session ended by its idle or absolute limit, §6.2 and §6.4 route 1; `refresh_failed` is a refresh the provider answered with neither a grant nor a deprovision signal, §6.4 route 1; `deactivated` is a session closed because its principal's last membership that reached a scope in the deployment ended, §5.2 step 2); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
+| `NotificationAddressChanged` | member, channel, action (`added`, `removed`), opaque address reference, step-up evidence for an add or a member's own removal (null when it rides a deactivation, §5.2); defined with lane L3's web-push routes (workspace API §4.10, PR #827), the endpoint and keys only in the vault |
 | `ClientConnected`, `ClientRevoked` | client id, user, scopes, step-up evidence |
 | `ServiceAccountIssued`, `ServiceAccountRevoked` | account, scopes, workspaces, expiry, issuing user |
 | `HostCliRegistered`, `HostCliRevoked` | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence |
