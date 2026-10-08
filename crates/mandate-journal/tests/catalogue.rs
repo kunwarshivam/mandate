@@ -1383,3 +1383,27 @@ fn the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream() {
         );
     }
 }
+
+/// The compiler's record is on the control stream (§9.8), but on the agent stream
+/// `ModelInvocationRecorded` stays catalogued and open, needing `model_version`, before and after
+/// E10-15 (E15-8 closes it there).
+#[test]
+fn the_model_invocation_stays_open_on_the_agent_stream() {
+    let refused = Draft::parse(&draft("ModelInvocationRecorded", AGENT, &[MOD])).unwrap_err();
+    assert_eq!(
+        (refused.reason, refused.path),
+        (InvalidReason::UnknownSchema, "payload".to_owned())
+    );
+    let refused = Draft::parse(&draft("ModelInvocationRecorded", AGENT, &[])).unwrap_err();
+    assert_eq!(
+        (refused.reason, refused.path),
+        (
+            InvalidReason::MissingConfigRef,
+            "config_refs.model_version".to_owned()
+        )
+    );
+    for kind in [ACCT, CLOCK] {
+        let refused = Draft::parse(&draft("ModelInvocationRecorded", kind, &[MOD])).unwrap_err();
+        assert_eq!(refused.reason, InvalidReason::WrongStream, "{kind}");
+    }
+}
