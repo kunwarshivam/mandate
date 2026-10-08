@@ -522,7 +522,7 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   §4.5; DEC-690, DEC-691, DEC-821.
 - **Code:** `mandate-connections` (pure; stubs until E10-13 lands):
   `crates/mandate-connections/src/start.rs` (API process: the single-use `state` and the
-  authorization URL), `crates/mandate-connections/src/exchange.rs` (executor process: the code
+  authorization URL), `crates/mandate-connections/src/exchange.rs` (token-exchange process: the code
   exchange behind `TokenEndpoint`), `crates/mandate-connections/src/vault.rs` (the `Vault` trait
   and the secret wrappers), `crates/mandate-connections/src/hosts.rs` (`LiveTokenRequest`, the only live-host request;
   `PaperRequest`; `admit`), `crates/mandate-connections/src/grant.rs` (exact scopes),
