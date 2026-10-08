@@ -508,7 +508,9 @@ the `Id`, `EventId`, `Timestamp`, `Decimal`, and `ContentRef` of
 a trace node, a gate view, or a JSON or CSV view row, and the `hash` of a stream `head`, is 64
 lowercase hex exactly as journal spec §3 and the body re-hash give it. Everything else is a
 `sha256:` `ContentRef`: the `hash` of an `as_of` `Watermark` (the same digest, with the API adding
-the prefix), `manifest_hash`, `artifact_ref`, `content_hash`, and every `config_refs` value. The JSON Schemas of the trace, the gate view,
+the prefix), a segment manifest's `manifest_hash`, `artifact_ref`, `content_hash`, and every
+`config_refs` value. An export's `verifier_digest` is bare 64 hex where the journal records it
+(`ExportCreated`) and a `sha256:` ref where a view prints it. The JSON Schemas of the trace, the gate view,
 exports, and verification follow under `schemas/workspace-api/audit/`. The timeline's response
 schema is the agent-timeline read model's (`schemas/workspace-api/read-models/`), and the timeline
 rules below are its semantics.
@@ -723,10 +725,12 @@ connection record. An unknown agent is the 404.
   range from the first event with `recorded_at ≥ from` to the last with `recorded_at < to`, so each
   range has a trusted start (the previous event's `hash`) and verifies under journal spec §11.
 - `format` is `canonical`, `json`, or `csv`. Every export builds the canonical export first (journal
-  spec §12: segment files, manifests, anchors with inclusion proofs, the verifier digest), and its
-  **manifest hash** is the SHA-256 of the canonical manifest that lists them. `json` and `csv` are
-  views derived from it, and each names that manifest hash.
-- The API appends `ExportCreated` (its members are journal spec §9's; it names the manifest hash) and serves
+  spec §12: segment files, manifests, anchors with inclusion proofs). Its anchor is the canonical
+  export's **verifier digest** (journal spec §12, DEC-265 item 3: `ExportBundle::verifier_digest` in
+  `mandate-journal-cold`). `json` and `csv` are views derived from it, and each names that digest
+  as `verifier_digest`. This is the "manifest hash" API-16 and the §4.8 table name.
+- The API appends `ExportCreated` (its members are journal spec §9's; it records the bare-hex
+  `verifier_digest`) and serves
   nothing until it is committed (AU-6). Response `202 {export_id, phase: "recorded"}`;
   `GET /exports/{id}` serves the files. Each download is journaled as `RecordsAccessed` before its
   bytes are served ([DEC-766](../project/decisions/DEC-766.md)).
@@ -735,14 +739,15 @@ The views ([DEC-765](../project/decisions/DEC-765.md)), in event order per strea
 ascending `stream_id` bytes:
 
 - **JSON lines.** UTF-8, LF after every line. The first line is the canonical JSON (journal spec §4)
-  of `{"kind": "audit_view", "view_version": 1, "format": "jsonl", "manifest_hash": "sha256:…"}`.
+  of `{"kind": "audit_view", "view_version": 1, "format": "jsonl", "verifier_digest": "sha256:…"}`.
   Every other line is the canonical JSON of `{stream_id, seq, event_id, event_type, schema_version,
   environment, recorded_at, event_time, actor, causation_id, correlation_id, config_refs, payload,
   prev_hash, hash}`, the members copied from the body.
 - **CSV.** RFC 4180: UTF-8 without a byte-order mark, comma separators, CRLF after every record,
   every field enclosed in double quotes and an embedded double quote doubled. The header row is
-  `manifest_hash,stream_id,seq,event_id,event_type,schema_version,environment,recorded_at,event_time,actor_kind,actor_id,causation_id,correlation_id,prev_hash,hash,payload`.
-  `manifest_hash` repeats on every row, so a cut-out row still names its source. `payload` is the
+  `verifier_digest,stream_id,seq,event_id,event_type,schema_version,environment,recorded_at,event_time,actor_kind,actor_id,causation_id,correlation_id,prev_hash,hash,payload`.
+  `verifier_digest` repeats on every row, as a `sha256:` ref, so a cut-out row still names its
+  source. `payload` is the
   payload's canonical JSON. A null is an empty field.
 - **Formula injection.** A CSV cell whose first character is `=`, `+`, `-`, `@`, a tab (U+0009), or a
   carriage return (U+000D) is written with a single quote (`'`) before it. The canonical export is
