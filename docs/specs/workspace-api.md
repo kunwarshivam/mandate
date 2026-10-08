@@ -552,11 +552,14 @@ spec §4.1).
 workspace services append a `removed` `NotificationAddressChanged` for each of the member's active
 addresses in this workspace inside the deactivation's own commit, all or nothing (identity spec
 §5.2 step 2, [#811](https://github.com/kunwarshivam/mandate/pull/811), DEC-816 item 7). Each carries
-the authenticated principal who acted, the admin or the member who left (DEC-642, identity spec
-§4.5), `null` step-up evidence, which the journal row allows only for a `removed` inside a
-deactivation or removal commit, and no `OwnerAlertSent`. The dispatcher sends them nothing more, the
-workspace admins get `member_deactivated` (notifications spec §3.2), and the vault entries are then
-swept as for any removal.
+the same actor as the `MemberDeactivated` or `MemberRemoved` it rides in: on the request path the
+authenticated principal, the admin or the member who left (DEC-642, identity spec §4.5); when the
+directory-sync or SCIM process deactivates, `system` (identity spec §11.1). Its step-up evidence is
+`null`, which the journal row allows only for a `removed` riding in such a commit, and it raises no
+`OwnerAlertSent`. The dispatcher sends the member nothing more, the workspace admins get
+`member_deactivated` (notifications spec §3.2), and the vault entries are then swept as for any
+removal. The event's members match identity spec §12.1's row: `member`, `channel`, `action`,
+`address_ref` (the opaque address reference), and the step-up evidence or `null`.
 
 ---
 

@@ -367,7 +367,8 @@ The dispatcher **tails the journal**, which is its outbox:
    every notice, subject to the allowlist, retried within the safety window (NT-6), and never
    repeated for a later notice. If the vault entry is already gone, that attempt is a terminal
    repeated for a later notice. If the vault entry is already gone when that last send is made, the
-   attempt is `abandoned` with reason `retry_window_ended`: it is not `address_missing`, marks
+   attempt is `abandoned` with reason `retry_window_ended` (the safety window's reason, from
+   [#763](https://github.com/kunwarshivam/mandate/pull/763)): it is not `address_missing`, marks
    nothing, and raises no `channel_lost`; once the entry is swept, no exception remains. **An active
    address whose vault entry is missing** (a failure the workspace API's §5.7 repairs, by a retry or
    by setting the same endpoint again) is a terminal `failed` with reason `address_missing`: it
@@ -398,7 +399,7 @@ Every channel is one adapter behind one interface:
 - Adapters take no string from the caller except the address handle, which they dereference
   through the vault client. They cannot read the journal or write the control stream (NT-3).
 - `reason` is a closed enum (`timeout`, `rate_limited`, `provider_error`, `address_rejected`,
-  `auth_failed`, `too_large`, `address_missing`, `retry_window_ended`); provider error text is never journaled or logged, since a provider
+  `auth_failed`, `too_large`, `address_missing`); provider error text is never journaled or logged, since a provider
   may echo the message.
 - A receipt can only mark an attempt or an address. It never changes an approval or any trading
   state (NT-5).
