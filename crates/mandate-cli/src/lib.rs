@@ -29,6 +29,7 @@ pub mod connection;
 pub mod control;
 pub mod deploy;
 pub mod download;
+pub mod gestures;
 pub mod inbox;
 pub mod inspect;
 pub mod journal;
@@ -75,4 +76,10 @@ pub enum Command {
     /// Record a checked broker connection on the workspace control stream.
     #[command(subcommand)]
     Connection(connection::ConnectionCommand),
+    /// Create a mandate version, or show its confirmation code and confirm it, in paper.
+    #[command(subcommand)]
+    Version(gestures::VersionCommand),
+    /// Show an agent's deployment code, or deploy it with a confirmed version, in paper.
+    #[command(subcommand)]
+    Agent(gestures::AgentCommand),
 }
