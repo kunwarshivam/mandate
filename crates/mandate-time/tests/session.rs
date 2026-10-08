@@ -988,89 +988,109 @@ fn the_last_completed_regular_session_is_the_newest_whose_close_is_not_after_now
     let cases = [
         (
             "2026-10-07T19:59:59.999999999Z",
-            Some("2026-10-06"),
+            Ok(Some("2026-10-06")),
             "a weekday one nanosecond before its 16:00 EDT close names the day before",
         ),
         (
             "2026-10-07T20:00:00.000000000Z",
-            Some("2026-10-07"),
+            Ok(Some("2026-10-07")),
             "a weekday at its 16:00 EDT close names itself, the close being exclusive",
         ),
         (
             "2026-10-08T03:00:00.000000000Z",
-            Some("2026-10-07"),
+            Ok(Some("2026-10-07")),
             "the evening after a close, already the next day in UTC, names that close's day",
         ),
         (
             "2026-10-05T14:00:00.000000000Z",
-            Some("2026-10-02"),
+            Ok(Some("2026-10-02")),
             "a Monday before its close names the previous Friday",
         ),
         (
             "2026-10-03T16:00:00.000000000Z",
-            Some("2026-10-02"),
+            Ok(Some("2026-10-02")),
             "a Saturday names the Friday before it",
         ),
         (
             "2025-11-27T21:00:00.000000000Z",
-            Some("2025-11-26"),
+            Ok(Some("2025-11-26")),
             "Thanksgiving, closed, names the Wednesday before it",
         ),
         (
             "2025-11-28T17:59:59.999999999Z",
-            Some("2025-11-26"),
+            Ok(Some("2025-11-26")),
             "the day after Thanksgiving before its 13:00 EST early close skips the closed holiday",
         ),
         (
             "2025-11-28T18:00:00.000000000Z",
-            Some("2025-11-28"),
+            Ok(Some("2025-11-28")),
             "the day after Thanksgiving at its 13:00 EST early close names itself",
         ),
         (
             "2025-11-28T20:00:00.000000000Z",
-            Some("2025-11-28"),
+            Ok(Some("2025-11-28")),
             "15:00 EST on an early-close day, before the usual close, names the early-closed day",
         ),
         (
             "2025-11-30T15:00:00.000000000Z",
-            Some("2025-11-28"),
+            Ok(Some("2025-11-28")),
             "the Sunday after an early close names the early-closed Friday",
         ),
         (
             "2025-12-01T20:59:59.999999999Z",
-            Some("2025-11-28"),
+            Ok(Some("2025-11-28")),
             "a Monday one nanosecond before its 16:00 EST close names the Friday before",
         ),
         (
             "2025-12-01T21:00:00.000000000Z",
-            Some("2025-12-01"),
+            Ok(Some("2025-12-01")),
             "a Monday at its 16:00 EST close names itself",
         ),
         (
             "2025-12-26T14:00:00.000000000Z",
-            Some("2025-12-24"),
+            Ok(Some("2025-12-24")),
             "the morning after Christmas names Christmas Eve's early close",
         ),
         (
             "2018-01-02T20:59:59.999999999Z",
-            None,
+            Ok(None),
             "before the range's first regular close, 2018-01-01 being closed, nothing has completed",
         ),
         (
             "2018-01-02T21:00:00.000000000Z",
-            Some("2018-01-02"),
+            Ok(Some("2018-01-02")),
             "the range's first regular close names its day",
         ),
         (
             "2017-12-29T21:00:00.000000000Z",
-            None,
+            Ok(None),
             "a clock before the range names no session",
+        ),
+        (
+            "2028-12-29T21:00:00.000000000Z",
+            Ok(Some("2028-12-29")),
+            "the range's last trading day, a Friday, at its 16:00 EST close names itself",
+        ),
+        (
+            "2029-01-01T04:59:59.999999999Z",
+            Ok(Some("2028-12-29")),
+            "23:59:59 New York on the range's last date, already 2029 in UTC, is still inside it",
+        ),
+        (
+            "2029-01-01T05:00:00.000000000Z",
+            Err(TimeError::OutsideCalendar),
+            "midnight New York after the range's last date is refused, never answered with a guess (DEC-513)",
+        ),
+        (
+            "2029-03-01T21:00:00.000000000Z",
+            Err(TimeError::OutsideCalendar),
+            "a clock months past the range is refused, not answered with the range's last session (DEC-513)",
         ),
     ];
     for (instant, expected, why) in cases {
         assert_eq!(
             calendar.last_completed_regular_session(at(instant)),
-            Ok(expected.map(date)),
+            expected.map(|day| day.map(date)),
             "{instant}: {why}"
         );
     }
