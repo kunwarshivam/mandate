@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft v0.2: round 1's minors fixed (E8-16, freeze rule); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for owner-only mail decided by the founder in [DEC-820](../project/decisions/DEC-820.md); the rest of items 19 to 26 Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); the rest of items 19 to 26 Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent) |
 | **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
@@ -288,29 +288,33 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
   a reply (NT-3).
 - **Subject:** the rendered text. **Body:** the rendered text, the sentence "Open Owlhead to see
   it.", the link, and the footer placeholder `[[EMAIL-FOOTER]]`, whose wording is the founder's and
-  counsel's (DEC-79). For mail addressed only to the owner's own address it resolves to exactly
+  counsel's (DEC-79). For mail addressed only to the founder's own address it resolves to exactly
   `Sent by your Mandate workspace to its owner.` (DEC-820 item 4); for every other recipient it is
-  unresolved until counsel supplies the general footer and unsubscribe wording. Plain text, plus HTML with no remote images, no tracking pixel, and no styling
-  fetched from elsewhere.
+  unresolved until counsel supplies the general footer and unsubscribe wording. Plain text, plus
+  HTML with no remote images, no tracking pixel, and no styling fetched from elsewhere.
 - **Provider settings:** open and click tracking off, so the provider never rewrites the link
   through its own domain; message retention at the provider set to the minimum it offers.
 - **No greeting by name** (NT-1). The address is the only personal data the provider receives.
 - **Unsubscribe:** `List-Unsubscribe` appears only on `info` mail (the brief). §5.7.
-- **No mail reaches anyone but the owner while the general footer is unresolved** (DEC-700 item 4,
-  DEC-820 item 4). Two transports may exist: the recorded-fixture transport, which writes each
-  rendered message to a test capture and sends nothing, and the owner-only SMTP transport. The
-  owner-only transport is bound at construction to the owner's own address, read from the vault,
-  and its send takes no recipient, so no other address can reach it (rung 1); a notice for any
-  other recipient is refused at the adapter as `permanent { address_rejected }` before any
-  connection, and journaled with no address (NT-2). E8-11's tests pin both: the owner-only
-  transport sends only to the bound address with exactly DEC-820's footer, and every other
-  recipient is refused. E8-11 also builds the check that holds this (rung 2), in the same change as
-  the adapter: an `xtask` check, run by `cargo xtask ci fast`'s lint, that fails while the general
-  footer is still `[[EMAIL-FOOTER]]` if the workspace has any implementor of the mail transport
-  trait other than those two, or any mail-sending crate outside the owner-only transport's own. The
-  change that supplies counsel's general footer removes the check, and only that change may add a
-  transport that can address anyone else. `AGENTS.md`'s trust ladder lists the check under
-  "Checked" once it exists.
+- **No mail reaches anyone but the founder while the general footer is unresolved** (DEC-700 item
+  4, DEC-820 item 4, which covers only the founder's own account). Two transports may exist: the
+  recorded-fixture transport, which writes each rendered message to a test capture and sends
+  nothing, and the founder-only SMTP transport. The founder-only transport is bound at construction
+  to a one-address allowlist: the single founder address the deployment's configuration names, read
+  from the vault. It is not bound to each workspace's owner, and its send takes no recipient, so no
+  other address can reach it (rung 1). A notice for any other recipient, a workspace owner who is
+  not the founder included, is refused at the adapter as `permanent { recipient_not_permitted }`
+  before any connection and journaled with no address (NT-2); §5.2 says what that reason does and
+  does not do. E8-11's tests pin both: the founder-only transport sends only to the allowlisted
+  address with exactly DEC-820's footer, and every other recipient is refused.
+- **The check that holds it** (rung 2). E8-11 builds it in the same change as the adapter: an
+  `xtask` check, run by `cargo xtask ci fast`'s lint, that fails while the general footer is still
+  `[[EMAIL-FOOTER]]`. Its primary rule fails on any implementor of the mail transport trait other
+  than those two. Its second rule is a deny-list, kept as the check's configuration, of
+  mail-sending crates (`lettre` and similar SMTP or mail-provider client crates), which may appear
+  only as dependencies of the founder-only transport. The change that supplies counsel's general
+  footer removes the check, and only that change may add a transport that can address anyone else.
+  `AGENTS.md`'s trust ladder lists the check under "Checked" once it exists.
 
 ### 4.5 Chat
 
@@ -416,8 +420,12 @@ Every channel is one adapter behind one interface:
 - Adapters take no string from the caller except the address handle, which they dereference
   through the vault client. They cannot read the journal or write the control stream (NT-3).
 - `reason` is a closed enum (`timeout`, `rate_limited`, `provider_error`, `address_rejected`,
-  `auth_failed`, `too_large`); provider error text is never journaled or logged, since a provider
-  may echo the message.
+  `auth_failed`, `too_large`, `recipient_not_permitted`); provider error text is never journaled or
+  logged, since a provider may echo the message.
+- `recipient_not_permitted` is the platform's own refusal (§4.4: a recipient the founder-only mail
+  transport may not address), not the provider's verdict on the address. It is `permanent` for that
+  notice and channel, is not retried, marks no address `unreachable`, and raises no `channel_lost`
+  (§5.6); the recipient keeps the pull channels and every other push channel.
 - A receipt can only mark an attempt or an address. It never changes an approval or any trading
   state (NT-5).
 
@@ -430,7 +438,7 @@ Every channel is one adapter behind one interface:
 | `info` | Same schedule | Accepted, a permanent failure, or 6 hours |
 
 A `retryable` result, a timeout, and a provider 429 all retry. `permanent` stops that channel for
-that notice and, for `address_rejected` or `auth_failed`, marks the address (§5.6).
+that notice and, for `address_rejected` or `auth_failed`, marks the address (§5.6); `recipient_not_permitted` marks nothing (§5.2).
 
 ### 5.4 Coalescing and rate limits
 
@@ -443,7 +451,9 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
     ends, which is 60 seconds after the earliest commit among the causes that joined it, and never
     later than 60 seconds after the window opened. It does not wait on the first message's outcome.
   - A cause read when its own commit is already 60 seconds old (the dispatcher lagged) goes at once
-    in its own message; the lag alert of §7 fires.
+    in its own message; the lag alert of §7 fires. The age is the cause's journal commit time
+    against the dispatcher's clock; a skew between the two clocks shows as lag, which the same
+    alert covers.
 
   So every `safety` notice is sent within 60 seconds of its own commit while the dispatcher keeps
   up, and none is dropped. The combined message's notice id is the first combined notice's and its
@@ -464,7 +474,7 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 | `ApprovalDelivered` | Agent (the runtime) | The pull channels' `delivered`, in the request's own batch, at every stage. Push outcomes are not copied here: check 4 is met by the pull channel | As journal spec §9: approval, channel, status, message id |
 | `OwnerAlertSent` | The subject's own stream (its owner) | With the subject, in the same batch | Subject event, kind, and for a kill switch the owner command it carries out (journal spec v0.12) |
 | `NoticeIssued` | Notice (the dispatcher) | Before the first send | Notice id, kind, class, cause and its stream, recipients (opaque) |
-| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason`, `provider_message_id`, `coalesced_into` |
+| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason` (§5.2's closed enum, `recipient_not_permitted` included, plus `bounced` and `not_pending`), `provider_message_id`, `coalesced_into` |
 
 `delivered` means the provider accepted the message, not that a person read it. A later bounce is a
 new record for the same provider message id with `failed` and reason `bounced`; it never retracts an
@@ -671,7 +681,7 @@ deterministic fixture, so every id-dependent test replays.
 | Delivery records | `ApprovalDelivered` written by the runtime; `OwnerAlertSent` catalogued but **not written by anything**: executor alerts reach only the tracer's report today; no notice stream | E8-9 has each stream owner write `OwnerAlertSent`; E8-10 adds the notice stream and writes every outcome (NT-8) |
 | Dispatcher | None. The shell collects alerts into the tracer report | E8-10: `mandate-dispatcher`, its own process with its own stream, over `mandate-notify`'s pure core |
 | Identity and account-security notices | None; the identity events are proposed in #556 | E8-10 issues them once E9-7 journals the events |
-| Email, chat | None | E8-11, E8-12 (M7). Email has only the recorded-fixture transport and the owner-only SMTP transport until counsel's general footer (§4.4, DEC-820) |
+| Email, chat | None | E8-11, E8-12 (M7). Email has only the recorded-fixture transport and the founder-only SMTP transport, bound to the one founder address in the deployment's configuration, until counsel's general footer (§4.4, DEC-820) |
 | Web push, relay | None; the relay is an HLD box | E8-14 (M10) |
 | Deep-link landing | None; the web app renders fixtures (DEC-200) | E8-13 (M9/M10), with the workspace API and identity specs |
 | SMS, phone, escalation chain | None | E8-7 |
@@ -688,9 +698,10 @@ readings the agent accepted; most only tighten what the specs already say. v0.2'
 [DEC-702](../project/decisions/DEC-702.md); each only tightens (DEC-176). Items 19 to 26 are the
 founder's (DEC-79: spending, vendors, legal wording, or a new restriction). The founder decided
 items 21 (the sender is the founder's own SMTP submission account), 23 (`notify.owlhead.ai`, with
-SPF, DKIM, and DMARC `p=reject`), and 24 for owner-only mail (the footer above) in [DEC-820](../project/decisions/DEC-820.md). Items
+SPF, DKIM, and DMARC `p=reject`), and 24 for mail to the founder's own address only (the footer above) in [DEC-820](../project/decisions/DEC-820.md). Items
 19, 20, 22, 25, 26, and item 24 for any other recipient, stay Proposed; until each is decided, the
-most conservative option holds: `cli_inbox` and owner-only mail, no vendor, no spend.
+most conservative option holds: `cli_inbox` and mail to the founder's own address only, no vendor,
+no spend.
 
 ---
 
