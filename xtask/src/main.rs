@@ -2321,12 +2321,17 @@ const STUB_MARKERS: [&str; 5] = [
 /// first open interval in the instrument rather than the awaited one. It reaches no stub and fails
 /// on that behaviour until E4b's fix deletes the row with its `#[ignore]` line.
 ///
+/// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
+/// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
+/// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
+/// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
+///
 /// The two rows for journal spec v0.18's `policy_overlay` label are J3's (DEC-536). They check
 /// `Draft::parse`, the journal's existing draft check, against the vectors' `policy_overlay`
 /// section. There is no stub to stop at: until J3's implementation adds the label, the journal
 /// answers `non_canonical`, which is the behaviour they fail on. J3's implementation deletes the
 /// two rows with the `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 15] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2361,16 +2366,28 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
         "no_interval_exceeds_the_limit_without_an_alert",
     ),
     (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
+    ),
+    (
+        "crates/mandate-runtime/tests/answer_records.rs",
+        "every_answer_record_the_runtime_writes_passes_the_journals_check",
+    ),
+    (
+        "crates/mandate-runtime/tests/answer_records.rs",
+        "a_responded_record_carries_its_quorum_only_where_check_7_was_judged",
+    ),
+    (
+        "crates/mandate-runtime/tests/answer_records.rs",
+        "decided_by_now_is_null_unless_the_reclassification_asks",
+    ),
+    (
         "crates/mandate-journal/tests/policy_overlay.rs",
         "every_policy_overlay_valid_draft_parses",
     ),
     (
         "crates/mandate-journal/tests/policy_overlay.rs",
         "every_policy_overlay_invalid_draft_is_refused_with_its_reason_at_its_path",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
     ),
 ];
 

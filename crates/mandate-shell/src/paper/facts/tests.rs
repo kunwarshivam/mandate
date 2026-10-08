@@ -22,6 +22,10 @@ fn text<E: std::fmt::Display>(error: E) -> String {
     error.to_string()
 }
 
+fn aapl() -> Result<InstrumentId, String> {
+    InstrumentId::new("AAPL").map_err(text)
+}
+
 fn at(rfc3339: &str) -> Result<UtcNanos, String> {
     UtcNanos::parse_rfc3339(rfc3339).map_err(text)
 }
@@ -126,8 +130,13 @@ fn scratch_root(name: &str) -> Result<PathBuf, String> {
 fn the_liquidity_facts_are_the_pure_crates_figures_over_the_snapshots_bars() -> Result<(), String> {
     let root = scratch_root("liquidity")?;
     let daily_dir = daily(&root.join("daily"), "2026-08-24", &sessions())?;
-    let facts =
-        liquidity_facts(&daily_dir, &minute_bars("AAPL", &TRAILING)?, at(NOW)?).map_err(text)?;
+    let facts = liquidity_facts(
+        &aapl()?,
+        &daily_dir,
+        &minute_bars("AAPL", &TRAILING)?,
+        at(NOW)?,
+    )
+    .map_err(text)?;
     assert_eq!(
         facts,
         LiquidityFacts {
@@ -165,7 +174,7 @@ fn each_unusable_input_refuses_with_its_own_reason() -> Result<(), String> {
             minute_bars("MSFT", &TRAILING)?,
             NOW,
             Cause::Absent {
-                what: "AAPL's minute bars",
+                what: "the instrument's minute bars",
             },
         ),
         (
@@ -197,7 +206,7 @@ fn each_unusable_input_refuses_with_its_own_reason() -> Result<(), String> {
         ),
     ];
     for (name, dir, bars, now, expected) in cases {
-        let refused = match liquidity_facts(&dir, &bars, at(now)?) {
+        let refused = match liquidity_facts(&aapl()?, &dir, &bars, at(now)?) {
             Err(cause) => cause,
             Ok(facts) => return Err(format!("{name}: accepted as {facts:?}")),
         };
