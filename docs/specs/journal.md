@@ -2,16 +2,26 @@
 
 | | |
 |---|---|
-| **Status** | v0.19 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.20 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.20 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, and `workspace_api` section of §9.8; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `workspace_api` section of §9.8, and `client_actor` section of §3 and §9.9; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.20 ([DEC-671](../project/decisions/DEC-671.md)):** §3's closed `actor.kind` set gains
+  `client`, an owner-connected agent ([workspace API spec §3.3](workspace-api.md#33-authentication-and-sessions)
+  item 4, [identity spec §12.2](identity.md)), whose actor alone carries `on_behalf_of`, the user it
+  acts for. Every other actor keeps exactly its four members, so no recorded event changes. Rules 66
+  to 68 shape the client actor and confine it to the control stream's `MandateDraftSaved`,
+  `OwnerRequestSubmitted`, and `RecordsAccessed`. §9.8's rules 55 and 64 already had client branches,
+  which now admit. §9.9 closes `ConnectionRevoked` version 2, with the reason `owner` or
+  `compromised` and its step-up (workspace API §5.6), and `ClientConnected` and `ClientRevoked`
+  (identity spec §12.1), with rules 69 to 74. Version 1 of `ConnectionRevoked` stays registered and
+  unchanged. The vectors gain a generated `client_actor` section and stay version 3.
 - **v0.19 ([DEC-670](../project/decisions/DEC-670.md)):** §9.8 closes four control-stream records
   the [workspace API](workspace-api.md) commits (its §4.1, §4.6, §5.1; DEC-436 item 14), with rules
   54 to 65. `MandateDraftSaved` records one explicit draft save, its draft stored as an artifact.
@@ -297,12 +307,35 @@ service at append; all others come from the writer's draft.
 | `recorded_at` | *journal* | Timestamp when appended; informational |
 | `clock_source` | writer | `broker`, `exchange`, `local`, `scheduler` |
 | `causation_id`, `correlation_id` | writer | Event ID or `null` |
-| `actor` | writer | `{kind, id, version, build}`; `kind` ∈ `system`, `agent`, `user`, `broker`, `platform_operator`; `build` is the binary digest (`sha256:…`) or `null` for external actors; users are opaque IDs |
+| `actor` | writer | `{kind, id, version, build}`; `kind` ∈ `system`, `agent`, `user`, `broker`, `platform_operator`, `client`; `build` is the binary digest (`sha256:…`) or `null` for external actors; users are opaque IDs. A `client` actor, and only it, has a fifth member, `on_behalf_of` (below) |
 | `config_refs` | writer | Map of content hashes; required keys per event type (§9) |
 | `payload` | writer | Per the event type's schema |
 | `artifact_refs` | writer | Sorted, de-duplicated set of every `sha256:` reference in the payload |
 | `pii_refs` | writer | Sorted set of opaque vault references (random IDs, never hashes of personal data) |
 | `hash` | *journal* | SHA-256 of the canonical body; **not part of the body** |
+
+**The client actor** ([DEC-671](../project/decisions/DEC-671.md)). An owner-connected agent
+(DEC-141) is recorded as `{kind: "client", id, version, build: null, on_behalf_of}`: `id` is the
+client's opaque ID, and `on_behalf_of` the opaque ID (an `id`) of the user it acts for, from its
+token, never from a request body. This is the one actor shape every record a client may write uses.
+A client is never a `user`, so a rule that requires a user actor, such as
+[mandate spec §6.4](mandate.md#64-approvals) check 3, refuses a client from the record alone. A rule
+that compares people reads the **human** of an actor: `on_behalf_of` for a client, `id` for anyone
+else. So check 7's "not the mandate's author", [mandate spec §5.8](mandate.md)'s requester, and
+[identity spec ID-6](identity.md) count a client as its user, and a person's own client is never
+their second party. Checked at append, after the envelope's types (reason `schema`):
+
+66. `on_behalf_of` is present exactly when `kind` is `client`, and is then an `id`
+    (`actor.on_behalf_of`; a well-typed string of the wrong form is `non_canonical`). Every other
+    actor is exactly as before. The host CLI's `system` actor with `on_behalf_of` (identity spec
+    §6.4) is not admitted by this version; the change that adds `HostCliRegistered` widens this rule.
+67. A `client` actor's `build` is `null` (`actor.build`): a client is external.
+68. A `client` actor is on the control stream, on `MandateDraftSaved`, `OwnerRequestSubmitted`, or
+    `RecordsAccessed` only (`actor.kind`), reported before the payload is read. These are its
+    `propose`, `request`, and `read` and `dry_run` scopes (workspace API §3.8). Whatever identity
+    spec ID-11 forbids a client (confirming, approving, acknowledging, owner commands, connections,
+    membership) is refused at append, and check 3 refuses an approval again at the runtime. A
+    client's `hold` command joins the list with the `hold_openings` command (DEC-672).
 
 ## 4. Canonical serialization
 
@@ -544,7 +577,8 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 | `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-51-dec-97): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque); `MandateConfirmed` version 2 also names the agent and the version it replaces (§9.8) |
 | `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason (`goal_complete`, `profit_stop_reached`, `end_date`, owner stop), net dollar loss added to the connection's loss carry; for `AgentDeployed`: the rendered go-live screen (artifact), backtest and paper-run IDs shown, performance legend and disclosure versions shown, approving users, step-up evidence ([mandate spec §10](mandate.md#10-records-dec-51-dec-97)) |
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
-| `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result |
+| `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result; `ConnectionRevoked` version 2 adds the reason (`owner`, `compromised`) and step-up (§9.9) |
+| `ClientConnected`, `ClientRevoked` | — | An owner-connected client issued or revoked ([identity spec §12.1](identity.md)): client, user, scopes, agents, step-up; closed in §9.9 |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
 | `OwnerAlertSent` | — | Written by the owner of the subject event's stream, in that stream and in the subject's batch, on any stream type ([notifications spec §5.5](notifications.md#55-records)): subject event, kind (notifications spec §3.2), and for a kill switch the owner command it carries out, if any. It records that an alert was raised; delivery is the notice stream's |
 | `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
@@ -1656,8 +1690,7 @@ hands it to the order builder, which sizes, clips, and classifies it as any prop
     first that fails, in that order, is reported.
 55. `MandateDraftSaved`: the actor is a `user`, or a `client` whose `origin` is `version`
     (`actor.kind`): a client's `propose` scope creates a draft from a base version and nothing
-    else (workspace API §3.8). No `client` actor is admitted at this version (§3), so until one is
-    only a user saves a draft.
+    else (workspace API §3.8).
 56. `ModelInvocationRecorded` on the control stream: `model.content_hash` equals
     `config_refs.model_version` (`payload.model.content_hash`), as rule 38 binds a thesis's model.
     A missing ref is already `missing_config_ref`.
@@ -1687,12 +1720,62 @@ hands it to the order builder, which sizes, clips, and classifies it as any prop
 64. `OwnerRequestSubmitted`: the actor is a `user` or a `client` (`actor.kind`); `requested_by`
     is `owner` for a user and `client` for a client (`payload.requested_by`); and `client_id` is
     the actor's `id` for a client and `null` for a user (`payload.client_id`). So who asked is the
-    authenticated principal's, never the request body's (workspace API API-6, DEC-185 item 2). No
-    `client` actor is admitted at this version (§3), so a client's request is refused until one is.
+    authenticated principal's, never the request body's (workspace API API-6, DEC-185 item 2).
 65. `OwnerRequestSubmitted`: a non-null `quantity` is greater than 0 (`payload.quantity`).
 
 These records map to no `JournaledFact` except `MandateConfirmed` version 2, which maps as version 1
 does (§9.2), from the same members.
+
+### 9.9 Connection revocation and client records ([DEC-671](../project/decisions/DEC-671.md))
+
+Closed as §9.8's are, on the control stream. Rules number on from §3's 66 to 68. No member carries
+a credential or a token: a client is named by its opaque ID and scopes, and a connection by its ID
+(§9.2).
+
+**`ConnectionRevoked`** version 2: version 1's member, then why and with what step-up. Version 1
+stays registered and unchanged (§8); the workspace API writes version 2.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `connection_id` | `id` | |
+| `reason` | `owner` \| `compromised` | `owner`: the ordinary revoke, which the API refuses while an agent on the connection holds positions or is not stopped (workspace API §4.5). `compromised`: the revoke now of workspace API §5.6, which follows its kill switch: rule 69 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}` | Never `null`: a revocation needs step-up (identity spec ID-4). Without it the API commits only the kill switch (workspace API §5.6) |
+
+**`ClientConnected`**: a user issued a client its token (identity spec §12.1, workspace API §3.8).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `client_id` | `id` | The client, as its actor's `id` names it |
+| `user` | `text` | The user it acts for (opaque), its actors' `on_behalf_of`: rule 73 |
+| `scopes` | `[read \| request \| propose \| dry_run \| hold]` | Workspace API §3.8's closed list: rules 71 and 72 |
+| `agents` | `[id]` | The agents it may see: rules 71 and 72 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}` | Never `null`: connecting a client needs step-up (identity spec ID-4) |
+
+**`ClientRevoked`**: a client's token revoked. It needs no step-up, because it only removes access
+(identity spec ID-5); revocation takes effect for every request authorized after it commits (ID-11).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `client_id` | `id` | |
+| `user` | `text` | The user it acted for (opaque) |
+
+**Consistency rules** (reason `schema` unless stated; the path is the member named):
+
+69. `ConnectionRevoked` version 2: `causation_id` is non-null exactly when `reason` is
+    `compromised` (`causation_id`). A compromised revocation names the connection-scope kill switch
+    (`OwnerCommandIssued`) committed before it in the same batch (workspace API §5.6), so the
+    record shows the kill switch ran first; an ordinary revoke has no cause.
+70. `ConnectionRevoked` version 2: the actor is a `user` (`actor.kind`).
+71. `ClientConnected`: `scopes` and `agents` are non-empty (the first that is empty).
+72. `ClientConnected`: `scopes` and `agents` are each strictly ascending by bytes (`non_canonical`
+    at the list, `scopes` first).
+73. `ClientConnected`: the actor is a `user` (`actor.kind`), and `user` is its `id`
+    (`payload.user`): a user connects their own client (identity spec §4.2).
+74. `ClientRevoked`: the actor is a `user` (the client's user or an admin) or the `system` that
+    deprovisions a user's clients (identity spec §11.1) (`actor.kind`).
+
+`ConnectionRevoked` version 2 maps to the `ConnectionRevoked` fact as version 1 does (§9.2). The
+client records map to no `JournaledFact`.
 
 ## 10. Anchoring
 
