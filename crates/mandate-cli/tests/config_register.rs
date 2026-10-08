@@ -87,7 +87,6 @@ fn refused(result: Result<impl std::fmt::Debug, ControlError>) -> &'static str {
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn an_instrument_snapshot_of_dec_523_is_stored_registered_and_found_on_a_rerun() {
     for exchange in ["arca", "nasdaq"] {
         let canonical_input = spy_with(set_key("exchange", Value::Str(exchange.into())));
@@ -120,7 +119,6 @@ fn an_instrument_snapshot_of_dec_523_is_stored_registered_and_found_on_a_rerun()
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn a_snapshot_outside_dec_523_is_refused_before_anything_is_stored() {
     let changes = [
         ("note", "an extra member"),
@@ -169,7 +167,6 @@ fn set_key(name: &str, value: Value) -> impl FnOnce(&mut BTreeMap<Key, Value>) {
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn the_other_kinds_register_at_their_schema_version_and_a_bad_object_is_refused() {
     let kinds = [
         (ConfigKind::FeeConfig, "fee_config", 1),
@@ -221,7 +218,6 @@ fn the_other_kinds_register_at_their_schema_version_and_a_bad_object_is_refused(
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn a_model_is_registered_with_the_hosts_content_and_hash_only() {
     let (mut journal, mut store) = (Journal::default(), Store::new());
     let (id, version) = MODEL;
@@ -257,7 +253,6 @@ fn a_model_is_registered_with_the_hosts_content_and_hash_only() {
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn nothing_is_registered_outside_paper() {
     for environment in [Environment::Live, Environment::Backtest] {
         let owner = Owner {
@@ -291,7 +286,6 @@ impl ArtifactStore for Unwritable {
 /// The object is stored before the event is committed, and a store that fails commits nothing:
 /// both commands report the failure, and the journal sees no append (DEC-526 item 5).
 #[test]
-#[ignore = "pending E10-16"]
 fn a_store_that_fails_commits_nothing() {
     let mut journal = Journal::default();
     let registered = snapshot(&mut journal, &mut Unwritable, &owner(), SPY.as_bytes());
