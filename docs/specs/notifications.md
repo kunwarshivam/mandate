@@ -306,7 +306,7 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 - **Encryption.** The workspace deployment encrypts the payload to the subscribing browser with Web
   Push message encryption (RFC 8291) and signs with its own application server key (RFC 8292). The
   browser's push service and the relay see only ciphertext, of a payload that is opaque anyway.
-- **Only the browsers' push services** ([DEC-792](../project/decisions/DEC-792.md)). A subscription's
+- **Only the browsers' push services** (DEC-792, [#833](https://github.com/kunwarshivam/mandate/pull/833)). A subscription's
   endpoint is accepted, stored, and sent to only if it is `https` on port 443, with no user
   information and no IP literal, and its host is on the deployment's push-service allowlist: each
   entry is an exact host or `*.` and a domain, whose subdomains are all allowed. The default list
