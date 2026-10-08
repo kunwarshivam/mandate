@@ -4,7 +4,7 @@ use crate::SetupError;
 
 /// The signature algorithms a token may use. Every other `alg`, `none` and the HMAC family
 /// included, is refused before a key is looked up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Algorithm {
     /// ECDSA over P-256 with SHA-256, the signature as the fixed 64-byte `r || s` (RFC 7518 §3.4).
     Es256,

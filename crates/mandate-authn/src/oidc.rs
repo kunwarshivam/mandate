@@ -2,7 +2,7 @@
 
 use core::fmt;
 
-use crate::{Jwks, Refusal, SetupError, UtcNanos};
+use crate::{Algorithm, Jwks, Refusal, SetupError, UtcNanos};
 
 /// The clock skew allowed on each side of `exp` and `nbf`, in seconds. It is a constant, not a
 /// setting, so no configuration can widen it.
@@ -11,8 +11,9 @@ pub const CLOCK_SKEW_S: i64 = 60;
 /// The largest token [`verify`] reads, in bytes; a longer one is refused before it is decoded.
 pub const MAX_TOKEN_BYTES: usize = 16_384;
 
-/// The one issuer a workspace accepts tokens from, and the audiences that name this workspace's
-/// client.
+/// The one issuer a workspace accepts tokens from, the audiences that name this workspace's
+/// client, and the algorithms that issuer signs with: the managed Supabase issuer ES256 only
+/// (DEC-820), another SSO issuer whichever of [`Algorithm`]'s three it uses (DEC-650 item 2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssuerConfig {
     stub: (),
@@ -20,20 +21,33 @@ pub struct IssuerConfig {
 
 impl IssuerConfig {
     /// Configures the issuer, compared byte for byte with `iss` (no trailing-slash or case
-    /// folding), and the audiences, at least one, none empty.
-    pub fn new(_issuer: &str, _audiences: &[&str]) -> Result<Self, SetupError> {
+    /// folding), the audiences, at least one, none empty, and the algorithms, at least one.
+    pub fn new(
+        _issuer: &str,
+        _audiences: &[&str],
+        _algorithms: &[Algorithm],
+    ) -> Result<Self, SetupError> {
         Err(SetupError::Unimplemented { story: "E9-1" })
     }
 }
 
-/// Which token [`verify`] is reading.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which token [`verify`] is reading. Its `Debug` never prints the nonce (ID-9).
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind<'a> {
     /// An ID token from the authorization code flow, whose `nonce` must equal the one this
     /// sign-in issued.
     IdToken { nonce: &'a str },
     /// The issuer's access token (Supabase Auth's, DEC-211), which carries no nonce.
     AccessToken,
+}
+
+impl fmt::Debug for TokenKind<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::IdToken { .. } => f.write_str("IdToken { nonce: .. }"),
+            Self::AccessToken => f.write_str("AccessToken"),
+        }
+    }
 }
 
 /// The subject a token proved, constructed only by [`verify`]. Its `Debug` shows the issuer and
@@ -89,9 +103,11 @@ impl VerifiedSubject {
 /// Verifies a compact JWS `token` from `config`'s issuer under `jwks` at `now`.
 ///
 /// The checks run in this order, and the first that fails is the refusal: size and shape, the
-/// header (`alg` allowed, no `crit`), the key (`kid` found, of the algorithm's type), the
-/// signature, then the claims (`iss`, `sub`, `aud`, `azp`, `exp`, `nbf`, and for an ID token
-/// `nonce`). No claim is read before the signature verifies.
+/// header (`alg` allowed for this issuer, no `crit`, no key of its own in `jwk`, `jku`, `x5u`,
+/// `x5c`, `x5t`, or `x5t#S256`), the key (`kid` found, of the algorithm's type), the signature,
+/// then the claims (`iss`, `sub`, `aud`, `azp`, `exp`, `nbf`, and for an ID token `nonce`). No
+/// claim is read before the signature verifies. An empty signature segment decodes to no bytes,
+/// which never verify: it is [`Refusal::BadSignature`], not a malformed token.
 pub fn verify(
     _token: &str,
     _config: &IssuerConfig,

@@ -1300,9 +1300,13 @@ proves each pending test fails on them (DEC-110).
   `TokenKind`, `VerifiedSubject`, `verify`, `CLOCK_SKEW_S`, `MAX_TOKEN_BYTES`), and `src/jwks.rs`
   (`Jwks`, `Algorithm`), stubbed (slice A1, tests first).
 - **Tests:** `crates/mandate-authn/tests/oidc.rs` (each allowed algorithm verifies; `none`, HMAC
-  and every other `alg` refused before a key is used, the HMAC key-confusion attack included; the
-  `kid` and key-type checks; another key's signature; the issuer byte for byte against another
-  tenant signing with the same keys; each refusal's stable code, live), pending, with the
+  and every other `alg` refused before a key is used, whatever the `kid`, the HMAC key-confusion
+  attack with five encodings of the public key included; an ES256-only issuer; a header naming
+  its own key or a critical extension; the `kid` and key-type checks, with a second ES256 key so
+  a verifier ignoring `kid` is caught; another key's signature and the ES256 signature form; no
+  claim read before the signature; the issuer byte for byte against another tenant signing with
+  the same keys; each refusal's stable code and `TokenKind`'s nonce-free `Debug`, live), pending,
+  with the
   in-memory issuer in `tests/common/mod.rs` (keys made in the test, one fixed RS256 test key).
 - **Run:** `cargo nextest run -p mandate-authn --run-ignored all`; `cargo xtask ci pending`.
 

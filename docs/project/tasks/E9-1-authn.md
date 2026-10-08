@@ -17,7 +17,8 @@ Agent task brief ([ADR-0001](../../adr/0001-engineering-setup.md) ES-15).
   (`HostCliRegistered`, ID-1); and the log scan finds no canary token from any path (ID-9).
 - **PRD / HLD / spec anchors:** PRD FR-1.1; HLD §8; [identity spec](../../specs/identity.md) §6.1,
   §6.2, §6.4, §11.1, ID-9, ID-10
-- **Decisions that apply:** DEC-211, DEC-437 (item 15 Proposed: the managed issuer), DEC-650
+- **Decisions that apply:** DEC-211, DEC-437, DEC-820 (the founder's acceptance of DEC-437 item 15:
+  Supabase Auth is the managed issuer, ES256 only), DEC-650, DEC-651 (the ES-13 exception for A1)
 
 ## Scope
 

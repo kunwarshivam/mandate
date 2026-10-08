@@ -55,20 +55,26 @@ pub enum Refusal {
     /// The token is not a well-formed compact JWS within [`MAX_TOKEN_BYTES`].
     #[error("the token's {part:?} is malformed")]
     Malformed { part: TokenPart },
-    /// The header's `alg` is not ES256, RS256, or EdDSA (`none` and HMAC included).
+    /// The header's `alg` is not one of the issuer's configured algorithms, which are drawn from
+    /// ES256, RS256, and EdDSA (`none` and HMAC never).
     #[error("the token's algorithm is not allowed")]
     AlgorithmNotAllowed,
     /// The header names a `crit` extension, which this verifier understands none of (RFC 7515
     /// §4.1.11).
     #[error("the token names a critical header extension")]
     CriticalHeader,
+    /// The header carries a key or a pointer to one (`jwk`, `jku`, `x5u`, `x5c`, `x5t`,
+    /// `x5t#S256`); only the issuer's supplied key set is ever used.
+    #[error("the token's header names its own key")]
+    HeaderKey,
     /// The header has no `kid`, or the key set has no usable key with it.
     #[error("the token's key is not in the issuer's key set")]
     KeyNotFound,
     /// The key the `kid` names is of another type than the algorithm, or its own `alg` differs.
     #[error("the token's key does not fit its algorithm")]
     KeyAlgorithmMismatch,
-    /// The signature does not verify under the key.
+    /// The signature does not verify under the key: another key's, over other bytes, of the
+    /// wrong form or length (an ES256 signature is the raw 64-byte `r || s`), or empty.
     #[error("the token's signature does not verify")]
     BadSignature,
     /// A required claim is absent.
@@ -110,6 +116,7 @@ impl Refusal {
             Self::Malformed { .. } => "token_malformed",
             Self::AlgorithmNotAllowed => "algorithm_not_allowed",
             Self::CriticalHeader => "critical_header",
+            Self::HeaderKey => "header_key",
             Self::KeyNotFound => "key_not_found",
             Self::KeyAlgorithmMismatch => "key_algorithm_mismatch",
             Self::BadSignature => "bad_signature",
@@ -138,6 +145,9 @@ pub enum SetupError {
     /// No audience is configured, or one is empty.
     #[error("an audience is missing or empty")]
     EmptyAudience,
+    /// No algorithm is configured for the issuer.
+    #[error("the issuer has no algorithm")]
+    NoAlgorithm,
     /// The key set is not a JSON object with a `keys` array.
     #[error("the key set is malformed")]
     JwksMalformed,
