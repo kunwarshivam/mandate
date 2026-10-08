@@ -153,7 +153,7 @@ subject's stream writes an `OwnerAlertSent` naming it, with the kind, in the sub
 | `integrity_incident` | `IntegrityIncidentRecorded` (journal spec §11) | safety | `attention_needed` | Owners and workspace admins |
 | `credential_added` | `CredentialEnrolled` (identity spec §12.1): a new passkey or device | safety | `account_changed` | The member, on every push channel |
 | `new_device` | `SessionOpened` with the first-seen-device flag (identity spec §6.2, §12.1): a sign-in from a device the member has not used, which a synced passkey makes possible with no enrolment | safety | `account_changed` | The member, on every push channel |
-| `notification_address_changed` | `NotificationAddressChanged`, `added` or `removed` (workspace API spec §4.10, §5.7): a member set or removed one of their own push addresses, with step-up ([DEC-795](../project/decisions/DEC-795.md)) | safety | `account_changed` | The member, on every push channel they hold after the change (an address just added included), once more on the address just removed, and in the pull channels |
+| `notification_address_changed` | `NotificationAddressChanged`, `added` or `removed` (workspace API spec §4.10, §5.7): a member set or removed one of their own push addresses, with step-up ([DEC-795](../project/decisions/DEC-795.md)) | safety | `account_changed` | The member, on every push channel they hold after the change (an address just added included), once more on an address the member removed (never on one a replacement retired), and in the pull channels |
 | `recovery_used` | A sign-in by OIDC or a recovery code that starts an enrolment cool-off (identity spec §10.1) | safety | `account_changed` | The member, on every push channel |
 | `role_granted` | `MemberActivated` or `MemberRoleChanged` adding a role (identity spec §8.3) | safety | `account_changed` | Every other workspace admin and org owner, and the member |
 | `member_deactivated` | `MemberDeactivated` or `MemberRemoved` (identity spec §5.2) | safety | `account_changed` | The remaining workspace admins |
@@ -164,7 +164,7 @@ subject's stream writes an `OwnerAlertSent` naming it, with the kind, in the sub
 | `connection_added` | `ConnectionEstablished` | safety | `account_changed` | Owners and workspace admins |
 | `went_live` | `AgentDeployed` in a live environment | safety | `account_changed` | Owners and workspace admins |
 | `client_connected` | `ClientConnected` (identity spec §12.1, DEC-141) | safety | `account_changed` | The member and workspace admins |
-| `channel_lost` | A `NoticeAttempted` that marks the member's address `unreachable` (§5.6); the dispatcher's own record, so no other stream is written | safety | `account_changed` | The member, on their other channels |
+| `channel_lost` | A `NoticeAttempted` that marks the member's address `unreachable` or fails it as `address_missing` (§5.1, §5.6); the dispatcher's own record, so no other stream is written | safety | `account_changed` | The member, on their other channels |
 | `daily_brief` | The brief for the risk day is built (D13, DEC-184) | info | `brief_ready` | Owners |
 | `delegation_ended` | A delegation expires, is spent, or is suspended (mandate spec §6.5) | info | none (pull and brief only) | Owners |
 | `model_status` | A pinned model deprecated or withdrawn (inference spec; mandate spec §8.1) | info | none | Owners |
@@ -198,7 +198,7 @@ user with no address on any push channel still has the pull channels.
 
 - A notice answers exactly one cause, and the dispatcher's key for it is the cause's event id. The
   causes are `ApprovalRequested`, `OwnerAlertSent`, and the dispatcher's own `NoticeAttempted`
-  that loses an address (`channel_lost`).
+  that marks an address `unreachable` or fails it as `address_missing` (`channel_lost`).
 - **A user's kill switch is one cause.** Journal spec §2 makes it a command that each stream owner
   journals as `KillSwitchActivated` in its own stream. The command's `OwnerCommandIssued` is the
   cause: the API writes `OwnerAlertSent` (`kill_switch`) with it on the control stream, and the
@@ -366,11 +366,12 @@ The dispatcher **tails the journal**, which is its outbox:
    `notification_address_changed` notice to the very address its `removed` event names: opaque like
    every notice, subject to the allowlist, retried within the safety window (NT-6), and never
    repeated for a later notice. If the vault entry is already gone, that attempt is a terminal
-   `failed` that marks nothing and raises no `channel_lost`; once the entry is swept, no exception
-   remains. **An active address whose vault entry is missing** (a failure the workspace API's
-   §5.7 repairs on retry) is a terminal `failed` with reason `address_missing`: it raises
-   `channel_lost` to the member's other channels, telling them to set the address again, and does
-   not mark the address `unreachable`.
+   repeated for a later notice. If the vault entry is already gone when that last send is made, the
+   attempt is `abandoned` with reason `retry_window_ended`: it is not `address_missing`, marks
+   nothing, and raises no `channel_lost`; once the entry is swept, no exception remains. **An active
+   address whose vault entry is missing** (a failure the workspace API's §5.7 repairs, by a retry or
+   by setting the same endpoint again) is a terminal `failed` with reason `address_missing`: it
+   does not mark the address `unreachable`, and it raises `channel_lost` once (§5.6).
 4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
    issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
    while the approval is still pending.
@@ -397,7 +398,7 @@ Every channel is one adapter behind one interface:
 - Adapters take no string from the caller except the address handle, which they dereference
   through the vault client. They cannot read the journal or write the control stream (NT-3).
 - `reason` is a closed enum (`timeout`, `rate_limited`, `provider_error`, `address_rejected`,
-  `auth_failed`, `too_large`, `address_missing`); provider error text is never journaled or logged, since a provider
+  `auth_failed`, `too_large`, `address_missing`, `retry_window_ended`); provider error text is never journaled or logged, since a provider
   may echo the message.
 - A receipt can only mark an attempt or an address. It never changes an approval or any trading
   state (NT-5).
@@ -456,6 +457,9 @@ adds the notice stream and these records; E8-9's tests PR closes their payload s
   still counts toward the member's limit, and shows its status in the workspace until the member
   removes it or sets the same endpoint again, which replaces it with a new address in one batch
   (workspace API spec §4.10, §5.7).
+- **A missing entry is reported once.** The first `address_missing` attempt on an address raises
+  `channel_lost`; later attempts on it are `failed` `address_missing` with no new `channel_lost`,
+  until the member sets the address again or removes it.
 - **A member's own change is not a loss.** Adding or removing a push address through the workspace
   API (workspace API spec §4.10) is journaled as `NotificationAddressChanged` on the control
   stream and raises a `notification_address_changed` notice, not `channel_lost`. Its one last send
