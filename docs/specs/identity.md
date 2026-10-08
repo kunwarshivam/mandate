@@ -313,35 +313,42 @@ that store from the control stream's fold (DEC-642 item 7 says which crates the 
 test doubles live only behind `cfg(test)` or in `mandate-identity`'s dev-only test support.
 
 **The session.** `Session` is an authenticated-session type with private fields, built only by
-§6's code (`mandate-authn`) and by test support. It contributes the `session_ref` every committed
-event names (ID-1, §12.2), the workspace it was opened in, and its kind. A reduction-only session
+§6's code (`mandate-authn`), from the session record it reads for this request, and by test
+support; if that read fails there is no `Session`, and the request is refused before authorizing.
+It contributes the `session_ref` every committed event names (ID-1, §12.2), the workspace it was
+opened in, its kind, and its **roles snapshot**: the principal's memberships in that workspace and
+its organization (a client token's record: its user's), as of the last successful membership read.
+`MemberDeactivated` revokes every session and client token of the member in the same transaction
+(§5.2 step 2), and `MemberRoleChanged` rewrites the member's snapshots in the same transaction
+(§5.2), so a snapshot is never wider than the committed membership. A reduction-only session
 (§6.4: route 1 after the provider became unreachable, route 2) authorizes exactly these rows of
 §4.2: Pause; Kill switch, agent scope: engage; Kill switch, connection or workspace scope:
 engage; Kill switch, org scope: engage. "Kill switch, any scope: privileges beyond the stop" is not
 among them. Any other row is refused `reduction_only`. A route-1 session leaves reduction-only
 when a refresh succeeds (it is a full session again) or the provider refuses one (it ends, §6.4).
 
-**A failed membership read** (DEC-642 item 10, an agent reading under DEC-176). It fails closed
-for every row but risk reduction. `membership_unavailable` applies only to principals that hold
-memberships (a user, a client); the host CLI (whose route 3 rests on its registration alone), a
-service account, and a platform operator never read memberships and never get it. The exemption
-covers exactly three rows: Pause; Kill switch, agent scope: engage; and Kill switch, connection or
-workspace scope: engage. "Kill switch, org scope: engage" is not among them, since a workspace's
-session cannot authorize an organization's scope. On those three rows, at the scope of the
-workspace the session was opened in, a failed membership read does not refuse a user's
-reduction-only session, on one condition: the session record itself is read, in that workspace's
-store, and is unrevoked. Then the row is authorized from the session alone, and the committed
-pause or kill-switch event carries `membership_unverified: true` beside its `session_ref`
-(§12.1). If the session read fails too, the request is refused, and nothing could be journaled
-anyway (workspace API §7). The bound needs no timer: §5.2 step 2 revokes every session of a
-deactivated member in the same transaction as `MemberDeactivated`, so a deactivated member never
-holds a live session to use the exemption with. Any other session that meets a failed read on those
-rows is refused `membership_unavailable` with the hint to use route 2, which needs only the
-workspace-local passkey, whose public keys are in the workspace deployment's own credential table
-(§3.3), and no membership read; so `AGENTS.md` rule 13 holds through §6.4's routes. A reduction-only
-session is still refused after a deprovision signal (§6.4 route 2, §11.1). The ID-3 and ID-5 fuzz
-assert that a reduction-only session's pause or engage during a failed read commits with
-`membership_unverified: true`, and that nothing else ever does.
+**A failed membership read** (DEC-642 item 10, an agent reading under DEC-176 on the
+coordinator's ruling). `membership_unavailable` is never the outcome of a risk-reducing operation
+(`AGENTS.md` rules 2, 3, 13). The risk-reducing rows are those of workspace API-7's operations:
+pause; holding new openings; an owner exit; Skip on an approval; removing or narrowing a
+delegation, and away mode; and engaging a kill switch at agent, connection or workspace, or org
+scope. When the live membership read fails on one of them, a
+user's or a client's request is authorized from its session's roles snapshot against the same
+§4.2 row, by the same grammar, at the session's workspace or its organization; the context carries
+`membership_unverified`, and the committed event records `membership_unverified: true` beside its
+`session_ref` (§12.1). This holds for every session kind; a reduction-only session still reaches
+only its four rows. A failed read refuses (`membership_unavailable`) only the rows that add or
+keep risk or change configuration, and only for a user or a client: the host CLI (whose route 3
+rests on its registration alone), a service account, and a platform operator never read
+memberships. Step-up still applies where §4.2 already asks for it (an owner exit): it is verified
+locally against the passkey public keys in the workspace deployment's credential table (§3.3) and
+needs no membership read; a reduction-only session cannot present step-up (§7.3), so it cannot
+make an owner exit, as before, while a full session or route 1 after a refresh can. That is not a
+new refusal. If the session record cannot be read either, the request is refused, and nothing
+could be journaled anyway (workspace API §7). The ID-3 and ID-5 fuzz assert, across the whole
+risk-reducing set with an injected membership-store outage, that `membership_unavailable` never
+occurs, that each such operation commits with `membership_unverified: true`, and that no
+operation outside the set commits during the outage.
 
 **`TenantContext`** ([DEC-642](../project/decisions/DEC-642.md)). Only the authorization step
 constructs one, and only when it authorizes a permission at a workspace's scope; an org-scope
@@ -402,7 +409,7 @@ deactivating another member who holds it counts as removing it; and the last-own
 | `owner_role_reserved` | A principal other than an org owner grants or removes the org owner role | 403, code `owner_role_reserved` |
 | `last_owner`, `last_admin` | The change leaves no `active` org owner, or no `active` workspace admin (§5.2) | 409, the code itself |
 | `reduction_only` | A reduction-only session asks for a row other than pause or a kill switch's engage (§6.4) | 403, code `reduction_only` |
-| `membership_unavailable` | The membership lookup cannot answer, for a user or a client, outside the reduction-only exemption above | 503, `retryable`, with the hint to use §6.4 route 2 on a risk-reducing row |
+| `membership_unavailable` | The membership lookup cannot answer, for a user or a client, on a row that is not risk-reducing (never on a risk-reducing row, above) | 503, `retryable` |
 
 Step-up is not judged here: an authorization carries the row's step-up requirement, and §7
 verifies the evidence.
@@ -453,7 +460,9 @@ SSO domain, and enrols a passkey before any step-up permission becomes usable. T
 to `cooling_off` (`MemberActivated` with the cool-off end).
 
 **Role change.** A workspace admin grants (step-up) or removes (no step-up) roles. A grant may start
-a cool-off for the added role, as §8.3's rule says. No admin changes their own roles (ID-13).
+a cool-off for the added role, as §8.3's rule says. No admin changes their own roles (ID-13). The
+same transaction as `MemberRoleChanged` rewrites the member's session and client-token roles
+snapshots (§4.5).
 
 **Deactivate.** An admin deactivates a member, or a member leaves. Deactivation is never refused for
 the effect it has on V-047 or on any mandate's approvers (DEC-437 item 17, Proposed, interim reading
@@ -860,10 +869,11 @@ them to journal §9 with schemas (DEC-437 item 9):
 | `ScopeHalted`, `ScopeReenabled` | Only if DEC-437 item 21 is accepted (§4.4): kill-switch scope, by whom, step-up evidence for re-enabling |
 | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` | operator (opaque), reason code, window, approvers |
 
-**Owed with these events:** the pause and kill-switch engage events (`OwnerCommandIssued` and its
-kill-switch commands) gain `membership_unverified` (bool), beside the `session_ref` every event
-carries, true only for a reduction-only session's pause or engage authorized during a failed
-membership read (§4.5). Their schemas take the field when this journal change lands.
+**Owed with these events:** the events of the risk-reducing operations (§4.5; workspace API-7:
+pause, hold, owner exit, Skip, ending or narrowing a delegation and away mode, and kill-switch
+engage) gain `membership_unverified` (bool), beside the `session_ref` every event carries, true
+only for such an operation authorized from a session's roles snapshot during a failed membership
+read (§4.5). Their schemas take the field when this journal change lands.
 
 Organization-scope events (ownership, SSO, org policy) are written to each of the org's workspaces'
 control streams, so each workspace's records are complete on their own.
