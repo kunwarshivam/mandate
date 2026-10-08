@@ -181,7 +181,6 @@ impl Stream {
 /// deployed model, and their config references are the hashes of the registered objects and the
 /// confirmed version.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_artifacts_bind_the_registered_instrument_and_objects() {
     let nasdaq = SNAPSHOT.replace("arca", "nasdaq");
     for (snapshot, venues) in [
@@ -221,7 +220,6 @@ fn the_artifacts_bind_the_registered_instrument_and_objects() {
 /// that names the pin under another `kind`, and the E7-7 file's `{"id","version"}` shape, which is
 /// no DEC-504 content object and has no fallback (DEC-504).
 #[test]
-#[ignore = "pending E7-19"]
 fn a_registered_object_the_run_cannot_use_is_refused() {
     let aggressive = FEE.replace("conservative_v1", "aggressive_v1");
     let slow_quotes = RULES.replace(r#""iex_quote_max_age_s":"#, r#""iex_quote_max_age_s":6"#);
@@ -310,7 +308,6 @@ fn minute_bars(symbol: &str) -> MinuteBars {
 /// The liquidity facts read the instrument the registered artifacts bind: SPY's daily and minute
 /// bars give SPY's figures, and AAPL's minute bars are refused for it.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_liquidity_facts_read_the_registered_instrument() {
     let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
     let symbol = artifacts.production_identity().symbol;
@@ -387,7 +384,6 @@ fn spy_facts(asset_id: &str, symbol: &str, exchange: BrokerExchange) -> PaperFac
 /// another symbol is refused at the asset record, and a registered snapshot whose ETP
 /// classification is dated after the run is refused at the classification.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_preflight_judges_the_registered_instruments_asset_record() {
     let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
     let agent = mandate_runtime::AgentId("agent_spy".to_owned());
