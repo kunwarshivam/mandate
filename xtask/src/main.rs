@@ -7,6 +7,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use anyhow::{Context, Result, bail};
@@ -1380,6 +1381,17 @@ impl Drop for GateDiff {
     }
 }
 
+/// How many gate diffs this process has named, so two in one process never share a file.
+static GATE_DIFFS: AtomicU64 = AtomicU64::new(0);
+
+/// A temporary path for one [`GateDiff`], unique within the machine while this process lives: the
+/// process id alone is shared by every test thread of `cargo test`, and one [`GateDiff`] dropping
+/// its file removed the file another was about to time (#768's follow-up).
+fn gate_diff_path() -> PathBuf {
+    let n = GATE_DIFFS.fetch_add(1, Ordering::Relaxed);
+    env::temp_dir().join(format!("mandate-mutants-{}-{n}.diff", std::process::id()))
+}
+
 /// The diff [`mutants`] and [`mutants_plan`] both judge, or `None`, saying why, when there is no
 /// base or no safety-critical crate's source changed. One function, so the plan that sizes CI's
 /// matrix and the gate each shard runs cannot select different source (DEC-538).
@@ -1410,7 +1422,7 @@ fn gate_diff(root: &Path, base: Option<&str>) -> Result<Option<GateDiff>> {
         "git",
         &args.iter().map(String::as_str).collect::<Vec<_>>(),
     )?;
-    let file = env::temp_dir().join(format!("mandate-mutants-{}.diff", std::process::id()));
+    let file = gate_diff_path();
     fs::write(&file, text)?;
     Ok(Some(GateDiff {
         crates,
@@ -3360,10 +3372,10 @@ mod tests {
         MutantPlan, MutantShard, MutatedCrate, Package, PendingTest, PendingTestRun, REFCASES,
         TestOutcome, actionlint_workflows, backticked_paths, base_ref_in, check_schedule, ci,
         classify, contains_dec_id, contains_word, external_oracles, failure_cause,
-        files_by_extension, first_panic_line, forbidden_reached, generated_pending_markers,
-        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
-        listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts, mutants,
-        mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
+        files_by_extension, first_panic_line, forbidden_reached, gate_diff, gate_diff_path,
+        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
+        layer_problems, lint, listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts,
+        mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
         plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
         spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
@@ -5781,6 +5793,26 @@ mod tests {
     /// the tool lists for the diff; the plan's shards between them test that whole set; shard `k`
     /// of the plan tests what shard `k` of 192 tests; the shards the plan drops test nothing; and a
     /// shard is refused when its listing or its total disagrees with the plan that launched it.
+    /// Two gate diffs in one process get two files, and dropping one leaves the other: under plain
+    /// `cargo test` every test thread shares the process id, and one gate's drop removed the diff
+    /// another was about to time ("timing the diff this run reads: No such file or directory").
+    #[test]
+    fn two_gate_diffs_in_one_process_never_share_a_file() -> Result<()> {
+        let fx = Fixture::gated("gate-diff-names")?;
+        let base = fs::read_to_string(fx.0.join("base"))?;
+        let base = base.trim();
+        let first = gate_diff(&fx.0, Some(base))?.context("the fixture's diff changes source")?;
+        let second = gate_diff(&fx.0, Some(base))?.context("the fixture's diff changes source")?;
+        assert_ne!(first.file, second.file, "each diff has its own file");
+        drop(first);
+        assert!(
+            second.file.exists(),
+            "and dropping one gate's diff leaves the other's in place"
+        );
+        assert_ne!(gate_diff_path(), gate_diff_path());
+        Ok(())
+    }
+
     #[test]
     fn the_planned_shards_test_the_gates_mutants_and_no_more_per_shard() -> Result<()> {
         let fx = Fixture::gated("mutants-plan")?;
