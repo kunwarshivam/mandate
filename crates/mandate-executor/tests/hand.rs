@@ -4200,7 +4200,6 @@ fn the_ladder_never_prices_below_the_floor() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_kill_switch_cancels_only_that_agents_orders() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4260,7 +4259,6 @@ fn an_agent_kill_switch_cancels_only_that_agents_orders() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4377,7 +4375,6 @@ fn an_account_cancel_all_covers_unknown_orders() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_applies_the_mode_before_it_cancels() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4452,7 +4449,6 @@ fn deferred(ran: &common::Ran) -> Vec<String> {
 /// sells nothing, and journals the instrument as `deferred`; the same switch in the regular
 /// session cancels the protection for its close and defers nothing.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_automated_flatten_defers_equity_sells_to_the_session() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4510,7 +4506,6 @@ fn an_automated_flatten_defers_equity_sells_to_the_session() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_automated_flatten_sells_crypto_at_once() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -4641,7 +4636,6 @@ fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
 /// pre-market, once the protection's cancel is confirmed, no sell goes with `extended_hours`; in
 /// the regular session, the control, the same switch's close is submitted.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unconfirmed_owner_exit_waits_for_the_session() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4704,7 +4698,6 @@ fn an_unconfirmed_owner_exit_waits_for_the_session() {
 /// laddered, and stepped while the agent is paused, each step's cancel confirmed before the next
 /// rung, and no step ends the sequence (#373 round 1, major 1).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_paused_flattens_ladder_steps_and_its_step_cancel_does_not_end_the_sequence() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4820,7 +4813,6 @@ fn a_paused_flattens_ladder_steps_and_its_step_cancel_does_not_end_the_sequence(
 /// [`the_ladder_never_prices_below_the_floor`] pins the alert only for `max_exit_offset`'s own
 /// floor.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4919,7 +4911,6 @@ fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
 /// its own `client_order_id`, never by cancel-all, and never treats it as the agent's own: the
 /// switch sells exactly the agent's attributed lots, not the position the exit was sized to.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_kill_switch_cancels_a_watchdog_exit_of_no_agent_and_sells_only_its_own_lots() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5528,7 +5519,6 @@ fn the_reducing_sell_waits_for_the_cancel_confirmation() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_jumps_a_full_queue() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5562,7 +5552,6 @@ fn a_kill_switch_jumps_a_full_queue() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_journaled_order_is_the_handling_order() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
