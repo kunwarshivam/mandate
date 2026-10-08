@@ -1251,7 +1251,7 @@ proves each pending test fails on them (DEC-110).
   second order; a terminal order never changes and is refused; a fill never exceeds the quantity;
   every state change is a legal transition, and every legal one is accepted; each against the
   test's own oracle), with fixtures in
-  `tests/common/mod.rs`. Pending E7-25.
+  `tests/common/mod.rs`.
 - **Run:** `cargo nextest run -p mandate-rh-sim`.
 
 ## Research-agent spike (E17-0)
