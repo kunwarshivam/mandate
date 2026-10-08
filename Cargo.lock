@@ -1559,6 +1559,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-rh-sim"
+version = "0.0.0"
+dependencies = [
+ "mandate-num",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-risk"
 version = "0.0.0"
 dependencies = [
