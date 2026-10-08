@@ -13,46 +13,92 @@
     "NaN",
     " 1",
     "1_000",
-    "0.00000000000000000000000000001"
+    "0.00000000000000000000000000001",
+    "1\n",
+    "",
+    "-"
   ],
   "Timestamp": [
     "2026-09-28T14:05:18-04:00",
+    "2026-09-28T18:05:18.000000000+00:00",
     "2026-09-28T18:05:18Z",
     "2026-09-28T18:05:18.000Z",
     "2026-13-01T00:00:00.000000000Z",
+    "1969-12-31T23:59:59.000000000Z",
+    "0000-01-01T00:00:00.000000000Z",
+    "2026-02-31T00:00:00.000000000Z",
+    "2026-02-30T00:00:00.000000000Z",
+    "2026-04-31T00:00:00.000000000Z",
+    "2026-11-31T00:00:00.000000000Z",
+    "2026-09-28T24:00:00.000000000Z",
+    "2026-09-28T18:60:00.000000000Z",
+    "2026-09-28T18:05:60.000000000Z",
+    "2026-09-28 18:05:18.000000000Z",
+    "2026-09-28T18:05:18.000000000z",
+    "2026-09-28T18:05:18.000000000Z\n",
     1727546718
   ],
   "ContentRef": [
-    "516967c3516967c3516967c3516967c3516967c3516967c3516967c3516967c3",
-    "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee",
+    "sha512:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee",
+    "SHA256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee",
+    "sha256516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee",
+    "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedeA",
+    "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedeg",
+    "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daede",
+    "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee0",
+    "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee\n"
   ],
   "Id": [
     "",
     "has space",
     "btc/usd",
+    "quant.momentum",
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "agt_1\n",
+    "agt:1"
   ],
   "AssetId": [
     "7B4A1C2E-1111-4A2B-9C3D-000000000001",
+    "7B4a1c2e-1111-4a2b-9c3d-000000000001",
+    "7b4a1c2e-1111-4a2b-9c3-0000000000001",
+    "7b4a1c2e-1111-4a2b-9c3d-0000000000012",
+    "7b4a1c2-1111-4a2b-9c3d-000000000001",
+    "7b4a1c2e-111-4a2b-9c3d-000000000001",
+    "7b4a1c2e-1111-4a2-9c3d-000000000001",
     "7b4a1c2e11114a2b9c3d000000000001",
+    "7b4a1c2e-1111-4a2b-9c3d-00000000000g",
     "BTC/USD",
-    "7b4a1c2e-1111-4a2b-9c3d-00000000000"
+    "7b4a1c2e-1111-4a2b-9c3d-000000000001\n"
   ],
   "EventId": [
-    "01jbh3btz8k2m4n6p8r0s2t4v6",
-    "01JBH3BTZ8K2M4N6P8R0S2T4VU",
     "81JBH3BTZ8K2M4N6P8R0S2T4V6",
-    "01JBH3BTZ8"
+    "01JBH3BTZ8K2M4N6P8R0S2T4VI",
+    "01JBH3BTZ8K2M4N6P8R0S2T4VL",
+    "01JBH3BTZ8K2M4N6P8R0S2T4VO",
+    "01JBH3BTZ8K2M4N6P8R0S2T4VU",
+    "01jbh3btz8k2m4n6p8r0s2t4v6",
+    "01JBH3BTZ8K2M4N6P8R0S2T4v6",
+    "01JBH3BTZ8K2M4N6P8R0S2T4V",
+    "01JBH3BTZ8K2M4N6P8R0S2T4V60",
+    "01JBH3BTZ8K2M4N6P8R0S2T4V6\n"
   ],
   "Watermark": [
     {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 0, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
-    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1842, "hash": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1.5, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 9007199254740992, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1842, "hash": "516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
     {"stream_id": "orders:ws_1", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "acct:ws_1", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "agent:ws_1", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "ctl:ws_1:x", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "clock:a:b", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "ntf:ws_1:x", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "acct:ws_1:acc.1", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "ctl:ws_1\n", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "ctl:", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
     {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z", "extra": 1},
-    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"},
-    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1.5, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"}
+    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"}
   ],
   "AsOf": [
     [],
@@ -63,14 +109,25 @@
     {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "age_seconds": -1, "limit_source": "data_profile.max_mark_age_s"},
     {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": "no", "age_seconds": 2, "limit_source": "data_profile.max_mark_age_s"},
     {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "limit_source": "data_profile.max_mark_age_s"},
-    {"observed_at": "2026-09-28T14:05:18-04:00", "stale": false, "age_seconds": 2, "limit_source": "data_profile.max_mark_age_s"}
+    {"observed_at": "2026-09-28T14:05:18-04:00", "stale": false, "age_seconds": 2, "limit_source": "data_profile.max_mark_age_s"},
+    {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "age_seconds": 2, "limit_source": "data_profile.max_mark_age_s", "extra": 1},
+    {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "age_seconds": 2, "limit_source": ""},
+    {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "age_seconds": 2, "limit_source": " "},
+    {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "age_seconds": 2, "limit_source": "Data Profile"},
+    {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "age_seconds": 2, "limit_source": "data_profile.max_mark_age_s\n"}
   ],
   "QuotedContent": [
     {"author": "user", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null},
+    {"author": "user_authored", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null},
+    {"author": "platform", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null},
     {"author": "owner_selected", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null, "action": "approve"},
     {"author": "owner_selected", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null, "button": {"label": "Buy"}},
     {"text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null},
     {"author": "owner_selected", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": "abc"},
-    {"author": "owner_selected", "text": ["a"], "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null}
+    {"author": "owner_selected", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee\n"},
+    {"author": "owner_selected", "text": ["a"], "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null},
+    {"author": "owner_selected", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum\n", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null},
+    {"author": "owner_selected", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0\n", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null},
+    {"author": "owner_selected", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6\n", "artifact": null}
   ]
 }
