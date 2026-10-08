@@ -25,7 +25,6 @@ fn account(equity: &str, maintenance_margin: &str) -> BrokerAccount {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn maintenance_excess_is_equity_less_the_maintenance_margin() {
     for (equity, margin, excess) in [
         ("20000", "0", "20000"),
@@ -42,7 +41,6 @@ fn maintenance_excess_is_equity_less_the_maintenance_margin() {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn a_requirement_above_equity_is_a_negative_excess_a_deficit() {
     for (equity, margin, deficit) in [
         ("20000", "25000.5", "-5000.5"),
@@ -58,7 +56,6 @@ fn a_requirement_above_equity_is_a_negative_excess_a_deficit() {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn the_excess_reads_neither_the_prior_close_nor_the_buying_power() {
     let given = BrokerAccount {
         equity: usd("50000"),
@@ -78,7 +75,6 @@ fn the_excess_reads_neither_the_prior_close_nor_the_buying_power() {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn a_negative_maintenance_margin_is_refused_rather_than_raising_the_excess() {
     for margin in ["-0.01", "-12500"] {
         assert_eq!(
@@ -91,7 +87,6 @@ fn a_negative_maintenance_margin_is_refused_rather_than_raising_the_excess() {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn an_excess_beyond_the_usd_range_is_refused_not_wrapped() {
     let given = account(&format!("-{USD_LIMIT}"), "1");
     assert_eq!(
@@ -133,7 +128,6 @@ fn cents_text(cents: i128) -> String {
 /// `i128` difference: an excess when the requirement is below equity, zero at it, and a deficit
 /// above it, with no clamp and no rounding.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_excess_is_the_whole_cent_difference_for_every_account() {
     let equity = -10_000_000_000_i64..=10_000_000_000_000_i64;
     let margin = 0_i64..=10_000_000_000_000_i64;

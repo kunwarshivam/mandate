@@ -4,7 +4,7 @@
 //! fields the connector parses (§7.2), and the shell takes it from here rather than computing its
 //! own (the first paper trade brief's X-9, slices A1 and Q2; DEC-524).
 
-use mandate_num::Usd;
+use mandate_num::{NumError, Usd};
 
 use crate::error::ExecutorError;
 use crate::types::BrokerAccount;
@@ -19,6 +19,9 @@ impl BrokerAccount {
     /// [`ExecutorError::Num`] with `NumError::Negative` for a negative maintenance margin, and
     /// with the arithmetic's own error when the difference does not fit a [`Usd`].
     pub fn maintenance_excess(&self) -> Result<Usd, ExecutorError> {
-        Err(ExecutorError::Unimplemented { story: "E7-19" })
+        if self.maintenance_margin.is_negative() {
+            return Err(NumError::Negative.into());
+        }
+        Ok(self.equity.checked_sub(self.maintenance_margin)?)
     }
 }
