@@ -23,6 +23,7 @@ use mandate_journal::{
 };
 
 pub mod cold;
+pub mod export;
 
 #[derive(Debug, Subcommand)]
 pub enum JournalCommand {
@@ -33,6 +34,9 @@ pub enum JournalCommand {
     /// order from a trusted start, then an anchor and its timestamp token when they are given.
     /// Exits with an error on any failure, and on a token until its signature can be checked.
     VerifyCold(cold::VerifyColdArgs),
+    /// Write one stream of the workspace's Postgres journal as a segment file `verify` reads.
+    /// Refuses an existing file and a stream with no event.
+    Export(export::ExportArgs),
 }
 
 #[derive(Debug, Args)]

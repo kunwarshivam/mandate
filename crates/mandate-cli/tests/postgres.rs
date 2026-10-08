@@ -1,7 +1,8 @@
 //! P0 (E10-16, DEC-520): `PgControlJournal` and the `--journal` and `--store` options, against
 //! oracles sharing no code with it: the journal vectors, `MemoryJournal`'s artifact-aware append,
 //! and the CLI tests' own journal. Every Postgres test starts with [`unparsable_dsn_property`], which
-//! needs no database, so the pending gate sees the stub without one (DEC-510 item 3).
+//! needs no database, so the pending gate sees the stub without one (DEC-510 item 3). V0's
+//! `journal export` tests (DEC-522) start with [`bad_stream_property`] for the same reason.
 
 #[path = "common/mod.rs"]
 mod cli;
@@ -18,6 +19,7 @@ mod conformance;
 mod support;
 
 use std::path::{Path, PathBuf};
+use std::process::Command as Process;
 
 use clap::Parser;
 use clap::error::ErrorKind;
@@ -26,6 +28,8 @@ use conformance::{fixture, fixture_artifacts, get, list, text};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, to_canonical};
 use mandate_cli::control::{ControlError, ControlJournal};
+use mandate_cli::journal::export::{ExportArgs, export};
+use mandate_cli::journal::{VerifyArgs, verify};
 use mandate_cli::postgres::{JournalArgs, PgControlJournal};
 use mandate_journal::AppendOutcome::{self, AlreadyCommitted, Committed, HeadMismatch};
 use mandate_journal::{ArtifactRef, ArtifactStore, InvalidReason, MemoryJournal, StreamId};
@@ -71,12 +75,17 @@ fn unparsable_dsn_property() {
 fn opened(name: &str) -> Option<(TestDb, PgControlJournal, PathBuf)> {
     unparsable_dsn_property();
     let db = TestDb::new()?;
+    let root = scratch(name);
+    let journal = PgControlJournal::open(&args(&dsn(&db), &root));
+    Some((db, journal.unwrap(), root))
+}
+
+/// A DSN acting as the application role in `db`'s schema.
+fn dsn(db: &TestDb) -> String {
     let url = std::env::var(URL_VAR).unwrap();
     let joiner = if url.contains('?') { '&' } else { '?' };
     let options = format!("-c%20search_path%3D{}%20-c%20role%3D{APP_ROLE}", db.schema);
-    let root = scratch(name);
-    let journal = PgControlJournal::open(&args(&format!("{url}{joiner}options={options}"), &root));
-    Some((db, journal.unwrap(), root))
+    format!("{url}{joiner}options={options}")
 }
 
 /// The writer's draft of a vector's stored body: the body without the journal-assigned fields.
@@ -262,4 +271,183 @@ fn the_options_debug_form_never_shows_the_dsn() {
     let shown = format!("{given:?}");
     assert!(!shown.contains("p0-sentinel"), "{shown}");
     assert!(shown.contains("store-root"), "{shown}");
+}
+
+fn export_args(journal: &str, stream: &str, out: &Path) -> ExportArgs {
+    let (stream, out) = (stream.to_owned(), out.to_owned());
+    ExportArgs {
+        journal: journal.into(),
+        stream,
+        out,
+    }
+}
+
+/// The message an export refused with, or the empty string when it did not refuse.
+fn refusal<T>(result: anyhow::Result<T>) -> String {
+    result.err().map(|e| format!("{e:#}")).unwrap_or_default()
+}
+
+/// A stream id that is not one of journal spec §2's is refused before the journal is opened, so
+/// with no database at all: nothing is written and the DSN's password is never repeated.
+fn bad_stream_property() {
+    let (secret, out) = ("v0-sentinel-password", scratch("bad").join("out.jsonl"));
+    let dsn = format!("postgres://owner:{secret}@127.0.0.1:1/j");
+    let why = refusal(export(
+        &export_args(&dsn, "not-a-stream", &out),
+        &mut Vec::new(),
+    ));
+    assert!(why.starts_with("export_stream_id_invalid"), "{why}");
+    assert!(!why.contains(secret) && !out.exists(), "{why}");
+}
+
+/// With no database: an existing file is refused before the journal is read, and an unreachable
+/// journal's error is reported; each refusal carries its code, none names any part of the DSN (its
+/// user, password or host), and nothing is created beside the existing file, which is left as it
+/// was (DEC-522 item 3; `AGENTS.md` rule 7).
+#[test]
+#[ignore = "pending E10-16"]
+fn no_refusal_names_the_dsn_or_creates_a_file() {
+    let sentinels = [
+        "v0-user-sentinel",
+        "v0-password-sentinel",
+        "v0-host-sentinel.invalid",
+    ];
+    let [user, password, host] = sentinels;
+    let dsn = format!("postgres://{user}:{password}@{host}:1/j");
+    let dir = scratch("sentinels");
+    std::fs::create_dir_all(&dir).unwrap();
+    let kept = dir.join("kept.jsonl");
+    std::fs::write(&kept, b"kept").unwrap();
+    let cases = [
+        (kept.clone(), "export_file_exists"),
+        (dir.join("new.jsonl"), "the journal failed: unavailable"),
+    ];
+    for (out, code) in cases {
+        let why = refusal(export(&export_args(&dsn, CONTROL, &out), &mut Vec::new()));
+        assert!(why.contains(code), "{code}: {why}");
+        let named: Vec<&str> = sentinels.into_iter().filter(|s| why.contains(s)).collect();
+        assert!(named.is_empty(), "{code} names {named:?}: {why}");
+    }
+    let left: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left, ["kept.jsonl"], "nothing is created");
+    assert_eq!(std::fs::read(&kept).unwrap(), b"kept");
+}
+
+/// After [`bad_stream_property`], a database holding the control-stream vectors, its DSN, and a
+/// store holding their artifacts; `None` where `TestDb` skips.
+fn seeded(name: &str) -> Option<(TestDb, String, PathBuf)> {
+    bad_stream_property();
+    let (db, mut pg, root) = opened(name)?;
+    let fx = fixture();
+    let mut files = FsArtifactStore::open(&root).unwrap();
+    for bytes in fixture_artifacts(get(&fx, "control_stream")).values() {
+        files.put_artifact(bytes).unwrap();
+    }
+    let epoch = pg.take_ownership(&stream()).unwrap();
+    for (head, entry) in (0u64..).zip(list(&fx, "control_stream.chain")) {
+        let body = get(entry, "body");
+        let when = at(text(body, "recorded_at"));
+        let outcome = pg.append(&stream(), head, epoch, when, &[&draft_of(body)]);
+        assert_eq!(outcome.unwrap().name(), "Committed");
+    }
+    let dsn = dsn(&db);
+    Some((db, dsn, root))
+}
+
+/// The export is the vectors' segment, line for line from their canonical bodies and hashes
+/// (journal spec §6.2), and `journal verify` passes it with the store (X-11).
+#[test]
+#[ignore = "pending E10-16"]
+fn a_stream_exports_as_its_vectors_segment_and_verifies() {
+    let Some((_db, dsn, root)) = seeded("x") else {
+        return;
+    };
+    let out = root.join("ctl.jsonl");
+    let exported = export(&export_args(&dsn, CONTROL, &out), &mut Vec::new()).unwrap();
+    let chain = list(&fixture(), "control_stream.chain").to_vec();
+    let line = |e: &Value| {
+        format!(
+            "{{\"body\":{},\"hash\":\"{}\"}}\n",
+            text(e, "canonical"),
+            text(e, "hash")
+        )
+    };
+    let want: String = chain.iter().map(line).collect();
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), want);
+    let last = (
+        chain.len() as u64,
+        text(chain.last().unwrap(), "hash").to_owned(),
+    );
+    let got = (
+        exported.stream_id.as_str(),
+        exported.last_seq,
+        exported.last_hash.to_hex(),
+    );
+    assert_eq!(got, (CONTROL, last.0, last.1));
+    let (store, anchor, from_seq, trusted_prev_hash) = (Some(root), None, None, None);
+    let args = VerifyArgs {
+        export: out,
+        store,
+        anchor,
+        from_seq,
+        trusted_prev_hash,
+    };
+    let verified = verify(&args, &mut Vec::new()).unwrap();
+    assert_eq!(verified.code(), None, "{verified}");
+}
+
+/// An existing file is refused and left as it was, and a stream with no event is refused and
+/// writes nothing: a segment never replaces evidence, and an empty one verifies nothing.
+#[test]
+#[ignore = "pending E10-16"]
+fn an_existing_file_and_an_empty_stream_are_refused() {
+    let Some((_db, dsn, root)) = seeded("r") else {
+        return;
+    };
+    let kept = root.join("kept.jsonl");
+    std::fs::write(&kept, b"kept").unwrap();
+    let why = refusal(export(&export_args(&dsn, CONTROL, &kept), &mut Vec::new()));
+    assert!(why.starts_with("export_file_exists"), "{why}");
+    assert_eq!(std::fs::read(&kept).unwrap(), b"kept");
+    let empty = root.join("empty.jsonl");
+    let nobody = "agent:ws_01J8Z2:nobody";
+    let why = refusal(export(&export_args(&dsn, nobody, &empty), &mut Vec::new()));
+    assert!(
+        why.starts_with("export_stream_empty") && !empty.exists(),
+        "{why}"
+    );
+}
+
+/// The binary dispatches `journal export` from `main` and does not panic on the journal's own
+/// runtime (DEC-522), and the file it writes passes `journal verify`.
+#[test]
+#[ignore = "pending E10-16"]
+fn the_binary_exports_a_stream_that_the_binary_verifies() {
+    let Some((_db, dsn, root)) = seeded("b") else {
+        return;
+    };
+    let out = root.join("bin.jsonl");
+    let mandate = |argv: &[&str]| {
+        Process::new(env!("CARGO_BIN_EXE_mandate"))
+            .args(argv)
+            .output()
+            .unwrap()
+    };
+    let (out_path, store) = (out.to_str().unwrap(), root.to_str().unwrap());
+    let run = mandate(&["journal", "export", "--journal", &dsn, CONTROL, out_path]);
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(String::from_utf8_lossy(&run.stdout).contains(CONTROL));
+    let checked = mandate(&["journal", "verify", out_path, "--store", store]);
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stdout)
+    );
 }

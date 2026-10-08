@@ -53,6 +53,10 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Command::Journal(JournalCommand::Export(args)) => {
+            journal::export::export(&args, &mut io::stdout().lock())?;
+            Ok(())
+        }
         Command::Artifact(ArtifactCommand::Put(args)) => {
             artifact::put(&args, &mut io::stdout().lock())?;
             Ok(())

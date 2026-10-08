@@ -1335,6 +1335,16 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `ConnectionEstablished` (its permission check is E7-12's); a re-run of a committed command
   commits nothing (DEC-290); and the records fold, through `JournaledFact::from_record`, to a
   context in which the mandate validates.
+- **E10-17 (Should, M6; SC)** As an engineer, I want a test that pins the text of the CLI's
+  journal errors, so that a change to `the journal failed: <code>` is caught rather than only
+  documented (DEC-520 item 1; #680's review, minor 2). *Accepted when:* a test drives
+  `PgControlJournal` to each answerless outcome (`unavailable`, `integrity`, and an append's failed
+  §11 check) and asserts the exact message, and no message carries the DSN.
+- **E10-18 (Should, M6; SC)** As the founder, I want the CLI to say why it could not reach the
+  journal, so that a refused password, a missing database or a TLS failure is not reported as the
+  same `unavailable` as a database that is down (#680's review, minor 3). *Accepted when:*
+  connection-time failures map to distinct stable codes in `ControlError::Journal`, tested against
+  Postgres, and none carries the DSN or its password.
 
 ### E11 Web app: dashboard and controls
 
