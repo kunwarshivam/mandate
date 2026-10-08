@@ -14,20 +14,19 @@
 //!
 //! **Nothing about trading can reach a provider** (`AGENTS.md` rule 6, NT-1). A [`Notification`]
 //! holds a [`NoticeId`] and a [`TextKey`] and nothing else. A notice id is minted only from a
-//! [`SecureRandom`] source and has no constructor from text, so no journal event id, and with it no
-//! event's creation time, can become one (NT-4):
+//! [`SecureRandom`] source and has no constructor from an event id, so no journal event id, and
+//! with it no event's creation time, can become one (NT-4):
 //!
-//! ```compile_fail
+//! ```compile_fail,E0308
 //! let _ = mandate_notify::NoticeId::from("01J8ZNB0M000000000000000K1");
 //! ```
 //!
-//! ```compile_fail
-//! let _: mandate_notify::NoticeId = "01J8ZNB0M000000000000000K1".parse().unwrap();
-//! ```
-//!
-//! ```compile_fail
+//! ```compile_fail,E0423
 //! let _ = mandate_notify::NoticeId([0u8; 16]);
 //! ```
+//!
+//! The one way back from text is [`NoticeId::parse`], to resolve a link: it takes exactly 32
+//! lowercase hex digits, which no ULID is (DEC-702 item 2).
 //!
 //! **It reaches no stream.** The crate sits at layer 1 over `mandate-canon` alone, so it cannot
 //! reach the journal or the control-stream writer (NT-3 at rung 1). It is pure: the random source
@@ -52,6 +51,9 @@ pub enum NotifyError {
     /// predictable one.
     #[error("the random source is unavailable")]
     EntropyUnavailable,
+    /// Text that is not exactly 32 lowercase hex digits was offered as a notice id.
+    #[error("a notice id is exactly 32 lowercase hex digits")]
+    NotANoticeId,
     /// The configured origin is not `https://<lowercase host>[:<port>]` (DEC-710 item 3).
     #[error("the workspace app origin must be https://<lowercase host>[:<port>] and nothing else")]
     InvalidOrigin,

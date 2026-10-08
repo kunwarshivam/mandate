@@ -62,6 +62,34 @@ fn a_failing_random_source_mints_no_notice() {
     );
 }
 
+/// DEC-702 item 2: text reads back only as exactly 32 lowercase hex digits, the form a link and
+/// `NoticeIssued` carry, and the id it gives is the one that was minted.
+#[test]
+#[ignore = "pending E8-9"]
+fn a_notice_id_parses_only_from_32_lowercase_hex() {
+    let mut random = Recording::seeded(21);
+    let minted = answer("mint", NoticeId::mint(&mut random));
+    let id = hex(&random.issued[0]);
+    assert_eq!(answer("parse", NoticeId::parse(&id)), minted);
+    let upper = id.to_ascii_uppercase();
+    for text in [
+        "01J8ZNB0M000000000000000K1",
+        "01j8znb0m000000000000000k1",
+        &upper,
+        &id[..31],
+        &format!("{id}0"),
+        &format!("{}g", &id[..31]),
+        &format!(" {}", &id[1..]),
+        "",
+    ] {
+        assert_eq!(
+            NoticeId::parse(text),
+            Err(NotifyError::NotANoticeId),
+            "{text:?}"
+        );
+    }
+}
+
 proptest! {
     /// NT-4: notices about one cause never share an id, and no id is, or parses as, a journaled
     /// event's ULID.

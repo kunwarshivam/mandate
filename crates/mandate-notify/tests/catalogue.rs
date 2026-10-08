@@ -91,9 +91,11 @@ fn every_text_key_renders_its_fixed_english_text() {
     }
 }
 
-/// NT-12: the advice-wording list `the_content_never_carries_advice_wording` (mandate-approval's
-/// `tests/content.rs`) uses, then the urgency, outcome, and trade words NT-12 adds, as whole
-/// words, and no figure at all.
+/// NT-12: first the advice-wording list of `the_content_never_carries_advice_wording` in
+/// `crates/mandate-approval/tests/content.rs`, copied word for word: both crates sit at layer 1,
+/// so neither may depend on the other, and a shared list would need a crate of its own. Then the
+/// urgency, outcome, and trade words NT-12 adds, as whole words, and no figure at all. A word added
+/// to either list belongs in both.
 #[test]
 #[ignore = "pending E8-9"]
 fn no_text_advises_urges_or_counts() {

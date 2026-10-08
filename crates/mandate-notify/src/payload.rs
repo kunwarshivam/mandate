@@ -15,8 +15,9 @@ pub trait SecureRandom {
 }
 
 /// A random 128-bit notice id, the only id that leaves the workspace (spec §1.3, §4.2). It is
-/// minted, never derived: it has no constructor from text or from any event id, so a ULID, whose
-/// leading 48 bits are its creation time, can never be sent as one (NT-4).
+/// minted, never derived: it has no constructor from any event id, and text parses only as exactly
+/// 32 lowercase hex digits, so a ULID, whose leading 48 bits are its creation time, can never be
+/// sent as one (NT-4, DEC-702 item 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NoticeId([u8; 16]);
 
@@ -27,6 +28,17 @@ impl NoticeId {
     /// [`NotifyError::EntropyUnavailable`] when the source fails.
     pub fn mint(random: &mut dyn SecureRandom) -> Result<Self, NotifyError> {
         let _ = random;
+        Err(NotifyError::Unimplemented { story: "E8-9" })
+    }
+
+    /// Reads back a notice id from its 32 lowercase hex digits, as a link or the dispatcher's own
+    /// `NoticeIssued` carries it (DEC-702 item 2). A ULID, 26 characters of Crockford base32, never
+    /// parses.
+    ///
+    /// # Errors
+    /// [`NotifyError::NotANoticeId`] for anything but exactly 32 lowercase hex digits.
+    pub fn parse(hex: &str) -> Result<Self, NotifyError> {
+        let _ = hex;
         Err(NotifyError::Unimplemented { story: "E8-9" })
     }
 }
