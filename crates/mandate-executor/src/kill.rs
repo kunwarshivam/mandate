@@ -1329,4 +1329,30 @@ mod tests {
         }
         Ok(())
     }
+
+    /// #668 round 1, minor 2: a second switch while the first's flatten is received but not yet
+    /// sent, waiting on its protection's cancel, raises no second close for the same lots, and
+    /// the confirmation sends one sell.
+    #[test]
+    fn a_second_switch_waits_on_the_first_flatten_still_unsent() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(MONDAY)), &ports)?;
+        executor.run(quote_of("AAPL", "150", MONDAY)?, &ports)?;
+        let first = executor.run(switch(Initiator::RiskLimit, false)?, &ports)?;
+        assert_eq!(raised(&first).len(), 1, "{:?}", raised(&first));
+        let second = executor.run(switch(Initiator::Owner, false)?, &ports)?;
+        assert!(raised(&second).is_empty(), "{:?}", raised(&second));
+        let confirmed = executor.run(cancel_accepted("md-oco-1"), &ports)?;
+        assert_eq!(sold(&confirmed).len(), 1);
+        assert!(raised(&confirmed).is_empty(), "{:?}", raised(&confirmed));
+        Ok(())
+    }
 }
