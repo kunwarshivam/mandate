@@ -6,6 +6,7 @@
 mod common;
 
 use common::{Case, at, dec, id, long, params};
+use std::cell::Cell;
 use std::collections::BTreeSet;
 
 use mandate_canon::Digest;
@@ -57,6 +58,7 @@ fn every_refusal_has_its_own_stable_code() {
 enum Change {
     Id,
     Version,
+    /// E7-7's old fixture hash, the digest of `{"id","version"}`, which covers no code (X-4).
     PinHash,
     NoEntry,
     EntryHash,
@@ -74,10 +76,14 @@ enum Change {
     Instrument,
     Skipped,
     Repeated,
+    OutOfOrder,
+    NonTradingDay,
     Stale,
     BeforeClose,
     TwoCloses,
+    HugePrices,
     PastCalendar,
+    BeforeRange,
 }
 
 fn fast_slow(case: &mut Case, fast: ParamValue, slow: &str) {
@@ -111,14 +117,32 @@ fn apply(case: &mut Case, change: Change) {
         Change::Instrument => case.closes.instrument_id = id("AAPL"),
         Change::Skipped => days(case, ["2026-10-02", "2026-10-05", "2026-10-07"]),
         Change::Repeated => days(case, ["2026-10-06", "2026-10-06", "2026-10-07"]),
+        Change::OutOfOrder => days(case, ["2026-10-06", "2026-10-05", "2026-10-07"]),
+        Change::NonTradingDay => {
+            days(case, ["2026-10-02", "2026-10-03", "2026-10-05"]);
+            case.now = at("2026-10-05T21:00:00Z");
+        }
         Change::Stale => days(case, ["2026-10-02", "2026-10-05", "2026-10-06"]),
         Change::BeforeClose => case.now = at("2026-10-07T19:59:59Z"),
         Change::TwoCloses => drop(case.closes.closes.drain(..1)),
+        Change::HugePrices => {
+            let huge = Price::parse("70000000000000000000.000000001").unwrap();
+            case.closes
+                .closes
+                .iter_mut()
+                .for_each(|close| close.1 = huge);
+        }
         Change::PastCalendar => case.now = at("2029-01-01T05:00:00Z"),
+        Change::BeforeRange => case.now = at("2017-12-01T21:00:00Z"),
     }
 }
 
 /// Every one-input disagreement is its own typed refusal, and no refusal is an output (INF-4).
+/// Closes near `Price`'s largest value overflow the crossover's exact window sum, which is
+/// `SignalArithmetic`. Three refusals have no row because no input reaches them:
+/// `ExpiryOverflow` (a calendar date's seconds plus a `u32` age stay far inside `i64`), and
+/// `OutputUnrepresentable` and `ContentObject` (built from constants). They are defensive;
+/// their codes are pinned above.
 #[test]
 fn every_disagreement_is_its_own_refusal_and_no_output() {
     let fast = |key| Refusal::ParamValue { key };
@@ -142,10 +166,14 @@ fn every_disagreement_is_its_own_refusal_and_no_output() {
         (Change::Instrument, Refusal::WrongInstrument),
         (Change::Skipped, Refusal::ClosesIncomplete),
         (Change::Repeated, Refusal::ClosesIncomplete),
+        (Change::OutOfOrder, Refusal::ClosesIncomplete),
+        (Change::NonTradingDay, Refusal::ClosesIncomplete),
         (Change::Stale, Refusal::ClosesEnd),
         (Change::BeforeClose, Refusal::ClosesEnd),
         (Change::TwoCloses, Refusal::TooFewCloses),
+        (Change::HugePrices, Refusal::SignalArithmetic),
         (Change::PastCalendar, Refusal::CalendarCannotName),
+        (Change::BeforeRange, Refusal::CalendarCannotName),
     ];
     for (change, refusal) in rows {
         let mut case = Case::rising();
@@ -154,8 +182,9 @@ fn every_disagreement_is_its_own_refusal_and_no_output() {
     }
 }
 
-/// FT-4: an output exists only when the pin, the registry entry and the host agree. A random
-/// non-empty set of the six identity changes is refused at the first check any of them fails.
+/// FT-4: an output exists only when the pin, the registry entry and the host agree. Every
+/// non-empty set of the six identity changes, all 63, is refused at the first check any of them
+/// fails.
 #[test]
 fn an_output_exists_only_when_pin_registry_and_host_agree() {
     assert_eq!(
@@ -171,12 +200,7 @@ fn an_output_exists_only_when_pin_registry_and_host_agree() {
         Change::EntryVersion,
         Change::NoEntry,
     ];
-    let config = Config {
-        cases: 64,
-        failure_persistence: None,
-        ..Config::default()
-    };
-    let result = TestRunner::new(config).run(&(1u8..64), |mask| {
+    for mask in 1u8..64 {
         let mut case = Case::rising();
         let on = |i: usize| mask & (1 << i) != 0;
         identity
@@ -190,15 +214,50 @@ fn an_output_exists_only_when_pin_registry_and_host_agree() {
             (false, false, true) => Refusal::NotRegistered,
             (false, false, false) => Refusal::RegistryMismatch,
         };
-        prop_assert_eq!(case.run(), Err(want), "mask {:06b}", mask);
-        Ok(())
-    });
-    result.unwrap();
+        assert_eq!(case.run(), Err(want), "mask {mask:06b}");
+    }
 }
 
-/// The signal against an independent oracle, and the same inputs giving the same evaluation:
-/// random cents on the last `n` sessions to 2026-10-07 and windows `fast < slow <= n`; `Long`
-/// exactly when `fast_sum × slow > slow_sum × fast` in `i128` cents.
+/// The brief's order of checks, across stages: for every ordered pair of changes from two
+/// different stages (content, pin hash, registry entry, registry agreement, parameters,
+/// instrument, closes, session, count), applying both is refused at the earlier stage's check.
+#[test]
+fn of_two_failed_checks_the_earlier_one_is_the_refusal() {
+    let stages = [
+        (Change::Id, Refusal::UnknownModel),
+        (Change::PinHash, Refusal::PinHashMismatch),
+        (Change::NoEntry, Refusal::NotRegistered),
+        (Change::EntryHash, Refusal::RegistryMismatch),
+        (
+            Change::Zero,
+            Refusal::ParamValue {
+                key: "fast_periods",
+            },
+        ),
+        (Change::Instrument, Refusal::WrongInstrument),
+        (Change::OutOfOrder, Refusal::ClosesIncomplete),
+        (Change::BeforeClose, Refusal::ClosesEnd),
+        (Change::TwoCloses, Refusal::TooFewCloses),
+    ];
+    for (i, (first, earlier)) in stages.iter().enumerate() {
+        for (second, _) in &stages[i + 1..] {
+            for order in [[*first, *second], [*second, *first]] {
+                let mut case = Case::rising();
+                order
+                    .into_iter()
+                    .for_each(|change| apply(&mut case, change));
+                assert_eq!(case.run(), Err(earlier.clone()), "{order:?}");
+            }
+        }
+    }
+}
+
+/// The signal against an independent oracle: random cents on the last `n` sessions to
+/// 2026-10-07 and windows `fast < slow <= n`; `Long` exactly when
+/// `fast_sum × slow > slow_sum × fast` in `i128` cents. Half the cases are ties, the slow
+/// window's closes all one random price, so equal means are `Flat` (a `>=` is caught here). And
+/// the evaluation depends on the clock only through the last completed session: the same closes
+/// read before the next morning's open give the same evaluation, `as_of` included.
 #[test]
 fn the_signal_is_the_window_means_comparison_and_evaluation_is_deterministic() {
     let calendar = ExchangeCalendar::us_equities().unwrap();
@@ -217,15 +276,22 @@ fn the_signal_is_the_window_means_comparison_and_evaluation_is_deterministic() {
     let windows = |n: usize| (prop::collection::vec(1u32..=100_000, n), 1..n);
     let slow = |(cents, fast): (Vec<u32>, usize)| {
         let n = cents.len();
-        (Just(cents), Just(fast), fast + 1..=n)
+        (Just(cents), Just(fast), fast + 1..=n, any::<bool>())
     };
     let strategy = (3usize..=25).prop_flat_map(windows).prop_flat_map(slow);
+    let ties = Cell::new(0u32);
     let config = Config {
         cases: 64,
         failure_persistence: None,
         ..Config::default()
     };
-    let result = TestRunner::new(config).run(&strategy, |(cents, fast, slow)| {
+    let result = TestRunner::new(config).run(&strategy, |(mut cents, fast, slow, tie)| {
+        if tie {
+            let n = cents.len();
+            let level = cents[n - 1];
+            cents[n - slow..].fill(level);
+            ties.set(ties.get() + 1);
+        }
         let text = |c: u32| match (c / 100, c % 100) {
             (whole, 0) => whole.to_string(),
             (whole, part) if part % 10 == 0 => format!("{whole}.{}", part / 10),
@@ -247,13 +313,19 @@ fn the_signal_is_the_window_means_comparison_and_evaluation_is_deterministic() {
             true => long("2026-10-07T20:00:00Z"),
             false => Evaluation::NoOutput(Signal::Flat),
         };
-        prop_assert_eq!(case.run(), Ok(want), "fast {} slow {}", fast, slow);
+        let evening = case.run();
         prop_assert_eq!(
-            case.run(),
-            case.run(),
-            "the same inputs, the same evaluation"
+            &evening,
+            &Ok(want),
+            "fast {} slow {} tie {}",
+            fast,
+            slow,
+            tie
         );
+        case.now = at("2026-10-08T13:29:59Z");
+        prop_assert_eq!(case.run(), evening, "read again before the next open");
         Ok(())
     });
     result.unwrap();
+    assert!(ties.get() > 0, "the run drew at least one tie");
 }
