@@ -106,10 +106,15 @@ fn a_refused_record_builds_no_session() {
     );
     let mut idle = open();
     let lapsed = idle.admit(Request::Pause, at(3_600), REFERENCE, snapshot());
-    assert_eq!(lapsed, Err(SessionRefusal::IdleExpired));
+    let expired = SessionRefusal::Ended {
+        reason: EndReason::Expired,
+    };
+    assert_eq!(lapsed, Err(expired));
+    assert_eq!(idle.ended(), Some(EndReason::Expired));
     let mut fresh = open();
     let late = fresh.admit(Request::Other, at(300), REFERENCE, snapshot());
     assert_eq!(late, Err(SessionRefusal::AccessExpired));
+    assert_eq!(fresh.ended(), None, "a refresh renews an access token");
 }
 
 /// Four entries in the order the store read them: an org membership, two workspaces with
