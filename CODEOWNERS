@@ -44,5 +44,6 @@
 /crates/mandate-executor/   @kunwarshivam
 /crates/mandate-liquidity/  @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
+/crates/mandate-mcp/        @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-modelhost/  @kunwarshivam

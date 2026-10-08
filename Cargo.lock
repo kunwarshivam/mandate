@@ -1484,6 +1484,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-mcp"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-modelhost"
 version = "0.0.0"
 dependencies = [
