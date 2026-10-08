@@ -1082,6 +1082,13 @@ proves each pending test fails on them (DEC-110).
   every refusal code, each writing nothing; a failing store committing nothing. The SPY mandate is
   `crates/mandate-cli/tests/fixtures/spy_mandate.json`.
 - **Run:** `cargo nextest run -p mandate-cli --test version`; `cargo xtask ci pending`.
+- **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
+  takes the stream's latest confirmed version and a code bound to the agent and the version, and
+  commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
+  stubbed; `crates/mandate-cli/tests/deploy.rs`, pending E10-16, over a control stream seeded in
+  §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
+  force; every refusal code, each writing nothing; a failing store committing nothing.
+  `cargo nextest run -p mandate-cli --test deploy`.
 
 ## Reference-case harness
 
