@@ -3108,6 +3108,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `a_re_cover_leaves_a_held_brackets_shares_to_its_legs` (2, not 6). The fix sizes each path on
   the position less every working bracket entry's filled quantity whose legs are held, deletes
   the rows and the `#[ignore]` lines, and covers the original exit-beside-activated-legs case above.
+  The four sizing paths are done by E1's sizing fix: they size on the position less every bracket
+  entry's filled quantity whose legs are not yet recorded placed. The exit-beside-activated-legs
+  case stays open, pinned by its property's row.
 - **E7-4 (stream K), E2 from E7-4 slice 7's tests correction ([DEC-506](decisions/DEC-506.md)
   item 8): an opening rests inside an unprotected interval.** Minimal script
   (`properties::no_resting_order_is_submitted_inside_an_unprotected_interval`):

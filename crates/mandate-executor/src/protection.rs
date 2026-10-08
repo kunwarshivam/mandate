@@ -17,7 +17,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::kill::{flatten_closes, floor_of, is_flatten, mode_holds};
+use crate::kill::{flatten_closes, floor_of, is_flatten, mode_holds, unplaced};
 use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
 use crate::ports::Ports;
@@ -1429,7 +1429,7 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
         let committed = covered(&batch.view, &instrument)?
             .checked_add(working_exits(&batch.view, &instrument)?)?;
-        if committed >= long(&batch.view, &instrument)? {
+        if committed >= sizable(&batch.view, &instrument)? {
             continue;
         }
         let resting = batch
@@ -1803,6 +1803,22 @@ fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Executor
     Ok(folded.checked_sub(unapplied).unwrap_or(Qty::ZERO))
 }
 
+/// The long position protection is sized on: [`long`] less the filled quantity of every bracket
+/// entry in `instrument` whose legs are not yet recorded placed. Those legs, held until the entry
+/// completes and sized to it, or its OCO if it ends partly filled, cover that quantity, so
+/// protection sized on the whole position would sell it twice once they rest (§5.4; DEC-346 item
+/// 6; DEC-532 item 1).
+fn sizable(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+    let held = view
+        .orders
+        .values()
+        .filter(|order| &order.instrument == instrument && unplaced(view, order))
+        .try_fold(Qty::ZERO, |sum, order| sum.checked_add(order.filled_qty))?;
+    Ok(long(view, instrument)?
+        .checked_sub(held)
+        .unwrap_or(Qty::ZERO))
+}
+
 /// The unfilled quantity every live protective order in `instrument` covers.
 fn covered(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
     view.orders
@@ -1873,7 +1889,7 @@ fn re_place(
 ) -> Result<(), ExecutorError> {
     let committed =
         covered(&batch.view, instrument)?.checked_add(working_exits(&batch.view, instrument)?)?;
-    let qty = long(&batch.view, instrument)?
+    let qty = sizable(&batch.view, instrument)?
         .checked_sub(committed)
         .unwrap_or(Qty::ZERO);
     if qty == Qty::ZERO {
@@ -2026,7 +2042,7 @@ pub(crate) fn passive_exit(
     let Some(take_profit) = prices.take_profit else {
         return Err(ExecutorError::Unimplemented { story: "E7-4" });
     };
-    let held = long(&batch.view, instrument)?;
+    let held = sizable(&batch.view, instrument)?;
     let exit = OcoLegs {
         take_profit: limit,
         stop: prices.stop,

@@ -3295,7 +3295,6 @@ fn re_placed(ran: &common::Ran, except: Option<&str>) -> mandate_num::Qty {
 /// 12, it and the bracket's legs would sell 12 + 10 = 22 once the bracket completes, against a
 /// position of 8 + 10 + 2 = 20 (§5.4's tranche model, rule 12).
 #[test]
-#[ignore = "pending E7-4"]
 fn an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3340,7 +3339,6 @@ fn an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs() {
 /// the expiring OCO's cancel is confirmed, its replacement covers the 10 it covered, not 14:
 /// with the bracket's 10 legs that would be 24 against 20 once it completes.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3377,7 +3375,6 @@ fn a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs() {
 /// the rest of the position keeps its stop. The rest is 7, not 11: 3 + 11 and the bracket's 10
 /// legs would sell 24 against 20 once it completes.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3410,7 +3407,6 @@ fn a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs() {
 /// shares they covered are re-covered: 2, not the 6 that the whole position of 16 less the 10
 /// still resting leaves, since the held bracket's legs cover its 4.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_re_cover_leaves_a_held_brackets_shares_to_its_legs() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

@@ -133,7 +133,7 @@ fn live(order: &Order) -> bool {
 /// Whether a bracket entry has filled shares whose legs are not yet recorded placed: the flatten
 /// waits a step for them, so it finds them resting and cancels them before it sells (§5.4,
 /// rule 12; DEC-485 item 6).
-fn unplaced(view: &ExecutorState, order: &Order) -> bool {
+pub(crate) fn unplaced(view: &ExecutorState, order: &Order) -> bool {
     order.filled_qty > Qty::ZERO
         && view
             .details
