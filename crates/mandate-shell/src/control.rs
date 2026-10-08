@@ -15,7 +15,7 @@ use mandate_num::Usd;
 use mandate_spec::context::{AgentId, Membership};
 use mandate_spec::validate::Violation;
 use mandate_spec::{Mandate, ValidationContext};
-use mandate_time::Date;
+use mandate_time::{Date, UtcNanos};
 
 /// One record of the workspace control stream as the run read it: its sequence number, type and
 /// payload (journal spec §9.2). The journal has already verified the chain it came from.
@@ -128,6 +128,7 @@ impl ConfirmedVersion {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pinned {
     pub asset_id: String,
+    pub symbol: String,
     pub model_id: String,
     pub model_version: String,
     pub content_hash: Digest,
@@ -141,18 +142,35 @@ pub struct Registered {
     pub bytes: Vec<u8>,
 }
 
-/// The effective registration of every configuration kind the run uses.
+/// The listing exchanges DEC-523 item 3 admits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotExchange {
+    Arca,
+    Nasdaq,
+}
+
+/// The registered instrument snapshot as DEC-523 reads it, less the members with one value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstrumentSnapshot {
+    pub instrument_id: String,
+    pub symbol: String,
+    pub exchange: SnapshotExchange,
+    pub etp_classified_at: UtcNanos,
+}
+
+/// The effective registration of every configuration kind the run uses, and the snapshot read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Configuration {
     pub fee_config: Registered,
     pub trading_calendar: Registered,
     pub rule_set: Registered,
     pub instrument_snapshot: Registered,
+    pub instrument: InstrumentSnapshot,
     pub model_version: Registered,
 }
 
 /// Why the registered configuration cannot be used. Each is a refusal before any credential is
-/// read.
+/// read; a snapshot refusal names the DEC-523 member, never a value.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigRefusal {
     /// The body of every stub in the tests PR (DEC-77).
@@ -170,6 +188,14 @@ pub enum ConfigRefusal {
     Malformed { kind: &'static str },
     #[error("the effective fee schedule is not yet effective on the trade date")]
     FeeNotYetEffective,
+    #[error("the instrument snapshot lacks member {member}")]
+    SnapshotMissingMember { member: &'static str },
+    #[error("the instrument snapshot has a member DEC-523 does not list")]
+    SnapshotExtraMember,
+    #[error("the instrument snapshot's {member} is not a string")]
+    SnapshotWrongType { member: &'static str },
+    #[error("the instrument snapshot's {member} is outside DEC-523's value set")]
+    SnapshotValue { member: &'static str },
 }
 
 impl ConfigRefusal {
@@ -183,6 +209,10 @@ impl ConfigRefusal {
             Self::StoreUnavailable => "store_unavailable",
             Self::Malformed { .. } => "malformed",
             Self::FeeNotYetEffective => "fee_not_yet_effective",
+            Self::SnapshotMissingMember { .. } => "snapshot_missing_member",
+            Self::SnapshotExtraMember => "snapshot_extra_member",
+            Self::SnapshotWrongType { .. } => "snapshot_wrong_type",
+            Self::SnapshotValue { .. } => "snapshot_value",
         }
     }
 }
@@ -190,7 +220,9 @@ impl ConfigRefusal {
 /// Each kind's effective registration in `records`: the latest by `seq`, a snapshot only if its
 /// object names the pinned asset id, a model only if it registers the pinned triple (DEC-505 item
 /// 1). A fee schedule not yet effective on `trade_date` is refused, never passed over. A candidate
-/// snapshot whose object cannot be read refuses: it cannot be shown not to name the pinned asset.
+/// snapshot whose object cannot be read, or names no asset id, refuses: it cannot be shown not to
+/// name the pinned asset. The effective snapshot is read exactly as DEC-523 pins it, and a later
+/// one that fails is refused, never passed over for an earlier one.
 pub fn configuration(
     records: &[ControlRecord],
     store: &dyn ArtifactSource,

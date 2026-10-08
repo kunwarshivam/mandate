@@ -1,16 +1,18 @@
 //! The effective configuration registrations (E19-11, DEC-505 item 1; the brief's slice D3, part
 //! b): the latest by `seq` per kind, the asset-id and model-triple narrowings, the fee date, and
-//! each registered object re-hashed. Each object is written here and registered in journal spec
-//! §9.2's closed `ConfigSnapshotRegistered` payload, among records of other types and kinds.
+//! each registered object re-hashed; then the effective snapshot read exactly as DEC-523 pins it
+//! (part c), a later one that fails refused rather than passed over. Each object is written here
+//! and registered in journal spec §9.2's closed `ConfigSnapshotRegistered` payload, among records
+//! of other types and kinds.
 
 use std::collections::BTreeMap;
 
-use mandate_canon::{Digest, Value, to_canonical};
+use mandate_canon::{Digest, Key, Value, to_canonical};
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
 use mandate_shell::control::{
-    ConfigRefusal as Refusal, Configuration, ControlRecord, Pinned, configuration,
+    ConfigRefusal as Refusal, Configuration, ControlRecord, Pinned, SnapshotExchange, configuration,
 };
-use mandate_time::Date;
+use mandate_time::{Date, UtcNanos};
 
 const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const AAPL: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
@@ -112,6 +114,7 @@ impl Stream {
 fn pinned() -> Pinned {
     Pinned {
         asset_id: SPY.to_owned(),
+        symbol: "SPY".to_owned(),
         model_id: "quant.ma_crossover".to_owned(),
         model_version: "1.0.0".to_owned(),
         content_hash: digest(MODEL),
@@ -243,10 +246,142 @@ fn a_missing_registration_or_object_refuses() {
     }
 }
 
+/// The DEC-523 members, in canonical order.
+const MEMBERS: [&str; 8] = [
+    "asset_class",
+    "etp",
+    "etp_classified_at",
+    "etp_source",
+    "exchange",
+    "increment",
+    "instrument_id",
+    "symbol",
+];
+
+/// `SNAPSHOT` with `member` set to `value`, or removed when there is none.
+fn snapshot_with(member: &str, value: Option<Value>) -> String {
+    let Value::Object(mut object) = json(SNAPSHOT) else {
+        panic!("the snapshot is an object");
+    };
+    let key = Key::new(member).unwrap();
+    if let Some(value) = value {
+        object.insert(key, value);
+    } else {
+        object.remove(&key);
+    }
+    String::from_utf8(to_canonical(&Value::Object(object))).unwrap()
+}
+
+/// A valid SPY snapshot at seq 4, then `snapshot` registered at seq 9.
+fn later(snapshot: &str) -> Stream {
+    Stream::registered(SNAPSHOT).register("instrument_snapshot", snapshot)
+}
+
+/// The effective snapshot is read into SPY's id, symbol, exchange and classification instant, for
+/// both exchanges DEC-523 admits.
+#[test]
+#[ignore = "pending E19-11"]
+fn the_snapshot_is_read_as_dec_523_pins_it() {
+    let read = Stream::registered(SNAPSHOT).read(TODAY).unwrap().instrument;
+    assert_eq!(
+        (read.instrument_id.as_str(), read.symbol.as_str()),
+        (SPY, "SPY")
+    );
+    assert_eq!(read.exchange, SnapshotExchange::Arca);
+    let classified = UtcNanos::parse_rfc3339("2026-10-05T00:00:00Z").unwrap();
+    assert_eq!(read.etp_classified_at, classified);
+    let nasdaq = later(&SNAPSHOT.replace("arca", "nasdaq"))
+        .read(TODAY)
+        .unwrap();
+    assert_eq!(nasdaq.instrument.exchange, SnapshotExchange::Nasdaq);
+}
+
+/// No silent fallback (DEC-505 item 1, rule 3): after a valid SPY snapshot, a later one that lacks
+/// any DEC-523 member, holds one as a number or `null`, has an extra member, is no object, or whose
+/// object is missing, corrupt or unreadable refuses rather than leaving the earlier one in force.
+#[test]
+#[ignore = "pending E19-11"]
+fn a_later_snapshot_that_fails_dec_523_refuses_rather_than_falling_back() {
+    for member in MEMBERS {
+        let rows = [
+            (None, Refusal::SnapshotMissingMember { member }),
+            (Some(json("7")), Refusal::SnapshotWrongType { member }),
+            (Some(Value::Null), Refusal::SnapshotWrongType { member }),
+        ];
+        for (value, refusal) in rows {
+            let snapshot = snapshot_with(member, value);
+            assert_eq!(later(&snapshot).refused(), Some(refusal), "{snapshot}");
+        }
+    }
+    let extra = SNAPSHOT.replace(r#""symbol""#, r#""cusip":"78462F103","symbol""#);
+    assert_eq!(later(&extra).refused(), Some(Refusal::SnapshotExtraMember));
+    let kind = "instrument_snapshot";
+    let not_object = later(r#"["SPY"]"#).refused();
+    assert_eq!(not_object, Some(Refusal::Malformed { kind }));
+    let newer = SNAPSHOT.replace("2026-10-05", "2026-10-06");
+    let mut missing = later(&newer);
+    missing.store.remove(&digest(&newer));
+    assert_eq!(missing.refused(), Some(Refusal::ObjectMissing { kind }));
+    let mut corrupt = later(&newer);
+    corrupt.store.get_mut(&digest(&newer)).unwrap().push(b' ');
+    assert_eq!(corrupt.refused(), Some(Refusal::ObjectCorrupt { kind }));
+    let mut down = later(&newer);
+    down.down = Some(digest(&newer));
+    assert_eq!(down.refused(), Some(Refusal::StoreUnavailable));
+}
+
+/// DEC-523's value sets, each on a later SPY snapshot: `etp_source` is closed (another source, or a
+/// prefix of its one value), `exchange` is `arca` or `nasdaq`, the one-value members, an instant
+/// with an upper-case `T`, and the pinned symbol.
+#[test]
+#[ignore = "pending E19-11"]
+fn a_value_outside_dec_523s_sets_refuses() {
+    let value = |member| Refusal::SnapshotValue { member };
+    let rows = [
+        ("nasdaq_trader", "issuer_website", value("etp_source")),
+        ("_symbol_directory", "_symbol", value("etp_source")),
+        (r#""arca""#, r#""nyse""#, value("exchange")),
+        ("us_equity", "crypto", value("asset_class")),
+        (r#""plain""#, r#""leveraged""#, value("etp")),
+        ("whole", "fractional", value("increment")),
+        ("05T00:00:00Z", "05", value("etp_classified_at")),
+        ("05T00", "05t00", value("etp_classified_at")),
+        (r#""SPY""#, r#""SPYG""#, value("symbol")),
+    ];
+    for (from, to, refusal) in rows {
+        let snapshot = SNAPSHOT.replace(from, to);
+        assert_ne!(snapshot, SNAPSHOT, "the edit applied for {refusal:?}");
+        assert_eq!(later(&snapshot).refused(), Some(refusal), "{snapshot}");
+    }
+}
+
+/// A fee schedule effective tomorrow refuses today and counts tomorrow; an `effective_from` that is
+/// no date refuses as malformed.
+#[test]
+#[ignore = "pending E19-11"]
+fn the_fee_date_is_read_to_the_day() {
+    let fee = FEE.replace("2026-01-01", "2026-10-08");
+    let tomorrow = Stream::registered(SNAPSHOT).register("fee_config", &fee);
+    assert_eq!(tomorrow.refused(), Some(Refusal::FeeNotYetEffective));
+    let counted = tomorrow.read("2026-10-08").map(|c| c.fee_config.seq);
+    assert_eq!(counted, Ok(9), "from its own date");
+    let kind = "fee_config";
+    for date in ["2026-13-01", "2026-10-7", "soon"] {
+        let fee = FEE.replace("2026-01-01", date);
+        let malformed = Stream::registered(SNAPSHOT).register(kind, &fee);
+        assert_eq!(
+            malformed.refused(),
+            Some(Refusal::Malformed { kind }),
+            "{date}"
+        );
+    }
+}
+
 /// Each refusal has its own stable code (ADR-0001 ES-09); a live test for the mutation gate.
 #[test]
 fn every_config_refusal_has_its_own_code() {
     let kind = "rule_set";
+    let member = "exchange";
     let rows = [
         (Refusal::Unimplemented { story: "E19-11" }, "unimplemented"),
         (Refusal::Unregistered { kind }, "unregistered"),
@@ -255,6 +390,13 @@ fn every_config_refusal_has_its_own_code() {
         (Refusal::StoreUnavailable, "store_unavailable"),
         (Refusal::Malformed { kind }, "malformed"),
         (Refusal::FeeNotYetEffective, "fee_not_yet_effective"),
+        (
+            Refusal::SnapshotMissingMember { member },
+            "snapshot_missing_member",
+        ),
+        (Refusal::SnapshotExtraMember, "snapshot_extra_member"),
+        (Refusal::SnapshotWrongType { member }, "snapshot_wrong_type"),
+        (Refusal::SnapshotValue { member }, "snapshot_value"),
     ];
     for (refusal, code) in rows {
         assert_eq!(refusal.code(), code, "{refusal:?}");
