@@ -307,13 +307,30 @@ read before any context exists. `authorize` builds the `MembershipQuery` itself 
 a client's user, and the scope) and reads, uncached, through the membership lookup it is given
 (§6.2), which takes only that query and returns memberships only. No data API accepts a
 `MembershipQuery`, and the caller passes no membership list, so it can neither reach workspace
-data through the read nor hand the step a forged list. A lookup that cannot answer refuses
-(`membership_unavailable`); nothing is granted on a failed read.
+data through the read nor hand the step a forged list. `MembershipLookup` is sealed and
+implemented only by the workspace store crate, and `Membership` has private fields, built only by
+that store from the control stream's fold (item 9 says how the seal admits exactly these crates);
+test doubles live only behind `cfg(test)` or in `mandate-identity`'s dev-only test support.
 
-**The session.** It contributes the `session_ref` every committed event names (ID-1, §12.2) and its
-kind: a reduction-only session (§6.4: route 1 after the provider became unreachable, route 2)
-authorizes only the pause and kill-switch engage rows, and any other row is refused
-`reduction_only`.
+**The session.** `Session` is an authenticated-session type with private fields, built only by
+§6's code (`mandate-authn`) and by test support. It contributes the `session_ref` every committed
+event names (ID-1, §12.2), the workspace it was opened in, and its kind. A reduction-only session
+(§6.4: route 1 after the provider became unreachable, route 2) authorizes exactly these rows of
+§4.2: Pause; Kill switch, agent scope: engage; Kill switch, connection or workspace scope:
+engage; Kill switch, org scope: engage. "Kill switch, any scope: privileges beyond the stop" is not
+among them. Any other row is refused `reduction_only`. A route-1 session leaves reduction-only
+when a refresh succeeds (it is a full session again) or the provider refuses one (it ends, §6.4).
+
+**A failed membership read** (DEC-642 item 10). It fails closed for every row but risk
+reduction. `membership_unavailable` applies only to principals that hold memberships (a user, a
+client); the host CLI (whose route 3 rests on its registration alone), a service account, and a
+platform operator never read memberships and never get it. On the four reduction rows above, a
+failed read does not refuse a user's reduction-only session at the scope of the workspace it was
+opened in: the row is authorized from the session alone, and the gap is journaled. Any other
+session that meets a failed read on those rows is refused `membership_unavailable` with the hint
+to use route 2, which needs only the workspace-local passkey and no membership read, so
+`AGENTS.md` rule 13 holds through §6.4's routes. A reduction-only session is still refused after a
+deprovision signal (§6.4 route 2, §11.1).
 
 **`TenantContext`** ([DEC-642](../project/decisions/DEC-642.md)). Only the authorization step
 constructs one, and only when it authorizes a permission at a workspace's scope; an org-scope
@@ -323,23 +340,36 @@ principal (ID and kind), and the one permission authorized. Every store, cache, 
 and vault API over a workspace's data takes a context and reads the workspace from it; none takes
 a bare workspace ID (ID-8). A context lives for one request and is never stored or serialized.
 
-**`SystemContext`** (DEC-642 item 5). The deployment's own background processes act with no
-request and no principal behind them (ID-5), yet nothing they commit is anonymous (ID-1). They hold
-a `SystemContext`: one workspace and the process's workload identity (§3.1), recorded as
+**`SystemContext`** (DEC-642 items 5 to 8). The deployment's own background processes act with
+no request and no principal behind them (ID-5), yet nothing they commit is anonymous (ID-1). They
+hold a `SystemContext`: one workspace and the process's workload identity (§3.1), recorded as
 `actor.kind` `agent` for an agent's runtime and `system` for the executor and the scheduler. It is
-not an output of `authorize`, and it is unrepresentable from a request by crate boundary: its
-fields are private, and its one constructor is reachable only through the small crate
-`mandate-identity-system`, which alone switches on that constructor in `mandate-identity`. Every
-request-serving crate (`mandate-api`, `mandate-api-server`, and the workspace services' identity
-crate) lists `mandate-identity-system` in `forbidden_internal` in `xtask/layers.toml`, a
-mechanical check (DEC-525); the crate and those entries land with the E9-8 code. Workspace
-services' request path never holds a `SystemContext`: every write it makes is attributed to the
-authenticated principal, including revoking a deactivated member's sessions and client tokens
-(§5.2 step 2), which carry the deactivating admin as actor. System-attributed control writes
-(refresh-family revocation on expiry, deprovision signals, scheduled expiry) come only from a
-separate process. Data APIs accept either context through one sealed trait that only these two
-types implement. It never gates risk reduction: automated exits, protective orders, and kill
-switches proceed without any check it could fail (`AGENTS.md` rule 13).
+not an output of `authorize`, and it is unrepresentable from a request by crate boundary, with no
+Cargo feature involved:
+
+- `SystemContext` and its only constructor live in their own crate, `mandate-identity-system`.
+- **An allowlist, not a denylist:** only the bootstrap crates of the agent runtime, the executor,
+  and the scheduler may depend on `mandate-identity-system`. `xtask/layers.toml` gains an
+  `allowed_dependents` key that `cargo xtask layers` checks; that mechanism lands with E9-8,
+  under a claim on `xtask`, which is shared.
+- **The seal** lives in a small base crate, `mandate-tenant`: the `Tenant` trait (re-exported as
+  `mandate_identity::Tenant`), its sealing supertrait, and the seal token that the constructors of
+  `Membership` and `Session` and the impls of `MembershipLookup` require. Only `mandate-identity`,
+  `mandate-identity-system`, the workspace store crate, and `mandate-authn` may depend on it
+  (`allowed_dependents` again), so no other crate can implement `Tenant` or `MembershipLookup`, or
+  build a `Membership` or a `Session`. Data APIs take either context through `Tenant`.
+- Both planned crates are named in `xtask/layers.toml`'s `planned` list (DEC-525).
+
+Workspace services' request path never holds a `SystemContext`: every write it makes is
+attributed to the authenticated principal, including revoking a deactivated member's sessions and
+client tokens (§5.2 step 2), which carry the deactivating admin as actor. System-attributed
+control writes (refresh-family revocation on expiry, deprovision signals, scheduled expiry) come
+only from a separate process. A back-channel logout arrives as an inbound request: its endpoint
+verifies the provider's logout token (signature, `iss`, `aud`, and the `events` claim) and relays
+it to that process, which commits `SessionRevoked` with reason `deprovisioned`, attributed to
+`system`; the request path itself commits nothing. A `SystemContext` never gates risk reduction:
+automated exits, protective orders, and kill switches proceed without any check it could fail
+(`AGENTS.md` rule 13).
 
 **Role changes.** A grant or removal of roles, and a deactivation, pass the same step for their
 row (deactivating one's own membership is the leave row), then: no change grants or removes a
@@ -357,7 +387,7 @@ deactivating another member who holds it counts as removing it; and the last-own
 | `owner_role_reserved` | A principal other than an org owner grants or removes the org owner role | 403, code `owner_role_reserved` |
 | `last_owner`, `last_admin` | The change leaves no `active` org owner, or no `active` workspace admin (§5.2) | 409, the code itself |
 | `reduction_only` | A reduction-only session asks for a row other than pause or a kill switch's engage (§6.4) | 403, code `reduction_only` |
-| `membership_unavailable` | The membership lookup cannot answer | 503, `retryable` |
+| `membership_unavailable` | The membership lookup cannot answer, for a user or a client, outside the reduction-only exemption above | 503, `retryable`, with the hint to use §6.4 route 2 on a risk-reducing row |
 
 Step-up is not judged here: an authorization carries the row's step-up requirement, and §7
 verifies the evidence.
