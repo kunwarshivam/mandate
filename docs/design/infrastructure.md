@@ -152,9 +152,9 @@ journal returns.
 | Process | How many | Writes | Holds | Network (egress allow-list, §9) | Host-local channels (not network) |
 |---|---|---|---|---|---|
 | **Agent runtime** (`mandate-runtime` inside the shell; see `docs/specs/agent-harness.md`) | One per agent deployment (DEC-08) | Its agent stream | No broker credential (rule 12) | Postgres; model gateway; artifact store. No broker, no internet | Reads the workspace's data service |
-| **Account executor** (`mandate-executor` plus a connector) | One per broker account | That account's stream (journal §2) | A vault lease for that one connection | Postgres; vault; that connection's broker hosts only | Reads the workspace's data service |
+| **Account executor** (`mandate-executor` plus a connector) | One per broker account | That account's stream (journal §2) | A vault lease for that one connection; while `connecting`, a single-use grant on the platform's OAuth client secret (§5.2) | Postgres; vault; that connection's broker hosts only, and while `connecting` an Alpaca paper connection's one live-host request, `POST /oauth/token` (DEC-821) | Reads the workspace's data service |
 | **Scheduler** | One per workspace | The scheduler stream (`clock:`) | Nothing secret | Postgres; time sources | None |
-| **Workspace control services** (Phase 1: the founder's CLI) | One set per workspace deployment | The control stream | Session keys for the identity provider | Postgres; identity provider; users | None |
+| **Workspace control services** (Phase 1: the founder's CLI) | One set per workspace deployment | The control stream | Session keys for the identity provider; an OAuth authorization code only in transit, during the callback ([connections spec](../specs/connections.md) §5.2) | Postgres; identity provider; users; vault (write only, under pending connections' paths, and the single-use client-secret grant it requests for a connecting executor) | None |
 | **Model gateway** ([inference spec](../specs/inference.md)) | One per workspace deployment, replicated; exactly one replica holds the meter writer role per workspace (inference spec §3.6; see below) | Each workspace's meter stream, `meter:{workspace_id}` (proposed, E15-8), by the holder only. The call record itself, `ModelInvocationRecorded`, is appended by the caller | Provider keys | Postgres; vault; the meter holder (other replicas); allowed model providers only | None |
 | **Cold exporter and anchorer** | One per workspace deployment | Control stream (`SegmentExported`, `AnchorComputed`) | Object-storage write credential | Postgres; object storage; timestamping authority | None |
 | **Market data service** ([data-plane spec](../specs/data-plane.md)) | Per workspace in v1 (no redistribution, HLD §12 item 3) | Parquet datasets; no journal stream | The workspace's data credential | That data host | Serves the workspace's runtimes and executors |
@@ -251,7 +251,9 @@ reference), and a workload identity issued by the orchestrator. Everything else 
    mandate version by content hash; the body comes from the content-addressed configuration store.
    A missing object halts replay (journal §8); the process never falls back to a default mandate.
 3. **Credentials:** only the executor asks the vault, authenticating with its workload identity, for
-   a lease on its one connection (§5). The runtime asks for nothing.
+   a lease on its one connection (§5). An executor started for a `connecting` connection also
+   redeems one single-use grant on the platform's OAuth client secret, for its code exchange (§5.2).
+   The runtime asks for nothing.
 4. **Configuration:** fee tables, calendars, and instrument snapshots by content hash
    (`config_refs`), never by "latest".
 
@@ -359,7 +361,7 @@ into hybrid or on-prem deployments (HLD §8).
 | Secret | Used by | Custody |
 |---|---|---|
 | Broker credentials (API keys, OAuth tokens) | The account executor for that connection | Workspace vault; write-only after entry: no person reads them back |
-| Broker OAuth client secrets (the platform's registered app, e.g. Alpaca) | An account executor in `connecting`, for the code exchange only ([connections spec](../specs/connections.md) §5.2, DEC-690 item 1) | The cell's vault; never the API process. Custody in hybrid and on-prem is open |
+| Broker OAuth client secrets (the platform's registered app, e.g. Alpaca) | An account executor in `connecting`, for the code exchange only, through a single-use grant ([connections spec](../specs/connections.md) §5.2; DEC-690 item 1; DEC-821 item 2) | The cell's vault; no person and no API process reads it. Custody in hybrid and on-prem is open |
 | Model provider keys | The model gateway | Workspace vault (customer-supplied keys) or the cell's vault (platform keys) |
 | Database credentials | Each process type's role | Short-lived, issued by the vault per process |
 | Object-storage write credentials | Cold exporter, artifact writer | Vault, per workspace prefix |
@@ -373,7 +375,13 @@ into hybrid or on-prem deployments (HLD §8).
   workspace. **Hybrid and on-prem:** the customer's vault; credentials never leave the customer's
   environment (HLD §8).
 - **Per-process scoping.** An executor's workload identity can read exactly one connection's
-  credential. A runtime's identity can read none. The model gateway's can read its workspace's
+  credential. It gets one more read only while its connection is `connecting` (connections spec
+  §5.2): a single-use grant on the platform's OAuth client secret. The connection manager asks the
+  vault to issue the grant when it starts the executor. The vault binds it to that executor's
+  workload identity, with a lifetime of the code's 10 minutes, and revokes it at
+  `ConnectionEstablished` or teardown. An active executor's policy has no read of the client
+  secret, so a refresh needs a new decision (connections spec §5.4, U-A3). A runtime's identity can
+  read none. The model gateway's can read its workspace's
   provider keys. Nothing has a wildcard policy.
 - **Leases.** The executor holds its credential in memory as a `secrecy` value (ES-09), renews its
   lease ahead of expiry, and drops it on stop. A vault outage does not stop a running executor
@@ -399,7 +407,7 @@ At connection time and at every executor start:
 3. **Account:** the account the credential reaches must be the account the connection names (the
    dedicated agentic account for Robinhood, E7-6).
 
-Each check's result is journaled on the control stream with the connection, never the credential.
+Each check's result is journaled without the credential. The executor appends checks 1 to 3 and 5 to 7 on its account stream (the check-result event of E7-17). Check 4, uniqueness, runs in the connection manager. The control stream's `ConnectionEstablished` cites the passing results ([connections spec](../specs/connections.md) §5.2, §8.1).
 
 ### 5.4 Rotation and revocation
 

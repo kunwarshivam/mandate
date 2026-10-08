@@ -69,7 +69,9 @@ under the client's token. It has no path of its own.
   **Hybrid and on-prem:** on the customer's network; reaching it from a phone is HLD §12 item 7,
   open.
 - **Process:** the workspace control services process of infrastructure §3.1. It holds the control
-  stream's writer epoch (DEC-436 item 3), session keys, and no broker credential. It reads the
+  stream's writer epoch (DEC-436 item 3), session keys, and no broker credential: an OAuth
+  authorization code passes through it only in transit, during the callback, on its way to the
+  vault (connections spec §5.2, CN-1). It reads the
   journal and its read-model tables; it writes only the control stream, the artifact store, and its
   own read-model and draft tables.
 
@@ -804,8 +806,8 @@ Items 17 and 18 stay **Proposed** for the founder:
 - **Item 18:** whether the API is offered to third parties (DEC-149, E18). Recommended: first-party
   only in v1 (the web app, the CLI, the Owlhead MCP server). Until decided: first-party only.
 
-[DEC-690](../project/decisions/DEC-690.md) item 1 (Accepted, a tightening) settles where connect
-reaches the broker: never in the API process; the code exchange and permission checks run in the
+[DEC-690](../project/decisions/DEC-690.md) item 1 (Accepted; its client-secret grant adds a custody path under DEC-821
+item 2) settles where connect reaches the broker: never in the API process; the code exchange and permission checks run in the
 connection's executor (§1.4). Alpaca OAuth stays refused in every environment until the founder
 decides DEC-690 items 6 and 7.
 

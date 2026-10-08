@@ -71,7 +71,7 @@ deployment mode, every environment, and every state of §9.
 
 | ID | Invariant | Source | Test |
 |---|---|---|---|
-| **CN-1** | **Credentials live only in the vault** and in the memory of the one executor process that uses them. No credential, token, refresh token, API secret, or authorization code appears in a journal event, artifact, log, metric, trace, prompt, model context, notification, API response, error message, fixture, or backup outside the vault's own snapshots | Rule 7; FR-2.4; OPS-1; API-11 (#560) | Canary-secret scans of logs, journal, artifacts, API responses, and restored backups; a type test that every connection payload schema has no secret-shaped member; the Alpaca `Debug` test extended to every connector |
+| **CN-1** | **Credentials live only in the vault** and in the memory of the one executor process that uses them. Two narrow exceptions apply. An OAuth authorization code and PKCE verifier pass through the API process in transit, during the callback, before the vault write. The platform's OAuth client secret is read by a connecting executor through a single-use grant (§5.2). Neither is ever logged or persisted outside the vault. No credential, token, refresh token, API secret, or authorization code appears in a journal event, artifact, log, metric, trace, prompt, model context, notification, API response, error message, fixture, or backup outside the vault's own snapshots | Rule 7; FR-2.4; OPS-1; API-11 (#560) | Canary-secret scans of logs, journal, artifacts, API responses, and restored backups; a type test that every connection payload schema has no secret-shaped member; the Alpaca `Debug` test extended to every connector |
 | **CN-2** | **No permission that can move funds out.** A connection never holds a scope, key permission, or MCP tool that can withdraw, transfer, or send funds or assets out of the account. A credential that carries one is refused at connect time, before storage, with instructions for a trading-only credential. A live credential whose fund-movement permission cannot be shown absent is refused | HLD §6 A step 2; FR-2.2; infrastructure §5.3 (tightened, DEC-441 item 4) | Per connector: a fixture grant or key with each fund-movement permission is refused before any vault write; an MCP tool list containing a transfer tool is refused; a live key from a venue that cannot report permissions is refused |
 | **CN-3** | **Paper and live are distinct connections, and paper never reaches live.** A connection has one environment for life. A paper connection's executor has only paper hosts; a non-production build has no live host at all. A credential that does not work against its own environment is refused, and so is one that also reaches the other environment, until the broker's documentation shows it cannot (U-A4; DEC-441 item 21). The other environment is never probed to find out | Rule 8; V-001; V-031; OPS-5; ES-23; DEC-441 item 21 | Build test that no live host is compiled outside production; a staging egress test; a fixture test that a token documented as reaching both environments is refused for a paper and for a live connection, with no request to the other host |
 | **CN-4** | **Agents never reach the broker.** Every account-level action goes through the account's executor and its ledger. The runtime holds no credential and has no route to a broker; a connector is reachable only from the executor | Rule 12; trading §7.1; infrastructure §3.1, §3.5 | Crate layering (`xtask/layers.toml`); a vault policy test that a runtime identity reads no connection; an egress test |
@@ -174,37 +174,81 @@ describes key checks for venues that can report permissions; Alpaca keys cannot.
 ### 5.2 M8: OAuth
 
 The flow, with the workspace API's routes (#560 §4.5). **The API process never calls Alpaca**
-(workspace API spec §1.4; DEC-690 item 1): it has no broker host in its egress (infrastructure
-§3.1). It takes the owner's input, journals it, and reports. The code exchange and every §8.1
-check run in the account executor started for the pending connection, the one process type that
-holds a vault lease for one connection and that connection's broker hosts.
+(workspace API spec §1.4; DEC-690 item 1). It has no broker host in its egress
+(infrastructure §3.1). It takes the owner's input, journals it on the control stream, and reports.
+The code exchange and the broker-facing §8.1 checks run in the account executor started for the
+pending connection. That is the one process type that holds a vault lease for one connection and
+reaches that connection's broker hosts.
 
-1. A workspace admin presents step-up (identity spec #556, ID-4) and starts the connect. The server
-   creates a single-use `state` bound to the user, workspace, intended environment, and a PKCE
-   verifier, with a short expiry (Proposed default: 10 minutes).
-2. The browser goes to Alpaca's authorization page with the platform's client id, the redirect
-   URI registered for the deployment, the `state`, the PKCE challenge, **only the scopes in §5.3**,
-   and `env` set to the connection's environment, always (DEC-690 item 3: without `env`, Alpaca
-   prompts for a live and a paper account together).
-3. The callback checks `state` (exists, unexpired, unused, same user). It writes the authorization
-   code and the PKCE verifier **straight to the vault**, write-only, under the pending connection's
-   path, in the same request; the API process holds them only in a `secrecy` value until the
-   vault write commits (CN-1). It then asks for the pending connection's executor to start
-   (infrastructure §3.5) and reports `connecting`. It sends nothing to Alpaca.
-4. The executor reads the code from its lease and exchanges it at once at Alpaca's token endpoint
-   (an authorization code lives 10 minutes, §5.5), authenticating with the platform's client
-   secret, which only an executor in `connecting` may read. The token goes to the vault and the
-   code is deleted. The executor then runs the §8.1 checks against the granted scopes and the
-   account. Any failure deletes the vault entry, journals the refusal without the token (CN-10),
-   and stops the executor; the API shows the reason it reads from the journal.
-5. On success the executor journals the passing check results (CN-10, E7-17), and the API, as the
-   control stream's writer, appends `ConnectionEstablished` (journal §9.2) once it reads them.
-   The executor then runs as the account's executor.
+1. **Start.** A workspace admin presents step-up (identity spec #556, ID-4) and starts the connect.
+   The connection manager creates the pending connection record (`connecting`, §9.1) with its
+   `connection_id`, `account_ref`, and vault path. It also creates a single-use `state` bound to the
+   user, workspace, intended environment, and a PKCE verifier, with a short expiry (Proposed
+   default: 10 minutes).
+2. **Authorize.** The browser goes to Alpaca's authorization page with these parameters:
+   - the platform's client id;
+   - the registered redirect URI;
+   - the `state`;
+   - the PKCE challenge;
+   - **only the scopes in §5.3**;
+   - `env` set to the connection's environment, always. Without `env`, Alpaca prompts for a live
+     and a paper account together (DEC-690 item 3).
+3. **Callback.** The API checks `state`: it exists, is unexpired and unused, and belongs to the
+   same user. It then:
+   - writes the authorization code and the PKCE verifier **straight to the vault**, write-only,
+     under the pending connection's path, in the same request. The code and verifier pass through
+     the API process only in transit, as `secrecy` values, and are dropped when the vault write
+     commits (CN-1);
+   - asks for the pending connection's executor to start (infrastructure §3.5), and reports
+     `connecting`.
 
-**The redirect URI is fixed:** `https://api.owlhead.ai/v1/oauth/alpaca/callback` (DEC-820's
-domain). A registered URI cannot carry a workspace id, so the callback sits outside the
-`/v1/workspaces/{workspace_id}` prefix; the workspace, user, environment, and PKCE verifier are
-bound server-side to the single-use `state` (workspace API spec §4.5). A hybrid or on-prem
+   It sends nothing to Alpaca. If the vault write fails, nothing is started. If the executor
+   start fails after the vault write, the API deletes the vault entry and the record stays
+   `connecting` until the teardown in step 6.
+4. **Exchange and checks (executor, `connecting`).** The executor exchanges the code at once at
+   Alpaca's token endpoint; a code lives 10 minutes (§5.5). It authenticates with the platform's
+   client secret, which it reads through a single-use grant valid only while its connection is
+   `connecting` (infrastructure §5.2). The token goes to the vault and the code is deleted. The
+   executor then runs checks 1 to 3 and 5 to 7 of §8.1 against the grant and the account, using
+   only reads (`hosts::PaperRequest`). It asks the vault to compute the account fingerprint (§3.1)
+   and writes it to the pending record.
+
+   While `connecting`, the executor does **nothing else**:
+   - no order, cancel, or other write to the broker;
+   - no reconciliation;
+   - no lease beyond its own vault entry and the client-secret grant;
+   - no append other than the check results below.
+5. **Record the results.** The executor appends each check's result, pass or refusal, without the
+   token, on the pending connection's account stream (`acct:{workspace_id}:{account_ref}`). The
+   event is the check-result event the journal spec change E7-17 adds (CN-10). The API reads the
+   results from the journal. It runs check 4 itself, because only the connection manager sees
+   every connection's fingerprint (CN-5). Then:
+   - **if all pass**, the API appends `ConnectionEstablished` on the control stream (journal
+     §9.2), with its causation pointing at the passing results. The executor leaves `connecting`
+     only when it reads that event from the control stream; from then on it runs as the account's
+     executor.
+   - **if any check refuses**, the API appends nothing and the teardown in step 6 runs at once.
+
+   **Until E7-17 adds the check-result event, steps 4 to 6 cannot be built.**
+6. **Teardown, the only exit from `connecting` other than step 5.** The connection manager tears a
+   pending connection down when any check refuses, or when no passing results arrive within the
+   code's lifetime plus one minute (Proposed: 11 minutes). Teardown:
+   - deletes the vault entry (code or token);
+   - revokes the client-secret grant and stops the executor;
+   - journals the refusal or timeout on the control stream, without the token (CN-10, E7-17).
+
+   **Restarts.**
+   - *API restart:* the connection manager re-reads every `connecting` record. It appends
+     `ConnectionEstablished` for one whose results all passed and whose check 4 still passes, and
+     tears down every other one that is past its deadline.
+   - *Executor restart while `connecting`:* the executor never re-runs an exchange. If a token is
+     stored, it re-runs the checks; if none is, it stops, and the teardown follows.
+
+**The redirect URI is fixed:** `https://api.owlhead.ai/v1/oauth/alpaca/callback`, on the domain in
+DEC-820 and DEC-822, both pending on PR #762. A registered URI cannot carry a workspace id, so the
+callback sits outside the `/v1/workspaces/{workspace_id}` prefix. The workspace, user,
+environment, and PKCE verifier are bound server-side to the single-use `state` (workspace API spec
+§4.5). A hybrid or on-prem
 deployment would need its own registered URI; that is open (§13).
 
 **Not buildable yet.** U-A4 is open (§5.5), so DEC-441 item 21 refuses every Alpaca OAuth grant,
@@ -400,10 +444,12 @@ Kraken now.
 
 ### 8.1 At connect, at every executor start, and daily
 
-Each check's result is journaled without the credential (CN-10; infrastructure §5.3). The checks
-run in the connection's account executor, never in the API process, which holds no credential and
-reaches no broker (workspace API spec §1.4; DEC-690 item 1). At connect, the API learns the results
-from the journal and only then appends `ConnectionEstablished` or shows the refusal.
+Each check's result is journaled without the credential (CN-10; infrastructure §5.3). Checks 1 to 3
+and 5 to 7 run in the connection's account executor, never in the API process, which holds no
+credential and reaches no broker (workspace API spec §1.4; DEC-690 item 1). The executor appends
+their results on its account stream (E7-17). Check 4 runs in the connection manager, the only
+component that sees every connection's fingerprint. At connect, the API reads the results from the
+journal and only then appends `ConnectionEstablished` or tears the pending connection down (§5.2).
 
 | # | Check | Failure at connect | Failure later |
 |---|---|---|---|
@@ -437,7 +483,7 @@ only through the transitions in §9; health never adds risk and never alone bloc
 
 | State | Entered when | Openings | Exits, protection, kill switch | Ends when | Who ends it |
 |---|---|---|---|---|---|
-| `connecting` | Step-up and connect started | No agent yet | — | Checks pass (`active`) or fail (refused, no record kept beyond the refusal event) | System |
+| `connecting` | Step-up and connect started | No agent yet; the executor may only exchange, run checks, and append their results (§5.2 step 4) | — | `ConnectionEstablished` (`active`), or the teardown of §5.2 step 6 on a refusal, a timeout, or a restart past the deadline (refused, no record kept beyond the refusal event) | System |
 | `active` | All §8.1 checks pass | As the gate allows | Yes | Any transition below | — |
 | `degraded` | Network errors, low headroom, or contract drift | **Halted**: account state `closing_only`, agents `exits_only` | Yes, while the broker accepts | Good probes, or for drift a released connector version, **then** the owner's acknowledgment (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
 | `suspended` | Credential invalid: expired, revoked at the broker, refresh failed, or a later permission check failed | **Halted**: account state `closing_only`, agents `exits_only` | Attempted while any call succeeds; otherwise protection rests at the broker | The owner reconnects the same account, then acknowledges (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
@@ -462,7 +508,7 @@ transient. A restriction that lifts with no acknowledgment would be a separate s
 
 | Step | What happens | Invariants |
 |---|---|---|
-| **Connect** | Step-up; OAuth or key entry; code or key to vault (API); executor started; code exchanged and token to vault, §8.1 checks (executor); `ConnectionEstablished` (API, after the checks' results are journaled); first reconciliation | CN-1, CN-2, CN-3, CN-5, CN-10 |
+| **Connect** | Step-up; pending record (`connecting`); OAuth or key entry; code or key to vault (API); executor started in `connecting`, which may only exchange, run checks, and append their results (§5.2 step 4); check 4 and `ConnectionEstablished`, whose causation cites the passing results (API); only then does the executor act on the account, starting with the first reconciliation. A refusal, a timeout, or a restart follows §5.2 step 6 | CN-1, CN-2, CN-3, CN-5, CN-10 |
 | **Verify permissions** | §8.1 at every executor start and daily | CN-2, CN-3 |
 | **Healthy** | `active`; health probe; daily 1× and permission checks | — |
 | **Degraded** | `closing_only`, so agents are `exits_only`; exits continue. The owner is alerted after a configured period (Proposed: 5 minutes) for network errors and low headroom, and **at once** for contract drift, which is not transient | CN-6, rule 13 |
@@ -532,8 +578,9 @@ backlog rows (item 13); health defaults (item 14); trading §7.3's connection ro
 refused until U-A4 is answered (item 21).
 
 [DEC-690](../project/decisions/DEC-690.md) records what Alpaca's documentation answers (§5.5).
-Accepted (agent, DEC-176): the API never calls a broker, and the code exchange and checks run in the
-executor (item 1); U-A1 and U-A5 answered (items 2 and 8); `env` always set (item 3); U-A2 and U-A3
+Accepted (agent): the API never calls a broker, and the code exchange and checks run in the
+executor (item 1, whose client-secret grant adds a custody path under DEC-821 item 2, not a
+tightening); U-A1 and U-A5 answered (items 2 and 8); `env` always set (item 3); U-A2 and U-A3
 open, with live Alpaca OAuth refused under CN-2 and no refresh assumed (items 4 and 5); PKCE never
 relied on (item 9). **Proposed for the founder:** whether an `env`-scoped grant satisfies U-A4
 (item 6), and whether a non-production build may reach the live host's token endpoint (item 7).
@@ -555,8 +602,6 @@ Until then no Alpaca OAuth grant is accepted in any environment.
 
 1. U-A2, U-A3, U-A4, and PKCE (Alpaca; U-A1 and U-A5 answered, §5.5) and U-R1 to U-R12
    (Robinhood), above. The Alpaca ones need Alpaca's written answer (DEC-690 item 10).
-5. The OAuth redirect URI for a hybrid or on-prem deployment, which would need its own
-   registration with Alpaca (§5.2).
 2. Answered in §3: a reconnect is a second `ConnectionEstablished` for the same `connection_id`,
    valid only after its `ConnectionRevoked`; the rule is a journal spec change (E7-17).
 3. Whether cross-deployment duplicate detection (CN-5) is worth a fingerprint registry in the
@@ -564,3 +609,5 @@ Until then no Alpaca OAuth grant is accepted in any environment.
    plane's ban on personal data applies to it (§3.1); it would also add a dependency the trade path
    must not have.
 4. Kraken's key-permission query shape, at E16.
+5. The OAuth redirect URI for a hybrid or on-prem deployment, which would need its own
+   registration with Alpaca (§5.2).
