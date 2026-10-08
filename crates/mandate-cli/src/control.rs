@@ -218,12 +218,14 @@ fn build_ref() -> String {
     format!("sha256:{}", digest.to_hex())
 }
 
-/// What an envelope says of its event besides its type and payload: the schema version, and the
-/// content references the payload names, sorted, which the envelope must list (journal spec §3).
+/// What an envelope says of its event besides its type and payload: the schema version, the
+/// content references the payload names, sorted, which the envelope must list (journal spec §3),
+/// and the configuration it binds, by kind (§9's required `config_refs`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Shape {
     pub(crate) schema_version: u64,
     pub(crate) artifact_refs: Vec<String>,
+    pub(crate) config_refs: Vec<(&'static str, Value)>,
 }
 
 /// Who writes a control-stream draft. Private to this module, so no other module can name the
@@ -258,6 +260,7 @@ pub(crate) fn open_control_stream(
     let shape = Shape {
         schema_version: 1,
         artifact_refs: Vec::new(),
+        config_refs: Vec::new(),
     };
     let bytes = draft(
         Writer::Opener,
@@ -334,7 +337,7 @@ fn draft(
         ),
         ("causation_id", Value::Null),
         ("clock_source", text("local")),
-        ("config_refs", Value::Object(Object::new())),
+        ("config_refs", object(shape.config_refs)?),
         ("correlation_id", Value::Null),
         ("environment", text(owner.environment.as_str())),
         ("envelope_version", one.clone()),
@@ -651,6 +654,7 @@ pub(crate) fn commit(
     let shape = Shape {
         schema_version: 1,
         artifact_refs: referenced.into_iter().collect(),
+        config_refs: Vec::new(),
     };
     let bytes = draft(
         Writer::Owner,
@@ -786,6 +790,7 @@ mod tests {
         let shape = || Shape {
             schema_version: 1,
             artifact_refs: Vec::new(),
+            config_refs: Vec::new(),
         };
         let actor = |writer, event_type| -> Result<(String, String), ControlError> {
             let bytes = draft(
