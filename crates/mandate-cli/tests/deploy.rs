@@ -30,6 +30,8 @@ const SEEDED: &str = r#"{"actor":{"build":null,"id":"control_services","kind":"s
 const DEPLOYED: &str = r#"{"agent_id":"agent-a","mandate_version":"@V","record_ref":"@R"}"#;
 const RECORD: &str = r#"{"agent_id":"agent-a","kind":"deployment_record","mandate_version":"@V","step_up":{"assertion_id":"cli-assertion-1","authenticated_at":1790000000,"method":"cli_confirm"},"user":"user-owner"}"#;
 const STOPPED: &str = r#"{"agent_id":"agent-a","connection_id":"conn_alpaca_paper_01","loss_added":"0","reason":"owner_stop","retired_on":"2026-09-20"}"#;
+/// Another agent's stop, which leaves `agent-a`'s deployment active.
+const OTHER_STOPPED: &str = r#"{"agent_id":"agent-b","connection_id":"conn_alpaca_paper_01","loss_added":"0","reason":"owner_stop","retired_on":"2026-09-20"}"#;
 const REVOKED: &str = r#"{"connection_id":"conn_alpaca_paper_01"}"#;
 /// The fixture's top-level members but the two system fields (mandate spec §4.1 V-020).
 const PATHS: &str = "autonomy behavior capital connection_id environment goal name notifications \
@@ -322,8 +324,9 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
         Seed("ConnectionRevoked", REVOKED),
     );
     let other = Deploy(OTHER_AGENT, "v1", None);
+    let other_stop = Seed("AgentStopped", OTHER_STOPPED);
     let codes = [deploy_code(OTHER_AGENT, "v1"), deploy_code(AGENT, "v2")];
-    let cases: [(&str, &[Do<'_>], Do<'_>); 18] = [
+    let cases: [(&str, &[Do<'_>], Do<'_>); 19] = [
         ("paper_only", &[v1, c1, As(Environment::Live)], d1),
         ("paper_only", &[v1, c1, As(Environment::Backtest)], d1),
         ("agent_invalid", &[v1, c1], Deploy("agent a", "v1", None)),
@@ -350,6 +353,11 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
         (
             "agent_active",
             &[v1, c1, d1, v2, c2],
+            Deploy(AGENT, "v2", None),
+        ),
+        (
+            "agent_active",
+            &[v1, c1, d1, other_stop, v2, c2],
             Deploy(AGENT, "v2", None),
         ),
         ("control_stream_invalid", &[model, v1, c1], d1),
