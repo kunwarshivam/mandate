@@ -9,6 +9,7 @@ use crate::checks::{
     AccountRead, Check, CheckInput, CheckReport, ContractSeen, Granted, Occasion, Outcome, Reason,
     run,
 };
+use crate::grant::GrantedScopes;
 use crate::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, ConnectionState, Environment};
 
 const PINNED: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
@@ -25,7 +26,7 @@ fn pii() -> AccountPiiRef {
 fn read() -> AccountRead {
     AccountRead::Read {
         pii_ref: pii(),
-        dedicated: true,
+        dedicated: None,
     }
 }
 
@@ -37,7 +38,7 @@ fn alpaca() -> CheckInput {
         environment: Environment::Paper,
         auth_kind: AuthKind::Oauth,
         occasion: Occasion::Connect,
-        granted: Granted::Scopes(set(&["data", "trading"])),
+        granted: Granted::OAuth(GrantedScopes(set(&["data", "trading"]))),
         account: read(),
         contract: None,
         pinned_contract: None,
@@ -51,6 +52,10 @@ fn robinhood() -> CheckInput {
         environment: Environment::Live,
         auth_kind: AuthKind::McpOauth,
         granted: Granted::Tools(set(&["get_accounts", "place_equity_order"])),
+        account: AccountRead::Read {
+            pii_ref: pii(),
+            dedicated: Some(true),
+        },
         contract: Some(ContractSeen {
             allowlisted_tools_present: true,
             hash: PINNED.to_owned(),
@@ -128,7 +133,7 @@ fn scopes_must_be_exactly_trading_and_data() {
         &["data", "trading", "account:read"],
     ] {
         let mut input = alpaca();
-        input.granted = Granted::Scopes(set(granted));
+        input.granted = Granted::OAuth(GrantedScopes(set(granted)));
         let report = run(&input).unwrap();
         assert_eq!(
             outcome(&report, Check::Scope),
@@ -240,11 +245,20 @@ fn the_account_is_read_and_for_robinhood_dedicated() {
     let mut shared = robinhood();
     shared.account = AccountRead::Read {
         pii_ref: pii(),
-        dedicated: false,
+        dedicated: Some(false),
     };
     assert_eq!(
         outcome(&run(&shared).unwrap(), Check::Account),
         Some(Outcome::Failed(Reason::NotDedicated))
+    );
+    shared.account = AccountRead::Read {
+        pii_ref: pii(),
+        dedicated: None,
+    };
+    assert_eq!(
+        outcome(&run(&shared).unwrap(), Check::Account),
+        Some(Outcome::Failed(Reason::NotDedicated)),
+        "an account not shown to be the dedicated one is not"
     );
 }
 
@@ -314,7 +328,7 @@ fn a_refused_credential_is_never_stored() {
         Ok(())
     };
     let mut refused = alpaca();
-    refused.granted = Granted::Scopes(set(&["data", "trading", "account:write"]));
+    refused.granted = Granted::OAuth(GrantedScopes(set(&["data", "trading", "account:write"])));
     assert_eq!(
         run(&refused).unwrap().then_store(store),
         Err(ConnectError::CheckRefused)

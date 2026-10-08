@@ -11,7 +11,14 @@
 use std::collections::BTreeSet;
 
 use crate::ConnectError;
+use crate::grant::GrantedScopes;
 use crate::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, ConnectionState, Environment};
+
+/// Whether an Alpaca OAuth grant requested with `env=paper` counts as reaching paper only
+/// (check 2). The founder accepted this residual risk for paper connections in DEC-821 item 1
+/// (PR #762, with #769); until DEC-821 is in force, or to revert it, this is the one line to
+/// change, and every Alpaca OAuth grant is then refused as `reaches_both` (DEC-441 item 21).
+pub const ALPACA_PAPER_OAUTH_REACHES_PAPER_ONLY: bool = true;
 
 /// When the checks run (journal spec §9.12 `ConnectionChecked.occasion`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,8 +33,9 @@ pub enum Occasion {
 /// What the credential is allowed to do, as the broker reported it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Granted {
-    /// OAuth scopes, as granted.
-    Scopes(BTreeSet<String>),
+    /// OAuth scopes, which only [`crate::grant::check_scope`] builds; [`run`] still re-checks
+    /// them, so a set that was never checked cannot pass.
+    OAuth(GrantedScopes),
     /// An API key's permissions, or `None` when the venue cannot report them (Alpaca keys).
     KeyPermissions(Option<BTreeSet<String>>),
     /// The MCP server's tool names.
@@ -39,10 +47,11 @@ pub enum Granted {
 pub enum AccountRead {
     Unreadable,
     /// The broker account id went to the personal-data vault under `pii_ref`; `dedicated` is
-    /// whether it is a dedicated agentic account (Robinhood; true elsewhere).
+    /// whether it is a dedicated agentic account, where the broker has them (Robinhood), and
+    /// `None` elsewhere.
     Read {
         pii_ref: AccountPiiRef,
-        dedicated: bool,
+        dedicated: Option<bool>,
     },
 }
 
@@ -114,8 +123,10 @@ pub struct CheckReport {
 /// 1. scope: OAuth scopes exactly `trading` and `data`; no permission or tool that can move
 ///    funds out; a live key whose permissions cannot be read is refused, a paper one recorded;
 /// 2. environment: from the broker's documented reach only, never a request; a credential that
-///    may reach both environments is refused, except Alpaca paper OAuth (DEC-821);
-/// 3. account: readable, and for Robinhood the dedicated agentic account;
+///    may reach both environments is refused, except Alpaca paper OAuth while
+///    [`ALPACA_PAPER_OAUTH_REACHES_PAPER_ONLY`] holds (DEC-821);
+/// 3. account: readable, and for Robinhood the dedicated agentic account (`dedicated` must be
+///    `Some(true)`);
 /// 7. contract (MCP only): the allowlisted tools are present and the hash equals the pinned one.
 pub fn run(input: &CheckInput) -> Result<CheckReport, ConnectError> {
     let _ = input;
