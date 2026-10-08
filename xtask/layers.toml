@@ -21,7 +21,8 @@
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1)
 #   2  mandate-journal, mandate-accounting
 #   3  mandate-spec
-#   4  mandate-risk
+#   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
+#      mandate-spec and the planned mandate-audit (layer 3) it may use; its server sits higher (DEC-680)
 #   5  mandate-builder
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
 #      mandate-runtime, mandate-mcp
@@ -47,7 +48,7 @@
 impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
-planned = ["mandate-paper"]
+planned = ["mandate-identity-system", "mandate-paper"]
 
 [crates.xtask]
 layer = "tool"
@@ -113,6 +114,15 @@ layer = 3
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+[crates.mandate-api]
+layer = 4
+safety_critical = true
+pure = true
+allowed_external = ["serde", "serde_json", "sha2", "thiserror"]
+# The identity system crate holds sessions and credentials; the contract never reaches it
+# (DEC-642 item 6).
+forbidden_internal = ["mandate-identity-system"]
 
 [crates.mandate-refcases]
 layer = "tool"

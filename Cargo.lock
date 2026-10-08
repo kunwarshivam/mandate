@@ -1313,6 +1313,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-api"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-journal",
+ "mandate-time",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-approval"
 version = "0.0.0"
 dependencies = [
