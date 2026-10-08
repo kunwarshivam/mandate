@@ -81,6 +81,9 @@ Everything in the [PRD](04-prd-v1.md) P0 list:
 - Hybrid installer (Helm / Docker Compose).
 - Robinhood Agentic Trading connector (retail equities over MCP into a dedicated account); the
   retail profile and disclosures; live retail trading once counsel signs off ([DEC-98](../project/04-decision-log.md#decisions)).
+- The landing page with the owner's connected accounts and their holdings, read-only; display-only
+  instrument search and owner-curated watchlists. Every buy still goes through an agent: there is
+  no order ticket ([DEC-528](../project/decisions/DEC-528.md); PRD FR-8.5, FR-8.6).
 
 **Exit criteria:** PRD release criteria met; 5+ design partners on paper, 3+ live.
 
@@ -95,6 +98,9 @@ Everything in the [PRD](04-prd-v1.md) P0 list:
 - Kraken Derivatives US connector: CFTC-regulated crypto perpetuals, with perpetuals accounting
   (funding, margin, liquidation thresholds) and a funding/carry signal model.
 - SMS and phone escalation; two-approver rule.
+- Monitor-only agents, unless pulled into Phase 2 once their mandate spec change lands, and
+  event-triggered research once the research agent's evaluation has passed
+  ([DEC-528](../project/decisions/DEC-528.md); PRD §6.11).
 
 **Exit criteria:** escalation precision and autonomy-rate targets met across design partners;
 at least one hybrid customer in production.
@@ -117,9 +123,14 @@ at least one hybrid customer in production.
   views) for managed workspaces.
 - WebAssembly plug-ins for custom logic.
 
+**Not yet placed:** agents over holdings the owner already has (adoption). They wait until cost basis
+and tax lots are modelled, with wash-sale handling and an answer for external activity
+([DEC-46](../project/04-decision-log.md#decisions), [DEC-528](../project/decisions/DEC-528.md) item 3).
+
 ## Explicitly not planned
 
 - Signals sold separately from agents.
+- An order ticket, and instrument lists the platform ranks or suggests ([DEC-528](../project/decisions/DEC-528.md)).
 - Strategy marketplace or copy trading.
 - Custody of funds.
 - Pricing tied to trades, assets, or profits.

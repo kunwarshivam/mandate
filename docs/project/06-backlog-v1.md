@@ -1353,6 +1353,25 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   connection-time failures map to distinct stable codes in `ControlError::Journal`, tested against
   Postgres, and none carries the DSN or its password.
 
+- **E10-19 (Should, Phase 3 unless pulled into Phase 2, after the first paper trade; SC)** As an
+  owner, I want an agent that only monitors (it watches the instruments and conditions I confirm and
+  alerts me, and never opens a position), so that I can follow an instrument before I let an agent
+  trade it ([DEC-528](decisions/DEC-528.md) item 4; PRD FR-11.1; product experience brief D16).
+  *Depends on:*
+  - a mandate spec change, which is not written yet and touches a protected path. It must say how a
+    monitor agent is expressed (an envelope with no allocation, or autonomy that denies `open` and
+    `increase`), what it may alert on, and which validation rules and reference cases change;
+  - E8-5's opaque notifications.
+
+  *Accepted when:*
+  - the gate and the autonomy policy deny every opening and increase for a monitor agent, whatever
+    its signal models say, tested over random inputs;
+  - it holds nothing, so it has nothing to exit;
+  - each alert is journaled with the facts or the quoted, attributed model output behind it;
+  - every notification carries only an opaque ID and generic text (rule 6);
+  - turning a monitor agent into one that trades is a new mandate the owner confirms, never an
+    in-place change.
+
 ### E11 Web app: dashboard and controls
 
 - **E11-1 (Must)** As an operator, I want a dashboard of agents, state, positions, P&L, open
@@ -1390,6 +1409,46 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   response carries per-stream watermarks; values past their freshness limit are marked stale with
   their age; model text appears only in quoted, attributed members (API-18); scorecards appear only
   at their own route (FR-8.4); each fixture type of `web/src/fixtures/types.ts` has its source route.
+- **E11-10 (Should, M9, after the first paper trade and E11-9)** As an owner, I want the landing
+  page to show my connected accounts, their holdings and "no agents deployed", so that I start from
+  what I have ([DEC-528](decisions/DEC-528.md) item 4; PRD FR-8.5; product experience brief J-H, D1,
+  H1).
+  *Depends on:*
+  - E11-9's journal-served read models;
+  - E7-6 for Robinhood accounts;
+  - a workspace API spec change for the holdings route (protected; not written yet).
+
+  *Accepted when:*
+  - holdings are read-only and per connection, each with its age;
+  - a request names only the connection's own account, so for Robinhood only the agentic account
+    appears (CN-8), tested with the multi-account fixtures;
+  - a holding no agent bought is labeled the owner's and is never attributed to an agent or offered
+    for adoption (CN-7, DEC-528 item 3);
+  - an unreadable connection is named while the others still show;
+  - no buy or sell control appears on the view.
+- **E11-11 (Should, M9, after the first paper trade and E11-9)** As an owner, I want to search
+  instruments by name or ticker and keep my own watchlists, so that I can find an instrument and ask
+  an agent about it or set one up ([DEC-528](decisions/DEC-528.md) item 2; PRD FR-8.6; product
+  experience brief I1 to I3).
+  *Depends on:*
+  - an instrument directory read: data-plane and workspace API spec changes, protected and not
+    written yet;
+  - one of these, recorded in the same spec change: a control-stream record for watchlist changes
+    (a journal spec change), or a decision that watchlists are workspace configuration outside the
+    journal.
+
+  *Accepted when:*
+  - results are ordered by match to the query text, then alphabetically, and a test shows the order
+    is unchanged by any price, volume, return or model output;
+  - no route returns a ranking, score, flag or platform-authored list
+    ([data-plane spec §1.4](../specs/data-plane.md#14-non-goals));
+  - the instrument page offers "Ask an agent" (an owner request through the builder, gate and
+    autonomy rules, DEC-141) and "Set up an agent", and never "buy" (Rule 12);
+  - watchlists are stored in the workspace and change no agent's universe unless pinned in a
+    confirmed mandate version (rule 11);
+  - the Robinhood connector still calls no watchlist or scan tool
+    ([connections spec §6.2](../specs/connections.md#62-how-mcp-maps-to-the-connector-interface)
+    rule 2).
 
 ### E12 Audit explorer
 
@@ -1900,6 +1959,26 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   the connection's environment is `paper` only when the stream holds no fact about the connection,
   so a `ConnectionRevoked` still refuses (DEC-505 item 3); and the paper path reads no mandate or
   configuration file.
+- **E19-12 (Should, after the research agent's DEC-99 evaluation passes and E19-3; SC)** As an
+  owner, I want a market event (news, a filing, a price move, an earnings date or call transcript)
+  to bring my agent's next research run forward, so that its theses respond to what happened rather
+  than waiting for the interval ([DEC-528](decisions/DEC-528.md) item 4; PRD FR-11.2).
+  *Depends on:*
+  - agent harness spec §5.3's change (protected; not written yet): an event edge from `Idle` to
+    `Due` with its debounce, and the invariants that keep a trigger from bypassing the run's
+    preconditions, the mode, or E19-3's caps;
+  - a source evaluation for an earnings calendar and transcripts. A paid vendor is spending, which
+    the founder decides (DEC-79), and any new source joins the allowlist (DEC-101).
+
+  *Accepted when:*
+  - triggers are debounced, and rate- and cost-capped per agent, with the caps in the research
+    entry;
+  - only allowlisted sources can trigger, and a triggered run's admissions still need DEC-101's
+    corroboration;
+  - prompt-injection fixtures in every triggering source never reach an order (E17-7);
+  - a burst of events never starts more runs than the caps allow, tested over random event
+    sequences;
+  - a run still produces opinions only (rule 4) and never sizes or places an order.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 
@@ -2240,6 +2319,18 @@ fully on-prem control plane; shared data plane; strategy marketplace.
      hash, with every output journaled. A plug-in emits only an opinion (a signal or a thesis), which enters
      through the eligibility floor, the autonomy rules and the risk gate like the platform's own ideas. It
      never sizes or places an order (rule 4).
+
+- **Agents over holdings the owner already has (adoption)** ([DEC-528](decisions/DEC-528.md) item 3;
+  PRD FR-11.3). Deferred: [DEC-46](04-decision-log.md#decisions) stands, and an agent's sub-ledger
+  holds only what it bought. Prerequisites, each its own story when it is written:
+  1. Importing lots and their cost basis from the broker, with each lot's source recorded.
+  2. Wash-sale handling across adopted lots and the agent's own trades (PRD FR-5.11 is
+     informational only today).
+  3. An answer for how an adopted position meets
+     [trading-domain spec §7.1](../specs/trading-domain.md#71-account-ledger-dec-26) (activity the
+     platform did not originate is external activity, which puts the account's agents in
+     `exits_only`) and [connections spec](../specs/connections.md) CN-7 (never adopted as ours).
+     Both are protected spec changes.
 
 ## Enterprise harness (proposed, DEC-149)
 
