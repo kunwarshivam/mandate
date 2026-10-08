@@ -36,6 +36,7 @@
 /crates/mandate-risk/       @kunwarshivam
 /crates/mandate-backtest/   @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
+/crates/mandate-rh-sim/     @kunwarshivam
 /crates/mandate-journal-pg/ @kunwarshivam
 /crates/mandate-journal-cold/ @kunwarshivam
 /crates/mandate-runtime/    @kunwarshivam
@@ -44,5 +45,6 @@
 /crates/mandate-executor/   @kunwarshivam
 /crates/mandate-liquidity/  @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
+/crates/mandate-mcp/        @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-modelhost/  @kunwarshivam

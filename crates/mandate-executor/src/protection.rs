@@ -17,6 +17,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
+use crate::kill::{flatten_closes, floor_of, is_flatten, mode_holds};
 use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
 use crate::ports::Ports;
@@ -116,22 +117,7 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .collect();
     for instrument in due {
         let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument)?);
-        let fresh = batch
-            .view
-            .quotes
-            .get(&instrument)
-            .filter(|quote| quote.sane);
-        let kept = batch.view.sane_bids.get(&instrument);
-        let limit = [
-            fresh.and_then(|quote| quote.mark),
-            fresh.and_then(|quote| quote.bid),
-            kept.and_then(|quote| quote.mark),
-            kept.and_then(|quote| quote.bid),
-        ]
-        .into_iter()
-        .flatten()
-        .min();
-        let (true, Some(limit)) = (held > Qty::ZERO, limit) else {
+        let (true, Some(limit)) = (held > Qty::ZERO, lowest_sane(&batch.view, &instrument)) else {
             continue;
         };
         let agent = single_holder(&batch.view, &instrument)
@@ -164,6 +150,20 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     Ok(())
 }
 
+/// The lowest of the latest quote's mark and bid, if that quote is sane, and the last sane bid's
+/// mark and bid: a self-made exit's own limit, which an insane quote never sets and which is
+/// never above a fresh bid (#385 round 1, blocker 1; DEC-485 item 8).
+pub(crate) fn lowest_sane(view: &ExecutorState, instrument: &InstrumentId) -> Option<Price> {
+    let fresh = view.quotes.get(instrument).filter(|quote| quote.sane);
+    let kept = view.sane_bids.get(instrument);
+    [fresh, kept]
+        .into_iter()
+        .flatten()
+        .flat_map(|quote| [quote.mark, quote.bid])
+        .flatten()
+        .min()
+}
+
 /// Whether every protective order resting in `instrument` is unfilled: §5.4's "with no fill".
 fn untouched(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     view.protection.get(instrument).is_some_and(|protection| {
@@ -176,11 +176,11 @@ fn untouched(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     })
 }
 
-/// Whether a watchdog intent in `instrument` is still waiting: received, and not yet submitted,
-/// denied or abandoned.
+/// Whether a watchdog intent or a kill switch's flatten in `instrument` is still waiting:
+/// received, and not yet submitted, denied or abandoned (#668 round 1, minor 3).
 fn watching(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     view.intents.iter().any(|(intent, record)| {
-        intent.0.0.starts_with(WATCHDOG)
+        (intent.0.0.starts_with(WATCHDOG) || is_flatten(view, intent))
             && record.outcome == IntentOutcome::Received
             && view.bodies.get(intent).is_some_and(
                 |body| matches!(body, IntentBody::Order { instrument: of, .. } if of == instrument),
@@ -285,7 +285,7 @@ pub(crate) fn exit_limit(
         &observed(batch, instrument),
         0,
         batch.at(),
-        None,
+        floor_of(&batch.view, intent),
         purpose,
         limit,
     ) {
@@ -338,9 +338,10 @@ fn steps(view: &ExecutorState, sequence: &ExitSequence) -> bool {
     sequence.ladder.stepping && climbs(view, sequence)
 }
 
-/// Whether the sequence's ladder may still climb: neither bounded nor its agent paused or stopped.
+/// Whether the sequence's ladder may still climb: neither bounded nor held by the agent's mode,
+/// which a kill switch's own flatten is exempt from (§5.5, DEC-260 (3)).
 pub(crate) fn climbs(view: &ExecutorState, sequence: &ExitSequence) -> bool {
-    view.effective_mode(&sequence.agent) < Mode::Paused
+    !mode_holds(view, &sequence.agent, &sequence.intent)
         && !view.unprotected.iter().any(|interval| {
             interval.ended_at.is_none()
                 && interval.alerted
@@ -376,7 +377,7 @@ pub(crate) fn remainders(
         .iter()
         .filter(|((held, _), _)| held == instrument)
         .map(|(_, lone)| lone)
-        .filter(|lone| !lone.ladder.parked || state.effective_mode(&lone.agent) < Mode::Paused)
+        .filter(|lone| !lone.ladder.parked || !mode_holds(state, &lone.agent, &lone.intent))
         .filter(|lone| {
             state
                 .intents
@@ -536,7 +537,8 @@ fn next_rung(
     let step = rung.saturating_add(1);
     let tier = batch.ports.instruments.exit_tier(instrument);
     let observations = observed(batch, instrument);
-    let rung = tier.map(|tier| ladder_price(tier, &observations, step, batch.at(), None));
+    let floor = floor_of(&batch.view, intent);
+    let rung = tier.map(|tier| ladder_price(tier, &observations, step, batch.at(), floor));
     let (price, at_floor) = match rung {
         Some(Ok(rung)) => (
             ticked(batch.ports.instruments.asset_class(instrument), rung.limit),
@@ -909,7 +911,10 @@ pub(crate) fn crypto_add(batch: &Batch<'_, '_>, intent: &IntentId) -> Result<(),
 }
 
 /// Whether a live order with no cancel outstanding was moved to `PendingCancel`.
-fn ask_cancel(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<bool, ExecutorError> {
+pub(crate) fn ask_cancel(
+    batch: &mut Batch<'_, '_>,
+    id: &ClientOrderId,
+) -> Result<bool, ExecutorError> {
     let live = batch
         .view
         .orders
@@ -964,7 +969,7 @@ fn lone_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         if left == Qty::ZERO {
             continue;
         }
-        let paused = batch.view.effective_mode(&lone.agent) >= Mode::Paused;
+        let paused = mode_holds(&batch.view, &lone.agent, &lone.intent);
         if let Some(reason) = closed_hold(batch.ports, &instrument, batch.at()) {
             park(batch, &lone.intent, reason, lone.ladder.parked)?;
         } else if lone.ladder.parked && paused {
@@ -1033,7 +1038,11 @@ fn park(
 /// asked again once its query finds the order still live, so the exit never waits out the bound
 /// on a cancel nothing will confirm (DEC-425 item 1; #524's pin (d)). A handed-on placement is
 /// [`overtaken`]'s.
+///
+/// A kill switch's closes are raised first, so a flatten waiting on a `*` exit's cancel holds the
+/// sequence's re-placement until it has sold the agent's lots (DEC-485 items 6 and 13).
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    flatten_closes(batch)?;
     release_waiting(batch)?;
     lone_steps(batch)?;
     let sequences: Vec<(InstrumentId, ExitSequence)> = batch
@@ -2189,7 +2198,8 @@ pub struct LadderPrice {
 /// reference, and the offset never exceeds `max_exit_offset`.
 ///
 /// An owner exit outside the regular session prices from the bid the owner confirmed and never
-/// below the floor that `OwnerExitRequested` carries (§5.5, mandate spec §6.1).
+/// below the floor that `OwnerExitRequested` carries (§5.5, mandate spec §6.1): a rung the floor
+/// clamps is at the floor, so it rests rather than being stepped to the same price again.
 ///
 /// `observations` run oldest to newest. "Fresh" is the newest observation, sane; "within five
 /// minutes" is [`SANE_BID_WINDOW_S`] of `now`, for a bid and a trade alike: an insane print or an
@@ -2237,7 +2247,7 @@ pub(crate) fn ladder_price(
         limit: floor.map_or(priced, |floor| priced.max(floor)),
         reference,
         step,
-        at_floor: offset == tier.max_exit_offset,
+        at_floor: offset == tier.max_exit_offset || floor.is_some_and(|floor| priced <= floor),
     })
 }
 
@@ -11142,7 +11152,6 @@ mod sequence_tests {
     /// parked and an exit held, leaves nothing selling past the position through the open
     /// (`AGENTS.md` rule 13; E7-3 implements the kill switch).
     #[test]
-    #[ignore = "pending E7-3"]
     fn a_kill_switch_between_rungs_never_over_sells() -> Result<(), String> {
         let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
             .into_iter()
@@ -13696,6 +13705,7 @@ mod remainder_pins {
                     protection: None,
                     limit: mandate_num::Price::parse("150")?,
                     tif: crate::types::TimeInForce::Day,
+                    flatten: false,
                 },
                 ports,
             )

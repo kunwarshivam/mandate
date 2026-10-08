@@ -318,7 +318,9 @@ crates.
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
   `src/bin/mandate-tracer.rs` the binary; `src/control.rs` the deployment input from the control
   stream (E19-11, DEC-505; tests in `crates/mandate-shell/tests/control.rs`) and the effective
-  registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`);
+  registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`),
+  and the policy set and model registry that govern the run, DEC-534 (tests in
+  `crates/mandate-shell/tests/governance.rs`);
   `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed artifacts and binds the
   bytes it checked (`Artifacts::from_registered` takes them from the confirmed version and the
   registered objects instead of files, Q1; tests in `crates/mandate-shell/tests/registered.rs`), reads the GET-only broker preflight (including the trailing window's
@@ -397,7 +399,11 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-executor/src/ids.rs` (`ClientOrderId`, three derivations and one validating
   parser, no free constructor), `crates/mandate-executor/src/types.rs` (the vocabulary, including
   `BrokerRequest` and `AccountWideScope`), `crates/mandate-executor/src/reconcile.rs`,
-  `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/gate.rs` (the binding
+  `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/kill.rs` (the
+  agent-scoped kill switch of section 5.5: the final mode first, the agent's orders cancelled by
+  id, and its sub-ledger sold through the executor's own `k-<switch>-<n>` flatten intents once the
+  cancels confirm; the account and workspace scopes answer their stub; DEC-485),
+  `crates/mandate-executor/src/gate.rs` (the binding
   gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`,
   `crates/mandate-executor/src/opening.rs` (`equity_bracket_prices`, the bracket's stop and
   take-profit rounded up onto the Reg NMS grid, and `BrokerAccount::one_x_buying_power`, with
@@ -488,6 +494,22 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `RC-04`, `RC-06`'s `protective_orders_kept_through_dividend`, `RC-07`, `RC-11`, `RC-20`, `RC-21` and
   `RC-24` green.
 - **Run:** `cargo nextest run -p mandate-executor -p mandate-alpaca`.
+
+## MCP transport for broker connectors (E7-16)
+
+- **Spec:** `docs/specs/connections.md` §6.2 rules 1 and 4, §6.5 (the reserved exit budget), CN-9;
+  DEC-441 item 8; slice M1 of the first-live-trade brief (#706).
+- **Code:** `mandate-mcp`: `crates/mandate-mcp/src/endpoint.rs` (`PinnedEndpoint`: `https` on the
+  pinned host only, plain `http` only to a loopback literal in the crate's own test build),
+  `crates/mandate-mcp/src/budget.rs` (`RateBudget`: the ordinary bucket and the reserved one only
+  risk-reducing calls draw on), `crates/mandate-mcp/src/error.rs` (`McpError`, and `ServerText`,
+  which has no `Display` and whose `Debug` withholds what the server sent).
+- **Tests:** in-crate where a loopback server is needed, since loopback is accepted only in the
+  crate's own test build: `crates/mandate-mcp/src/tests/endpoint.rs`,
+  `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
+  loopback), `crates/mandate-mcp/src/tests/budget.rs` (an oracle that steps one refill period at a
+  time), `crates/mandate-mcp/src/tests/errors.rs`.
+- **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
 
 ## Risk gate
 
@@ -1009,6 +1031,10 @@ proves each pending test fails on them (DEC-110).
   `kill`, `status`), stubbed; `crates/mandate-cli/tests/approvals.rs` and
   `crates/mandate-cli/tests/agent.rs`, pending E8-3 but for one live fixture check, with an
   in-memory journal in `crates/mandate-cli/tests/common/mod.rs`.
+- **The `approvals` commands (K1a, DEC-533):** `crates/mandate-cli/src/inbox.rs` (`list`, `show`,
+  `approve` and `skip` over P0's journal as D1b's paper owner; the renderers `list_lines`,
+  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`), stubbed, and `main`;
+  `crates/mandate-cli/tests/inbox.rs`, pending E8-3 but for the live flags test.
 - **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime -p mandate-cli`;
   `cargo xtask ci pending`.
 
@@ -1062,13 +1088,20 @@ proves each pending test fails on them (DEC-110).
 - **Code:** `crates/mandate-cli/src/version.rs` (`create`, which stores the canonical document and
   its record and commits `MandateVersionCreated`, every envelope path `user_entered`; `confirm`,
   which takes the code bound to the version, checks every V-rule but V-002 and the registered
-  instrument snapshots, and commits `MandateConfirmed`; both paper only), stubbed.
-- **Tests:** `crates/mandate-cli/tests/version.rs`, pending E10-16: payloads and records written
+  instrument snapshots, and commits `MandateConfirmed`; both paper only).
+- **Tests:** `crates/mandate-cli/tests/version.rs`: payloads and records written
   out from the vectors' shapes and read back through `Draft::parse`; the stream folded with
   `JournaledFact::from_record` and `ValidationContext::from_journal`, leaving only V-001 and V-002;
-  every refusal code, each writing nothing; a failing store committing nothing. The SPY mandate is
+  every refusal code, each writing nothing; a store failing at each write committing nothing. The SPY mandate is
   `crates/mandate-cli/tests/fixtures/spy_mandate.json`.
-- **Run:** `cargo nextest run -p mandate-cli --test version`; `cargo xtask ci pending`.
+- **Run:** `cargo nextest run -p mandate-cli --test version`.
+- **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
+  takes the stream's latest confirmed version and a code bound to the agent and the version, and
+  commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
+  stubbed; `crates/mandate-cli/tests/deploy.rs`, pending E10-16, over a control stream seeded in
+  §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
+  force; every refusal code, each writing nothing; a failing store committing nothing.
+  `cargo nextest run -p mandate-cli --test deploy`.
 
 ## Reference-case harness
 
@@ -1258,6 +1291,19 @@ proves each pending test fails on them (DEC-110).
   check order over every pair of stages, and the signal against an `i128` oracle with ties and a
   clock-independence check), with fixtures in `tests/common/mod.rs`.
 - **Run:** `cargo nextest run -p mandate-modelhost`.
+
+## Simulated Robinhood broker (E7-25)
+
+- **Spec:** the Robinhood tool contract (E7-15: "The equity order tools", "Order states") and
+  slice S1 of the first live trade brief, both from PR #706; connections spec §6; DEC-124;
+  DEC-441 items 11 and 16.
+- **Code:** `mandate-rh-sim`, `crates/mandate-rh-sim/` (layer 10, above every product crate, so
+  a dev-dependency only; safety-critical, pure):
+  `src/lib.rs` (`Sim`, its scripted `Event`s and `Fault`s, the order and request types,
+  `SimError`).
+- **Tests:** `crates/mandate-rh-sim/tests/rules.rs` (only an agentic account reviews or places;
+  account numbers are unique), with fixtures in `tests/common/mod.rs`. Pending E7-25.
+- **Run:** `cargo nextest run -p mandate-rh-sim`.
 
 ## Research-agent spike (E17-0)
 
