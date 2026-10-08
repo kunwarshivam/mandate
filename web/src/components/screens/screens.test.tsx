@@ -115,13 +115,14 @@ describe("D1 dashboard", () => {
       expect(entry).toHaveAttribute("data-verdict", d.verdict);
       expect(entry.querySelector("svg[data-slot=owl]")).not.toBeNull();
       expect(within(entry).getByRole("link")).toHaveAttribute("href", decisionHref(d.agent_id, d.event_id));
-      expect(entry.querySelector("[data-slot=verdict]")).toHaveTextContent(/^(Allowed|Not allowed|Held|Waiting)$/);
+      expect(entry.querySelector("[data-slot=verdict]")).toHaveTextContent(/^(Allowed|Asked you|Not allowed|Held|Waiting)$/);
+      if (d.verdict === "allow" && d.approval_id) expect(entry.querySelector("[data-slot=verdict]")).toHaveTextContent("Asked you");
       expect(entry.querySelector("time")).toHaveTextContent(clock(d.at).slice(0, 5));
       if (d.verdict === "allow") expect(entry.querySelector("[data-slot=gate-rule]")).toBeNull();
       else expect(entry.querySelector("[data-slot=gate-rule]")).toHaveTextContent(/\w/);
       expect(entry.innerHTML).not.toMatch(/\b(text|bg|ring|border)-(gain|loss|crimson)\b/);
     });
-    expect(region.querySelector("[data-slot=decision-tally]")).toHaveTextContent(/^The latest 4 decisions: \d+ allowed(, \d+ (not allowed|held|waiting))+\.$/);
+    expect(region.querySelector("[data-slot=decision-tally]")).toHaveTextContent(/^The latest 4 decisions: \d+ allowed(, \d+ (asked you|not allowed|held|waiting))+\.$/);
     expect(within(region).getByRole("link", { name: /All decisions/ })).toHaveAttribute("href", "/audit/decisions");
   });
 
@@ -141,10 +142,13 @@ describe("D1 dashboard", () => {
     expect(main()).toHaveTextContent(/Stale: as of 14:02:11, 3 min ago/);
   });
 
-  it("shows a paused agent's restriction with what it blocks and how it ends", () => {
+  it("names a paused agent's restriction on its row in one line, since when, with what it blocks and how it ends behind it, not inline (DEC-512)", () => {
     renderScreen("/", <DashboardScreen />, "paused");
-    const restrictions = within(main()).getByRole("list", { name: "Restrictions" });
-    expect(restrictions).toHaveTextContent(/Blocks .+\. Ends when: .+\./);
+    const restrictions = within(main()).getByLabelText("Restrictions");
+    expect(restrictions.tagName).toBe("P");
+    expect(restrictions).toHaveTextContent(/since \d\d:\d\d/);
+    expect(restrictions).not.toHaveTextContent(/Blocks/);
+    expect(restrictions.querySelector("[title]")?.getAttribute("title")).toMatch(/^Blocks .+\. Ends when: .+\.$/);
   });
 });
 
@@ -232,7 +236,7 @@ describe("D2 agent detail", () => {
       expect(raise).not.toHaveAttribute("data-current");
       expect(raise).toHaveTextContent("Not applied");
       expect(raise.querySelector("[data-slot=version-rejected]")).toHaveTextContent(
-        "Rejected at application, Sep 28, 2026 at 14:03:34 ET. An allocation increase is refused while a limit is latched, and the drawdown ladder holds this agent at exits only. Version 1 stays in effect; version 2 never applied.",
+        "Rejected at application, Sep 28, 2026 at 14:03:34 ET. An allocation increase is refused while a limit is latched, and the drawdown ladder holds this agent at selling only. Version 1 stays in effect; version 2 never applied.",
       );
       expect(changes(raise)).toEqual(["Capital$10,000.00to$12,000.00Risk-increasing"]);
       expect(first).toHaveAttribute("data-current", "true");

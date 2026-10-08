@@ -100,7 +100,7 @@ function Inbox() {
 
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
-      <PageHeader title="Approvals" environment={ws.environment} description="Requests your rules sent to you. If you do nothing, a request is skipped at its deadline." className="mb-0" />
+      <PageHeader title="Approvals" description="Requests your rules sent to you. If you do nothing, a request is skipped at its deadline." className="mb-0" />
       <div className={PAGE_GRID}>
         <div data-layout="main" className="grid min-w-0 grid-cols-1 content-start gap-(--section-gap)">
           <Section title="Open, by deadline">

@@ -29,7 +29,7 @@ export type ThreadView = "chat" | "desk";
  * the open thread, and the agent beside it, divided by hairlines. On a phone: one of the first two.
  */
 const MESSAGES_GRID =
-  "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[19rem_minmax(0,1fr)_17rem] lg:divide-x lg:divide-border/70 xl:grid-cols-[21rem_minmax(0,1fr)_19rem]";
+  "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[19rem_minmax(0,1fr)] lg:divide-x lg:divide-border/70 xl:grid-cols-[21rem_minmax(0,1fr)_19rem]";
 
 /** A side pane scrolls on its own, and its end clears the dock. A pane is the containing block of what it scrolls, so nothing inside, such as a screen reader's label, lengthens the page. */
 const SIDE_PANE = "relative min-h-0 min-w-0 overflow-y-auto overscroll-contain lg:pb-[calc(var(--dock-clearance)+1rem)]";
@@ -60,7 +60,7 @@ function ThreadBar({ agent, view }: { agent: Agent; view: ThreadView }) {
         <ArrowLeft aria-hidden className="size-6" />
       </Link>
       <div className="relative flex min-w-0 flex-1 items-center gap-2.5 rounded-lg max-lg:min-h-11 max-lg:has-[a:focus-visible]:ring-2 max-lg:has-[a:focus-visible]:ring-ring lg:gap-3 lg:pb-3">
-        <AgentOwl agent={agent} className="size-7 shrink-0 lg:hidden" />
+        <AgentOwl agent={agent} className="size-8 shrink-0 lg:hidden" />
         <div className="grid min-w-0 gap-0.5 lg:gap-1">
           <h2 id="thread-title" className="flex min-w-0 items-center gap-x-3 gap-y-1 font-semibold max-lg:leading-5 lg:flex-wrap lg:text-h3">
             <Link
@@ -145,7 +145,7 @@ function Messages({ agentId, view }: { agentId: string | null; view: ThreadView 
       </div>
       {agent ? <Thread agent={agent} view={view} /> : <NoThreadOpen />}
       {agent ? (
-        <div data-slot="rail-pane" className={cn(SIDE_PANE, "px-5 pt-5 max-lg:hidden")}>
+        <div data-slot="rail-pane" className={cn(SIDE_PANE, "px-5 pt-5 max-xl:hidden")}>
           <ThreadRail agent={agent} />
         </div>
       ) : null}

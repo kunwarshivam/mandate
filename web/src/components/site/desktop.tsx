@@ -39,6 +39,20 @@ const CLOSED: Win = { open: false, min: false, max: false, x: 0, y: 0, z: 0 };
 
 const closed = (id: AppId): Win => ({ ...CLOSED, ...APPS[id].offset });
 
+/**
+ * A window opened while another is in front sits this far down and right of it, as a 1990s desktop
+ * cascaded its windows, so each new one shows the one before it rather than covering it. The home
+ * page is the desktop's ground and is never cascaded from.
+ */
+const CASCADE = 28;
+
+function cascadeFrom(state: State): Pick<Win, "x" | "y"> | null {
+  const front = frontmost(state);
+  if (front === null || front === "home") return null;
+  const w = state.wins[front];
+  return { x: w.x + CASCADE, y: w.y + CASCADE };
+}
+
 function initial(): State {
   const wins = Object.fromEntries((Object.keys(APPS) as AppId[]).map((id) => [id, closed(id)])) as Record<AppId, Win>;
   return { top: 1, wins: { ...wins, home: { ...wins.home, open: true, z: 1 } } };
@@ -53,7 +67,7 @@ function reduce(state: State, action: Action): State {
   });
   switch (action.type) {
     case "open":
-      return set({ open: true, min: false }, true);
+      return set({ open: true, min: false, ...(win.open ? null : cascadeFrom(state)) }, true);
     case "close":
       return set(closed(action.id));
     case "minimize":

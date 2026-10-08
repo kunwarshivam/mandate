@@ -5,13 +5,14 @@ import Link from "next/link";
 import { Button } from "@cloudflare/kumo/components/button";
 import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
 import { Undo } from "pixelarticons/react/Undo.js";
-import { Owl } from "@/components/domain/owl";
+import { HatchingOwl } from "@/components/domain/owl";
 import { KEY } from "@/components/kumo/key";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import { StepUpDialog } from "@/components/stop/step-up-dialog";
 import type { ContentRef, Provenance } from "@/fixtures/types";
 import { type Dec, sub } from "@/lib/decimal";
 import { type NewAgent, mandateVersion } from "@/lib/fixture-journey";
+import { PROVENANCE_LABEL } from "@/lib/labels";
 import { clock, quantity, price, usd, zoneLabel } from "@/lib/format";
 import { type Deployment, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
@@ -26,16 +27,17 @@ import { type Draft, goalWords } from "./draft";
  */
 
 export const SUMMARY_TITLE = "Your agent";
-export const LEGEND = "Marked proposed or default: set by Owlhead to fit inside the loss you gave. Everything else came from you.";
+export const LEGEND = "Marked Proposed or Default: set by Owlhead to fit inside the loss you gave. Everything else came from you.";
 export const GAP_NOTE = "Price gaps and exit prices can make any of these losses larger. You gave the last one; Owlhead worked out the others from it.";
 const NOT_ENFORCED_WHY = "No limit can check this, so it isn't enforced. The agent gets it as a note.";
 
+/** The same words as the mandate page's provenance badges (DEC-513), on what the owner did not say. */
 const TAG: Record<Provenance, string | null> = {
   user_stated: null,
   user_entered: null,
-  template_structure: "template",
-  platform_proposed: "proposed",
-  platform_default: "default",
+  template_structure: PROVENANCE_LABEL.template_structure,
+  platform_proposed: PROVENANCE_LABEL.platform_proposed,
+  platform_default: PROVENANCE_LABEL.platform_default,
 };
 
 /** The agent in plain sentences, one per line. */
@@ -140,7 +142,7 @@ function Progress({ deployment }: { deployment: Deployment }) {
       return (
         <div data-phase="recorded" className="grid gap-4">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-            <Owl seed={deployment.agentId} mood="awake" className="size-14" />
+            <HatchingOwl seed={deployment.agentId} className="size-16" />
             <div className="grid min-w-0 gap-0.5">
               <p className="font-semibold">{agent ? `${agent.label} is running on paper.` : "It is running on paper."}</p>
               <p className="text-sm text-pretty text-muted-foreground">Recorded in the journal at {at(deployment.recordedAt ?? now)}, as version 1. This owl is its own, drawn from its ID.</p>

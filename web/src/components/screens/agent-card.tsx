@@ -8,13 +8,13 @@ import { useMarket } from "@/components/charts/chart-parts";
 import { Sparkline } from "@/components/charts/sparkline";
 import { AsOf } from "@/components/domain/as-of";
 import { AgentOwl } from "@/components/domain/owl";
-import { ModeBadge, SOURCE_FIELD, SourceTag } from "@/components/domain/mode";
+import { ModeBadge } from "@/components/domain/mode";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { Agent } from "@/fixtures/types";
 import { equityWindow, mandateLevels } from "@/lib/chart-data";
-import { quantity, usd } from "@/lib/format";
+import { clock, quantity, usd } from "@/lib/format";
 import { headroomLine } from "@/lib/limits";
 import { describeRestriction } from "@/lib/restrictions";
 
@@ -117,19 +117,19 @@ export function AgentCard({
       </p>
 
       {agent.restrictions.length > 0 ? (
-        <ul aria-label="Restrictions" className="col-start-2 grid gap-1.5">
-          {agent.restrictions.map((r) => {
+        <p aria-label="Restrictions" className="col-start-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-caption text-muted-foreground">
+          {agent.restrictions.map((r, i) => {
             const d = describeRestriction(r);
             return (
-              <li key={`${r.code}-${r.symbol ?? ""}`} data-source={d.source} className={cn("flex flex-wrap items-baseline gap-x-2.5 gap-y-1 rounded-xl px-3 py-2.5 text-sm", SOURCE_FIELD[d.source])}>
-                <SourceTag source={d.source} className="self-center" />
-                <span className="min-w-0 flex-1">
-                  <span className="font-semibold">{d.title}.</span> Blocks {d.blocks.toLowerCase()}. Ends when: {d.endsWhen.charAt(0).toLowerCase() + d.endsWhen.slice(1)}.
+              <span key={`${r.code}-${r.symbol ?? ""}`} data-source={d.source} className="inline-flex items-center gap-x-1.5">
+                {i > 0 ? <span aria-hidden>·</span> : null}
+                <span title={`Blocks ${d.blocks.toLowerCase()}. Ends when: ${d.endsWhen.charAt(0).toLowerCase() + d.endsWhen.slice(1)}.`}>
+                  <span className="font-medium text-foreground">{d.title}</span> since {clock(r.since)}
                 </span>
-              </li>
+              </span>
             );
           })}
-        </ul>
+        </p>
       ) : null}
     </article>
   );

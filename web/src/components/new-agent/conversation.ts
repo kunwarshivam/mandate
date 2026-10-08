@@ -28,8 +28,8 @@ export type Step =
 
 export type Entry =
   | { id: string; kind: "owner"; text: string }
-  /** The platform's reply: deterministic sentences, with the model's own reply first when it gave one. `asks` is the step it leaves open. */
-  | { id: string; kind: "said"; lines: string[]; asks: Step }
+  /** The platform's reply: deterministic sentences, with the model's own reply first when it gave one. `asks` is the step it leaves open; `unread` marks a reply to a message that changed nothing. */
+  | { id: string; kind: "said"; lines: string[]; asks: Step; unread?: true }
   /** The whole agent as it stood at `revision`, for the owner to create. */
   | { id: string; kind: "summary"; revision: number }
   | { id: string; kind: "failed"; reason: "unreachable" | "invalid"; messageId: string };
@@ -126,28 +126,50 @@ export function question(step: Step, c: Conversation): string {
   }
 }
 
-/** What to say when a message changed nothing and the model said nothing either. */
-function unreadFor(step: Step): string {
+/**
+ * What to say when a message changed nothing and the model said nothing either. A second miss in a
+ * row at the same step says what shape of answer would be read, never a value, instead of the same
+ * sentence again.
+ */
+function unreadFor(step: Step, again: boolean): string {
   switch (step.kind) {
     case "money":
-      return "I couldn't find an amount in that. How much money can it use, in dollars?";
+      return again
+        ? "I still couldn't find an amount. Write the figure on its own, in dollars, with nothing else in the message."
+        : "I couldn't find an amount in that. How much money can it use, in dollars?";
     case "goal":
       return "What's it for, in your own words?";
     case "loss":
-      return "I couldn't find a loss in that. Write it in dollars, or as a percentage of the money.";
+      return again
+        ? "I still couldn't find a loss. Write one figure on its own: dollars, or a percentage of the money."
+        : "I couldn't find a loss in that. Write it in dollars, or as a percentage of the money.";
     case "symbols":
-      return "I couldn't find a symbol in that. Write the symbols themselves, separated by commas or spaces.";
+      return again
+        ? "I still couldn't find a symbol. Write the ticker symbols on their own, in capitals, with a space between them."
+        : "I couldn't find a symbol in that. Write the symbols themselves, separated by commas or spaces.";
     case "model":
-      return "Pick one of the models, or write its name.";
+      return again ? "I still couldn't match that to a model. Pick one of the models below, or write its name as it appears there." : "Pick one of the models, or write its name.";
     case "param":
-      return "Write it as a number, in figures.";
+      return again ? "I still couldn't read that as a number. Write the number on its own, in figures, inside the range the question gives." : "Write it as a number, in figures.";
     case "ready":
-      return "I couldn't find a change in that. You can change the money, the goal, the loss, the symbols, or the model by saying so.";
+      return again
+        ? "I still couldn't find a change. Name the value and what it should become in one sentence: the money, the goal, the loss, the symbols, or the model."
+        : "I couldn't find a change in that. You can change the money, the goal, the loss, the symbols, or the model by saying so.";
     default: {
       const unhandled: never = step;
       throw new Error(`unhandled step ${JSON.stringify(unhandled)}`);
     }
   }
+}
+
+/** Whether the reply before this one, at the same step, already answered a message that changed nothing. */
+function missedBefore(c: Conversation, step: Step): boolean {
+  for (let i = c.entries.length - 1; i >= 0; i--) {
+    const e = c.entries[i];
+    if (e.kind === "owner") continue;
+    return e.kind === "said" && e.unread === true && sameStep(e.asks, step);
+  }
+  return false;
 }
 
 export function startConversation(): Conversation {
@@ -246,15 +268,16 @@ function list(items: string[]): string {
  * Ends the platform's turn: what it has to say, then the next question when the conversation moved
  * on or there is nothing else to say. Once nothing is missing, a change shows the whole agent again.
  */
-function reply(before: Conversation, after: Conversation, lines: string[]): Conversation {
+function reply(before: Conversation, after: Conversation, lines: string[], unread = false): Conversation {
   const was = nextStep(before);
   const step = nextStep(after);
   const moved = !sameStep(was, step);
+  const mark = unread ? { unread: true as const } : {};
   if (step.kind === "ready") {
     if (moved || after.revision !== before.revision) return push(after, { kind: "said", lines: [...lines, READY], asks: step }, { kind: "summary", revision: after.revision });
-    return push(after, { kind: "said", lines, asks: step });
+    return push(after, { kind: "said", lines, asks: step, ...mark });
   }
-  return push(after, { kind: "said", lines: moved || lines.length === 0 ? [...lines, question(step, after)] : lines, asks: step });
+  return push(after, { kind: "said", lines: moved || lines.length === 0 ? [...lines, question(step, after)] : lines, asks: step, ...mark });
 }
 
 /** The compiler's checked turn, applied: the model's reply, what was noted or refused, then what comes next. */
@@ -293,7 +316,7 @@ export function applyTurn(c: Conversation, messageId: string, turn: Turn, checks
   lines.push(...refused);
   if (noted.length > 0 || refused.length > 0) return reply(c, next, lines);
   const step = nextStep(next);
-  if (!turn.reply && !turn.withheld) return reply(c, next, [...lines, unreadFor(step)]);
+  if (!turn.reply && !turn.withheld) return reply(c, next, [...lines, unreadFor(step, missedBefore(c, step))], true);
   return reply(c, next, step.kind === "ready" ? lines : [...lines, question(step, next)]);
 }
 

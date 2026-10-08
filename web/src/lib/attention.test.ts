@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, OrderState, Scenario, Workspace } from "@/fixtures/types";
 import { AGENT_IDS, buildWorkspace } from "@/fixtures/workspace";
-import { IN_FLIGHT, alertLines, attentionText, stopAttention } from "./attention";
+import { IN_FLIGHT, alertLines, attentionText, needsYouLines, stopAttention } from "./attention";
 import { agentLimits, nearLossLimits } from "./limits";
 
 function agentIn(ws: Workspace, id: string): Agent {
@@ -68,7 +68,7 @@ describe("the Stop control turns loud", () => {
   it("for an agent in exits only, even without a restriction listed", () => {
     const ws = buildWorkspace("normal");
     agentIn(ws, AGENT_IDS.lmn).mode = "exits_only";
-    expect(stopAttention(ws)).toEqual(["Agent 3: exits only"]);
+    expect(stopAttention(ws)).toEqual(["Agent 3: selling only"]);
   });
 
   it("for a restriction from the mandate, the account or market data", () => {
@@ -151,5 +151,7 @@ describe("alert lines", () => {
       "Agent 2: stale price (QRS)",
     ]);
     expect(alertLines(buildWorkspace("normal"))).toEqual([]);
+    expect(needsYouLines(buildWorkspace("stale")).map((a) => a.text), "Needs you: no feed, and one line per agent and condition").toEqual(["Agent 2: stale price (XYZ, QRS)"]);
+    expect(needsYouLines(buildWorkspace("normal"))).toEqual([]);
   });
 });

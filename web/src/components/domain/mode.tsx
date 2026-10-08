@@ -1,21 +1,16 @@
 "use client";
 
 import { motion } from "motion/react";
-import { Cancel } from "pixelarticons/react/Cancel.js";
-import { CheckboxOn } from "pixelarticons/react/CheckboxOn.js";
-import { Logout } from "pixelarticons/react/Logout.js";
-import { Pause } from "pixelarticons/react/Pause.js";
 import { cn } from "@/lib/utils";
 import type { ActiveRestriction, AgentMode } from "@/fixtures/types";
 import { clock } from "@/lib/format";
 import { MODE_LABEL, MODE_MEANING } from "@/lib/labels";
 import { type RestrictionSource, SOURCE_LABEL, describeRestriction } from "@/lib/restrictions";
 
-const MODE_ICON = { normal: CheckboxOn, exits_only: Logout, paused: Pause, stopped: Cancel } as const;
-
 /**
- * Running is quiet; exits only is outlined in ink (half stopped); paused and stopped are solid ink.
- * The label and icon carry the mode, so no colour has to.
+ * Trading is quiet; selling only is outlined in ink (half stopped); paused and stopped are solid
+ * ink. The word carries the mode and a dot marks it as a state (DEC-512): never a glyph that reads
+ * as a control, so no colour has to carry it either.
  */
 export const MODE_FIELD: Record<AgentMode, string> = {
   normal: "bg-background text-muted-foreground",
@@ -27,7 +22,6 @@ export const MODE_FIELD: Record<AgentMode, string> = {
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
 export function ModeBadge({ mode, className }: { mode: AgentMode; className?: string }) {
-  const Icon = MODE_ICON[mode];
   return (
     <motion.span
       layout
@@ -35,12 +29,12 @@ export function ModeBadge({ mode, className }: { mode: AgentMode; className?: st
       data-slot="mode-badge"
       data-mode={mode}
       className={cn(
-        "inline-flex h-6 w-fit shrink-0 items-center gap-1 rounded-md pr-2.5 pl-1 text-label whitespace-nowrap transition-colors duration-(--duration-hover) [&>svg]:size-6",
+        "inline-flex h-6 w-fit shrink-0 items-center gap-1.5 rounded-md px-2 text-label whitespace-nowrap transition-colors duration-(--duration-hover)",
         MODE_FIELD[mode],
         className,
       )}
     >
-      <Icon aria-hidden />
+      <span aria-hidden data-slot="mode-dot" className={cn("size-1.5 shrink-0 rounded-full", mode === "exits_only" ? "ring-1 ring-current ring-inset" : "bg-current")} />
       {MODE_LABEL[mode]}
     </motion.span>
   );

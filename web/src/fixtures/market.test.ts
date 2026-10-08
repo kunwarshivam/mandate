@@ -180,4 +180,17 @@ describe("equity curves", () => {
   it.each(SCENARIOS.map((s) => s.id))("builds for the %s scenario", (scenario) => {
     expect(() => buildMarket(buildWorkspace(scenario))).not.toThrow();
   });
+
+  it.each(SCENARIOS.map((s) => s.id))("in the %s scenario no curve moves more than 2% in one minute, so a scenario's figures are reached along a path and never by a cliff at the right edge", (scenario) => {
+    const ws = buildWorkspace(scenario);
+    const m = buildMarket(ws);
+    const curves = [...ws.agents.map((a) => [`Agent ${a.agent_id}`, m.equity[a.agent_id]] as const), ["the account", m.account] as const];
+    for (const [name, curve] of curves) {
+      for (let i = 1; i < curve.length; i++) {
+        if (curve[i - 1].value === 0) continue;
+        const step = Math.abs(curve[i].value - curve[i - 1].value) / curve[i - 1].value;
+        expect(step, `${name} at ${new Date(curve[i].time * 1000).toISOString()}`).toBeLessThanOrEqual(0.02);
+      }
+    }
+  });
 });

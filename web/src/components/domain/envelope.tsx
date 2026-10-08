@@ -98,9 +98,12 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
       <ol className="grid text-sm" aria-label="Equity levels, highest first">
         {withEquity.map((row) =>
           row === "equity" ? (
-            <li key="equity" className="my-1 grid grid-cols-[6.5rem_1fr] items-baseline gap-3 rounded-lg bg-lapis px-2.5 py-2 text-lapis-foreground">
-              <span className="text-right font-mono font-medium tabular">{usd(equity)}</span>
-              <span className="font-medium">Equity now</span>
+            <li key="equity" data-level="equity" className="my-1 grid grid-cols-[6.5rem_1fr] items-baseline gap-3 rounded-lg bg-card px-2.5 py-2 ring-1 ring-mandate-edge ring-inset">
+              <span className="text-right font-mono font-semibold tabular">{usd(equity)}</span>
+              <span className="flex items-center gap-2 font-semibold">
+                <span className="size-3 shrink-0 rounded-full bg-lapis ring-3 ring-mandate" aria-hidden />
+                Equity now
+              </span>
             </li>
           ) : (
             <li key={row.key} data-level={row.kind} className="grid grid-cols-[6.5rem_1fr] items-baseline gap-x-3 gap-y-0.5 border-b border-mandate-strong/15 px-2.5 py-2 last:border-b-0">

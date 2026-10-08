@@ -2,13 +2,37 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { Agent, GateDecision } from "@/fixtures/types";
 import { clock } from "@/lib/format";
-import { actionSentence, gateRule, verdictLabel } from "@/lib/gate-reasons";
+import { actionSentence, gateRule, verdictBadge } from "@/lib/gate-reasons";
 import { PURPOSE_LABEL } from "@/lib/labels";
 import { STRETCHED_LINK } from "./positions";
 
+/** The one width every verdict chip takes, so "Not allowed" and "Allowed" line up down a list. */
+export const VERDICT_COLUMN = "[--verdict-w:5.75rem]";
+
 /**
- * A gate decision in plain language: the action, the verdict, and the rule, never an error code.
- * The verdict carries no meaning colour: an allowed action is a quiet chip, a held one is outlined.
+ * The gate's verdict as one chip in one style everywhere (DEC-512): a quiet chip on the well for an
+ * allow that went out, and an ink ring for everything that did not (asked you, not allowed, held,
+ * waiting). It takes the verdict column's width and never wraps; it carries no meaning colour.
+ */
+export function VerdictChip({ decision, className }: { decision: GateDecision; className?: string }) {
+  const sent = decision.verdict === "allow" && !decision.approval_id;
+  return (
+    <span
+      data-slot="verdict"
+      className={cn(
+        "inline-flex h-6 w-(--verdict-w) shrink-0 items-center justify-center rounded-md px-1 text-label whitespace-nowrap",
+        sent ? "bg-background text-muted-foreground" : "bg-card text-foreground ring-1 ring-foreground ring-inset",
+        className,
+      )}
+    >
+      {verdictBadge(decision)}
+    </span>
+  );
+}
+
+/**
+ * A gate decision in plain language: the verdict first, in its column, then the action and the
+ * rule, never an error code.
  */
 export function GateDecisionRow({
   decision,
@@ -23,14 +47,13 @@ export function GateDecisionRow({
   href?: string;
   className?: string;
 }) {
-  const label = verdictLabel(decision);
   const rule = decision.reason_code && agent ? gateRule(decision.reason_code, agent.mandate) : null;
-  const allowed = decision.verdict === "allow";
   return (
     <li
       data-verdict={decision.verdict}
       className={cn(
-        "grid grid-cols-[3.25rem_minmax(0,1fr)] gap-3 border-b border-border/70 py-(--row-y) last:border-b-0",
+        "grid grid-cols-[3.25rem_var(--verdict-w)_minmax(0,1fr)] gap-3 border-b border-border/70 py-(--row-y) last:border-b-0",
+        VERDICT_COLUMN,
         href && "group relative transition-colors duration-(--duration-hover) hover:bg-background",
         className,
       )}
@@ -38,14 +61,9 @@ export function GateDecisionRow({
       <time dateTime={decision.at} className="pt-0.5 font-mono text-caption text-muted-foreground tabular">
         {clock(decision.at).slice(0, 5)}
       </time>
+      <VerdictChip decision={decision} />
       <div className="grid gap-1">
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span
-            data-slot="verdict"
-            className={cn("inline-flex h-6 items-center rounded-md px-2.5 text-label", allowed ? "bg-background text-muted-foreground" : "bg-card text-foreground ring-1 ring-foreground ring-inset")}
-          >
-            {label}
-          </span>
           {href ? (
             <Link href={href} className={cn("font-medium underline-offset-4 group-hover:underline", STRETCHED_LINK)}>
               {actionSentence(decision.action)}
