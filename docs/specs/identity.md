@@ -406,6 +406,21 @@ transaction with `MemberDeactivated` or `MemberRoleChanged`. **The audit view
 shows the gap:** `membership_unverified: true` stays in the journaled record, and the workspace
 API's audit read model (§4.8) and the web audit trail display it (owed by those lanes).
 
+**A workspace scope's pair** ([DEC-832](../project/decisions/DEC-832.md) items 2 and 10). A
+`Scope::Workspace { org, workspace }` is the route's pair, which `authorize` checks against the
+workspace's own record in the store, in this order: an inactive row is refused
+`inactive_permission`; then a pair the record does not hold (a workspace under another
+organization than the one named, or one this deployment does not host) is refused `no_membership`
+for every principal kind (user, client, service account, host CLI, platform operator, agent, and
+process alike); then `reduction_only`, `no_membership`, and `forbidden` as above. When the record
+cannot be read, the pair cannot be checked: a row that is not risk-reducing is refused
+`membership_unavailable` for every principal kind, and a risk-reducing row is never refused for it.
+A user or a client is authorized from its session's roles snapshot as for a failed membership read,
+the snapshot entry's own pair, which the store folded, standing in for the record, so a pair the
+snapshot does not hold reaches nothing; a service account, the host CLI, and a platform operator
+by their columns, whose workspace their own issuance, registration, or window names; each context
+is flagged `membership_unverified`, and a reduction-only session still reaches only its four rows.
+
 **Principal-scope rows** ([DEC-816](../project/decisions/DEC-816.md) items 1 and 5). The `self` row
 of §4.2 is authorized at principal scope: `authorize` is given the principal scope,
 reads no membership, yields no `TenantContext` (it yields a `PrincipalContext`, below), and grants the row to a user principal whose
@@ -479,9 +494,15 @@ is attributed to the principal, with an idempotency key derived from the request
   reported committed, with the same key, until every workspace of the set is, showing the owner
   which are pending. During a membership-store outage the call is authorized from the session's
   roles snapshot (above), and the set check becomes the route workspace's own record naming the
-  snapshot's organization; if that record cannot be read either, the call is refused as a failed
-  session-record read is.
-- **One request writing to every workspace of the set** (no route does today): a risk-reducing
+  snapshot's organization. If that record cannot be read either, the call is pending, never
+  refused: `OrgContext::into_workspace` answers `OneWorkspace::Pending`, not a refusal, and the
+  client retries it with the same key and shows it pending. It is never granted unchecked, which
+  would let one organization's kill switch reach another's workspace (DEC-832 item 4).
+- **One request writing to every workspace of the set** (no route does today, and none may call
+  it until a route story decides it): `OrgContext::into_every_workspace` yields one context per
+  workspace of the enumerated set, or, for a context built during a membership-store outage (no
+  set enumerated), `EveryWorkspace::NoSetYet`: never a caller-named or partial set, and not a
+  refusal; the caller treats it as pending and retries (DEC-832 item 5). A risk-reducing
   write is never denied, and a workspace whose append fails is retried until it commits, the
   response reporting each workspace as committed or pending; any other write commits in one
   database transaction across every target workspace's control stream or not at all, refused
@@ -519,8 +540,10 @@ Cargo feature involved:
 - **An allowlist, not a denylist:** only the bootstrap crates of the agent runtime, the executor,
   and the scheduler may depend on `mandate-identity-system`; E9-8 creates those bootstrap crates.
   `xtask/layers.toml` gains an `allowed_dependents` key that `cargo xtask layers` checks; the
-  same check restricts `mandate-identity-testkit` to `[dev-dependencies]`. That check lands with
-  E9-8, under a claim on `xtask`, which is shared, and does not run before.
+  same check restricts `mandate-identity-testkit` to `[dev-dependencies]`. That check, and the
+  `dev_only` key, land with E9-2's identity kit
+  ([DEC-645](../project/decisions/DEC-645.md)), together with `mandate-identity-seal`; E9-8 adds
+  `mandate-tenant` and `mandate-identity-system` under the same check.
 - **Two seals**, so no crate that builds sessions or memberships can mint a context:
   - `mandate-tenant` holds only the `Tenant` trait (re-exported as `mandate_identity::Tenant`) and
     its sealing supertrait. Its allowed dependents are `mandate-identity` and
@@ -799,7 +822,13 @@ enough:
    subject) returns one identical answer, 401 `unauthenticated` with the same status, body and
    headers, and no distinguishing timing, so the route does not reveal whether a credential exists
    or its member was deactivated. It is rate-limited per address and per device, like the challenge
-   route (owed to E9-1: `reduction_session_failures_are_indistinguishable`). Whether this route
+   route (owed to E9-1: `reduction_session_failures_are_indistinguishable`). **Neither limit shuts
+   out a member who holds a valid key** ([DEC-834](../project/decisions/DEC-834.md)): the assertion
+   route's limit counts failed assertions only, and an assertion that verifies is never refused for
+   a limit; the challenge route's limit counts a challenge only until it is redeemed or expires.
+   Over a limit, a failed assertion still gets the same 401. A flood from the member's own address
+   and device can delay a new challenge by at most the 300 s a challenge lives (owed to E9-1:
+   `a_verified_assertion_is_never_refused_for_a_rate_limit`). Whether this route
    should serve discoverable credentials only is [DEC-833](../project/decisions/DEC-833.md), Proposed;
    until the founder decides, it serves both. The session covers every
    workspace in which the verified credential has a row (§4.5), each with that row's
