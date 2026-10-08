@@ -25,5 +25,7 @@
   `--code` a gesture prints `code …` and `warnings …` from the read-only `confirmation` or
   `deployment` and commits nothing), stubbed, and `main`; `crates/mandate-cli/tests/gestures.rs`,
   pending E10-16 but for the flag test: the binary's refusals without a database, each exiting
-  non-zero with its code on stderr, nothing on stdout, and no part of the DSN.
-  `cargo nextest run -p mandate-cli --test gestures`.
+  non-zero with its code on stderr, nothing on stdout, and no part of the DSN; the read-only shown
+  codes; and the binary against Postgres, its refusals (`version_unconfirmed`, `version_unknown`,
+  `code_mismatch`) committing nothing.
+  `cargo nextest run -p mandate-cli --test gestures`; `cargo xtask ci postgres` for the binary.

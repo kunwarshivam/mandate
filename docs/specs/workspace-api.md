@@ -289,6 +289,12 @@ Errors are RFC 9457 problem documents with these members:
 | `reduction_only` | 403 | A reduction-only session asks for anything but pause or a kill switch (identity spec §4.5, §6.4) |
 | `membership_unavailable` | 503 | The membership read, or the membership-index read of `GET /v1/me/workspaces` (§4.10), failed on an operation outside identity spec §4.5's risk-reducing set (API-7's operations, revoking a client, and tightening a policy); nothing was authorized; `retryable`. Never sent for an operation in that set |
 | `outcome_unknown` | 503 | (planned: E10-10) The append's outcome could not be confirmed (an ambiguous commit, or `Fenced` during an upgrade, §7); `effect: unknown`, the derived `event_id` given, `retryable: false`. The client polls §5.5 with that `event_id` and never resends with a new key. A resend with the same key is still safe (API-4: it resolves to the original outcome), so `retryable: false` is a rule for the UI, not for correctness |
+| `address_limit` | 409 | **(planned: E8-14)** A member already holds 10 notification addresses on the channel (§4.11). `effect: none`, `retryable: false`; title "Too many notification addresses". An endpoint already held is not an error: §5.7 answers `200` |
+| `busy` | 503 | **(planned: E8-14)** The control stream moved under the call 5 times in a row (the expected-head retry of §5.7). `effect: none`, `retryable: true`; title "Try again" |
+
+Success is not only `202`: a command that records a change answers `202` with `phase: "recorded"`,
+and one whose change is already recorded answers `200` with that record and appends nothing, as
+ending an already-ended delegation and §5.7's notification addresses do.
 
 ### 3.6 Step-up
 
@@ -929,6 +935,60 @@ Owed to the identity spec's lanes, and listed so the prefix rule above is comple
 `POST /v1/reduction-sessions/challenges`, and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
 they sit outside the matrix, DEC-816 item 7). Every failure of the last is the one answer, 401 `unauthenticated` (§3.5), with no distinguishing timing, and `GET /v1/oauth/alpaca/callback` (§4.5).
 
+### 4.11 Notification addresses (web push)
+
+A member's own push address: where the dispatcher sends their opaque notices (notifications spec
+§4.6, NT-2). The address is personal data held in the vault, never in the journal, a log, a metric,
+or a response (API-11's shape). Unlike §4.10's routes, these name the workspace: every path below sits under `/v1/workspaces/{workspace_id}`, because the addresses belong to it. These routes add no trading rule and change no mandate (DEC-795).
+
+| Operation | Method and path | Event | Notes |
+|---|---|---|---|
+| Set this browser's push address | `PUT /me/channels/web_push` | `NotificationAddressChanged` (`action: added`) with its `OwnerAlertSent` (`notification_address_changed`), one batch (journal change, owed by the journal spec change that closes §9.11's notification records) | §5.7. Step-up. The endpoint and keys go to the vault; the event carries only `address_ref`. An endpoint off the push-service allowlist is `invalid` (notifications spec §4.6, [DEC-792](../project/decisions/DEC-792.md)). An endpoint the member already holds as an active address answers `200` with its `address_ref` and appends nothing. A member holds at most 10 active addresses; an 11th is `address_limit` (409, §3.5) |
+| Remove a push address | `POST /me/channels/web_push/{address_ref}/remove` | `NotificationAddressChanged` (`action: removed`) with its `OwnerAlertSent`, one batch | §5.7. Step-up. An `address_ref` that is not the member's own or does not exist is 404 exactly as any missing resource (API-9, NT-10). One already removed answers `200` and appends nothing. The pull channels (`web_inbox`, `cli_inbox`) are not addresses and are never affected |
+| List one's push addresses | `GET /me/channels/web_push` | — | Each active `address_ref` with when it was added and its delivery status (`ok` or `unreachable`, notifications spec §5.6); never an endpoint, a key, or a hash of either |
+
+**Active addresses.** An address is active while its last `NotificationAddressChanged` is
+`added`. The set is derived from the journal, never from the vault: a vault entry with no committed
+event, and one kept after its removal for the last send (§5.7), are not active. Only active
+addresses count toward the limit, match an endpoint already held, or are listed, and a re-add after
+a removal is a new address under a new `address_ref`. An active address marked `unreachable` (an
+allowlist change or a rejection, notifications spec §5.6) stays active, counts toward the limit,
+and shows its status until the member removes it, or sets the same endpoint again, which replaces
+it under a new `address_ref` (§5.7).
+
+**Not risk reduction.** Neither change is an API-7 operation. Someone holding a stolen session could
+add their own browser to watch a member's notices, or remove the member's address to silence the
+safety notices that are the member's out-of-band signal of a takeover (identity spec ID-14), so
+both need step-up and may be refused for missing step-up, a rate limit, or a frozen control stream
+like any other change.
+
+**Only one's own.** `/me` resolves to the authenticated user; no route sets or removes another
+member's address, and a client, a service account, the host CLI, and a platform operator have none
+(API-6). The identity spec §4.2 row "Add or remove one's own notification address (a push
+subscription; later an email address)" authorizes setting and removing: **S** for both,
+`own` in the five workspace columns (workspace admin, operator, approver, viewer, auditor), at this
+workspace's scope through a membership that reaches it, and blank everywhere else. The row "List
+one's own notification addresses (opaque references only)", `own` in the same columns without
+**S**, authorizes the listing. Both are in identity spec §4.2 ([#811](https://github.com/kunwarshivam/mandate/pull/811),
+DEC-816 item 2), which also prints them in §3.7 and the step-up kind `notification_address` in §3.6.
+Addresses belong to the workspace: each workspace's addresses live in its own vault namespace
+(identity spec §9.1), and a member who belongs to two workspaces sets one in each.
+Holding an address grants nothing: what a member receives stays the receive column's (identity
+spec §4.1).
+
+**Deactivation.** When a deactivation or removal ends a member's membership in this workspace,
+workspace services append a `removed` `NotificationAddressChanged` for each of the member's active
+addresses in this workspace inside the deactivation's own commit, all or nothing (identity spec
+§5.2 step 3, [#811](https://github.com/kunwarshivam/mandate/pull/811), DEC-816 item 7). Each carries
+the same actor as the `MemberDeactivated` or `MemberRemoved` it rides in: on the request path the
+authenticated principal, the admin or the member who left (DEC-642, identity spec §4.5); when the
+directory-sync or SCIM process deactivates, `system` (identity spec §11.1). Its step-up evidence is
+`null`, which the journal row allows only for a `removed` riding in such a commit, and it raises no
+`OwnerAlertSent`. The dispatcher sends the member nothing more, the workspace admins get
+`member_deactivated` (notifications spec §3.2), and the vault entries are then swept as for any
+removal. The event's members match identity spec §12.1's row: `member`, `channel`, `action`,
+`address_ref` (the opaque address reference), and the step-up evidence or `null`.
+
 ---
 
 ## 5. Safety-relevant request and response shapes
@@ -1121,6 +1181,137 @@ The kill-switch half is an API-7 operation: without valid step-up, or while the 
 frozen, the API still commits the kill switch, and refuses only the revocation with
 `step_up_required` (`effect: recorded` for the kill switch). The batch is otherwise all or nothing.
 
+### 5.7 Set or remove a push address
+
+`PUT /me/channels/web_push` with:
+
+| Member | Type | Meaning |
+|---|---|---|
+| `endpoint` | string | The subscription's push endpoint, at most 2,048 characters, on the deployment's push-service allowlist (notifications spec §4.6) |
+| `keys` | `{p256dh, auth}` | The subscription's keys as unpadded base64url: `p256dh` an uncompressed P-256 point (65 octets), `auth` 16 octets |
+| `step_up` | step-up or `null` | Bound to digest = SHA-256 of `{channel: "web_push", action: "added", endpoint, keys}` (kind `notification_address`) |
+
+`POST /me/channels/web_push/{address_ref}/remove` with `{step_up}`, bound to digest = SHA-256 of
+`{channel: "web_push", action: "removed", address_ref}`. A request without evidence, a body an
+intermediary dropped included, is refused `step_up_required` and removes nothing.
+
+A change answers `202` with the committed watermark, `phase: "recorded"`, and the `address_ref`. A
+PUT of an endpoint the member already holds as an active address, and a removal of an address
+already removed, answer `200` with the `address_ref`, the watermark of the event that recorded it,
+and no new event, as ending an already-ended delegation does. No response, problem document, log,
+metric, or event carries the endpoint, a key, or a hash of either, and the response schema bars
+secret-shaped member names (API-11).
+
+**The record.** One control-stream batch, with ids derived from the `Idempotency-Key` (§3.4):
+
+1. `NotificationAddressChanged` `{member, channel: "web_push", action, address_ref}`, with the
+   step-up evidence `{assertion_id, authenticated_at, method}` recorded as other step-up-bound
+   control events record it (journal spec §9.2, API-17). `address_ref` is listed in the event's
+   `pii_refs` (journal spec §6.4), so redaction and erasure reach the vault entry. The step-up
+   digest's inputs (the endpoint and keys) are never journaled, and the step-up challenge record
+   keeps only the digest.
+2. `OwnerAlertSent` `{subject: that event, kind: notification_address_changed}`, its cause
+   (notifications spec §3.2, §3.4). Both commit together or not at all.
+
+`address_ref` is the `added` event's own id: the ULID §3.4 derives from the member's random
+`Idempotency-Key`, whose time component carries no meaning. It is random in journal spec §3's sense
+for `pii_refs`: it is never derived from the address. The `NotificationAddressChanged` journal row is
+written by the L3 lane's journal spec PR for §9.11's notification records; the routes stay Planned
+until it merges (§9).
+
+**The vault's part.** The vault holds each entry under its `address_ref` with the member, the
+endpoint, the keys, the request digest it was written for, and a `version` and `written_at` that
+every write of the entry bumps. It answers one question about
+endpoints, "which of this member's entries hold this endpoint", from a keyed hash it computes
+itself under a per-workspace key that never leaves it; the hash is scoped to the member, deleted
+with the entry, and never logged, journaled, or returned. The NT-2 canary scan covers it.
+
+**One member's addresses change one at a time.** Every check below reads the member's active set
+as of the control stream's head `h`, and the batch is appended with `expected_head = h` (journal
+spec §5.1). A `HeadMismatch` means something was appended meanwhile, perhaps by another member, since the
+precondition is on the whole stream: the API reads the active set again, repeats only the set
+checks (step 3 when setting, step 2 when removing), and appends again, without writing the vault
+again or judging the step-up evidence again (it is judged once and is single use, API-17). After 5
+attempts it answers `busy` (503), `effect: none`, `retryable: true`. So two tabs
+cannot both add one endpoint, ten addresses cannot become eleven, and one address cannot be removed
+twice.
+
+**Setting, in order.**
+
+1. Check the session, CSRF (§3.3), and the request's shape. Derive the event id and look it up
+   (§3.4): once the event exists, the retry returns its original outcome, without judging the step-up
+   evidence again and without writing the vault (so a retry after a lost `202` succeeds). No body
+   is compared then: the journaled members hold no endpoint or keys, so a retry with a different
+   body answers the original outcome too. Before the event exists, a vault entry under the derived
+   `address_ref` written for a different request digest is `idempotency_conflict`. This is a deliberate exception
+   to API-4 and §3.4 (a different body is a 409): once the event exists, the journaled members
+   hold no endpoint or keys, so there is nothing to compare the new body against
+   ([DEC-795](../project/decisions/DEC-795.md)).
+2. Check the allowlist and the step-up evidence, which is judged only by a call that will append.
+3. Ask the vault which of the member's entries hold this endpoint, and keep only the active ones
+   (§4.11). An active match that is reachable answers `200` and writes nothing. An active match
+   marked `unreachable` is replaced: the batch removes it and adds the new `address_ref` (below).
+   Otherwise, ten active addresses is `address_limit`.
+4. Write the entry under `address_ref`, put-if-absent, bound to the request digest. A failure is
+   `effect: none`, `retryable: true`.
+5. Append the batch with the expected head.
+6. Put the entry again (idempotent: the same `address_ref` and digest), in this first attempt
+   only. If that fails, answer `effect: unknown`, `retryable: true`. A retry finds the event at
+   step 1 and answers its outcome without writing the vault; if the entry is gone, the dispatcher
+   records `address_missing`, and the member repairs it by removing the address and setting it
+   again.
+
+**Replacing an unreachable address.** When step 3 finds the endpoint active but `unreachable`, the
+batch is `NotificationAddressChanged` `removed` for the old `address_ref`, `NotificationAddressChanged`
+`added` for the new one, and one `OwnerAlertSent` naming the `added` event, all or nothing. The
+member is told once, on every push channel they hold after the change, the new address included and
+the old one not: no last send goes to a replaced address, so its entry's sweep waits on none.
+
+Refusals in steps 1 to 3 are `effect: none` and write nothing. The vault write before the append is
+a deliberate exception to API-3's order, for setting only: an entry with no committed `added` event
+is inert, because nothing reads an address that is not active (notifications spec §5.1). There is
+no inline rollback.
+
+| Stops after | Outcome |
+|---|---|
+| Steps 1 to 3 | Nothing written; `effect: none` |
+| Step 4, before the append | An inert entry. A retry with the same key and body passes step 1, rewrites nothing (put-if-absent), and appends |
+| Step 5, the append refused | `effect: none`; the entry stays inert |
+| Step 5, the append's outcome unknown | `effect: unknown`; a retry with the same key resolves it |
+| Step 6, the put fails | `effect: unknown`, `retryable: true`; the address is active, and if its entry is missing the dispatcher's attempt is `address_missing` until the member removes the address and sets it again |
+
+**The sweep.** For an entry whose `written_at` is more than 24 hours old, workspace services check
+the journal; if no `added` event names its `address_ref`, they delete it by compare-and-delete
+inside the vault on the `version` they read, which fails if steps 4 or 6 have written it since. A
+first attempt that loses that race regardless is repaired by its step 6; if step 6 also fails, the
+dispatcher finds the entry missing, records `address_missing`, and tells the member to remove the
+address and set it again (notifications spec §5.1, §5.6). Removing needs no vault entry.
+
+**Removing, in order.** Journal first, as API-3 requires:
+
+1. Check the session and CSRF. Derive the event id and look it up (§3.4): an event with the same
+   members returns its original outcome, without judging the step-up again.
+2. Check that the `address_ref` is the member's own and exists (otherwise 404, the same answer as
+   for a random id), and only then that it is active (otherwise `200`), so the `200` for an
+   already-removed address is never given for a foreign one.
+3. Check the step-up evidence.
+4. Append the batch with the expected head. From then on the dispatcher sends nothing to the
+   address but the one last `notification_address_changed` notice about this removal
+   (notifications spec §5.1).
+5. Keep the entry until that last send's attempt is terminal or 24 hours have passed, then delete
+   it. If the entry is missing when the last send is made, that attempt is a terminal `failed`
+   that marks nothing and raises no `channel_lost`; after the sweep there is no exception left.
+
+| Stops after | Outcome |
+|---|---|
+| Steps 1 to 3 | Nothing changed; `effect: none` |
+| Step 4, the append refused or unknown | `effect: none` or `unknown`; the address stays active until a removal commits |
+| Step 4, committed | The removal stands; the sweep deletes the entry after the last send |
+
+**Races.** Every change is an append on the one control stream, ordered by `seq` and guarded by the
+expected head: a removal committed after an add removes it, a removal of an unknown `address_ref`
+is 404, and a PUT of the same endpoint after its removal adds it again under a new `address_ref`.
+
 ---
 
 ## 6. Consistency model
@@ -1233,6 +1424,8 @@ risk-reducing call never consults one (API-7, API-8).
 | Journal queries, trace, exports over the API | **Planned** (E12-6); contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | Journal events this spec needs (`MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, `OwnerRequestSubmitted`, `hold_openings`, client events) | **Planned** (E10-15, journal spec change first) |
 | Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
+| Notification addresses (§4.11, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14). Mounted once the API's authentication middleware lands and the journal spec change that writes the `NotificationAddressChanged` row (the L3 lane's §9.11 journal PR) merges. Merge order: #811, #763, this change (#827), then #833. The push-service allowlist's decision is DEC-792 (this spec change, #827); the web client's mirror of its table is #833, which merges after #827. Accepted when: a canary scan of responses, problems, logs, metrics and the journal finds no endpoint, key, or endpoint hash; the append is failed at every step of §5.7's tables (API-3's test) and crash injection gives each stated outcome; a replay after a lost `202` returns it; a retry with a different body, once its event exists, answers the original outcome and writes nothing to the vault; before the event exists, with the entry present, it is `idempotency_conflict`; a retry racing the sweep ends with the entry present or `address_missing` recorded; inert and removed entries neither match an endpoint nor count to the limit; two concurrent PUTs of one endpoint, an eleventh address, and a double removal are each settled by the expected head; a PUT of an unreachable address's endpoint replaces it in one batch with no last send to the old address; a stream busy for 5 attempts answers `busy` without a second vault write or step-up judgment; deactivation removes every address in its own commit, under the acting principal; a foreign `address_ref` answers byte-for-byte as a random one; the shared allowlist table (DEC-792) passes; and a replayed or wrongly bound step-up is refused |
+| The relay's own allowlist check (DEC-792 item 3) | **Planned** (E20-8) |
 
 ---
 
