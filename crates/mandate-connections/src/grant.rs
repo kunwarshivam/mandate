@@ -1,4 +1,6 @@
-//! The granted scopes must equal the requested ones (connections spec §5.3, §8.1 check 1).
+//! The granted scopes must equal the requested ones (connections spec §5.3, §8.1 check 1;
+//! DEC-821 item 4). The token-exchange process checks them on the token response, before the
+//! vault write, so an over-scoped token is never stored (CN-2).
 
 use std::collections::BTreeSet;
 

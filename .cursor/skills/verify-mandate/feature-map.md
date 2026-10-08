@@ -525,8 +525,8 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `PaperRequest`; `admit`), `crates/mandate-connections/src/grant.rs` (exact scopes),
   `crates/mandate-connections/src/error.rs` (`ConnectError`). The `state`, the code exchange,
   and the vault follow in D2b and D2c.
-- **Tests:** `crates/mandate-connections/src/tests/` (the DEC-821 guardrails a to c, pending
-  E10-13), and the `compile_fail` doctest in `hosts.rs`.
+- **Tests:** `crates/mandate-connections/src/tests/` (DEC-821 items 2 to 4, pending E10-13),
+  and the `compile_fail` doctest in `hosts.rs`.
 - **Run:** `cargo nextest run -p mandate-connections --run-ignored all`.
 
 ## The local vault (E10-13 V1)
