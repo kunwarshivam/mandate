@@ -14,7 +14,7 @@ use clap::{Args, Subcommand};
 use mandate_time::UtcNanos;
 
 use crate::approvals::{Listed, Outcome, Shown};
-use crate::control::{ControlError, Ids, Now, Owner, Submitted};
+use crate::control::{ControlError, Now, Owner, Submitted};
 use crate::postgres::JournalArgs;
 use crate::register::OwnerArgs;
 
@@ -125,28 +125,16 @@ pub fn skipped_line(approval: &str, submitted: &Submitted) -> Result<String, Con
     Err(ControlError::Unimplemented { story: "E8-3" })
 }
 
-/// The step-up assertion ids the binary mints: derived from the owner and the instant the command
-/// ran, and a count within the command, with no new dependency (DEC-533's K1a reading). Each is a
-/// fresh id the workspace has not seen (mandate spec §6.1), since no two commands run at one
+/// The `count`th step-up assertion id a command run by `owner` at `at` mints, which the binary's
+/// `Ids` hands out: derived from the three, with no new dependency (DEC-533's K1a reading). Each is
+/// a fresh id the workspace has not seen (mandate spec §6.1), since no two commands run at one
 /// nanosecond on one owner's clock.
-#[derive(Debug)]
-pub struct InstantIds {
-    _private: (),
-}
-
-impl InstantIds {
-    /// # Errors
-    /// The stub's [`ControlError::Unimplemented`].
-    pub fn new(owner: &Owner, at: UtcNanos) -> Result<Self, ControlError> {
-        let _ = (owner, at);
-        Err(ControlError::Unimplemented { story: "E8-3" })
-    }
-}
-
-impl Ids for InstantIds {
-    fn assertion_id(&mut self) -> String {
-        String::new()
-    }
+///
+/// # Errors
+/// None once implemented; the stub's [`ControlError::Unimplemented`].
+pub fn assertion_id(owner: &Owner, at: UtcNanos, count: u32) -> Result<String, ControlError> {
+    let _ = (owner, at, count);
+    Err(ControlError::Unimplemented { story: "E8-3" })
 }
 
 /// Runs `approvals list` and prints [`list_lines`].
@@ -169,7 +157,7 @@ pub fn run_show(args: &ShowArgs, report: &mut impl Write) -> anyhow::Result<Show
     Err(ControlError::Unimplemented { story: "E8-3" }.into())
 }
 
-/// Runs `approvals approve` with [`InstantIds`], waits up to `--wait-s` for the runtime's record,
+/// Runs `approvals approve` with ids from [`assertion_id`], waits up to `--wait-s` for the runtime's record,
 /// and prints [`granted_lines`].
 ///
 /// # Errors

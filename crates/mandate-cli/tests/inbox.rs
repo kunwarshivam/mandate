@@ -14,9 +14,9 @@ use clap::error::ErrorKind;
 use common::{AGENT, ASKED_AT, FixedIds, OTHER_AGENT, at, code_of, hash_of, owner};
 use mandate_canon::to_canonical;
 use mandate_cli::approvals::{Outcome, Revalidated, approve, list, message, show};
-use mandate_cli::control::{Ids, Submitted};
+use mandate_cli::control::Submitted;
 use mandate_cli::inbox::{
-    ApprovalsCommand, ApproveArgs, InstantIds, ListArgs, ShowArgs, SkipArgs, granted_lines,
+    ApprovalsCommand, ApproveArgs, ListArgs, ShowArgs, SkipArgs, assertion_id, granted_lines,
     list_lines, run_approve, run_list, run_show, run_skip, show_lines, skipped_line,
 };
 use mandate_cli::postgres::JournalArgs;
@@ -243,18 +243,17 @@ fn assertion_ids_are_fresh_per_instant_owner_and_count() {
         ..owner()
     };
     for nanos in [0_u32, 1, 999_999_999] {
+        let at = UtcNanos::from_parts(1_790_000_000, nanos).unwrap();
         for who in [owner(), other.clone()] {
-            let mut ids =
-                InstantIds::new(&who, UtcNanos::from_parts(1_790_000_000, nanos).unwrap()).unwrap();
-            for _ in 0..3 {
-                let id = ids.assertion_id();
+            for count in 1..=3 {
+                let id = assertion_id(&who, at, count).unwrap();
                 assert!(!id.is_empty() && id.is_ascii(), "{id:?}");
                 assert!(seen.insert(id.clone()), "{id} repeats");
             }
         }
     }
     let at = UtcNanos::from_parts(1_790_000_000, 5).unwrap();
-    let twice = [owner(), owner()].map(|o| InstantIds::new(&o, at).unwrap().assertion_id());
+    let twice = [owner(), owner()].map(|o| assertion_id(&o, at, 1).unwrap());
     assert_eq!(
         twice[0], twice[1],
         "derived, so a replayed instant gives the same id"
