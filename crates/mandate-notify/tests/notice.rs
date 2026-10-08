@@ -76,6 +76,9 @@ fn a_notice_id_round_trips_only_through_32_lowercase_hex() {
     for text in [
         "01J8ZNB0M000000000000000K1",
         "01j8znb0m000000000000000k1",
+        "0123456789abcdef0123456789",
+        "0123456789abcdef",
+        &"0123456789abcdef".repeat(4),
         &upper,
         &id[..31],
         &format!("{id}0"),
