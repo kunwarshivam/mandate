@@ -17,11 +17,10 @@
 #
 # Planned crates and layers, created only when a story needs them:
 #   0  mandate-num, mandate-time, mandate-canon
-#   1  mandate-domain, mandate-approval, mandate-liquidity (pure cores over layer-0 values;
+#   1  mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1)
 #   2  mandate-journal, mandate-accounting, and mandate-passkey, the WebAuthn relying party
-#      (E9-1, DEC-660): above mandate-identity's principal and step-up types, and it verifies
-#      and never signs
+#      (E9-1, DEC-660), which verifies and never signs
 #   3  mandate-spec
 #   4  mandate-risk
 #   5  mandate-builder
@@ -49,7 +48,13 @@
 impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
-planned = ["mandate-paper"]
+planned = [
+    "mandate-paper",
+    "mandate-identity-system",
+    "mandate-tenant",
+    "mandate-identity-seal",
+    "mandate-identity-testkit",
+]
 
 [crates.xtask]
 layer = "tool"
@@ -74,6 +79,16 @@ safety_critical = true
 pure = true
 allowed_external = ["sha2", "thiserror"]
 
+# Web push for opaque notices (E8-14, notifications spec §4.6): RFC 8291 encryption and RFC 8292
+# VAPID over a closed payload. It depends on no workspace crate, and may never reach the journal,
+# the control stream's writers, or the order path, so no push can approve or act (NT-3).
+[crates.mandate-webpush]
+layer = 0
+safety_critical = true
+pure = true
+allowed_external = ["aes-gcm", "base64ct", "hkdf", "p256", "sha2", "thiserror"]
+forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-mcp", "mandate-cli"]
+
 [crates.mandate-domain]
 layer = 1
 safety_critical = true
@@ -81,6 +96,12 @@ pure = true
 allowed_external = ["thiserror"]
 
 [crates.mandate-approval]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+[crates.mandate-identity]
 layer = 1
 safety_critical = true
 pure = true
@@ -171,6 +192,12 @@ safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "serde", "serde_json", "thiserror"]
 
+[crates.mandate-connections]
+layer = 6
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-journal-pg]
 layer = 6
 safety_critical = true
@@ -197,6 +224,12 @@ layer = 6
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+[crates.mandate-vault-local]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["secrecy", "thiserror"]
 
 [crates.mandate-alpaca]
 layer = 7

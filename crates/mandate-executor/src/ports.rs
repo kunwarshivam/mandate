@@ -11,6 +11,7 @@ use std::future::Future;
 #[cfg(test)]
 use mandate_accounting::AccountType;
 use mandate_accounting::{AssetClass, InstrumentId};
+use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_num::{Fraction, ShareIncrement};
 #[cfg(test)]
 use mandate_num::{Price, Qty, Ratio, Usd};
@@ -364,6 +365,11 @@ impl ConnectorError {
 /// the outcome is unknown and recovery must query (task brief interpretation 10); the other two
 /// variants are failures of this process that the shell stops on.
 pub trait BrokerConnector {
+    /// The broker's capability profile, declared by the connector from its published contract
+    /// alone (DEC-531 item 1). Shared code reads what the broker accepts from here, never from
+    /// the broker's name or the asset class. The answer never depends on a broker call.
+    fn profile(&self) -> Result<CapabilityProfile, ProfileError>;
+
     fn call(
         &mut self,
         request: &BrokerRequest,
