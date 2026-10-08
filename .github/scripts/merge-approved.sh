@@ -16,9 +16,9 @@
 # A pull request merges only when all of these hold, read here from GitHub and never from the event:
 # it is open, not a draft, targets `main`, and carries the label; its description names exactly one
 # approved head, outside any code fence, and that head is its current head; GitHub reports it
-# mergeable; and the latest `ci` run for that head from a `pull_request` event succeeded (so `fast`
-# and `full` did), plus the latest `web` run when it touches `web/`, since DEC-112 lets `fast` and
-# `full` skip the web checks. The merge names the head (`sha`), so a push after these reads makes
+# mergeable; and the latest `ci` run for that head from a `pull_request` event succeeded with its
+# `fast` and `full` jobs run and green, not skipped as on a draft (DEC-610), plus the latest `web`
+# run when it touches `web/`, since DEC-112 lets `fast` and `full` skip the web checks. The merge names the head (`sha`), so a push after these reads makes
 # GitHub refuse it. The commit message is the description's own body with any `Co-authored-by`
 # line removed, never GitHub's default, which copies every commit message and its trailers onto
 # `main` (ship playbook, step 5).
@@ -81,10 +81,21 @@ written_by=$(gh api graphql -F owner="$owner" -F name="$name" -F number="$pr" -f
 mergeable=$(jq -r .mergeable <<<"$view")
 [ "$mergeable" = MERGEABLE ] || skip "is not mergeable yet ($mergeable)"
 
+# The latest run of a workflow for the head, as its conclusion (or status, while it runs) and its
+# id: "missing 0" when there is none.
 latest_run() {
   gh api "repos/$repo/actions/workflows/$1/runs?head_sha=$sha&event=pull_request&per_page=100" \
-    --jq '.workflow_runs | if length == 0 then "missing"
-          else (max_by(.id) | if .status == "completed" then .conclusion else .status end) end'
+    --jq '.workflow_runs | if length == 0 then "missing 0"
+          else (max_by(.id) | "\(if .status == "completed" then .conclusion else .status end) \(.id)") end'
+}
+
+# The conclusions of a run's `fast` and `full` jobs, as "fast=<conclusion> full=<conclusion>". `ci`
+# skips every job while a pull request is a draft (DEC-610), and a run whose jobs were all skipped
+# can conclude `success`; only a run in which both required jobs ran and passed counts.
+required_jobs() {
+  gh api "repos/$repo/actions/runs/$1/jobs?per_page=100" --paginate \
+    --jq '.jobs[] | select(.name == "fast" or .name == "full") | "\(.name)=\(.conclusion)"' |
+    sort | paste -sd ' ' -
 }
 
 workflows=(ci.yml)
@@ -93,8 +104,13 @@ if grep -qE '^(web/|\.github/workflows/web\.yml$)' <<<"$files"; then
   workflows+=(web.yml)
 fi
 for workflow in "${workflows[@]}"; do
-  conclusion=$(latest_run "$workflow")
+  read -r conclusion run <<<"$(latest_run "$workflow")"
   [ "$conclusion" = success ] || skip "has $workflow at $conclusion on $sha"
+  if [ "$workflow" = ci.yml ]; then
+    jobs=$(required_jobs "$run")
+    [ "$jobs" = "fast=success full=success" ] ||
+      skip "has ci.yml run $run on $sha without fast and full both run and green (${jobs:-neither found}); a run skipped on a draft does not count"
+  fi
 done
 
 title="$(jq -r .title <<<"$view") (#$pr)"

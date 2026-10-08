@@ -1,0 +1,99 @@
+[
+  {
+    "label": "phase approved",
+    "set": {
+      "/phase": "approved"
+    }
+  },
+  {
+    "label": "a lowercase event id",
+    "set": {
+      "/response_id": "01jbh3btz8k2m4n6p8r0s2t4v6"
+    }
+  },
+  {
+    "label": "an empty dropped list",
+    "set": {
+      "/dropped": []
+    }
+  },
+  {
+    "label": "a dropped entry that is not a pointer",
+    "set": {
+      "/dropped": [
+        "step_up"
+      ]
+    }
+  },
+  {
+    "label": "the whole body dropped: a Skip body that is not JSON is refused, never read as {}",
+    "set": {
+      "/dropped": [
+        ""
+      ]
+    }
+  },
+  {
+    "label": "auto: no /response_id",
+    "remove": [
+      "/response_id"
+    ]
+  },
+  {
+    "label": "auto: no /phase",
+    "remove": [
+      "/phase"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /phase outside its set",
+    "set": {
+      "/phase": "mutant_value"
+    }
+  },
+  {
+    "label": "auto: no /as_of/0/stream_id",
+    "remove": [
+      "/as_of/0/stream_id"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/seq",
+    "remove": [
+      "/as_of/0/seq"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/hash",
+    "remove": [
+      "/as_of/0/hash"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/recorded_at",
+    "remove": [
+      "/as_of/0/recorded_at"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /as_of/0",
+    "set": {
+      "/as_of/0/mutant_member": 1
+    }
+  },
+  {
+    "label": "a pointer dropped twice",
+    "set": {
+      "/dropped": [
+        "/a",
+        "/a"
+      ]
+    }
+  }
+]
