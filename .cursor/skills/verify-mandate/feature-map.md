@@ -1176,7 +1176,8 @@ proves each pending test fails on them (DEC-110).
   `docs/project/tasks/first-paper-trade.md` ("The model host", slices M0 to M2, FT-4, FT-5);
   DEC-503, DEC-504, DEC-517 (the last completed session), DEC-518 (the content object and when
   its hash is pinned).
-- **Code:** `crates/mandate-modelhost/` (layer 8, safety-critical, pure): `src/lib.rs` (`content`,
+- **Code:** `mandate-modelhost`, `crates/mandate-modelhost/` (layer 8, safety-critical, pure):
+  `src/lib.rs` (`content`,
   `evaluate`, `Refusal`), `src/ma_crossover.rs` (the model's own host code and the listed sources),
   with the crossover itself in `crates/mandate-backtest/src/strategy/ma_crossover.rs`.
 - **Tests:** `crates/mandate-modelhost/tests/host.rs` (the content object against canonical JSON
