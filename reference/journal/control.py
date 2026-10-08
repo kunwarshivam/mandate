@@ -896,7 +896,8 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
             and rule("54.compile", p["origin"] != "compile" or draft["causation_id"] is not None, "causation_id")
         )
         client = actor["kind"] == "client" and (p["origin"] == "version" or "rule.55.client_origin" in skip)
-        rule("55", actor["kind"] == "user" or client, "actor.kind")
+        person = actor["kind"] != "system" if "rule.55.not_system_only" in skip else actor["kind"] == "user"
+        rule("55", person or client, "actor.kind")
     if event_type == "ModelInvocationRecorded":
         bound = draft["config_refs"].get("model_version")
         if bound is not None:
@@ -934,15 +935,19 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
             if "boundary.rule_60_strict" in skip:
                 late = instant_nanos(p["completed_at"]) >= instant_nanos(p["deadline"])
             rule("60.late", not late, "payload.completed_at")
-        rule("61", actor["kind"] == "system", "actor.kind")
+        services = actor["kind"] != "user" if "rule.61.not_user_only" in skip else actor["kind"] == "system"
+        rule("61", services, "actor.kind")
     if event_type == "MandateConfirmed" and draft["schema_version"] == 2:
         (
             rule("62.paired", (p["base_version"] is None) == (p["agent_id"] is None), "payload.base_version")
             and rule("62.moved", p["base_version"] != p["mandate_version"], "payload.base_version")
         )
-        rule("63", actor["kind"] == "user", "actor.kind")
+        confirmer = actor["kind"] != "system" if "rule.63.not_system_only" in skip else actor["kind"] == "user"
+        rule("63", confirmer, "actor.kind")
     if event_type == "OwnerRequestSubmitted":
         expected = {"user": "owner", "client": "client"}.get(actor["kind"])
+        if "rule.64.not_system_only" in skip and actor["kind"] != "system":
+            expected = expected or "owner"
         if rule("64.actor", expected is not None, "actor.kind") and rule(
             "64.requested_by", p["requested_by"] == expected, "payload.requested_by"
         ):

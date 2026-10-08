@@ -18449,6 +18449,345 @@
     }
    },
    {
+    "name": "rule_55_refuses_agent",
+    "clause": "rule 55: a agent actor",
+    "base_draft": "draft_created",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_55_refuses_broker",
+    "clause": "rule 55: a broker actor",
+    "base_draft": "draft_created",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "broker",
+       "id": "broker_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_55_refuses_platform_operator",
+    "clause": "rule 55: a platform_operator actor",
+    "base_draft": "draft_created",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "op_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_61_refuses_agent",
+    "clause": "rule 61: a agent actor",
+    "base_draft": "compile_ok",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+       "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+       "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_61_refuses_broker",
+    "clause": "rule 61: a broker actor",
+    "base_draft": "compile_ok",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "broker",
+       "id": "broker_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+       "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+       "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_61_refuses_platform_operator",
+    "clause": "rule 61: a platform_operator actor",
+    "base_draft": "compile_ok",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "op_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+       "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+       "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_63_refuses_agent",
+    "clause": "rule 63: a agent actor",
+    "base_draft": "confirmed_v2",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_63_refuses_broker",
+    "clause": "rule 63: a broker actor",
+    "base_draft": "confirmed_v2",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "broker",
+       "id": "broker_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_63_refuses_platform_operator",
+    "clause": "rule 63: a platform_operator actor",
+    "base_draft": "confirmed_v2",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "op_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_64_refuses_agent",
+    "clause": "rule 64: a agent actor",
+    "base_draft": "request_owner",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_64_refuses_broker",
+    "clause": "rule 64: a broker actor",
+    "base_draft": "request_owner",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "broker",
+       "id": "broker_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "rule_64_refuses_platform_operator",
+    "clause": "rule 64: a platform_operator actor",
+    "base_draft": "request_owner",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "op_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
     "name": "draft_wrong_stream",
     "clause": "§9.8: a draft is a control-stream record",
     "base_draft": "draft_created",
