@@ -27,6 +27,24 @@ pub enum Broker {
     KrakenDerivativesUs,
 }
 
+impl Broker {
+    /// The broker's name as the journal and the CLI write it (journal spec §9.2 `broker`).
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Alpaca => "alpaca",
+            Self::Robinhood => "robinhood",
+            Self::KrakenDerivativesUs => "kraken_derivatives_us",
+        }
+    }
+
+    /// The inverse of [`Broker::code`]: exactly those names, nothing near them
+    /// (`InvalidRecord { member: "broker" }`).
+    pub fn from_code(code: &str) -> Result<Self, ConnectError> {
+        let _ = code;
+        Err(ConnectError::Unimplemented { story: "E7-11" })
+    }
+}
+
 /// How the credential was obtained (connections spec §3, `auth_kind`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AuthKind {

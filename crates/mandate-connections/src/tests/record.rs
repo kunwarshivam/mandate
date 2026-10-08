@@ -118,6 +118,43 @@ fn identifiers_are_validated() {
 }
 
 #[test]
+fn each_broker_has_its_journal_name() {
+    for (broker, code) in [
+        (Broker::Alpaca, "alpaca"),
+        (Broker::Robinhood, "robinhood"),
+        (Broker::KrakenDerivativesUs, "kraken_derivatives_us"),
+    ] {
+        assert_eq!(broker.code(), code);
+    }
+}
+
+#[test]
+#[ignore = "pending E7-11"]
+fn a_broker_is_read_back_from_its_name_only() {
+    for broker in [
+        Broker::Alpaca,
+        Broker::Robinhood,
+        Broker::KrakenDerivativesUs,
+    ] {
+        assert_eq!(Broker::from_code(broker.code()), Ok(broker));
+    }
+    for bad in [
+        "",
+        "Alpaca",
+        "alpaca ",
+        "kraken",
+        "robinhood_sim",
+        "kraken-derivatives-us",
+    ] {
+        assert_eq!(
+            Broker::from_code(bad),
+            Err(ConnectError::InvalidRecord { member: "broker" }),
+            "{bad:?}"
+        );
+    }
+}
+
+#[test]
 fn a_fingerprint_prints_no_byte() {
     let shown = format!("{:?}", AccountFingerprint::from_vault_hash(CANARY));
     assert_eq!(shown, "AccountFingerprint(redacted)");
