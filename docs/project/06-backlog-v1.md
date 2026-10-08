@@ -4448,3 +4448,26 @@ From the round-6 review of the flatten adapter's implementation PR ([#596](https
   `StoredEvent::draft()` that also checks the columns) is private, so the flatten adapter holds a
   second copy of the three assigned-field names, the digest form, and the re-seal, the exact
   things that must not drift from `seal`.
+
+From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
+
+- **The mutation plan's tests** (#768).
+  - `the_planned_shards_test_the_gates_mutants_and_no_more_per_shard` seeds a diff whose mutants
+    are all in one package. Add a second mutated crate to its fixture, so the plan's sum across
+    packages is pinned as well as its listing.
+  - `ci_sizes_the_mutation_matrix_from_the_plan` pins exact `ci.yml` lines, so rewording one
+    fails the test even when the wiring still holds. It fails safe; parse the jobs' keys instead
+    when it next gets in the way.
+- **The behaviour-only rows** (#770, `xtask/behaviour-only/`).
+  - Pin the exact refusal message for a non-`.toml` file in `a_malformed_or_misnamed_row_is_refused`,
+    as the other refusals' messages are pinned.
+  - Read the rows through `git ls-files` rather than `read_dir`, as `ci pending` reads test files, so
+    an untracked or ignored file in the directory cannot change the gate's verdict.
+  - Say in the README that two tests whose paths differ only by `::` against `__` derive the same
+    file name, so the second row cannot be added until one is renamed.
+- **The feature map's directory** (#773, `.cursor/skills/verify-mandate/features/`).
+  - Check or refuse what else sits in the directory: today the README and any non-`.md` file are
+    skipped without a word.
+  - Refuse two feature files with the same `# ` title, which `--index` would list twice.
+  - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
+    the README is never read as a feature.
