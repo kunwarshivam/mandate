@@ -2289,12 +2289,12 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The two `approval_answers` rows are J2's (DEC-533). They check `Draft::parse`, the journal's
-/// existing draft check, against journal spec v0.17 §9.7's vectors. There is no stub to stop at:
-/// until J2's implementation catalogues and closes the three records, the journal answers
-/// `unknown_event_type` or `unknown_schema`, which is the behaviour they fail on. J2's
-/// implementation deletes both rows with the `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 6] = [
+/// The three rows for journal spec v0.17 §9.7's records are J2's (DEC-533). They check
+/// `Draft::parse`, the journal's existing draft check, against §9.7's vectors and its catalogue.
+/// There is no stub to stop at: until J2's implementation catalogues and closes the three records,
+/// the journal answers `unknown_event_type` or `unknown_schema`, which is the behaviour they fail
+/// on. J2's implementation deletes the three rows with the `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2315,6 +2315,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 6] = [
     (
         "crates/mandate-journal/tests/approval_answers.rs",
         "every_invalid_approval_answer_is_refused_with_its_reason_at_its_path",
+    ),
+    (
+        "crates/mandate-journal/tests/catalogue.rs",
+        "the_approval_answers_are_catalogued_and_closed_on_their_streams",
     ),
 ];
 
