@@ -245,7 +245,7 @@ Errors are RFC 9457 problem documents with these members:
 | `owner_role_reserved` | 403 | Someone other than an org owner grants or removes the org owner role (identity spec §4.5) |
 | `last_owner`, `last_admin` | 409 | The change leaves no `active` org owner or workspace admin (identity spec §5.2) |
 | `reduction_only` | 403 | A reduction-only session asks for anything but pause or a kill switch (identity spec §4.5, §6.4) |
-| `membership_unavailable` | 503 | The membership read failed on an operation outside identity spec §4.5's risk-reducing set (API-7's operations, revoking a client, and tightening a policy); nothing was authorized; `retryable`. Never sent for an operation in that set |
+| `membership_unavailable` | 503 | The membership read, or the membership-index read of `GET /v1/me/workspaces` (§4.10), failed on an operation outside identity spec §4.5's risk-reducing set (API-7's operations, revoking a client, and tightening a policy); nothing was authorized; `retryable`. Never sent for an operation in that set |
 
 ### 3.6 Step-up
 
@@ -322,7 +322,7 @@ break-glass. Their columns are printed so the copy stays exact. The cells read b
 | Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
-| Add or remove one's own notification address (a push subscription; later an email or chat address) | S | | | | own | own | own | own | own | | | | |
+| Add or remove one's own notification address (a push subscription; later an email address) | S | | | | own | own | own | own | own | | | | |
 | List one's own notification addresses (opaque references only) | | | | | own | own | own | own | own | | | | |
 | List one's own workspace memberships | | self | self | self | self | self | self | self | self | | | | |
 | Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
@@ -399,7 +399,7 @@ shedding applies to the API-7 operations, which run on the reserved pool of API-
 
 ## 4. Resources and operations
 
-All paths are under `/v1/workspaces/{workspace_id}`. "Event" names the control-stream event the call
+Every path is under `/v1/workspaces/{workspace_id}` except those §4.10 lists: `/v1/me/*`, `/v1/reduction-sessions*`, and the OAuth callback of §4.5. "Event" names the control-stream event the call
 commits (journal spec §9). **Journal change** marks an event or member the journal spec does not
 define yet; §11's E10-15 adds them before the operation ships.
 
@@ -870,6 +870,19 @@ here, so replacing fixtures with calls changes no screen contract:
 | `GateDecision`, `TimelineEvent` | `GET /journal/events/{id}/gate`, `GET /agents/{id}/timeline` |
 | `Connection` | `GET /connections/{id}` |
 | `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`) | §5.5's phases; `undelivered` is `effect: none` |
+
+### 4.10 Routes outside the workspace prefix
+
+These routes name no `{workspace_id}`: each acts for the caller's own principal or session, so no
+workspace exists to name before it is authorized (identity spec §4.5, §6.4).
+
+| Operation | Method and path | Event | Notes |
+|---|---|---|---|
+| List one's own workspace memberships | `GET /v1/me/workspaces` | — | Authorized by the `self` row "List one's own workspace memberships" (identity spec §4.2): a full session of a user principal only. Returns the caller's `active` memberships as `{workspace_id, label, roles}` from the membership index, reading no workspace's data; absent and foreign workspaces look the same. A failed index read is `membership_unavailable` ([DEC-816](../project/decisions/DEC-816.md) item 1) |
+
+Owed to the identity spec's lanes, and listed so the prefix rule above is complete: `GET /v1/me/session`,
+`POST /v1/reduction-sessions/challenges`, and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
+they sit outside the matrix, DEC-816 item 7), and `GET /v1/oauth/alpaca/callback` (§4.5).
 
 ---
 
