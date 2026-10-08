@@ -142,7 +142,6 @@ fn attempted(step: &Step) -> Vec<(UserId, Channel, u32, Status, Option<Reason>)>
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_cause_is_issued_once_with_a_minted_id_before_any_send() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Open);
@@ -207,7 +206,6 @@ fn notice_bytes(notice: NoticeId) -> [u8; 16] {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_users_kill_switch_is_one_notice_however_many_streams_record_it() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Open);
@@ -240,7 +238,6 @@ fn a_users_kill_switch_is_one_notice_however_many_streams_record_it() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn recipients_are_the_rows_audience_narrowed_by_the_receive_column() {
     let roles = [
         Role::Operator,
@@ -283,7 +280,6 @@ fn recipients_are_the_rows_audience_narrowed_by_the_receive_column() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_viewer_listed_as_an_approver_still_gets_no_action_notice() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Open);
@@ -317,7 +313,6 @@ fn approval(deadline_s: i64) -> Input {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn an_action_push_in_quiet_hours_is_suppressed_and_never_deferred() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Quiet { until: at(600) });
@@ -340,7 +335,6 @@ fn an_action_push_in_quiet_hours_is_suppressed_and_never_deferred() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_safety_notice_ignores_quiet_hours_without_asking_for_the_verdict() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Quiet { until: at(36_000) });
@@ -358,7 +352,6 @@ fn a_safety_notice_ignores_quiet_hours_without_asking_for_the_verdict() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn the_brief_in_quiet_hours_waits_for_the_windows_end() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Quiet { until: at(3_600) });
@@ -392,7 +385,6 @@ fn the_brief_in_quiet_hours_waits_for_the_windows_end() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn an_info_kind_without_a_text_key_is_issued_and_never_pushed() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Open);
@@ -435,7 +427,6 @@ fn fail_retryably(d: &mut Dispatcher, ctx: &mut Fixture, sent: &Step, now: i64) 
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn retries_follow_the_schedule_and_number_each_attempt() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Open);
@@ -471,7 +462,6 @@ fn retries_follow_the_schedule_and_number_each_attempt() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn safety_retries_end_at_24_hours_and_info_at_6_with_retry_window_ended() {
     for (kind, window_s) in [
         (NoticeKind::Protection, 86_400),
@@ -530,7 +520,6 @@ fn outcome(sent: &Step, result: SendResult, at_s: i64) -> Input {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_retry_due_exactly_at_the_windows_end_is_sent_and_one_due_past_it_is_not() {
     for (kind, window_s) in [
         (NoticeKind::Protection, 86_400),
@@ -565,7 +554,6 @@ fn a_retry_due_exactly_at_the_windows_end_is_sent_and_one_due_past_it_is_not() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn an_outcome_for_a_finished_or_superseded_attempt_changes_nothing() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Open);
@@ -597,7 +585,6 @@ fn an_outcome_for_a_finished_or_superseded_attempt_changes_nothing() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn action_retries_stop_as_not_pending_when_the_approval_closes() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Open);
@@ -624,7 +611,6 @@ fn action_retries_stop_as_not_pending_when_the_approval_closes() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn action_retries_stop_at_the_deadline_without_a_closing_event() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Open);
@@ -654,7 +640,6 @@ fn action_retries_stop_at_the_deadline_without_a_closing_event() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_permanent_failure_stops_only_that_channel() {
     for reason in [
         Reason::AddressRejected,
@@ -704,7 +689,6 @@ fn a_permanent_failure_stops_only_that_channel() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_lost_address_is_told_on_the_members_other_channels() {
     let mut d = Dispatcher::new(receive_table());
     let mut ctx = Fixture::new(Quiet::Quiet { until: at(36_000) });
