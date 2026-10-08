@@ -22155,6 +22155,198 @@
      "outcome": "Valid"
     }
    }
+  ],
+  "kill_switch": {
+   "envelope_version": 1,
+   "environment": "paper",
+   "event_id": "01J8Z5C2B000000000000000C6",
+   "stream_id": "ctl:ws_01J8Z2",
+   "event_type": "OwnerCommandIssued",
+   "schema_version": 1,
+   "event_time": "2026-10-08T15:00:00.000000000Z",
+   "clock_source": "local",
+   "causation_id": null,
+   "correlation_id": null,
+   "actor": {
+    "kind": "user",
+    "id": "user_owner_01",
+    "version": "1",
+    "build": null
+   },
+   "config_refs": {},
+   "payload": {
+    "agent": null,
+    "command": "kill_switch",
+    "scope": "connection",
+    "subject": "conn_01",
+    "release": null,
+    "warning_shown": null,
+    "bid": null,
+    "bid_size": null,
+    "floor": null,
+    "user": "user_owner_01",
+    "submitted_at": 1791470000,
+    "step_up": null
+   },
+   "artifact_refs": [],
+   "pii_refs": []
+  },
+  "valid_batches": [
+   {
+    "name": "the_kill_switch_then_its_revocation",
+    "clause": "rule 69: one batch, the connection's kill switch first (workspace API §5.6)",
+    "drafts": [
+     {
+      "kill_switch": true,
+      "changes": []
+     },
+     {
+      "base_draft": "revoked_compromised",
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Committed"
+    }
+   }
+  ],
+  "invalid_batches": [
+   {
+    "name": "a_revocation_naming_another_event",
+    "clause": "rule 69: the cause is the kill switch, not any event",
+    "drafts": [
+     {
+      "kill_switch": true,
+      "changes": []
+     },
+     {
+      "base_draft": "revoked_compromised",
+      "changes": [
+       {
+        "path": "causation_id",
+        "value": "01J8Z5C2C000000000000000C7"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 1,
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "a_revocation_after_a_workspace_kill_switch",
+    "clause": "rule 69: the kill switch is at the connection's scope, not a wider one",
+    "drafts": [
+     {
+      "kill_switch": true,
+      "changes": [
+       {
+        "path": "payload.scope",
+        "value": "workspace"
+       }
+      ]
+     },
+     {
+      "base_draft": "revoked_compromised",
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 1,
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "a_revocation_after_another_connections_kill_switch",
+    "clause": "rule 69: the kill switch is this connection's",
+    "drafts": [
+     {
+      "kill_switch": true,
+      "changes": [
+       {
+        "path": "payload.subject",
+        "value": "conn_02"
+       }
+      ]
+     },
+     {
+      "base_draft": "revoked_compromised",
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 1,
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "a_revocation_after_a_pause",
+    "clause": "rule 69: the command is a kill switch",
+    "drafts": [
+     {
+      "kill_switch": true,
+      "changes": [
+       {
+        "path": "payload.command",
+        "value": "pause"
+       }
+      ]
+     },
+     {
+      "base_draft": "revoked_compromised",
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 1,
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "a_revocation_alone",
+    "clause": "rule 69: the kill switch is in the same batch",
+    "drafts": [
+     {
+      "base_draft": "revoked_compromised",
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 0,
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "a_revocation_before_its_kill_switch",
+    "clause": "rule 69: the kill switch is earlier in the batch",
+    "drafts": [
+     {
+      "base_draft": "revoked_compromised",
+      "changes": []
+     },
+     {
+      "kill_switch": true,
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 0,
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   }
   ]
  }
 }

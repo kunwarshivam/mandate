@@ -965,7 +965,7 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
         rule("72.scopes", ascending(encoded(p["scopes"])), "payload.scopes", "non_canonical")
         rule("72.agents", ascending(encoded(p["agents"])), "payload.agents", "non_canonical")
         if rule("73.actor", actor["kind"] == "user", "actor.kind"):
-            rule("73.user", p["user"] == actor["id"], "payload.user")
+            rule("73.user", p["user"] == human(actor), "payload.user")
     if event_type == "ClientRevoked":
         if rule("74", actor["kind"] in REVOCATION_ACTORS[p["reason"]], "actor.kind"):
             if p["reason"] == "owner":

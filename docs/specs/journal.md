@@ -327,11 +327,15 @@ their second party. Checked at append, after the envelope's types (reason `schem
 
 66. `on_behalf_of` is present exactly when `kind` is `client`, and is then an `id`
     (`actor.on_behalf_of`; a well-typed string of the wrong form is `non_canonical`). Every other
-    actor is exactly as before. The host CLI's `system` actor with `on_behalf_of` (identity spec
+    actor is exactly as before. The API sets it from the client's token, which names a user, so it
+    is never the client's own `id`. The host CLI's `system` actor with `on_behalf_of` (identity spec
     §6.4) is not admitted by this version; the change that adds `HostCliRegistered` widens this rule.
 67. A `client` actor's `build` is `null` (`actor.build`): a client is external.
 68. A `client` actor is on the control stream, on `MandateDraftSaved`, `OwnerRequestSubmitted`, or
-    `RecordsAccessed` only (`actor.kind`), reported before the payload is read. These are its
+    `RecordsAccessed` only (`actor.kind`), reported before the payload is read. `RecordsAccessed`'s
+    payload is not closed yet (the audit lane closes it); rule 68 admits a client on it at append,
+    but a client's read is journaled only once that schema exists, and it must use this actor
+    shape. These are its
     `propose`, `request`, and `read` and `dry_run` scopes (workspace API §3.8). Whatever identity
     spec ID-11 forbids a client (confirming, approving, acknowledging, owner commands, connections,
     membership) is refused at append, and check 3 refuses an approval again at the runtime. A
@@ -1763,9 +1767,14 @@ stays registered and unchanged (§8); the workspace API writes version 2.
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 
 69. `ConnectionRevoked` version 2: `causation_id` is non-null exactly when `reason` is
-    `compromised` (`causation_id`). A compromised revocation names the connection-scope kill switch
-    (`OwnerCommandIssued`) committed before it in the same batch (workspace API §5.6), so the
-    record shows the kill switch ran first; an ordinary revoke has no cause.
+    `compromised` (`causation_id`); an ordinary revoke has no cause. A compromised revocation's
+    `causation_id` names an `OwnerCommandIssued` earlier in the same `append` batch whose `command`
+    is `kill_switch`, whose `scope` is `connection`, and whose `subject` is the revoked
+    `connection_id` (`causation_id`, as rule 45 checks its pair inside one batch). So the record
+    shows this connection's kill switch ran first (workspace API §5.6), and a revocation citing any
+    other event, a wider kill switch, or a cause outside its batch is refused. These are the
+    members the CLI writes on a kill switch today; no §11 check repeats the clause, since a range
+    never splits a batch.
 70. `ConnectionRevoked` version 2: the actor is a `user` (`actor.kind`).
 71. `ClientConnected`: `scopes` and `agents` are non-empty (the first that is empty).
 72. `ClientConnected`: `scopes` and `agents` are each strictly ascending by bytes (`non_canonical`
