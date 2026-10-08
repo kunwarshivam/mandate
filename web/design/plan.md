@@ -70,15 +70,18 @@ the owl, the rules and the record.
       (R-8, DEC-504)
 - [ ] **The set-up summary, short first.** The six sentences and the three dollar losses, then
       Create agent; the thirty rows folded under "Everything it will hold to"; the hash in a
-      footnote. (R-28)
+      footnote. (R-28) Waits on counsel: the rows are what the passkey confirms, and DEC-477
+      flags accepting proposed limits in bulk as compliance question 23.
 - [x] **Messages columns.** The rail shows from 80rem, so between 64 and 80rem the thread has the
       room. (R-15, DEC-504)
 - [ ] **Phone chart.** No axis on phones; levels as hairlines with the label at the right edge.
-      (R-20)
+      (R-20) Waits on a decision: the axis is a canvas option, and the phone rule allows no script
+      media query (DEC-207); either the rule takes a stated exception for canvas or the chart
+      clips its axis by CSS.
 - [x] **Phone More sheet order.** Approvals and Alerts first, then Search, then the rest; account
       and workspace at the bottom with the theme. (R-21, DEC-504)
-- [ ] **Needs you holds requests only.** Degraded feeds go to the degraded bar; one line per
-      agent, not per instrument. (R-11)
+- [x] **Needs you holds requests and the agents' conditions.** No feed lines (the strip and
+      Alerts carry them); one line per agent and condition, not per instrument. (R-11, DEC-504)
 - [x] **The palette's first row.** Go to first, the agents, then Safety with "Stop…" last. (R-18,
       DEC-504)
 - [ ] **One request, one place.** An approval appears as a page, a card in the thread and a row
@@ -99,14 +102,14 @@ the owl, the rules and the record.
 
 - [ ] **One pixel grid** for the owls, the icons, the info symbol and the hourglass; snap every
       icon box to whole pixels. (R-8)
-- [ ] **Four frames per owl:** awake, watching (stale feed), asleep (paused, with the "z"),
-      stopped (eyes shut, greyed). One frame change per state, never a loop; the face never
-      changes with P&L. (R-1)
-- [ ] **One distinguishing feature per agent** (a tuft, a brow, a belly) so silhouettes tell them
-      apart in greyscale.
+- [x] **Four frames per owl.** Already shipped (DEC-217, `owl-sprite.ts`): eyes open when
+      trading, lidded on selling only, asleep with a "z" when paused, shut when stopped; nothing
+      follows P&L. The review missed it because every fixture agent was trading. (R-1)
+- [x] **One distinguishing feature per agent.** Already shipped: ears and markings come from the
+      agent's ID (`owlShape`), so the silhouettes differ in greyscale.
 - [ ] **The hatch.** Create agent ends with the owl hatching once, 600ms, then on its branch.
-- [ ] **Silence as a feature.** The all-clear on Home is the owl asleep and "Nothing needs you",
-      and nothing else.
+- [x] **Silence as a feature.** Already shipped: the all-clear is the brand owl and "All clear.
+      Nothing needs you."
 - [ ] **One era of type on the landing page:** the Pixelify wordmark, not the figlet ASCII.
 
 ## F. Home and the agent page (DEC)

@@ -10,7 +10,7 @@ import { BrandOwl } from "@/components/brand/brand-owl";
 import { AgentOwl } from "@/components/domain/owl";
 import type { Agent, Approval, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
-import { alertLines } from "@/lib/attention";
+import { needsYouLines } from "@/lib/attention";
 import { clock, price, quantity, zoneLabel } from "@/lib/format";
 import { headroomLine } from "@/lib/limits";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
@@ -49,13 +49,14 @@ const NEEDS_ROW = cn(
 
 /**
  * Home's first question, answered first at every width (DEC-207, DEC-467): the requests waiting for
- * you, soonest deadline first, each with the static time it is skipped at, then the open alerts. Each
+ * you, soonest deadline first, each with the static time it is skipped at, then the agents' open
+ * conditions, one line per agent and condition; a degraded feed is the strip's to say (DEC-504). Each
  * row opens where it is read in full. With nothing, it says so plainly. The only place Home shows a
  * request; the dock carries the count. On a phone they are one sideways row of cards, never a stack
  * above the money (DEC-482).
  */
 function NeedsYou({ ws, open }: { ws: Workspace; open: Approval[] }) {
-  const lines = alertLines(ws);
+  const lines = needsYouLines(ws);
   const count = open.length + lines.length;
   return (
     <section aria-labelledby="needs-you-title" data-slot="needs-you" data-count={count} className="grid content-start gap-2">

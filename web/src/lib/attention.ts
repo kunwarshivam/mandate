@@ -35,6 +35,32 @@ export function alertLines(ws: Workspace): AlertLine[] {
 }
 
 /**
+ * What Needs you lists under the requests (DEC-504): the agents' conditions, one line per agent and
+ * condition with every instrument it covers in one pair of brackets, and no feed. A degraded feed is
+ * the status strip's and the Alerts screen's to say, and it asks nothing of the owner.
+ */
+export function needsYouLines(ws: Workspace): AlertLine[] {
+  const lines: AlertLine[] = [];
+  for (const a of ws.agents) {
+    const byCode = new Map<string, { symbols: string[]; source: RestrictionSource }>();
+    for (const r of a.restrictions) {
+      const entry = byCode.get(r.code) ?? { symbols: [], source: RESTRICTIONS[r.code].source };
+      if (r.symbol) entry.symbols.push(r.symbol);
+      byCode.set(r.code, entry);
+    }
+    for (const [code, { symbols, source }] of byCode) {
+      lines.push({
+        key: `${a.agent_id}-${code}`,
+        text: `${a.label}: ${lowerFirst(RESTRICTIONS[code as keyof typeof RESTRICTIONS].label)}${symbols.length > 0 ? ` (${symbols.join(", ")})` : ""}`,
+        href: `/agents/${a.agent_id}`,
+        source,
+      });
+    }
+  }
+  return lines;
+}
+
+/**
  * Orders whose standing the broker has not confirmed (trading-domain spec §5.7): recorded or being
  * sent, a cancel or replace not yet answered, or unknown. An order resting at the broker, partly
  * filled or not, is confirmed; protective stops rest there all day.
