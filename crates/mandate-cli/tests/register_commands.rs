@@ -170,7 +170,8 @@ fn the_kinds_take_their_journal_names() {
 
 /// With no database: a bad owner id is refused before the file is read, the journal opened, or the
 /// store created; a missing file before the journal is opened; and a snapshot outside DEC-523
-/// without a connection; and a journal that cannot be reached is an error. No refusal names any
+/// without a connection; and a journal whose host does not resolve is an error at once (a refused
+/// port is retried for the pool's 30 s acquire timeout, which every mutant's run would pay). No refusal names any
 /// part of the DSN (`AGENTS.md` rule 7) or prints anything. `tag` keeps each caller's files apart.
 fn refusals_without_a_database(tag: &str) {
     let [user, password, host, db] = SENTINELS;
@@ -219,8 +220,7 @@ fn refusals_without_a_database(tag: &str) {
     refuses("instrument_snapshot_invalid", |out| run(&args, now(), out));
     let spy = dir.join("spy.json");
     std::fs::write(&spy, SPY).unwrap();
-    let unreachable = format!("postgres://{user}:{password}@127.0.0.1:1/{db}");
-    let args = snapshot_args(owner, &spy, &unreachable, &store);
+    let args = snapshot_args(owner, &spy, &dsn, &store);
     refuses("unavailable", |out| run(&args, now(), out));
     for made in [dir, store] {
         std::fs::remove_dir_all(made).ok();
