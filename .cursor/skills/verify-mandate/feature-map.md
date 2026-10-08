@@ -1101,7 +1101,7 @@ proves each pending test fails on them (DEC-110).
 - **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
   takes the stream's latest confirmed version and a code bound to the agent and the version, and
   commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
-  stubbed; `crates/mandate-cli/tests/deploy.rs`, pending E10-16, over a control stream seeded in
+  on `version.rs`'s checks; `crates/mandate-cli/tests/deploy.rs`, over a control stream seeded in
   §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
   force; every refusal code, each writing nothing; a failing store committing nothing.
   `cargo nextest run -p mandate-cli --test deploy`.
@@ -1294,6 +1294,16 @@ proves each pending test fails on them (DEC-110).
   check order over every pair of stages, and the signal against an `i128` oracle with ties and a
   clock-independence check), with fixtures in `tests/common/mod.rs`.
 - **Run:** `cargo nextest run -p mandate-modelhost`.
+
+## Passkey relying party (E9-1)
+
+- **Spec:** identity spec §6.1, §6.3, §7.2 step 4; DEC-660 (dependencies, algorithms, and the
+  strict readings).
+- **Code:** `mandate-passkey`, `crates/mandate-passkey/` (layer 2, pure, safety-critical):
+  `src/lib.rs` (`enrol`, `verify`, `RelyingParty`, `Challenge`, `Credential`, `PublicKey`,
+  `Refusal`).
+- **Tests:** `crates/mandate-passkey/tests/api.rs` (refusal codes, the challenge length).
+- **Run:** `cargo nextest run -p mandate-passkey`.
 
 ## Simulated Robinhood broker (E7-25)
 
