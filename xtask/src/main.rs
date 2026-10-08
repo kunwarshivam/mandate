@@ -227,8 +227,9 @@ fn ci(job: &str) -> Result<()> {
     }
 }
 
-/// The Postgres journal tests against a real database (ADR-0001 ES-08). `test` runs them too, but
-/// they skip there unless `MANDATE_PG_URL` is set; here they must run.
+/// The Postgres journal tests against a real database (ADR-0001 ES-08), `mandate-journal-pg`'s and
+/// the CLI's control journal's (P0, DEC-520). `test` runs them too, but they skip there unless
+/// `MANDATE_PG_URL` is set; here they must run.
 fn postgres() -> Result<()> {
     if env::var_os(PG_URL).is_none() {
         if env::var_os(PG_REQUIRED).is_some() {
@@ -244,6 +245,8 @@ fn postgres() -> Result<()> {
         "run",
         "--package",
         "mandate-journal-pg",
+        "--package",
+        "mandate-cli",
         "--locked",
         "--no-tests=pass",
     ];
