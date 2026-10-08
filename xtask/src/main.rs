@@ -1395,16 +1395,34 @@ fn mutants_args(
 /// how the run is judged when no directory is exported.
 const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 
+/// The profile every build of the mutants job runs under: no debuginfo, for the `dev` profile and
+/// for the `test` profile that inherits it (DEC-519).
+///
+/// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. The baseline builds only the
+/// mutated packages, so a low-layer mutant's first build compiles the rest of its tested packages'
+/// graph from nothing: a `mandate-time` mutant whose tested packages included `mandate-shell` ran
+/// past the cap on CI's runner (#677). Without debuginfo that build took about a quarter less CPU
+/// time from cold, and nearly half less after a one-file change, measured in DEC-519. Debuginfo
+/// changes no test's verdict, only what a backtrace can name, and the gate reads verdicts. It is set
+/// on the job's children rather than left to the caller, so CI and `cargo xtask check` build
+/// mutants the same way whatever the caller exported.
+const MUTANT_BUILD_PROFILE: [(&str, &str); 2] = [
+    ("CARGO_PROFILE_DEV_DEBUG", "0"),
+    ("CARGO_PROFILE_TEST_DEBUG", "0"),
+];
+
 /// A `cargo` child of the mutants job that builds, with the caller's [`CARGO_TARGET_DIR`] out of its
-/// environment: the pre-flight's `cargo nextest list`, which builds the very packages the run is
-/// about to judge, and the `cargo mutants` run itself. The job's other `cargo` children —
-/// `cargo mutants --list` and `cargo metadata` — build nothing, so they carry none of this state.
+/// environment and [`MUTANT_BUILD_PROFILE`] in it: the pre-flight's `cargo nextest list`, which
+/// builds the very packages the run is about to judge, and the `cargo mutants` run itself, whose
+/// baseline and mutant builds inherit both. The job's other `cargo` children — `cargo mutants
+/// --list` and `cargo metadata` — build nothing, so they carry none of this state.
 fn mutants_job_cargo(root: &Path, args: &[&str]) -> Command {
     let mut cargo = Command::new("cargo");
     cargo
         .current_dir(root)
         .args(args)
-        .env_remove(CARGO_TARGET_DIR);
+        .env_remove(CARGO_TARGET_DIR)
+        .envs(MUTANT_BUILD_PROFILE);
     cargo
 }
 
@@ -3042,6 +3060,7 @@ mod tests {
     use std::cell::Cell;
     use std::collections::{BTreeMap, BTreeSet};
     use std::env;
+    use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
@@ -3058,10 +3077,10 @@ mod tests {
         contains_word, external_oracles, failure_cause, files_by_extension, first_panic_line,
         generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function, lint,
         listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts, mutants,
-        mutants_args, mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems,
-        pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_outcomes, unjudged_mutants, verdicts, workspace_closure,
+        mutants_args, mutants_job_cargo, mutants_outcome, mutated_crates, names_a_stub, output_in,
+        pending_problems, pending_tests, plain_comment_lines, proptest_seeds_in, repo_root,
+        shellcheck_scripts, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
+        test_binary, test_outcomes, unjudged_mutants, verdicts, workspace_closure,
     };
 
     #[test]
@@ -3243,6 +3262,98 @@ mod tests {
             "the reference suites must reach every crate they judge through their own dependency \
              graph, which `cargo metadata` can see, and not through a subprocess, which it cannot \
              (DEC-497): {spawning:?}"
+        );
+        Ok(())
+    }
+
+    /// The lines of `job` in `workflow`: from its `  <job>:` key, two spaces in under `jobs:`, to the
+    /// next key at that depth or the end of the file.
+    fn workflow_job<'a>(workflow: &'a str, job: &str) -> Option<Vec<&'a str>> {
+        let key = format!("  {job}:");
+        let at_job_depth = |line: &str| {
+            line.starts_with("  ") && !line.starts_with("   ") && !line.trim().starts_with('#')
+        };
+        let mut lines = workflow.lines().skip_while(|line| *line != key);
+        let first = lines.next()?;
+        Some(
+            std::iter::once(first)
+                .chain(lines.take_while(|line| !at_job_depth(line)))
+                .collect(),
+        )
+    }
+
+    /// DEC-519 item 1: a mutant in code only the Postgres tests reach is judged by them. Those tests
+    /// skip without `MANDATE_PG_URL`, so a shard without the database reports every such mutant
+    /// missed (#678's `lost_a_race` guard). Each shard gets the database `full-checks` has, from
+    /// the same script, before the gate runs, and requires it, so a shard that lost it fails
+    /// rather than skipping the tests that judge those mutants.
+    #[test]
+    fn every_mutation_shard_has_the_database_the_postgres_tests_need() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        for (job, gate) in [
+            ("full-checks", "run: cargo xtask ci full"),
+            ("mutants", "run: cargo xtask ci mutants"),
+        ] {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            let trimmed: Vec<&str> = lines
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- "))
+                .collect();
+            for setting in [
+                "MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres",
+                "MANDATE_PG_REQUIRED: \"1\"",
+            ] {
+                assert!(
+                    trimmed.contains(&setting),
+                    "`{job}` sets `{setting}`, so its Postgres tests run and cannot skip (DEC-519)"
+                );
+            }
+            let started = trimmed
+                .iter()
+                .position(|line| *line == "run: .github/scripts/start-postgres.sh");
+            let gated = trimmed.iter().position(|line| *line == gate);
+            assert!(
+                started.is_some() && gated.is_some() && started < gated,
+                "`{job}` starts the shared, digest-pinned PostgreSQL before `{gate}` (DEC-519): \
+                 start at {started:?}, gate at {gated:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-519 item 2: every build the mutants job makes, the baseline's and each mutant's under
+    /// `cargo mutants` and the pre-flight's test listing, is without debuginfo, whatever the caller
+    /// exported, and still out of the caller's target directory. CI's matrix sets the same two
+    /// settings in its environment, which is what puts them in rust-cache's key.
+    #[test]
+    fn the_mutants_job_builds_without_debuginfo() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let matrix = workflow_job(&workflow, "mutants").context("ci.yml has a `mutants` job")?;
+        for setting in [
+            "CARGO_PROFILE_DEV_DEBUG: \"0\"",
+            "CARGO_PROFILE_TEST_DEBUG: \"0\"",
+        ] {
+            assert!(
+                matrix.iter().any(|line| line.trim() == setting),
+                "the mutants matrix sets `{setting}`, so the dependencies rust-cache restores \
+                 were built the way the gate builds (DEC-519)"
+            );
+        }
+        let cargo = mutants_job_cargo(Path::new("."), &["mutants"]);
+        let envs: BTreeMap<&OsStr, Option<&OsStr>> = cargo.get_envs().collect();
+        for profile in ["CARGO_PROFILE_DEV_DEBUG", "CARGO_PROFILE_TEST_DEBUG"] {
+            assert_eq!(
+                envs.get(OsStr::new(profile)),
+                Some(&Some(OsStr::new("0"))),
+                "the mutants job sets {profile}=0 on its building children, which shortens the \
+                 build phase `--build-timeout` caps (DEC-519)"
+            );
+        }
+        assert_eq!(
+            envs.get(OsStr::new(CARGO_TARGET_DIR)),
+            Some(&None),
+            "the caller's CARGO_TARGET_DIR is still removed (#419 review, nit 3)"
         );
         Ok(())
     }
