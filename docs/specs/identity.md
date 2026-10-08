@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.2 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md)). Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by DEC-820 (PR #762) and applied by DEC-640; items 16 to 21 are Proposed and wait for the founder |
+| **Status** | v0.3 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md); v0.3 adds one's own memberships, one's own notification address, who may obtain a step-up challenge, and `refresh_failed`, [DEC-816](../project/decisions/DEC-816.md)). Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by DEC-820 (PR #762) and applied by DEC-640; items 16 to 21 are Proposed and wait for the founder |
 | **Implements** | [HLD §4](../HLD.md#4-architecture) (org directory, workspace deployment, deployment modes) and [§8](../HLD.md#8-multi-tenancy-and-security); PRD [FR-1.1 to FR-1.6](../product/04-prd-v1.md#61-identity-and-tenancy); backlog E9 |
 | **Depends on** | [Mandate spec §4.3, V-047, §6.1, §6.4, §6.5](mandate.md#43-policy-hierarchy-dec-51-dec-98); [journal spec §2, §3, §6.4, §7](journal.md#3-event-envelope); [infrastructure design §5, OPS-6](../design/infrastructure.md#5-secrets-and-the-vault); [inference spec INF-9, INF-11](inference.md#2-invariants); [DEC-141](../project/04-decision-log.md#decisions), [DEC-211](../project/04-decision-log.md#decisions), [DEC-411](../project/decisions/DEC-411.md) |
 | **Read by** | The workspace services API spec (`docs/specs/workspace-api.md`, DEC-436), the notifications spec (`docs/specs/notifications.md`, DEC-438), and the threat model (`docs/security/threat-model.md`, DEC-439), all drafted in parallel. They take roles, principals, and step-up from here |
@@ -77,7 +77,7 @@ is trusted (§14, E9-11).
 | **ID-1** | **Every action is attributed.** Every mutation workspace services accept, and every event they commit to the control stream, carries the authenticated principal (`actor.kind`, opaque `actor.id`) and the session it came through. The principal comes from the authenticated channel, never from the request body. Nothing anonymous is committed | Journal §3; HLD §8 "Agent identity" | A fuzz of API calls with forged `actor`, `user`, `responder`, and `workspace_id` fields in bodies asserts every committed event's actor equals the oracle's record of who authenticated |
 | **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some effective role the principal holds through a membership in that scope that reaches it (one that reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows) has the permission in §4.2's matrix, or, for a principal that holds no membership (a client, a service account, the host CLI, a platform operator in break-glass), when its own column has it within that column's stated scope. Everything else is denied, including a permission the matrix leaves blank. It covers exactly the rows the matrix names (DEC-641 item 6) | §4 | An exhaustive test over every (role set or non-member principal kind, permission, scope) triple against a table parsed from §4.2 itself, by the grammar of §4.2, not from the code |
 | **ID-3** | **Only a member reaches a workspace.** A membership reaches its scope when `active` or `cooling_off`, with its roles effective as §8.3 allows (§5.1); a principal with no membership in workspace W that reaches it can neither read nor write W. A deactivation applies to every request authorized after it commits, and open streams (server-sent events, websockets) of that principal in W close within 60 s | §5 | A fuzz interleaving requests with membership changes; the oracle replays `Member*` events and asserts no request authorized after a deactivation succeeded, and every stream closed within the bound |
-| **ID-4** | **Step-up where risk can grow.** These need valid step-up (§7): confirming a risk-increasing mandate version, deploying (going live or paper), approving under policy (mandate §6.4 check 6), granting a delegation, connecting or changing a connection, revoking a connection, re-enabling a halted scope if DEC-437 item 21 creates one (§4.4), resume, Stop, acknowledgments (mandate §6.1), owner exits, accepting a disclosure (V-005), loosening a policy, granting a role, connecting a client, enrolling a step-up credential, and break-glass | FR-1.4; mandate §6.1 | A table test per command: with each failure mode (missing, stale, reused, wrong method, wrong action digest, wrong principal) the command is refused and nothing else is committed |
+| **ID-4** | **Step-up where risk can grow.** These need valid step-up (§7): confirming a risk-increasing mandate version, deploying (going live or paper), approving under policy (mandate §6.4 check 6), granting a delegation, connecting or changing a connection, revoking a connection, re-enabling a halted scope if DEC-437 item 21 creates one (§4.4), resume, Stop, acknowledgments (mandate §6.1), owner exits, accepting a disclosure (V-005), loosening a policy, granting a role, connecting a client, enrolling a step-up credential, adding or removing one's own notification address, and break-glass | FR-1.4; mandate §6.1 | A table test per command: with each failure mode (missing, stale, reused, wrong method, wrong action digest, wrong principal) the command is refused and nothing else is committed |
 | **ID-5** | **Never for risk reduction.** No step-up, session freshness, or identity-provider round trip is required to pause, to engage a kill switch at any scope (its stop and flatten; only its extra privileges need step-up, mandate §6.1), to skip an approval, to tighten a policy, to remove or narrow a delegation, or to revoke a client. Automated exits, protective orders, and risk exits involve no principal at all | `AGENTS.md` rules 2, 3, 13; MI-23 | With step-up absent, stale, and with the identity provider unreachable, each of these commits, and the kill switch stops and flattens |
 | **ID-6** | **Approver is not the requester.** Under the effective `independent_approval_required`, the user who grants, acknowledges, or approves (deployment, a risk-increasing change, a high-water-mark reset, loosening a latched floor, lifting a tripwire, an approval) is a different `user` principal from the requester and, for approvals, from the mandate's author. A client counts as the user named in its `on_behalf_of` (§12.2) and a service account as its issuing admin, so neither is ever the other party | Mandate §4.3, §6.4 check 7, §5.8, §6.7; E9-5 | A fuzz over principals, clients, and service accounts; the oracle maps each to its human and asserts no grant counted where the two humans match |
 | **ID-7** | **The user count is active humans.** `workspace_users` (the count V-047 and V-020 read) is the number of distinct `user` principals whose membership in the workspace is `active` and past its cool-off (§8.3) at the read. Invited, cooling-off, deactivated, and removed memberships, clients, service accounts, agents, and platform staff count zero. A count that cannot be read counts as one | V-047; DEC-411 item 2 | The oracle folds `Member*` events itself and is compared with the count validation reads, at validation and at application, over random membership histories |
@@ -222,6 +222,8 @@ it names; outside such a window a platform operator has no permission at all (ID
 | Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
+| Add or remove one's own notification address (a push subscription; later an email or chat address) | S | own | own | own | own | own | own | own | own | | | | |
+| List one's own workspace memberships | | own | own | own | own | own | own | own | own | | | | |
 | Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
 | Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | | | |
@@ -241,7 +243,7 @@ table, so its cells follow a closed grammar, and any other text is a spec defect
   needs it; deactivating or removing a member does not), or `S for grant` (only a grant needs it;
   removing a role does not).
 - **Principal cells:** blank (denied); `✓` (granted); `own` (granted for the principal's own
-  credential only, at the scope of any membership it holds that reaches that scope); `✓ (propose only)` (granted; confirming is its own row); `✓ (org)` (granted
+  credential, notification address, or memberships only, at the scope of any membership it holds that reaches that scope); `✓ (propose only)` (granted; confirming is its own row); `✓ (org)` (granted
   at org scope only); `✓ (not owner)` (granted, except that granting or removing the org owner
   role is refused `owner_role_reserved`).
 - **Column scopes:** OO, OA, and Bill apply only at an organization's scope, through an org
@@ -365,6 +367,22 @@ refused too, because their revocation, like a role change's snapshot
 rewrite, shares one transaction with `MemberDeactivated` or `MemberRoleChanged`. **The audit view
 shows the gap:** `membership_unverified: true` stays in the journaled record, and the workspace
 API's audit read model (§4.8) and the web audit trail display it (owed by those lanes).
+
+**One's own memberships** ([DEC-816](../project/decisions/DEC-816.md) items 1 and 2). After
+sign-in the web app must learn which workspaces it may name in a path, before it holds any
+workspace's context. `GET /v1/me/workspaces` is the one route outside every `/v1/workspaces/{ws}`
+path. It is authorized by the session alone against the "List one's own workspace memberships"
+row: a full session of a user principal; never a reduction-only session (opened in one workspace,
+which it already names), a client (whose token names its one workspace), a service account, the
+host CLI, or a platform operator. It reads through the membership lookup with a query keyed by the
+principal only, never by a workspace, and answers with the principal's `active` workspace
+memberships and nothing else: for each, `{workspace_id, label, roles}`, where `label` is the
+workspace's display label (no personal data, agent, strategy, or amount) and `roles` are its
+effective roles at the read (§8.3). It yields no `TenantContext` and reads no workspace's data, so
+a workspace the principal is not an active member of, an absent one, and a foreign one are equally
+absent from the answer (ID-8). If the membership lookup cannot answer, it is refused
+`membership_unavailable` (503): it is not a risk-reducing operation, and no kill-switch route needs
+the list (a reduction-only session names its workspace, and the host CLI its deployment's).
 
 **`TenantContext`** ([DEC-642](../project/decisions/DEC-642.md)). Only the authorization step
 constructs one, and only when it authorizes a permission at a workspace's scope; an org-scope
@@ -624,8 +642,8 @@ enough:
    absolute lifetime ends. When the provider **answers and refuses** (`invalid_grant`, a revoked or
    disabled subject, a back-channel logout), that is a deprovision, not an outage: the session ends at
    once with every permission (§11.1). Only a transport-level failure or a 5xx keeps anything. A 408
-   or 429 ends the session like any other non-5xx answer, but is not a deprovision signal (§11.1),
-   so route 2 stays open.
+   or 429 ends the session like any other non-5xx answer (`SessionRevoked` with reason
+   `refresh_failed`, §12.1), but is not a deprovision signal (§11.1), so route 2 stays open.
 2. **Workspace-local passkey.** The workspace deployment verifies a fresh passkey assertion
    against the public keys it holds (§6.1) and opens a *reduction-only session*: pause and kill
    switch, nothing else, 15 minutes. No identity provider, global control plane, or model is
@@ -671,8 +689,12 @@ passkey, within the last 300 seconds, for **this** action and no other.
 
 ### 7.2 Mechanics
 
-1. The client asks workspace services for a challenge, naming the action. Workspace services issue
-   a challenge record: `{challenge_id (ULID), workspace_id, principal_id, action_kind,
+1. The client asks workspace services for a challenge, naming the action. A challenge for an action
+   is authorized exactly as the §4.2 row that action needs ([DEC-816](../project/decisions/DEC-816.md)
+   item 3): a principal that may not perform the action cannot obtain a challenge for it, so a
+   client, a service account, the host CLI, and a platform operator, whose cells on every **S** row
+   are blank, never obtain one, and a reduction-only session is refused `reduction_only` (§7.3).
+   Workspace services issue a challenge record: `{challenge_id (ULID), workspace_id, principal_id, action_kind,
    action_digest, issued_at, expires_at = issued_at + 300 s}`. The `action_digest` is the SHA-256
    of the canonical action (journal §4): an approval's content hash (mandate §6.4), a version's
    hash, or a command's canonical body.
@@ -881,7 +903,7 @@ them to journal §9 with schemas (DEC-437 item 9):
 | `MemberDeactivated`, `MemberReactivated`, `MemberRemoved` | member, by whom, reason code |
 | `CredentialEnrolled`, `CredentialRemoved` | member, credential (opaque reference, never the key), kind, enrolment cool-off end |
 | `SessionOpened` | member, session (opaque), method, device (opaque), `first_seen_device` (true when the principal has not used the device before); the subject event of the notifications spec's `new_device` kind |
-| `SessionRevoked` | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `admin`); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
+| `SessionRevoked` | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `refresh_failed`, `admin`; `refresh_failed` is a refresh the provider answered with neither a grant nor a deprovision signal, §6.4 route 1); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
 | `ClientConnected`, `ClientRevoked` | client id, user, scopes, step-up evidence |
 | `ServiceAccountIssued`, `ServiceAccountRevoked` | account, scopes, workspaces, expiry, issuing user |
 | `HostCliRegistered`, `HostCliRevoked` | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence |
@@ -981,6 +1003,12 @@ grammar, column scopes, inactive rows, and ID-2 scoped to the rows the matrix na
 [DEC-641](../project/decisions/DEC-641.md); the `TenantContext` contract,
 [DEC-642](../project/decisions/DEC-642.md); and the authorization step's refusal codes,
 [DEC-643](../project/decisions/DEC-643.md).
+
+**v0.3's readings (agent, DEC-79, DEC-176)**, each closing a gap other lanes hit, by the reading
+that adds no risk: the "List one's own workspace memberships" row and `GET /v1/me/workspaces`
+(§4.5); the "Add or remove one's own notification address" row, with step-up for both (ID-4); a
+step-up challenge authorized as the row its action needs (§7.2 step 1); and the `refresh_failed`
+reason of `SessionRevoked` (§6.4 route 1, §12.1), [DEC-816](../project/decisions/DEC-816.md).
 
 **Proposed for the founder**, item 15 now decided (spending, legal text, a safety rule, or a question already put to the founder):
 

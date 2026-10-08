@@ -248,8 +248,8 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   with that list: `confirm_version` (risk-increasing, a delegation grant included), `deploy`,
   `approve`, `connection` (connect, change, or revoke), `resume`, `stop`,
   `acknowledge`, `owner_exit`, `kill_switch_privilege`, `disclosure`, `policy_loosen`,
-  `member_invite`, `role_grant`, `client_connect`, `credential_enrol`, `break_glass_approve`, and
-  `lift_hold`. There is no kind for re-enabling a halted scope: the halted state is Proposed
+  `member_invite`, `role_grant`, `client_connect`, `credential_enrol`, `notification_address`,
+  `break_glass_approve`, and `lift_hold`. There is no kind for re-enabling a halted scope: the halted state is Proposed
   (DEC-437 item 21) and does not exist until the founder accepts it. API-17's test enumerates only
   the step-up actions this API serves: identity spec ID-4's list and the **S** cells of §3.7's
   workspace-scope rows. The org-scope **S** actions (SSO configuration, creating or archiving a
@@ -314,6 +314,8 @@ break-glass. Their columns are printed so the copy stays exact. The cells read b
 | Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
+| Add or remove one's own notification address (a push subscription; later an email or chat address) | S | own | own | own | own | own | own | own | own | | | | |
+| List one's own workspace memberships | | own | own | own | own | own | own | own | own | | | | |
 | Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
 | Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | | | |
@@ -340,6 +342,8 @@ How the API's operations map onto those rows:
 | Approve, Skip (§5.2) | Answer an approval, and listed in `autonomy.approval.approvers` (identity spec §4.1) |
 | Connect, revoke, revoke on compromise (§4.5) | Connect, change, or revoke a broker connection |
 | Policies, members, clients (§4.5) | The rows of the same names; a member deactivating their own membership is the leave row |
+| One's own workspaces, `GET /v1/me/workspaces` (identity spec §4.5) | List one's own workspace memberships |
+| One's own notification channels (a push subscription) | Add or remove one's own notification address |
 | Owner request, dry run, chat (§4.6) | Make an owner request; dry run of a request; chat thread with the agent. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
 
 Separation of duties is enforced where the specs already enforce it: by the runtime at approval
