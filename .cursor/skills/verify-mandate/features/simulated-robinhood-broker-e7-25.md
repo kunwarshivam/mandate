@@ -12,6 +12,10 @@
   `crates/mandate-rh-sim/tests/lifecycle.rs` (fills and positions, `ref_id` after a lost answer
   and its echo and changed-resend switches, `gfd` and `gtc`, sessions, scripted answers, and the
   refusals of cancel, fill and a sell that working sells already hold, a working sell holding
-  only its unfilled remainder), with fixtures
-  in `tests/common/mod.rs`. Pending E7-25.
+  only its unfilled remainder), and
+  `crates/mandate-rh-sim/tests/properties.rs` (over random scripts: a `ref_id` never yields a
+  second order; a terminal order never changes and is refused; a fill never exceeds the quantity;
+  every state change is a legal transition, and every legal one is accepted; each against the
+  test's own oracle), with fixtures in
+  `tests/common/mod.rs`. Pending E7-25.
 - **Run:** `cargo nextest run -p mandate-rh-sim`.
