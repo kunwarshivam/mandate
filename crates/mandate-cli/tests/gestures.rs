@@ -4,18 +4,55 @@
 //! non-zero with its code on stderr and nothing on stdout, and no output names any part of the DSN
 //! (`AGENTS.md` rule 7).
 
+#[path = "../../mandate-journal/tests/common/mod.rs"]
+mod common;
+#[path = "../../mandate-journal/tests/conformance/mod.rs"]
+#[allow(
+    unused_imports,
+    unused_macros,
+    reason = "only `support`'s backend trait is used here; the suite runs in `mandate-journal-pg`"
+)]
+mod conformance;
+#[path = "common/mod.rs"]
+mod double;
+#[path = "../../mandate-journal-pg/tests/support/mod.rs"]
+mod support;
+
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command as Process;
 
 use clap::Parser;
 use clap::error::ErrorKind;
-use mandate_canon::{Digest, parse, to_canonical};
-use mandate_cli::gestures::{AgentCommand, VersionCommand};
+use double::{CONTROL, FixedIds, Journal, at, owner, stream};
+use mandate_artifacts_fs::FsArtifactStore;
+use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_cli::control::{ControlJournal, Now};
+use mandate_cli::gestures::{AgentCommand, Shown, VersionCommand, confirmation, deployment};
+use mandate_cli::postgres::{JournalArgs, read_stream};
+use mandate_cli::version;
 use mandate_cli::{Cli, Command};
+use mandate_journal::StreamId;
+use mandate_journal::{AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent};
+use mandate_journal_pg::APP_ROLE;
+use support::{TestDb, URL_VAR};
 
+type Store = BTreeMap<Digest, Vec<u8>>;
+
+const NOW: i64 = 1_790_000_000;
 const AGENT: &str = "agent-a";
 const MANDATE: &str = include_str!("fixtures/spy_mandate.json");
+const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-10-05T13:30:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","symbol":"SPY"}"#;
+/// The fixture's model hash, E7-7's, which the binary test swaps for the host's.
+const FIXTURE_HASH: &str = "4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc";
+const MODEL: &str = r#"{"admits_instruments":false,"content_hash":"sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}"#;
+const SNAPSHOT: &str = r#"{"admits_instruments":null,"content_hash":"@H","kind":"instrument_snapshot","model_id":null,"model_version":null,"params":[]}"#;
+const SEEDED: &str = r#"{"actor":{"build":null,"id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"9@I","event_time":"2026-10-08T13:00:00.000000000Z","event_type":"ConfigSnapshotRegistered","payload":@P,"pii_refs":[],"schema_version":1,"stream_id":"ctl:ws1"}"#;
 const SENTINEL_DSN: &str = "postgres://d2c-user-sentinel:d2c-password-sentinel@d2c-host-sentinel.invalid:1/d2c-db-sentinel";
+
+fn now() -> Now {
+    at(NOW)
+}
 
 fn reference(bytes: &[u8]) -> String {
     format!("sha256:{}", Digest::of(bytes).to_hex())
@@ -23,6 +60,81 @@ fn reference(bytes: &[u8]) -> String {
 
 fn canonical(text: &str) -> Vec<u8> {
     to_canonical(&parse(text.as_bytes()).unwrap())
+}
+
+/// DEC-530 item 4's codes, computed here.
+fn code(gesture: &str) -> String {
+    Digest::of(&canonical(gesture)).to_hex()[..8].to_owned()
+}
+
+fn confirm_code(version: &str) -> String {
+    code(&format!(
+        r#"{{"gesture":"mandate_confirm","mandate_version":"{version}"}}"#
+    ))
+}
+
+fn deploy_code(agent: &str, version: &str) -> String {
+    let gesture = r#""gesture":"agent_deploy""#;
+    code(&format!(
+        r#"{{"agent_id":"{agent}",{gesture},"mandate_version":"{version}"}}"#
+    ))
+}
+
+/// Appends one event as another control-stream writer would.
+fn seed(journal: &mut Journal, event_type: &str, payload: &str) {
+    let control = stream(CONTROL);
+    let head = journal.head(&control).unwrap().seq;
+    let draft = SEEDED
+        .replace("@I", &format!("{head:025}"))
+        .replace("@P", payload);
+    let draft = draft.replace("ConfigSnapshotRegistered", event_type);
+    let epoch = journal.take_ownership(&control).unwrap();
+    let outcome = journal.append(&control, head, epoch, now().at, &[draft.as_bytes()]);
+    assert!(matches!(outcome, Ok(AppendOutcome::Committed(_))));
+}
+
+/// Showing a gesture's code runs its checks but the code's and writes nothing: no append, no
+/// stored object, no assertion. The codes are DEC-530 item 4's, and the warnings mandate spec
+/// §4.2's: W-002, as 1000 x 0.05 at the stop is over 0.02 x 1000 a day. A shown deployment checks
+/// what its gesture does, the V-rules among them.
+#[test]
+#[ignore = "pending E10-16"]
+fn a_shown_code_is_the_gestures_and_showing_writes_nothing() {
+    let (mut journal, mut store) = (Journal::default(), Store::new());
+    store.put_artifact(SPY.as_bytes()).unwrap();
+    let snapshot = SNAPSHOT.replace("@H", &reference(&canonical(SPY)));
+    seed(&mut journal, "ConfigSnapshotRegistered", MODEL);
+    seed(&mut journal, "ConfigSnapshotRegistered", &snapshot);
+    let (mut ids, owner) = (FixedIds::default(), owner());
+    let version = reference(&canonical(MANDATE));
+    version::create(&mut journal, &mut store, &owner, MANDATE.as_bytes(), now()).unwrap();
+    let written = |journal: &Journal, store: &Store, ids: &FixedIds| {
+        (journal.attempts.len(), store.clone(), ids.assertions)
+    };
+    let before = written(&journal, &store, &ids);
+    let shown = confirmation(&journal, &store, &owner, &version, now());
+    let code = confirm_code(&version);
+    let warnings = vec!["W-002"];
+    assert_eq!(shown, Ok(Shown { code, warnings }), "the confirmation's");
+    let refused = deployment(&journal, &store, &owner, (AGENT, &version), now());
+    let reason = refused.map_err(|e| e.to_string());
+    let unconfirmed = matches!(&reason, Err(why) if why.contains("version_unconfirmed"));
+    assert!(unconfirmed, "{reason:?}");
+    assert_eq!(written(&journal, &store, &ids), before, "nothing written");
+    let code = confirm_code(&version);
+    let stream = (&mut journal, &mut store);
+    version::confirm(stream.0, stream.1, &mut ids, &owner, &version, &code, now()).unwrap();
+    let before = written(&journal, &store, &ids);
+    let shown = deployment(&journal, &store, &owner, (AGENT, &version), now());
+    let (code, warnings) = (deploy_code(AGENT, &version), vec!["W-002"]);
+    assert_eq!(shown, Ok(Shown { code, warnings }), "the deployment's");
+    assert_eq!(written(&journal, &store, &ids), before, "nothing written");
+    let revoked = r#"{"connection_id":"conn_alpaca_paper_01"}"#;
+    seed(&mut journal, "ConnectionRevoked", revoked);
+    let refused = deployment(&journal, &store, &owner, (AGENT, &version), now());
+    let reason = refused.map_err(|e| e.to_string());
+    let invalid = matches!(&reason, Err(why) if why.contains("version_invalid"));
+    assert!(invalid, "the V-rules are checked: V-001, {reason:?}");
 }
 
 /// The three commands parse with DEC-527's required owner flags and P0's target, `--code` is
@@ -190,4 +302,141 @@ fn refusals_without_a_database(tag: &str) {
 #[ignore = "pending E10-16"]
 fn the_binary_refuses_a_bad_owner_a_missing_file_and_no_database() {
     refusals_without_a_database("refusals");
+}
+
+/// A DSN acting as the application role in `db`'s schema.
+fn dsn(db: &TestDb) -> String {
+    let url = std::env::var(URL_VAR).unwrap();
+    let joiner = if url.contains('?') { '&' } else { '?' };
+    let options = format!("-c%20search_path%3D{}%20-c%20role%3D{APP_ROLE}", db.schema);
+    format!("{url}{joiner}options={options}")
+}
+
+/// The binary opens `ctl:ws1`, registers SPY and the host's model, then creates the SPY mandate's
+/// version, shows and types its confirmation code, and shows and types the deployment code. A
+/// shown code commits nothing; each typed one commits one event with an assertion of its own, and
+/// prints its event id and `seq`. Deploying before the confirmation, confirming an unknown
+/// version and a wrong code each exit non-zero with their code and commit nothing. No output,
+/// stdout or stderr, names any part of the DSN.
+#[test]
+#[ignore = "pending E10-16"]
+fn the_binary_creates_confirms_and_deploys_in_postgres() {
+    refusals_without_a_database("binary");
+    let Some(db) = TestDb::new() else {
+        return;
+    };
+    let (dsn, root) = (dsn(&db), scratch("binary"));
+    let hidden = dsn_parts(&std::env::var(URL_VAR).unwrap());
+    std::fs::create_dir_all(&root).unwrap();
+    let (spy, file, store) = (
+        root.join("spy.json"),
+        root.join("mandate.json"),
+        root.join("store"),
+    );
+    let content = mandate_modelhost::content("quant.ma_crossover", "1.0.0").unwrap();
+    let document = MANDATE.replace(FIXTURE_HASH, &content.hash.to_hex());
+    std::fs::write(&spy, SPY).unwrap();
+    std::fs::write(&file, &document).unwrap();
+    let version = reference(&canonical(&document));
+    let target = ["--journal", &dsn, "--store", store.to_str().unwrap()];
+    let owned = ["--workspace", "ws1", "--user", "u1"];
+    let refuse = |command: &[&str], code: &str| {
+        refused(&[command, &owned, &target].concat(), code, &hidden);
+    };
+    let ok = |command: &[&str], owner: &[&str]| {
+        let argv = [command, owner, &target].concat();
+        let (succeeded, stdout, stderr) = run(&argv);
+        assert!(succeeded && stderr.is_empty(), "{argv:?}: {stderr}");
+        names_none(&argv, &hidden, &stdout, &stderr);
+        stdout
+    };
+    let args = JournalArgs {
+        journal: dsn.as_str().into(),
+        store: store.clone(),
+    };
+    let journal = args.journal;
+    let ctl = StreamId::parse(CONTROL).unwrap();
+    let count = || read_stream(&journal, &ctl).unwrap().len();
+    ok(&["workspace", "open"], &owned[..2]);
+    let spy = spy.to_str().unwrap();
+    ok(
+        &["config", "register", "--kind", "instrument_snapshot", spy],
+        &owned,
+    );
+    ok(
+        &["model", "register", "quant.ma_crossover", "1.0.0"],
+        &owned,
+    );
+    let created = ok(&["version", "create", file.to_str().unwrap()], &owned);
+    assert!(created.contains(&version), "{created}");
+    let before = count();
+    let (code, deploying) = (confirm_code(&version), deploy_code(AGENT, &version));
+    let unknown = reference(b"no such mandate");
+    for given in [vec![], vec!["--code", &deploying]] {
+        let deploy = [&["agent", "deploy", AGENT, &version][..], &given].concat();
+        refuse(&deploy, "version_unconfirmed");
+        let confirm = [&["version", "confirm", &unknown][..], &given].concat();
+        refuse(&confirm, "version_unknown");
+    }
+    let wrong = ["--code", "00000000"];
+    let confirm = [&["version", "confirm", &version][..], &wrong].concat();
+    refuse(&confirm, "code_mismatch");
+    assert_eq!(count(), before, "a refusal commits nothing");
+    let shown = ok(&["version", "confirm", &version], &owned);
+    assert_eq!(
+        shown,
+        format!("code {code}\nwarnings W-002\n"),
+        "the confirmation shown"
+    );
+    assert_eq!(count(), before, "showing commits nothing");
+    let confirmed = ok(&["version", "confirm", &version, "--code", &code], &owned);
+    let shown = ok(&["agent", "deploy", AGENT, &version], &owned);
+    assert_eq!(
+        shown,
+        format!("code {deploying}\nwarnings W-002\n"),
+        "the deployment shown"
+    );
+    let deploy = [&["agent", "deploy", AGENT, &version][..], &wrong].concat();
+    refuse(&deploy, "code_mismatch");
+    assert_eq!(
+        count(),
+        before + 1,
+        "showing or a wrong code commits nothing"
+    );
+    let deployed = ok(
+        &["agent", "deploy", AGENT, &version, "--code", &deploying],
+        &owned,
+    );
+    let rows = read_stream(&journal, &ctl).unwrap();
+    let types: Vec<&str> = rows.iter().map(|r| r.event_type.as_str()).collect();
+    let expected = [
+        "StreamOpened",
+        "ConfigSnapshotRegistered",
+        "ConfigSnapshotRegistered",
+        "MandateVersionCreated",
+        "MandateConfirmed",
+        "AgentDeployed",
+    ];
+    assert_eq!(types, expected);
+    let printed = |done: &str, row: &StoredEvent| {
+        format!("{done} as event {} at seq {}\n", row.event_id, row.seq)
+    };
+    assert_eq!(
+        confirmed,
+        printed("confirmed", &rows[4]),
+        "the confirmation"
+    );
+    assert_eq!(deployed, printed("deployed", &rows[5]), "the deployment");
+    let files = FsArtifactStore::open(&store).unwrap();
+    let assertion = |row: &StoredEvent| {
+        let body = parse(&row.body).unwrap();
+        let record = body.get("payload").and_then(|p| p.get("record_ref"));
+        let record = ArtifactRef::parse(record.and_then(Value::as_str).unwrap()).unwrap();
+        let record = parse(&files.read_artifact(&record).unwrap()).unwrap();
+        let step_up = record.get("step_up").and_then(|s| s.get("assertion_id"));
+        step_up.and_then(Value::as_str).unwrap().to_owned()
+    };
+    let minted = [assertion(&rows[4]), assertion(&rows[5])];
+    assert_ne!(minted[0], minted[1], "each gesture mints its own assertion");
+    std::fs::remove_dir_all(root).ok();
 }
