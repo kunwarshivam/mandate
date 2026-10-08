@@ -309,7 +309,7 @@ a client's user, and the scope) and reads, uncached, through the membership look
 `MembershipQuery`, and the caller passes no membership list, so it can neither reach workspace
 data through the read nor hand the step a forged list. `MembershipLookup` is sealed and
 implemented only by the workspace store crate, and `Membership` has private fields, built only by
-that store from the control stream's fold (item 9 says how the seal admits exactly these crates);
+that store from the control stream's fold (DEC-642 item 7 says which crates the seal admits);
 test doubles live only behind `cfg(test)` or in `mandate-identity`'s dev-only test support.
 
 **The session.** `Session` is an authenticated-session type with private fields, built only by
@@ -321,16 +321,27 @@ engage; Kill switch, org scope: engage. "Kill switch, any scope: privileges beyo
 among them. Any other row is refused `reduction_only`. A route-1 session leaves reduction-only
 when a refresh succeeds (it is a full session again) or the provider refuses one (it ends, §6.4).
 
-**A failed membership read** (DEC-642 item 10). It fails closed for every row but risk
-reduction. `membership_unavailable` applies only to principals that hold memberships (a user, a
-client); the host CLI (whose route 3 rests on its registration alone), a service account, and a
-platform operator never read memberships and never get it. On the four reduction rows above, a
-failed read does not refuse a user's reduction-only session at the scope of the workspace it was
-opened in: the row is authorized from the session alone, and the gap is journaled. Any other
-session that meets a failed read on those rows is refused `membership_unavailable` with the hint
-to use route 2, which needs only the workspace-local passkey and no membership read, so
-`AGENTS.md` rule 13 holds through §6.4's routes. A reduction-only session is still refused after a
-deprovision signal (§6.4 route 2, §11.1).
+**A failed membership read** (DEC-642 item 10, an agent reading under DEC-176). It fails closed
+for every row but risk reduction. `membership_unavailable` applies only to principals that hold
+memberships (a user, a client); the host CLI (whose route 3 rests on its registration alone), a
+service account, and a platform operator never read memberships and never get it. The exemption
+covers exactly three rows: Pause; Kill switch, agent scope: engage; and Kill switch, connection or
+workspace scope: engage. "Kill switch, org scope: engage" is not among them, since a workspace's
+session cannot authorize an organization's scope. On those three rows, at the scope of the
+workspace the session was opened in, a failed membership read does not refuse a user's
+reduction-only session, on one condition: the session record itself is read, in that workspace's
+store, and is unrevoked. Then the row is authorized from the session alone, and the committed
+pause or kill-switch event carries `membership_unverified: true` beside its `session_ref`
+(§12.1). If the session read fails too, the request is refused, and nothing could be journaled
+anyway (workspace API §7). The bound needs no timer: §5.2 step 2 revokes every session of a
+deactivated member in the same transaction as `MemberDeactivated`, so a deactivated member never
+holds a live session to use the exemption with. Any other session that meets a failed read on those
+rows is refused `membership_unavailable` with the hint to use route 2, which needs only the
+workspace-local passkey, whose public keys are in the workspace deployment's own credential table
+(§3.3), and no membership read; so `AGENTS.md` rule 13 holds through §6.4's routes. A reduction-only
+session is still refused after a deprovision signal (§6.4 route 2, §11.1). The ID-3 and ID-5 fuzz
+assert that a reduction-only session's pause or engage during a failed read commits with
+`membership_unverified: true`, and that nothing else ever does.
 
 **`TenantContext`** ([DEC-642](../project/decisions/DEC-642.md)). Only the authorization step
 constructs one, and only when it authorizes a permission at a workspace's scope; an org-scope
@@ -349,25 +360,29 @@ Cargo feature involved:
 
 - `SystemContext` and its only constructor live in their own crate, `mandate-identity-system`.
 - **An allowlist, not a denylist:** only the bootstrap crates of the agent runtime, the executor,
-  and the scheduler may depend on `mandate-identity-system`. `xtask/layers.toml` gains an
-  `allowed_dependents` key that `cargo xtask layers` checks; that mechanism lands with E9-8,
-  under a claim on `xtask`, which is shared.
-- **The seal** lives in a small base crate, `mandate-tenant`: the `Tenant` trait (re-exported as
-  `mandate_identity::Tenant`), its sealing supertrait, and the seal token that the constructors of
-  `Membership` and `Session` and the impls of `MembershipLookup` require. Only `mandate-identity`,
-  `mandate-identity-system`, the workspace store crate, and `mandate-authn` may depend on it
-  (`allowed_dependents` again), so no other crate can implement `Tenant` or `MembershipLookup`, or
-  build a `Membership` or a `Session`. Data APIs take either context through `Tenant`.
-- Both planned crates are named in `xtask/layers.toml`'s `planned` list (DEC-525).
+  and the scheduler may depend on `mandate-identity-system`; E9-8 creates those bootstrap crates.
+  `xtask/layers.toml` gains an `allowed_dependents` key that `cargo xtask layers` checks. That
+  check lands with E9-8, under a claim on `xtask`, which is shared, and does not run before.
+- **Two seals**, so no crate that builds sessions or memberships can mint a context:
+  - `mandate-tenant` holds only the `Tenant` trait (re-exported as `mandate_identity::Tenant`) and
+    its sealing supertrait. Its allowed dependents are `mandate-identity` and
+    `mandate-identity-system`, and nothing else, so only `TenantContext` and `SystemContext`
+    implement `Tenant`. Data APIs take either context through it.
+  - `mandate-identity-seal` holds the tokens that the constructors of `Membership` and `Session`
+    and the impls of `MembershipLookup` require. Its allowed dependents are `mandate-identity`,
+    `mandate-authn`, the workspace store crate, and `mandate-identity-testkit` (a `tool`-layer
+    crate that only dev-dependencies reach).
+- The planned crates are named in `xtask/layers.toml`'s `planned` list (DEC-525).
 
 Workspace services' request path never holds a `SystemContext`: every write it makes is
 attributed to the authenticated principal, including revoking a deactivated member's sessions and
 client tokens (§5.2 step 2), which carry the deactivating admin as actor. System-attributed
 control writes (refresh-family revocation on expiry, deprovision signals, scheduled expiry) come
 only from a separate process. A back-channel logout arrives as an inbound request: its endpoint
-verifies the provider's logout token (signature, `iss`, `aud`, and the `events` claim) and relays
-it to that process, which commits `SessionRevoked` with reason `deprovisioned`, attributed to
-`system`; the request path itself commits nothing. A `SystemContext` never gates risk reduction:
+verifies the provider's logout token (signature, `iss`, `aud`, and the `events` claim) and writes
+it only to a relay table outside the journal (an outbox), attributed to the verified issuer as its
+principal. The separate process reads the outbox and commits `SessionRevoked` with reason
+`deprovisioned`, attributed to `system`; the request path itself commits nothing to the journal. A `SystemContext` never gates risk reduction:
 automated exits, protective orders, and kill switches proceed without any check it could fail
 (`AGENTS.md` rule 13).
 
@@ -445,8 +460,8 @@ the effect it has on V-047 or on any mandate's approvers (DEC-437 item 17, Propo
 below). In order, workspace services:
 
 1. commit `MemberDeactivated`;
-2. revoke every session and client token of that principal in the workspace, and close its open
-   streams within 60 s (ID-3);
+2. revoke every session and client token of that principal in the workspace, in the same
+   transaction as step 1, and close its open streams within 60 s (ID-3);
 3. leave every committed event as it was. A response or command committed before step 1 was
    authorized when committed and is judged by the runtime as usual. One arriving after step 1 is
    refused at the API and never committed;
@@ -844,6 +859,11 @@ them to journal §9 with schemas (DEC-437 item 9):
 | `HostCliRegistered`, `HostCliRevoked` | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence |
 | `ScopeHalted`, `ScopeReenabled` | Only if DEC-437 item 21 is accepted (§4.4): kill-switch scope, by whom, step-up evidence for re-enabling |
 | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` | operator (opaque), reason code, window, approvers |
+
+**Owed with these events:** the pause and kill-switch engage events (`OwnerCommandIssued` and its
+kill-switch commands) gain `membership_unverified` (bool), beside the `session_ref` every event
+carries, true only for a reduction-only session's pause or engage authorized during a failed
+membership read (§4.5). Their schemas take the field when this journal change lands.
 
 Organization-scope events (ownership, SSO, org policy) are written to each of the org's workspaces'
 control streams, so each workspace's records are complete on their own.
