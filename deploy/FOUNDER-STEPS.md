@@ -8,6 +8,14 @@ issue, or the repository.
 
 `<IP>` below stands for the server's IP address. Keep it on your machine.
 
+## 0. Before anything else: two-factor sign-in
+
+0. **Turn on two-factor sign-in** on your **Hetzner** and **Cloudflare** accounts, with a hardware
+   security key or an authenticator app (TOTP), not SMS ([DEC-822](../docs/project/decisions/DEC-822.md)
+   item 4). Hetzner's disk images hold the vault together with its keys, and Cloudflare holds the
+   tunnel to the API, so whoever signs in to either reaches the host's secrets. Keep the recovery
+   codes in your password manager.
+
 ## A. Hetzner Cloud console
 
 1. **Project.** Create a project named `owlhead`.
@@ -89,27 +97,30 @@ issue, or the repository.
 
 ## D. Secrets, last, then the first start
 
-9. **Fill `/etc/owlhead/api.env` and `/etc/owlhead/executor.env`** on the host. Have Alpaca's OAuth
-   app page (paper, DEC-821) open for its client id and secret.
+9. **Set the secrets** on the host. Have Alpaca's OAuth app page (paper, DEC-821) open for its
+   client id.
 
    ```bash
    cd /root/owlhead/deploy
    bash set-secrets.sh
    ```
 
-   It makes the session key and the vault's two keys with `openssl` straight into the files, asks for the
-   Alpaca client id and then the secret (the secret is not echoed), and keeps every value already
-   set. The secret goes only into `executor.env`: the API never holds it. The database URLs are
-   already filled in; they have no password. Nothing is printed.
+   The script does four things, keeping every value already set and printing none:
+   - it makes the vault's two keys and the session key with `openssl`, straight into
+     `/etc/owlhead/credentials/` (root:root 0600; DEC-822 item 4);
+   - it asks for the Alpaca client id, which is public, and fills it into both env files;
+   - **the client secret, after V1 lands:** it asks for the secret (not echoed) and pipes it into
+     the vault's import. The secret is never written to a file under `/etc/owlhead`. Until V1 is
+     installed, the script says it skipped this; skip it too, and run the script again once V1
+     lands;
+   - the database URLs are already filled in; they have no password.
 
    Then copy both vault keys into your password manager: they are never in a backup, and without
    them a restored vault cannot be read, so every connection would need re-authorizing.
-   `grep '^MANDATE_VAULT_.*_KEY=' /etc/owlhead/executor.env` shows both once; clear the screen
-   after.
+   `cat /etc/owlhead/credentials/vault-pending-key /etc/owlhead/credentials/vault-token-key` shows
+   them once; clear the screen after.
 
-   If you edit the file by hand instead (`nano /etc/owlhead/api.env`): Ctrl+O, then Enter, saves;
-   Ctrl+X quits. Check that it is still `root root` and `-rw-------` with
-   `ls -l /etc/owlhead/api.env`.
+   Check the files with `ls -l /etc/owlhead/credentials`: each is `root root` and `-rw-------`.
 10. **Start the API and check it answers locally:**
 
     ```bash
@@ -182,9 +193,10 @@ issue, or the repository.
   so it does not protect against losing the VM.
 - **Hetzner Backups** (daily, 7 kept): an image of the whole disk, taken while the server runs.
   This covers losing the VM, and it includes the local backups above. Being a whole-disk copy, it
-  also holds `/etc/owlhead`, so an image holds the vault together with its key and the client
-  secret: protect the Hetzner account (two-factor sign-in) accordingly. The nightly backup never
-  holds them. A database restored from
+  also holds `/etc/owlhead/credentials`, so an image holds the vault together with its keys:
+  protect the Hetzner account (step 0) accordingly. The nightly backup never holds them. This is
+  accepted for the paper-only demo; before any live credential or customer data, backups must
+  exclude every secret outside the vault (DEC-822 item 4). A database restored from
   the image is crash-consistent, so after such a restore, run the restore check on the newest
   local dump.
 - **Neither is off-site** beyond Hetzner's own storage. An off-site copy comes before any customer

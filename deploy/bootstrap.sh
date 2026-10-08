@@ -8,7 +8,8 @@
 # It installs PostgreSQL 18 from apt.postgresql.org (localhost only), creates the database, its
 # roles and schema, applies migrations/, creates the API's system user and directories, installs
 # the executor unit template, the backup timer, and /etc/owlhead/api.env and executor.env from
-# their examples if absent. It never writes a secret: set-secrets.sh fills them on the host, last.
+# their examples if absent, and the empty /etc/owlhead/credentials/ (0700). It never writes a
+# secret: set-secrets.sh and install-cloudflared.sh make the credentials on the host, last.
 #
 # Two service users (DEC-692): owlhead_api runs the API (the control services), owlhead_exec the
 # connection executors, which never run inside the API process. The minimal vault's directories
@@ -144,6 +145,9 @@ for user in "$API_USER" "$EXEC_USER"; do
   fi
 done
 run install -d -o root -g root -m 0700 /etc/owlhead
+# The three kinds of secret outside the vault, each a root:root 0600 file systemd loads with
+# LoadCredential= (DEC-822 item 4); set-secrets.sh and install-cloudflared.sh fill it.
+run install -d -o root -g root -m 0700 /etc/owlhead/credentials
 run install -d -o root -g root -m 0700 /var/backups/owlhead
 run install -d -o root -g root -m 0755 /var/lib/owlhead "$VAULT"
 # The artifact store is written and read by both services, through the shared group. Every

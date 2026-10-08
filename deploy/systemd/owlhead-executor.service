@@ -1,8 +1,9 @@
 # A connection's executor (DEC-692): its own process and user, never inside the API. A TEMPLATE,
 # installed and never enabled by bootstrap.sh: the live lane supplies the binary and its arguments
 # (the name below is provisional) and the founder enables it when they do. It reads its settings
-# and the Alpaca client secret from /etc/owlhead/executor.env (root:root 0600; systemd reads it
-# before dropping to the user). It listens on no port.
+# from /etc/owlhead/executor.env, which holds no secret, and the vault's two keys as systemd
+# credentials (DEC-822 item 4); the token key is this unit's alone. The Alpaca client secret is in
+# the vault. It listens on no port.
 [Unit]
 Description=Owlhead connection executor
 After=network-online.target postgresql.service
@@ -15,6 +16,8 @@ Type=simple
 User=owlhead_exec
 Group=owlhead_exec
 EnvironmentFile=/etc/owlhead/executor.env
+LoadCredential=vault-pending-key:/etc/owlhead/credentials/vault-pending-key
+LoadCredential=vault-token-key:/etc/owlhead/credentials/vault-token-key
 ExecStart=/usr/local/bin/mandate-executor
 Restart=on-failure
 RestartSec=2s

@@ -33,7 +33,7 @@ def strict_mode(f: dict[str, str]) -> list[str]:
 
 
 def env_files_private(f: dict[str, str]) -> list[str]:
-    """api.env, executor.env, and cloudflared.env are written only as root:root 0600."""
+    """api.env, executor.env, and every credential file are written only as root:root 0600."""
     problems = []
     for name, target in (("bootstrap.sh", '"/etc/owlhead/$name.env"'), ("install-cloudflared.sh", '"$TOKEN_FILE"')):
         writes = [line for line in f[name].splitlines() if "put_file" in line and target in line]
@@ -41,8 +41,10 @@ def env_files_private(f: dict[str, str]) -> list[str]:
             problems.append(f"{name}: {target} not written 0600 root:root")
     if "for name in api executor; do" not in f["bootstrap.sh"]:
         problems.append("bootstrap.sh: not both env files")
-    if "TOKEN_FILE=/etc/owlhead/cloudflared.env" not in f["install-cloudflared.sh"]:
+    if "TOKEN_FILE=/etc/owlhead/credentials/tunnel-token" not in f["install-cloudflared.sh"]:
         problems.append("install-cloudflared.sh: the token file moved")
+    if 'openssl rand -base64 32 | put_file "$CREDENTIALS/$key" 0600 root:root' not in f["set-secrets.sh"]:
+        problems.append("set-secrets.sh: a key is not written root:root 0600 straight from openssl")
     if 'run chmod 0600 "/etc/owlhead/$name.env"' not in f["bootstrap.sh"]:
         problems.append("bootstrap.sh: an existing env file is not reset to 0600")
     if f["set-secrets.sh"].count("install -o root -g root -m 0600") != 1:
@@ -92,24 +94,47 @@ def executor_unit_hardened(f: dict[str, str]) -> list[str]:
     return problems
 
 
-EXECUTOR_ONLY = ("ALPACA_OAUTH_CLIENT_SECRET", "MANDATE_VAULT_TOKEN_KEY")
+CREDENTIALS = "/etc/owlhead/credentials"
+# DEC-822 item 4: exactly three kinds of secret outside the vault, each loaded only by its units.
+# The vault's token key is the executor's alone (DEC-692), so the API cannot write a token the
+# executor would accept.
+LOADED = {
+    "systemd/owlhead-api.service": ("vault-pending-key", "session-signing-key"),
+    "systemd/owlhead-executor.service": ("vault-pending-key", "vault-token-key"),
+    "systemd/cloudflared.service": ("tunnel-token",),
+}
+SECRET_NAME = re.compile(r"KEY|SECRET|TOKEN|PASSWORD")
 
 
-def client_secret_executor_only(f: dict[str, str]) -> list[str]:
-    """The Alpaca client secret and the vault's token key are the executor's alone (DEC-692,
-    infrastructure §5.1): the API can neither use the client secret nor write a token the executor
-    would accept."""
+def secrets_are_credentials(f: dict[str, str]) -> list[str]:
+    """Every secret outside the vault is a credential file, never an environment variable: no env
+    file names one, each unit loads exactly its own credentials with LoadCredential=, cloudflared
+    reads no environment file, and the Alpaca client secret is nowhere under /etc/owlhead."""
     problems = []
-    api_fill = re.search(r'^fill "\$API_ENV".*?(?<!\\)\n', f["set-secrets.sh"], re.M | re.S)
-    for name in EXECUTOR_ONLY:
-        if name in f["api.env.example"]:
-            problems.append(f"api.env.example names {name}")
-        if f"\n{name}=\n" not in f["executor.env.example"]:
-            problems.append(f"executor.env.example lacks {name}")
-        if not api_fill or name in api_fill.group(0):
-            problems.append(f"set-secrets.sh writes {name} to api.env")
-    if "MANDATE_VAULT_KEY" in "".join(f[e] for e in EXAMPLES):
-        problems.append("a single vault key again")
+    for example in EXAMPLES:
+        for line in f[example].splitlines():
+            if line and not line.startswith("#") and SECRET_NAME.search(line.partition("=")[0]):
+                problems.append(f"{example}: {line.partition('=')[0]} is a secret in an environment file")
+    for unit, names in LOADED.items():
+        loaded = [l for l in f[unit].splitlines() if l.startswith("LoadCredential=")]
+        wanted = [f"LoadCredential={n}:{CREDENTIALS}/{n}" for n in names]
+        if loaded != wanted:
+            problems.append(f"{unit} loads {loaded}, not {wanted}")
+    if re.search(r"^EnvironmentFile=", f["systemd/cloudflared.service"], re.M):
+        problems.append("cloudflared reads an environment file")
+    if "${CREDENTIALS_DIRECTORY}/tunnel-token" not in f["systemd/cloudflared.service"]:
+        problems.append("cloudflared does not read the token from its credential")
+    if "KEYS=(vault-pending-key vault-token-key session-signing-key)" not in f["set-secrets.sh"]:
+        problems.append("set-secrets.sh does not make exactly the three keys")
+    for name, text in f.items():
+        code = [l for l in text.splitlines() if not l.lstrip().startswith("#")]
+        if any("cloudflared.env" in l or "ALPACA_OAUTH_CLIENT_SECRET" in l for l in code):
+            problems.append(f"{name}: a secret back in an environment file")
+    fills = [l for l in f["set-secrets.sh"].splitlines() if l.startswith("fill ")]
+    if any(SECRET_NAME.search(l) for l in fills):
+        problems.append("set-secrets.sh fills a secret into an env file")
+    if '"$answer" | systemd-run' not in f["set-secrets.sh"]:
+        problems.append("set-secrets.sh does not pipe the client secret to the vault import on stdin")
     return problems
 
 
@@ -155,7 +180,7 @@ TOKEN_USES = (
     r'^\s*read -r -s -p "[^"]*" token$',
     r'^\s*token="\$\{token//\[\[:space:\]\]/\}"$',
     r'^\s*if ! \[\[ "\$token" =~ .*\]\]; then$',
-    r"^\s*printf 'TUNNEL_TOKEN=%s\\n' \"\$token\" \| put_file \"\$TOKEN_FILE\" 0600 root:root$",
+    r"^\s*printf '%s' \"\$token\" \| put_file \"\$TOKEN_FILE\" 0600 root:root$",
 )
 
 
@@ -206,13 +231,14 @@ def secrets_never_reported(f: dict[str, str]) -> list[str]:
     base64 value ends in `=`, so matching the line's last character would print a secret."""
     text = f["set-secrets.sh"]
     problems = []
-    if 'missing="$missing ${file##*/}:${line%%=*}"' not in text or 'if [ -z "${line#*=}" ]; then' not in text:
+    if 'problems="$problems ${file##*/}:${line%%=*}(empty)"' not in text or 'if [ -z "${line#*=}" ]; then' not in text:
         problems.append("set-secrets.sh does not report empty values by name, judged on the value")
     shown = [
         line
         for line in text.splitlines()
-        if re.search(r"(echo|printf).*\$\{?(line|values|pending_key|token_key|exec_key|session_key|client_secret|client_id|answer|value)\b", line)
+        if re.search(r"(echo|printf).*\$\{?(line|values|client_id|answer|value)\b", line)
         and not line.rstrip().endswith('>>"$rebuilt"')
+        and line.strip() != 'printf \'%s\' "$answer" | systemd-run --quiet --wait --pipe --collect \\'
     ]
     if shown:
         problems.append(f"set-secrets.sh shows a line or a value: {shown}")
@@ -266,13 +292,13 @@ def artifacts_shared(f: dict[str, str]) -> list[str]:
 
 
 def etc_private(f: dict[str, str]) -> list[str]:
-    """/etc/owlhead is made root:root 0700 wherever it is made, and nothing loosens it."""
-    made = "run install -d -o root -g root -m 0700 /etc/owlhead"
+    """/etc/owlhead and its credentials/ are made root:root 0700 wherever they are made, and nothing
+    loosens them."""
+    made = ("run install -d -o root -g root -m 0700 /etc/owlhead", f"run install -d -o root -g root -m 0700 {CREDENTIALS}")
     problems = []
     for name in ("bootstrap.sh", "install-cloudflared.sh"):
         lines = f[name].splitlines()
-        if made not in lines:
-            problems.append(f"{name} does not make /etc/owlhead 0700")
+        problems += [f"{name} does not make {m.split()[-1]} 0700" for m in made if m not in lines]
         problems += [f"{name}: {l.strip()}" for l in lines if re.search(r"(chmod|chown)\b.*/etc/owlhead/?(\s|$)", l)]
     return problems
 
@@ -317,7 +343,7 @@ CHECKS = (
     secrets_never_reported,
     keys_pinned,
     executor_unit_hardened,
-    client_secret_executor_only,
+    secrets_are_credentials,
     vault_layout,
     strict_mode,
     env_files_private,
@@ -354,11 +380,19 @@ SEEDED = (
     ("restore-check.sh", "pg_restore --exit-on-error -d", "pg_restore -d", restore_strict),
     ("bootstrap.sh", 'if [ "$DRY_RUN" = 0 ] && [ -z "$(query postgres "SELECT 1 FROM pg_hba_file_rules', 'if false && [ "$DRY_RUN" = 0 ] && [ -z "$(query postgres "SELECT 1 FROM pg_hba_file_rules', restore_strict),
     ("bootstrap.sh", 'run install -d -o root -g root -m 0755 /var/lib/owlhead "$VAULT"', 'run install -d -o root -g root -m 0777 /var/lib/owlhead "$VAULT"', vault_layout),
-    ("executor.env.example", "MANDATE_VAULT_TOKEN_KEY=\n", "", client_secret_executor_only),
-    ("set-secrets.sh", 'MANDATE_VAULT_PENDING_KEY "$pending_key" \\\n  ALPACA_OAUTH_CLIENT_ID "$client_id"\nfill', 'MANDATE_VAULT_PENDING_KEY "$pending_key" MANDATE_VAULT_TOKEN_KEY "$token_key" \\\n  ALPACA_OAUTH_CLIENT_ID "$client_id"\nfill', client_secret_executor_only),
+    ("systemd/owlhead-api.service", "LoadCredential=session-signing-key:/etc/owlhead/credentials/session-signing-key\n", "LoadCredential=session-signing-key:/etc/owlhead/credentials/session-signing-key\nLoadCredential=vault-token-key:/etc/owlhead/credentials/vault-token-key\n", secrets_are_credentials),
+    ("systemd/owlhead-executor.service", "LoadCredential=vault-token-key:/etc/owlhead/credentials/vault-token-key\n", "", secrets_are_credentials),
+    ("systemd/cloudflared.service", "LoadCredential=tunnel-token", "EnvironmentFile=/etc/owlhead/cloudflared.env\nLoadCredential=tunnel-token", secrets_are_credentials),
+    ("api.env.example", "ALPACA_OAUTH_CLIENT_ID=\n", "ALPACA_OAUTH_CLIENT_ID=\nMANDATE_API_SESSION_SIGNING_KEY=\n", secrets_are_credentials),
+    ("executor.env.example", "ALPACA_OAUTH_CLIENT_ID=\n", "ALPACA_OAUTH_CLIENT_ID=\nMANDATE_VAULT_TOKEN_KEY=\n", secrets_are_credentials),
+    ("set-secrets.sh", 'fill "$EXEC_ENV" ALPACA_OAUTH_CLIENT_ID "$client_id"', 'fill "$EXEC_ENV" ALPACA_OAUTH_CLIENT_ID "$client_id" ALPACA_OAUTH_CLIENT_SECRET "$answer"', secrets_are_credentials),
+    ("set-secrets.sh", "KEYS=(vault-pending-key vault-token-key session-signing-key)", "KEYS=(vault-pending-key vault-token-key session-signing-key alpaca-client-secret)", secrets_are_credentials),
     ("set-secrets.sh", 'if [ -z "${line#*=}" ]; then', 'if [ "${line: -1}" = "=" ]; then', secrets_never_reported),
-    ("set-secrets.sh", 'missing="$missing ${file##*/}:${line%%=*}"', 'missing="$missing ${file##*/}:${line}"', secrets_never_reported),
-    ("set-secrets.sh", "unset pending_key exec_key token_key", 'echo "key: $token_key" >&2\nunset pending_key exec_key token_key', secrets_never_reported),
+    ("set-secrets.sh", 'problems="$problems ${file##*/}:${line%%=*}(empty)"', 'problems="$problems ${file##*/}:${line}(empty)"', secrets_never_reported),
+    ("set-secrets.sh", "unset client_id\n", 'echo "id: $client_id" >&2\nunset client_id\n', secrets_never_reported),
+    ("set-secrets.sh", '  ask "Alpaca OAuth client secret (not echoed): " 1\n', '  ask "Alpaca OAuth client secret (not echoed): " 1\n  echo "secret: $answer" >&2\n', secrets_never_reported),
+    ("bootstrap.sh", "run install -d -o root -g root -m 0700 /etc/owlhead/credentials", "run install -d -o root -g root -m 0755 /etc/owlhead/credentials", etc_private),
+    ("set-secrets.sh", '| put_file "$CREDENTIALS/$key" 0600 root:root', '| put_file "$CREDENTIALS/$key" 0640 root:root', env_files_private),
     ("install-cloudflared.sh", '"$found" != "$CLOUDFLARE_FINGERPRINT"', '"$found" = "$found"', keys_pinned),
     ("backup.sh", "set -euo pipefail\n", "set -eu\n", strict_mode),
     ("bootstrap.sh", '"/etc/owlhead/$name.env" 0600 root:root', '"/etc/owlhead/$name.env" 0644 root:root', env_files_private),
@@ -367,13 +401,11 @@ SEEDED = (
     ("systemd/owlhead-executor.service", "SocketBindDeny=any", "SocketBindAllow=tcp:9090\nSocketBindDeny=any", executor_unit_hardened),
     ("systemd/owlhead-executor.service", "NoNewPrivileges=yes", "NoNewPrivileges=no", executor_unit_hardened),
     ("systemd/owlhead-api.service", "UMask=0027", "StateDirectory=owlhead\nUMask=0027", api_unit_hardened),
-    ("api.env.example", "ALPACA_OAUTH_CLIENT_ID=\n", "ALPACA_OAUTH_CLIENT_ID=\nALPACA_OAUTH_CLIENT_SECRET=\n", client_secret_executor_only),
-    ("set-secrets.sh", '  ALPACA_OAUTH_CLIENT_ID "$client_id"\nfill "$EXEC_ENV"', '  ALPACA_OAUTH_CLIENT_ID "$client_id" ALPACA_OAUTH_CLIENT_SECRET "$client_secret"\nfill "$EXEC_ENV"', client_secret_executor_only),
     ("bootstrap.sh", '-m 0730 "$VAULT/tokens"', '-m 0770 "$VAULT/tokens"', vault_layout),
     ("bootstrap.sh", '-m 2770 "$VAULT/pending"', '-m 0770 "$VAULT/pending"', vault_layout),
     ("bootstrap.sh", '-o "$EXEC_USER" -g "$API_USER" -m 0730', '-o "$API_USER" -g "$API_USER" -m 0730', vault_layout),
     ("bootstrap.sh", "GRANT CONNECT ON DATABASE $DB TO $EXEC_USER;", "GRANT CONNECT ON DATABASE $DB TO $EXEC_USER;\nGRANT ALL ON SCHEMA journal TO $EXEC_USER;", api_role_minimal),
-    ("executor.env.example", "ALPACA_OAUTH_CLIENT_SECRET=\n", "ALPACA_OAUTH_CLIENT_SECRET=s3cr3t\n", example_names_only),
+    ("executor.env.example", "ALPACA_OAUTH_CLIENT_ID=\n", "ALPACA_OAUTH_CLIENT_ID=PKAB12\n", example_names_only),
     ("backup.sh", 'artifacts vault\n', 'artifacts vault /etc/owlhead\n', backup_covers_state),
     ("install-cloudflared.sh", '"$TOKEN_FILE" 0600 root:root', '"$TOKEN_FILE" 0640 root:root', env_files_private),
     ("systemd/owlhead-api.service", "--bind 127.0.0.1:8080", "--bind 0.0.0.0:8080", api_unit_hardened),
@@ -385,7 +417,7 @@ SEEDED = (
     ("bootstrap.sh", "LOGIN IN ROLE mandate_journal_app", "LOGIN SUPERUSER IN ROLE mandate_journal_app", api_role_minimal),
     ("install-cloudflared.sh", "  unset token\n", '  echo "token: $token"\n  unset token\n', token_never_shown),
     ("install-cloudflared.sh", "  unset token\n", '  cloudflared service install "$token"\n  unset token\n', token_never_shown),
-    ("api.env.example", "MANDATE_VAULT_PENDING_KEY=\n", "MANDATE_VAULT_PENDING_KEY=c2VjcmV0\n", example_names_only),
+    ("api.env.example", "ALPACA_OAUTH_CLIENT_ID=\n", "ALPACA_OAUTH_CLIENT_ID=PKAB12\n", example_names_only),
     ("restore-check.sh", '  check_head "$verified"', '  : "$verified"', restore_checks_heads),
     ("backup.sh", '"$DEST/state-$stamp.tar.gz.partial" artifacts vault', '"$DEST/state-$stamp.tar.gz.partial" artifacts', backup_covers_state),
 )

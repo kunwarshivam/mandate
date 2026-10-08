@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# Fills /etc/owlhead/api.env and /etc/owlhead/executor.env in place, last, right before the first
-# start. Run as root:
+# Sets the host's secrets, last, right before the first start (DEC-822 item 4). Run as root:
 #
 #   bash set-secrets.sh
 #
-# It makes each random key on the host with openssl, asks for the Alpaca OAuth client id and secret
-# (the secret without echo), and leaves every value that is already set alone. The session key goes
-# to api.env only; the vault's token key and the client secret to executor.env only (DEC-692); the
-# vault's pending key and the client id to both. It never prints a value, never passes one on a command line, and keeps both files
-# root:root 0600.
+# Exactly three kinds of secret live outside the vault, each a root:root 0600 file under
+# /etc/owlhead/credentials/, which systemd hands to the units that need it with LoadCredential=:
+#   - the vault's keys: vault-pending-key (the API and the executor) and vault-token-key (the
+#     executor alone, DEC-692);
+#   - session-signing-key (the API);
+#   - tunnel-token (cloudflared), which install-cloudflared.sh writes.
+# This script makes the first two kinds with openssl when they are missing, and leaves every one
+# that exists alone. It asks for the Alpaca OAuth client id, which is public, and fills it into
+# api.env and executor.env, which hold no secret. The Alpaca client secret goes into the vault
+# through V1's import, read from stdin, and is written nowhere under /etc/owlhead; until V1 is
+# installed, that step is skipped and said so. It never prints a value and never passes one on a
+# command line.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=lib.sh
@@ -18,12 +24,15 @@ require_host
 
 API_ENV=/etc/owlhead/api.env
 EXEC_ENV=/etc/owlhead/executor.env
+CREDENTIALS=/etc/owlhead/credentials
+KEYS=(vault-pending-key vault-token-key session-signing-key)
+VAULT_IMPORT=(/usr/local/bin/mandate vault import alpaca-oauth-client-secret)
 if [ "$DRY_RUN" = 1 ]; then
-  echo "+ fill the empty values of $API_ENV and $EXEC_ENV: random keys from openssl, Alpaca's id and secret asked for"
+  echo "+ make each missing key in $CREDENTIALS (root:root 0600) with openssl; ask for Alpaca's client id and fill it into $API_ENV and $EXEC_ENV; import the client secret into the vault once V1 is installed"
   exit 0
 fi
-for file in "$API_ENV" "$EXEC_ENV"; do
-  if [ ! -f "$file" ]; then
+for file in "$API_ENV" "$EXEC_ENV" "$CREDENTIALS"; do
+  if [ ! -e "$file" ]; then
     echo "$file does not exist; run bootstrap.sh first" >&2
     exit 1
   fi
@@ -70,17 +79,15 @@ fill() {
 }
 
 umask 077
-pending_key="$(current "$API_ENV" MANDATE_VAULT_PENDING_KEY)"
-exec_key="$(current "$EXEC_ENV" MANDATE_VAULT_PENDING_KEY)"
-if [ -n "$pending_key" ] && [ -n "$exec_key" ] && [ "$pending_key" != "$exec_key" ]; then
-  unset pending_key exec_key
-  echo "the two files hold different pending keys; fix one by hand before going on" >&2
-  exit 1
-fi
-pending_key="${pending_key:-$exec_key}"
-pending_key="${pending_key:-$(openssl rand -base64 32)}"
-token_key="$(openssl rand -base64 32)"
-session_key="$(openssl rand -base64 32)"
+for key in "${KEYS[@]}"; do
+  if [ ! -s "$CREDENTIALS/$key" ]; then
+    # The value goes from openssl straight into the file, through no variable.
+    openssl rand -base64 32 | put_file "$CREDENTIALS/$key" 0600 root:root
+  else
+    run chown root:root "$CREDENTIALS/$key"
+    run chmod 0600 "$CREDENTIALS/$key"
+  fi
+done
 
 client_id="$(current "$API_ENV" ALPACA_OAUTH_CLIENT_ID)"
 client_id="${client_id:-$(current "$EXEC_ENV" ALPACA_OAUTH_CLIENT_ID)}"
@@ -88,20 +95,27 @@ if [ -z "$client_id" ]; then
   ask "Alpaca OAuth client id: " 0
   client_id="$answer"
 fi
-client_secret=""
-if [ -z "$(current "$EXEC_ENV" ALPACA_OAUTH_CLIENT_SECRET)" ]; then
-  ask "Alpaca OAuth client secret (not echoed): " 1
-  client_secret="$answer"
-fi
 unset answer
+fill "$API_ENV" ALPACA_OAUTH_CLIENT_ID "$client_id"
+fill "$EXEC_ENV" ALPACA_OAUTH_CLIENT_ID "$client_id"
+unset client_id
 
-fill "$API_ENV" MANDATE_API_SESSION_SIGNING_KEY "$session_key" MANDATE_VAULT_PENDING_KEY "$pending_key" \
-  ALPACA_OAUTH_CLIENT_ID "$client_id"
-fill "$EXEC_ENV" MANDATE_VAULT_PENDING_KEY "$pending_key" MANDATE_VAULT_TOKEN_KEY "$token_key" \
-  ALPACA_OAUTH_CLIENT_ID "$client_id" ALPACA_OAUTH_CLIENT_SECRET "$client_secret"
-unset pending_key exec_key token_key session_key client_id client_secret
+# The client secret: into the vault, as owlhead_exec, with the executor's credentials, through
+# stdin only. Nothing of it is written under /etc/owlhead.
+if [ -x "${VAULT_IMPORT[0]}" ] && "${VAULT_IMPORT[0]}" vault import --help >/dev/null 2>&1; then
+  ask "Alpaca OAuth client secret (not echoed): " 1
+  printf '%s' "$answer" | systemd-run --quiet --wait --pipe --collect \
+    -p User=owlhead_exec -p Group=owlhead_exec -p UMask=0077 \
+    -p LoadCredential=vault-pending-key:"$CREDENTIALS/vault-pending-key" \
+    -p LoadCredential=vault-token-key:"$CREDENTIALS/vault-token-key" \
+    -p EnvironmentFile="$EXEC_ENV" \
+    "${VAULT_IMPORT[@]}"
+  unset answer
+else
+  echo "the Alpaca client secret: skipped until V1 lands (\`mandate vault import\`); run this script again then"
+fi
 
-missing=""
+problems=""
 for file in "$API_ENV" "$EXEC_ENV"; do
   while IFS= read -r line; do
     case "$line" in
@@ -109,18 +123,24 @@ for file in "$API_ENV" "$EXEC_ENV"; do
       *)
         # Only the name is ever reported; a value never leaves the file.
         if [ -z "${line#*=}" ]; then
-          missing="$missing ${file##*/}:${line%%=*}"
+          problems="$problems ${file##*/}:${line%%=*}(empty)"
+        fi
+        if [[ "${line%%=*}" =~ (KEY|SECRET|TOKEN|PASSWORD) ]]; then
+          problems="$problems ${file##*/}:${line%%=*}(a secret in an environment file; DEC-822 item 4)"
         fi
         ;;
     esac
   done <"$file"
 done
-if grep -Eq '^(ALPACA_OAUTH_CLIENT_SECRET|MANDATE_VAULT_TOKEN_KEY)=' "$API_ENV"; then
-  echo "$API_ENV must not hold the client secret or the vault's token key (DEC-692); remove that line" >&2
+for found in "$CREDENTIALS"/*; do
+  name="${found##*/}"
+  case " ${KEYS[*]} tunnel-token " in
+    *" $name "*) ;;
+    *) problems="$problems credentials/$name(not one of the three kinds)" ;;
+  esac
+done
+if [ -n "$problems" ]; then
+  echo "fix by hand:$problems" >&2
   exit 1
 fi
-if [ -n "$missing" ]; then
-  echo "still empty:$missing" >&2
-  exit 1
-fi
-echo "every value is set in $API_ENV and $EXEC_ENV (root:root 0600). Copy both vault keys to your password manager now."
+echo "every key is in $CREDENTIALS (root:root 0600) and the client id in both env files. Copy both vault keys to your password manager now: they are never in a backup."
