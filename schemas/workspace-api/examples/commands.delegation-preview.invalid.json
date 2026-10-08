@@ -1,0 +1,170 @@
+[
+  {
+    "label": "classified neutral",
+    "set": {
+      "/classification": "neutral"
+    }
+  },
+  {
+    "label": "a number for dollars",
+    "set": {
+      "/unasked_usd_after": 1200
+    }
+  },
+  {
+    "label": "no delegation",
+    "remove": [
+      "/delegation"
+    ]
+  },
+  {
+    "label": "a delegation without its approval",
+    "remove": [
+      "/delegation/source_approval_id"
+    ]
+  },
+  {
+    "label": "a delegation cap as a number",
+    "set": {
+      "/delegation/max_total_usd": 900
+    }
+  },
+  {
+    "label": "auto: no /preview_id",
+    "remove": [
+      "/preview_id"
+    ]
+  },
+  {
+    "label": "auto: no /mandate_version",
+    "remove": [
+      "/mandate_version"
+    ]
+  },
+  {
+    "label": "auto: no /unasked_usd_after",
+    "remove": [
+      "/unasked_usd_after"
+    ]
+  },
+  {
+    "label": "auto: no /classification",
+    "remove": [
+      "/classification"
+    ]
+  },
+  {
+    "label": "auto: no /step_up_digest",
+    "remove": [
+      "/step_up_digest"
+    ]
+  },
+  {
+    "label": "auto: no /delegation",
+    "remove": [
+      "/delegation"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /classification outside its set",
+    "set": {
+      "/classification": "mutant_value"
+    }
+  },
+  {
+    "label": "auto: no /as_of/0/stream_id",
+    "remove": [
+      "/as_of/0/stream_id"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/seq",
+    "remove": [
+      "/as_of/0/seq"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/hash",
+    "remove": [
+      "/as_of/0/hash"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/recorded_at",
+    "remove": [
+      "/as_of/0/recorded_at"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /as_of/0",
+    "set": {
+      "/as_of/0/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: no /delegation/shape",
+    "remove": [
+      "/delegation/shape"
+    ]
+  },
+  {
+    "label": "auto: no /delegation/max_orders",
+    "remove": [
+      "/delegation/max_orders"
+    ]
+  },
+  {
+    "label": "auto: no /delegation/max_order_usd",
+    "remove": [
+      "/delegation/max_order_usd"
+    ]
+  },
+  {
+    "label": "auto: no /delegation/max_total_usd",
+    "remove": [
+      "/delegation/max_total_usd"
+    ]
+  },
+  {
+    "label": "auto: no /delegation/expires_at",
+    "remove": [
+      "/delegation/expires_at"
+    ]
+  },
+  {
+    "label": "auto: no /delegation/source_approval_id",
+    "remove": [
+      "/delegation/source_approval_id"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /delegation",
+    "set": {
+      "/delegation/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /delegation/shape outside its set",
+    "set": {
+      "/delegation/shape": "mutant_value"
+    }
+  },
+  {
+    "label": "a delegation of 0 orders",
+    "set": {
+      "/delegation/max_orders": 0
+    }
+  },
+  {
+    "label": "a delegation of 1001 orders",
+    "set": {
+      "/delegation/max_orders": 1001
+    }
+  }
+]
