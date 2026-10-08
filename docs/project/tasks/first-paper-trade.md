@@ -284,8 +284,9 @@ E7-7's recorded tests and the existing dry run passing until E3 deletes them (DE
 | J0 | E7-19 slice 4 remainder | T, I | `mandate-journal-pg` | An artifact-aware append that checks a version-2 draft's configuration objects in a given `ArtifactSource`, as `MemoryJournal` does, with the same outcomes; Postgres integration tests under `MANDATE_PG_URL`, which #644's reviewer said become required here (X-10) | — | T 200–300, I 150–250 |
 | P0 | E10-16 | T, I | `mandate-cli` | A `mandate-journal-pg` implementation of `ControlJournal`, appending through J0 with the `mandate-artifacts-fs` store; the `--journal` and `--store` options; the `clap` skeleton the D1, D2 and V0 commands hang on | J0 | T 200–300, I 200–300 |
 | V0 | E10-16 | T, I | `mandate-cli` | `mandate journal export`: one Postgres stream to the segment file `journal verify` reads (journal spec §6.2), so the run's journal can be verified with its store (X-11) | P0 | T 120–200, I 100–180 |
-| D1 | E10-16 | T, I | `mandate-cli` | `config register` (the instrument snapshot with `etp_source`), `model register`: stored objects and `ConfigSnapshotRegistered` v1 and v2, paper only | P0, M2 (content object), M2b (the pinned hash) | T 300–400, I 250–350 |
-| D2 | E10-16 | T, I | `mandate-cli` | `version create`, `version confirm` (`cli_confirm`), `agent deploy`, with their records | D1 | T 300–400, I 300–400 |
+| D1 | E10-16 | T, I | `mandate-cli` | `config::register` (the instrument snapshot with `etp_source`, exactly DEC-523's object) and `config::register_model` (content and hash from `mandate_modelhost::content`): stored objects and `ConfigSnapshotRegistered` v1 and v2, paper only, as library functions (DEC-526) | P0, M2 (content object), M2b (the pinned hash) | T 300–400, I 250–350 |
+| D1b | E10-16 | T, I | `mandate-cli` | The `clap` commands `config register` and `model register` over P0's `--journal` and `--store`, the source of the `Owner` they run as, and a binary test against Postgres (DEC-526 item 1) | D1 | T 150–250, I 100–200 |
+| D2 | E10-16 | T, I | `mandate-cli` | `version create`, `version confirm` (`cli_confirm`), `agent deploy`, with their records | D1b (the commands and the `Owner` source) | T 300–400, I 300–400 |
 | D3 | E19-11 | T, I | `mandate-shell` | The deployment input from the control stream (DEC-505), replacing `--mandate` and `--config-dir`; the selection rule for registrations; the reader of D1's instrument snapshot (DEC-523); V-007 checked (X-7). Two tests PRs to stay under 400 lines: D3a (the confirmed version: deployment, stop, document, V-rules with the registry, DEC-505 item 3's two facts) and D3b (the registrations: latest by `seq` with the two narrowings, the fee date, the DEC-523 snapshot reader) | — (builds its own control-stream fixtures) | T 300–400 each, I 300–400 |
 | D4 | E7-19 slice 4 remainder | T, I | `mandate-shell` | `ModelOutputRecorded` and `DecisionMade` v2 with `policy_set` and `model_registry` refs (X-1), appended through J0 | D3, J0 | T 150–250, I 150–250 |
 | Q1 | E7-19 slice 2 remainder | T, I | `mandate-shell` | Liquidity facts and every preflight check take the instrument from the deployment input, not `SYMBOL` (X-8) | D3 | T 100–200, I 80–150 |
@@ -297,13 +298,13 @@ E7-7's recorded tests and the existing dry run passing until E3 deletes them (DE
 | E3 | E7-19 slice 5 | Deletion PR under DEC-475 item 6 (not a DEC-77 pair) | `mandate-shell`, `xtask` | Delete `mandate-tracer`, `paper.rs`'s constants, `Artifacts::load` and the file reader, `legacy_identity`, `tracer::run`'s signal path, `MovingAverage`, `MOVING_AVERAGE`, the bars and signal stages, `map::model_output` (X-3), the E7-7 model artifact (X-4), `tests/tracer.rs` with its row in `xtask`'s `BEHAVIOUR_ONLY_TESTS` (F-3), and the `mandate-backtest` dependency | E1b, Q2, H3 | 400–900 deleted; two PRs if over 400 |
 | E2 | — | run, then D | — | The manual paper run (below); a docs PR records its evidence | E3, D2, V0 | — |
 
-**Totals.** 34 PRs (35 if E3 splits) and about 6,200 to 9,600 changed lines.
+**Totals.** 36 PRs (37 if E3 splits) and about 6,450 to 10,050 changed lines.
 
 **Critical path.** Two chains meet at E2:
 
 - the shell chain, D3 → D4 → Q1 → E1a → E1b → E3: 11 to 12 merges, with Q2 and H3 fitted into
   the shell between E1a and E3, since `mandate-shell` slices cannot overlap;
-- the CLI chain, J0 → P0 → D1 → D2 (and V0): 8 to 10 merges. D4 also waits on J0, so J0 goes
+- the CLI chain, J0 → P0 → D1 → D1b → D2 (and V0): 10 to 12 merges. D4 also waits on J0, so J0 goes
   first.
 
 M0 to M2, R0 and A1 run beside them, by crate. At the recent pace of two to three review rounds
