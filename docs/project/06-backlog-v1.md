@@ -4448,3 +4448,11 @@ From the round-6 review of the flatten adapter's implementation PR ([#596](https
   `StoredEvent::draft()` that also checks the columns) is private, so the flatten adapter holds a
   second copy of the three assigned-field names, the digest form, and the re-seal, the exact
   things that must not drift from `seal`.
+
+From the workspace API contract's drift rule (DEC-683, E10-10):
+
+- **A `cargo xtask` check for stale planned markers.** List every `(planned: <story>)` in a spec
+  table and every `x-planned` value in `schemas/`, with its story's state, and fail on a marker
+  whose story is done. Until it exists, removing a story's markers is part of its done-definition.
+- **Rust JSON-pointer checks refuse control characters**, as the schemas' pointer pattern does
+  (`[^/~\u0000-\u001f]`), wherever `mandate-api` checks a path (E10-10 implementation).

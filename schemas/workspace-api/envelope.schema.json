@@ -32,7 +32,7 @@
       }
     },
     "ProblemCode": {
-      "description": "\u00a73.5's codes. Closed on the server (DEC-681 item 1); a client handles an unknown code by status and effect (\u00a73.2).",
+      "description": "\u00a73.5's codes. Closed on the server (DEC-681 item 1); a client handles an unknown code by status and effect (\u00a73.2). A value in x-planned is listed before the code serves it (DEC-683).",
       "enum": [
         "unauthenticated",
         "forbidden",
@@ -45,7 +45,11 @@
         "live_unavailable",
         "control_stream_frozen",
         "journal_unavailable",
-        "rate_limited"
+        "rate_limited",
+        "outcome_unknown"
+      ],
+      "x-planned": [
+        "outcome_unknown"
       ]
     },
     "Effect": {
@@ -73,7 +77,7 @@
             },
             "path": {
               "type": "string",
-              "pattern": "^(/([^/~]|~[01])*)*$"
+              "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)*$"
             },
             "code": {
               "type": "string",
@@ -99,7 +103,7 @@
             },
             "path": {
               "type": "string",
-              "pattern": "^(/([^/~]|~[01])*)*$"
+              "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)*$"
             },
             "code": {
               "type": "string",
@@ -129,7 +133,7 @@
             },
             "path": {
               "type": "string",
-              "pattern": "^(/([^/~]|~[01])*)*$"
+              "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)*$"
             },
             "key": {
               "type": "string",
@@ -434,6 +438,28 @@
             "properties": {
               "status": {
                 "const": 429
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "outcome_unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              },
+              "effect": {
+                "const": "unknown"
+              },
+              "retryable": {
+                "const": false
               }
             }
           }

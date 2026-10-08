@@ -16,5 +16,11 @@
     "set": {
       "/access_token": "x"
     }
+  },
+  {
+    "label": "a URL with a trailing newline",
+    "set": {
+      "/authorization_url": "https://broker.example/oauth/authorize\n"
+    }
   }
 ]

@@ -22,5 +22,11 @@
     "set": {
       "/classification": "neutral"
     }
+  },
+  {
+    "label": "a path with a trailing newline",
+    "set": {
+      "/confirmed_paths/0": "/capital/allocation_usd\n"
+    }
   }
 ]

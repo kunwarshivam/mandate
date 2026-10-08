@@ -38,7 +38,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(/[^/]*)*$"
+        "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)*$"
       }
     },
     "warnings_acknowledged": {

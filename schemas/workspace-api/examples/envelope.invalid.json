@@ -68,6 +68,26 @@
       "event_id": null,
       "retryable": false,
       "violations": []
+    },
+    {
+      "type": "x",
+      "status": 503,
+      "code": "outcome_unknown",
+      "title": "t",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "x",
+      "status": 503,
+      "code": "outcome_unknown",
+      "title": "t",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
     }
   ],
   "Actor": [
@@ -156,6 +176,34 @@
       "path": "risk",
       "code": "type",
       "message": "not a pointer"
+    },
+    {
+      "kind": "rule",
+      "path": "/x",
+      "code": "V-022\n",
+      "message": "trailing newline"
+    },
+    {
+      "kind": "schema",
+      "path": "/x",
+      "code": "type\n",
+      "message": "trailing newline"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd\n",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "trailing newline"
+    },
+    {
+      "kind": "schema",
+      "path": "/x\n",
+      "code": "type",
+      "message": "trailing newline"
     }
   ],
   "PolicyLevel": [
