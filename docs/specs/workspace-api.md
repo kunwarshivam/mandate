@@ -279,11 +279,11 @@ Errors are RFC 9457 problem documents with these members:
 | `stale_base` | 409 | The draft or version base moved (API-19); the body names the current base |
 | `classification_changed` | 409 | The server's classification differs from the one the confirmation screen showed |
 | `step_up_required` | 401 | A call that needs step-up presents no evidence at all (§3.6, DEC-686) |
-| `step_up_missing` | 401 | Evidence is presented but does not count: its challenge is unknown, its credential is not the principal's or is in its enrolment cool-off, or its assertion does not verify (identity spec §7.2, DEC-662) |
-| `step_up_stale` | 401 | The challenge has expired, or is presented before its `issued_at` |
-| `step_up_reused` | 401 | The challenge was already used |
-| `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3) |
-| `step_up_mismatch` | 401 | The challenge names another principal, workspace, action kind, or action digest |
+| `step_up_missing` | 401 | (planned: E10-10) Evidence is presented but does not count: its challenge is unknown, its credential is not the principal's or is in its enrolment cool-off, or its assertion does not verify (identity spec §7.2 steps 4 and 6) |
+| `step_up_stale` | 401 | (planned: E10-10) The challenge has expired, or is presented before its `issued_at` |
+| `step_up_reused` | 401 | (planned: E10-10) The challenge was already used |
+| `step_up_method` | 401 | (planned: E10-10) The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3) |
+| `step_up_mismatch` | 401 | (planned: E10-10) The challenge names another principal, workspace, action kind, or action digest |
 | `live_unavailable` | 409 | A live environment operation before counsel signs off (rule 8, B5) |
 | `control_stream_frozen` | 503 | Journal spec §11 froze mandate and deployment changes; never sent for a risk-reducing call (API-7) |
 | `journal_unavailable` | 503 | Postgres cannot take the append; `effect: none`, `retryable: true` |
@@ -298,10 +298,25 @@ Errors are RFC 9457 problem documents with these members:
 The six step-up codes have `retryable: false`, and `effect: none`: nothing the step-up guards is
 committed (identity spec §7.2 step 6), and the same evidence fails the same way, so the client runs
 a new ceremony first. The one exception is a revoke on compromise, whose kill-switch half is
-committed anyway (`effect: recorded`, §5.6). None is ever sent for pause, the kill switch, an owner exit, or Skip (API-7): there, failed
-step-up loses only the privilege it would have added (identity spec §7.3). A call without evidence
-gets `step_up_required` before any other step-up check; evidence that is present is judged in
-DEC-662's order, and the first check that fails names the code.
+committed anyway (`effect: recorded`, §5.6); the schema cannot tell that call apart, so it allows
+both effects for these codes. None is ever sent for pause, the kill switch, an owner exit, or Skip
+(API-7): there, failed step-up loses only the privilege it would have added (identity spec §7.3).
+A call without evidence gets `step_up_required` before any other step-up check. Evidence that is
+present is judged in the order of identity spec §7.2 step 4, and the first check that fails names
+the code:
+
+1. the challenge exists: else `step_up_missing`;
+2. the method is allowed in this environment (§7.3, reported by step 6): else `step_up_method`;
+3. the challenge is unused: else `step_up_reused`;
+4. the challenge is not expired, and is not presented before its `issued_at`: else
+   `step_up_stale`;
+5. the challenge names this principal and workspace: else `step_up_mismatch`;
+6. the credential belongs to this principal and its enrolment cool-off has ended, the signature
+   verifies, user verification shows in the flags, and the counter has not gone backwards: else
+   `step_up_missing`;
+7. the submitted action's digest equals the challenge's: else `step_up_mismatch`.
+
+These codes are returned only to the authenticated requester, with no detail beyond the code.
 
 ### 3.6 Step-up
 

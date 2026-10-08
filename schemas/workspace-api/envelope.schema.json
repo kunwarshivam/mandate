@@ -60,7 +60,12 @@
         "outcome_unknown"
       ],
       "x-planned": {
-        "outcome_unknown": "E10-10"
+        "outcome_unknown": "E10-10",
+        "step_up_missing": "E10-10",
+        "step_up_stale": "E10-10",
+        "step_up_reused": "E10-10",
+        "step_up_method": "E10-10",
+        "step_up_mismatch": "E10-10"
       }
     },
     "Effect": {
@@ -848,7 +853,8 @@
                 "enum": [
                   "none",
                   "recorded"
-                ]
+                ],
+                "description": "`none`, except that a refused revoke on compromise (\u00a75.6) carries `recorded`, because its kill-switch half is committed anyway. The schema cannot tell that call apart."
               },
               "retryable": {
                 "const": false
@@ -879,7 +885,8 @@
                 "enum": [
                   "none",
                   "recorded"
-                ]
+                ],
+                "description": "`none`, except that a refused revoke on compromise (\u00a75.6) carries `recorded`, because its kill-switch half is committed anyway. The schema cannot tell that call apart."
               },
               "retryable": {
                 "const": false
@@ -910,7 +917,8 @@
                 "enum": [
                   "none",
                   "recorded"
-                ]
+                ],
+                "description": "`none`, except that a refused revoke on compromise (\u00a75.6) carries `recorded`, because its kill-switch half is committed anyway. The schema cannot tell that call apart."
               },
               "retryable": {
                 "const": false
@@ -941,7 +949,8 @@
                 "enum": [
                   "none",
                   "recorded"
-                ]
+                ],
+                "description": "`none`, except that a refused revoke on compromise (\u00a75.6) carries `recorded`, because its kill-switch half is committed anyway. The schema cannot tell that call apart."
               },
               "retryable": {
                 "const": false
@@ -972,7 +981,8 @@
                 "enum": [
                   "none",
                   "recorded"
-                ]
+                ],
+                "description": "`none`, except that a refused revoke on compromise (\u00a75.6) carries `recorded`, because its kill-switch half is committed anyway. The schema cannot tell that call apart."
               },
               "retryable": {
                 "const": false
