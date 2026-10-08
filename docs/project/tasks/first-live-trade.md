@@ -177,15 +177,15 @@ Robinhood code.
 
 | Reference | Scope | Outcome | Matches? |
 |---|---|---|---|
-| Trading §5.2 "Alpaca capability matrix" ↔ DEC-531 | Every broker | Profiles as data | **No** until SP1 renames it and adds Robinhood's profile |
+| Trading §5.2 "Alpaca capability matrix" ↔ DEC-531 | Every broker | Profiles as data | Yes, by SP1 (trading spec v0.16) |
 | Executor `protection.rs` (`asset_class == Crypto` picks one stop-limit) ↔ DEC-531 item 2 | Protection | Strongest form the profile offers | **No**: B2a replaces the branch |
 | DEC-441 item 10 ↔ U-R1, U-R2 ↔ the contract | Idempotency | Submit with id, query by id | **No**: no query by `ref_id`; DEC-529 item 4 resolves it for this order only (B2b, C3) |
 | DEC-441 item 15 ↔ U-R10 | Platform terms | Written answer before any connection | Resolved for this order only by DEC-529 item 5; customers still blocked |
 | FR-2.6 (1× verified) ↔ U-R7 | Account | Margin field | **No** field; DEC-529 item 11's attestation for this order |
-| Trading §5.4 (OCO or bracket for equities) ↔ Robinhood's profile | Protection | One GTC stop-limit | **No**: SP1, DEC-529 item 7 (founder) |
-| Trading §4.2 (`sip` for live equities) | Live quote | Collar and risk mark | **No**: DEC-529 item 12, SP1 |
-| Trading §7.2 (account type and regime per broker) | Account | Robinhood rows | **No**: SP1 |
-| Mandate §6.1 `cli_confirm` paper only ↔ DEC-155 item 4 | Live grant | Method field | **No**: DEC-529 item 3, until E9-4 |
+| Trading §5.4 (OCO or bracket for equities) ↔ Robinhood's profile | Protection | One GTC stop-limit | Yes, by SP1 (DEC-529 item 7); the stop-limit's limit price is trading §15 q9 |
+| Trading §4.2 (`sip` for live equities) | Live quote | Collar and risk mark | Yes, by SP1 (DEC-529 item 12) |
+| Trading §7.2 (account type and regime per broker) | Account | Robinhood rows | Yes, by SP1 |
+| Mandate §6.1 `cli_confirm` paper only ↔ DEC-155 item 4 | Live grant | Method field | Yes, by SP1 (DEC-529 item 3), until E9-4 |
 | ES-23 ↔ the runner's `live` feature | Build | — | **No**: DEC-529 item 3; X1 adds the check ES-23 assumes |
 | Connections §6.2 rule 5 ↔ ES-23 numbers | Prices, quantities | Decimal strings via `mandate-num` | Yes |
 | CN-8 ↔ `get_accounts` | Reads | Other accounts dropped | Yes, by C2 |
