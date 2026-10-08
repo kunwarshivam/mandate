@@ -456,6 +456,8 @@ impl Reconciler for FixedReconciler {
                 buying_power: Usd::ZERO,
                 non_marginable_buying_power: Usd::ZERO,
                 accrued_fees: Usd::ZERO,
+                last_equity: Usd::ZERO,
+                maintenance_margin: Usd::ZERO,
             },
             fills: Vec::new(),
             cursor: ActivityCursor(String::new()),

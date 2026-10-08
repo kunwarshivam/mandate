@@ -661,6 +661,13 @@ after U-A1 to U-A5 are recorded.
   `model_registry`, DEC-484, which needs an artifact-aware append in `mandate-journal-pg`), and
   slice 5 as the new `mandate-paper` adapter, its bounded wait for a terminal entry, and the
   deletion of E7-7's AAPL assembly.
+  *Follow-up (A1, [DEC-524](decisions/DEC-524.md)):* nothing yet turns a broker-reported
+  maintenance deficit, a negative `BrokerAccount::maintenance_excess`, into trading-domain spec
+  §9.2's `exits_only` for every agent and an owner alert. The gate deliberately denies nothing per
+  order on it (`mandate-risk`'s `a_reported_deficit_is_an_account_state_not_a_denial`), so the
+  account-state path owns it, beside §7.3's restriction table in the executor's reconciliation.
+  With 1× long-only exposure no approved order creates a deficit, so the first trade does not
+  need it.
 - **E7-20 (Must, M7)** As the founder, I want CodeQL to flag a credential written to a log by
   its type rather than its name, so that excluding the name-keyed `rust/cleartext-logging` query
   ([DEC-500](decisions/DEC-500.md)) leaves no gap. *Accepted when:* a query under

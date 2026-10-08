@@ -166,6 +166,8 @@ pub fn account(body: &[u8]) -> Result<BrokerAccount, WireError> {
         buying_power: usd(fields, "buying_power")?,
         non_marginable_buying_power: usd(fields, "non_marginable_buying_power")?,
         accrued_fees: usd(fields, "accrued_fees")?,
+        last_equity: usd(fields, "last_equity")?,
+        maintenance_margin: usd(fields, "maintenance_margin")?,
     })
 }
 
