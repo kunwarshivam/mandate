@@ -32,6 +32,7 @@
 /crates/mandate-identity/   @kunwarshivam
 /crates/mandate-identity-seal/ @kunwarshivam
 /crates/mandate-identity-testkit/ @kunwarshivam
+/crates/mandate-passkey/    @kunwarshivam
 /crates/mandate-cli/        @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
 /crates/mandate-accounting/ @kunwarshivam
@@ -49,5 +50,7 @@
 /crates/mandate-liquidity/  @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
 /crates/mandate-mcp/        @kunwarshivam
+/crates/mandate-vault-local/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-modelhost/  @kunwarshivam
+/crates/mandate-webpush/    @kunwarshivam

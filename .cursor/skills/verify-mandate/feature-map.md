@@ -511,8 +511,21 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
   loopback), `crates/mandate-mcp/src/tests/budget.rs` (an oracle that steps one refill period at a
   time), `crates/mandate-mcp/src/tests/server.rs` (the scripted loopback server),
-  `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/errors.rs`.
+  `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/bounds.rs` (sessions,
+  redirects, timeouts, the exit budget, and a canary in server text),
+  `crates/mandate-mcp/src/tests/errors.rs`.
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
+
+## The local vault (E10-13 V1)
+
+- **Spec:** `docs/specs/connections.md` §5.2; `docs/design/infrastructure.md` §3.1, §5.2;
+  DEC-692; DEC-822 item 4.
+- **Code:** `mandate-vault-local` (stubs until E10-13 lands): `crates/mandate-vault-local/src/startup.rs`
+  (the two keys as systemd credentials, the token key never in the API process, exact directory
+  owners and modes), `crates/mandate-vault-local/src/error.rs` (`VaultError`).
+- **Tests:** `crates/mandate-vault-local/src/tests/` (a fresh layout per test in a temporary
+  directory; startup refusals, pending E10-13).
+- **Run:** `cargo nextest run -p mandate-vault-local --run-ignored all`.
 
 ## Risk gate
 
@@ -1036,10 +1049,29 @@ proves each pending test fails on them (DEC-110).
   in-memory journal in `crates/mandate-cli/tests/common/mod.rs`.
 - **The `approvals` commands (K1a, DEC-533):** `crates/mandate-cli/src/inbox.rs` (`list`, `show`,
   `approve` and `skip` over P0's journal as D1b's paper owner; the renderers `list_lines`,
-  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`), stubbed, and `main`;
-  `crates/mandate-cli/tests/inbox.rs`, pending E8-3 but for the live flags test.
+  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`) and `main`, with the answer's
+  `content_hash` in `artifact_refs` (`control.rs`, DEC-533 item 6);
+  `crates/mandate-cli/tests/inbox.rs`, and `crates/mandate-cli/tests/grant.rs`, the binary over
+  Postgres (`MANDATE_PG_URL`), playing the runtime that records the grant.
 - **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime -p mandate-cli`;
   `cargo xtask ci pending`.
+
+## Web push encryption and VAPID (E8-14, slice S8a)
+
+- **Spec:** [notifications spec](../../../docs/specs/notifications.md) §4.2 (the closed payload),
+  §4.6 (web push and the relay's 512-byte cap), NT-1 and NT-3; DEC-438 items 1 and 13, DEC-700
+  item 3 (the envelope per class), DEC-790. RFC 8291, RFC 8188, RFC 8292.
+- **Code:** `mandate-webpush` (layer 0, pure, no workspace dependency):
+  `crates/mandate-webpush/src/lib.rs` (`build_request`, `encrypt`, `vapid_authorization`,
+  `Subscription`, `PushEndpoint`, `VapidSubject`, the `SecureRandom` and `VapidSigner` traits, and
+  `NoticeClass`'s fixed urgency and TTL) and `crates/mandate-webpush/src/payload.rs` (the closed
+  `PushPlaintext` and `PushText`), stubbed but for the closed tables.
+- **Tests:** `crates/mandate-webpush/src/tests.rs`, with the published vectors and their fixtures in
+  `crates/mandate-webpush/tests/vectors/mod.rs` (DEC-794): the RFC 8291 §5 and RFC 8188 §3.1 vectors
+  byte-exact, a receiver-side decrypt oracle, an ES256 check of the VAPID token against the
+  signer's public key, the size cap, refusals, and properties for the opaque payload and the
+  token's expiry, pending E8-14 but for the live closed-tables test.
+- **Run:** `cargo nextest run -p mandate-webpush`; `cargo xtask ci pending`.
 
 ## The CLI's Postgres control journal (E10-16, P0)
 
@@ -1101,7 +1133,7 @@ proves each pending test fails on them (DEC-110).
 - **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
   takes the stream's latest confirmed version and a code bound to the agent and the version, and
   commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
-  stubbed; `crates/mandate-cli/tests/deploy.rs`, pending E10-16, over a control stream seeded in
+  on `version.rs`'s checks; `crates/mandate-cli/tests/deploy.rs`, over a control stream seeded in
   §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
   force; every refusal code, each writing nothing; a failing store committing nothing.
   `cargo nextest run -p mandate-cli --test deploy`.
@@ -1298,22 +1330,26 @@ proves each pending test fails on them (DEC-110).
 ## Identity: roles, the permission matrix, and the authorization step (E9-2)
 
 - **Spec:** identity spec §3 to §5, §4.2's matrix and its grammar (DEC-641), §4.5's authorization
-  step, the context contract (DEC-642), and the refusal codes (DEC-643); ID-2, ID-8, ID-13.
+  step, the context contract (DEC-642), the org-scope and own-data contexts (DEC-832), and the
+  refusal codes (DEC-643); ID-2, ID-8, ID-13, ID-16.
 - **Code:** `mandate-identity`, `crates/mandate-identity/` (layer 1, safety-critical, pure):
-  `src/lib.rs` (`authorize`, `change_roles`, `Authorized`, `TenantContext`, the sealed `Tenant`
+  `src/lib.rs` (`authorize`, `change_roles`, `Authorized`, `TenantContext`, `OrgContext` and its
+  two consumptions, `PrincipalContext`, the sealed `Tenant`
   and `MembershipLookup`, `MembershipQuery`, `Session`, `Membership`, `Refusal`, `ClientScope`,
   `StepUpActionKind`, `StepUpEvidence`) and `src/permission.rs` (one `Permission` per §4.2 row).
-  Tests PR: `authorize` and `change_roles` are stubs.
+  Tests PR: `authorize`, `change_roles`, and the context consumptions are stubs.
 - **Tests:** in the crate, because its session, membership, and lookup types are sealed to it:
   `crates/mandate-identity/src/tests/matrix.rs` (ID-2 and the failed membership read, pending
   E9-2: every role set, membership state, cool-off, session kind, principal kind, permission, and
-  scope against §4.2 parsed from `docs/specs/identity.md` at test time by the grammar its doc
+  scope, workspace pairs the store does not hold included, and each grant's context, against §4.2 parsed from `docs/specs/identity.md` at test time by the grammar its doc
   states; the grammar check is live), with the hand-written row map in
   `crates/mandate-identity/src/tests/rows.rs` and the test doubles in
   `crates/mandate-identity/src/tests/mod.rs`; `crates/mandate-identity/src/tests/wire.rs` (each
   refusal's code, and the step-up kinds and client scopes read from workspace API §3.6 and §3.8,
-  live); and the `compile_fail` doctests in `src/lib.rs` (a `TenantContext` cannot be built,
-  defaulted, or cloned, nor `Tenant` implemented, outside the crate), with their in-crate control.
+  live); `org_fanout_workspaces_come_from_the_store` in `matrix.rs` (pending E9-2); and the
+  `compile_fail` doctests in `src/lib.rs` (a `TenantContext` cannot be built, defaulted, or cloned,
+  nor `Tenant` implemented, an `OrgContext` or `PrincipalContext` cannot be built, and an
+  `OrgContext` is not a `Tenant`, outside the crate), with their in-crate controls.
 - **Run:** `cargo nextest run -p mandate-identity --run-ignored all` and
   `cargo test -p mandate-identity --doc`.
 - **Seal and test support:** `mandate-identity-seal` (layer 0, safety-critical; the `Seal` token
@@ -1321,6 +1357,19 @@ proves each pending test fails on them (DEC-110).
   `cargo xtask layers` checks, DEC-642 item 7) and `mandate-identity-testkit` (layer 11, so only
   dev-dependencies reach it, and `dev_only` in `xtask/layers.toml`; `StaticLookup`, `FailingLookup`, `session`, `membership`; DEC-645).
   The ULID text codecs are pending in `crates/mandate-identity/src/tests/ulid.rs`.
+
+## Passkey relying party (E9-1)
+
+- **Spec:** identity spec §6.1, §6.3, §7.2 step 4; DEC-660 (dependencies, algorithms, and the
+  strict readings).
+- **Code:** `mandate-passkey`, `crates/mandate-passkey/` (layer 2, pure, safety-critical):
+  `src/lib.rs` (`enrol`, `verify`, `RelyingParty`, `Challenge`, `Credential`, `PublicKey`,
+  `Refusal`).
+- **Tests:** `crates/mandate-passkey/tests/api.rs` (refusal codes, the challenge length) and
+  `tests/oracle.rs` (the software authenticator in `tests/common/mod.rs` against RFC 4648 and
+  RFC 8949 vectors and `ring`'s verifier; its keys are generated in the test, never a real
+  authenticator, identity spec §1.3).
+- **Run:** `cargo nextest run -p mandate-passkey`.
 
 ## Simulated Robinhood broker (E7-25)
 
@@ -1331,8 +1380,17 @@ proves each pending test fails on them (DEC-110).
   a dev-dependency only; safety-critical, pure):
   `src/lib.rs` (`Sim`, its scripted `Event`s and `Fault`s, the order and request types,
   `SimError`).
-- **Tests:** `crates/mandate-rh-sim/tests/rules.rs` (only an agentic account reviews or places;
-  account numbers are unique), with fixtures in `tests/common/mod.rs`. Pending E7-25.
+- **Tests:** `crates/mandate-rh-sim/tests/rules.rs` (quantity forms, sessions and text against
+  the contract; only an agentic account reviews or places; each pre-trade alert refuses) and
+  `crates/mandate-rh-sim/tests/lifecycle.rs` (fills and positions, `ref_id` after a lost answer
+  and its echo and changed-resend switches, `gfd` and `gtc`, sessions, scripted answers, and the
+  refusals of cancel, fill and a sell that working sells already hold, a working sell holding
+  only its unfilled remainder), and
+  `crates/mandate-rh-sim/tests/properties.rs` (over random scripts: a `ref_id` never yields a
+  second order; a terminal order never changes and is refused; a fill never exceeds the quantity;
+  every state change is a legal transition, and every legal one is accepted; each against the
+  test's own oracle), with fixtures in
+  `tests/common/mod.rs`. Pending E7-25.
 - **Run:** `cargo nextest run -p mandate-rh-sim`.
 
 ## Research-agent spike (E17-0)

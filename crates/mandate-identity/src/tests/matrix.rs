@@ -17,27 +17,32 @@
 //!   in it counts once its effective-from instant is at or before `now`.
 //! - **Inactive rows:** a permission that applies "only if DEC-437 item" creates its state is
 //!   refused to everyone.
+//! - **Workspace pairs:** a workspace scope's (organization, workspace) pair is the route's, so a
+//!   workspace under another organization than the one named, or one the deployment does not host,
+//!   is refused `no_membership` for every principal kind (user, client, SA, HC, PO, agent, and
+//!   process alike), on every row but an inactive one, and before any membership read (DEC-832
+//!   item 2). `SCOPES` holds two such pairs, (O2, W1) and (O1, W3).
+//! - **What a grant carries** (DEC-642, DEC-832): an `own` row or the leave row, at any scope, and
+//!   a `self` row yield `Authorized::Principal` with a `PrincipalContext` bound to the authenticated
+//!   principal and the scope; any other org-scope row `Authorized::Org` with an `OrgContext`
+//!   carrying the organization and its workspaces as the store holds them; any other
+//!   workspace-scope row `Authorized::Workspace` with the `TenantContext` of the pair.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_time::UtcNanos;
 
 use crate::{
-    Authorized, Membership, MembershipLookup, MembershipState, OrgId, Permission, Principal,
-    PrincipalId, PrincipalKind, Refusal, Role, Scope, Session, SessionKind, SessionRef, StepUp,
-    WorkspaceId, authorize,
+    Authorized, Membership, MembershipLookup, MembershipState, Permission, Principal, PrincipalId,
+    PrincipalKind, Refusal, Role, Scope, Session, SessionKind, SessionRef, StepUp, WorkspaceId,
+    authorize,
 };
 
 use super::rows::{ORG_ROLES, OWED, RISK_REDUCING, ROLE_COLUMNS, ROWS};
-use super::{ByMember, Everything, Failing};
+use super::{ByMember, Everything, Failing, O1, O2, W1, W2, W3, hosted_in, paired};
 
 const SPEC: &str = include_str!("../../../../docs/specs/identity.md");
 
-const O1: OrgId = OrgId(0x11);
-const O2: OrgId = OrgId(0x12);
-const W1: WorkspaceId = WorkspaceId(0x21);
-const W2: WorkspaceId = WorkspaceId(0x22);
-const W3: WorkspaceId = WorkspaceId(0x23);
 const USER: PrincipalId = PrincipalId(0x31);
 const DECOY: PrincipalId = PrincipalId(0x32);
 const OTHER: PrincipalId = PrincipalId(0x33);
@@ -59,7 +64,9 @@ const WS1: Scope = Scope::Workspace {
     workspace: W1,
 };
 
-const SCOPES: [Scope; 6] = [
+/// Every scope the tests ask at: the principal's, both organizations, the three hosted pairs, and
+/// two pairs the store does not hold, a workspace named under the other organization.
+const SCOPES: [Scope; 8] = [
     Scope::Principal,
     Scope::Org(O1),
     Scope::Org(O2),
@@ -70,6 +77,14 @@ const SCOPES: [Scope; 6] = [
     },
     Scope::Workspace {
         org: O2,
+        workspace: W3,
+    },
+    Scope::Workspace {
+        org: O2,
+        workspace: W1,
+    },
+    Scope::Workspace {
+        org: O1,
         workspace: W3,
     },
 ];
@@ -89,6 +104,7 @@ struct Row {
     reduction: bool,
     risk_reducing: bool,
     self_row: bool,
+    own_row: bool,
     cells: BTreeMap<String, Cell>,
 }
 
@@ -177,6 +193,8 @@ fn matrix() -> Vec<Row> {
                 reduction: text.starts_with("Pause")
                     || (text.starts_with("Kill switch") && text.ends_with(": engage")),
                 self_row,
+                own_row: texts[2..].iter().any(|c| c == "own")
+                    || text.starts_with("Leave: deactivate one's own membership"),
                 cells,
             }
         })
@@ -243,6 +261,9 @@ fn expected(
 ) -> Expected {
     if row.inactive {
         return Err(Refusal::InactivePermission);
+    }
+    if !paired(scope) {
+        return Err(Refusal::NoMembership);
     }
     if scope == Scope::Principal {
         return match (row.self_row, principal) {
@@ -407,24 +428,64 @@ fn check(
             "{principal:?} {:?} at {scope:?} in a {kind_of_session:?} session with {ms:?}",
             row.permission
         );
-        if let Ok(a) = got {
-            match (scope, &a) {
-                (Scope::Principal, Authorized::Principal { .. })
-                | (Scope::Org(_), Authorized::Org { .. }) => {}
-                (Scope::Workspace { org, workspace }, Authorized::Workspace { tenant: t, .. }) => {
-                    assert_eq!(
-                        (t.org(), t.workspace(), t.principal(), t.permission()),
-                        (org, workspace, id(principal), row.permission)
-                    );
-                    assert_eq!(
-                        (t.kind(), t.session(), t.membership_unverified()),
-                        (kind(principal), SESSION, false)
-                    );
-                }
-                (s, a) => panic!("{s:?} gave {a:?}"),
-            }
+        if let Ok(a) = &got {
+            carries(a, row, principal, scope, false);
         }
         *checked += 1;
+    }
+}
+
+/// Asserts the arm a grant at `scope` must take and what its context carries: the authenticated
+/// principal, its kind, the session, the row, the scope (the organization's workspaces as the store
+/// holds them, or none read during an outage), and whether the snapshot answered.
+fn carries(a: &Authorized, row: &Row, principal: &Principal, scope: Scope, unverified: bool) {
+    let who = (id(principal), kind(principal), SESSION, row.permission);
+    match (scope, a) {
+        (_, Authorized::Principal { context: c, .. })
+            if row.self_row == (scope == Scope::Principal) && (row.self_row || row.own_row) =>
+        {
+            assert_eq!(
+                (c.principal(), c.kind(), c.session(), c.permission()),
+                who,
+                "{scope:?}"
+            );
+            assert_eq!(
+                (c.scope(), c.membership_unverified()),
+                (scope, unverified),
+                "{:?}",
+                row.permission
+            );
+        }
+        (Scope::Org(org), Authorized::Org { context: c, .. }) if !row.own_row => {
+            assert_eq!(
+                (c.principal(), c.kind(), c.session(), c.permission()),
+                who,
+                "{scope:?}"
+            );
+            let set = hosted_in(org);
+            assert_eq!(
+                (c.org(), c.workspaces(), c.membership_unverified()),
+                (org, (!unverified).then_some(&set), unverified),
+                "{:?}",
+                row.permission
+            );
+        }
+        (Scope::Workspace { org, workspace }, Authorized::Workspace { tenant: t, .. })
+            if !row.own_row =>
+        {
+            assert_eq!(
+                (t.principal(), t.kind(), t.session(), t.permission()),
+                who,
+                "{scope:?}"
+            );
+            assert_eq!(
+                (t.org(), t.workspace(), t.membership_unverified()),
+                (org, workspace, unverified),
+                "{:?}",
+                row.permission
+            );
+        }
+        (s, a) => panic!("{:?} at {s:?} gave {a:?}", row.permission),
     }
 }
 
@@ -603,7 +664,8 @@ fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() 
                         for scope in SCOPES {
                             let client_outside =
                                 matches!(principal, Principal::Client { .. }) && scope != WS1;
-                            let read = scope != Scope::Principal && !client_outside;
+                            let read =
+                                scope != Scope::Principal && !client_outside && paired(scope);
                             let want = match (row.inactive, read, row.risk_reducing) {
                                 (true, _, _) => Err(Refusal::InactivePermission),
                                 (false, false, _) | (false, true, true) => {
@@ -619,8 +681,8 @@ fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() 
                                 row.permission,
                                 now(),
                             );
-                            if let Ok(Authorized::Workspace { tenant, .. }) = &got {
-                                assert!(tenant.membership_unverified(), "the gap is flagged");
+                            if let Ok(a) = &got {
+                                carries(a, row, principal, scope, read);
                             }
                             assert_eq!(
                                 got.map(|a| a.step_up()),
@@ -660,6 +722,9 @@ fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() 
                     let want = expected_in(row, &principal, &none, scope, kind_of_session);
                     let got =
                         authorize(&Failing, &principal, &session, scope, row.permission, now());
+                    if let Ok(a) = &got {
+                        carries(a, row, &principal, scope, false);
+                    }
                     assert_eq!(got.map(|a| a.step_up()), want, "{principal:?} {scope:?}");
                 }
             }
@@ -708,4 +773,116 @@ fn a_snapshot_entry_never_serves_another_workspace() {
             assert_eq!(got.map(|a| a.step_up()), want, "{permission:?} in W1");
         }
     }
+}
+
+/// An org-scope grant reaches workspaces only through the set the store enumerated (DEC-832 items
+/// 2 to 4, `org_fanout_workspaces_come_from_the_store`, this crate's part): the route's workspace
+/// only when it is in the set, so another organization's workspace and one the deployment does not
+/// host are refused `no_membership`, and the every-workspace way yields exactly the set, each
+/// context bound to the same principal, session, and row. During a membership-store outage the
+/// org kill switch is still authorized from the snapshot, with no set, and the route's workspace is
+/// checked against its own record instead.
+#[test]
+#[ignore = "pending E9-2"]
+fn org_fanout_workspaces_come_from_the_store() {
+    let owner = BTreeSet::from([Role::OrgOwner]);
+    let none = BTreeSet::new();
+    let ms = vec![membership(
+        USER,
+        Scope::Org(O1),
+        MembershipState::Active,
+        &owner,
+        &none,
+    )];
+    let user = Principal::User { id: USER };
+    let full = session(SessionKind::Full, ms.clone());
+    let unhosted = WorkspaceId(0x29);
+    let outage = Failing;
+    let reachable = ByMember(&ms);
+    for (name, unverified) in [("live", false), ("outage", true)] {
+        let org_context = || {
+            let got = match unverified {
+                false => authorize(
+                    &reachable,
+                    &user,
+                    &full,
+                    Scope::Org(O1),
+                    Permission::KillSwitchOrg,
+                    now(),
+                ),
+                true => authorize(
+                    &outage,
+                    &user,
+                    &full,
+                    Scope::Org(O1),
+                    Permission::KillSwitchOrg,
+                    now(),
+                ),
+            };
+            match got {
+                Ok(Authorized::Org { context, .. }) => context,
+                other => panic!("the {name} org kill switch at O1 gave {other:?}"),
+            }
+        };
+        let into = |workspace| match unverified {
+            false => org_context().into_workspace(&reachable, workspace),
+            true => org_context().into_workspace(&outage, workspace),
+        };
+        for workspace in [W1, W2] {
+            let tenant = into(workspace).unwrap();
+            assert_eq!(
+                (
+                    tenant.org(),
+                    tenant.workspace(),
+                    tenant.principal(),
+                    tenant.kind(),
+                    tenant.session(),
+                    tenant.permission(),
+                    tenant.membership_unverified()
+                ),
+                (
+                    O1,
+                    workspace,
+                    USER,
+                    PrincipalKind::User,
+                    SESSION,
+                    Permission::KillSwitchOrg,
+                    unverified
+                ),
+                "{name} {workspace:?}"
+            );
+        }
+        for workspace in [W3, unhosted] {
+            assert_eq!(
+                into(workspace).map(|t| t.workspace()),
+                Err(Refusal::NoMembership),
+                "{name} {workspace:?}"
+            );
+        }
+    }
+    let every = match authorize(
+        &reachable,
+        &user,
+        &full,
+        Scope::Org(O1),
+        Permission::KillSwitchOrg,
+        now(),
+    ) {
+        Ok(Authorized::Org { context, .. }) => context.into_every_workspace().unwrap(),
+        other => panic!("the org kill switch at O1 gave {other:?}"),
+    };
+    let reached: Vec<(WorkspaceId, PrincipalId, SessionRef, Permission)> = every
+        .iter()
+        .map(|t| {
+            assert_eq!(t.org(), O1);
+            (t.workspace(), t.principal(), t.session(), t.permission())
+        })
+        .collect();
+    assert_eq!(
+        reached,
+        vec![
+            (W1, USER, SESSION, Permission::KillSwitchOrg),
+            (W2, USER, SESSION, Permission::KillSwitchOrg),
+        ]
+    );
 }
