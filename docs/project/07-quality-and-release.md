@@ -41,7 +41,13 @@ flowchart LR
    item per PR, green CI, the author's checks and the screen's pictures in the body, then merge,
    with the review reading the diff after the merge and the founder judging from the pictures.
 5. **No live secrets for agents.** Agents use paper and demo credentials and fixtures only.
-6. **Decisions are recorded.** An agent that needs to deviate from an accepted decision stops and
+6. **CI runs on ready pull requests, not drafts** ([DEC-610](decisions/DEC-610.md)). A builder
+   proves a change locally with `cargo xtask check` and keeps its pull request a draft, where `ci`
+   runs no job. It marks the pull request ready once its independent review passes, or earlier
+   when the change needs CI's runners (the Postgres tests, the mutation shards). Marking it ready
+   starts the run that judges it, and a merge still needs `fast` and `full` run and green on the
+   exact head: a run skipped on a draft never counts.
+7. **Decisions are recorded.** An agent that needs to deviate from an accepted decision stops and
    writes a new decision instead, as a file under `docs/project/decisions/` (DEC-344).
 
 Full agent rules: [`AGENTS.md`](../../AGENTS.md).
