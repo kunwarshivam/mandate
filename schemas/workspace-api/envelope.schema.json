@@ -48,9 +48,9 @@
         "rate_limited",
         "outcome_unknown"
       ],
-      "x-planned": [
-        "outcome_unknown"
-      ]
+      "x-planned": {
+        "outcome_unknown": "E10-10"
+      }
     },
     "Effect": {
       "enum": [
@@ -167,7 +167,7 @@
       ]
     },
     "Problem": {
-      "description": "RFC 9457 problem document (\u00a73.5). event_id is present exactly when effect is recorded or unknown; each code carries the status \u00a73.5's table gives it.",
+      "description": "RFC 9457 problem document (\u00a73.5). Not wrapped in the Envelope (\u00a73.2). event_id is present exactly when effect is recorded or unknown. Each code pins its status, the effects it may carry, retryable, and a fixed title with no content (API-10, DEC-682 item 28); current_base is present exactly for stale_base.",
       "type": "object",
       "required": [
         "type",
@@ -224,6 +224,17 @@
           "items": {
             "$ref": "#/$defs/Violation"
           }
+        },
+        "current_base": {
+          "description": "The base now in force, for stale_base only (\u00a73.5, API-19).",
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/ContentRef"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/Id"
+            }
+          ]
         }
       },
       "allOf": [
@@ -262,6 +273,18 @@
             "properties": {
               "status": {
                 "const": 401
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Sign in required"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/unauthenticated"
               }
             }
           }
@@ -278,6 +301,18 @@
             "properties": {
               "status": {
                 "const": 403
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Not allowed"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/forbidden"
               }
             }
           }
@@ -294,6 +329,18 @@
             "properties": {
               "status": {
                 "const": 404
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Not found"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/not_found"
               }
             }
           }
@@ -310,6 +357,18 @@
             "properties": {
               "status": {
                 "const": 422
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Invalid request"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/invalid"
               }
             }
           }
@@ -326,6 +385,18 @@
             "properties": {
               "status": {
                 "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Key already used"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/idempotency_conflict"
               }
             }
           }
@@ -342,8 +413,23 @@
             "properties": {
               "status": {
                 "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Changed since loaded"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/stale_base"
               }
-            }
+            },
+            "required": [
+              "current_base"
+            ]
           }
         },
         {
@@ -358,6 +444,18 @@
             "properties": {
               "status": {
                 "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Classification changed"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/classification_changed"
               }
             }
           }
@@ -374,6 +472,21 @@
             "properties": {
               "status": {
                 "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ]
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation required"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_required"
               }
             }
           }
@@ -390,6 +503,18 @@
             "properties": {
               "status": {
                 "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Live trading unavailable"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/live_unavailable"
               }
             }
           }
@@ -406,6 +531,21 @@
             "properties": {
               "status": {
                 "const": 503
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ]
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Changes are frozen"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/control_stream_frozen"
               }
             }
           }
@@ -422,6 +562,18 @@
             "properties": {
               "status": {
                 "const": 503
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": true
+              },
+              "title": {
+                "const": "Temporarily unavailable"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/journal_unavailable"
               }
             }
           }
@@ -438,6 +590,18 @@
             "properties": {
               "status": {
                 "const": 429
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": true
+              },
+              "title": {
+                "const": "Too many requests"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/rate_limited"
               }
             }
           }
@@ -460,7 +624,31 @@
               },
               "retryable": {
                 "const": false
+              },
+              "title": {
+                "const": "Result unknown"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/outcome_unknown"
               }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "not": {
+                  "const": "stale_base"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "current_base"
+              ]
             }
           }
         }
@@ -508,7 +696,7 @@
       ]
     },
     "StepUpEvidence": {
-      "description": "Journal spec \u00a79.2's evidence, mirroring mandate-identity's StepUpEvidence.",
+      "description": "Journal spec \u00a79.2's evidence, mirroring mandate-identity's StepUpEvidence: the challenge's ULID, when the user verified, and how (identity spec \u00a76.1, \u00a77.3; `live` takes `passkey` only).",
       "type": "object",
       "required": [
         "assertion_id",
@@ -518,13 +706,16 @@
       "additionalProperties": false,
       "properties": {
         "assertion_id": {
-          "$ref": "common.schema.json#/$defs/Id"
+          "$ref": "common.schema.json#/$defs/EventId"
         },
         "authenticated_at": {
           "$ref": "common.schema.json#/$defs/Timestamp"
         },
         "method": {
-          "$ref": "common.schema.json#/$defs/Id"
+          "enum": [
+            "passkey",
+            "cli_confirm"
+          ]
         }
       }
     },

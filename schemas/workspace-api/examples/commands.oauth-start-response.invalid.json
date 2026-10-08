@@ -22,5 +22,35 @@
     "set": {
       "/authorization_url": "https://broker.example/oauth/authorize\n"
     }
+  },
+  {
+    "label": "a capitalised secret member",
+    "set": {
+      "/Client_Secret": "x"
+    }
+  },
+  {
+    "label": "a vault reference",
+    "set": {
+      "/vault_ref": "x"
+    }
+  },
+  {
+    "label": "auto: no /authorization_url",
+    "remove": [
+      "/authorization_url"
+    ]
+  },
+  {
+    "label": "auto: no /expires_at",
+    "remove": [
+      "/expires_at"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
   }
 ]

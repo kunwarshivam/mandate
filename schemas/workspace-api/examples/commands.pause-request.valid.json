@@ -10,5 +10,11 @@
     "set": {
       "/record": null
     }
+  },
+  {
+    "label": "auto: /record null",
+    "set": {
+      "/record": null
+    }
   }
 ]

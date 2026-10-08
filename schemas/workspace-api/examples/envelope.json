@@ -25,7 +25,16 @@
     "unauthenticated",
     "step_up_required",
     "journal_unavailable",
-    "outcome_unknown"
+    "outcome_unknown",
+    "forbidden",
+    "not_found",
+    "invalid",
+    "idempotency_conflict",
+    "stale_base",
+    "classification_changed",
+    "live_unavailable",
+    "control_stream_frozen",
+    "rate_limited"
   ],
   "Effect": [
     "none",
@@ -79,11 +88,51 @@
         "us_equity"
       ],
       "message": "Not a subset of the organization's."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "organization",
+      "value": "5000",
+      "ancestor_level": "platform",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "workspace",
+      "value": "5000",
+      "ancestor_level": "platform",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "platform",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "organization",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
     }
   ],
   "Problem": [
     {
-      "type": "about:blank",
+      "type": "https://mandate.dev/problems/invalid",
       "status": 422,
       "code": "invalid",
       "title": "Invalid request",
@@ -100,13 +149,13 @@
       ]
     },
     {
-      "type": "about:blank",
+      "type": "https://mandate.dev/problems/journal_unavailable",
       "status": 503,
       "code": "journal_unavailable",
-      "title": "Unavailable",
-      "effect": "unknown",
-      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
-      "retryable": false,
+      "title": "Temporarily unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
       "violations": []
     },
     {
@@ -118,6 +167,155 @@
       "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
       "retryable": false,
       "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/stale_base",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [],
+      "current_base": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_required",
+      "status": 401,
+      "code": "step_up_required",
+      "title": "Confirmation required",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/unauthenticated",
+      "status": 401,
+      "code": "unauthenticated",
+      "title": "Sign in required",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/forbidden",
+      "status": 403,
+      "code": "forbidden",
+      "title": "Not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/not_found",
+      "status": 404,
+      "code": "not_found",
+      "title": "Not found",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/idempotency_conflict",
+      "status": 409,
+      "code": "idempotency_conflict",
+      "title": "Key already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/classification_changed",
+      "status": 409,
+      "code": "classification_changed",
+      "title": "Classification changed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_required",
+      "status": 401,
+      "code": "step_up_required",
+      "title": "Confirmation required",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/live_unavailable",
+      "status": 409,
+      "code": "live_unavailable",
+      "title": "Live trading unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/control_stream_frozen",
+      "status": 503,
+      "code": "control_stream_frozen",
+      "title": "Changes are frozen",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/control_stream_frozen",
+      "status": 503,
+      "code": "control_stream_frozen",
+      "title": "Changes are frozen",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/rate_limited",
+      "status": 429,
+      "code": "rate_limited",
+      "title": "Too many requests",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [
+        {
+          "kind": "schema",
+          "path": "/a",
+          "code": "type",
+          "message": "m"
+        }
+      ]
+    },
+    {
+      "type": "https://mandate.dev/problems/stale_base",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [],
+      "current_base": "draft_7"
     }
   ],
   "Actor": [
@@ -133,9 +331,14 @@
   ],
   "StepUpEvidence": [
     {
-      "assertion_id": "asr_01JBH3C0Q0",
+      "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
       "authenticated_at": "2026-10-08T14:30:00.000000000Z",
       "method": "passkey"
+    },
+    {
+      "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+      "method": "cli_confirm"
     }
   ],
   "StepUpStatus": [
@@ -151,7 +354,9 @@
   ],
   "PolicyLevel": [
     "platform",
-    "mandate"
+    "mandate",
+    "organization",
+    "workspace"
   ],
   "PolicyValue": [
     "0.25",

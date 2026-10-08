@@ -23,6 +23,16 @@
     },
     "as_of": {
       "$ref": "../common.schema.json#/$defs/AsOf"
+    },
+    "dropped": {
+      "description": "The JSON pointers of request members an API-7 operation dropped rather than refused (DEC-682 item 27). Absent when nothing was dropped.",
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)+$"
+      }
     }
   },
   "description": "The 202 of an owner command, a kill switch, or a revoke (\u00a75.4). step_up_status is the kill switch's alone, advisory.",

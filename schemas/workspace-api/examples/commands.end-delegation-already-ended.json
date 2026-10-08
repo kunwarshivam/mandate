@@ -1,0 +1,14 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-08T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "agent:ws_1:agt_1",
+      "seq": 9,
+      "hash": "sha256:abababababababababababababababababababababababababababababababab",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    }
+  ],
+  "outcome": "already_ended"
+}

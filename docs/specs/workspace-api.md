@@ -157,20 +157,26 @@ the journal is the only channel (DEC-17).
   classification, phase, effect) are closed sets; a new value is a new major version, so an old
   client never meets a verdict it cannot render.
 - Each response carries `api_version` and the server build digest, so a record screen names what
-  rendered it (mandate spec §10's UI build covers the client half).
+  rendered it (mandate spec §10's UI build covers the client half). A problem document (§3.5) is
+  the exception: it is not wrapped in the envelope, and its `type` and `code` say what it is.
 
 ### 3.3 Authentication and sessions
 
 Owned by the [identity spec](identity.md). What the API requires of it:
 
 1. **Browser sessions** in a `Secure`, `HttpOnly`, `SameSite=Strict` cookie, with a CSRF defence on
-   every mutating call: the `Origin` header must equal the deployment's configured app origin
-   (`https://app.owlhead.ai` for the demo), and the call must carry the custom request header
-   `X-Mandate-Request: 1`, which a cross-site form cannot set. A mutating call failing either check
-   is refused before any read or write with 403 `forbidden`, `effect: none`, `retryable: false`.
-   The check applies to every route, the API-7 operations included: a call that fails it is not
-   authenticated as the owner, which API-7 allows as a refusal (DEC-682 item 19). No bearer token is
-   ever stored in browser storage (brief §5, rule 6 row).
+   every mutating call that the session cookie authenticates. The `Origin` header must equal the
+   deployment's configured app origin (`https://app.owlhead.ai` for the demo), and the call must
+   carry the custom request header `X-Mandate-Request: 1`, which a cross-site form cannot set.
+   - The order is fixed: authentication first (401 `unauthenticated`, one body, API-1), then the
+     CSRF check (403 `forbidden`, `effect: none`, `retryable: false`), before any other read or
+     write.
+   - A call authenticated by a sender-constrained token (item 2: the CLI, a client, a service
+     account) sends no `Origin` and is not checked; a cross-site page cannot produce its proof.
+   - The check applies to the API-7 operations too. A cookie call that fails it is not the owner's
+     authenticated call, so its refusal is API-7's "failed authentication", not a new reason
+     (DEC-682 item 19).
+   - No bearer token is ever stored in browser storage (brief §5, rule 6 row).
 2. **CLI, client, and service-account tokens are sender-constrained** (DPoP, RFC 9449; identity
    spec §6.3, §6.5, §6.6): each request carries a proof signed by the key the token was issued to,
    and the API refuses a token presented without a matching proof. A copied token alone is useless.
@@ -203,7 +209,14 @@ DEC-681 item 5), and a client can compute the same id before it sends the call:
   integer from 0 in batch order.
 - Write it in journal spec §4's canonical form and take its SHA-256.
 - The first 128 bits of that digest, most significant first, are the ULID. It is written as 26
-  Crockford base-32 digits (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`), uppercase.
+  Crockford base-32 digits (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`), uppercase: 130 bits, so the
+  128-bit value is left-padded with two zero bits and the first digit is `0` to `7`.
+- A call that commits several events (§5.3, §5.6) reports position 0's id as its `command_id`: for
+  a revoke on compromise, the kill switch's.
+- **Worked vector.** Workspace `ws_01`, principal `user_7`, operation `kill_switch`, key
+  `k1Z-9_aaaaaaaaaa`, one event: the canonical object is
+  `{"key":"k1Z-9_aaaaaaaaaa","operation":"kill_switch","principal":"user_7","workspace":"ws_01"}`,
+  and the event id is `7KXV6BGDW36KYC7RE5BPQG28Z0`.
 
 The ULID's time component carries no meaning (journal spec §3), so this is a valid id. Then:
 
@@ -234,7 +247,7 @@ Errors are RFC 9457 problem documents with these members:
 | Code | Status | When |
 |---|---|---|
 | `unauthenticated` | 401 | No valid session or token |
-| `forbidden` | 403 | The role or scope may not do this (never sent for a resource the principal cannot see: that is 404) |
+| `forbidden` | 403 | The role or scope may not do this (never sent for a resource the principal cannot see: that is 404), or a cookie-authenticated mutating call failed the CSRF check of §3.3 item 1 |
 | `not_found` | 404 | Absent, or in another workspace (API-9) |
 | `invalid` | 422 | Schema, canonical form, or a value out of range |
 | `idempotency_conflict` | 409 | Same key, different body |
@@ -524,6 +537,15 @@ Members are listed in full. Every request also carries `Idempotency-Key`. `step_
 is always `{artifact: "sha256:…", ui_build: "sha256:…"}`: the rendered record screen the client
 uploaded to the artifact store, and the build that rendered it (brief §4.1, mandate spec §10).
 
+**The API-7 operations are lenient about their bodies** (DEC-682 item 27). Their shapes below are
+what a client should send, but only their hard members are strict: the path ids, the kill switch's
+`scope`, an owner exit's `instrument`, and a Skip's `verdict` and `content_hash`. Any other member
+that is omitted, unknown, or fails to parse is dropped, not refused, and the `202` lists each
+dropped member's JSON pointer in `dropped`. An owner exit's bid confirmation is all or nothing: if
+any part is missing or unparsable, every part sent is dropped and equities wait for the session.
+This applies to pause, holding new openings, the kill switch, an owner exit, Skip, ending a
+delegation, and away mode; an `approved` and every other operation is judged strictly.
+
 ### 5.1 Confirm a mandate version
 
 `POST /mandate-versions/{mandate_version}/confirm`
@@ -571,11 +593,12 @@ Application is the executor's `MandateVersionApplied`, which may still reject (f
 | `content_hash` | ref | The content hash of the request the client rendered (API-12) |
 | `record` | record | The rendered D6 screen, including whether model output was expanded |
 | `step_up` | step-up or `null` | Required for `approved`, bound to the content hash (or to §5.3's digest with a delegation). `null` for `skipped` |
-| `delegation` | `null` or `{preview_id, mandate_version}` | The shape chosen on the card (§5.3) |
+| `delegation` | `null` or `{preview_id, mandate_version}` | The shape chosen on the card (§5.3); always `null` for `skipped` (a Skip naming one has it dropped, below) |
 
 The API refuses only: an unauthenticated or non-user principal, a user who is not listed in
 `autonomy.approval.approvers` and holding an approving role (§3.7), an unknown approval, and, for
-`approved` only, missing or unbound step-up. It does not judge the deadline, the quorum,
+`approved` only, missing or unbound step-up: bound to the content hash, or with a delegation to the
+preview's `step_up_digest` (§5.3), else 401 `step_up_required`. It does not judge the deadline, the quorum,
 independence, or re-validation: the runtime does (checks 1 to 12). A `skipped` is never refused for
 anything else (API-7).
 

@@ -127,5 +127,6 @@
       ]
     }
   },
-  "description": "POST /kill-switch (\u00a75.4). Only scope is required: a missing optional member never refuses it (API-7). No org scope: the org kill switch is one workspace call per workspace (DEC-436 item 13)."
+  "description": "POST /kill-switch (\u00a75.4). Only scope is required: a missing optional member never refuses it (API-7). No org scope: the org kill switch is one workspace call per workspace (DEC-436 item 13). API-7 leniency (DEC-682 item 27): this schema is what a client should send; the server is lenient. Only `scope` is strict. An omitted, unknown, or unparsable `environment_shown`, `record`, `step_up`, or `owner_exit` (or any other member) is dropped, and the switch still cancels and stops; without a valid bid confirmation, equity sells wait for the session. The 202 lists every dropped member's JSON pointer in `dropped`.",
+  "x-api7-lenient": true
 }

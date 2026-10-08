@@ -14,5 +14,29 @@
         "mandate_version": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
       }
     }
+  },
+  {
+    "label": "auto: /verdict = \"approved\"",
+    "set": {
+      "/verdict": "approved"
+    }
+  },
+  {
+    "label": "auto: /verdict = \"skipped\"",
+    "set": {
+      "/verdict": "skipped"
+    }
+  },
+  {
+    "label": "auto: /step_up null",
+    "set": {
+      "/step_up": null
+    }
+  },
+  {
+    "label": "auto: /delegation null",
+    "set": {
+      "/delegation": null
+    }
   }
 ]

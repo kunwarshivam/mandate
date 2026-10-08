@@ -19,5 +19,41 @@
       "/floor": null,
       "/step_up": null
     }
+  },
+  {
+    "label": "auto: /bid null",
+    "set": {
+      "/bid": null
+    }
+  },
+  {
+    "label": "auto: /bid_size null",
+    "set": {
+      "/bid_size": null
+    }
+  },
+  {
+    "label": "auto: /quoted_at null",
+    "set": {
+      "/quoted_at": null
+    }
+  },
+  {
+    "label": "auto: /floor null",
+    "set": {
+      "/floor": null
+    }
+  },
+  {
+    "label": "auto: /record null",
+    "set": {
+      "/record": null
+    }
+  },
+  {
+    "label": "auto: /step_up null",
+    "set": {
+      "/step_up": null
+    }
   }
 ]

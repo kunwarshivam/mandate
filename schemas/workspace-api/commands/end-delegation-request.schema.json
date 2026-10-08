@@ -16,5 +16,6 @@
       ]
     }
   },
-  "description": "POST /agents/{agent_id}/delegations/{delegation_id}/end (\u00a75.3): reducing, no step-up. {} is valid."
+  "description": "POST /agents/{agent_id}/delegations/{delegation_id}/end (\u00a75.3): reducing, no step-up. {} is valid. API-7 leniency (DEC-682 item 27): this schema is what a client should send; the server is lenient. No member is strict: an omitted, unknown, or unparsable `record` (or any other member) is dropped. The 202 lists every dropped member's JSON pointer in `dropped`.",
+  "x-api7-lenient": true
 }

@@ -71,5 +71,6 @@
       ]
     }
   },
-  "description": "POST /agents/{agent_id}/exits (\u00a75.4). Bid members are null in the regular session and for crypto; without valid step-up it is still routed (API-7)."
+  "description": "POST /agents/{agent_id}/exits (\u00a75.4). Bid members are null in the regular session and for crypto; without valid step-up it is still routed (API-7). API-7 leniency (DEC-682 item 27): this schema is what a client should send; the server is lenient. Only `instrument` is strict: without it there is nothing to exit. An unknown or unparsable member is dropped. A bid confirmation (`bid`, `bid_size`, `quoted_at`, `floor`) is all or nothing: if any of its members is missing or unparsable, every one sent is dropped and equities wait for the session. Without valid step-up it is still routed and loses only the owner-exit privilege (mandate spec \u00a76.1). The 202 lists every dropped member's JSON pointer in `dropped`.",
+  "x-api7-lenient": true
 }

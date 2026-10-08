@@ -6,5 +6,17 @@
       "/warning_shown": null,
       "/step_up": null
     }
+  },
+  {
+    "label": "auto: /record null",
+    "set": {
+      "/record": null
+    }
+  },
+  {
+    "label": "auto: /step_up null",
+    "set": {
+      "/step_up": null
+    }
   }
 ]
