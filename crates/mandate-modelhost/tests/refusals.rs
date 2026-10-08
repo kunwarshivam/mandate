@@ -120,7 +120,6 @@ fn apply(case: &mut Case, change: Change) {
 
 /// Every one-input disagreement is its own typed refusal, and no refusal is an output (INF-4).
 #[test]
-#[ignore = "pending E15-13"]
 fn every_disagreement_is_its_own_refusal_and_no_output() {
     let fast = |key| Refusal::ParamValue { key };
     let rows = [
@@ -158,7 +157,6 @@ fn every_disagreement_is_its_own_refusal_and_no_output() {
 /// FT-4: an output exists only when the pin, the registry entry and the host agree. A random
 /// non-empty set of the six identity changes is refused at the first check any of them fails.
 #[test]
-#[ignore = "pending E15-13"]
 fn an_output_exists_only_when_pin_registry_and_host_agree() {
     assert_eq!(
         Case::rising().run(),
@@ -202,7 +200,6 @@ fn an_output_exists_only_when_pin_registry_and_host_agree() {
 /// random cents on the last `n` sessions to 2026-10-07 and windows `fast < slow <= n`; `Long`
 /// exactly when `fast_sum × slow > slow_sum × fast` in `i128` cents.
 #[test]
-#[ignore = "pending E15-13"]
 fn the_signal_is_the_window_means_comparison_and_evaluation_is_deterministic() {
     let calendar = ExchangeCalendar::us_equities().unwrap();
     let (mut sessions, mut day) = (Vec::new(), Date::parse("2026-09-01").unwrap());

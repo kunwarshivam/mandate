@@ -23,7 +23,6 @@ fn a_refusal_names_the_failed_check_and_no_value() {
 /// DEC-504 item 2 and DEC-518: the host computes the content object from the bytes it was built
 /// with, so it equals the object written from the files on disk; it has content for no other model.
 #[test]
-#[ignore = "pending E15-13"]
 fn the_content_object_lists_the_source_bytes_the_host_was_built_from() {
     let text = oracle_content();
     let hash = Digest::of(text.as_bytes());
@@ -41,7 +40,6 @@ fn the_content_object_lists_the_source_bytes_the_host_was_built_from() {
 /// DEC-157 item 4: `Long` is the one output; `Flat`, a tie included, is none (100.5 and 100 are
 /// not above 304/3 and 100).
 #[test]
-#[ignore = "pending E15-13"]
 fn a_long_is_the_one_output_and_a_flat_or_a_tie_is_none() {
     let rising = Case::rising().run();
     assert_eq!(rising, Ok(long("2026-10-07T20:00:00Z")), "102 above 304/3");
@@ -55,7 +53,6 @@ fn a_long_is_the_one_output_and_a_flat_or_a_tie_is_none() {
 /// run clock (X-3, mandate spec §8.2): an early close's 13:00 EST with the holiday before it
 /// skipped, a Monday morning reading Friday's 16:00 EDT, and a parsed calendar's own early close.
 #[test]
-#[ignore = "pending E15-13"]
 fn as_of_is_the_last_completed_sessions_close_in_the_calendar_given() {
     let thanksgiving = ["2025-11-25", "2025-11-26", "2025-11-28"];
     let early = Case::new(thanksgiving, RISING, "2025-11-28T19:00:00Z").run();
