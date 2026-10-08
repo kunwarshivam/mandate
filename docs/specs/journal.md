@@ -446,7 +446,8 @@ anchors reveal only hashes.
 | Platform staff (managed mode) | **Break-glass only**, with customer approval, journaled to a stream the customer can read |
 
 Every read of records outside normal product views and every export is journaled (`RecordsAccessed`,
-`ExportCreated`; §9.8) before it is served. In hybrid mode the platform receives anchors (hashes) only.
+`ExportCreated`; §9.8) before it is served. In hybrid mode the platform receives anchors (hashes)
+only.
 
 ## 8. Replay, snapshots, and versioning
 
