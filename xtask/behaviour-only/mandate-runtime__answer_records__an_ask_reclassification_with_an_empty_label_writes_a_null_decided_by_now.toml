@@ -1,0 +1,8 @@
+file = "crates/mandate-runtime/tests/answer_records.rs"
+test = "an_ask_reclassification_with_an_empty_label_writes_a_null_decided_by_now"
+reason = """
+E8-3's (DEC-533 items 3 and 4): the runtime's answer records already exist, so the test sees the
+writer write a text `decided_by_now` for an `ask` re-classification whose label is empty
+(DEC-830), rather than a stub's report. The runtime writer change deletes this file with its
+`#[ignore]` line.
+"""
