@@ -1,6 +1,6 @@
 //! The replay: one journaled event into the state, effect-free (journal spec §8).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
@@ -1225,9 +1225,11 @@ fn protection_changed(
         }
         "unprotected_start" | "passive_start" => {
             let passive = action == "passive_start";
-            if let Some(entry) = optional_text(payload, "bracket") {
-                let entry = ClientOrderId::parse(entry)?;
-                let detail = state.details.entry(entry).or_default();
+            let bracket = optional_text(payload, "bracket")
+                .map(ClientOrderId::parse)
+                .transpose()?;
+            if let Some(entry) = &bracket {
+                let detail = state.details.entry(entry.clone()).or_default();
                 detail.bracket_since = detail.bracket_since.or(Some(at));
             }
             if flag(payload, "replacing")
@@ -1283,6 +1285,7 @@ fn protection_changed(
                     ended_at: None,
                     alerted: false,
                     uncovered: false,
+                    bracket,
                 });
             }
         }
@@ -1305,12 +1308,21 @@ fn protection_changed(
         }
         "rung_short" => {}
         "unprotected_end" if flag(payload, "acknowledged") => {
-            state.awaiting.remove(&instrument);
-            if let Some(open) = state
-                .unprotected
-                .iter_mut()
-                .find(|interval| interval.instrument == instrument && interval.ended_at.is_none())
-            {
+            let entries: BTreeSet<ClientOrderId> = state
+                .awaiting
+                .remove(&instrument)
+                .into_iter()
+                .flatten()
+                .filter_map(|id| id.protected_entry())
+                .collect();
+            if let Some(open) = state.unprotected.iter_mut().find(|interval| {
+                interval.instrument == instrument
+                    && interval.ended_at.is_none()
+                    && interval
+                        .bracket
+                        .as_ref()
+                        .is_none_or(|entry| entries.contains(entry))
+            }) {
                 open.ended_at = Some(at);
             }
         }
@@ -1348,11 +1360,14 @@ fn protection_changed(
                     .ladders
                     .insert((instrument.clone(), lone.intent.clone()), lone);
             }
-            if let Some(open) = state
-                .unprotected
-                .iter_mut()
-                .find(|interval| interval.instrument == instrument && interval.ended_at.is_none())
-            {
+            let named = optional_text(payload, "bracket")
+                .map(ClientOrderId::parse)
+                .transpose()?;
+            if let Some(open) = state.unprotected.iter_mut().find(|interval| {
+                interval.instrument == instrument
+                    && interval.ended_at.is_none()
+                    && (named.is_none() || interval.bracket == named)
+            }) {
                 if ends {
                     open.ended_at = Some(at);
                 } else if uncovered {

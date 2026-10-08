@@ -23,6 +23,7 @@ use mandate_journal::{
 };
 
 pub mod cold;
+pub mod export;
 
 #[derive(Debug, Subcommand)]
 pub enum JournalCommand {
@@ -33,6 +34,9 @@ pub enum JournalCommand {
     /// order from a trusted start, then an anchor and its timestamp token when they are given.
     /// Exits with an error on any failure, and on a token until its signature can be checked.
     VerifyCold(cold::VerifyColdArgs),
+    /// Write one stream of the workspace's Postgres journal as a segment file `verify` reads.
+    /// Refuses an existing file and a stream with no event.
+    Export(export::ExportArgs),
 }
 
 #[derive(Debug, Args)]
@@ -129,6 +133,10 @@ pub enum Refusal {
     ExportStreams,
     /// The export's `stream_id` is not one of journal spec §2.
     ExportStreamId,
+    /// `journal export` was given a file that exists; an export never replaces one (DEC-522).
+    ExportExists,
+    /// `journal export` was asked for a stream with no event, whose segment would verify nothing.
+    ExportEmpty,
     /// A path the cold command was given, or a file inside its export, could not be read: the
     /// export is not a directory, or an I/O failure (DEC-490 item 4).
     Unreadable,
@@ -147,6 +155,8 @@ impl Refusal {
             Self::AnchorStream => "anchor_covers_another_stream",
             Self::ExportStreams => "export_mixes_streams",
             Self::ExportStreamId => "export_stream_id_invalid",
+            Self::ExportExists => "export_file_exists",
+            Self::ExportEmpty => "export_stream_empty",
             Self::Unreadable => "path_unreadable",
             Self::ColdExportIncomplete => "cold_export_incomplete",
         }

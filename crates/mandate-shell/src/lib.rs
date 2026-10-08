@@ -40,6 +40,7 @@
 
 pub mod adapters;
 pub mod cli;
+pub mod control;
 pub mod envelope;
 mod error;
 pub mod host;

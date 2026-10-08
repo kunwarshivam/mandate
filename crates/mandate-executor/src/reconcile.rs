@@ -696,6 +696,8 @@ pub(crate) mod tests {
             buying_power: Usd::parse(cash)?,
             non_marginable_buying_power: Usd::parse(cash)?,
             accrued_fees: Usd::ZERO,
+            last_equity: Usd::parse(cash)?,
+            maintenance_margin: Usd::ZERO,
         })
     }
 
@@ -2410,6 +2412,8 @@ pub(crate) mod tests {
             buying_power: Usd::parse(text("buying_power")?)?,
             non_marginable_buying_power: Usd::parse(text("non_marginable_buying_power")?)?,
             accrued_fees: Usd::parse(text("accrued_fees")?)?,
+            last_equity: Usd::parse(text("equity")?)?,
+            maintenance_margin: Usd::ZERO,
         })
     }
 
@@ -2465,7 +2469,9 @@ pub(crate) mod tests {
     /// which differs from the vectors' `snapshot_fees`, comes back member for member in §9.2's
     /// types, so a writer that ignores its argument and answers the vector's values fails here
     /// (#441 round 2, m1). The expected payload is written out by hand from the account, not read
-    /// back through the writer or `account_fields`.
+    /// back through the writer or `account_fields`. The account's `last_equity` and
+    /// `maintenance_margin` are set and differ from its equity, and the closed schema carries
+    /// neither, so a writer that journaled either fails here too (DEC-524 item 3).
     #[test]
     fn the_fee_steps_snapshot_reads_the_account_it_is_given() -> Result<(), ExecutorError> {
         let vector = vector_snapshot_fees()?;
@@ -2481,6 +2487,8 @@ pub(crate) mod tests {
             buying_power: Usd::parse("62675")?,
             non_marginable_buying_power: Usd::parse("4321.09")?,
             accrued_fees: Usd::parse("1.23")?,
+            last_equity: Usd::parse("29999.99")?,
+            maintenance_margin: Usd::parse("7500.25")?,
         };
         let expected: Map<String, Json> = [
             ("status", Json::from("ACCOUNT_UPDATED")),

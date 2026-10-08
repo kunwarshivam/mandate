@@ -1,0 +1,23 @@
+[package]
+name = "mandate-modelhost"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The model host: a pinned quant model's typed output, outside the production cycle and the shell (DEC-503, DEC-504)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-backtest.workspace = true
+mandate-canon.workspace = true
+mandate-num.workspace = true
+mandate-runtime.workspace = true
+mandate-spec.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

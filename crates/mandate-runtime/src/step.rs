@@ -817,16 +817,28 @@ fn activated(
     ])
 }
 
+/// The `ObservationRecorded` payload of journal spec §9.1: the closed schema's four members, with the
+/// cut-off as a §4.7 timestamp and the data as the stored artifact's digest (DEC-503 item 7). An
+/// empty `source`, which §9.1's `text` refuses, is refused here rather than at append, where the batch
+/// would go into doubt and hold every later input, the kill switch included, until restart.
 fn observed(observation: &Observation) -> Result<Value, RuntimeError> {
-    let instrument = match &observation.instrument {
-        Some(instrument) => payload::text(instrument.as_str()),
-        None => Value::Null,
-    };
+    if observation.source.is_empty() {
+        return Err(payload::non_canonical("source"));
+    }
     payload::object(vec![
         ("source", payload::text(&observation.source)),
-        ("instrument", instrument),
-        ("at", payload::seconds_text(observation.at)),
-        ("data", observation.data.clone()),
+        (
+            "instrument_id",
+            observation
+                .instrument_id
+                .as_ref()
+                .map_or(Value::Null, |instrument| payload::text(instrument.as_str())),
+        ),
+        ("as_of", payload::stamp(observation.as_of, "as_of")?),
+        (
+            "data_ref",
+            payload::text(&format!("sha256:{}", observation.data_ref)),
+        ),
     ])
 }
 

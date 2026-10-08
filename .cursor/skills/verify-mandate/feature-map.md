@@ -282,6 +282,9 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
   `crates/mandate-runtime/tests/properties.rs` (26 properties against three oracles that share no
   code with the crate: a shadow fold rebuilt from the emitted drafts' payloads, a separately written
   restriction lattice, and an interval accumulator for durations),
+  `crates/mandate-runtime/tests/observation.rs` (`ObservationRecorded` as journal spec §9.1 closes
+  it, checked against `mandate-journal`'s registered schema: E15-13, slice R0 of the
+  [first paper trade brief](../../../docs/project/tasks/first-paper-trade.md)),
   `crates/mandate-runtime/tests/common/mod.rs` (the in-memory shell, which can put an append in doubt,
   fence a writer, and crash and restart), and `crates/mandate-runtime/tests/golden-journal.json` (the
   committed fold output that pins `FOLD_VERSION`). Planted bugs per test: the task brief.
@@ -313,7 +316,8 @@ crates.
   after its `OrderSubmitted` committed in the same run; `src/map.rs` the total mappings with no
   permitting arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
-  `src/bin/mandate-tracer.rs` the binary; `src/paper.rs` the DEC-466 one-run loader that verifies the
+  `src/bin/mandate-tracer.rs` the binary; `src/control.rs` the deployment input from the control
+  stream (E19-11, DEC-505; tests in `crates/mandate-shell/tests/control.rs`); `src/paper.rs` the DEC-466 one-run loader that verifies the
   reviewed E7-7 AAPL artifacts and binds the bytes it checked, reads the GET-only broker preflight
   (including the trailing window's IEX minute bars, DEC-471) and the liquidity facts into one
   `PaperFacts` snapshot, refuses any missing, stale, or
@@ -435,7 +439,12 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-alpaca/tests/reads.rs` and the latest-quote scenarios under
   `crates/mandate-alpaca/tests/fixtures/alpaca-data/`; for DEC-471,
   `crates/mandate-alpaca/tests/bars.rs` (request construction and its refusals, exact volumes, and
-  every refused answer over a scripted transport) and the bars cases in `src/http.rs`. In prose: the hand cases of the brief
+  every refused answer over a scripted transport) and the bars cases in `src/http.rs`; for A1
+  (E7-19, [DEC-524](../../../docs/project/decisions/DEC-524.md)),
+  `crates/mandate-alpaca/tests/margin.rs` (`last_equity` and `maintenance_margin` parsed from the
+  recorded accounts and an edited body whose members all differ) and
+  `crates/mandate-executor/tests/margin.rs` (maintenance excess, hand cases and a whole-cent `i128`
+  property). In prose: the hand cases of the brief
   (the submission chain, the `Unknown` lookup discipline, the
   status mapping, the protective and kill-switch sequences, the ladder, the restriction table, error
   codes), twelve `fault::crash_at_*` cases at the enumerated submission steps, and property tests
@@ -1010,13 +1019,20 @@ proves each pending test fails on them (DEC-110).
   (`docs/project/tasks/first-paper-trade.md`, P0 and X-12); DEC-510, DEC-520.
 - **Code:** `crates/mandate-cli/src/postgres.rs` (`JournalArgs`, the `--journal` and `--store`
   options D1, D2 and V0 flatten; `PgControlJournal`, `mandate-journal-pg` behind `ControlJournal`,
-  appending through J0's artifact-aware append with the `mandate-artifacts-fs` store), stubbed
-  pending E10-16.
+  appending through J0's artifact-aware append with the `mandate-artifacts-fs` store; the DSN a
+  `SecretString` exposed only to `PgJournal::from_dsn`).
 - **Tests:** `crates/mandate-cli/tests/postgres.rs` (the control-stream vectors byte for byte, a
   registration refused until its object is in the store, as `MemoryJournal` answers, and
   ownership, fencing and retries as the CLI tests' journal answers; each starts with a
   database-free DSN property; the options parse and hide the DSN), and the in-module
   `waiting_sleeps_for_the_whole_delay`.
+- **`journal export` (V0, DEC-522):** `crates/mandate-cli/src/journal/export.rs` (one stream to
+  the §6.2 segment `journal verify` reads, written whole to `<out>.tmp` and published by a hard
+  link that never replaces a file), and `main`, synchronous so the journal's runtime is the only
+  one; its tests are the four export tests in `crates/mandate-cli/tests/postgres.rs` (the vectors'
+  segment, line for line, verified with its store; an existing file and an empty stream refused;
+  the binary exporting and verifying; no refusal naming the DSN or creating a file), each running
+  without a database until it reaches the journal.
 - **Run:** `MANDATE_PG_URL=postgres://… cargo nextest run -p mandate-cli --test postgres`, or
   `cargo xtask ci postgres`, which runs `mandate-cli` beside `mandate-journal-pg`.
 
@@ -1189,6 +1205,25 @@ proves each pending test fails on them (DEC-110).
   - `crates/mandate-marketdata/tests/corporate_actions.rs`, `actions.rs`, and `download.rs`;
   - `crates/mandate-cli/tests/inspect.rs` and `download.rs`: the exact report lines.
 - **Run:** `cargo nextest run -p mandate-time -p mandate-marketdata -p mandate-cli`.
+
+## Quant model host (E15-13)
+
+- **Spec:** mandate spec §8.1 and §8.2 (the pin, the content hash, `as_of` as the data cut-off);
+  `docs/project/tasks/first-paper-trade.md` ("The model host", slices M0 to M2, FT-4, FT-5);
+  DEC-503, DEC-504, DEC-517 (the last completed session), DEC-518 (the content object and when
+  its hash is pinned).
+- **Code:** `mandate-modelhost`, `crates/mandate-modelhost/` (layer 8, safety-critical, pure):
+  `src/lib.rs` (`content`,
+  `evaluate`, `Refusal`), `src/ma_crossover.rs` (the model's own host code and the listed sources),
+  with the crossover itself in `crates/mandate-backtest/src/strategy/ma_crossover.rs`.
+- **Tests:** `crates/mandate-modelhost/tests/host.rs` (the content object against canonical JSON
+  written by hand from the files on disk, 1.0.0's content hash pinned as a literal (DEC-518 item 1),
+  the output mapping, `as_of` on early closes, weekends and
+  a given calendar) and `crates/mandate-modelhost/tests/refusals.rs` (one refusal per failed check
+  in the brief's order, each refusal's stable code, FT-4 over all 63 sets of identity changes, the
+  check order over every pair of stages, and the signal against an `i128` oracle with ties and a
+  clock-independence check), with fixtures in `tests/common/mod.rs`.
+- **Run:** `cargo nextest run -p mandate-modelhost`.
 
 ## Research-agent spike (E17-0)
 

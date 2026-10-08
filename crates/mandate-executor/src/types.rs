@@ -379,6 +379,10 @@ pub struct UnprotectedInterval {
     /// open and bounded until the next interval in the instrument starts (DEC-367 item 4, #468's
     /// round-4 review, m2).
     pub uncovered: bool,
+    /// The bracket entry whose partial fill opened it, when one did. Only an `unprotected_end`
+    /// naming that entry, or the acknowledgment of the OCO placed for it, ends this interval, so a
+    /// second bracket in the instrument never closes it (§5.4; DEC-521 item 3, backlog E4).
+    pub bracket: Option<ClientOrderId>,
 }
 
 /// One difference a reconciliation found.
@@ -593,6 +597,13 @@ pub struct BrokerAccount {
     pub buying_power: Usd,
     pub non_marginable_buying_power: Usd,
     pub accrued_fees: Usd,
+    /// The broker's equity at the prior session's close (§7.2's `last_equity`): the prior-close
+    /// equity §9.2's `legacy_pdt` regime compares with its threshold. Read from the broker, never
+    /// journaled: `AccountStateObserved` and `AccountSnapshotRecorded` are closed schemas (DEC-524).
+    pub last_equity: Usd,
+    /// The broker's maintenance margin requirement, from which [`BrokerAccount::maintenance_excess`]
+    /// derives the excess §9.2's `intraday_margin` regime checks. Never journaled (DEC-524).
+    pub maintenance_margin: Usd,
 }
 
 /// A reject the broker answered with, from which §7.3's restriction table is read.

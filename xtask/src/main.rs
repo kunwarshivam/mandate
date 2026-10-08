@@ -653,13 +653,14 @@ fn workspace_packages(meta: &Metadata) -> Vec<&Package> {
 /// harness's dependency list into the full set of packages its suites can fail on (DEC-497),
 /// without anyone auditing which call reaches which layer.
 fn workspace_closure(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
+    let dirs = member_dirs(meta);
     let direct: BTreeMap<&str, Vec<&str>> = workspace_packages(meta)
         .into_iter()
         .map(|pkg| {
             let deps = pkg
                 .dependencies
                 .iter()
-                .filter(|dep| dep.path.is_some())
+                .filter(|dep| on_member(dep, &dirs))
                 .map(|dep| dep.name.as_str())
                 .collect();
             (pkg.name.as_str(), deps)
@@ -680,6 +681,22 @@ fn workspace_closure(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
         .collect()
 }
 
+/// Each workspace member's directory, by name: where a path dependency on it must point.
+fn member_dirs(meta: &Metadata) -> BTreeMap<&str, &Path> {
+    workspace_packages(meta)
+        .into_iter()
+        .filter_map(|pkg| Some((pkg.name.as_str(), pkg.manifest_path.parent()?)))
+        .collect()
+}
+
+/// Whether `dep` is a path dependency on the workspace member it names, by that member's
+/// directory, not by name alone: a crate outside the workspace can take a member's name (DEC-525).
+fn on_member(dep: &Dependency, dirs: &BTreeMap<&str, &Path>) -> bool {
+    dep.path
+        .as_deref()
+        .is_some_and(|path| dirs.get(dep.name.as_str()) == Some(&path))
+}
+
 fn workspace_has_library() -> Result<bool> {
     let meta = metadata()?;
     Ok(workspace_packages(&meta)
@@ -690,6 +707,10 @@ fn workspace_has_library() -> Result<bool> {
 #[derive(Deserialize)]
 struct Layers {
     impure_crates: Vec<String>,
+    /// Crates planned but not yet created, which a `forbidden_internal` list may already name
+    /// (DEC-525).
+    #[serde(default)]
+    planned: Vec<String>,
     crates: BTreeMap<String, CratePolicy>,
 }
 
@@ -700,6 +721,10 @@ struct CratePolicy {
     pure: bool,
     #[serde(default)]
     allowed_external: Vec<String>,
+    /// Workspace crates this crate may never reach, directly or through any chain of path
+    /// dependencies, dev-dependencies included, whatever the layers allow (DEC-525).
+    #[serde(default)]
+    forbidden_internal: Vec<String>,
 }
 
 enum Layer {
@@ -719,9 +744,15 @@ fn layers() -> Result<()> {
     eprintln!("    layers: checking xtask/layers.toml against cargo metadata");
     let policy: Layers = toml::from_str(&fs::read_to_string("xtask/layers.toml")?)
         .context("parsing xtask/layers.toml")?;
-    let meta = metadata()?;
-    let packages = workspace_packages(&meta);
+    report(layer_problems(&policy, &metadata()?)?, "layers")
+}
+
+/// Every way the workspace in `meta` breaks `policy`.
+fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
+    let packages = workspace_packages(meta);
     let names: BTreeSet<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+    let closure = workspace_closure(meta);
+    let dirs = member_dirs(meta);
     let mut problems = Vec::new();
 
     for listed in policy.crates.keys() {
@@ -731,13 +762,44 @@ fn layers() -> Result<()> {
             ));
         }
     }
+    for (listed, own) in &policy.crates {
+        let unknown = own
+            .forbidden_internal
+            .iter()
+            .filter(|name| !names.contains(name.as_str()) && !policy.planned.contains(name));
+        problems.extend(unknown.map(|name| {
+            format!(
+                "`{listed}` forbids `{name}`, which is neither a workspace member nor in `planned`, \
+                 so a misspelt name would guard nothing (DEC-525)"
+            )
+        }));
+    }
     for pkg in &packages {
         let Some(own) = policy.crates.get(&pkg.name) else {
             problems.push(format!("`{}` has no entry in xtask/layers.toml", pkg.name));
             continue;
         };
         let own_layer = layer_of(own, &pkg.name)?;
+        if let Some(reached) = closure.get(&pkg.name) {
+            problems.extend(forbidden_reached(
+                &pkg.name,
+                &own.forbidden_internal,
+                reached,
+            ));
+        }
         for dep in &pkg.dependencies {
+            if let Some(path) = dep.path.as_deref()
+                && !on_member(dep, &dirs)
+            {
+                problems.push(format!(
+                    "`{}` has a path dependency on `{}`, which is not a workspace member at {}, so \
+                     the layers cannot see what it reaches (DEC-525)",
+                    pkg.name,
+                    dep.name,
+                    path.display()
+                ));
+                continue;
+            }
             let internal = dep.path.is_some() && names.contains(dep.name.as_str());
             if internal {
                 let Some(dep_policy) = policy.crates.get(&dep.name) else {
@@ -788,7 +850,22 @@ fn layers() -> Result<()> {
             }
         }
     }
-    report(problems, "layers")
+    Ok(problems)
+}
+
+/// A problem for each crate in `forbidden` that `name` reaches, `reached` being every workspace
+/// crate it is built on through path dependencies of any kind (DEC-525).
+fn forbidden_reached(name: &str, forbidden: &[String], reached: &BTreeSet<String>) -> Vec<String> {
+    forbidden
+        .iter()
+        .filter(|crate_name| reached.contains(*crate_name))
+        .map(|crate_name| {
+            format!(
+                "`{name}` reaches `{crate_name}`, which its forbidden_internal list in \
+                 xtask/layers.toml rules out (DEC-525)"
+            )
+        })
+        .collect()
 }
 
 /// Rows of `docs/dependencies.md` shaped `| `name` | ecosystem | ...`.
@@ -1398,16 +1475,34 @@ fn mutants_args(
 /// how the run is judged when no directory is exported.
 const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 
+/// The profile every build of the mutants job runs under: no debuginfo, for the `dev` profile and
+/// for the `test` profile that inherits it (DEC-519).
+///
+/// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. The baseline builds only the
+/// mutated packages, so a low-layer mutant's first build compiles the rest of its tested packages'
+/// graph from nothing: a `mandate-time` mutant whose tested packages included `mandate-shell` ran
+/// past the cap on CI's runner (#677). Without debuginfo that build took about a quarter less CPU
+/// time from cold, and nearly half less after a one-file change, measured in DEC-519. Debuginfo
+/// changes no test's verdict, only what a backtrace can name, and the gate reads verdicts. It is set
+/// on the job's children rather than left to the caller, so CI and `cargo xtask check` build
+/// mutants the same way whatever the caller exported.
+const MUTANT_BUILD_PROFILE: [(&str, &str); 2] = [
+    ("CARGO_PROFILE_DEV_DEBUG", "0"),
+    ("CARGO_PROFILE_TEST_DEBUG", "0"),
+];
+
 /// A `cargo` child of the mutants job that builds, with the caller's [`CARGO_TARGET_DIR`] out of its
-/// environment: the pre-flight's `cargo nextest list`, which builds the very packages the run is
-/// about to judge, and the `cargo mutants` run itself. The job's other `cargo` children —
-/// `cargo mutants --list` and `cargo metadata` — build nothing, so they carry none of this state.
+/// environment and [`MUTANT_BUILD_PROFILE`] in it: the pre-flight's `cargo nextest list`, which
+/// builds the very packages the run is about to judge, and the `cargo mutants` run itself, whose
+/// baseline and mutant builds inherit both. The job's other `cargo` children — `cargo mutants
+/// --list` and `cargo metadata` — build nothing, so they carry none of this state.
 fn mutants_job_cargo(root: &Path, args: &[&str]) -> Command {
     let mut cargo = Command::new("cargo");
     cargo
         .current_dir(root)
         .args(args)
-        .env_remove(CARGO_TARGET_DIR);
+        .env_remove(CARGO_TARGET_DIR)
+        .envs(MUTANT_BUILD_PROFILE);
     cargo
 }
 
@@ -3073,6 +3168,7 @@ mod tests {
     use std::cell::Cell;
     use std::collections::{BTreeMap, BTreeSet};
     use std::env;
+    use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
@@ -3083,16 +3179,18 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT,
-        MUTANTS_OUT, MutantShard, MutatedCrate, PendingTest, PendingTestRun, REFCASES, TestOutcome,
+        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, CratePolicy, Dependency, Layers,
+        MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, Metadata, MutantShard,
+        MutatedCrate, Package, PendingTest, PendingTestRun, REFCASES, TestOutcome,
         actionlint_workflows, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
         contains_word, external_oracles, failure_cause, files_by_extension, first_panic_line,
-        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function, lint,
-        listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts, mutants,
-        mutants_args, mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems,
-        pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_outcomes, unjudged_mutants, verdicts, workspace_closure,
+        forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
+        is_stub_function, layer_problems, lint, listed_mutant_counts, live_test_counts,
+        metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
+        mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
+        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
+        unjudged_mutants, verdicts, workspace_closure,
     };
 
     #[test]
@@ -3136,6 +3234,235 @@ mod tests {
                 "{invalid} must not select an incomplete or undefined shard"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_crate_that_reaches_a_forbidden_crate_is_a_problem_and_one_that_does_not_is_none() {
+        let forbidden = ["mandate-alpaca".to_owned(), "mandate-paper".to_owned()];
+        let through_a_chain: BTreeSet<String> =
+            ["mandate-cli", "mandate-journal", "mandate-alpaca"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+        assert_eq!(
+            forbidden_reached("mandate-cli", &forbidden, &through_a_chain),
+            [
+                "`mandate-cli` reaches `mandate-alpaca`, which its forbidden_internal list in \
+              xtask/layers.toml rules out (DEC-525)"
+            ],
+            "a forbidden crate reached through any chain is named, and only the one reached"
+        );
+        let clear: BTreeSet<String> = ["mandate-cli", "mandate-journal"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        assert!(forbidden_reached("mandate-cli", &forbidden, &clear).is_empty());
+        assert!(
+            forbidden_reached("mandate-cli", &[], &through_a_chain).is_empty(),
+            "a crate with no forbidden_internal list is held only by its layer"
+        );
+    }
+
+    /// The policy as written holds the CLI away from the connector, the shell and the paper
+    /// binary, and the workspace as built respects it (DEC-525).
+    #[test]
+    fn the_cli_reaches_no_crate_that_can_place_an_order() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
+        let cli = policy
+            .crates
+            .get("mandate-cli")
+            .context("mandate-cli has a policy")?;
+        assert_eq!(
+            cli.forbidden_internal,
+            ["mandate-alpaca", "mandate-paper", "mandate-shell"],
+            "the CLI may never reach the connector, the paper binary or the shell"
+        );
+        let meta = metadata_in(&root)?;
+        let reached = workspace_closure(&meta);
+        let reached = reached
+            .get("mandate-cli")
+            .context("mandate-cli is a member")?;
+        assert!(forbidden_reached("mandate-cli", &cli.forbidden_internal, reached).is_empty());
+        let mut stricter = policy;
+        let cli = stricter
+            .crates
+            .get_mut("mandate-cli")
+            .context("mandate-cli has a policy")?;
+        cli.forbidden_internal.push("mandate-journal".to_owned());
+        let problems = layer_problems(&stricter, &meta)?;
+        let named = "`mandate-cli` reaches `mandate-journal`";
+        assert!(
+            problems.iter().any(|p| p.starts_with(named)),
+            "the layers check applies the list to the workspace as built: {problems:?}"
+        );
+        Ok(())
+    }
+
+    /// A workspace member named `name` with path dependencies on `deps`, each with its kind
+    /// (`None` for a normal one), as `cargo metadata --no-deps` reports them.
+    fn member(name: &str, deps: &[(&str, Option<&str>)]) -> Package {
+        let dependencies = deps
+            .iter()
+            .map(|(dep, kind)| Dependency {
+                name: (*dep).to_owned(),
+                kind: kind.map(str::to_owned),
+                path: Some(PathBuf::from(format!("/nowhere/{dep}"))),
+            })
+            .collect();
+        Package {
+            id: format!("{name} 0.0.0"),
+            name: name.to_owned(),
+            manifest_path: PathBuf::from(format!("/nowhere/{name}/Cargo.toml")),
+            dependencies,
+            targets: Vec::new(),
+        }
+    }
+
+    fn workspace(members: Vec<Package>) -> Metadata {
+        let workspace_members = members.iter().map(|p| p.id.clone()).collect();
+        Metadata {
+            packages: members,
+            workspace_members,
+        }
+    }
+
+    /// A policy putting every crate in `layers` at its layer, none safety-critical, with the
+    /// `forbidden_internal` lists in `forbidden` and the `planned` crates.
+    fn policy(layers: &[(&str, i64)], forbidden: &[(&str, &[&str])], planned: &[&str]) -> Layers {
+        let owned = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
+        let crates = layers
+            .iter()
+            .map(|(name, layer)| {
+                let banned = forbidden
+                    .iter()
+                    .find(|(f, _)| f == name)
+                    .map(|(_, b)| owned(b));
+                let policy = CratePolicy {
+                    layer: toml::Value::Integer(*layer),
+                    safety_critical: false,
+                    pure: false,
+                    allowed_external: Vec::new(),
+                    forbidden_internal: banned.unwrap_or_default(),
+                };
+                ((*name).to_owned(), policy)
+            })
+            .collect();
+        Layers {
+            impure_crates: Vec::new(),
+            planned: owned(planned),
+            crates,
+        }
+    }
+
+    /// The closure the guard reads follows every kind of path dependency: normal, dev and build,
+    /// and through a dev-dependency of a dependency (DEC-525 item 2).
+    #[test]
+    fn the_closure_follows_normal_dev_and_build_path_dependencies() {
+        let meta = workspace(vec![
+            member(
+                "a",
+                &[("b", None), ("c", Some("dev")), ("d", Some("build"))],
+            ),
+            member("b", &[("e", Some("dev"))]),
+            member("c", &[]),
+            member("d", &[]),
+            member("e", &[]),
+        ]);
+        let closure = workspace_closure(&meta);
+        let reached: Vec<&str> = closure["a"].iter().map(String::as_str).collect();
+        assert_eq!(reached, ["a", "b", "c", "d", "e"]);
+    }
+
+    /// A path dependency on a crate outside the workspace, which `cargo metadata --no-deps` does not
+    /// walk, is refused, of any kind: it could reach a forbidden crate unseen (#697 review, M1).
+    #[test]
+    fn a_path_dependency_outside_the_workspace_is_a_problem() -> Result<()> {
+        let layers = [("mandate-cli", 9), ("mandate-alpaca", 7)];
+        let forbidden: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpaca"])];
+        let rules = policy(&layers, &forbidden, &[]);
+        let clean = workspace(vec![
+            member("mandate-cli", &[]),
+            member("mandate-alpaca", &[]),
+        ]);
+        assert_eq!(layer_problems(&rules, &clean)?, Vec::<String>::new());
+        for kind in [None, Some("dev"), Some("build")] {
+            let evading = workspace(vec![
+                member("mandate-cli", &[("evader", kind)]),
+                member("mandate-alpaca", &[]),
+            ]);
+            let problems = layer_problems(&rules, &evading)?;
+            let named = "`mandate-cli` has a path dependency on `evader`, which is not a workspace";
+            assert!(
+                problems.iter().any(|p| p.starts_with(named)),
+                "{kind:?}: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A path dependency that names a workspace member but points at another directory, a crate
+    /// outside the workspace that took the member's name, is refused of any kind, and the closure
+    /// does not follow it as that member (#697 review, round 2).
+    #[test]
+    fn a_crate_outside_the_workspace_with_a_members_name_is_a_problem() -> Result<()> {
+        let layers = [
+            ("mandate-cli", 9),
+            ("mandate-alpaca", 7),
+            ("mandate-liquidity", 1),
+        ];
+        let forbidden: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpaca"])];
+        let rules = policy(&layers, &forbidden, &[]);
+        for kind in [None, Some("dev"), Some("build")] {
+            let mut cli = member("mandate-cli", &[("mandate-liquidity", kind)]);
+            for dep in &mut cli.dependencies {
+                dep.path = Some(PathBuf::from("/nowhere/tools/evader"));
+            }
+            let shadowed = workspace(vec![
+                cli,
+                member("mandate-alpaca", &[]),
+                member("mandate-liquidity", &[]),
+            ]);
+            let problems = layer_problems(&rules, &shadowed)?;
+            let named = "`mandate-cli` has a path dependency on `mandate-liquidity`, which is not a \
+                         workspace member at /nowhere/tools/evader";
+            assert!(
+                problems.iter().any(|p| p.starts_with(named)),
+                "{kind:?}: {problems:?}"
+            );
+            let closure = workspace_closure(&shadowed);
+            let reached: Vec<&str> = closure["mandate-cli"].iter().map(String::as_str).collect();
+            assert_eq!(
+                reached,
+                ["mandate-cli"],
+                "{kind:?}: the shadow is not the member"
+            );
+        }
+        Ok(())
+    }
+
+    /// A `forbidden_internal` name that is neither a member nor planned is a problem, so a typo
+    /// cannot leave the guard empty (#697 review, m1).
+    #[test]
+    fn a_forbidden_name_must_be_a_member_or_planned() -> Result<()> {
+        let layers = [("mandate-cli", 9), ("mandate-alpaca", 7)];
+        let members = || {
+            workspace(vec![
+                member("mandate-cli", &[]),
+                member("mandate-alpaca", &[]),
+            ])
+        };
+        let typo: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpacca"])];
+        let problems = layer_problems(&policy(&layers, &typo, &[]), &members())?;
+        let named = "`mandate-cli` forbids `mandate-alpacca`";
+        assert!(
+            problems.iter().any(|p| p.starts_with(named)),
+            "{problems:?}"
+        );
+        let planned: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpaca", "mandate-paper"])];
+        let problems = layer_problems(&policy(&layers, &planned, &["mandate-paper"]), &members())?;
+        assert_eq!(problems, Vec::<String>::new());
         Ok(())
     }
 
@@ -3274,6 +3601,98 @@ mod tests {
             "the reference suites must reach every crate they judge through their own dependency \
              graph, which `cargo metadata` can see, and not through a subprocess, which it cannot \
              (DEC-497): {spawning:?}"
+        );
+        Ok(())
+    }
+
+    /// The lines of `job` in `workflow`: from its `  <job>:` key, two spaces in under `jobs:`, to the
+    /// next key at that depth or the end of the file.
+    fn workflow_job<'a>(workflow: &'a str, job: &str) -> Option<Vec<&'a str>> {
+        let key = format!("  {job}:");
+        let at_job_depth = |line: &str| {
+            line.starts_with("  ") && !line.starts_with("   ") && !line.trim().starts_with('#')
+        };
+        let mut lines = workflow.lines().skip_while(|line| *line != key);
+        let first = lines.next()?;
+        Some(
+            std::iter::once(first)
+                .chain(lines.take_while(|line| !at_job_depth(line)))
+                .collect(),
+        )
+    }
+
+    /// DEC-519 item 1: a mutant in code only the Postgres tests reach is judged by them. Those tests
+    /// skip without `MANDATE_PG_URL`, so a shard without the database reports every such mutant
+    /// missed (#678's `lost_a_race` guard). Each shard gets the database `full-checks` has, from
+    /// the same script, before the gate runs, and requires it, so a shard that lost it fails
+    /// rather than skipping the tests that judge those mutants.
+    #[test]
+    fn every_mutation_shard_has_the_database_the_postgres_tests_need() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        for (job, gate) in [
+            ("full-checks", "run: cargo xtask ci full"),
+            ("mutants", "run: cargo xtask ci mutants"),
+        ] {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            let trimmed: Vec<&str> = lines
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- "))
+                .collect();
+            for setting in [
+                "MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres",
+                "MANDATE_PG_REQUIRED: \"1\"",
+            ] {
+                assert!(
+                    trimmed.contains(&setting),
+                    "`{job}` sets `{setting}`, so its Postgres tests run and cannot skip (DEC-519)"
+                );
+            }
+            let started = trimmed
+                .iter()
+                .position(|line| *line == "run: .github/scripts/start-postgres.sh");
+            let gated = trimmed.iter().position(|line| *line == gate);
+            assert!(
+                started.is_some() && gated.is_some() && started < gated,
+                "`{job}` starts the shared, digest-pinned PostgreSQL before `{gate}` (DEC-519): \
+                 start at {started:?}, gate at {gated:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-519 item 2: every build the mutants job makes, the baseline's and each mutant's under
+    /// `cargo mutants` and the pre-flight's test listing, is without debuginfo, whatever the caller
+    /// exported, and still out of the caller's target directory. CI's matrix sets the same two
+    /// settings in its environment, which is what puts them in rust-cache's key.
+    #[test]
+    fn the_mutants_job_builds_without_debuginfo() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let matrix = workflow_job(&workflow, "mutants").context("ci.yml has a `mutants` job")?;
+        for setting in [
+            "CARGO_PROFILE_DEV_DEBUG: \"0\"",
+            "CARGO_PROFILE_TEST_DEBUG: \"0\"",
+        ] {
+            assert!(
+                matrix.iter().any(|line| line.trim() == setting),
+                "the mutants matrix sets `{setting}`, so the dependencies rust-cache restores \
+                 were built the way the gate builds (DEC-519)"
+            );
+        }
+        let cargo = mutants_job_cargo(Path::new("."), &["mutants"]);
+        let envs: BTreeMap<&OsStr, Option<&OsStr>> = cargo.get_envs().collect();
+        for profile in ["CARGO_PROFILE_DEV_DEBUG", "CARGO_PROFILE_TEST_DEBUG"] {
+            assert_eq!(
+                envs.get(OsStr::new(profile)),
+                Some(&Some(OsStr::new("0"))),
+                "the mutants job sets {profile}=0 on its building children, which shortens the \
+                 build phase `--build-timeout` caps (DEC-519)"
+            );
+        }
+        assert_eq!(
+            envs.get(OsStr::new(CARGO_TARGET_DIR)),
+            Some(&None),
+            "the caller's CARGO_TARGET_DIR is still removed (#419 review, nit 3)"
         );
         Ok(())
     }

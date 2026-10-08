@@ -34,4 +34,7 @@ parallel against one database. The roles `mandate_journal_owner` and `mandate_jo
 created `NOLOGIN` and left in place; the tests act as them with `SET ROLE`.
 
 CI runs these tests against PostgreSQL 18 in `full` and against 17, the supported floor, nightly
-(ADR-0001 ES-08).
+(ADR-0001 ES-08). Every mutation shard has the same PostgreSQL 18 and requires it (DEC-519), so a
+mutant in code only these tests reach is judged by them. Locally, export `MANDATE_PG_URL` before
+`cargo xtask check` when a change touches such code: without it these tests skip, and the gate
+reports those mutants missed.
