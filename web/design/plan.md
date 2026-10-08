@@ -116,24 +116,25 @@ the owl, the rules and the record.
 
 ## F. Home and the agent page (DEC)
 
-- [ ] **Home answers one question.** Needs you is the screen when something needs the owner, in
-      the phone's volt card at every width, the deadline as a fixed time; the money, the agents
-      and the decisions below, quieter. (R-2)
+- [x] **Needs you in the volt card at every width**, with the deadline as a fixed time, so the
+      one thing asking for the owner is the one tinted thing on the screen. (R-2, DEC-506) Still
+      open: when something needs the owner, Needs you as the screen itself, the rest quieter.
 - [ ] **The mandate becomes the agent page.** The ladder and the headroom as the main column, the
-      chart inside it; "Equity now" no longer drawn as a button. (R-6, R-22)
+      chart inside it. (R-6) Done: "Equity now" is a marked row, no longer a filled block that read
+      as a button. (R-22, DEC-506)
 - [ ] **The mandate you can feel.** Scrub the chart and the headroom bars move; drag a limit line
       and a sentence says what would have happened last week under that rule, from the journal,
       never a forecast.
-- [ ] **Agent-row sparklines** scaled to their own range with the loss limit as a shaded band.
-      (R-5)
+- [x] **Agent-row sparklines** scaled to their own range with the loss limit as the pale volt
+      region below the line, rising into view as the agent nears it. (R-5, DEC-506)
 - [ ] **The agent's diary.** Activity in the first person, from the journal, deterministic, no
       model.
 - [ ] **"Try to change it" on every real record**, with the owner's own data.
 - [ ] **The deadline as a sand clock:** a pixel hourglass that is simply there, the same at nine
       minutes and one.
-- [ ] **The Stop sheet as a physical object:** the three choices at one visual weight, Pause as
-      the cover, Stop as the switch, the bullets of Close everything behind its confirmation.
-      (R-13)
+- [x] **The Stop sheet's three account choices at one weight**, outlined rows, with Close
+      everything's list behind its confirmation on the record screen. (R-13, DEC-506) Still open:
+      the switch-under-a-cover drawing.
 - [ ] **Unreachable deployment:** screens that need it greyed; Stop opens straight onto "reach the
       broker directly". (R-12)
 - [ ] **The ladder drawn once.** The mandate page's top rail of ticks duplicates the list below

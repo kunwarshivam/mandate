@@ -50,8 +50,9 @@ const NEEDS_ROW = cn(
 /**
  * Home's first question, answered first at every width (DEC-207, DEC-467): the requests waiting for
  * you, soonest deadline first, each with the static time it is skipped at, then the agents' open
- * conditions, one line per agent and condition; a degraded feed is the strip's to say (DEC-504). Each
- * row opens where it is read in full. With nothing, it says so plainly. The only place Home shows a
+ * conditions, one line per agent and condition; a degraded feed is the strip's to say (DEC-504). A
+ * request is a pale volt card at every width, the one thing on the screen asking for the owner
+ * (DEC-506); a condition is a hairline row. Each row opens where it is read in full. With nothing, it says so plainly. The only place Home shows a
  * request; the dock carries the count. On a phone they are one sideways row of cards, never a stack
  * above the money (DEC-482).
  */
@@ -78,7 +79,7 @@ function NeedsYou({ ws, open }: { ws: Workspace; open: Approval[] }) {
         <ul className={NEEDS_STRIP}>
           {open.map((a) => (
             <li key={a.approval_id} data-kind="request" className={NEEDS_ITEM}>
-              <Link href={`/approvals/${a.approval_id}`} className={cn(NEEDS_ROW, "max-lg:bg-lapis-soft")}>
+              <Link href={`/approvals/${a.approval_id}`} className={cn(NEEDS_ROW, "bg-lapis-soft max-lg:bg-lapis-soft lg:mx-0 lg:rounded-xl lg:px-3")}>
                 <Inbox aria-hidden className="size-6 text-lapis" />
                 <span className="grid min-w-0 gap-0.5 max-lg:gap-0">
                   <span className="font-medium text-pretty max-lg:text-sm max-lg:leading-5">{requestSentence(ws, a)}</span>

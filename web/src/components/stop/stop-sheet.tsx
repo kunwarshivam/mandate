@@ -22,10 +22,14 @@ import { StepUpDialog } from "./step-up-dialog";
 
 type Tone = "ink" | "outline";
 
-/** Pausing is ink, like a paused agent. The kill switch is `KillSwitchButton`, the only crimson. */
+/**
+ * Pausing is ink, like a paused agent. The kill switch is `KillSwitchButton`, the only crimson. The
+ * account's three choices share one weight, an outlined row each, so the most drastic is not also
+ * the loudest (DEC-506): pausing comes first and reads first.
+ */
 const TONE: Record<Tone, string> = {
   ink: "bg-ink text-ink-foreground hover:bg-ink/85",
-  outline: "border border-foreground/25 bg-card text-foreground hover:bg-background",
+  outline: "border-2 border-foreground/40 bg-card text-foreground hover:bg-background",
 };
 
 /**
@@ -227,7 +231,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               </section>
             ) : null}
 
-            <section className="grid gap-2" aria-labelledby="stop-account">
+            <section className="grid gap-3" aria-labelledby="stop-account">
               <h3 id="stop-account" className="flex items-baseline justify-between gap-2 text-h3">
                 Everything on this account
               </h3>
@@ -235,28 +239,19 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
                 <span className="inline-flex h-6 items-center rounded-md bg-lapis-soft px-2.5 text-label text-lapis">Account</span>
                 {ws.connection.broker}
               </p>
-              <Choice tone="ink" title="Pause all agents on this account" onClick={() => choose("pause_all", null)}>
+              <Choice tone="outline" title="Pause all agents on this account" onClick={() => choose("pause_all", null)}>
                 No new orders from any agent. Resting protection stays. No passkey needed.
               </Choice>
               {full ? (
                 <>
-                  <KillSwitchButton title="Stop all agents on this account" href={recordHref("stop_all", ws.connection.connection_id)} onClick={leave}>
+                  <KillSwitchButton appearance="outline" title="Stop all agents on this account" href={recordHref("stop_all", ws.connection.connection_id)} onClick={leave}>
                     Each agent&apos;s own kill switch: cancels its orders, sells its positions, and ends it. Your own holdings are untouched. Opens the full list to confirm with
                     your passkey.
                   </KillSwitchButton>
                   <KillSwitchButton appearance="outline" title="Close everything on this account" href={recordHref("close_all", ws.connection.connection_id)} onClick={leave}>
-                    <span className="grid gap-1">
-                      <span>The broker&apos;s cancel-all and close-all. It:</span>
-                      <span className="grid list-disc gap-0.5 pl-4 [&>span]:list-item">
-                        <span>cancels every open order on the account, including ones Owlhead did not place;</span>
-                        <span>
-                          closes every position, including your own
-                          {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages;
-                        </span>
-                        <span>ends every agent.</span>
-                      </span>
-                      <span>Opens the full list to confirm with your passkey.</span>
-                    </span>
+                    The broker&apos;s cancel-all and close-all: it cancels every open order, including ones Owlhead did not place, closes every position, including your own
+                    {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages, and ends every agent. Opens
+                    the full list to confirm with your passkey.
                   </KillSwitchButton>
                 </>
               ) : (
