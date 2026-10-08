@@ -24,7 +24,6 @@ commands:
   markers               check for debt markers and #[ignore] without a pending story
   feature-map           check the verification skill's feature map against the workspace
   deps                  check every direct dependency against docs/dependencies.md
-  live-feature          check that only the runner may build `live`, and CI only compiles it
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
 ";
 
@@ -135,7 +134,6 @@ fn run() -> Result<()> {
         ["markers"] => markers(),
         ["feature-map"] => feature_map(),
         ["deps"] => deps(),
-        ["live-feature"] => live_feature(),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
         _ => {
@@ -1338,12 +1336,9 @@ fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
         .collect()
 }
 
-fn live_feature() -> Result<()> {
-    live_feature_in(Path::new("."))
-}
-
 /// [`live_feature_problems`] over the repository at `root`: its layering policy, its Cargo
-/// workspace, and its [`ci_files`]. The lint job runs it on the repository it is given.
+/// workspace, and its [`ci_files`]. The lint job runs it on the repository it is given, so
+/// `cargo xtask ci lint` (and `cargo xtask check`) runs it on this one.
 fn live_feature_in(root: &Path) -> Result<()> {
     eprintln!("    live-feature: checking that only the runner may build `live` (ES-23, DEC-529)");
     let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)
