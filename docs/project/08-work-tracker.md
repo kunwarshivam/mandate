@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-08, after the design conversation and the first five decisions of its plan (#669) |
+| **Last updated** | 2026-10-08, after the design conversation and the first five decisions of its plan (#669), merged with `main`'s first-paper-trade brief (DEC-502 to DEC-510) |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
@@ -21,9 +21,9 @@ Open PRs and claim issues on GitHub are the live record of who holds what.
 | M1 Market data | Done, exit run 2026-09-26 | — |
 | M2 Accounting | Done | RC-18's main path (see Reference cases) |
 | M3 Simulated execution and backtest | Done | The backtest runner's remaining pieces (DEC-127 items 15, 24, 25) have no story row yet |
-| M4 Journal | In progress: core, Postgres, artifacts, verification CLI, cold store and its checks merged; E5-8 `verify-cold` tests merged (#654), implementation open (#662) | E5-5 the personal-data vault; E5-7 to E5-9 the cold store's operational half, CLI and examination bundle; all safety-critical; DEC-265 item 1 waits on the founder |
+| M4 Journal | In progress: core, Postgres, artifacts, verification CLI, cold store and its checks, E5-8 `verify-cold` (#654, #662) merged; E7-19's artifact-aware Postgres append in tests (#676, DEC-510) | E5-5 the personal-data vault; E5-7 and E5-9 the cold store's operational half and examination bundle; all safety-critical; DEC-265 item 1 waits on the founder |
 | M5 Agent runtime and risk | In progress: the runtime and kill switches, the mandate document (validation, policy, change classification), the risk state and ladder, the gate with the US account rules, eligibility, conduct controls and restrictions, autonomy and the order builder, delegations, the client ceiling, the review date, V-047 | Tripwires (E6-13: MC-W01 to MC-W57) in the DEC-77 sequence; the Proposed readings under Waiting on the founder |
-| M6 Alpaca connector (paper) and recovery | In progress: the executor's intent, state machine and reconciliation; the protective-exit slices 1 to 6; the agent-, control- and account-stream schemas | The tracer (E7-7): #598 through its gates, then the one external order under DEC-450; E7-9's implementation |
+| M6 Alpaca connector (paper) and recovery | In progress: the executor's intent, state machine and reconciliation; the protective-exit slices 1 to 6, slice 7's tests corrections (#671 to #673); the agent-, control- and account-stream schemas | E7-4 slice 7, the agent-scoped kill switch (DEC-485); then the first real paper trade (DEC-502, DEC-509, the [brief](tasks/first-paper-trade.md)): one SPY order through the production cycle API from a confirmed mandate version and the pinned `quant.ma_crossover` model; E7-19 slice 5 deletes E7-7's AAPL assembly |
 | M7 Escalation v0 | In progress: `mandate-approval` (E8-1 to E8-3), the runtime's approval path, owner commands, the MC-E lifecycle driver | The CLI's `clap` wiring of the inbox and owner commands; email and one chat channel; MC-E01, E06, E17 to E24, E29 |
 | M9 Web app (started early, DEC-200) | On fixtures: the shell, Home, agents, approvals, Messages and the copilot, the set-up chat, sign-in, the landing page; the design plan's first five decisions (DEC-511 to DEC-515) on #669 | `web/design/plan.md`, every unticked item, in its order; then the connection to a deployment |
 | M8, M10 to M13 | Planned; the design layer drafted (DEC-431 to DEC-443) | ADR-0003's code stories (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5) |
@@ -33,9 +33,9 @@ wait on the executor stories (E7-2 to E7-5) and the founder's DEC-129 items. Man
 the rest on E6-13, E8-3, E8-8 and DEC-444's harness. `crates/mandate-refcases/status.toml` is the
 record.
 
-**Open PRs.** #669 (the design plan, DEC-511 to DEC-515), #662 (E5-8 implementation), #647 (the
-xtask reference checks, DEC-493), #514 (DEC-422, amends trading spec §5.4), #603 (the tracer's
-paper assembly). Each merges on green CI and an independent review on a different model (DEC-79).
+**Open PRs.** #669 (the design plan, DEC-511 to DEC-515), #647 (the xtask reference checks,
+DEC-493), #514 (DEC-422, amends trading spec §5.4). Each merges on green CI and an independent
+review on a different model (DEC-79).
 
 ## Next, in order
 
@@ -43,13 +43,19 @@ paper assembly). Each merges on green CI and an independent review on a differen
    become the bottleneck): one branch per plan item; `npm run shots` and a golden-path contact
    sheet so review is visual; the test sort DEC-511 item 5 calls for; a lighter path for
    reversible product changes. Decisions already taken may be revised.
-2. **The tracer (E7-7).** #598 through its full local check, green CI and review; then the one
-   external order only with explicit founder confirmation, paper-only credentials and a
-   founder-selected instrument (DEC-450).
-3. **The web plan** (`web/design/plan.md`), in its order: the process and codebase items (I), the
+2. **E7-4 slice 7, the agent-scoped kill switch (DEC-485).** Nearly done; it finishes first.
+3. **The first real paper trade (DEC-502, DEC-509).** One SPY order on the founder's Alpaca paper
+   account through the production cycle API, the deployment built from a confirmed mandate version
+   and the model output from the pinned quant model `quant.ma_crossover`, which makes no model
+   call, so neither the gateway (E15-6) nor the inference registry (E15-7) is on this path. The
+   [brief](tasks/first-paper-trade.md) sets the slices (DEC-503 to DEC-505; rows E10-16, E15-13,
+   E19-11, and for BTC/USD later E7-21 and E7-22). The one submission waits for the founder's
+   explicit confirmation (DEC-450).
+4. **The web plan** (`web/design/plan.md`), in its order: the process and codebase items (I), the
    remaining Home and agent-page items (F), craft (G), the website (H).
-4. **Tripwires (E6-13)**, then M7's remainder, then M4's safety-critical half, then ADR-0003's code
-   stories, each in the DEC-77 sequence with its own claim.
+5. **Tripwires (E6-13)**, then M7's remainder (and the full agent process, E19-1, which its soak
+   needs), then M4's safety-critical half, then ADR-0003's code stories, each in the DEC-77
+   sequence with its own claim.
 
 Streams that touch different crates run in parallel; reviews and merges run one at a time.
 
