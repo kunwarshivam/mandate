@@ -31,6 +31,7 @@ pub mod inspect;
 pub mod journal;
 pub mod postgres;
 pub mod register;
+pub mod workspace;
 
 /// Mandate research and audit tools.
 #[derive(Debug, Parser)]
@@ -61,4 +62,7 @@ pub enum Command {
     /// Store a model's content object and register it on the workspace control stream, in paper.
     #[command(subcommand)]
     Model(register::ModelCommand),
+    /// Open the workspace control stream, once, in paper.
+    #[command(subcommand)]
+    Workspace(workspace::WorkspaceCommand),
 }
