@@ -166,7 +166,7 @@ const CLOSED_BY_SECTION_9_7: &[(&str, &str, &[&str])] = &[
     ("ApprovalRevalidated", AGENT, &[MAN]),
 ];
 
-/// The connection records journal spec v0.19 §9.8 closes (E7-17, DEC-800), with the stream types
+/// The connection records journal spec v0.20 §9.8 closes (E7-17, DEC-800), with the stream types
 /// each is closed on. `ConnectionEstablished` gains the account stream for the executor's copy, so
 /// [`stream_types_and_required_config_refs_match_the_spec`] leaves its streams alone;
 /// `the_connection_records_are_catalogued_and_closed_on_their_streams` asserts what each becomes.

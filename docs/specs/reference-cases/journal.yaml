@@ -56,14 +56,6 @@
 # companion rebuilds, which a resubmission after a confirmed absence sends again under the same id
 # (§5.7). `valid_batches` and `invalid_batches` are rule 45's batch cases; each member of their
 # `drafts` is built like a draft case, and an invalid one is refused whole at `draft_index`.
-#
-# `connections` (spec v0.23 §9.12, DEC-800) is generated and checked the same way, by
-# reference/journal/connections.py. `drafts` are named base drafts of each connection record on the
-# control and account streams, and each invalid or valid draft names its base by `base_draft`.
-# `sequences` are the stream rules 64 to 66: each record is built like a draft case, the records are
-# folded in order on their stream, and a `Mismatch` is `connection_lifecycle_mismatch` (§11) at the
-# record `index` names, for the rule it names; a `Valid` sequence breaks none. Every record of a
-# sequence passes the per-draft checks on its own. The section is additive.
 
 version: 3
 hash_algorithm: sha256
@@ -10341,8 +10333,450 @@ approval_answers:
       - sha256:1111111111111111111111111111111111111111111111111111111111111111
     expect:
       outcome: Valid
+broker_profile:
+  spec: docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)
+  artifacts:
+  - name: alpaca
+    ref: sha256:6408fbbc116a3cd591c9a0377079a6cac0104766974b60a93ab7b1f0b8b8315c
+    object:
+      kind: broker_profile
+      profile_version: 1
+      rows:
+      - &id005
+        asset_class: us_equity
+        session: regular
+        cells: &id022
+        - &id006
+          order_type: limit
+          quantity_form: fractional
+          times_in_force: &id023
+          - day
+          protection_forms: &id018 []
+        - &id007
+          order_type: limit
+          quantity_form: notional
+          times_in_force:
+          - day
+          protection_forms: []
+        - &id008
+          order_type: limit
+          quantity_form: whole
+          times_in_force: &id024
+          - day
+          - gtc
+          protection_forms: &id019
+          - bracket
+          - oco
+        - &id009
+          order_type: market
+          quantity_form: fractional
+          times_in_force:
+          - day
+          protection_forms: []
+        - &id010
+          order_type: market
+          quantity_form: notional
+          times_in_force:
+          - day
+          protection_forms: []
+        - &id011
+          order_type: market
+          quantity_form: whole
+          times_in_force:
+          - day
+          - gtc
+          protection_forms:
+          - bracket
+        - &id012
+          order_type: stop
+          quantity_form: fractional
+          times_in_force: &id020
+          - day
+          protection_forms: &id021 []
+        - &id013
+          order_type: stop
+          quantity_form: notional
+          times_in_force:
+          - day
+          protection_forms: []
+        - &id014
+          order_type: stop
+          quantity_form: whole
+          times_in_force:
+          - day
+          - gtc
+          protection_forms: []
+        - &id015
+          order_type: stop_limit
+          quantity_form: fractional
+          times_in_force:
+          - day
+          protection_forms: []
+        - &id016
+          order_type: stop_limit
+          quantity_form: notional
+          times_in_force:
+          - day
+          protection_forms: []
+        - &id017
+          order_type: stop_limit
+          quantity_form: whole
+          times_in_force:
+          - day
+          - gtc
+          protection_forms: []
+      idempotency:
+        client_order_id: true
+        retry: idempotent
+        query_by_client_order_id: true
+    canonical: '{"idempotency":{"client_order_id":true,"query_by_client_order_id":true,"retry":"idempotent"},"kind":"broker_profile","profile_version":1,"rows":[{"asset_class":"us_equity","cells":[{"order_type":"limit","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"limit","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"limit","protection_forms":["bracket","oco"],"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"market","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"market","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"market","protection_forms":["bracket"],"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"stop","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"stop","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"stop","protection_forms":[],"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"stop_limit","protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},{"order_type":"stop_limit","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},{"order_type":"stop_limit","protection_forms":[],"quantity_form":"whole","times_in_force":["day","gtc"]}],"session":"regular"}]}'
+  valid_drafts:
+    profile_registration:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Y0A2B000000000000000S4
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConfigSnapshotRegistered
+      schema_version: 3
+      event_time: '2026-09-20T13:06:30.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        kind: broker_profile
+        content_hash: sha256:6408fbbc116a3cd591c9a0377079a6cac0104766974b60a93ab7b1f0b8b8315c
+        model_id: null
+        model_version: null
+        params: []
+        admits_instruments: null
+      artifact_refs:
+      - sha256:6408fbbc116a3cd591c9a0377079a6cac0104766974b60a93ab7b1f0b8b8315c
+      pii_refs: []
+  invalid_drafts:
+  - name: profile_registration_version_2
+    base: profile_registration
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      reason: non_canonical
+      path: payload.kind
+  - name: profile_registration_version_1
+    base: profile_registration
+    changes:
+    - path: schema_version
+      value: 1
+    expect:
+      reason: non_canonical
+      path: payload.kind
+  - name: profile_registration_version_4
+    base: profile_registration
+    changes:
+    - path: schema_version
+      value: 4
+    expect:
+      reason: unknown_schema
+      path: payload
+  - name: profile_registration_as_policy_set
+    base: profile_registration
+    changes:
+    - path: payload.kind
+      value: policy_set
+    expect:
+      reason: config_ref_kind
+      path: payload.kind
+  - name: profile_registration_with_a_model_id
+    base: profile_registration
+    changes:
+    - path: payload.model_id
+      value: sm.trend
+    expect:
+      reason: schema
+      path: payload.model_id
+  missing_artifact:
+    base: profile_registration
+    expect:
+      reason: missing_artifact
+      path: payload.content_hash
+  invalid_artifacts:
+  - name: profile_version_zero
+    base: alpaca
+    changes:
+    - path: profile_version
+      value: 0
+    expect:
+      reason: profile_version_zero
+  - name: no_rows
+    base: alpaca
+    changes:
+    - path: rows
+      value: []
+    expect:
+      reason: profile_no_rows
+  - name: empty_row
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells: []
+    expect:
+      reason: profile_empty_row
+  - name: duplicate_row
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - *id005
+      - *id005
+    expect:
+      reason: profile_duplicate_row
+  - name: duplicate_cell
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - *id006
+        - *id006
+        - *id007
+        - *id008
+        - *id009
+        - *id010
+        - *id011
+        - *id012
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: profile_duplicate_cell
+  - name: no_time_in_force
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - order_type: limit
+          quantity_form: fractional
+          times_in_force: []
+          protection_forms: *id018
+        - *id007
+        - *id008
+        - *id009
+        - *id010
+        - *id011
+        - *id012
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: profile_no_time_in_force
+  - name: cells_out_of_order
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - *id007
+        - *id006
+        - *id008
+        - *id009
+        - *id010
+        - *id011
+        - *id012
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: non_canonical
+  - name: times_in_force_out_of_order
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - *id006
+        - *id007
+        - order_type: limit
+          quantity_form: whole
+          times_in_force:
+          - gtc
+          - day
+          protection_forms: *id019
+        - *id009
+        - *id010
+        - *id011
+        - *id012
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: non_canonical
+  - name: a_claim_without_a_client_order_id
+    base: alpaca
+    changes:
+    - path: idempotency
+      value:
+        client_order_id: false
+        retry: unknown
+        query_by_client_order_id: false
+    expect:
+      reason: profile_claim_without_client_id
+  - name: robinhood_stop_market_spelling
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - *id006
+        - *id007
+        - *id008
+        - *id009
+        - *id010
+        - *id011
+        - order_type: stop_market
+          quantity_form: fractional
+          times_in_force: *id020
+          protection_forms: *id021
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: schema
+  - name: a_gtc_expiry_member
+    base: alpaca
+    changes:
+    - path: gtc_expiry_days
+      value: 90
+    expect:
+      reason: schema
+  - name: an_unknown_row_member
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells: *id022
+        venue: xnys
+    expect:
+      reason: schema
+  - name: an_unknown_cell_member
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - order_type: limit
+          quantity_form: fractional
+          times_in_force: *id023
+          protection_forms: *id018
+          min_qty: '1'
+        - *id007
+        - *id008
+        - *id009
+        - *id010
+        - *id011
+        - *id012
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: schema
+  - name: a_wrong_kind
+    base: alpaca
+    changes:
+    - path: kind
+      value: policy_set
+    expect:
+      reason: schema
+  - name: protection_forms_duplicated
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - *id006
+        - *id007
+        - order_type: limit
+          quantity_form: whole
+          times_in_force: *id024
+          protection_forms:
+          - oco
+          - oco
+        - *id009
+        - *id010
+        - *id011
+        - *id012
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: non_canonical
+  - name: protection_forms_out_of_order
+    base: alpaca
+    changes:
+    - path: rows
+      value:
+      - asset_class: us_equity
+        session: regular
+        cells:
+        - *id006
+        - *id007
+        - order_type: limit
+          quantity_form: whole
+          times_in_force: *id024
+          protection_forms:
+          - oco
+          - bracket
+        - *id009
+        - *id010
+        - *id011
+        - *id012
+        - *id013
+        - *id014
+        - *id015
+        - *id016
+        - *id017
+    expect:
+      reason: non_canonical
 connections:
-  spec: docs/specs/journal.md v0.19 §9.8 (DEC-800)
+  spec: docs/specs/journal.md v0.20 §9.8 (DEC-800)
   drafts:
     established_v2:
       envelope_version: 1
@@ -10365,12 +10799,12 @@ connections:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: &id005
+        scopes: &id025
         - data
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id006
+        step_up: &id026
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
@@ -10398,10 +10832,10 @@ connections:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: *id005
+        scopes: *id025
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: *id006
+        step_up: *id026
         margin_attestation: null
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
@@ -10425,11 +10859,11 @@ connections:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: &id007
+        scopes: &id027
         - data
         - trading
         user: user_owner_01
-        step_up: *id006
+        step_up: *id026
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
       pii_refs: []
@@ -10459,7 +10893,7 @@ connections:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id006
+        step_up: *id026
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -10481,9 +10915,9 @@ connections:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: *id007
+        scopes: *id027
         user: user_owner_01
-        step_up: *id006
+        step_up: *id026
       artifact_refs: []
       pii_refs: []
     checked_start:
@@ -12678,7 +13112,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
-      - &id008
+      - &id028
         path: payload.scopes
         value:
         - trading
@@ -12686,7 +13120,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - *id008
+      - *id028
     expect:
       outcome: Valid
   - name: established_twice
@@ -12725,7 +13159,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id014
+      - &id034
         path: payload.account_ref
         value: 01J8Z2ACCT00000000000000B7
     expect:
@@ -12753,13 +13187,13 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id011
+      - &id031
         path: payload.environment
         value: live
-      - &id012
+      - &id032
         path: environment
         value: live
-      - &id013
+      - &id033
         path: payload.margin_attestation
         value: cash_account
     expect:
@@ -12924,7 +13358,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
-      - *id008
+      - *id028
     - base_draft: rotated
       changes:
       - path: event_id
@@ -13048,7 +13482,7 @@ connections:
   - name: degraded_cleared_acknowledged_then_suspended_and_reauthorized
     clause: 'rule 68: the B1 path: a reauthorize after the suspension, accepted by a rotation, then cleared'
     records:
-    - &id009
+    - &id029
       base_draft: checked_start
       changes:
       - path: event_id
@@ -13066,7 +13500,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id010
+    - &id030
       base_draft: established_copy
       changes:
       - path: event_id
@@ -13183,8 +13617,8 @@ connections:
   - name: executor_start_after_binding
     clause: 'rule 68: checks after the binding'
     records:
-    - *id009
-    - *id010
+    - *id029
+    - *id030
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13250,12 +13684,12 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - &id015
+      - &id035
         path: payload.broker
         value: robinhood
-      - *id011
-      - *id012
-      - *id013
+      - *id031
+      - *id032
+      - *id033
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13409,7 +13843,7 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id014
+      - *id034
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -13441,10 +13875,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id015
-      - *id011
-      - *id012
-      - *id013
+      - *id035
+      - *id031
+      - *id032
+      - *id033
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -13479,10 +13913,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id015
-      - *id011
-      - *id012
-      - *id013
+      - *id035
+      - *id031
+      - *id032
+      - *id033
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13508,8 +13942,8 @@ connections:
   - name: rotation_copied_without_a_passing_reauthorize
     clause: 'rule 68: a rotation follows a passing reauthorize check'
     records:
-    - *id009
-    - *id010
+    - *id029
+    - *id030
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13539,9 +13973,9 @@ connections:
   - name: suspension_cleared_without_a_rotation
     clause: 'rule 68: the clearing cause is the copied rotation'
     records:
-    - *id009
-    - *id010
-    - &id016
+    - *id029
+    - *id030
+    - &id036
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -13574,9 +14008,9 @@ connections:
   - name: refused_reauth_check_clears
     clause: 'rule 68: a passing reauthorize the control services refused never clears (no rotation names it)'
     records:
-    - *id009
-    - *id010
-    - *id016
+    - *id029
+    - *id030
+    - *id036
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13614,8 +14048,8 @@ connections:
   - name: stale_check_clears
     clause: 'rule 68: the reauthorize came after the suspension'
     records:
-    - *id009
-    - *id010
+    - *id029
+    - *id030
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13669,8 +14103,8 @@ connections:
   - name: stale_rotation_clears
     clause: 'rule 68: the rotation came after the suspension'
     records:
-    - *id009
-    - *id010
+    - *id029
+    - *id030
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13724,8 +14158,8 @@ connections:
   - name: two_connections_on_one_account_stream
     clause: 'rule 68: one account stream, one connection (CN-5)'
     records:
-    - *id009
-    - *id010
+    - *id029
+    - *id030
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -13752,8 +14186,8 @@ connections:
   - name: first_change_not_from_active
     clause: rule 68
     records:
-    - *id009
-    - *id010
+    - *id029
+    - *id030
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -13774,8 +14208,8 @@ connections:
   - name: from_not_the_last_state
     clause: rule 68
     records:
-    - *id009
-    - *id010
+    - *id029
+    - *id030
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -13808,8 +14242,8 @@ connections:
   - name: acknowledged_before_cleared
     clause: 'rule 68: the acknowledgment never lifts a cause that has not cleared'
     records:
-    - *id009
-    - *id010
+    - *id029
+    - *id030
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -13842,8 +14276,8 @@ connections:
   - name: acknowledged_after_the_cause_returned
     clause: rule 68
     records:
-    - *id009
-    - *id010
+    - *id029
+    - *id030
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -13901,7 +14335,7 @@ connections:
   - name: connect_then_reauthorize
     clause: '§11: every cause on its stream, for its connection, passing'
     records:
-    - &id022
+    - &id042
       base_draft: checked_start
       changes:
       - path: event_id
@@ -13919,21 +14353,21 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id017
+    - &id037
       base_draft: established_v2
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4S01A0000000000000000
-    - &id018
+    - &id038
       base_draft: established_copy
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
       - path: causation_id
         value: 01J8Z4S02A0000000000000000
-    - &id019
+    - &id039
       base_draft: checked_start
       changes:
       - path: event_id
@@ -13951,14 +14385,14 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id020
+    - &id040
       base_draft: rotated
       changes:
       - path: event_id
         value: 01J8Z4S05A0000000000000000
       - path: causation_id
         value: 01J8Z4S04A0000000000000000
-    - &id021
+    - &id041
       base_draft: rotated_copy
       changes:
       - path: event_id
@@ -13987,11 +14421,11 @@ connections:
         - check: scope
           result: failed
           reason: scope_mismatch
-    - *id017
-    - *id018
-    - *id019
-    - *id020
-    - *id021
+    - *id037
+    - *id038
+    - *id039
+    - *id040
+    - *id041
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14016,11 +14450,11 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - *id017
-    - *id018
-    - *id019
-    - *id020
-    - *id021
+    - *id037
+    - *id038
+    - *id039
+    - *id040
+    - *id041
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14047,11 +14481,11 @@ connections:
           reason: null
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-    - *id017
-    - *id018
-    - *id019
-    - *id020
-    - *id021
+    - *id037
+    - *id038
+    - *id039
+    - *id040
+    - *id041
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14078,11 +14512,11 @@ connections:
           reason: null
       - path: stream_id
         value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
-    - *id017
-    - *id018
-    - *id019
-    - *id020
-    - *id021
+    - *id037
+    - *id038
+    - *id039
+    - *id040
+    - *id041
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14128,17 +14562,17 @@ connections:
   - name: rotated_on_a_connect_check
     clause: '§11: occasion reauthorize'
     records:
-    - *id022
-    - *id017
-    - *id018
-    - *id019
+    - *id042
+    - *id037
+    - *id038
+    - *id039
     - base_draft: rotated
       changes:
       - path: event_id
         value: 01J8Z4S05A0000000000000000
       - path: causation_id
         value: 01J8Z4S01A0000000000000000
-    - *id021
+    - *id041
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14146,8 +14580,8 @@ connections:
   - name: copy_differs_from_its_original
     clause: '§11: a copy carries its original''s members'
     records:
-    - *id022
-    - *id017
+    - *id042
+    - *id037
     - base_draft: established_copy
       changes:
       - path: event_id
@@ -14157,9 +14591,9 @@ connections:
       - path: payload.scopes
         value:
         - trading
-    - *id019
-    - *id020
-    - *id021
+    - *id039
+    - *id040
+    - *id041
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14167,11 +14601,11 @@ connections:
   - name: copy_of_nothing
     clause: '§11: a copy names its original'
     records:
-    - *id022
-    - *id017
-    - *id018
-    - *id019
-    - *id020
+    - *id042
+    - *id037
+    - *id038
+    - *id039
+    - *id040
     - base_draft: rotated_copy
       changes:
       - path: event_id

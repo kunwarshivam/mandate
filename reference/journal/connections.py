@@ -1,4 +1,4 @@
-"""Journal spec v0.19 §9.8's reference vectors (DEC-800): a connection's history.
+"""Journal spec v0.20 §9.8's reference vectors (DEC-800): a connection's history.
 
 The schemas and consistency rules 54 to 65 live in `control.py`, beside §9.2's to §9.7's, so one
 validator judges every closed schema. This module builds the `connections` section: a base draft of
@@ -30,7 +30,7 @@ from control import (
 from control import invalid as control_invalid
 from control import valid as control_valid
 
-SPEC = "docs/specs/journal.md v0.19 §9.8 (DEC-800)"
+SPEC = "docs/specs/journal.md v0.20 §9.8 (DEC-800)"
 AT = "2026-09-22T13:00:00.000000000Z"
 CLOCK = "2026-09-22T13:00:00.000000000Z"
 ACCOUNT_STREAM = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"

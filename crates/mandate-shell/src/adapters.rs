@@ -32,6 +32,7 @@ use std::cell::{Ref, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
@@ -50,7 +51,7 @@ use mandate_executor::{
     Order as ExecutorOrder, Ports, Seq, WorkspaceId, WriterEpoch, fold, is_protected,
     paper_only_fee_config,
 };
-use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, ArtifactSource, MemoryJournal, StoredEvent, StreamId};
 use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
@@ -73,6 +74,7 @@ use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
 use mandate_time::{Date, ExchangeCalendar, TradingCalendar, UtcNanos};
 
+use crate::control::Governance;
 use crate::envelope::account_stream;
 use crate::error::Cause;
 use crate::stages::{
@@ -845,6 +847,11 @@ pub struct RunContext {
     pub author: String,
     pub restricted_instruments: BTreeSet<InstrumentId>,
     pub decision: Option<DecisionContext>,
+    /// The effective policy set and model registry (DEC-484, D4b). `Some` makes the run write
+    /// `ModelOutputRecorded` and `DecisionMade` at schema version 2 with their `policy_set` and
+    /// `model_registry` refs, appended through the store's artifact-aware append (journal spec
+    /// v0.16). `None` keeps the version-1 records of a run nothing governs yet.
+    pub governance: Option<Governance>,
 }
 
 fn required_context(context: &Option<Rc<RunContext>>) -> Result<&RunContext, Cause> {
@@ -935,6 +942,9 @@ pub struct SpecMandate {
 impl MandateSource for SpecMandate {
     fn admitted(&self) -> Result<Admitted, Cause> {
         let context = required_context(&self.context)?;
+        if context.governance.is_some() {
+            return Err(Cause::Unimplemented { story: "E7-19" });
+        }
         let validated = validated_mandate(&self.path, context)?;
         let document = validated.mandate();
         let mut instruments = document.universe.pinned_instruments.iter();
@@ -979,6 +989,7 @@ impl MandateSource for SpecMandate {
                 params,
             },
             symbol: instrument.symbol.clone(),
+            governed: None,
         })
     }
 }
@@ -2028,6 +2039,11 @@ pub struct Sources<T> {
     /// Validation, admission, builder, and advisory-gate facts. `None` keeps the binary fail closed
     /// until live assembly can supply every effective-dated input.
     pub run: Option<RunContext>,
+    /// The content-addressed store the run's configuration objects were registered in. The
+    /// journal checks a version-2 record's `policy_set` and `model_registry` objects in it before
+    /// it commits the record, so `None`, or a store missing either object, stops a governed run
+    /// at its first version-2 append, before any intent (journal spec §5.1, §11 check 6).
+    pub artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
     pub transport: T,
 }
 
@@ -2043,6 +2059,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         account_ref,
         executor,
         run,
+        artifacts,
         transport,
     } = sources;
     over(Sources {
@@ -2055,6 +2072,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         account_ref,
         executor,
         run,
+        artifacts,
         transport: Box::new(AlpacaConnector { transport }),
     })
 }
@@ -3523,6 +3541,7 @@ mod tests {
                 builder: None,
                 gate: Some(gate),
             }),
+            governance: None,
         };
         let proposal = mandate_runtime::Proposal {
             instrument: mandate_accounting::InstrumentId::new(
