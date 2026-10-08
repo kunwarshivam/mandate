@@ -11,3 +11,4 @@ extend-ignore-re = [
 [default.extend-words]
 marginable = "marginable"           # Alpaca's term (non_marginable_buying_power)
 caf = "caf"                         # "café" split by an escaped byte in journal vectors
+cose = "cose"                       # CBOR Object Signing and Encryption (RFC 9052), WebAuthn's key format

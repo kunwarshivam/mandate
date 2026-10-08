@@ -21,6 +21,13 @@
 
 use std::collections::BTreeSet;
 
+mod profile;
+
+pub use profile::{
+    CapabilityProfile, Cell, Idempotency, OrderType, ProfileError, ProtectionForm, QuantityForm,
+    Retry, Row, TimeInForce,
+};
+
 /// An asset class the platform trades (mandate spec §3, trading-domain spec §3).
 ///
 /// The text form is the schema's (`us_equity`, `crypto`), which is also the reference cases' and the

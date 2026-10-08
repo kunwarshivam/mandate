@@ -19,7 +19,8 @@
 #   0  mandate-num, mandate-time, mandate-canon
 #   1  mandate-domain, mandate-approval, mandate-liquidity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1)
-#   2  mandate-journal, mandate-accounting
+#   2  mandate-journal, mandate-accounting, and mandate-passkey, the WebAuthn relying party
+#      (E9-1, DEC-660), which verifies and never signs
 #   3  mandate-spec
 #   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
 #      mandate-spec; it holds L5's audit wire types, and mandate-audit sits above it and converts
@@ -85,6 +86,12 @@ layer = 1
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+[crates.mandate-passkey]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
 
 [crates.mandate-liquidity]
 layer = 1
