@@ -20,8 +20,7 @@
 #   1  mandate-domain, mandate-approval, mandate-liquidity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1)
 #   2  mandate-journal, mandate-accounting, and mandate-passkey, the WebAuthn relying party
-#      (E9-1, DEC-660): above mandate-identity's principal and step-up types, and it verifies
-#      and never signs
+#      (E9-1, DEC-660), which verifies and never signs
 #   3  mandate-spec
 #   4  mandate-risk
 #   5  mandate-builder
