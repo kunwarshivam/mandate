@@ -1,0 +1,68 @@
+{
+  "Decimal": [
+    0.12,
+    1,
+    "-0",
+    "1e5",
+    "+1",
+    "01",
+    "1.",
+    "1.0",
+    "1.50",
+    "NaN",
+    " 1",
+    "1_000",
+    "0.00000000000000000000000000001"
+  ],
+  "Timestamp": [
+    "2026-09-28T14:05:18-04:00",
+    "2026-09-28T18:05:18Z",
+    "2026-09-28T18:05:18.000Z",
+    "2026-13-01T00:00:00.000000000Z",
+    1727546718
+  ],
+  "ContentRef": [
+    "516967c3516967c3516967c3516967c3516967c3516967c3516967c3516967c3",
+    "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "Id": [
+    "",
+    "has space",
+    "btc/usd",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "EventId": [
+    "01jbh3btz8k2m4n6p8r0s2t4v6",
+    "01JBH3BTZ8K2M4N6P8R0S2T4VU",
+    "81JBH3BTZ8K2M4N6P8R0S2T4V6",
+    "01JBH3BTZ8"
+  ],
+  "Watermark": [
+    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 0, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1842, "hash": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "orders:ws_1", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"},
+    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z", "extra": 1},
+    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"},
+    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1.5, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"}
+  ],
+  "AsOf": [
+    [],
+    {"stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "seq": 1842, "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "recorded_at": "2026-09-28T18:05:19.000000000Z"}
+  ],
+  "Freshness": [
+    {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "age_seconds": 2.5, "limit_source": "data_profile.max_mark_age_s"},
+    {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "age_seconds": -1, "limit_source": "data_profile.max_mark_age_s"},
+    {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": "no", "age_seconds": 2, "limit_source": "data_profile.max_mark_age_s"},
+    {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "limit_source": "data_profile.max_mark_age_s"},
+    {"observed_at": "2026-09-28T14:05:18-04:00", "stale": false, "age_seconds": 2, "limit_source": "data_profile.max_mark_age_s"}
+  ],
+  "QuotedContent": [
+    {"author": "user", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null},
+    {"author": "owner_selected", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null, "action": "approve"},
+    {"author": "owner_selected", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null, "button": {"label": "Buy"}},
+    {"text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null},
+    {"author": "owner_selected", "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars", "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": "abc"},
+    {"author": "owner_selected", "text": ["a"], "model_id": "quant.momentum", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:58.000000000Z", "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA", "artifact": null}
+  ]
+}
