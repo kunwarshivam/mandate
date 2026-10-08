@@ -15,6 +15,7 @@ use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, get_artifact};
 use mandate_num::Usd;
 use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
 use mandate_spec::document::ModelId;
+use mandate_spec::policy::{PolicyOverlay, PolicyViolation};
 use mandate_spec::validate::{RegisteredModel, Violation, validate};
 use mandate_spec::{Mandate, ValidationContext};
 use mandate_time::{Date, UtcNanos};
@@ -346,6 +347,8 @@ pub enum ConfigRefusal {
     SnapshotWrongType { member: &'static str },
     #[error("the instrument snapshot's {member} is outside DEC-523's value set")]
     SnapshotValue { member: &'static str },
+    #[error("the model registry does not hold exactly one entry equal to the pinned registration")]
+    RegistryMismatch,
 }
 
 impl ConfigRefusal {
@@ -363,6 +366,7 @@ impl ConfigRefusal {
             Self::SnapshotExtraMember => "snapshot_extra_member",
             Self::SnapshotWrongType { .. } => "snapshot_wrong_type",
             Self::SnapshotValue { .. } => "snapshot_value",
+            Self::RegistryMismatch => "registry_mismatch",
         }
     }
 }
@@ -528,3 +532,32 @@ const KINDS: [&str; 5] = [
     "instrument_snapshot",
     "model_version",
 ];
+
+/// What governs a run beside its mandate (DEC-484, DEC-534): the effective `policy_set` and
+/// `model_registry` registrations, §4.3's overlay folded from the policy's levels, and the
+/// confirmed mandate's violations of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Governance {
+    pub policy_set: Registered,
+    pub model_registry: Registered,
+    pub overlay: PolicyOverlay,
+    /// Empty when the mandate conforms. Otherwise the run denies every action that adds risk and
+    /// lets exits, protective orders and kill switches through (DEC-534).
+    pub violations: Vec<PolicyViolation>,
+}
+
+/// The governance of the run that `records` and `store` define for `mandate`. Each kind's
+/// effective registration is the latest by `seq` (DEC-505 item 1). The policy set is read
+/// through `policy::parse_policy_set`. The registry is shaped as journal spec §9 says, and holds
+/// exactly one entry for the pinned model, equal to its effective `model_version` registration:
+/// triple, `params` and `admits_instruments` (DEC-484 item 5). A nonconforming mandate is no
+/// refusal here: its violations are returned (DEC-534).
+pub fn governance(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    pinned: &Pinned,
+    mandate: &Mandate,
+) -> Result<Governance, ConfigRefusal> {
+    let _ = (records, store, pinned, mandate);
+    Err(ConfigRefusal::Unimplemented { story: "E7-19" })
+}

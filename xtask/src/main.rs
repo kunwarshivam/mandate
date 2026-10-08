@@ -2313,15 +2313,20 @@ const STUB_MARKERS: [&str; 5] = [
 ///   goes beside that cancel (backlog: "E7-4 (stream K), E5b from #668's round-2 review").
 /// - `no_interval_exceeds_the_limit_without_an_alert` (defect E4b): while a bracket's OCO awaits
 ///   its acknowledgment, a new interval's start ends the first open interval rather than the
-///   awaited one, so the bound alerts late (E4b, from #698's review; its backlog row comes with
-///   E4b's tests PR).
+///   awaited one, so the bound alerts late (backlog: "E7-4 (stream K), E4b from E4's fix"). Its
+///   scripts are now either that lead or the wide protected search, so the search stays reachable.
+///
+/// One more `hand` row is defect E4b (backlog: "E7-4 (stream K), E4b from E4's fix"; DEC-521 item
+/// 3): while a second bracket's OCO awaits its acknowledgment, a third bracket's start ends the
+/// first open interval in the instrument rather than the awaited one. It reaches no stub and fails
+/// on that behaviour until E4b's fix deletes the row with its `#[ignore]` line.
 ///
 /// The two rows for journal spec v0.18's `policy_overlay` label are J3's (DEC-536). They check
 /// `Draft::parse`, the journal's existing draft check, against the vectors' `policy_overlay`
 /// section. There is no stub to stop at: until J3's implementation adds the label, the journal
 /// answers `non_canonical`, which is the behaviour they fail on. J3's implementation deletes the
 /// two rows with the `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 11] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2362,6 +2367,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 11] = [
     (
         "crates/mandate-journal/tests/policy_overlay.rs",
         "every_policy_overlay_invalid_draft_is_refused_with_its_reason_at_its_path",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
     ),
 ];
 
