@@ -2326,12 +2326,12 @@ const STUB_MARKERS: [&str; 5] = [
 /// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
 /// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
 ///
-/// The eight `notices` rows are E8-9 slice S2's (DEC-720). They check `StreamId::parse`,
+/// The nine `notices` rows are E8-9 slice S2's (DEC-720). They check `StreamId::parse`,
 /// `Draft::parse`, and `check_batch`, the journal's existing checks, so there is no stub to stop
 /// at: until S2's implementation, the journal refuses `ntf:` as a stream id and `OwnerAlertSent` off
-/// the control stream, which is the behaviour they fail on. S2's implementation deletes the eight
+/// the control stream, which is the behaviour they fail on. S2's implementation deletes the nine
 /// rows with the `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 21] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 22] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2388,6 +2388,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 21] = [
     (
         "crates/mandate-journal/tests/notices.rs",
         "the_alert_and_notice_records_are_catalogued_and_closed_on_their_streams",
+    ),
+    (
+        "crates/mandate-journal/tests/notices.rs",
+        "the_notice_stream_admits_only_its_own_three_records",
     ),
     (
         "crates/mandate-journal/tests/notices.rs",

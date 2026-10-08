@@ -20,41 +20,16 @@ const NTF: &str = "ntf:ws_1";
 const NOTICE: &str = "0123456789abcdef0123456789abcdef";
 const STREAMS: [&str; 5] = [STREAM, "agent:ws_1:agent_a", "ctl:ws_1", "clock:ws_1", NTF];
 
-/// DEC-720's kinds in notifications spec §3.2's order, each with its class.
-const KINDS: [(&str, &str); 32] = [
-    ("approval_requested", "action"),
-    ("approval_reminder", "action"),
-    ("risk_limit", "safety"),
-    ("kill_switch", "safety"),
-    ("agent_held", "safety"),
-    ("account_restriction", "safety"),
-    ("protection", "safety"),
-    ("exit_stalled", "safety"),
-    ("reconciliation", "safety"),
-    ("external_activity", "safety"),
-    ("account_state", "safety"),
-    ("data_feed_down", "safety"),
-    ("integrity_incident", "safety"),
-    ("credential_added", "safety"),
-    ("new_device", "safety"),
-    ("recovery_used", "safety"),
-    ("role_granted", "safety"),
-    ("member_deactivated", "safety"),
-    ("deprovisioned", "safety"),
-    ("break_glass", "safety"),
-    ("version_risk_increasing", "safety"),
-    ("delegation_added", "safety"),
-    ("connection_added", "safety"),
-    ("went_live", "safety"),
-    ("client_connected", "safety"),
-    ("channel_lost", "safety"),
-    ("daily_brief", "info"),
-    ("delegation_ended", "info"),
-    ("model_status", "info"),
-    ("research_status", "info"),
-    ("spend_cap", "info"),
-    ("approval_closed", "info"),
-];
+/// DEC-720's kinds in notifications spec §3.2's order, each `kind:class`.
+const KINDS: &str = "approval_requested:action approval_reminder:action risk_limit:safety \
+    kill_switch:safety agent_held:safety account_restriction:safety protection:safety \
+    exit_stalled:safety reconciliation:safety external_activity:safety account_state:safety \
+    data_feed_down:safety integrity_incident:safety credential_added:safety new_device:safety \
+    recovery_used:safety role_granted:safety member_deactivated:safety deprovisioned:safety \
+    break_glass:safety version_risk_increasing:safety delegation_added:safety \
+    connection_added:safety went_live:safety client_connected:safety channel_lost:safety \
+    daily_brief:info delegation_ended:info model_status:info research_status:info spend_cap:info \
+    approval_closed:info";
 
 fn envelope(stream: &str, id: u64, event_type: &str, causation: &str, payload: &str) -> Vec<u8> {
     format!(
@@ -184,6 +159,32 @@ fn the_alert_and_notice_records_are_catalogued_and_closed_on_their_streams() {
     }
 }
 
+/// Other event types the catalogue holds, account, agent, control, and scheduler alike, the copies
+/// a stream owner writes from another stream's event among them. None is admitted on `ntf:`, so no
+/// stream owner copies a fact from the notice stream and the dispatcher writes nothing else.
+const NOT_ON_NTF: &str = "IntentReceived GateDecided FillApplied MarkUpdated AgentModeApplied \
+    OwnerAcknowledged OwnerCommandRefused KillSwitchActivated TradingDayStarted ClockAdvanced \
+    ClockToleranceExceeded DecisionMade ApprovalRequested ApprovalDelivered ApprovalResponded \
+    AgentModeChanged ApprovalResponseSubmitted ConfigSnapshotRegistered IntegrityIncidentRecorded \
+    OwnerAlertSent";
+
+#[test]
+#[ignore = "pending E8-9"]
+fn the_notice_stream_admits_only_its_own_three_records() {
+    let opened = envelope(NTF, 9, "StreamOpened", "null", r#"{"unregistered":true}"#);
+    assert_eq!(outcome(&opened), "schema@payload.unregistered");
+    let types: Vec<&str> = NOT_ON_NTF.split_whitespace().collect();
+    assert_eq!(types.len(), 20);
+    for event_type in types {
+        let draft = envelope(NTF, 9, event_type, "null", r#"{"unregistered":true}"#);
+        assert_eq!(
+            outcome(&draft),
+            "wrong_stream@event_type",
+            "{event_type} on {NTF}"
+        );
+    }
+}
+
 #[test]
 #[ignore = "pending E8-9"]
 fn every_member_is_required_and_no_unlisted_member_is_admitted() {
@@ -273,6 +274,11 @@ fn the_member_types_refuse_event_ids_and_foreign_vocabulary() {
         "attempted | channel=cli_inbox | non_canonical@payload.channel",
         "attempted | channel=web_inbox | non_canonical@payload.channel",
         "attempted | attempt=\"1\" | schema@payload.attempt",
+        "attempted | attempt=true | schema@payload.attempt",
+        "attempted | status=5 | schema@payload.status",
+        "attempted | status=null | schema@payload.status",
+        "attempted | reason=true | schema@payload.reason",
+        "attempted | reason=[\"timeout\"] | schema@payload.reason",
         "attempted | status=sent | non_canonical@payload.status",
         "attempted | reason=network_down | non_canonical@payload.reason",
         "attempted | status=failed reason=retry_window_elapsed | non_canonical@payload.reason",
@@ -289,13 +295,26 @@ fn the_member_types_refuse_event_ids_and_foreign_vocabulary() {
         &format!("alert | kind={ulid} | non_canonical@payload.kind"),
         "alert | kind=kill_switch owner_command=not-a-ulid | non_canonical@payload.owner_command",
     ]);
+    let attempted = String::from_utf8(base("attempted")).unwrap();
+    assert!(attempted.contains(r#""attempt":1,"#));
+    let fractional = attempted.replace(r#""attempt":1,"#, r#""attempt":1.5,"#);
+    assert_eq!(
+        outcome(fractional.as_bytes()),
+        "float@",
+        "an attempt is never fractional"
+    );
 }
 
 #[test]
 #[ignore = "pending E8-9"]
 fn every_kind_and_vocabulary_member_is_admitted_where_dec_720_allows_it() {
     let mut cases = Vec::new();
-    for (kind, class) in KINDS {
+    let kinds: Vec<(&str, &str)> = KINDS
+        .split_whitespace()
+        .filter_map(|pair| pair.split_once(':'))
+        .collect();
+    assert_eq!(kinds.len(), 32, "notifications spec §3.2's 32 kinds");
+    for (kind, class) in kinds {
         let cause_stream = match kind {
             "approval_requested" | "approval_reminder" => "agent:ws_1:agent_a",
             "channel_lost" => NTF,
@@ -374,6 +393,7 @@ fn the_consistency_rules_refuse_at_their_paths() {
         "issued | cause_stream=ntf:ws_1 | stream_mismatch@payload.cause_stream",
         "issued | cause_stream=agent:ws_1:a | ok",
         "attempted | attempt=0 | schema@payload.attempt",
+        "attempted | attempt=-1 | schema@payload.attempt",
         "attempted | reason=timeout | schema@payload.reason",
         &format!(
             "attempted | {abandoned} status=suppressed_quiet_hours reason=not_pending | schema@payload.reason"
