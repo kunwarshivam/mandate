@@ -1760,12 +1760,14 @@ The first three reasons are connections spec §8.2's degrading signals; the next
 the control services accepted) while the state stays where it is. `acknowledged` returns the
 connection to `active`, and its `causation_id` is the `OwnerAcknowledged` the executor copied (rule
 61). A reconnect continues its account stream (CN-12), and with it the state that stream last
-recorded: a connection revoked while `suspended` is still `suspended` when it is established again,
-and returns to `active` only by `condition_cleared` and then `acknowledged`, as trading spec §7.3
-lifts its restriction.
+recorded: a connection revoked while `suspended` is still `suspended` when it is established again.
+A reconnect journals a `ConnectionEstablished` copy and a `reconnect` check, never a rotation, so it
+does not by itself leave `suspended`: after reconnecting, the owner still re-authorizes, and the
+connection returns to `active` only as the next paragraph says, by `condition_cleared` and then
+`acknowledged`, as trading spec §7.3 lifts its restriction.
 
-**Out of `suspended`** ([DEC-800](../project/decisions/DEC-800.md) item 5), in order, each on the
-account stream (rule 68): the owner replaces the credential; the executor journals a
+**Out of `suspended`** ([DEC-800](../project/decisions/DEC-800.md) item 5), by re-authorization only,
+in order, each on the account stream (rule 68): the owner replaces the credential; the executor journals a
 `ConnectionChecked` with occasion `reauthorize`, after the `ConnectionStateChanged` that entered
 `suspended`, in which every result passed (with `contract` for an MCP connection); the control
 services confirm it, compare the fingerprint (the same account), and append
@@ -1878,7 +1880,9 @@ own stream:
       connection clears only on a credential the control services accepted after the suspension.
 
 No rule here refuses a `ConnectionRevoked`, so §5.6's compromised revocation, whose kill switch
-shares its batch, is never held by one.
+shares its batch, is never held by one. §9.8 adds no `ConnectionRevoked` version; #792's version 2
+lands after this change, at a later spec version, and these rules count a revocation of either
+version.
 
 **No mapping to `JournaledFact`** beyond `ConnectionEstablished`'s (§9.2): the control-stream
 version, never its copy. The executor folds the account-stream records itself, and the connection
