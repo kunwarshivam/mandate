@@ -14,8 +14,8 @@ use core::cmp::Ordering;
 use mandate_canon::Value;
 use mandate_domain::{AutonomyDecision, Environment, Purpose};
 
-use crate::document::{Channel, LadderAction, Mandate};
-use crate::{DecGrammar, SchemaDec, SpecError};
+use crate::document::{Channel, LadderAction, Mandate, Pointer};
+use crate::{DecGrammar, ParseError, SchemaDec, SpecError};
 
 /// A level of the hierarchy, outermost first when a chain is passed to [`check`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -224,8 +224,241 @@ impl PolicyLevel {
     /// [`ParseError`](crate::ParseError) naming the pointer. `profile` is checked and not kept
     /// (journal spec §9, DEC-484 item 4).
     pub fn parse(document: &Value) -> Result<Self, SpecError> {
-        let _ = document;
-        Err(SpecError::Unimplemented)
+        level_at(document, "")
+    }
+}
+
+/// How the schema shapes one key's value.
+enum Shape {
+    Decimal(DecGrammar),
+    Integer(u64, u64),
+    Flag,
+    Set(&'static [&'static str]),
+}
+
+const KEYS: [PolicyKey; 40] = [
+    PolicyKey::AllocationUsd,
+    PolicyKey::MaxLossFromAllocation,
+    PolicyKey::MaxPositionUsd,
+    PolicyKey::MaxPositionFraction,
+    PolicyKey::MaxGrossExposureUsd,
+    PolicyKey::MaxOrderUsd,
+    PolicyKey::MaxOrdersPerDay,
+    PolicyKey::MaxDailyLoss,
+    PolicyKey::MaxDrawdown,
+    PolicyKey::BreachConfirmS,
+    PolicyKey::MaxOutputAgeS,
+    PolicyKey::ExitThreshold,
+    PolicyKey::StopDistanceMax,
+    PolicyKey::ExitsOnlyAtMax,
+    PolicyKey::TwoApproverAboveUsd,
+    PolicyKey::MaxInstruments,
+    PolicyKey::ResearchWeight,
+    PolicyKey::ResearchCostCapUsdPerDay,
+    PolicyKey::MaxRevisionsPerLineage,
+    PolicyKey::EntryThreshold,
+    PolicyKey::RebalanceBand,
+    PolicyKey::Hysteresis,
+    PolicyKey::CadenceIntervalS,
+    PolicyKey::ApprovalTimeoutS,
+    PolicyKey::ReentryCooldownS,
+    PolicyKey::DailyBreachMinS,
+    PolicyKey::ScaleLiftAfterS,
+    PolicyKey::ResearchIntervalS,
+    PolicyKey::StaggerWindowS,
+    PolicyKey::LeveragedEtpsAllowed,
+    PolicyKey::AutoAllowed,
+    PolicyKey::ResearchAgentAllowed,
+    PolicyKey::AdmissionAutoAllowed,
+    PolicyKey::ProtectionRequired,
+    PolicyKey::IndependentApprovalRequired,
+    PolicyKey::AssetClasses,
+    PolicyKey::SignalModelTypes,
+    PolicyKey::GoalTypes,
+    PolicyKey::Channels,
+    PolicyKey::Environments,
+];
+
+fn shape(key: PolicyKey) -> Shape {
+    use DecGrammar::{Fraction, OpenFraction, PositiveDecimal, UnitPositive};
+    match key {
+        PolicyKey::AllocationUsd
+        | PolicyKey::MaxPositionUsd
+        | PolicyKey::MaxGrossExposureUsd
+        | PolicyKey::MaxOrderUsd
+        | PolicyKey::TwoApproverAboveUsd
+        | PolicyKey::ResearchCostCapUsdPerDay => Shape::Decimal(PositiveDecimal),
+        PolicyKey::MaxLossFromAllocation
+        | PolicyKey::MaxDailyLoss
+        | PolicyKey::MaxDrawdown
+        | PolicyKey::StopDistanceMax
+        | PolicyKey::ExitsOnlyAtMax
+        | PolicyKey::Hysteresis => Shape::Decimal(OpenFraction),
+        PolicyKey::MaxPositionFraction
+        | PolicyKey::ExitThreshold
+        | PolicyKey::ResearchWeight
+        | PolicyKey::EntryThreshold => Shape::Decimal(UnitPositive),
+        PolicyKey::RebalanceBand => Shape::Decimal(Fraction),
+        PolicyKey::MaxOrdersPerDay => Shape::Integer(1, 10_000),
+        PolicyKey::BreachConfirmS => Shape::Integer(0, 300),
+        PolicyKey::MaxOutputAgeS | PolicyKey::CadenceIntervalS => Shape::Integer(60, 86_400),
+        PolicyKey::MaxInstruments => Shape::Integer(1, 20),
+        PolicyKey::MaxRevisionsPerLineage => Shape::Integer(0, 10),
+        PolicyKey::ApprovalTimeoutS => Shape::Integer(30, 86_400),
+        PolicyKey::ReentryCooldownS => Shape::Integer(0, 604_800),
+        PolicyKey::DailyBreachMinS | PolicyKey::ScaleLiftAfterS => Shape::Integer(0, 86_400),
+        PolicyKey::ResearchIntervalS => Shape::Integer(300, 604_800),
+        PolicyKey::StaggerWindowS => Shape::Integer(0, 3_600),
+        PolicyKey::LeveragedEtpsAllowed
+        | PolicyKey::AutoAllowed
+        | PolicyKey::ResearchAgentAllowed
+        | PolicyKey::AdmissionAutoAllowed
+        | PolicyKey::ProtectionRequired
+        | PolicyKey::IndependentApprovalRequired => Shape::Flag,
+        PolicyKey::AssetClasses => Shape::Set(&["crypto", "us_equity"]),
+        PolicyKey::SignalModelTypes => Shape::Set(&["fast", "llm", "quant"]),
+        PolicyKey::GoalTypes => Shape::Set(&["accumulate", "continuous", "profit_stop"]),
+        PolicyKey::Channels => {
+            Shape::Set(&["email", "phone", "slack", "sms", "telegram", "web_push"])
+        }
+        PolicyKey::Environments => Shape::Set(&["live", "paper"]),
+    }
+}
+
+fn pointer(path: String) -> Pointer {
+    Pointer::new(&path)
+}
+
+/// The object's members, each one of `allowed`, and each of `required` present.
+fn members<'a>(
+    value: &'a Value,
+    path: &str,
+    allowed: &[&str],
+    required: &[&str],
+) -> Result<&'a mandate_canon::Object, SpecError> {
+    let object = value.as_object().ok_or_else(|| ParseError::WrongType {
+        path: pointer(path.to_owned()),
+    })?;
+    for name in object.keys() {
+        if !allowed.contains(&name.as_str()) {
+            return Err(ParseError::UnknownMember {
+                path: pointer(format!("{path}/{name}")),
+            }
+            .into());
+        }
+    }
+    for name in required {
+        if object.get(*name).is_none() {
+            return Err(ParseError::MissingMember {
+                path: pointer(format!("{path}/{name}")),
+            }
+            .into());
+        }
+    }
+    Ok(object)
+}
+
+fn level_at(document: &Value, path: &str) -> Result<PolicyLevel, SpecError> {
+    let object = members(
+        document,
+        path,
+        &["level", "policy_schema_version", "profile", "values"],
+        &["level", "policy_schema_version", "values"],
+    )?;
+    let off = |member: &str| ParseError::NotInEnum {
+        path: pointer(format!("{path}/{member}")),
+    };
+    if object.get("policy_schema_version").and_then(Value::as_int) != Some(1) {
+        return Err(off("policy_schema_version").into());
+    }
+    let name = match object.get("level").and_then(Value::as_str) {
+        Some("platform") => LevelName::Platform,
+        Some("organization") => LevelName::Organization,
+        Some("workspace") => LevelName::Workspace,
+        Some(_) | None => return Err(off("level").into()),
+    };
+    if let Some(profile) = object.get("profile") {
+        let known = matches!(profile.as_str(), Some("internal_research" | "retail"));
+        if !known && *profile != Value::Null {
+            return Err(off("profile").into());
+        }
+    }
+    let values_path = format!("{path}/values");
+    let values = members(
+        object.get("values").unwrap_or(&Value::Null),
+        &values_path,
+        &KEYS.map(PolicyKey::as_str),
+        &[],
+    )?;
+    let mut read = BTreeMap::new();
+    for (name, value) in values {
+        let at = format!("{values_path}/{name}");
+        let key = KEYS
+            .into_iter()
+            .find(|key| key.as_str() == name.as_str())
+            .ok_or_else(|| ParseError::UnknownMember {
+                path: pointer(at.clone()),
+            })?;
+        read.insert(key, key_value(shape(key), value, &at)?);
+    }
+    Ok(PolicyLevel { name, values: read })
+}
+
+fn key_value(shape: Shape, value: &Value, at: &str) -> Result<PolicyValue, SpecError> {
+    let wrong = || ParseError::WrongType {
+        path: pointer(at.to_owned()),
+    };
+    match shape {
+        Shape::Decimal(grammar) => match value {
+            Value::Int(_) => Err(ParseError::DecimalAsNumber {
+                path: pointer(at.to_owned()),
+            }
+            .into()),
+            Value::Str(text) => SchemaDec::parse(text, grammar)
+                .map(PolicyValue::Decimal)
+                .map_err(|_| {
+                    ParseError::OffGrammar {
+                        path: pointer(at.to_owned()),
+                        grammar,
+                    }
+                    .into()
+                }),
+            Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => {
+                Err(wrong().into())
+            }
+        },
+        Shape::Integer(low, high) => {
+            let n = value.as_int().ok_or_else(wrong)?;
+            if n < low || n > high {
+                return Err(ParseError::OutOfBounds {
+                    path: pointer(at.to_owned()),
+                }
+                .into());
+            }
+            Ok(PolicyValue::Integer(n))
+        }
+        Shape::Flag => match value {
+            Value::Bool(flag) => Ok(PolicyValue::Flag(*flag)),
+            Value::Null | Value::Int(_) | Value::Str(_) | Value::Array(_) | Value::Object(_) => {
+                Err(wrong().into())
+            }
+        },
+        Shape::Set(allowed) => {
+            let items = value.as_array().ok_or_else(wrong)?;
+            let mut read = BTreeSet::new();
+            for (index, item) in items.iter().enumerate() {
+                let item_at = pointer(format!("{at}/{index}"));
+                let text = item.as_str().filter(|text| allowed.contains(text)).ok_or(
+                    ParseError::NotInEnum {
+                        path: item_at.clone(),
+                    },
+                )?;
+                if !read.insert(text.to_owned()) {
+                    return Err(ParseError::NotUnique { path: item_at }.into());
+                }
+            }
+            Ok(PolicyValue::Set(read))
+        }
     }
 }
 
@@ -235,8 +468,41 @@ impl PolicyLevel {
 /// repeated, is `invalid_input`; a member or a level that breaks the schema is its
 /// [`ParseError`](crate::ParseError), its pointer from the object's root.
 pub fn parse_policy_set(object: &Value) -> Result<Vec<PolicyLevel>, SpecError> {
-    let _ = object;
-    Err(SpecError::Unimplemented)
+    let members = members(
+        object,
+        "",
+        &["kind", "levels", "policy_set_version"],
+        &["kind", "levels", "policy_set_version"],
+    )?;
+    if members.get("kind").and_then(Value::as_str) != Some("policy_set") {
+        return Err(ParseError::NotInEnum {
+            path: Pointer::new("/kind"),
+        }
+        .into());
+    }
+    if members.get("policy_set_version").and_then(Value::as_int) != Some(1) {
+        return Err(ParseError::NotInEnum {
+            path: Pointer::new("/policy_set_version"),
+        }
+        .into());
+    }
+    let items = members
+        .get("levels")
+        .and_then(Value::as_array)
+        .ok_or(ParseError::WrongType {
+            path: Pointer::new("/levels"),
+        })?;
+    let mut levels: Vec<PolicyLevel> = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let level = level_at(item, &format!("/levels/{index}"))?;
+        if levels.last().is_some_and(|last| last.name >= level.name) {
+            return Err(SpecError::InvalidInput {
+                what: "policy levels out of the platform, organization, workspace order, or repeated",
+            });
+        }
+        levels.push(level);
+    }
+    Ok(levels)
 }
 
 /// One violation, naming the key, the level that broke it, and the **nearest** ancestor whose value it
