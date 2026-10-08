@@ -26,6 +26,7 @@ pub mod approvals;
 pub mod artifact;
 pub mod config;
 pub mod control;
+pub mod deploy;
 pub mod download;
 pub mod inspect;
 pub mod journal;
