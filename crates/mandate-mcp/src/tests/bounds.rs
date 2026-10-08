@@ -19,7 +19,6 @@ fn with_session(mut answer: Answer, id: &str) -> Answer {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn the_session_the_server_assigns_is_carried_until_it_expires() {
     let ok = |id: u64| json(&format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{{}}}}"#));
     let server = serve(vec![
@@ -51,7 +50,6 @@ async fn the_session_the_server_assigns_is_carried_until_it_expires() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_session_id_that_is_not_visible_ascii_is_refused() {
     for id in ["", "a b"] {
         let server = serve(vec![with_session(json("{}"), id)]).await;
@@ -68,7 +66,6 @@ async fn a_session_id_that_is_not_visible_ascii_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_redirect_is_refused_and_never_followed() {
     let elsewhere = serve(vec![json(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#)]).await;
     let mut redirect = with_type(307, "text/plain", "");
@@ -84,7 +81,6 @@ async fn a_redirect_is_refused_and_never_followed() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_timeout_is_typed() {
     let mut slow = json(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
     slow.delay = Duration::from_secs(5);
@@ -102,7 +98,6 @@ async fn a_timeout_is_typed() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_notification_is_accepted_with_202_and_nothing_else() {
     let server = serve(vec![with_type(202, "text/plain", ""), json("{}")]).await;
     let transport = server.transport(TransportConfig::CONSERVATIVE);
@@ -122,7 +117,6 @@ async fn a_notification_is_accepted_with_202_and_nothing_else() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn reads_that_spend_their_budget_leave_the_exit_budget_whole() {
     let hour = Duration::from_secs(3600);
     let config = TransportConfig {
@@ -156,7 +150,6 @@ async fn reads_that_spend_their_budget_leave_the_exit_budget_whole() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn server_text_never_appears_in_an_error_or_a_result_printout() {
     let error = format!(
         r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32000,"message":"{CANARY}","data":"{CANARY}"}}}}"#
@@ -180,7 +173,6 @@ async fn server_text_never_appears_in_an_error_or_a_result_printout() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_zero_timeout_size_cap_or_budget_is_refused() {
     let good = TransportConfig::CONSERVATIVE;
     let zero = Duration::ZERO;

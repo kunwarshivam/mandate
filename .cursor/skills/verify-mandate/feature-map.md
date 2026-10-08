@@ -497,8 +497,9 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-mcp/src/budget.rs` (`RateBudget`: the ordinary bucket and the reserved one only
   risk-reducing calls draw on), `crates/mandate-mcp/src/transport.rs` (`McpTransport`: one `POST`
   per message, the `Mcp-Session-Id` carried, no redirect followed, bounded timeouts and answer size,
-  and the injected `Monotonic` clock), `crates/mandate-mcp/src/error.rs` (`McpError`, and
-  `ServerText`, which has no `Display` and whose `Debug` withholds what the server sent).
+  and the injected `Monotonic` clock), `crates/mandate-mcp/src/frame.rs` (JSON-RPC 2.0 framing, and
+  the answer as one JSON body or an event stream), `crates/mandate-mcp/src/error.rs` (`McpError`,
+  and `ServerText`, which has no `Display` and whose `Debug` withholds what the server sent).
 - **Tests:** in-crate, because loopback is accepted only in the crate's test build:
   `crates/mandate-mcp/src/tests/endpoint.rs`, `crates/mandate-mcp/src/tests/budget.rs` (an oracle
   that steps one refill period at a time), `crates/mandate-mcp/src/tests/server.rs` (the scripted
