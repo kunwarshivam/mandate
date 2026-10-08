@@ -58,7 +58,7 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(hostingProblems(tree({ "src/middleware.ts": `${edge}\nexport const runtime = "nodejs";\n` }))).toEqual(only("runtime"));
   });
 
-  it.skip("pending E11-9: flags a wrangler.jsonc without the Worker's name, entry, minification, flags, assets or self-reference", () => {
+  it.skip("pending E11-9: flags a wrangler.jsonc without the Worker's name, entry, minification, flags, assets or self-reference, or with workers.dev on", () => {
     expect(hostingProblems(tree({ "wrangler.jsonc": null }))).toEqual(only("wrangler.jsonc"));
     const config = JSON.parse(wrangler().replace(/^\s*\/\/.*$/gm, ""));
     const broken = (change: (c: Record<string, unknown>) => void) => {
@@ -74,9 +74,11 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(broken((c) => delete c.compatibility_date)).toEqual(only("compatibility_date"));
     expect(broken((c) => (c.assets = { directory: ".open-next/assets" }))).toEqual(only("ASSETS"));
     expect(broken((c) => (c.assets = { directory: "public", binding: "ASSETS" }))).toEqual(only(".open-next/assets"));
+    expect(broken((c) => (c.workers_dev = true))).toEqual(only("workers_dev"));
+    expect(broken((c) => delete c.workers_dev)).toEqual(only("workers_dev"));
     expect(broken((c) => (c.services = []))).toEqual(only("WORKER_SELF_REFERENCE"));
     expect(broken((c) => (c.services = [{ binding: "WORKER_SELF_REFERENCE", service: "other" }]))).toEqual(only("WORKER_SELF_REFERENCE"));
-    expect(config).toMatchObject({ name: "owlhead-web", main: ".open-next/worker.js", minify: true });
+    expect(config).toMatchObject({ name: "owlhead-web", main: ".open-next/worker.js", minify: true, workers_dev: false });
   });
 
   it.skip("pending E11-9: flags missing build scripts, ignores and adapter config", () => {
