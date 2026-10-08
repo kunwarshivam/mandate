@@ -9,6 +9,17 @@ use mandate_canon::Digest;
 use mandate_modelhost::{Content, Evaluation, Refusal, Signal, content};
 use mandate_time::ExchangeCalendar;
 
+/// A refusal's message names the check that failed and no value of the run's, and the stub's names
+/// its story: the live test the mutation gate needs before M2 (DEC-139).
+#[test]
+fn a_refusal_names_the_failed_check_and_no_value() {
+    let stub = Refusal::Unimplemented { story: "E15-13" };
+    assert_eq!(stub.to_string(), "E15-13 has not been implemented yet");
+    let key = "fast_periods";
+    let bounds = "parameter fast_periods is not an integer within the model's bounds";
+    assert_eq!(Refusal::ParamValue { key }.to_string(), bounds);
+}
+
 /// DEC-504 item 2 and DEC-518: the host computes the content object from the bytes it was built
 /// with, so it equals the object written from the files on disk; it has content for no other model.
 #[test]
