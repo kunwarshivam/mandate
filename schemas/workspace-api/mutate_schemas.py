@@ -36,6 +36,11 @@ DELIBERATE: dict[str, str] = {
     "envelope.schema.json/$defs/Problem/properties/status/enum gains a value": "every code pins `status` to one constant",
     "envelope.schema.json/$defs/Problem/allOf/8/then/properties/effect/enum gains a value": "`effect` is also `Effect`, whose own enum refuses any added value",
     "envelope.schema.json/$defs/Problem/allOf/10/then/properties/effect/enum gains a value": "`effect` is also `Effect`, whose own enum refuses any added value",
+    "envelope.schema.json/$defs/Problem/allOf/15/then/properties/effect/enum gains a value": "`effect` is also `Effect`, whose own enum refuses any added value",
+    "envelope.schema.json/$defs/Problem/allOf/16/then/properties/effect/enum gains a value": "`effect` is also `Effect`, whose own enum refuses any added value",
+    "envelope.schema.json/$defs/Problem/allOf/17/then/properties/effect/enum gains a value": "`effect` is also `Effect`, whose own enum refuses any added value",
+    "envelope.schema.json/$defs/Problem/allOf/18/then/properties/effect/enum gains a value": "`effect` is also `Effect`, whose own enum refuses any added value",
+    "envelope.schema.json/$defs/Problem/allOf/19/then/properties/effect/enum gains a value": "`effect` is also `Effect`, whose own enum refuses any added value",
 }
 
 

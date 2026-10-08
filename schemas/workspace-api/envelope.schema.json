@@ -42,6 +42,11 @@
         "stale_base",
         "classification_changed",
         "step_up_required",
+        "step_up_missing",
+        "step_up_stale",
+        "step_up_reused",
+        "step_up_method",
+        "step_up_mismatch",
         "live_unavailable",
         "control_stream_frozen",
         "journal_unavailable",
@@ -649,6 +654,161 @@
               "required": [
                 "current_base"
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_missing"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ]
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation not valid"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_missing"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_stale"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ]
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation expired"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_stale"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_reused"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ]
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation already used"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_reused"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_method"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ]
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation method not allowed"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_method"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_mismatch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ]
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation does not match"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_mismatch"
+              }
             }
           }
         }

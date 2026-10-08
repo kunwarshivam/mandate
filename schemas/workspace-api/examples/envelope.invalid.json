@@ -1124,6 +1124,256 @@
       "event_id": null,
       "retryable": false,
       "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_missing",
+      "status": 403,
+      "code": "step_up_missing",
+      "title": "Confirmation not valid",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_missing",
+      "status": 401,
+      "code": "step_up_missing",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_missing",
+      "status": 401,
+      "code": "step_up_missing",
+      "title": "Confirmation not valid",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_missing",
+      "title": "Confirmation not valid",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_missing",
+      "status": 401,
+      "code": "step_up_missing",
+      "title": "Confirmation not valid",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_stale",
+      "status": 403,
+      "code": "step_up_stale",
+      "title": "Confirmation expired",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_stale",
+      "status": 401,
+      "code": "step_up_stale",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_stale",
+      "status": 401,
+      "code": "step_up_stale",
+      "title": "Confirmation expired",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_stale",
+      "title": "Confirmation expired",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_stale",
+      "status": 401,
+      "code": "step_up_stale",
+      "title": "Confirmation expired",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_reused",
+      "status": 403,
+      "code": "step_up_reused",
+      "title": "Confirmation already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_reused",
+      "status": 401,
+      "code": "step_up_reused",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_reused",
+      "status": 401,
+      "code": "step_up_reused",
+      "title": "Confirmation already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_reused",
+      "title": "Confirmation already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_reused",
+      "status": 401,
+      "code": "step_up_reused",
+      "title": "Confirmation already used",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_method",
+      "status": 403,
+      "code": "step_up_method",
+      "title": "Confirmation method not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_method",
+      "status": 401,
+      "code": "step_up_method",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_method",
+      "status": 401,
+      "code": "step_up_method",
+      "title": "Confirmation method not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_method",
+      "title": "Confirmation method not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_method",
+      "status": 401,
+      "code": "step_up_method",
+      "title": "Confirmation method not allowed",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_mismatch",
+      "status": 403,
+      "code": "step_up_mismatch",
+      "title": "Confirmation does not match",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_mismatch",
+      "status": 401,
+      "code": "step_up_mismatch",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_mismatch",
+      "status": 401,
+      "code": "step_up_mismatch",
+      "title": "Confirmation does not match",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_mismatch",
+      "title": "Confirmation does not match",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_mismatch",
+      "status": 401,
+      "code": "step_up_mismatch",
+      "title": "Confirmation does not match",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
     }
   ],
   "Actor": [

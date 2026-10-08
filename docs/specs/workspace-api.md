@@ -270,19 +270,34 @@ Errors are RFC 9457 problem documents with these members:
 | `idempotency_conflict` | 409 | Same key, different body |
 | `stale_base` | 409 | The draft or version base moved (API-19); the body names the current base |
 | `classification_changed` | 409 | The server's classification differs from the one the confirmation screen showed |
-| `step_up_required` | 401 | A risk-increasing call without evidence bound to its digest; never sent for pause, kill switch, owner exit, or Skip |
+| `step_up_required` | 401 | A call that needs step-up presents no evidence at all (§3.6, DEC-686) |
+| `step_up_missing` | 401 | Evidence is presented but does not count: its challenge is unknown, its credential is not the principal's or is in its enrolment cool-off, or its assertion does not verify (identity spec §7.2, DEC-662) |
+| `step_up_stale` | 401 | The challenge has expired, or is presented before its `issued_at` |
+| `step_up_reused` | 401 | The challenge was already used |
+| `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3) |
+| `step_up_mismatch` | 401 | The challenge names another principal, workspace, action kind, or action digest |
 | `live_unavailable` | 409 | A live environment operation before counsel signs off (rule 8, B5) |
 | `control_stream_frozen` | 503 | Journal spec §11 froze mandate and deployment changes; never sent for a risk-reducing call (API-7) |
 | `journal_unavailable` | 503 | Postgres cannot take the append; `effect: none`, `retryable: true` |
 | `rate_limited` | 429 | Over the principal's limit; never for an API-7 operation |
 | `outcome_unknown` | 503 | (planned: E10-10) The append's outcome could not be confirmed (an ambiguous commit, or `Fenced` during an upgrade, §7); `effect: unknown`, the derived `event_id` given, `retryable: false`. The client polls §5.5 with that `event_id` and never resends with a new key. A resend with the same key is still safe (API-4: it resolves to the original outcome), so `retryable: false` is a rule for the UI, not for correctness |
 
+The six step-up codes have `retryable: false`, and `effect: none`: nothing the step-up guards is
+committed (identity spec §7.2 step 6), and the same evidence fails the same way, so the client runs
+a new ceremony first. The one exception is a revoke on compromise, whose kill-switch half is
+committed anyway (`effect: recorded`, §5.6). None is ever sent for pause, the kill switch, an owner exit, or Skip (API-7): there, failed
+step-up loses only the privilege it would have added (identity spec §7.3). A call without evidence
+gets `step_up_required` before any other step-up check; evidence that is present is judged in
+DEC-662's order, and the first check that fails names the code.
+
 ### 3.6 Step-up
 
 The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
 
 - `POST /v1/workspaces/{ws}/step-up/challenges` with `{action: {kind, digest}}` returns a challenge
-  for that one action. `kind` names one of the actions identity spec ID-4 lists, and the set grows
+  for that one action. It is the only source of the WebAuthn challenge the authenticator signs:
+  the SHA-256 of the canonical challenge record (identity spec §7.2 steps 1 and 2),
+  `mandate_passkey::stepup::ChallengeRecord::webauthn_challenge`. `kind` names one of the actions identity spec ID-4 lists, and the set grows
   with that list: `confirm_version` (risk-increasing, a delegation grant included), `deploy`,
   `approve`, `connection` (connect, change, or revoke), `resume`, `stop`,
   `acknowledge`, `owner_exit`, `kill_switch_privilege`, `disclosure`, `policy_loosen`,
@@ -594,8 +609,9 @@ The server checks, in order, and refuses at the first failure: the principal is 
 role (API-5, API-6); the version exists in this workspace; `base_version` is the agent's version in
 force, else `stale_base`; the server's own §9.2 classification of `base_version` → `mandate_version`
 equals `classification_shown`, else `classification_changed`; every path V-020 requires is in
-`confirmed_paths`; the screen digest matches; for `risk_increasing`, step-up is present and bound,
-else `step_up_required`. While the control stream is frozen (journal spec §11), every confirm is
+`confirmed_paths`; the screen digest matches; for `risk_increasing`, step-up is present, else
+`step_up_required`, and passes identity spec §7.2 step 4, else that check's code (§3.5). While the
+control stream is frozen (journal spec §11), every confirm is
 refused with `control_stream_frozen`; the API-7 operations, including §4.4's reducing shortcuts,
 are still recorded.
 
@@ -627,7 +643,7 @@ Application is the executor's `MandateVersionApplied`, which may still reject (f
 The API refuses only: an unauthenticated or non-user principal, a user who is not listed in
 `autonomy.approval.approvers` and holding an approving role (§3.7), an unknown approval, and, for
 `approved` only, missing or unbound step-up: bound to the content hash, or with a delegation to the
-preview's `step_up_digest` (§5.3), else 401 `step_up_required`. It does not judge the deadline, the quorum,
+preview's `step_up_digest` (§5.3), else 401 with the step-up code §3.5 names. It does not judge the deadline, the quorum,
 independence, or re-validation: the runtime does (checks 1 to 12). A `skipped` is never refused for
 anything else (API-7).
 
@@ -737,7 +753,7 @@ positions, on fills, or on the regular session. The executor processes the batch
 
 The kill-switch half is an API-7 operation: without valid step-up, or while the control stream is
 frozen, the API still commits the kill switch, and refuses only the revocation with
-`step_up_required` (`effect: recorded` for the kill switch). The batch is otherwise all or nothing.
+the step-up code §3.5 names (`effect: recorded` for the kill switch). The batch is otherwise all or nothing.
 
 ---
 
