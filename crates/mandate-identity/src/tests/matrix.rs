@@ -1,19 +1,25 @@
 //! ID-2: `authorize` grants exactly identity spec §4.2's matrix, checked exhaustively against the
-//! table parsed from the spec itself, never from the code (E9-2, DEC-641).
+//! table parsed from the spec itself, never from the code (E9-2, DEC-641, DEC-816).
 //!
-//! The parser reads the cells by the grammar DEC-641 records and fails on any other text:
+//! The parser reads the cells by the grammar DEC-641 and DEC-816 record and fails on any other text:
 //!
 //! - **S cell:** blank, `S`, `S for invite`, or `S for grant`.
 //! - **Principal cells:** blank (denied), `✓`, `own`, `✓ (propose only)`, `✓ (org)` (org scope
-//!   only), or `✓ (not owner)`; each of the last five grants the row (the owner-role exception of
-//!   `✓ (not owner)` is `change_roles`'s, not `authorize`'s).
+//!   only), `✓ (not owner)`, or `self`; each of the five after blank but `self` grants the row (the
+//!   owner-role exception of `✓ (not owner)` is `change_roles`'s, not `authorize`'s). A `self` row
+//!   has `self` in all eight member columns and blank in every other, and is granted only at
+//!   principal scope, to a user, with no membership read.
 //! - **Column scopes:** OO, OA, Bill at an org's scope through an org membership; WA to Au at a
 //!   workspace's scope through its membership; Cl in its token's workspace, bounded by its user's
 //!   effective roles; SA in its named workspaces; HC in its own workspace; PO in its window's.
+//! - **Effective roles:** a membership reaches its scope when `active` or `cooling_off`, and a role
+//!   in it counts once its effective-from instant is at or before `now`.
 //! - **Inactive rows:** a permission that applies "only if DEC-437 item" creates its state is
 //!   refused to everyone.
 
 use std::collections::{BTreeMap, BTreeSet};
+
+use mandate_time::UtcNanos;
 
 use crate::{
     Authorized, Membership, MembershipLookup, MembershipState, OrgId, Permission, Principal,
@@ -35,14 +41,28 @@ const USER: PrincipalId = PrincipalId(0x31);
 const DECOY: PrincipalId = PrincipalId(0x32);
 const OTHER: PrincipalId = PrincipalId(0x33);
 const SESSION: SessionRef = SessionRef(0x41);
+const NOW_SECS: i64 = 1_790_000_000;
 
-const SCOPES: [Scope; 5] = [
+/// The tests' clock reading.
+fn now() -> UtcNanos {
+    UtcNanos::from_parts(NOW_SECS, 0).unwrap()
+}
+
+/// One nanosecond after `now`: a cool-off that has not ended yet.
+fn just_after_now() -> UtcNanos {
+    UtcNanos::from_parts(NOW_SECS, 1).unwrap()
+}
+
+const WS1: Scope = Scope::Workspace {
+    org: O1,
+    workspace: W1,
+};
+
+const SCOPES: [Scope; 6] = [
+    Scope::Principal,
     Scope::Org(O1),
     Scope::Org(O2),
-    Scope::Workspace {
-        org: O1,
-        workspace: W1,
-    },
+    WS1,
     Scope::Workspace {
         org: O1,
         workspace: W2,
@@ -58,6 +78,7 @@ enum Cell {
     Blank,
     Grant,
     OrgOnly,
+    SelfOnly,
 }
 
 struct Row {
@@ -66,13 +87,14 @@ struct Row {
     inactive: bool,
     reduction: bool,
     risk_reducing: bool,
+    self_row: bool,
     cells: BTreeMap<String, Cell>,
 }
 
 impl Row {
     fn grants(&self, column: &str, org_scope: bool) -> bool {
         match self.cells.get(column).copied().unwrap_or(Cell::Blank) {
-            Cell::Blank => false,
+            Cell::Blank | Cell::SelfOnly => false,
             Cell::Grant => true,
             Cell::OrgOnly => org_scope,
         }
@@ -84,6 +106,7 @@ fn cell(text: &str) -> Cell {
         "" => Cell::Blank,
         "✓" | "own" | "✓ (propose only)" | "✓ (not owner)" => Cell::Grant,
         "✓ (org)" => Cell::OrgOnly,
+        "self" => Cell::SelfOnly,
         other => panic!("§4.2 cell {other:?} is outside DEC-641's grammar"),
     }
 }
@@ -115,13 +138,14 @@ fn matrix() -> Vec<Row> {
         header.get(..2),
         Some(&["Permission".to_owned(), "S".to_owned()][..])
     );
+    let members: Vec<&str> = ROLE_COLUMNS.iter().map(|(c, _)| *c).collect();
     let mut used = BTreeSet::new();
     let rows: Vec<Row> = lines
         .filter(|l| !l.starts_with("|---"))
         .map(|l| {
-            let cells = split(l);
-            assert_eq!(cells.len(), header.len(), "row {l}");
-            let text = &cells[0];
+            let texts = split(l);
+            assert_eq!(texts.len(), header.len(), "row {l}");
+            let text = &texts[0];
             let matches: Vec<Permission> = ROWS
                 .iter()
                 .filter(|(prefix, _)| text.starts_with(prefix))
@@ -129,18 +153,30 @@ fn matrix() -> Vec<Row> {
                 .collect();
             assert_eq!(matches.len(), 1, "row {text:?} must match one permission");
             assert!(used.insert(matches[0]), "row {text:?} repeats a permission");
+            let cells: BTreeMap<String, Cell> = header[2..]
+                .iter()
+                .cloned()
+                .zip(texts[2..].iter().map(|c| cell(c)))
+                .collect();
+            let self_row = cells.values().any(|c| *c == Cell::SelfOnly);
+            if self_row {
+                for (column, c) in &cells {
+                    let want = match members.contains(&column.as_str()) {
+                        true => Cell::SelfOnly,
+                        false => Cell::Blank,
+                    };
+                    assert_eq!(*c, want, "the self row {text:?} at {column}");
+                }
+            }
             Row {
                 permission: matches[0],
-                step_up: step_up(&cells[1]),
+                step_up: step_up(&texts[1]),
                 inactive: text.contains("only if DEC-437 item"),
                 risk_reducing: RISK_REDUCING.iter().any(|p| text.starts_with(p)),
                 reduction: text.starts_with("Pause")
                     || (text.starts_with("Kill switch") && text.ends_with(": engage")),
-                cells: header[2..]
-                    .iter()
-                    .cloned()
-                    .zip(cells[2..].iter().map(|c| cell(c)))
-                    .collect(),
+                self_row,
+                cells,
             }
         })
         .collect();
@@ -156,22 +192,24 @@ fn matrix() -> Vec<Row> {
 /// What `authorize` must answer: the step-up requirement, or the refusal (DEC-643).
 type Expected = Result<StepUp, Refusal>;
 
-fn effective(m: &Membership) -> BTreeSet<Role> {
-    let reaches = matches!(
-        m.state,
-        MembershipState::Active | MembershipState::CoolingOff
-    );
-    match reaches {
-        true => m.roles.difference(&m.cooling).copied().collect(),
-        false => BTreeSet::new(),
-    }
-}
-
 fn reaches(m: &Membership) -> bool {
     matches!(
         m.state,
         MembershipState::Active | MembershipState::CoolingOff
     )
+}
+
+/// The roles of `m` that count at the tests' `now`.
+fn effective(m: &Membership) -> BTreeSet<Role> {
+    match reaches(m) {
+        true => m
+            .roles
+            .iter()
+            .filter(|(_, from)| **from <= now())
+            .map(|(r, _)| *r)
+            .collect(),
+        false => BTreeSet::new(),
+    }
 }
 
 /// The user's own grant at `scope`, from its own memberships only, org columns at org scope.
@@ -195,6 +233,7 @@ fn user_expected(row: &Row, ms: &[Membership], member: PrincipalId, scope: Scope
     }
 }
 
+/// The answer for a full session; `expected_in` applies a reduction-only session's limit.
 fn expected(
     row: &Row,
     principal: &Principal,
@@ -203,6 +242,13 @@ fn expected(
 ) -> Expected {
     if row.inactive {
         return Err(Refusal::InactivePermission);
+    }
+    if scope == Scope::Principal {
+        return match (row.self_row, principal) {
+            (false, _) => Err(Refusal::NoMembership),
+            (true, Principal::User { .. }) => Ok(row.step_up),
+            (true, _) => Err(Refusal::Forbidden),
+        };
     }
     let in_workspace =
         |w: WorkspaceId| matches!(scope, Scope::Workspace { workspace, .. } if workspace == w);
@@ -238,6 +284,22 @@ fn expected(
     }
 }
 
+/// `expected`, with a reduction-only session's limit to its own rows applied.
+fn expected_in(
+    row: &Row,
+    principal: &Principal,
+    ms: &[Membership],
+    scope: Scope,
+    kind: SessionKind,
+) -> Expected {
+    match expected(row, principal, ms, scope) {
+        Ok(_) if kind == SessionKind::ReductionOnly && !row.reduction => {
+            Err(Refusal::ReductionOnly)
+        }
+        other => other,
+    }
+}
+
 fn subsets(roles: &[Role]) -> Vec<BTreeSet<Role>> {
     (0..1u32 << roles.len())
         .map(|bits| {
@@ -251,6 +313,33 @@ fn subsets(roles: &[Role]) -> Vec<BTreeSet<Role>> {
         .collect()
 }
 
+/// `roles` with their effective-from instants: one nanosecond after `now` for those in `cooling`,
+/// exactly `now` for the rest, so the boundary itself is effective.
+fn dated(roles: &BTreeSet<Role>, cooling: &BTreeSet<Role>) -> BTreeMap<Role, UtcNanos> {
+    roles
+        .iter()
+        .map(|r| match cooling.contains(r) {
+            true => (*r, just_after_now()),
+            false => (*r, now()),
+        })
+        .collect()
+}
+
+fn membership(
+    member: PrincipalId,
+    scope: Scope,
+    state: MembershipState,
+    roles: &BTreeSet<Role>,
+    cooling: &BTreeSet<Role>,
+) -> Membership {
+    Membership {
+        member,
+        scope,
+        state,
+        roles: dated(roles, cooling),
+    }
+}
+
 /// The member's org membership in O1 and workspace membership in W1, both holding `roles` in
 /// `state`, of which only the scope's kind may act (no inheritance either way), and none in W2,
 /// O2, or W3; plus a decoy user holding every role in both, whose roles reach nobody else.
@@ -262,47 +351,19 @@ fn memberships(
 ) -> Vec<Membership> {
     let all: BTreeSet<Role> = Role::ALL.into_iter().collect();
     let none = BTreeSet::new();
-    let ws = Scope::Workspace {
-        org: O1,
-        workspace: W1,
-    };
+    let active = MembershipState::Active;
     vec![
-        Membership {
-            member,
-            scope: Scope::Org(O1),
-            state,
-            roles: roles.clone(),
-            cooling: cooling.clone(),
-        },
-        Membership {
-            member,
-            scope: ws,
-            state,
-            roles: roles.clone(),
-            cooling: cooling.clone(),
-        },
-        Membership {
-            member: DECOY,
-            scope: Scope::Org(O1),
-            state: MembershipState::Active,
-            roles: all.clone(),
-            cooling: none.clone(),
-        },
-        Membership {
-            member: DECOY,
-            scope: ws,
-            state: MembershipState::Active,
-            roles: all,
-            cooling: none,
-        },
+        membership(member, Scope::Org(O1), state, roles, cooling),
+        membership(member, WS1, state, roles, cooling),
+        membership(DECOY, Scope::Org(O1), active, &all, &none),
+        membership(DECOY, WS1, active, &all, &none),
     ]
 }
 
-/// A session of `kind` in W1 whose roles snapshot is `snapshot`.
+/// A session of `kind` whose roles snapshot is `snapshot`.
 fn session(kind: SessionKind, snapshot: Vec<Membership>) -> Session {
     Session {
         reference: SESSION,
-        workspace: W1,
         kind,
         snapshot,
     }
@@ -334,13 +395,8 @@ fn check(
         .flat_map(|(r, k)| SCOPES.map(|s| (r, k, s)))
     {
         let kind_of_session = *kind_of_session;
-        let want = match expected(row, principal, ms, scope) {
-            Ok(_) if kind_of_session == SessionKind::ReductionOnly && !row.reduction => {
-                Err(Refusal::ReductionOnly)
-            }
-            other => other,
-        };
-        let got = authorize(lookup, principal, session, scope, row.permission);
+        let want = expected_in(row, principal, ms, scope, kind_of_session);
+        let got = authorize(lookup, principal, session, scope, row.permission, now());
         let summary = got.as_ref().map(|a| a.step_up()).map_err(|r| *r);
         assert_eq!(
             summary, want,
@@ -349,7 +405,8 @@ fn check(
         );
         if let Ok(a) = got {
             match (scope, &a) {
-                (Scope::Org(_), Authorized::Org { .. }) => {}
+                (Scope::Principal, Authorized::Principal { .. })
+                | (Scope::Org(_), Authorized::Org { .. }) => {}
                 (Scope::Workspace { org, workspace }, Authorized::Workspace { tenant: t, .. }) => {
                     assert_eq!(
                         (t.org(), t.workspace(), t.principal(), t.permission()),
@@ -391,8 +448,8 @@ fn kind(p: &Principal) -> PrincipalKind {
     }
 }
 
-/// The grammar holds over the whole table, and the table grants something in every column, so
-/// the exhaustive test below is not vacuous.
+/// The grammar holds over the whole table, the table grants something in every column, and each
+/// risk-reducing name matches exactly one parsed row, so the exhaustive tests are not vacuous.
 #[test]
 fn the_matrix_parses_by_its_grammar_and_every_column_grants() {
     let rows = matrix();
@@ -409,6 +466,16 @@ fn the_matrix_parses_by_its_grammar_and_every_column_grants() {
         1,
         "only the halted-scope row is inactive"
     );
+    for name in RISK_REDUCING {
+        let named: Vec<Permission> = ROWS
+            .iter()
+            .filter(|(prefix, _)| name.starts_with(prefix))
+            .map(|(_, p)| *p)
+            .collect();
+        assert_eq!(named.len(), 1, "{name:?} names exactly one row");
+        let parsed = rows.iter().filter(|r| named.contains(&r.permission));
+        assert_eq!(parsed.count(), 1, "{name:?} matches exactly one parsed row");
+    }
 }
 
 #[test]
@@ -436,6 +503,9 @@ fn id2_authorize_grants_exactly_the_matrix_for_every_role_set_kind_and_scope() {
                 let ms = memberships(USER, &roles, cooling, state);
                 let user = Principal::User { id: USER };
                 check(&rows, &user, &ByMember(&ms), &ms, &mut checked);
+                if matches!(state, MembershipState::Active | MembershipState::CoolingOff) {
+                    check(&rows, &user, &Everything(&ms), &ms, &mut checked);
+                }
                 let client = Principal::Client {
                     id: OTHER,
                     on_behalf_of: USER,
@@ -491,10 +561,10 @@ fn id2_authorize_grants_exactly_the_matrix_for_every_role_set_kind_and_scope() {
 }
 
 /// A failed membership read never refuses a risk-reducing row (identity spec §4.5, DEC-642 item 10):
-/// a user or a client is authorized from its session's roles snapshot against the same row, flagged
-/// `membership_unverified`, and refused `membership_unavailable` on every other row; a reduction-only
-/// session still reaches only its rows, and the principals that never read memberships answer as
-/// their column says. Every role set of the snapshot is tried, for both session kinds.
+/// a user or a client is authorized from its session's roles snapshot against the same row, cooling
+/// roles included, flagged `membership_unverified`, and refused `membership_unavailable` on every
+/// other row; a reduction-only session still reaches only its rows; principal scope reads nothing;
+/// and the principals that never read memberships answer as their column says.
 #[test]
 #[ignore = "pending E9-2"]
 fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() {
@@ -506,51 +576,54 @@ fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() 
         workspace: W1,
     };
     let none: [Membership; 0] = [];
+    let reviewable = BTreeSet::from([Role::Operator, Role::Approver]);
     let mut checked = 0u64;
     for roles in subsets(&Role::ALL) {
-        let snapshot: Vec<Membership> =
-            memberships(USER, &roles, &BTreeSet::new(), MembershipState::Active)
-                .into_iter()
-                .filter(|m| m.member == USER)
-                .collect();
-        for kind_of_session in SESSION_KINDS {
-            let session = session(kind_of_session, snapshot.clone());
-            for row in &rows {
-                for principal in [&user, &client] {
-                    for scope in SCOPES {
-                        let outside = matches!(principal, Principal::Client { .. })
-                            && scope
-                                != (Scope::Workspace {
-                                    org: O1,
-                                    workspace: W1,
-                                });
-                        let want = match (row.inactive, outside, row.risk_reducing) {
-                            (true, _, _) => Err(Refusal::InactivePermission),
-                            (false, true, _) => Err(Refusal::NoMembership),
-                            (false, false, false) => Err(Refusal::MembershipUnavailable),
-                            (false, false, true) => {
-                                match expected(row, principal, &snapshot, scope) {
-                                    Ok(_)
-                                        if kind_of_session == SessionKind::ReductionOnly
-                                            && !row.reduction =>
-                                    {
-                                        Err(Refusal::ReductionOnly)
-                                    }
-                                    other => other,
+        let coolings = [
+            BTreeSet::new(),
+            roles.intersection(&reviewable).copied().collect(),
+        ];
+        for cooling in coolings {
+            let snapshot: Vec<Membership> =
+                memberships(USER, &roles, &cooling, MembershipState::Active)
+                    .into_iter()
+                    .filter(|m| m.member == USER)
+                    .collect();
+            for kind_of_session in SESSION_KINDS {
+                let session = session(kind_of_session, snapshot.clone());
+                for row in &rows {
+                    for principal in [&user, &client] {
+                        for scope in SCOPES {
+                            let client_outside =
+                                matches!(principal, Principal::Client { .. }) && scope != WS1;
+                            let read = scope != Scope::Principal && !client_outside;
+                            let want = match (row.inactive, read, row.risk_reducing) {
+                                (true, _, _) => Err(Refusal::InactivePermission),
+                                (false, false, _) | (false, true, true) => {
+                                    expected_in(row, principal, &snapshot, scope, kind_of_session)
                                 }
+                                (false, true, false) => Err(Refusal::MembershipUnavailable),
+                            };
+                            let got = authorize(
+                                &Failing,
+                                principal,
+                                &session,
+                                scope,
+                                row.permission,
+                                now(),
+                            );
+                            if let Ok(Authorized::Workspace { tenant, .. }) = &got {
+                                assert!(tenant.membership_unverified(), "the gap is flagged");
                             }
-                        };
-                        let got = authorize(&Failing, principal, &session, scope, row.permission);
-                        if let Ok(Authorized::Workspace { tenant, .. }) = &got {
-                            assert!(tenant.membership_unverified(), "the gap is flagged");
+                            assert_eq!(
+                                got.map(|a| a.step_up()),
+                                want,
+                                "{principal:?} {:?} at {scope:?} {kind_of_session:?} from \
+                                 {roles:?} cooling {cooling:?}",
+                                row.permission
+                            );
+                            checked += 1;
                         }
-                        let got = got.map(|a| a.step_up());
-                        assert_eq!(
-                            got, want,
-                            "{principal:?} {:?} at {scope:?} {kind_of_session:?} from {roles:?}",
-                            row.permission
-                        );
-                        checked += 1;
                     }
                 }
             }
@@ -572,22 +645,60 @@ fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() 
                 id: OTHER,
                 window: Some(W1),
             },
+            Principal::Agent { id: OTHER },
+            Principal::Process { id: OTHER },
         ] {
             for row in &rows {
                 for scope in SCOPES {
-                    let want = match expected(row, &principal, &none, scope) {
-                        Ok(_)
-                            if kind_of_session == SessionKind::ReductionOnly && !row.reduction =>
-                        {
-                            Err(Refusal::ReductionOnly)
-                        }
-                        other => other,
-                    };
-                    let got = authorize(&Failing, &principal, &session, scope, row.permission);
+                    let want = expected_in(row, &principal, &none, scope, kind_of_session);
+                    let got =
+                        authorize(&Failing, &principal, &session, scope, row.permission, now());
                     assert_eq!(got.map(|a| a.step_up()), want, "{principal:?} {scope:?}");
                 }
             }
         }
     }
-    assert!(checked > 200_000, "only {checked} cases checked");
+    assert!(checked > 400_000, "only {checked} cases checked");
+}
+
+/// A snapshot entry serves only its own scope (DEC-816): with W1's entry holding every role and
+/// W2's none, a request in W2 during an outage gets nothing from W1's roles.
+#[test]
+#[ignore = "pending E9-2"]
+fn a_snapshot_entry_never_serves_another_workspace() {
+    let ws2 = Scope::Workspace {
+        org: O1,
+        workspace: W2,
+    };
+    let all: BTreeSet<Role> = Role::ALL.into_iter().collect();
+    let none = BTreeSet::new();
+    let active = MembershipState::Active;
+    let snapshot = vec![
+        membership(USER, WS1, active, &all, &none),
+        membership(USER, ws2, active, &none, &none),
+    ];
+    let user = Principal::User { id: USER };
+    for kind_of_session in SESSION_KINDS {
+        let session = session(kind_of_session, snapshot.clone());
+        for permission in [
+            Permission::Pause,
+            Permission::KillSwitchAgent,
+            Permission::HoldNewOpenings,
+        ] {
+            let got = authorize(&Failing, &user, &session, ws2, permission, now());
+            assert_eq!(
+                got.map(|a| a.step_up()),
+                Err(Refusal::Forbidden),
+                "{permission:?}"
+            );
+            let got = authorize(&Failing, &user, &session, WS1, permission, now());
+            let want = match (kind_of_session, permission) {
+                (SessionKind::ReductionOnly, Permission::HoldNewOpenings) => {
+                    Err(Refusal::ReductionOnly)
+                }
+                _ => Ok(StepUp::NotRequired),
+            };
+            assert_eq!(got.map(|a| a.step_up()), want, "{permission:?} in W1");
+        }
+    }
 }

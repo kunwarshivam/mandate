@@ -1,10 +1,10 @@
 //! The test's own map from §4.2's rows and columns to the crate's names, written by hand from
-//! the spec. A row the spec adds, renames, or drops fails the parse in `main.rs`.
+//! the spec. A row the spec adds, renames, or drops fails the parse in `matrix.rs`.
 
 use crate::{Permission, Role};
 
 /// Each row's permission text starts with exactly one of these, in the spec's order.
-pub(crate) const ROWS: [(&str, Permission); 43] = [
+pub(crate) const ROWS: [(&str, Permission); 45] = [
     ("View agents", Permission::ViewAgents),
     ("Make an owner request", Permission::OwnerRequest),
     ("Dry run", Permission::DryRun),
@@ -64,6 +64,14 @@ pub(crate) const ROWS: [(&str, Permission); 43] = [
     ("Connect a client", Permission::ConnectClient),
     ("Revoke a client", Permission::RevokeClient),
     ("Enrol or remove one's own passkey", Permission::OwnPasskey),
+    (
+        "Add or remove one's own notification address",
+        Permission::NotificationAddress,
+    ),
+    (
+        "List one's own workspace memberships",
+        Permission::ListOwnMemberships,
+    ),
     ("Leave: deactivate one's own membership", Permission::Leave),
     ("Org policy: tighten", Permission::OrgPolicyTighten),
     ("Org policy: loosen", Permission::OrgPolicyLoosen),
@@ -98,14 +106,19 @@ pub(crate) const ROLE_COLUMNS: [(&str, Role); 8] = [
 ];
 pub(crate) const ORG_ROLES: [Role; 3] = [Role::OrgOwner, Role::OrgAdmin, Role::BillingAdmin];
 
-/// Rows the spec gains with PR #766 (identity spec v0.2, DEC-641 item 5), which may be absent from
-/// `docs/specs/identity.md` only until that PR merges; the follow-up that lands after it empties
-/// this list. Every other row must be in the spec.
-pub(crate) const OWED: [Permission; 1] = [Permission::Leave];
+/// Rows the spec gains with PR #766 (Leave, identity spec v0.2, DEC-641 item 5) and PR #811 (the two
+/// `self` rows, v0.3, DEC-816), which may be absent from `docs/specs/identity.md` only until those
+/// PRs merge; I1 tests part 2, which merges after both, empties this list. Every other row must be
+/// in the spec.
+pub(crate) const OWED: [Permission; 3] = [
+    Permission::Leave,
+    Permission::NotificationAddress,
+    Permission::ListOwnMemberships,
+];
 
-/// The §4.2 rows of workspace API-7's risk-reducing operations, mapped by workspace API §3.7, and
-/// ID-5's other never-gated reductions: a failed membership read never refuses them (identity spec
-/// §4.5, DEC-642 item 10).
+/// The §4.2 rows of workspace API-7's risk-reducing operations, mapped by workspace API §3.7 (away
+/// mode maps to "Remove or narrow a delegation" there), and ID-5's other never-gated reductions:
+/// a failed membership read never refuses them (identity spec §4.5, DEC-642 item 10).
 pub(crate) const RISK_REDUCING: [&str; 11] = [
     "Pause",
     "Hold new openings",

@@ -36,6 +36,8 @@ pub enum Permission {
     ConnectClient,
     RevokeClient,
     OwnPasskey,
+    NotificationAddress,
+    ListOwnMemberships,
     Leave,
     OrgPolicyTighten,
     OrgPolicyLoosen,

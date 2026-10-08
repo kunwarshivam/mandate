@@ -1425,7 +1425,6 @@ name = "mandate-identity"
 version = "0.0.0"
 dependencies = [
  "mandate-time",
- "proptest",
  "thiserror",
 ]
 

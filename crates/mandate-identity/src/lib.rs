@@ -44,13 +44,45 @@
 //! }
 //! ```
 //!
+//! **Sessions, memberships, and the membership lookup are sealed** (DEC-642 items 4, 7, 9): their
+//! fields are private and the lookup's supertrait is unreachable, so none of these compile either:
+//!
+//! ```compile_fail,E0451
+//! use mandate_identity::{Session, SessionKind, SessionRef};
+//! let _ = Session {
+//!     reference: SessionRef(1),
+//!     kind: SessionKind::Full,
+//!     snapshot: Vec::new(),
+//! };
+//! ```
+//!
+//! ```compile_fail,E0451
+//! use mandate_identity::{Membership, MembershipState, OrgId, PrincipalId, Scope};
+//! let _ = Membership {
+//!     member: PrincipalId(1),
+//!     scope: Scope::Org(OrgId(2)),
+//!     state: MembershipState::Active,
+//!     roles: std::collections::BTreeMap::new(),
+//! };
+//! ```
+//!
+//! ```compile_fail,E0277
+//! use mandate_identity::{LookupFailed, Membership, MembershipLookup, MembershipQuery};
+//! struct Forged;
+//! impl MembershipLookup for Forged {
+//!     fn memberships(&self, _: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed> {
+//!         Ok(Vec::new())
+//!     }
+//! }
+//! ```
+//!
 //! **Roles change only through their checks** (ID-13, §4.5): [`change_roles`] refuses a change to
 //! its author's own roles, the org owner role to anyone but an org owner, and a change that leaves
 //! no active org owner or workspace admin (§5.2). Refusals carry DEC-643's codes ([`Refusal`]).
 //!
 //! Every entry point is pure: no clock, no randomness, no I/O, ordered collections only.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_time::UtcNanos;
 
@@ -197,6 +229,9 @@ pub enum StepUp {
 /// Where an action applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Scope {
+    /// The principal's own scope, for the `self` rows of §4.2: its own data only, no workspace or
+    /// organization, and no membership read (identity spec §4.5, DEC-816).
+    Principal,
     /// An organization's scope, where only org roles act.
     Org(OrgId),
     /// A workspace's scope, where only workspace roles and the non-member columns act.
@@ -225,16 +260,16 @@ pub enum MembershipState {
 }
 
 /// A user's membership in one scope, as the workspace store folds it from the control stream (§5):
-/// the member, the org or workspace, its state, its roles, and those still in their cool-off
-/// (§8.3), which grant nothing. Its fields are private and only the store builds one (DEC-642 item
-/// 4); until E9-7 adds that store, only this crate's tests do.
+/// the member, the org or workspace, its state, and its roles, each with the instant it becomes
+/// effective, the end of its cool-off (§8.3); a role grants nothing before then. Its fields are
+/// private and only the store builds one (DEC-642 item 4); until E9-7 adds that store, only this
+/// crate's tests do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Membership {
     member: PrincipalId,
     scope: Scope,
     state: MembershipState,
-    roles: BTreeSet<Role>,
-    cooling: BTreeSet<Role>,
+    roles: BTreeMap<Role, UtcNanos>,
 }
 
 /// A change to roles or memberships in one scope, checked by [`change_roles`].
@@ -382,16 +417,15 @@ pub enum SessionKind {
 }
 
 /// An authenticated session (identity spec §4.5, §6.2), built from the session record read for this
-/// request: its opaque reference, which every committed event names (ID-1), the workspace it was
-/// opened in, its kind, and its roles snapshot, the principal's (or a client's user's) memberships
-/// in that workspace and its organization as of the last successful membership read, which a
-/// failed read falls back to on a risk-reducing row only (DEC-642 items 9 and 10). Its fields are
-/// private, and only §6's code (`mandate-authn`, through the seal crate E9-8 adds) builds one;
-/// until then only this crate's tests do.
+/// request: its opaque reference, which every committed event names (ID-1), its kind, and its roles
+/// snapshot: the principal's (or a client's user's) memberships that reach their scopes, one per
+/// workspace or organization, as of the last successful membership read. A failed read falls back
+/// to the snapshot's entry for the request's own scope, and never another's, on a risk-reducing
+/// row only (DEC-642 items 9 and 10). Its fields are private, and only §6's code (`mandate-authn`)
+/// builds one; until then only this crate's tests do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
     reference: SessionRef,
-    workspace: WorkspaceId,
     kind: SessionKind,
     snapshot: Vec<Membership>,
 }
@@ -400,6 +434,11 @@ pub struct Session {
 /// outside this crate can build, so a hand-made `Authorized` reaches no workspace data.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Authorized {
+    /// At the principal's own scope (a `self` row): its own data only, no context.
+    Principal {
+        /// What the row's **S** cell asks.
+        step_up: StepUp,
+    },
     /// At an organization's scope.
     Org {
         /// What the row's **S** cell asks.
@@ -418,7 +457,9 @@ impl Authorized {
     /// What the row's **S** cell asks.
     pub fn step_up(&self) -> StepUp {
         match self {
-            Self::Org { step_up } | Self::Workspace { step_up, .. } => *step_up,
+            Self::Principal { step_up }
+            | Self::Org { step_up }
+            | Self::Workspace { step_up, .. } => *step_up,
         }
     }
 }
@@ -482,13 +523,14 @@ pub enum StepUpActionKind {
     RoleGrant,
     ClientConnect,
     CredentialEnrol,
+    NotificationAddress,
     BreakGlassApprove,
     LiftHold,
 }
 
 impl StepUpActionKind {
     /// Every kind, in §3.6's order.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::ConfirmVersion,
         Self::Deploy,
         Self::Approve,
@@ -504,6 +546,7 @@ impl StepUpActionKind {
         Self::RoleGrant,
         Self::ClientConnect,
         Self::CredentialEnrol,
+        Self::NotificationAddress,
         Self::BreakGlassApprove,
         Self::LiftHold,
     ];
@@ -526,6 +569,7 @@ impl StepUpActionKind {
             Self::RoleGrant => "role_grant",
             Self::ClientConnect => "client_connect",
             Self::CredentialEnrol => "credential_enrol",
+            Self::NotificationAddress => "notification_address",
             Self::BreakGlassApprove => "break_glass_approve",
             Self::LiftHold => "lift_hold",
         }
@@ -552,13 +596,17 @@ impl StepUpMethod {
     }
 }
 
-/// A step-up challenge's ID, a ULID (identity spec §7.2), which the evidence names as its assertion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct AssertionId(pub u128);
+/// A step-up challenge's ID as the journal records it, in its text form (journal spec §9.2,
+/// `assertion_id: text`; identity spec §7.2). It has the shape of `mandate-approval`'s
+/// `AssertionId`: both crates sit at layer 1, so neither depends on the other, this one serving
+/// step-up issuance and verification and that one the runtime; the API converts, and E9-4 pins that
+/// the two agree (DEC-644).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AssertionId(pub String);
 
 /// Step-up evidence as the journal records it (journal spec §9.2; mandate spec §6.1). Verifying it
 /// is §7.2's, not this type's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepUpEvidence {
     /// The challenge the assertion answered.
     pub assertion_id: AssertionId,
@@ -598,7 +646,8 @@ pub enum Refusal {
     /// The change leaves the workspace with no active workspace admin.
     #[error("the workspace would have no active admin")]
     LastAdmin,
-    /// The stub of a story not yet implemented.
+    /// The stub of a story not yet implemented. It goes when E9-2 is implemented, so no caller
+    /// matches on it.
     #[error("{story} has not been implemented yet")]
     Unimplemented {
         /// The story.
@@ -624,31 +673,34 @@ impl Refusal {
     }
 }
 
-/// Applies identity spec §4.2 by its grammar (ID-2, §4.5), reading the principal's (or a client's
-/// user's) memberships through `lookup` itself.
+/// Applies identity spec §4.2 by its grammar (ID-2, §4.5) at `now`, reading the principal's (or a
+/// client's user's) memberships through `lookup` itself; a role counts once its effective-from
+/// instant is at or before `now`.
 pub fn authorize(
     lookup: &impl MembershipLookup,
     principal: &Principal,
     session: &Session,
     scope: Scope,
     permission: Permission,
+    now: UtcNanos,
 ) -> Result<Authorized, Refusal> {
-    let _ = (lookup, principal, session, scope, permission);
+    let _ = (lookup, principal, session, scope, permission, now);
     Err(Refusal::Unimplemented { story: "E9-2" })
 }
 
 /// Checks a role or membership change in `scope` (§4.5): its rows through [`authorize`] (the
 /// author's own deactivation is the leave row), then
 /// ID-13, the reserved owner role, and the last-owner and last-admin rules on the state after it.
-/// It reads every membership of the scope through `lookup`.
+/// It reads every membership of the scope through `lookup`, and judges roles at `now`.
 pub fn change_roles(
     lookup: &impl MembershipLookup,
     author: &Principal,
     session: &Session,
     scope: Scope,
     change: &RoleChange,
+    now: UtcNanos,
 ) -> Result<(), Refusal> {
-    let _ = (lookup, author, session, scope, change);
+    let _ = (lookup, author, session, scope, change, now);
     Err(Refusal::Unimplemented { story: "E9-2" })
 }
 
