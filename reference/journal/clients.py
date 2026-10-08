@@ -463,6 +463,14 @@ def invalid_drafts() -> list[dict]:
             "actor.kind",
         ),
         invalid(
+            "deactivation_by_a_user",
+            "rule 74: deactivation is the system's",
+            "client_revoked",
+            [change("payload.reason", "member_deactivated")],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
             "owner_revocation_by_the_system",
             "rule 74",
             "client_revoked",
@@ -770,6 +778,7 @@ VALIDATOR_MUTANTS = (
     "rule.73.user",
     "rule.74",
     "rule.74.owner",
+    "rule.74.user_any",
     "rule.74.admin",
     "record.extra",
     "record.missing",

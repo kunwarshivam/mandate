@@ -168,6 +168,9 @@ pub enum AgentStreamCheck {
     /// A `KillSwitchActivated`'s `mode_event` names no earlier `AgentModeChanged` with reason
     /// `kill_switch`.
     ModeEventMismatch,
+    /// A version-2 `AgentModeChanged` that is not a hold or a lift changes the owner's `held`, or a
+    /// version-1 one follows a version-2 one (journal spec v0.21 §9.10, §11; DEC-672).
+    HeldMismatch,
 }
 
 impl AgentStreamCheck {
@@ -176,6 +179,7 @@ impl AgentStreamCheck {
         match self {
             Self::IntentActionMismatch => "intent_action_mismatch",
             Self::ModeEventMismatch => "mode_event_mismatch",
+            Self::HeldMismatch => "held_mismatch",
         }
     }
 }
@@ -217,6 +221,7 @@ pub fn verify_agent_stream(
         })
         .collect();
     let mut earlier: BTreeSet<&str> = BTreeSet::new();
+    let mut held = Held::at(start.from_seq);
     for (row, body) in &events {
         let fail = |check| {
             Err(AgentStreamFailure {
@@ -252,11 +257,49 @@ pub fn verify_agent_stream(
                     return fail(AgentStreamCheck::ModeEventMismatch);
                 }
             }
+            "AgentModeChanged" => {
+                if !held.carries(row.schema_version, &own) {
+                    return fail(AgentStreamCheck::HeldMismatch);
+                }
+            }
             _ => {}
         }
         earlier.insert(row.event_id.as_str());
     }
     Ok(())
+}
+
+/// The owner's hold as a range of `AgentModeChanged` records has carried it so far (§11's
+/// `held_mismatch`): unknown before a range that starts after seq 1 reaches its first version-2
+/// record, and `false` before any on a full chain.
+struct Held {
+    last: Option<bool>,
+    versioned: bool,
+}
+
+impl Held {
+    fn at(from_seq: u64) -> Self {
+        Self {
+            last: (from_seq == 1).then_some(false),
+            versioned: false,
+        }
+    }
+
+    /// Whether the next record keeps the hold: a version-1 record only before any version-2 one,
+    /// and a version-2 record that is not a hold or a lift with the `held` last carried.
+    fn carries(&mut self, schema_version: u64, payload: &Value) -> bool {
+        if schema_version != 2 {
+            return !self.versioned;
+        }
+        self.versioned = true;
+        let now = payload.get("held") == Some(&Value::Bool(true));
+        let reason = Payload(payload).text("reason");
+        let kept = reason == "owner_hold"
+            || reason == "owner_lift_hold"
+            || self.last.is_none_or(|last| last == now);
+        self.last = Some(now);
+        kept
+    }
 }
 
 /// The members `IntentProposed` repeats from its `DecisionMade`, in rule 10's order.
