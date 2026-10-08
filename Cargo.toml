@@ -18,6 +18,7 @@ mandate-journal-cold = { path = "crates/mandate-journal-cold", version = "0.0.0"
 mandate-journal-pg = { path = "crates/mandate-journal-pg", version = "0.0.0" }
 mandate-liquidity = { path = "crates/mandate-liquidity", version = "0.0.0" }
 mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
+mandate-modelhost = { path = "crates/mandate-modelhost", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-risk = { path = "crates/mandate-risk", version = "0.0.0" }
 mandate-runtime = { path = "crates/mandate-runtime", version = "0.0.0" }

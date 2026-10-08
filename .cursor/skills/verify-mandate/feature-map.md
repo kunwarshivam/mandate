@@ -1186,6 +1186,22 @@ proves each pending test fails on them (DEC-110).
   - `crates/mandate-cli/tests/inspect.rs` and `download.rs`: the exact report lines.
 - **Run:** `cargo nextest run -p mandate-time -p mandate-marketdata -p mandate-cli`.
 
+## Quant model host (E15-13)
+
+- **Spec:** mandate spec §8.1 and §8.2 (the pin, the content hash, `as_of` as the data cut-off);
+  `docs/project/tasks/first-paper-trade.md` ("The model host", slices M0 to M2, FT-4, FT-5);
+  DEC-503, DEC-504, DEC-517 (the last completed session), DEC-518 (the content object and when
+  its hash is pinned).
+- **Code:** `mandate-modelhost`, `crates/mandate-modelhost/` (layer 8, safety-critical, pure):
+  `src/lib.rs` (`content`,
+  `evaluate`, `Refusal`), `src/ma_crossover.rs` (the model's own host code and the listed sources),
+  with the crossover itself in `crates/mandate-backtest/src/strategy/ma_crossover.rs`.
+- **Tests:** `crates/mandate-modelhost/tests/host.rs` (the content object against canonical JSON
+  written by hand from the files on disk, the output mapping, `as_of` on early closes, weekends and
+  a given calendar), with fixtures in `tests/common/mod.rs`. Pending until M2.
+- **Run:** `cargo nextest run -p mandate-modelhost`; the pending tests with
+  `cargo nextest run -p mandate-modelhost --run-ignored only`.
+
 ## Research-agent spike (E17-0)
 
 - **Spec:** ADR-0002; mandate spec §8.1 to §8.3 (the thesis shape and the sizing idea);
