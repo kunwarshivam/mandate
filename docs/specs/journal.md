@@ -5,7 +5,7 @@
 | **Status** | v0.21 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.20 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.21 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `workspace_api` section of §9.8, `client_actor` section of §3 and §9.9, and `hold` section of §9.10; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `workspace_api` section of §9.8, `client_actor` section of §3 and §9.9, and `hold` section of §9.10 with its `held_mismatch` range cases; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
@@ -31,8 +31,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `OwnerRequestSubmitted`, and `RecordsAccessed`. §9.8's rules 55 and 64 already had client branches,
   which now admit. §9.9 closes `ConnectionRevoked` version 2, with the reason `owner` or
   `compromised` and its step-up (workspace API §5.6), and `ClientConnected` and `ClientRevoked`
-  (identity spec §12.1), with rules 69 to 74; `ClientRevoked` records why with a closed `reason`. Version 1 of `ConnectionRevoked` stays registered and
-  unchanged. The vectors gain a generated `client_actor` section and stay version 3.
+  (identity spec §12.1), with rules 69 to 74; `ClientRevoked` records why with a closed `reason`.
+  Version 1 of `ConnectionRevoked` stays registered and unchanged. The vectors gain a generated
+  `client_actor` section and stay version 3.
 - **v0.19 ([DEC-670](../project/decisions/DEC-670.md)):** §9.8 closes four control-stream records
   the [workspace API](workspace-api.md) commits (its §4.1, §4.6, §5.1; DEC-436 item 14), with rules
   54 to 65. `MandateDraftSaved` records one explicit draft save, its draft stored as an artifact.
@@ -1869,6 +1870,13 @@ stream only (rule 26). A lift whose step-up does not count is refused like a res
     `causation_id`: its `OwnerCommandIssued` (`causation_id`). As rule 16 does at version 1, each
     command has one copy: its `AgentModeChanged`, or, for a lift, its `OwnerCommandRefused`.
 
+**Carried, never dropped.** `held` changes only on `owner_hold` and `owner_lift_hold`: every other
+version-2 copy (a restriction, a reconciliation, a kill switch, a pause, a resume, a Stop) carries
+the last one's, and once a stream holds a version-2 `AgentModeChanged` every later one is version
+2. `append` sees one record and cannot check either, so §11's per-range check `held_mismatch` does,
+and `mandate journal verify` reports it; a stray `held: false` would otherwise drop the hold on
+replay.
+
 **Lifecycle.** A hold is copied whatever the mode: on a paused or stopped agent the copy records
 `held` with `to` unchanged, so command status reaches `applied`. A second hold, or a lift with no
 hold standing, is copied too, with `held` as it already stood. A latched limit, a restriction, or a
@@ -1914,7 +1922,13 @@ anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_m
   the approval events' schemas; until then no range fails on it;
 - `mode_event_mismatch` — a `KillSwitchActivated` whose `mode_event` is non-null names an earlier
   `AgentModeChanged` on this stream with reason `kill_switch`, reported at the
-  `KillSwitchActivated`.
+  `KillSwitchActivated`;
+- `held_mismatch` — the owner's hold is carried, never dropped (§9.10, [DEC-672](../project/decisions/DEC-672.md)).
+  An `AgentModeChanged` version 2 whose reason is not `owner_hold` or `owner_lift_hold` has the
+  `held` of the last version-2 `AgentModeChanged` before it, or `false` when the range starts at
+  seq 1 and there is none; and no version-1 `AgentModeChanged` follows a version-2 one. Reported
+  at the record that breaks it. A range that starts later checks nothing before its first
+  version-2 record.
 
 A reference to an event before the range's trusted start is not checked by that range; the weekly
 full-chain run checks every one, and there a `mode_event` that names no earlier event fails. The

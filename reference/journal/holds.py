@@ -430,9 +430,105 @@ def valid_drafts() -> list[dict]:
     ]
 
 
+# --------------------------------------------------------------------------- §11's held_mismatch
+
+HOLD_REASONS = ("owner_hold", "owner_lift_hold")
+
+
+def held_mismatches(events: list[dict], from_seq: int, skip: frozenset[str] = frozenset()) -> list[int]:
+    """§11's `held_mismatch` over one agent-stream range of `AgentModeChanged` records, each
+    `{schema_version, payload}` in `seq` order from `from_seq`: the index of every record that
+    breaks it. A version-2 record whose reason is not a hold's or a lift's carries the `held` of the
+    last version-2 record before it, or `false` when the range starts the stream and there is none;
+    a range that starts later checks nothing before its first version-2 record. A version-1 record
+    after a version-2 one is refused: it would drop the hold on replay."""
+    out = []
+    last: bool | None = False if from_seq == 1 else None
+    seen_v2 = False
+    for i, event in enumerate(events):
+        if event["schema_version"] == 1:
+            if seen_v2 and "held.v1_after_v2" not in skip:
+                out.append(i)
+            continue
+        seen_v2 = True
+        p = event["payload"]
+        carried = p["reason"] in HOLD_REASONS or "held.carry" in skip
+        if not carried and last is not None and p["held"] != last:
+            out.append(i)
+        last = p["held"]
+        if "held.forget" in skip:
+            last = None
+    return out
+
+
+def range_event(version: int, from_: str, to: str, reason: str, lifecycle: str, held: bool | None = None) -> dict:
+    payload = {"from": from_, "to": to, "reason": reason, "lifecycle": lifecycle}
+    if version == 2:
+        payload["held"] = held
+    return {"schema_version": version, "payload": payload}
+
+
+def range_cases() -> list[dict]:
+    hold = range_event(2, "normal", "exits_only", "owner_hold", "normal", True)
+    pause = range_event(2, "exits_only", "paused", "owner_pause", "paused", True)
+    resume = range_event(2, "paused", "exits_only", "owner_resume", "normal", True)
+    lift = range_event(2, "exits_only", "normal", "owner_lift_hold", "normal", False)
+    return [
+        {"name": "the_hold_carried_through_a_pause_and_a_resume", "from_seq": 1, "events": [hold, pause, resume, lift], "expect": []},
+        {
+            "name": "a_restriction_drops_the_hold",
+            "from_seq": 1,
+            "events": [hold, range_event(2, "exits_only", "exits_only", "restriction_changed", "normal", False)],
+            "expect": [1],
+        },
+        {
+            "name": "a_kill_switch_drops_the_hold",
+            "from_seq": 1,
+            "events": [hold, range_event(2, "exits_only", "stopped", "kill_switch", "stopped", False)],
+            "expect": [1],
+        },
+        {
+            "name": "a_reconciliation_sets_a_hold_nobody_asked_for",
+            "from_seq": 1,
+            "events": [range_event(2, "normal", "exits_only", "awaiting_reconciliation", "normal", True)],
+            "expect": [0],
+        },
+        {
+            "name": "a_version_1_record_after_a_version_2_one",
+            "from_seq": 1,
+            "events": [hold, range_event(1, "exits_only", "paused", "owner_pause", "paused")],
+            "expect": [1],
+        },
+        {
+            "name": "version_1_records_before_the_first_hold",
+            "from_seq": 1,
+            "events": [range_event(1, "normal", "paused", "owner_pause", "paused"), hold],
+            "expect": [],
+        },
+        {
+            "name": "a_later_range_trusts_its_first_record",
+            "from_seq": 40,
+            "events": [range_event(2, "exits_only", "paused", "owner_pause", "paused", True), resume],
+            "expect": [],
+        },
+    ]
+
+
+RANGE_MUTANTS = ("held.v1_after_v2", "held.carry", "held.forget")
+
+
+def range_problems(section: dict, skip: frozenset[str] = frozenset()) -> list[str]:
+    problems = []
+    for case in section["range_verification"]:
+        got = held_mismatches(case["events"], case["from_seq"], skip)
+        if got != case["expect"]:
+            problems.append(found("range", f"{case['name']}: expected {case['expect']}, got {got}"))
+    return problems
+
+
 # --------------------------------------------------------------------------- independent oracles
 
-ORACLE_CHECKS = ("drafts.valid", "drafts.floor", "drafts.copies", "drafts.who", "invalid_drafts", "valid_drafts")
+ORACLE_CHECKS = ("drafts.valid", "drafts.floor", "drafts.copies", "drafts.who", "range", "invalid_drafts", "valid_drafts")
 RANK = {"normal": 0, "exits_only": 1, "paused": 2, "stopped": 3}
 
 
@@ -446,6 +542,8 @@ def floor_problems(name: str, draft: dict) -> list[str]:
     """Mandate spec §5.9 and §6.1: the effective mode is the strictest of what holds it. The owner's
     lifecycle holds its own mode, and the hold holds `exits_only`."""
     p = draft["payload"]
+    if not isinstance(p.get("held"), bool) or p.get("lifecycle") not in RANK or p.get("to") not in RANK:
+        return [found("drafts.floor", f"{name}: no `held`, lifecycle, or mode to judge")]
     held_by = [p["lifecycle"]] + (["exits_only"] if p["held"] else [])
     strictest = max(RANK[m] for m in held_by)
     if RANK[p["to"]] < strictest:
@@ -499,6 +597,7 @@ def check_section(section: dict) -> list[str]:
         if draft["event_type"] == "AgentModeChanged":
             problems += floor_problems(name, draft)
         problems += who_problems(name, draft)
+    problems += range_problems(section)
     return problems
 
 
@@ -559,6 +658,16 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: case(s, "valid_drafts", "client_holds")["changes"].append(change("actor.on_behalf_of", "user_owner_02"))),
         ),
         (
+            "a range case expects nothing of a dropped hold",
+            "range",
+            mutated(lambda s: s["range_verification"][1].update(expect=[])),
+        ),
+        (
+            "a valid copy loses its `held`",
+            "drafts.floor",
+            mutated(lambda s: s["drafts"]["held"]["payload"].pop("held")),
+        ),
+        (
             "an invalid draft's expectation differs",
             "invalid_drafts",
             mutated(lambda s: case(s, "invalid_drafts", "hold_with_step_up")["expect"].update(path="actor.kind")),
@@ -584,6 +693,9 @@ def run_mutants(section: dict) -> list[str]:
             caught |= bool(got) if want is None else not reported(got, want)
         if not caught:
             escaped.append(f"hold validator mutant {mutant}")
+    for mutant in RANGE_MUTANTS:
+        if not range_problems(section, frozenset([mutant])):
+            escaped.append(f"hold range mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if not any(c == check for _, c, _ in registered):
@@ -601,4 +713,5 @@ def build_section() -> dict:
         "drafts": base_drafts(),
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
+        "range_verification": range_cases(),
     }

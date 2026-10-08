@@ -1007,7 +1007,10 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
         if rule("73.actor", actor["kind"] == "user", "actor.kind"):
             rule("73.user", p["user"] == human(actor), "payload.user")
     if event_type == "ClientRevoked":
-        if rule("74", actor["kind"] in REVOCATION_ACTORS[p["reason"]], "actor.kind"):
+        allowed = REVOCATION_ACTORS[p["reason"]]
+        if "rule.74.user_any" in skip:
+            allowed = (*allowed, "user")
+        if rule("74", actor["kind"] in allowed, "actor.kind"):
             if p["reason"] == "owner":
                 rule("74.owner", p["user"] == actor["id"], "payload.user")
             if p["reason"] == "admin":
