@@ -3,7 +3,7 @@
 //! section. Every base and valid draft parses, and every invalid draft is refused with its reason
 //! at its path: the closed members, their types, rules 46 to 53, and each record's stream and
 //! configuration. Until J2's implementation registers them, the journal refuses all three as
-//! uncatalogued or unregistered, which is the answer these tests fail on.
+//! not catalogued or not registered, which is the answer these tests fail on.
 
 use std::path::Path;
 
