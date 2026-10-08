@@ -322,7 +322,7 @@ impl ExchangeCalendar {
     ///
     /// Errors: `outside_calendar` when `now`'s New York date is after the range, because the
     /// calendar cannot say which later days traded, and answering with the range's last session
-    /// would be a guess ([DEC-513](../../../docs/project/decisions/DEC-513.md)).
+    /// would be a guess ([DEC-516](../../../docs/project/decisions/DEC-516.md)).
     pub fn last_completed_regular_session(&self, now: UtcNanos) -> Result<Option<Date>, TimeError> {
         if new_york_date(now)? > self.valid_to {
             return Err(TimeError::OutsideCalendar);
