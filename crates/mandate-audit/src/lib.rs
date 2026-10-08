@@ -8,18 +8,19 @@
     clippy::float_cmp,
     clippy::as_conversions
 )]
-//! Read-only audit reads over the journal, scoped to one workspace (workspace API §4.8, backlog
+//! Read-only audit reads over the journal, scoped to one workspace (workspace API §4.8.1, backlog
 //! E12-6, journal spec §7). Pure: no I/O of its own, no clock, no randomness, and it writes nothing
 //! to any journal. A stream or event of another workspace, a malformed id, and an absent one all
-//! read as the same [`AuditError::NotFound`] (API-9). Pages follow API-15 and DEC-770: `seq`
-//! order, each event's canonical body bytes with its `hash` and `prev_hash`, and the cursor is the
-//! last `seq` served.
+//! read as the same [`AuditError::NotFound`] (API-9, AU-1, DEC-760 item 4). Pages follow API-15
+//! and DEC-760: `seq` order, each event's stored canonical body bytes with its `hash` and
+//! `prev_hash`, the stream head read with the page, and the cursor the last `seq` served.
 
 use mandate_canon::Digest;
 use mandate_journal::MemoryJournal;
 
 /// Why an audit read returned nothing. `NotFound` carries no detail, so a foreign id and an absent
-/// one cannot be told apart by their error (API-9).
+/// one cannot be told apart by their error (API-9). The other variants are the 422 `invalid` of a
+/// query member that is not an id, which a read checks before it resolves any id (DEC-760 item 5).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuditError {
     /// The body of every stub in the tests PR (DEC-77, DEC-83).
@@ -28,9 +29,12 @@ pub enum AuditError {
     /// The stream, event or workspace is absent, malformed, or in another workspace (API-9).
     #[error("not found")]
     NotFound,
-    /// A page `limit` outside `1..=500` (DEC-770 item 1). Refused, never clamped.
-    #[error("page limit {limit} is outside 1..=500")]
+    /// A page `limit` outside `1..=1000` (DEC-760 item 1). Refused, never clamped.
+    #[error("page limit {limit} is outside 1..=1000")]
     LimitOutOfRange { limit: u64 },
+    /// An `after_seq` above 2^53 − 1, the largest canonical integer (DEC-760 item 1).
+    #[error("after_seq {after_seq} is outside 0..=9007199254740991")]
+    AfterSeqOutOfRange { after_seq: u64 },
 }
 
 /// The caller's workspace, taken from its authenticated principal: one `[A-Za-z0-9_-]+` segment
@@ -46,8 +50,8 @@ impl WorkspaceId {
     }
 }
 
-/// How many events one page may hold: `1..=500`, and 100 when the caller names none (DEC-770
-/// item 1).
+/// How many events or streams one page may hold: `1..=1000`, and 100 when the caller names none
+/// (DEC-760 item 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PageLimit(u16);
 
@@ -58,44 +62,75 @@ impl PageLimit {
     }
 }
 
-/// A stream of the workspace and its head: the last `seq` and that event's hash.
+/// The five stream types of journal spec §2, as the stream list names them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StreamType {
+    Account,
+    Agent,
+    Control,
+    Scheduler,
+    Notice,
+}
+
+/// A stream's head: its last `seq`, that event's hash (bare, §4.8.1 "Hash forms") and its
+/// `recorded_at`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StreamHead {
-    pub stream_id: String,
+pub struct Head {
     pub seq: u64,
     pub hash: Digest,
+    pub recorded_at: String,
+}
+
+/// One item of the stream list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamEntry {
+    pub stream_id: String,
+    pub stream_type: StreamType,
+    pub head: Head,
 }
 
 /// One stored event as an audit read serves it: the exact canonical body bytes that were hashed,
-/// the stored `hash`, and the `prev_hash` that links it to the event before it.
+/// the stored `hash`, and the `prev_hash` that links it to the event before it. The other members
+/// repeat the body's; the body is what a client checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JournalEvent {
     pub stream_id: String,
     pub seq: u64,
     pub event_id: String,
+    pub event_type: String,
+    pub recorded_at: String,
     pub body: Vec<u8>,
     pub hash: Digest,
     pub prev_hash: Digest,
 }
 
-/// A page of one stream (API-15): the events after the request's `after_seq`, in `seq` order, and
-/// the cursor to pass as the next `after_seq`: the last `seq` served, or the request's own
-/// `after_seq` when the page is empty (DEC-770 item 2).
+/// A page of one stream (API-15, DEC-760 item 2): the events after the request's `after_seq` in
+/// `seq` order, the head read with them, the cursor for the next page (the last `seq` served, or
+/// the request's own `after_seq` when the page is empty), and whether the page ends at the head.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Page {
+    pub stream_id: String,
+    pub head: Head,
     pub events: Vec<JournalEvent>,
-    pub cursor: u64,
+    pub next_after_seq: u64,
+    pub at_head: bool,
 }
 
 /// The journal reads the audit explorer needs, each scoped to the caller's workspace. An adapter
 /// implements them over its store: [`MemoryRead`] here, the Postgres store in
 /// `mandate-journal-pg`.
 pub trait JournalRead {
-    /// The workspace's streams that hold at least one event, with their heads, sorted by
-    /// `stream_id` bytes (DEC-770 item 3).
-    fn streams(&self, workspace: &WorkspaceId) -> Result<Vec<StreamHead>, AuditError>;
+    /// The workspace's streams that hold at least one event, with their heads, in ascending
+    /// `stream_id` bytes, those after `after` only, at most `limit` of them (DEC-760 item 6).
+    fn streams(
+        &self,
+        workspace: &WorkspaceId,
+        after: Option<&str>,
+        limit: PageLimit,
+    ) -> Result<Vec<StreamEntry>, AuditError>;
 
-    /// The events of `stream_id` after `after_seq`, at most `limit` of them.
+    /// The events of `stream_id` after `after_seq`, at most `limit` of them, with the head read in
+    /// the same snapshot.
     fn page(
         &self,
         workspace: &WorkspaceId,
@@ -108,7 +143,7 @@ pub trait JournalRead {
     fn event(&self, workspace: &WorkspaceId, event_id: &str) -> Result<JournalEvent, AuditError>;
 }
 
-/// [`JournalRead`] over the in-memory journal.
+/// [`JournalRead`] over the in-memory journal. One borrow of the journal is one snapshot.
 #[derive(Debug, Clone, Copy)]
 pub struct MemoryRead<'a> {
     journal: &'a MemoryJournal,
@@ -121,8 +156,13 @@ impl<'a> MemoryRead<'a> {
 }
 
 impl JournalRead for MemoryRead<'_> {
-    fn streams(&self, workspace: &WorkspaceId) -> Result<Vec<StreamHead>, AuditError> {
-        let _ = (self.journal, workspace);
+    fn streams(
+        &self,
+        workspace: &WorkspaceId,
+        after: Option<&str>,
+        limit: PageLimit,
+    ) -> Result<Vec<StreamEntry>, AuditError> {
+        let _ = (self.journal, workspace, after, limit.0);
         Err(AuditError::Unimplemented { story: "E12-6" })
     }
 
