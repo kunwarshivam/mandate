@@ -684,8 +684,6 @@ fn drift_beyond_the_band_either_way_or_no_mark_skips() {
     skipped_on_revalidation(&ran, &asked, &grant.event_id, "drift");
 }
 
-/// The `quorum` member of the step's one `ApprovalResponded`, as written: `None` when the record
-/// carries no such key.
 /// The quorum check 7 applied, or `None` when the record carries none: `quorum` absent, or `null`
 /// as journal spec v0.17 §9.7 writes it (DEC-533 item 3, whose presence `answer_records.rs` pins).
 fn quorum_recorded(ran: &Ran) -> Option<&Value> {
