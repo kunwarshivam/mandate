@@ -1,22 +1,37 @@
 /**
  * Where the web app's workspace comes from (E11-9, E11-1; workspace API spec §4.7, §4.9, §6.1, §7):
- * the recorded fixtures, or the workspace API through the typed client. The choice is made at build
+ * the recorded fixtures, or the workspace API through the typed client. The source is chosen at build
  * time from public environment values, and a production build never falls back to fixtures on its
- * own: with no API configured it shows "cannot reach your workspace" (DEC-736).
+ * own: with no API configured it shows "cannot reach your workspace" (DEC-736). Which workspace is
+ * read is never a build value: it comes from the signed-in principal's memberships at run time
+ * (identity spec §3.2, §9.2), through `resolveWorkspace`.
  */
 import type { Environment, Workspace } from "@/fixtures/types";
 import type { Timestamp, Watermark } from "./types";
 
 /** The build-time choice. `unconfigured` renders as unreachable, never as fixtures. */
-export type DataSource = { kind: "fixtures" } | { kind: "api"; baseUrl: string; workspaceId: string } | { kind: "unconfigured"; reason: string };
+export type DataSource = { kind: "fixtures" } | { kind: "api"; baseUrl: string } | { kind: "unconfigured"; reason: string };
 
 /** The public values the choice reads; all are inlined into the bundle at build time. */
 export interface SourceEnv {
   NODE_ENV?: string;
   NEXT_PUBLIC_WORKSPACE_SOURCE?: string;
   NEXT_PUBLIC_WORKSPACE_API_URL?: string;
-  NEXT_PUBLIC_WORKSPACE_ID?: string;
 }
+
+/**
+ * The workspaces the signed-in principal is an active member of, or `null` while no route serves
+ * them. The identity service owns the answer (lane L1); the web app never takes a workspace id from
+ * its build or its URL alone.
+ */
+export type WorkspaceResolver = () => Promise<{ workspace_ids: string[] } | null>;
+
+/** Which workspace this session reads. `choose`: several memberships and none chosen yet (G1's switcher). */
+export type WorkspaceResolution =
+  | { kind: "fixtures" }
+  | { kind: "workspace"; baseUrl: string; workspaceId: string }
+  | { kind: "choose"; baseUrl: string; workspaceIds: string[] }
+  | { kind: "unconfigured"; reason: string };
 
 /** Common `Freshness` (spec §6.1, API-14): the server's judgment of one value's age, measured to `served_at`. */
 export interface Freshness {
@@ -41,6 +56,23 @@ export interface ChangeMark {
 
 export function dataSourceFrom(env: SourceEnv): DataSource {
   void env;
+  throw new Error("Unimplemented: E11-9");
+}
+
+/** Until the identity service serves the principal's memberships, there is no workspace to read. */
+export const membershipsNotServedYet: WorkspaceResolver = async () => {
+  throw new Error("Unimplemented: E11-9");
+};
+
+/**
+ * The workspace to read: fixtures need none; the API reads one the principal is a member of, the
+ * `chosen` one only when it is among them. A resolver that fails or answers nothing usable is
+ * `unconfigured`, never fixtures.
+ */
+export async function resolveWorkspace(source: DataSource, resolver: WorkspaceResolver, chosen: string | null): Promise<WorkspaceResolution> {
+  void source;
+  void resolver;
+  void chosen;
   throw new Error("Unimplemented: E11-9");
 }
 
