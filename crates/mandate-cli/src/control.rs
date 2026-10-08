@@ -217,6 +217,24 @@ fn build_ref() -> String {
     format!("sha256:{}", digest.to_hex())
 }
 
+/// What an envelope says of its event besides its type and payload: the schema version, and the
+/// content references the payload names, sorted, which the envelope must list (journal spec §3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Shape {
+    pub(crate) schema_version: u64,
+    pub(crate) artifact_refs: Vec<String>,
+}
+
+/// A schema version as the canonical integer the envelope carries.
+///
+/// # Errors
+/// [`ControlError::Journal`] for a version the canonical integer cannot hold.
+fn version(schema_version: u64) -> Result<Value, ControlError> {
+    Int::new(schema_version)
+        .map(Value::Int)
+        .ok_or_else(|| ControlError::Journal(format!("the schema version {schema_version}")))
+}
+
 /// The canonical bytes of one control-stream draft, written by the owner as a `user` (journal spec
 /// §3; EI-10 admits nothing else).
 fn draft(
@@ -224,6 +242,7 @@ fn draft(
     stream: &StreamId,
     event_id: &str,
     event_type: &str,
+    shape: Shape,
     payload: Value,
     now: Now,
 ) -> Result<Vec<u8>, ControlError> {
@@ -238,7 +257,10 @@ fn draft(
                 ("version", text(env!("CARGO_PKG_VERSION"))),
             ])?,
         ),
-        ("artifact_refs", Value::Array(Vec::new())),
+        (
+            "artifact_refs",
+            Value::Array(shape.artifact_refs.iter().map(|r| text(r)).collect()),
+        ),
         ("causation_id", Value::Null),
         ("clock_source", text("local")),
         ("config_refs", Value::Object(Object::new())),
@@ -250,7 +272,7 @@ fn draft(
         ("event_type", text(event_type)),
         ("payload", payload),
         ("pii_refs", Value::Array(Vec::new())),
-        ("schema_version", one),
+        ("schema_version", version(shape.schema_version)?),
         ("stream_id", text(stream.as_str())),
     ])?;
     Ok(to_canonical(&fields))
@@ -553,10 +575,54 @@ pub(crate) fn commit(
     };
     key.push(("step_up", evidence));
     let payload = object(key)?;
-    let bytes = draft(owner, &stream, &event_id, event_type, payload, now)?;
+    let shape = Shape {
+        schema_version: 1,
+        artifact_refs: Vec::new(),
+    };
+    let bytes = draft(owner, &stream, &event_id, event_type, shape, payload, now)?;
+    settle(journal, &stream, event_id, repeat, &bytes, now)
+}
+
+/// [`commit`] for an event whose payload is exactly the owner's choice, with no second and no
+/// step-up member, in `shape`: a configuration registration (journal spec §9.2).
+///
+/// # Errors
+/// As [`commit`].
+pub(crate) fn commit_choice(
+    journal: &mut dyn ControlJournal,
+    owner: &Owner,
+    decided: Decided,
+    shape: Shape,
+    now: Now,
+) -> Result<Submitted, ControlError> {
+    let Decided {
+        stream,
+        event_type,
+        key,
+        event_id,
+        repeat,
+        ..
+    } = decided;
+    let payload = object(key)?;
+    let bytes = draft(owner, &stream, &event_id, event_type, shape, payload, now)?;
+    settle(journal, &stream, event_id, repeat, &bytes, now)
+}
+
+/// Appends `bytes`, the draft of `event_id`, until the journal stores it or [`ATTEMPTS`] run out.
+///
+/// # Errors
+/// As [`commit`].
+fn settle(
+    journal: &mut dyn ControlJournal,
+    stream: &StreamId,
+    event_id: String,
+    repeat: Repeat,
+    bytes: &[u8],
+    now: Now,
+) -> Result<Submitted, ControlError> {
     let mut retries = 1..ATTEMPTS;
     loop {
-        if let Some(stored) = attempt(journal, &stream, &event_id, &bytes, now)? {
+        if let Some(stored) = attempt(journal, stream, &event_id, bytes, now)? {
             return Ok(Submitted {
                 event_id,
                 seq: stored,
