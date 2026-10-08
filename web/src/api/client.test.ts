@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import * as clientModule from "./client";
 import { CSRF_HEADER, OPERATIONS, createWorkspaceClient, isIdempotencyKey, newIdempotencyKey, type ClientOptions, type Fetch, type ProblemFields } from "./client";
-import * as decodeModule from "./decode";
 import { decimal, object, closedEnum } from "./decode";
-import * as mockServerModule from "./mock-server";
-import * as typesModule from "./types";
 import type { KillSwitchRequest, Operation } from "./types";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
@@ -310,18 +306,26 @@ describe("authentication (spec §3.3, §3.5)", () => {
 
 describe("no order ticket (DEC-528)", () => {
   const ORDERISH = /order|buy|sell|trade|place|ticket|request|submit|execute|fill|position/i;
-  const EXPORTS = {
+  /**
+   * Every module in src/api/ and every name it exports. An implementation that adds or removes a
+   * module or an export edits this list, and only this list, beyond un-skipping its pending tests (DEC-750 item 4).
+   */
+  const EXPORTS: Record<string, string[]> = {
     client: ["CSRF_HEADER", "OPERATIONS", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
     "mock-server": ["createMockServer"],
     types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
+    unimplemented: ["UNIMPLEMENTED"],
   };
-  const MODULES = { client: clientModule, decode: decodeModule, "mock-server": mockServerModule, types: typesModule };
+  const MODULES = Object.fromEntries(
+    Object.entries(import.meta.glob(["./*.ts", "!./*.test.ts"], { eager: true }) as Record<string, Record<string, unknown>>).map(([path, module]) => [path.replace(/^\.\/(.*)\.ts$/, "$1"), module]),
+  );
 
-  it("exports exactly the allowed names from every client module, none of them order-placing", () => {
+  it("has exactly the allowed modules in src/api, each exporting exactly its allowed names, none of them order-placing", () => {
+    expect(Object.keys(MODULES).sort()).toEqual(Object.keys(EXPORTS).sort());
     for (const [name, module] of Object.entries(MODULES)) {
       const exported = Object.keys(module).sort();
-      expect(exported, name).toEqual(EXPORTS[name as keyof typeof EXPORTS]);
+      expect(exported, name).toEqual(EXPORTS[name]);
       expect(exported.filter((e) => ORDERISH.test(e)), name).toEqual([]);
     }
   });
