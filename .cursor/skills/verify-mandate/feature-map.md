@@ -604,6 +604,17 @@ while a reducing purpose passes it.
   (the spec table written out again).
 - **Run:** `cargo nextest run -p mandate-journal`.
 
+## Audit journal reads (E12-6)
+
+- **Spec:** `docs/specs/workspace-api.md` §4.8 (streams, events, one event), API-9 and API-15;
+  DEC-770 (page bounds, the cursor, what is absent).
+- **Code:** `mandate-audit`: `crates/mandate-audit/src/lib.rs` (`JournalRead`, scoped to the
+  caller's workspace, and `MemoryRead` over `MemoryJournal`). Pure and read-only: it writes no
+  journal.
+- **Tests:** `crates/mandate-audit/tests/pages.rs` (pending E12-6 until slice A1's
+  implementation: page bounds, the cursor, and a chain check over a whole stream).
+- **Run:** `cargo nextest run -p mandate-audit --run-ignored all`.
+
 ## Production configuration references (E7-19)
 
 - **Spec:** `docs/specs/journal.md` §9's `config_refs` table and its append-time reference check
