@@ -234,6 +234,7 @@ Errors are RFC 9457 problem documents with these members:
 | `journal_unavailable` | 503 | Postgres cannot take the append; `effect: none`, `retryable: true` |
 | `rate_limited` | 429 | Over the principal's limit; never for an API-7 operation |
 | `address_limit` | 409 | **(planned: E8-14)** A member already holds 10 notification addresses on the channel (§4.10). `effect: none`, `retryable: false`; title "Too many notification addresses". An endpoint already held is not an error: §5.7 answers `200` |
+| `busy` | 503 | **(planned: E8-14)** The control stream moved under the call 5 times in a row (the expected-head retry of §5.7). `effect: none`, `retryable: true`; title "Try again" |
 
 Success is not only `202`: a command that records a change answers `202` with `phase: "recorded"`,
 and one whose change is already recorded answers `200` with that record and appends nothing, as
@@ -767,9 +768,9 @@ secret-shaped member names (API-11).
 
 `address_ref` is the `added` event's own id: the ULID §3.4 derives from the member's random
 `Idempotency-Key`, whose time component carries no meaning. It is random in journal spec §3's sense
-for `pii_refs`: it is never derived from the address. The journal row for these records is owed by
-the journal spec change that closes the notification records (§9.11, the L3 lane's journal slice);
-the routes stay Planned until it merges (§9).
+for `pii_refs`: it is never derived from the address. The `NotificationAddressChanged` journal row is
+written by the L3 lane's journal spec PR for §9.11's notification records; the routes stay Planned
+until it merges (§9).
 
 **The vault's part.** The vault holds each entry under its `address_ref` with the member, the
 endpoint, the keys, the request digest it was written for, and a `version` and `written_at` that
@@ -784,30 +785,30 @@ spec §5.1). A `HeadMismatch` means something was appended meanwhile, perhaps by
 precondition is on the whole stream: the API reads the active set again, repeats only the set
 checks (step 3 when setting, step 2 when removing), and appends again, without writing the vault
 again or judging the step-up evidence again (it is judged once and is single use, API-17). After 5
-attempts it answers `journal_unavailable` (503), `effect: none`, `retryable: true`. So two tabs
+attempts it answers `busy` (503), `effect: none`, `retryable: true`. So two tabs
 cannot both add one endpoint, ten addresses cannot become eleven, and one address cannot be removed
 twice.
 
 **Setting, in order.**
 
 1. Check the session, CSRF (§3.3), and the request's shape. Derive the event id and look it up
-   (§3.4): an event with the same members goes to step 6, which puts the entry again, and then
-   returns its original outcome, without judging the step-up evidence again (so a retry after a lost
-   `202` succeeds and repairs a missing entry); if that put fails, the answer is `effect: unknown`,
-   `retryable: true`. Different members are `idempotency_conflict`. A vault entry under the derived
-   `address_ref` written for a different request digest is also `idempotency_conflict`.
+   (§3.4): an event with the same members returns its original outcome, without judging the step-up
+   evidence again and without writing the vault (so a retry after a lost `202` succeeds); different
+   members are `idempotency_conflict`. A vault entry under the derived `address_ref` written for a
+   different request digest is also `idempotency_conflict`.
 2. Check the allowlist and the step-up evidence, which is judged only by a call that will append.
 3. Ask the vault which of the member's entries hold this endpoint, and keep only the active ones
-   (§4.10). An active match that is reachable has its entry put again (step 6's write, for its own
-   `address_ref`) and answers `200`, so setting the same endpoint repairs an `address_missing`
-   address without a removal. An active match marked `unreachable` is replaced: the batch removes
-   it and adds the new `address_ref` (below). Otherwise, ten active addresses is `address_limit`.
+   (§4.10). An active match that is reachable answers `200` and writes nothing. An active match
+   marked `unreachable` is replaced: the batch removes it and adds the new `address_ref` (below).
+   Otherwise, ten active addresses is `address_limit`.
 4. Write the entry under `address_ref`, put-if-absent, bound to the request digest. A failure is
    `effect: none`, `retryable: true`.
 5. Append the batch with the expected head.
-6. Put the entry again (idempotent: the same `address_ref` and digest). If that fails, answer
-   `effect: unknown`, `retryable: true`; a retry with the same key finds the event and puts the
-   entry again.
+6. Put the entry again (idempotent: the same `address_ref` and digest), in this first attempt
+   only. If that fails, answer `effect: unknown`, `retryable: true`. A retry finds the event at
+   step 1 and answers its outcome without writing the vault; if the entry is gone, the dispatcher
+   records `address_missing`, and the member repairs it by removing the address and setting it
+   again.
 
 **Replacing an unreachable address.** When step 3 finds the endpoint active but `unreachable`, the
 batch is `NotificationAddressChanged` `removed` for the old `address_ref`, `NotificationAddressChanged`
@@ -826,14 +827,14 @@ no inline rollback.
 | Step 4, before the append | An inert entry. A retry with the same key and body passes step 1, rewrites nothing (put-if-absent), and appends |
 | Step 5, the append refused | `effect: none`; the entry stays inert |
 | Step 5, the append's outcome unknown | `effect: unknown`; a retry with the same key resolves it |
-| Step 6, the put fails | `effect: unknown`, `retryable: true`; the address is active, and if its entry is missing the dispatcher's attempt is `address_missing` until a retry puts it back |
+| Step 6, the put fails | `effect: unknown`, `retryable: true`; the address is active, and if its entry is missing the dispatcher's attempt is `address_missing` until the member removes the address and sets it again |
 
 **The sweep.** For an entry whose `written_at` is more than 24 hours old, workspace services check
 the journal; if no `added` event names its `address_ref`, they delete it by compare-and-delete
 inside the vault on the `version` they read, which fails if steps 4 or 6 have written it since. A
-retry that loses that race regardless is repaired by step 6; if step 6 also fails, the dispatcher
-finds the entry missing, records `address_missing`, and tells the member to set the address again
-(notifications spec §5.1, §5.6).
+first attempt that loses that race regardless is repaired by its step 6; if step 6 also fails, the
+dispatcher finds the entry missing, records `address_missing`, and tells the member to remove the
+address and set it again (notifications spec §5.1, §5.6). Removing needs no vault entry.
 
 **Removing, in order.** Journal first, as API-3 requires:
 
@@ -967,7 +968,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Journal queries, trace, exports over the API | **Planned** (E12-6) |
 | Journal events this spec needs (`MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, `OwnerRequestSubmitted`, `hold_openings`, client events) | **Planned** (E10-15, journal spec change first) |
 | Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
-| Notification addresses (§4.10, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14). Mounted once the API's authentication middleware lands and the journal spec change for §9.11's notification records adds the event. The push-service allowlist's decision is DEC-792 (this spec change, #827); the web client's mirror of its table is #833, which merges after #827. Accepted when: a canary scan of responses, problems, logs, metrics and the journal finds no endpoint, key, or endpoint hash; the append is failed at every step of §5.7's tables (API-3's test) and crash injection gives each stated outcome; a replay after a lost `202` returns it; a same-key retry with a different body is `idempotency_conflict`; a retry racing the sweep ends with the entry present or `address_missing` recorded; inert and removed entries neither match an endpoint nor count to the limit; two concurrent PUTs of one endpoint, an eleventh address, and a double removal are each settled by the expected head; a PUT of an unreachable address's endpoint replaces it in one batch with no last send to the old address; a PUT of a held endpoint puts its entry back; a stream busy for 5 attempts answers `journal_unavailable` without a second vault write or step-up judgment; deactivation removes every address in its own commit, under the acting principal; a foreign `address_ref` answers byte-for-byte as a random one; the shared allowlist table (DEC-792) passes; and a replayed or wrongly bound step-up is refused |
+| Notification addresses (§4.10, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14). Mounted once the API's authentication middleware lands and the journal spec change that writes the `NotificationAddressChanged` row (the L3 lane's §9.11 journal PR) merges. Merge order: #811, #763, this change (#827), then #833. The push-service allowlist's decision is DEC-792 (this spec change, #827); the web client's mirror of its table is #833, which merges after #827. Accepted when: a canary scan of responses, problems, logs, metrics and the journal finds no endpoint, key, or endpoint hash; the append is failed at every step of §5.7's tables (API-3's test) and crash injection gives each stated outcome; a replay after a lost `202` returns it; a same-key retry with a different body is `idempotency_conflict`; a retry racing the sweep ends with the entry present or `address_missing` recorded; inert and removed entries neither match an endpoint nor count to the limit; two concurrent PUTs of one endpoint, an eleventh address, and a double removal are each settled by the expected head; a PUT of an unreachable address's endpoint replaces it in one batch with no last send to the old address; a different-body retry after the entry is swept is `idempotency_conflict` once its event exists; a stream busy for 5 attempts answers `busy` without a second vault write or step-up judgment; deactivation removes every address in its own commit, under the acting principal; a foreign `address_ref` answers byte-for-byte as a random one; the shared allowlist table (DEC-792) passes; and a replayed or wrongly bound step-up is refused |
 | The relay's own allowlist check (DEC-792 item 3) | **Planned** (E20-8) |
 
 ---

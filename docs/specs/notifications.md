@@ -370,9 +370,10 @@ The dispatcher **tails the journal**, which is its outbox:
    attempt is `abandoned` with reason `retry_window_ended` (the safety window's reason, from
    [#763](https://github.com/kunwarshivam/mandate/pull/763)): it is not `address_missing`, marks
    nothing, and raises no `channel_lost`; once the entry is swept, no exception remains. **An active
-   address whose vault entry is missing** (a failure the workspace API's §5.7 repairs, by a retry or
-   by setting the same endpoint again) is a terminal `failed` with reason `address_missing`: it
-   does not mark the address `unreachable`, and it raises `channel_lost` once (§5.6).
+   address whose vault entry is missing** (repaired by the member removing the address and setting it
+   again, workspace API spec §5.7; removing needs no entry) is a terminal `failed` with reason
+   `address_missing`: it does not mark the address `unreachable`, and it raises `channel_lost` once
+   (§5.6).
 4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
    issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
    while the approval is still pending.
@@ -409,7 +410,7 @@ Every channel is one adapter behind one interface:
 | Class | Attempts | Stops when |
 |---|---|---|
 | `action` | At once; then after 15 s, 60 s, 5 min; then every 15 min | The approval is no longer pending (terminal event, deadline passed, or cancellation), recorded as `abandoned` with reason `not_pending` |
-| `safety` | Same schedule | Accepted, a permanent failure, or 24 hours |
+| `safety` | Same schedule | Accepted, a permanent failure, or 24 hours; or at once, for the one last send to a removed address whose vault entry is already gone (§5.1), recorded as `abandoned` with reason `retry_window_ended` |
 | `info` | Same schedule | Accepted, a permanent failure, or 6 hours |
 
 A `retryable` result, a timeout, and a provider 429 all retry. `permanent` stops that channel for
@@ -459,8 +460,9 @@ adds the notice stream and these records; E8-9's tests PR closes their payload s
   removes it or sets the same endpoint again, which replaces it with a new address in one batch
   (workspace API spec §4.10, §5.7).
 - **A missing entry is reported once.** The first `address_missing` attempt on an address raises
-  `channel_lost`; later attempts on it are `failed` `address_missing` with no new `channel_lost`,
-  until the member sets the address again or removes it.
+  `channel_lost`; later attempts on it are `failed` `address_missing` with no new `channel_lost`.
+  The report resets on the next `delivered` attempt on that address, and a new `address_ref` (the
+  member removing the address and setting it again) starts afresh.
 - **A member's own change is not a loss.** Adding or removing a push address through the workspace
   API (workspace API spec §4.10) is journaled as `NotificationAddressChanged` on the control
   stream and raises a `notification_address_changed` notice, not `channel_lost`. Its one last send
