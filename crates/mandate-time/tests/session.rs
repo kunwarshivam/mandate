@@ -1079,12 +1079,12 @@ fn the_last_completed_regular_session_is_the_newest_whose_close_is_not_after_now
         (
             "2029-01-01T05:00:00.000000000Z",
             Err(TimeError::OutsideCalendar),
-            "midnight New York after the range's last date is refused, never answered with a guess (DEC-516)",
+            "midnight New York after the range's last date is refused, never answered with a guess (DEC-517)",
         ),
         (
             "2029-03-01T21:00:00.000000000Z",
             Err(TimeError::OutsideCalendar),
-            "a clock months past the range is refused, not answered with the range's last session (DEC-516)",
+            "a clock months past the range is refused, not answered with the range's last session (DEC-517)",
         ),
     ];
     for (instant, expected, why) in cases {
