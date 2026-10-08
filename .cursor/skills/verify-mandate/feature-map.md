@@ -1323,7 +1323,10 @@ proves each pending test fails on them (DEC-110).
   `ProviderAnswer`, `EndReason`, `SubjectStanding`, and `admit`, which builds
   `mandate_identity::Session` through the seal), stubbed; `crates/mandate-authn/tests/session_api.rs`
   (a refresh secret's `Debug` and the `SessionRevoked` reason codes, live; the digest-only
-  record, pending).
+  record, pending); `crates/mandate-authn/tests/session.rs` (org-kind limits that may only
+  shorten, the 5-minute access token, idle and absolute limits, refresh rotation with reuse
+  revoking the family) and `crates/mandate-authn/tests/admit.rs` (the sealed identity session's
+  kind and snapshot, and no session on a refusal), pending.
 - **Run:** `cargo nextest run -p mandate-authn`.
 ## Identity: roles, the permission matrix, and the authorization step (E9-2)
 
