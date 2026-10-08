@@ -62,7 +62,9 @@ impl PageLimit {
     }
 }
 
-/// The five stream types of journal spec §2, as the stream list names them.
+/// The stream types of journal spec §2, as the stream list names them. `Notice` (`ntf:{ws}`) is
+/// named by the spec but unreachable until `mandate_journal::StreamId::parse` parses `ntf:` streams
+/// (DEC-770 item 5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StreamType {
     Account,
