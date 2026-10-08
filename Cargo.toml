@@ -21,6 +21,7 @@ mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
 mandate-mcp = { path = "crates/mandate-mcp", version = "0.0.0" }
 mandate-modelhost = { path = "crates/mandate-modelhost", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
+mandate-passkey = { path = "crates/mandate-passkey", version = "0.0.0" }
 mandate-risk = { path = "crates/mandate-risk", version = "0.0.0" }
 mandate-runtime = { path = "crates/mandate-runtime", version = "0.0.0" }
 mandate-rh-sim = { path = "crates/mandate-rh-sim", version = "0.0.0" }
@@ -31,12 +32,14 @@ mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
 anyhow = "1.0.104"
 arrow-array = { version = "60.0.0", default-features = false }
 arrow-schema = { version = "60.0.0", default-features = false }
+base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 jiff = { version = "0.2.37", default-features = false, features = ["std", "tzdb-bundle-always"] }
 libtest-mimic = "0.8.2"
 parquet = { version = "60.0.0", default-features = false, features = ["arrow", "snap"] }
 proptest = "1.11.0"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
+ring = { version = "0.17.14", default-features = false, features = ["alloc"] }
 ruint = { version = "1.20.1", default-features = false }
 rust_decimal = { version = "1.43.0", default-features = false }
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }

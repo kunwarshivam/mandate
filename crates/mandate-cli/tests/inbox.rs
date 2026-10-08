@@ -1,6 +1,6 @@
 //! K1a (E8-3's `clap` follow-up, DEC-533): `mandate approvals list`, `show`, `approve` and `skip`.
-//! The flags are live. The renderers run over the M7 tests' in-memory journal, the refusals need no
-//! database, and the Postgres grant test follows J2 as a tests correction. What each command prints
+//! The renderers run over the M7 tests' in-memory journal and the refusals need no database; the
+//! binary's grant over Postgres is `grant.rs`, since J2 closed its records. What each command prints
 //! is its output contract: `list` never shows the request's content, `show` shows it exactly, and a
 //! refusal prints nothing and never names the DSN.
 
@@ -98,7 +98,6 @@ fn the_approvals_commands_take_an_agent_and_one_approval_each() {
 
 /// `list` shows opaque ids, states and seconds, pending first, and none of the request's content.
 #[test]
-#[ignore = "pending E8-3"]
 fn list_shows_ids_states_and_seconds_and_never_the_content() {
     let mut fx = common::Fixture::new();
     let first = fx.ask(AGENT, "2", ASKED_AT);
@@ -149,7 +148,6 @@ fn list_shows_ids_states_and_seconds_and_never_the_content() {
 /// grants is exactly the order that would be sent, with the hash the grant repeats and the code
 /// that confirms it.
 #[test]
-#[ignore = "pending E8-3"]
 fn show_prints_the_exact_order_its_hash_and_its_code() {
     let mut fx = common::Fixture::new();
     let asked = fx.ask(AGENT, "2", ASKED_AT);
@@ -173,7 +171,6 @@ fn show_prints_the_exact_order_its_hash_and_its_code() {
 /// `approve` prints the event it committed and the hash it granted, then the outcome line; `skip`
 /// prints the event alone.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_answer_prints_its_event_and_the_runtimes_outcome() {
     let mut fx = common::Fixture::new();
     let asked = fx.ask(AGENT, "2", ASKED_AT);
@@ -235,7 +232,6 @@ fn an_answer_prints_its_event_and_the_runtimes_outcome() {
 /// The binary's assertion ids: non-empty, and distinct within a command, across instants, and
 /// across owners, so no grant reuses an assertion the workspace has seen (mandate spec §6.1).
 #[test]
-#[ignore = "pending E8-3"]
 fn assertion_ids_are_fresh_per_instant_owner_and_count() {
     let mut seen = BTreeSet::new();
     let other = mandate_cli::control::Owner {
@@ -296,7 +292,6 @@ fn refuses<T: std::fmt::Debug>(
 /// created, and a journal whose host does not resolve is an error at once; no refusal prints or
 /// names the DSN.
 #[test]
-#[ignore = "pending E8-3"]
 fn every_command_refuses_without_a_database() {
     let [user, password, host, db] = SENTINELS;
     let dsn = format!("postgres://{user}:{password}@{host}:1/{db}");

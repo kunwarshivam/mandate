@@ -55,7 +55,9 @@
   in-memory journal in `crates/mandate-cli/tests/common/mod.rs`.
 - **The `approvals` commands (K1a, DEC-533):** `crates/mandate-cli/src/inbox.rs` (`list`, `show`,
   `approve` and `skip` over P0's journal as D1b's paper owner; the renderers `list_lines`,
-  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`), stubbed, and `main`;
-  `crates/mandate-cli/tests/inbox.rs`, pending E8-3 but for the live flags test.
+  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`) and `main`, with the answer's
+  `content_hash` in `artifact_refs` (`control.rs`, DEC-533 item 6);
+  `crates/mandate-cli/tests/inbox.rs`, and `crates/mandate-cli/tests/grant.rs`, the binary over
+  Postgres (`MANDATE_PG_URL`), playing the runtime that records the grant.
 - **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime -p mandate-cli`;
   `cargo xtask ci pending`.

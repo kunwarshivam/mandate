@@ -400,6 +400,7 @@ impl MandateSource for FixtureMandate {
                 ]),
             },
             symbol: "AAPL".to_owned(),
+            governed: None,
         })
     }
 }
