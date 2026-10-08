@@ -98,6 +98,37 @@ pub enum Refusal {
     CalendarCannotName,
     #[error("the output's expiry is beyond the risk clock's range")]
     ExpiryOverflow,
+    #[error("the crossover's exact arithmetic over the closes failed")]
+    SignalArithmetic,
+    #[error("the output's conviction or confidence cannot be represented")]
+    OutputUnrepresentable,
+    #[error("the host cannot build the model's content object")]
+    ContentObject,
+}
+
+impl Refusal {
+    /// Stable reason code (ADR-0001 ES-09), one per refusal.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Unimplemented { .. } => "unimplemented",
+            Self::UnknownModel => "unknown_model",
+            Self::PinHashMismatch => "pin_hash_mismatch",
+            Self::NotRegistered => "not_registered",
+            Self::RegistryMismatch => "registry_mismatch",
+            Self::ParamKeys => "param_keys",
+            Self::ParamValue { .. } => "param_value",
+            Self::WindowsCrossed => "windows_crossed",
+            Self::WrongInstrument => "wrong_instrument",
+            Self::ClosesIncomplete => "closes_incomplete",
+            Self::ClosesEnd => "closes_end",
+            Self::TooFewCloses => "too_few_closes",
+            Self::CalendarCannotName => "calendar_cannot_name",
+            Self::ExpiryOverflow => "expiry_overflow",
+            Self::SignalArithmetic => "signal_arithmetic",
+            Self::OutputUnrepresentable => "output_unrepresentable",
+            Self::ContentObject => "content_object",
+        }
+    }
 }
 
 /// The content object the host computes for `model_id` at `model_version`, from the source bytes

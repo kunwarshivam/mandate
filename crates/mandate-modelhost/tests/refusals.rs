@@ -6,6 +6,8 @@
 mod common;
 
 use common::{Case, at, dec, id, long, params};
+use std::collections::BTreeSet;
+
 use mandate_canon::Digest;
 use mandate_modelhost::{Evaluation, Refusal, Signal};
 use mandate_num::Price;
@@ -13,6 +15,43 @@ use mandate_spec::document::{ModelId, ParamValue};
 use mandate_time::{Date, ExchangeCalendar};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
+
+/// Each failure is its own typed refusal with its own stable code (ADR-0001 ES-09): an arithmetic
+/// failure in the crossover is not a crossed window, an unrepresentable output is not an expiry,
+/// and a content object the host cannot build is not an unknown model. A live test, as the
+/// mutation gate needs before M2 (DEC-139).
+#[test]
+fn every_refusal_has_its_own_stable_code() {
+    let rows = [
+        (Refusal::Unimplemented { story: "E15-13" }, "unimplemented"),
+        (Refusal::UnknownModel, "unknown_model"),
+        (Refusal::PinHashMismatch, "pin_hash_mismatch"),
+        (Refusal::NotRegistered, "not_registered"),
+        (Refusal::RegistryMismatch, "registry_mismatch"),
+        (Refusal::ParamKeys, "param_keys"),
+        (
+            Refusal::ParamValue {
+                key: "slow_periods",
+            },
+            "param_value",
+        ),
+        (Refusal::WindowsCrossed, "windows_crossed"),
+        (Refusal::WrongInstrument, "wrong_instrument"),
+        (Refusal::ClosesIncomplete, "closes_incomplete"),
+        (Refusal::ClosesEnd, "closes_end"),
+        (Refusal::TooFewCloses, "too_few_closes"),
+        (Refusal::CalendarCannotName, "calendar_cannot_name"),
+        (Refusal::ExpiryOverflow, "expiry_overflow"),
+        (Refusal::SignalArithmetic, "signal_arithmetic"),
+        (Refusal::OutputUnrepresentable, "output_unrepresentable"),
+        (Refusal::ContentObject, "content_object"),
+    ];
+    for (refusal, code) in &rows {
+        assert_eq!(refusal.code(), *code, "{refusal:?}");
+    }
+    let distinct: BTreeSet<&str> = rows.iter().map(|(r, _)| r.code()).collect();
+    assert_eq!(distinct.len(), rows.len(), "no two refusals share a code");
+}
 
 #[derive(Debug, Clone, Copy)]
 enum Change {
