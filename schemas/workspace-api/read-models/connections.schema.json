@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/connections.schema.json",
+  "title": "Connections",
+  "description": "GET /connections (§4.5, §4.11). References only (API-11). DEC-735.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "connections",
+    "as_of"
+  ],
+  "properties": {
+    "connections": {
+      "type": "array",
+      "items": {
+        "$ref": "connection.schema.json#/$defs/Connection"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false
+}

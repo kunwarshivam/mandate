@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/timeline.schema.json",
+  "title": "Agent timeline",
+  "description": "GET /agents/{id}/timeline?types=&from=&to= (§4.8, J1): merged from the agent and account streams, one cursor per stream, displayed by recorded_at. DEC-735.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "events",
+    "cursors",
+    "complete",
+    "as_of"
+  ],
+  "properties": {
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "event_id",
+          "stream_id",
+          "seq",
+          "recorded_at",
+          "event_type",
+          "kind",
+          "text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "$ref": "../common.schema.json#/$defs/EventId"
+          },
+          "stream_id": {
+            "$ref": "../common.schema.json#/$defs/Watermark/properties/stream_id"
+          },
+          "seq": {
+            "$ref": "../common.schema.json#/$defs/Watermark/properties/seq"
+          },
+          "recorded_at": {
+            "$ref": "../common.schema.json#/$defs/Timestamp"
+          },
+          "event_type": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Za-z]+$"
+          },
+          "kind": {
+            "enum": [
+              "fill",
+              "order",
+              "mode",
+              "approval",
+              "gate",
+              "protection",
+              "reconciliation",
+              "version"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Deterministic words built from the event's own members; never model output (API-18)."
+          }
+        }
+      }
+    },
+    "cursors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "stream_id",
+          "after_seq"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "stream_id": {
+            "$ref": "../common.schema.json#/$defs/Watermark/properties/stream_id"
+          },
+          "after_seq": {
+            "$ref": "../common.schema.json#/$defs/Watermark/properties/seq"
+          }
+        }
+      },
+      "description": "One per stream read; pass back to page on."
+    },
+    "complete": {
+      "type": "boolean",
+      "description": "true when no stream has more events in the range."
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false
+}

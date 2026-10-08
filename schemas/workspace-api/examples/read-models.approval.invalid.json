@@ -1,0 +1,107 @@
+[
+  {
+    "label": "a scorecard on an approval (DEC-126)",
+    "set": {
+      "/approval/scorecard": {
+        "rate": "0.6"
+      }
+    },
+    "remove": []
+  },
+  {
+    "label": "a price target on an approval (DEC-126)",
+    "set": {
+      "/approval/price_target": "150"
+    },
+    "remove": []
+  },
+  {
+    "label": "a profit estimate inside the content",
+    "set": {
+      "/approval/content/expected_profit_usd": "40"
+    },
+    "remove": []
+  },
+  {
+    "label": "a score label that reads as a probability",
+    "set": {
+      "/approval/content/evidence/combined_score/label": "probability of profit"
+    },
+    "remove": []
+  },
+  {
+    "label": "a sell bound into an approval",
+    "set": {
+      "/approval/content/action/side": "sell"
+    },
+    "remove": []
+  },
+  {
+    "label": "skip listed before approve",
+    "set": {
+      "/approval/content/choices": [
+        "skip",
+        "approve"
+      ]
+    },
+    "remove": []
+  },
+  {
+    "label": "five risk figures instead of six",
+    "set": {},
+    "remove": [
+      "/approval/content/risk_impact/5"
+    ]
+  },
+  {
+    "label": "a float quantity (§3.1)",
+    "set": {
+      "/approval/content/action/qty": 2.0
+    },
+    "remove": []
+  },
+  {
+    "label": "a rule unlike the mandate's",
+    "set": {
+      "/approval/content/trigger/rule": {
+        "id": "x"
+      }
+    },
+    "remove": []
+  },
+  {
+    "label": "a status outside the lifecycle",
+    "set": {
+      "/approval/status": "approved"
+    },
+    "remove": []
+  },
+  {
+    "label": "a decided_by with a trailing newline",
+    "set": {
+      "/approval/content/trigger/decided_by": "default\n"
+    },
+    "remove": []
+  },
+  {
+    "label": "an empty as_of on a read that reads streams (API-14)",
+    "set": {
+      "/as_of": []
+    },
+    "remove": []
+  },
+  {
+    "label": "a missing as_of (API-14)",
+    "set": {},
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "a missing served_at",
+    "set": {},
+    "remove": [
+      "/served_at"
+    ]
+  }
+]

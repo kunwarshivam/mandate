@@ -1,0 +1,28 @@
+{
+  "api_version": "v1",
+  "build": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "served_at": "2026-09-28T18:05:20.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "agent:01JB3K6A0B1C2D3E4F5G6H7J8K:agt_01JB3K9P2H6SD4F8G1E3W7XYZB",
+      "seq": 8813,
+      "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "recorded_at": "2026-09-28T18:05:19.000000000Z"
+    }
+  ],
+  "alerts": [
+    {
+      "alert_id": "01JBM8Z1Q2W3E4R5T6Y7T8V9W0",
+      "kind": "risk_limit",
+      "raised_at": "2026-09-28T17:41:03.000000000Z",
+      "subject": {
+        "stream_id": "agent:01JB3K6A0B1C2D3E4F5G6H7J8K:agt_01JB3K9P2H6SD4F8G1E3W7XYZB",
+        "seq": 8790,
+        "event_type": "RiskLimitTriggered"
+      },
+      "agent_id": "agt_01JB3K9P2H6SD4F8G1E3W7XYZB",
+      "connection_id": null,
+      "opens": "D2"
+    }
+  ]
+}

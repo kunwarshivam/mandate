@@ -1,0 +1,32 @@
+[
+  {
+    "label": "a version-1 trigger without the DEC-185 members",
+    "set": {},
+    "remove": [
+      "/approval/content/trigger/requested_by",
+      "/approval/content/trigger/client",
+      "/approval/content/trigger/rule"
+    ]
+  },
+  {
+    "label": "delegation shapes after approve and skip",
+    "set": {
+      "/approval/content/choices": [
+        "approve",
+        "skip",
+        "until_close"
+      ]
+    },
+    "remove": []
+  },
+  {
+    "label": "a resolved approval",
+    "set": {
+      "/approval/resolution": {
+        "at": "2026-09-28T18:06:00.000000000Z",
+        "cancel_reason": null
+      }
+    },
+    "remove": []
+  }
+]

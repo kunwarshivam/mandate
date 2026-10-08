@@ -1,0 +1,63 @@
+{
+  "api_version": "v1",
+  "build": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "served_at": "2026-09-28T18:05:20.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:01JB3K6A0B1C2D3E4F5G6H7J8K",
+      "seq": 3,
+      "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "recorded_at": "2026-09-28T13:30:02.000000000Z"
+    },
+    {
+      "stream_id": "acct:01JB3K6A0B1C2D3E4F5G6H7J8K:01JB3K7N4C6D8F0G2H4J6K8M0N",
+      "seq": 977,
+      "hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "recorded_at": "2026-09-28T18:05:01.000000000Z"
+    }
+  ],
+  "connection": {
+    "connection_id": "con_01JB3K7M9Q2W4E6R8T0Y1V3X5P",
+    "broker": "alpaca",
+    "environment": "paper",
+    "scopes": [
+      "data",
+      "trading"
+    ],
+    "auth_kind": "api_key",
+    "account_ref": "01JB3K7N4C6D8F0G2H4J6K8M0N",
+    "state": "active",
+    "contract_hash": null,
+    "checks": [
+      {
+        "check": "scope",
+        "result": "passed",
+        "at": "2026-09-28T13:30:02.000000000Z"
+      },
+      {
+        "check": "leverage_1x",
+        "result": "passed",
+        "at": "2026-09-28T13:30:02.000000000Z"
+      }
+    ],
+    "terms_version": null,
+    "account": {
+      "state": "normal",
+      "equity": "10412.37",
+      "day_trading_regime": "intraday_margin",
+      "freshness": {
+        "observed_at": "2026-09-28T18:05:01.000000000Z",
+        "stale": false,
+        "age_seconds": 19,
+        "limit_source": "account_snapshot.max_age_s"
+      }
+    },
+    "data_profile": "alpaca_iex",
+    "agents_granted": [
+      "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC",
+      "agt_01JB3K9P2H6SD4F8G1E3W7XYZB",
+      "agt_01JB3KAQ5R8TV2N4M6P9S1W3XD"
+    ],
+    "loss_carry_usd": null
+  }
+}

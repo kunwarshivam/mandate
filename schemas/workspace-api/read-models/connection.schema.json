@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/connection.schema.json",
+  "title": "Connection",
+  "description": "GET /connections/{id} (§4.5, §4.11). References only (API-11). DEC-735.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "connection",
+    "as_of"
+  ],
+  "properties": {
+    "connection": {
+      "$ref": "#/$defs/Connection"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Connection": {
+      "type": "object",
+      "propertyNames": {
+        "not": {
+          "pattern": "(?i)(token|secret|password|passphrase|credential|api_key|private_key|account_number|fingerprint|vault)"
+        }
+      },
+      "description": "A connection is a reference, never a credential (API-11, connections spec §3): closed, and no member may be named for a secret.",
+      "required": [
+        "connection_id",
+        "broker",
+        "environment",
+        "scopes",
+        "auth_kind",
+        "account_ref",
+        "state",
+        "contract_hash",
+        "checks",
+        "terms_version",
+        "account",
+        "data_profile",
+        "agents_granted",
+        "loss_carry_usd"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "connection_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "broker": {
+          "enum": [
+            "alpaca",
+            "robinhood",
+            "kraken_derivatives_us"
+          ]
+        },
+        "environment": {
+          "enum": [
+            "paper",
+            "live"
+          ]
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "auth_kind": {
+          "enum": [
+            "api_key",
+            "oauth",
+            "mcp_oauth"
+          ]
+        },
+        "account_ref": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "connecting",
+            "active",
+            "degraded",
+            "suspended",
+            "revoked"
+          ]
+        },
+        "contract_hash": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "check",
+              "result",
+              "at"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "check": {
+                "enum": [
+                  "scope",
+                  "environment",
+                  "account",
+                  "uniqueness",
+                  "leverage_1x",
+                  "account_status",
+                  "contract_hash"
+                ]
+              },
+              "result": {
+                "enum": [
+                  "passed",
+                  "failed"
+                ]
+              },
+              "at": {
+                "$ref": "../common.schema.json#/$defs/Timestamp"
+              }
+            }
+          }
+        },
+        "terms_version": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "account": {
+          "type": "object",
+          "propertyNames": {
+            "not": {
+              "pattern": "(?i)(token|secret|password|passphrase|credential|api_key|private_key|account_number|fingerprint|vault)"
+            }
+          },
+          "required": [
+            "state",
+            "equity",
+            "day_trading_regime",
+            "freshness"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "enum": [
+                "normal",
+                "closing_only",
+                "blocked"
+              ]
+            },
+            "equity": {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            "day_trading_regime": {
+              "enum": [
+                "intraday_margin"
+              ]
+            },
+            "freshness": {
+              "$ref": "../common.schema.json#/$defs/Freshness"
+            }
+          }
+        },
+        "data_profile": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "agents_granted": {
+          "type": "array",
+          "items": {
+            "$ref": "../common.schema.json#/$defs/Id"
+          },
+          "uniqueItems": true
+        },
+        "loss_carry_usd": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,402 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/approval.schema.json",
+  "title": "Approval",
+  "description": "GET /approvals/{id} (workspace API spec §4.3, §4.11). DEC-735.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "approval",
+    "as_of"
+  ],
+  "properties": {
+    "approval": {
+      "$ref": "#/$defs/Approval"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Approval": {
+      "type": "object",
+      "propertyNames": {
+        "not": {
+          "pattern": "(?i)(scorecard|profit|price_target|target_price|expected_return|win_rate|performance)"
+        }
+      },
+      "description": "One approval. Never a scorecard, profit estimate, or price target (DEC-126): closed, and no member may be named for one.",
+      "required": [
+        "approval_id",
+        "agent_id",
+        "status",
+        "requested_at",
+        "deadline",
+        "content",
+        "content_hash",
+        "model_outputs",
+        "grants",
+        "resolution"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "approval_id": {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        },
+        "agent_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "status": {
+          "enum": [
+            "delivered",
+            "acted",
+            "gate_skipped",
+            "rejected",
+            "expired",
+            "superseded"
+          ],
+          "description": "Folded from the agent stream (M7 approval lifecycle)."
+        },
+        "requested_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "deadline": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "content": {
+          "$ref": "#/$defs/Content"
+        },
+        "content_hash": {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "model_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common.schema.json#/$defs/QuotedContent"
+          },
+          "description": "The outputs content.evidence.outputs names, as quoted, attributed content behind 'View model output' (API-18)."
+        },
+        "grants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "user_label",
+              "at"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "user_label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "at": {
+                "$ref": "../common.schema.json#/$defs/Timestamp"
+              }
+            }
+          },
+          "description": "Grants the runtime counted so far."
+        },
+        "resolution": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "at",
+            "cancel_reason"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "$ref": "../common.schema.json#/$defs/Timestamp"
+            },
+            "cancel_reason": {
+              "enum": [
+                "version_applied",
+                "mode_tightened",
+                "owner_pause",
+                "owner_stop",
+                "kill_switch",
+                null
+              ]
+            }
+          }
+        }
+      }
+    },
+    "Content": {
+      "type": "object",
+      "description": "The content object exactly as ApprovalRequested holds it. Its canonical SHA-256 is content_hash, which the client sends back unchanged (API-12).",
+      "required": [
+        "action",
+        "trigger",
+        "evidence",
+        "risk_impact",
+        "reference_mark",
+        "deadline",
+        "default",
+        "choices",
+        "approvers"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "object",
+          "required": [
+            "instrument",
+            "asset_class",
+            "side",
+            "qty",
+            "limit",
+            "order_usd",
+            "purpose"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "instrument": {
+              "type": "string",
+              "minLength": 1
+            },
+            "asset_class": {
+              "enum": [
+                "us_equity",
+                "crypto"
+              ]
+            },
+            "side": {
+              "const": "buy"
+            },
+            "qty": {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            "limit": {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            "order_usd": {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            "purpose": {
+              "enum": [
+                "open",
+                "increase"
+              ]
+            }
+          }
+        },
+        "trigger": {
+          "type": "object",
+          "description": "Version-1 records carry mandate_version and decided_by; DEC-181 and DEC-185 add requested_by, client, and rule (the mandate's own rule shape). Every member the record holds is served unchanged.",
+          "required": [
+            "mandate_version",
+            "decided_by"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "mandate_version": {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            },
+            "decided_by": {
+              "type": "string",
+              "pattern": "^(rule:[a-z][a-z0-9_]{0,31}|default|admission_ceiling|client_ceiling|review_ceiling|policy_overlay)$"
+            },
+            "requested_by": {
+              "enum": [
+                "agent",
+                "owner",
+                "client"
+              ]
+            },
+            "client": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            },
+            "rule": {
+              "oneOf": [
+                {
+                  "$ref": "https://mandate.dev/schemas/mandate/1#/$defs/rule"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "combined_score",
+            "outputs"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "combined_score": {
+              "type": "object",
+              "required": [
+                "label",
+                "value"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "const": "combined model score, not a probability of profit"
+                },
+                "value": {
+                  "$ref": "../common.schema.json#/$defs/Decimal"
+                }
+              }
+            },
+            "outputs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "event_id",
+                  "artifact",
+                  "label"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "../common.schema.json#/$defs/EventId"
+                  },
+                  "artifact": {
+                    "oneOf": [
+                      {
+                        "$ref": "../common.schema.json#/$defs/ContentRef"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "label": {
+                    "enum": [
+                      "Output of software you selected",
+                      "platform-authored"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "risk_impact": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "required": [
+              "field",
+              "value",
+              "cap"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "field": {
+                "enum": [
+                  "order_usd",
+                  "position_usd_after",
+                  "gross_usd_after",
+                  "bought_today_usd",
+                  "drawdown",
+                  "daily_pnl_fraction"
+                ]
+              },
+              "value": {
+                "$ref": "../common.schema.json#/$defs/Decimal"
+              },
+              "cap": {
+                "oneOf": [
+                  {
+                    "$ref": "../common.schema.json#/$defs/Decimal"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "description": "One entry for each of the six fields (mandate spec §6.4)."
+        },
+        "reference_mark": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "price",
+            "seq"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "price": {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "deadline": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "default": {
+          "const": "If you do nothing, this action is skipped"
+        },
+        "choices": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "approve"
+            },
+            {
+              "const": "skip"
+            }
+          ],
+          "items": {
+            "enum": [
+              "until_close",
+              "instrument_for_time",
+              "kind_for_time"
+            ]
+          },
+          "minItems": 2,
+          "uniqueItems": true,
+          "description": "Approve and skip, then the delegation shapes offered, none preselected (PX-10, PX-15)."
+        },
+        "approvers": {
+          "type": "object",
+          "required": [
+            "required",
+            "independent"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "required": {
+              "enum": [
+                1,
+                2
+              ]
+            },
+            "independent": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  }
+}

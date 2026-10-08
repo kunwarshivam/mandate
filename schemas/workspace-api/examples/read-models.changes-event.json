@@ -1,0 +1,12 @@
+{
+  "watermarks": [
+    {
+      "stream_id": "agent:01JB3K6A0B1C2D3E4F5G6H7J8K:agt_01JB3K9P2H6SD4F8G1E3W7XYZB",
+      "seq": 8815
+    },
+    {
+      "stream_id": "ctl:01JB3K6A0B1C2D3E4F5G6H7J8K",
+      "seq": 412
+    }
+  ]
+}

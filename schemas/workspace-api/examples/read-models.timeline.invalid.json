@@ -1,0 +1,44 @@
+[
+  {
+    "label": "a timeline kind outside the set",
+    "set": {
+      "/events/0/kind": "chat"
+    },
+    "remove": []
+  },
+  {
+    "label": "an event type with a trailing newline",
+    "set": {
+      "/events/0/event_type": "FillApplied\n"
+    },
+    "remove": []
+  },
+  {
+    "label": "a timeline without its per-stream cursors",
+    "set": {},
+    "remove": [
+      "/cursors"
+    ]
+  },
+  {
+    "label": "an empty as_of on a read that reads streams (API-14)",
+    "set": {
+      "/as_of": []
+    },
+    "remove": []
+  },
+  {
+    "label": "a missing as_of (API-14)",
+    "set": {},
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "a missing served_at",
+    "set": {},
+    "remove": [
+      "/served_at"
+    ]
+  }
+]

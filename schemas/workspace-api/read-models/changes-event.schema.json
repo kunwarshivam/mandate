@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/changes-event.schema.json",
+  "title": "Change notice",
+  "description": "The data of one server-sent event on GET /changes (§3.1): {stream_id, seq} watermarks only. No hash, time, type, or content; the client refetches what it shows. DEC-735.",
+  "type": "object",
+  "required": [
+    "watermarks"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "watermarks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "stream_id",
+          "seq"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "stream_id": {
+            "$ref": "../common.schema.json#/$defs/Watermark/properties/stream_id"
+          },
+          "seq": {
+            "$ref": "../common.schema.json#/$defs/Watermark/properties/seq"
+          }
+        }
+      }
+    }
+  }
+}

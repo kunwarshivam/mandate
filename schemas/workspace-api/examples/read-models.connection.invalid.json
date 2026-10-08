@@ -1,0 +1,51 @@
+[
+  {
+    "label": "an access token on a connection (API-11)",
+    "set": {
+      "/connection/access_token": "canary"
+    },
+    "remove": []
+  },
+  {
+    "label": "an account number (API-11)",
+    "set": {
+      "/connection/account/account_number": "canary"
+    },
+    "remove": []
+  },
+  {
+    "label": "the account fingerprint (connections spec §3)",
+    "set": {
+      "/connection/account_fingerprint": "canary"
+    },
+    "remove": []
+  },
+  {
+    "label": "an unknown connection state",
+    "set": {
+      "/connection/state": "paused"
+    },
+    "remove": []
+  },
+  {
+    "label": "an empty as_of on a read that reads streams (API-14)",
+    "set": {
+      "/as_of": []
+    },
+    "remove": []
+  },
+  {
+    "label": "a missing as_of (API-14)",
+    "set": {},
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "a missing served_at",
+    "set": {},
+    "remove": [
+      "/served_at"
+    ]
+  }
+]

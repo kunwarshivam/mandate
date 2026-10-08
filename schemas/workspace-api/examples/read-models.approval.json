@@ -1,0 +1,133 @@
+{
+  "api_version": "v1",
+  "build": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "served_at": "2026-09-28T18:05:20.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "agent:01JB3K6A0B1C2D3E4F5G6H7J8K:agt_01JB3K9P2H6SD4F8G1E3W7XYZB",
+      "seq": 8813,
+      "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "recorded_at": "2026-09-28T18:05:19.000000000Z"
+    }
+  ],
+  "approval": {
+    "approval_id": "01JBM9S346Q3D25VT4F5V37E3S",
+    "agent_id": "agt_01JB3K9P2H6SD4F8G1E3W7XYZB",
+    "status": "delivered",
+    "requested_at": "2026-09-28T18:04:58.000000000Z",
+    "deadline": "2026-09-28T18:14:58.000000000Z",
+    "content": {
+      "action": {
+        "instrument": "XYZ",
+        "asset_class": "us_equity",
+        "side": "buy",
+        "qty": "2",
+        "limit": "141.3",
+        "order_usd": "282.6",
+        "purpose": "increase"
+      },
+      "trigger": {
+        "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "decided_by": "rule:low_score",
+        "requested_by": "agent",
+        "client": null,
+        "rule": {
+          "id": "low_score",
+          "when": {
+            "field": "combined_score",
+            "op": "lt",
+            "value": "0.65"
+          },
+          "then": "ask"
+        }
+      },
+      "evidence": {
+        "combined_score": {
+          "label": "combined model score, not a probability of profit",
+          "value": "0.574"
+        },
+        "outputs": [
+          {
+            "event_id": "01JBM9S2Z9F0K3D4ZQ6W7R8T1A",
+            "artifact": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "label": "Output of software you selected"
+          },
+          {
+            "event_id": "01JBM9P8Q1R2S3T4V5W6X7Y8Z9",
+            "artifact": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "label": "Output of software you selected"
+          }
+        ]
+      },
+      "risk_impact": [
+        {
+          "field": "order_usd",
+          "value": "282.6",
+          "cap": "1000"
+        },
+        {
+          "field": "position_usd_after",
+          "value": "1412.44",
+          "cap": "1500"
+        },
+        {
+          "field": "gross_usd_after",
+          "value": "1900.69",
+          "cap": "2000"
+        },
+        {
+          "field": "bought_today_usd",
+          "value": "282.6",
+          "cap": null
+        },
+        {
+          "field": "drawdown",
+          "value": "0.012",
+          "cap": "0.05"
+        },
+        {
+          "field": "daily_pnl_fraction",
+          "value": "-0.004",
+          "cap": "0.02"
+        }
+      ],
+      "reference_mark": {
+        "price": "141.22",
+        "seq": 8812
+      },
+      "deadline": "2026-09-28T18:14:58.000000000Z",
+      "default": "If you do nothing, this action is skipped",
+      "choices": [
+        "approve",
+        "skip"
+      ],
+      "approvers": {
+        "required": 1,
+        "independent": false
+      }
+    },
+    "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "model_outputs": [
+      {
+        "author": "owner_selected",
+        "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars",
+        "model_id": "quant.momentum",
+        "model_version": "1.0.0",
+        "produced_at": "2026-09-28T18:04:51.000000000Z",
+        "event_id": "01JBM9S2Z9F0K3D4ZQ6W7R8T1A",
+        "artifact": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      {
+        "author": "owner_selected",
+        "text": "score: 0.37 (weight 0.4)\ntwo news items about XYZ in the last hour\ntone of the items: mixed",
+        "model_id": "llm.news_research",
+        "model_version": "0.3.0",
+        "produced_at": "2026-09-28T18:01:12.000000000Z",
+        "event_id": "01JBM9P8Q1R2S3T4V5W6X7Y8Z9",
+        "artifact": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    ],
+    "grants": [],
+    "resolution": null
+  }
+}

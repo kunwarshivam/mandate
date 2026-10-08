@@ -1,0 +1,30 @@
+[
+  {
+    "label": "a vault path in a list item",
+    "set": {
+      "/connections/0/vault_path": "canary"
+    },
+    "remove": []
+  },
+  {
+    "label": "an empty as_of on a read that reads streams (API-14)",
+    "set": {
+      "/as_of": []
+    },
+    "remove": []
+  },
+  {
+    "label": "a missing as_of (API-14)",
+    "set": {},
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "a missing served_at",
+    "set": {},
+    "remove": [
+      "/served_at"
+    ]
+  }
+]

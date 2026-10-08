@@ -1,0 +1,23 @@
+[
+  {
+    "label": "a hash on a change notice (§3.1)",
+    "set": {
+      "/watermarks/0/hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "remove": []
+  },
+  {
+    "label": "content on a change notice (§3.1)",
+    "set": {
+      "/event_type": "FillApplied"
+    },
+    "remove": []
+  },
+  {
+    "label": "an empty change notice",
+    "set": {
+      "/watermarks": []
+    },
+    "remove": []
+  }
+]

@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/alerts.schema.json",
+  "title": "Alerts",
+  "description": "GET /alerts (§4.7, G5): one entry per OwnerAlertSent, naming its subject event. No free text: the client words each kind, and its class is notifications spec §3.2's. DEC-735.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "alerts",
+    "as_of"
+  ],
+  "properties": {
+    "alerts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "alert_id",
+          "kind",
+          "raised_at",
+          "subject",
+          "agent_id",
+          "connection_id",
+          "opens"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "alert_id": {
+            "$ref": "../common.schema.json#/$defs/EventId"
+          },
+          "kind": {
+            "enum": [
+              "risk_limit",
+              "kill_switch",
+              "agent_held",
+              "account_restriction",
+              "protection",
+              "exit_stalled",
+              "reconciliation",
+              "external_activity",
+              "account_state",
+              "data_feed_down",
+              "integrity_incident",
+              "credential_added",
+              "new_device",
+              "recovery_used",
+              "role_granted",
+              "member_deactivated",
+              "deprovisioned",
+              "break_glass",
+              "version_risk_increasing",
+              "delegation_added",
+              "connection_added",
+              "went_live",
+              "client_connected",
+              "daily_brief",
+              "delegation_ended",
+              "model_status",
+              "research_status",
+              "spend_cap",
+              "approval_closed"
+            ],
+            "description": "Closed (§3.2): notifications spec §3.2's kinds less the two approval kinds and channel_lost, whose causes are not an OwnerAlertSent. A new kind is a new major version."
+          },
+          "raised_at": {
+            "$ref": "../common.schema.json#/$defs/Timestamp"
+          },
+          "subject": {
+            "type": "object",
+            "required": [
+              "stream_id",
+              "seq",
+              "event_type"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "stream_id": {
+                "$ref": "../common.schema.json#/$defs/Watermark/properties/stream_id"
+              },
+              "seq": {
+                "$ref": "../common.schema.json#/$defs/Watermark/properties/seq"
+              },
+              "event_type": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Za-z]+$"
+              }
+            }
+          },
+          "agent_id": {
+            "oneOf": [
+              {
+                "$ref": "../common.schema.json#/$defs/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "connection_id": {
+            "oneOf": [
+              {
+                "$ref": "../common.schema.json#/$defs/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "opens": {
+            "type": "string",
+            "pattern": "^[A-Z][0-9]+$",
+            "description": "The screen that resolves it."
+          }
+        }
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false
+}

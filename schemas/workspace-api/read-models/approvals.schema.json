@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/approvals.schema.json",
+  "title": "Approvals inbox",
+  "description": "GET /approvals?state=pending|resolved (§4.3, §4.11): pending by deadline, then resolved with outcome (D5). DEC-735.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "state",
+    "approvals",
+    "as_of"
+  ],
+  "properties": {
+    "state": {
+      "enum": [
+        "pending",
+        "resolved"
+      ]
+    },
+    "approvals": {
+      "type": "array",
+      "items": {
+        "$ref": "approval.schema.json#/$defs/Approval"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,9 @@
+[
+  {
+    "label": "a connection with no account yet",
+    "set": {
+      "/connection/account_ref": null
+    },
+    "remove": []
+  }
+]
