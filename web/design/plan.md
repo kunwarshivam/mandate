@@ -189,14 +189,13 @@ the owl, the rules and the record.
 The speed has become too slow; the process must not be the bottleneck. Once #669 merges, the
 process is revised, and decisions already taken may be revised with it.
 
-- [ ] **One branch per plan item.** A short-lived branch and PR per item, each with its DEC, so the
-      review agent and CI judge one change; the plan file is the unit of work.
+- [x] **One branch per plan item** (DEC-516 item 2).
 - [ ] **Scenarios as journals.** A fixture scenario is a journal of events from which the
       workspace, the market and the timeline are derived, so a scenario cannot contradict itself;
       the 2%-step test is the tripwire until then.
-- [ ] **`npm run shots`.** Every route × scenario × two widths × two themes into a folder, and the
-      golden path as one Playwright spec that writes a contact sheet, so a weekly critique and a
-      founder's review are one command away.
+- [x] **`npm run shots`.** Every listed screen on the fixture scenarios at two widths in both
+      themes into `web/.shots/`, with a contact sheet (`index.html`) that puts the golden path
+      first. (DEC-516)
 - [x] **The tracker on one page.** `08-work-tracker.md` is where things stand; `11-work-log.md`
       is how they got there. (2026-10-08)
 - [ ] **A decisions index by area** (web, journal, risk, process) so an agent finds what was
@@ -210,10 +209,10 @@ process is revised, and decisions already taken may be revised with it.
 - [ ] **Dependabot:** six alerts on `main`, one high.
 - [ ] **A screen-reader pass** over the golden path.
 - [ ] **A read-aloud copy pass**, cutting a third.
-- [ ] **A faster process** (to design after #669 merges): where the DEC-77 sequence and the
-      cross-model review are required (safety-critical crates) and where a lighter path serves
-      (reversible product changes under DEC-79), what a session must leave behind (one tracker
-      row, one log paragraph), and how a founder reviews from pictures rather than diffs.
+- [x] **A faster process:** [DEC-516](../../docs/project/decisions/DEC-516.md), proposed. Two
+      lanes; one item per PR; review from pictures; tests pin invariants; one row and one paragraph
+      per session; numbers taken across every branch. Waits on the founder's yes for the light
+      lane's merge rule.
 
 ## Learnings (not action items)
 
