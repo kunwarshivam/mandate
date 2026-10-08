@@ -379,6 +379,152 @@ pub fn configuration(
     pinned: &Pinned,
     trade_date: Date,
 ) -> Result<Configuration, ConfigRefusal> {
-    let _ = (records, store, pinned, trade_date);
-    Err(ConfigRefusal::Unimplemented { story: "E19-11" })
+    let mut ordered: Vec<&ControlRecord> = records.iter().collect();
+    ordered.sort_by_key(|record| record.seq);
+    let mut latest: BTreeMap<&'static str, Registered> = BTreeMap::new();
+    for record in ordered {
+        if record.event_type != "ConfigSnapshotRegistered" {
+            continue;
+        }
+        let payload = &record.payload;
+        let text = |member: &str| payload.get(member).and_then(Value::as_str);
+        let Some(kind) = KINDS.into_iter().find(|kind| text("kind") == Some(*kind)) else {
+            continue;
+        };
+        let reference = text("content_hash")
+            .and_then(ArtifactRef::parse)
+            .ok_or(ConfigRefusal::Malformed { kind })?;
+        if kind == "model_version"
+            && (text("model_id") != Some(pinned.model_id.as_str())
+                || text("model_version") != Some(pinned.model_version.as_str())
+                || reference.digest() != pinned.content_hash)
+        {
+            continue;
+        }
+        let bytes = get_artifact(store, &reference).map_err(|error| match error {
+            ArtifactError::Missing => ConfigRefusal::ObjectMissing { kind },
+            ArtifactError::Corrupt => ConfigRefusal::ObjectCorrupt { kind },
+            ArtifactError::Unavailable => ConfigRefusal::StoreUnavailable,
+        })?;
+        if kind == "instrument_snapshot" {
+            let value =
+                mandate_canon::parse(&bytes).map_err(|_| ConfigRefusal::Malformed { kind })?;
+            let object = value.as_object().ok_or(ConfigRefusal::Malformed { kind })?;
+            if snapshot_text(object, "instrument_id")? != pinned.asset_id {
+                continue;
+            }
+        }
+        let registered = Registered {
+            seq: record.seq,
+            content_hash: reference.digest(),
+            bytes,
+        };
+        latest.insert(kind, registered);
+    }
+    let mut take = |kind: &'static str| {
+        latest
+            .remove(kind)
+            .ok_or(ConfigRefusal::Unregistered { kind })
+    };
+    let fee_config = take("fee_config")?;
+    let trading_calendar = take("trading_calendar")?;
+    let rule_set = take("rule_set")?;
+    let instrument_snapshot = take("instrument_snapshot")?;
+    let model_version = take("model_version")?;
+    let instrument = snapshot(&instrument_snapshot.bytes, pinned)?;
+    let malformed = ConfigRefusal::Malformed { kind: "fee_config" };
+    let fee = mandate_canon::parse(&fee_config.bytes).map_err(|_| malformed.clone())?;
+    let effective_from = fee
+        .get("effective_from")
+        .and_then(Value::as_str)
+        .ok_or(malformed.clone())
+        .and_then(|text| Date::parse(text).map_err(|_| malformed))?;
+    if effective_from > trade_date {
+        return Err(ConfigRefusal::FeeNotYetEffective);
+    }
+    Ok(Configuration {
+        fee_config,
+        trading_calendar,
+        rule_set,
+        instrument_snapshot,
+        instrument,
+        model_version,
+    })
 }
+
+const SNAPSHOT_MEMBERS: [&str; 8] = [
+    "asset_class",
+    "etp",
+    "etp_classified_at",
+    "etp_source",
+    "exchange",
+    "increment",
+    "instrument_id",
+    "symbol",
+];
+
+/// A DEC-523 member's text, or why there is none.
+fn snapshot_text<'a>(
+    object: &'a mandate_canon::Object,
+    member: &'static str,
+) -> Result<&'a str, ConfigRefusal> {
+    object
+        .get(member)
+        .ok_or(ConfigRefusal::SnapshotMissingMember { member })?
+        .as_str()
+        .ok_or(ConfigRefusal::SnapshotWrongType { member })
+}
+
+/// The effective snapshot's `bytes` read exactly as DEC-523 pins them.
+fn snapshot(bytes: &[u8], pinned: &Pinned) -> Result<InstrumentSnapshot, ConfigRefusal> {
+    let malformed = ConfigRefusal::Malformed {
+        kind: "instrument_snapshot",
+    };
+    let value = mandate_canon::parse(bytes).map_err(|_| malformed.clone())?;
+    let object = value.as_object().ok_or(malformed)?;
+    for member in SNAPSHOT_MEMBERS {
+        snapshot_text(object, member)?;
+    }
+    if object.len() != SNAPSHOT_MEMBERS.len() {
+        return Err(ConfigRefusal::SnapshotExtraMember);
+    }
+    let text = |member: &'static str| snapshot_text(object, member);
+    let pinned_values = [
+        ("asset_class", "us_equity"),
+        ("etp", "plain"),
+        ("etp_source", "nasdaq_trader_symbol_directory"),
+        ("increment", "whole"),
+        ("instrument_id", pinned.asset_id.as_str()),
+        ("symbol", pinned.symbol.as_str()),
+    ];
+    for (member, expected) in pinned_values {
+        if text(member)? != expected {
+            return Err(ConfigRefusal::SnapshotValue { member });
+        }
+    }
+    let exchange = text("exchange")?;
+    let exchange = if exchange == "arca" {
+        SnapshotExchange::Arca
+    } else if exchange == "nasdaq" {
+        SnapshotExchange::Nasdaq
+    } else {
+        return Err(ConfigRefusal::SnapshotValue { member: "exchange" });
+    };
+    let member = "etp_classified_at";
+    let etp_classified_at = UtcNanos::parse_rfc3339(text(member)?)
+        .map_err(|_| ConfigRefusal::SnapshotValue { member })?;
+    Ok(InstrumentSnapshot {
+        instrument_id: pinned.asset_id.clone(),
+        symbol: pinned.symbol.clone(),
+        exchange,
+        etp_classified_at,
+    })
+}
+
+const KINDS: [&str; 5] = [
+    "fee_config",
+    "trading_calendar",
+    "rule_set",
+    "instrument_snapshot",
+    "model_version",
+];
