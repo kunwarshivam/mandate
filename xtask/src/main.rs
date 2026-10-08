@@ -2294,7 +2294,13 @@ const STUB_MARKERS: [&str; 5] = [
 /// There is no stub to stop at: until J2's implementation catalogues and closes the three records,
 /// the journal answers `unknown_event_type` or `unknown_schema`, which is the behaviour they fail
 /// on. J2's implementation deletes the three rows with the `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
+///
+/// The two rows for journal spec v0.18's `policy_overlay` label are J3's (DEC-536). They check
+/// `Draft::parse`, the journal's existing draft check, against the vectors' `policy_overlay`
+/// section. There is no stub to stop at: until J3's implementation adds the label, the journal
+/// answers `non_canonical`, which is the behaviour they fail on. J3's implementation deletes the
+/// two rows with the `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2319,6 +2325,14 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
     (
         "crates/mandate-journal/tests/catalogue.rs",
         "the_approval_answers_are_catalogued_and_closed_on_their_streams",
+    ),
+    (
+        "crates/mandate-journal/tests/policy_overlay.rs",
+        "every_policy_overlay_valid_draft_parses",
+    ),
+    (
+        "crates/mandate-journal/tests/policy_overlay.rs",
+        "every_policy_overlay_invalid_draft_is_refused_with_its_reason_at_its_path",
     ),
 ];
 
