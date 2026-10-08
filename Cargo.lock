@@ -1527,6 +1527,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-passkey"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "mandate-canon",
+ "proptest",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-refcases"
 version = "0.0.0"
 dependencies = [
@@ -1612,6 +1625,7 @@ dependencies = [
  "mandate-journal-pg",
  "mandate-liquidity",
  "mandate-marketdata",
+ "mandate-modelhost",
  "mandate-num",
  "mandate-risk",
  "mandate-runtime",

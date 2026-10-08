@@ -1036,8 +1036,10 @@ proves each pending test fails on them (DEC-110).
   in-memory journal in `crates/mandate-cli/tests/common/mod.rs`.
 - **The `approvals` commands (K1a, DEC-533):** `crates/mandate-cli/src/inbox.rs` (`list`, `show`,
   `approve` and `skip` over P0's journal as D1b's paper owner; the renderers `list_lines`,
-  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`), stubbed, and `main`;
-  `crates/mandate-cli/tests/inbox.rs`, pending E8-3 but for the live flags test.
+  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`) and `main`, with the answer's
+  `content_hash` in `artifact_refs` (`control.rs`, DEC-533 item 6);
+  `crates/mandate-cli/tests/inbox.rs`, and `crates/mandate-cli/tests/grant.rs`, the binary over
+  Postgres (`MANDATE_PG_URL`), playing the runtime that records the grant.
 - **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime -p mandate-cli`;
   `cargo xtask ci pending`.
 
@@ -1294,6 +1296,16 @@ proves each pending test fails on them (DEC-110).
   check order over every pair of stages, and the signal against an `i128` oracle with ties and a
   clock-independence check), with fixtures in `tests/common/mod.rs`.
 - **Run:** `cargo nextest run -p mandate-modelhost`.
+
+## Passkey relying party (E9-1)
+
+- **Spec:** identity spec §6.1, §6.3, §7.2 step 4; DEC-660 (dependencies, algorithms, and the
+  strict readings).
+- **Code:** `mandate-passkey`, `crates/mandate-passkey/` (layer 2, pure, safety-critical):
+  `src/lib.rs` (`enrol`, `verify`, `RelyingParty`, `Challenge`, `Credential`, `PublicKey`,
+  `Refusal`).
+- **Tests:** `crates/mandate-passkey/tests/api.rs` (refusal codes, the challenge length).
+- **Run:** `cargo nextest run -p mandate-passkey`.
 
 ## Simulated Robinhood broker (E7-25)
 
