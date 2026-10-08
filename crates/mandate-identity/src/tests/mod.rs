@@ -3,14 +3,17 @@
 
 mod matrix;
 mod rows;
+mod ulid;
 mod wire;
 
 use std::collections::BTreeSet;
 
+use mandate_identity_seal::LookupSeal;
+
 use crate::{
     LookupFailed, Membership, MembershipLookup, MembershipQuery, OrgContext, OrgId, Permission,
     PrincipalContext, PrincipalId, PrincipalKind, Scope, SessionRef, Tenant, TenantContext,
-    WorkspaceId, sealed,
+    WorkspaceId,
 };
 
 pub(crate) const O1: OrgId = OrgId(0x11);
@@ -53,7 +56,7 @@ pub(crate) fn paired(scope: Scope) -> bool {
 /// every membership for `None`), so the step must still pick the scope.
 pub(crate) struct ByMember<'a>(pub(crate) &'a [Membership]);
 
-impl sealed::Sealed for ByMember<'_> {}
+impl LookupSeal for ByMember<'_> {}
 
 impl MembershipLookup for ByMember<'_> {
     fn memberships(&self, query: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed> {
@@ -78,7 +81,7 @@ impl MembershipLookup for ByMember<'_> {
 /// member too.
 pub(crate) struct Everything<'a>(pub(crate) &'a [Membership]);
 
-impl sealed::Sealed for Everything<'_> {}
+impl LookupSeal for Everything<'_> {}
 
 impl MembershipLookup for Everything<'_> {
     fn memberships(&self, _: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed> {
@@ -98,7 +101,7 @@ impl MembershipLookup for Everything<'_> {
 /// can be read; each workspace's own record still can (identity spec §4.5, DEC-832 item 4).
 pub(crate) struct Failing;
 
-impl sealed::Sealed for Failing {}
+impl LookupSeal for Failing {}
 
 impl MembershipLookup for Failing {
     fn memberships(&self, _: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed> {
@@ -118,7 +121,7 @@ impl MembershipLookup for Failing {
 /// workspace's own record, so no pair can be checked (identity spec §4.5).
 pub(crate) struct Unreadable;
 
-impl sealed::Sealed for Unreadable {}
+impl LookupSeal for Unreadable {}
 
 impl MembershipLookup for Unreadable {
     fn memberships(&self, _: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed> {
@@ -187,6 +190,45 @@ fn the_doctests_literal_builds_inside_the_crate() {
         ..context
     };
     assert!(!verified.membership_unverified());
+}
+
+/// The sealed constructors build exactly the value their fields name.
+#[test]
+fn the_sealed_constructors_build_what_they_are_given() {
+    use crate::{Membership, MembershipState, Role, Scope, Session, SessionKind};
+    use mandate_identity_seal::Seal;
+    use mandate_time::UtcNanos;
+    use std::collections::BTreeMap;
+    let scope = Scope::Org(OrgId(1));
+    let from = UtcNanos::from_parts(1_790_000_000, 7).unwrap();
+    let roles = BTreeMap::from([(Role::OrgOwner, UtcNanos::EPOCH), (Role::OrgAdmin, from)]);
+    let built = Membership::new(
+        Seal::grant(),
+        PrincipalId(2),
+        scope,
+        MembershipState::CoolingOff,
+        roles.clone(),
+    );
+    let literal = Membership {
+        member: PrincipalId(2),
+        scope,
+        state: MembershipState::CoolingOff,
+        roles,
+    };
+    assert_eq!((built.member(), built.scope()), (PrincipalId(2), scope));
+    assert_eq!(built, literal);
+    let session = Session::new(
+        Seal::grant(),
+        SessionRef(3),
+        SessionKind::ReductionOnly,
+        vec![literal.clone()],
+    );
+    let expected = Session {
+        reference: SessionRef(3),
+        kind: SessionKind::ReductionOnly,
+        snapshot: vec![literal],
+    };
+    assert_eq!(session, expected);
 }
 
 /// The control for the `OrgContext` and `PrincipalContext` `compile_fail` doctests: the same

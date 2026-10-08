@@ -155,6 +155,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_time::UtcNanos;
 
 mod permission;
@@ -177,6 +178,77 @@ pub struct WorkspaceId(pub u128);
 /// `session_ref`, never the cookie or the token. For the host CLI, its registration's ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SessionRef(pub u128);
+
+/// Why a text is not a ULID's: it must be 26 characters of uppercase Crockford base32, the first at
+/// most `7`, as the journal validates it (journal spec §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum UlidTextError {
+    /// Not 26 characters of uppercase Crockford base32 whose first is at most `7`.
+    #[error("not 26 characters of uppercase Crockford base32 whose first is at most 7")]
+    Invalid,
+    /// The stub of a story not yet implemented; it goes when E9-2 is implemented.
+    #[error("{story} has not been implemented yet")]
+    Unimplemented {
+        /// The story.
+        story: &'static str,
+    },
+}
+
+impl PrincipalId {
+    /// The principal's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
+    pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
+        let _ = self;
+        Err(UlidTextError::Unimplemented { story: "E9-2" })
+    }
+
+    /// The principal a ULID's text names, or [`UlidTextError::Invalid`].
+    pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
+        let _ = text;
+        Err(UlidTextError::Unimplemented { story: "E9-2" })
+    }
+}
+
+impl OrgId {
+    /// The organization's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
+    pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
+        let _ = self;
+        Err(UlidTextError::Unimplemented { story: "E9-2" })
+    }
+
+    /// The organization a ULID's text names, or [`UlidTextError::Invalid`].
+    pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
+        let _ = text;
+        Err(UlidTextError::Unimplemented { story: "E9-2" })
+    }
+}
+
+impl WorkspaceId {
+    /// The workspace's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
+    pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
+        let _ = self;
+        Err(UlidTextError::Unimplemented { story: "E9-2" })
+    }
+
+    /// The workspace a ULID's text names, or [`UlidTextError::Invalid`].
+    pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
+        let _ = text;
+        Err(UlidTextError::Unimplemented { story: "E9-2" })
+    }
+}
+
+impl SessionRef {
+    /// The session reference's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
+    pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
+        let _ = self;
+        Err(UlidTextError::Unimplemented { story: "E9-2" })
+    }
+
+    /// The session reference a ULID's text names, or [`UlidTextError::Invalid`].
+    pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
+        let _ = text;
+        Err(UlidTextError::Unimplemented { story: "E9-2" })
+    }
+}
 
 /// The principal kinds of identity spec §3.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -339,14 +411,43 @@ pub enum MembershipState {
 /// A user's membership in one scope, as the workspace store folds it from the control stream (§5):
 /// the member, the org or workspace, its state, and its roles, each with the instant it becomes
 /// effective, the end of its cool-off (§8.3); a role grants nothing before then. Its fields are
-/// private and only the store builds one (DEC-642 item 4); until E9-7 adds that store, only this
-/// crate's tests do.
+/// private, and only an allowed dependent of `mandate-identity-seal` builds one: the workspace
+/// store, and test support (DEC-642 items 4 and 7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Membership {
     member: PrincipalId,
     scope: Scope,
     state: MembershipState,
     roles: BTreeMap<Role, UtcNanos>,
+}
+
+impl Membership {
+    /// A membership, for a holder of the seal: each role with the instant it becomes effective.
+    pub fn new(
+        seal: Seal,
+        member: PrincipalId,
+        scope: Scope,
+        state: MembershipState,
+        roles: BTreeMap<Role, UtcNanos>,
+    ) -> Self {
+        let _: Seal = seal;
+        Self {
+            member,
+            scope,
+            state,
+            roles,
+        }
+    }
+
+    /// The member.
+    pub fn member(&self) -> PrincipalId {
+        self.member
+    }
+
+    /// The org or workspace it is a membership of.
+    pub fn scope(&self) -> Scope {
+        self.scope
+    }
 }
 
 /// A change to roles or memberships in one scope, checked by [`change_roles`].
@@ -634,10 +735,9 @@ pub struct MembershipQuery {
 
 /// The membership store's one read path (identity spec §4.5, §6.2): uncached, memberships only.
 ///
-/// It is sealed (DEC-642 items 4 and 7): only the workspace store implements it, through the seal
-/// crate E9-8 adds; until then nothing outside this crate does, and its tests' doubles are
-/// `cfg(test)` only.
-pub trait MembershipLookup: sealed::Sealed {
+/// It is sealed (DEC-642 items 4 and 7): only an allowed dependent of `mandate-identity-seal`
+/// implements it, the workspace store and test support.
+pub trait MembershipLookup: LookupSeal {
     /// The memberships the query names.
     fn memberships(&self, query: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed>;
 
@@ -673,13 +773,30 @@ pub enum SessionKind {
 /// snapshot: the principal's (or a client's user's) memberships that reach their scopes, one per
 /// workspace or organization, as of the last successful membership read. A failed read falls back
 /// to the snapshot's entry for the request's own scope, and never another's, on a risk-reducing
-/// row only (DEC-642 items 9 and 10). Its fields are private, and only §6's code (`mandate-authn`)
-/// builds one; until then only this crate's tests do.
+/// row only (DEC-642 items 9 and 10). Its fields are private, and only an allowed dependent of
+/// `mandate-identity-seal` builds one: §6's code (`mandate-authn`) and test support.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
     reference: SessionRef,
     kind: SessionKind,
     snapshot: Vec<Membership>,
+}
+
+impl Session {
+    /// A session, for a holder of the seal, from the session record read for this request.
+    pub fn new(
+        seal: Seal,
+        reference: SessionRef,
+        kind: SessionKind,
+        snapshot: Vec<Membership>,
+    ) -> Self {
+        let _: Seal = seal;
+        Self {
+            reference,
+            kind,
+            snapshot,
+        }
+    }
 }
 
 /// A granted authorization. Each arm carries a sealed context nobody outside this crate can build,
@@ -983,6 +1100,7 @@ pub fn change_roles(
     clippy::panic,
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
+    clippy::as_conversions,
     reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies; these tests sit in the \
               crate because `Session`, `Membership`, and `MembershipLookup` are sealed to it (DEC-642)"
 )]
