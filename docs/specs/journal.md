@@ -20,8 +20,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   cool-off end on `MemberReactivated`; each journals a state change identity spec §5 already defines.
   `MemberInvited` also carries `invited_at`, and each membership record, until the envelope gains
   identity spec §12.2's session field, a payload `session_ref`.
-  The credential, session, client, service-account, host-CLI, and break-glass records stay open
-  until their own change. The vectors gain a generated, additive `membership` section, so they stay
+  The credential, session, service-account, host-CLI, and break-glass records stay open until
+  their own change; the client records are E10-15's. The vectors gain a generated, additive `membership` section, so they stay
   version 3.
 - **v0.18 ([DEC-536](../project/decisions/DEC-536.md)):** `DecisionMade`'s `decided_by` may be
   `policy_overlay`, for a decision the effective policy changed at
@@ -553,16 +553,16 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 | `CredentialEnrolled`, `CredentialRemoved` | — | member, credential (opaque reference, never the key), kind, enrolment cool-off end ([identity spec §10.1, §12.1](identity.md#121-events-journal-9-control-stream)) |
 | `SessionOpened` | — | member, session (opaque), method, device (opaque), `first_seen_device`; the subject of the notifications spec's `new_device` kind |
 | `SessionRevoked` | — | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `admin`); with `deprovisioned`, the subject of the notifications spec's `deprovisioned` kind |
-| `ClientConnected`, `ClientRevoked` | — | client id, user, scopes, step-up evidence (DEC-141) |
 | `ServiceAccountIssued`, `ServiceAccountRevoked` | — | account, scopes, workspaces, expiry, issuing user |
 | `HostCliRegistered`, `HostCliRevoked` | — | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence ([identity spec §6.4](identity.md#64-the-risk-reduction-path)) |
 | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` | — | operator (opaque), reason code, window, approvers ([identity spec §10.3](identity.md#103-break-glass-for-platform-staff-managed-mode)) |
 
 The identity records ([identity spec §12.1](identity.md#121-events-journal-9-control-stream),
-DEC-437 item 9) are control-stream records. The membership records close in §9.8. The credential,
-session, client, service-account, host-CLI, and break-glass records are listed with the members the
-identity spec names and close in their own change, as §9.2's other records do; until then `append`
-refuses them as `unknown_event_type`. `ScopeHalted` and `ScopeReenabled` are not catalogued: they
+DEC-437 item 9) are control-stream records. The membership records close in §9.8. The client
+records `ClientConnected` and `ClientRevoked` are E10-15's, with the `client` actor (§3). The
+credential, session, service-account, host-CLI, and break-glass records are listed with the members
+the identity spec names and close in their own change, as §9.2's other records do; until then
+`append` refuses them as `unknown_event_type`. `ScopeHalted` and `ScopeReenabled` are not catalogued: they
 exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4).
 
 **Scheduler stream:** `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`,
