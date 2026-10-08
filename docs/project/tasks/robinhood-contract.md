@@ -8,7 +8,10 @@ text. No tool was called, no account was touched, and no credential was used (`A
 rule 8, [DEC-441](../decisions/DEC-441.md) item 11).
 
 The spec is a protected path, so the confirmed values live here until the spec change named at
-the end lands. [DEC-529](../decisions/DEC-529.md) uses them for the founder's one live order.
+the end lands. They are the source of Robinhood's capability profile
+([DEC-530](../decisions/DEC-530.md)): each "What the connector does" entry below is a profile row
+or the shared code's reading of one, never Robinhood-specific code.
+[DEC-529](../decisions/DEC-529.md) uses them for the founder's one live order.
 
 **Source.** Robinhood's MCP server tool list as of 2026-10-08, supplied by the coordinator. Each
 row below says which tool or parameter the answer comes from. "Confirmed from contract" means
