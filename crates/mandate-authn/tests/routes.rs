@@ -59,8 +59,9 @@ fn an_unreachable_provider_leaves_pause_and_the_kill_switch_until_the_absolute_l
         assert_eq!(s.authorize(Request::KillSwitch, at(12 * HOUR - 1)), Ok(()));
         assert_eq!(
             s.authorize(Request::KillSwitch, at(12 * HOUR)),
-            Err(SessionRefusal::AbsoluteExpired)
+            Err(ended(EndReason::Expired))
         );
+        assert_eq!(s.ended(), Some(EndReason::Expired), "{answer:?}");
     }
     let mut s = open();
     assert_eq!(
@@ -186,12 +187,12 @@ fn a_deprovision_signal_closes_route_two_whatever_any_session_is_doing() {
     let mut idle = open();
     assert_eq!(
         idle.authorize(Request::Pause, at(HOUR)),
-        Err(SessionRefusal::IdleExpired)
+        Err(ended(EndReason::Expired))
     );
     let mut lapsed = open();
     assert_eq!(
         lapsed.authorize(Request::Pause, at(12 * HOUR)),
-        Err(SessionRefusal::AbsoluteExpired)
+        Err(ended(EndReason::Expired))
     );
     let mut reused = open();
     assert!(
@@ -206,8 +207,12 @@ fn a_deprovision_signal_closes_route_two_whatever_any_session_is_doing() {
     assert_eq!(signed_out.ended(), Some(EndReason::SignOut));
     assert_eq!(
         (idle.ended(), lapsed.ended()),
-        (None, None),
-        "a lapse ends nothing to journal"
+        (Some(EndReason::Expired), Some(EndReason::Expired)),
+        "a lapse ends the session as expired"
+    );
+    assert!(
+        SessionRecord::open_reduction_only(signed_in, at(13 * HOUR)).is_ok(),
+        "an expiry is no deprovision signal"
     );
     assert_eq!(reused.ended(), Some(EndReason::RefreshReuse));
     for name in [
@@ -241,11 +246,30 @@ fn an_outage_restores_the_full_session_only_inside_the_idle_timeout() {
     let restore = lapsed.refresh(&secret(1), ProviderAnswer::Granted, &secret(3), at(HOUR));
     assert_eq!(
         restore,
-        Err(SessionRefusal::IdleExpired),
+        Err(ended(EndReason::Expired)),
         "an hour since the last admitted request"
     );
-    assert_eq!(lapsed.reach(), Reach::Outage, "the refusal narrows nothing");
-    assert_eq!(lapsed.authorize(Request::KillSwitch, at(HOUR + 1)), Ok(()));
+    assert_eq!(lapsed.ended(), Some(EndReason::Expired));
+    assert_eq!(
+        lapsed.authorize(Request::KillSwitch, at(HOUR + 1)),
+        Err(ended(EndReason::Expired)),
+        "route 2 or a new sign-in reaches the kill switch now"
+    );
+    let mut unanswered = open();
+    assert_eq!(
+        unanswered.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300)),
+        Ok(Refreshed::Outage)
+    );
+    assert_eq!(
+        unanswered.refresh(
+            &secret(1),
+            ProviderAnswer::Unreachable,
+            &secret(3),
+            at(2 * HOUR)
+        ),
+        Ok(Refreshed::Outage),
+        "only a grant ends an idle outage session"
+    );
     let mut active = open();
     assert_eq!(
         active.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300)),
@@ -287,13 +311,14 @@ fn a_reduction_only_session_reaches_pause_and_the_kill_switch_for_fifteen_minute
     );
     assert_eq!(s.authorize(Request::Pause, at(899)), Ok(()));
     assert_eq!(s.authorize(Request::KillSwitch, at(899)), Ok(()));
-    assert_eq!(
-        s.authorize(Request::KillSwitch, at(900)),
-        Err(SessionRefusal::AbsoluteExpired)
-    );
     let refresh = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(899));
     assert_eq!(refresh, Err(SessionRefusal::NotRefreshable));
     assert_eq!(s.reach(), Reach::ReductionOnly, "nothing widens it");
+    assert_eq!(
+        s.authorize(Request::KillSwitch, at(900)),
+        Err(ended(EndReason::Expired))
+    );
+    assert_eq!(s.ended(), Some(EndReason::Expired));
     let never_refused = SubjectStanding {
         last_sign_in: None,
         last_deprovision: None,
@@ -369,6 +394,13 @@ struct Oracle {
 }
 
 impl Oracle {
+    fn expire<T>(&mut self) -> Result<T, SessionRefusal> {
+        self.ended = Some(EndReason::Expired);
+        Err(SessionRefusal::Ended {
+            reason: EndReason::Expired,
+        })
+    }
+
     fn authorize(
         &mut self,
         request: Request,
@@ -380,7 +412,7 @@ impl Oracle {
             return Err(SessionRefusal::Ended { reason });
         }
         if now >= absolute {
-            return Err(SessionRefusal::AbsoluteExpired);
+            return self.expire();
         }
         let reducing = request != Request::Other;
         if self.outage {
@@ -391,7 +423,7 @@ impl Oracle {
             return Ok(());
         }
         if now - self.last_activity >= idle {
-            return Err(SessionRefusal::IdleExpired);
+            return self.expire();
         }
         if now >= self.access_until {
             return Err(SessionRefusal::AccessExpired);
@@ -425,10 +457,8 @@ proptest! {
                     let outcome = s.refresh(&secret(presented), answer, &secret(next), at(now));
                     let expected = if let Some(reason) = o.ended {
                         Err(SessionRefusal::Ended { reason })
-                    } else if now >= absolute {
-                        Err(SessionRefusal::AbsoluteExpired)
-                    } else if !o.outage && now - o.last_activity >= idle {
-                        Err(SessionRefusal::IdleExpired)
+                    } else if now >= absolute || (!o.outage && now - o.last_activity >= idle) {
+                        o.expire()
                     } else if back > o.issued {
                         Err(SessionRefusal::UnknownRefreshToken)
                     } else if back > 0 {
@@ -437,7 +467,7 @@ proptest! {
                     } else {
                         match answer {
                             ProviderAnswer::Granted if o.outage && now - o.last_activity >= idle => {
-                                Err(SessionRefusal::IdleExpired)
+                                o.expire()
                             }
                             ProviderAnswer::Granted => {
                                 o.issued += 1;

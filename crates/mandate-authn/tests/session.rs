@@ -121,8 +121,9 @@ fn the_idle_timeout_counts_from_the_last_admitted_request_and_the_absolute_from_
     assert_eq!(s.authorize(Request::Pause, at(end)), Ok(()));
     assert_eq!(
         s.authorize(Request::Pause, at(12 * HOUR)),
-        Err(SessionRefusal::AbsoluteExpired)
+        Err(ended(EndReason::Expired))
     );
+    assert_eq!(s.ended(), Some(EndReason::Expired), "the absolute lifetime");
 
     let mut idle = open();
     let refreshed = idle.refresh(
@@ -136,15 +137,21 @@ fn the_idle_timeout_counts_from_the_last_admitted_request_and_the_absolute_from_
     let quiet = 2 * HOUR + 298;
     assert_eq!(
         idle.authorize(Request::Pause, at(quiet)),
-        Err(SessionRefusal::IdleExpired)
+        Err(ended(EndReason::Expired))
     );
+    assert_eq!(idle.ended(), Some(EndReason::Expired), "the idle timeout");
     let late = idle.refresh(&secret(2), ProviderAnswer::Granted, &secret(3), at(quiet));
-    assert_eq!(late, Err(SessionRefusal::IdleExpired));
+    assert_eq!(late, Err(ended(EndReason::Expired)));
+    assert_eq!(idle.end(EndReason::SignOut), None, "journaled once");
+
+    let mut quiet_refresh = open();
+    let lapsed = quiet_refresh.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(HOUR));
     assert_eq!(
-        idle.ended(),
-        None,
-        "an idle session lapses; nothing revoked it"
+        lapsed,
+        Err(ended(EndReason::Expired)),
+        "a refresh at the idle timeout"
     );
+    assert_eq!(quiet_refresh.ended(), Some(EndReason::Expired));
 }
 
 #[test]
@@ -238,6 +245,7 @@ fn a_clock_behind_the_session_fails_closed() {
     );
     let refresh = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(50));
     assert_eq!(refresh, Err(SessionRefusal::ClockBehind));
+    assert_eq!(s.ended(), None, "a clock behind ends nothing");
     assert_eq!(
         s.authorize(Request::Other, at(100)),
         Ok(()),
