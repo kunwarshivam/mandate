@@ -697,6 +697,10 @@ enough:
    once with every permission (§11.1). Only a transport-level failure or a 5xx keeps anything. A 408
    or 429 ends the session like any other non-5xx answer (`SessionRevoked` with reason
    `refresh_failed`, §12.1), but is not a deprovision signal (§11.1), so route 2 stays open.
+   A session the outage left reduction-only has no idle limit for pause and the kill switch, and
+   those requests count as activity; a later granted refresh restores it to a full session only if
+   its idle timeout has not lapsed since its last admitted request, and otherwise ends it
+   ([DEC-816](../project/decisions/DEC-816.md) item 8).
 2. **Workspace-local passkey.** The workspace deployment verifies a fresh passkey assertion
    against the public keys it holds (§6.1) and opens a *reduction-only session*: pause and kill
    switch, nothing else, 15 minutes. `POST /v1/reduction-sessions/challenges` takes nothing and
