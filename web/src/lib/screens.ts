@@ -175,6 +175,15 @@ export const RECORD_TITLE: Record<AgentRecord["kind"], string> = {
   decision: "Gate decision",
 };
 
+/**
+ * The screens a role is offered a door to: the built ones. A screen that is not built yet keeps its
+ * route and its purpose (`routes.test.tsx`), and the section index names it as coming, but no dock,
+ * menu, sheet or palette lists it, so an owner never opens a door that does not open (DEC-504).
+ */
+export function listedScreens(): Screen[] {
+  return SCREENS.filter((s) => s.built);
+}
+
 export function findScreen(href: string): Screen | undefined {
   return SCREENS.find((s) => s.href === href);
 }

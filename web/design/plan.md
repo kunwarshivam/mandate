@@ -61,8 +61,8 @@ the owl, the rules and the record.
       platform", "Platform default" are one idea in four styles. (R-22)
 - [ ] **Less fine print.** One status line per screen for the as-of time, the simulated note and
       the fixture tag; required disclosures untouched. (R-4)
-- [ ] **Remove the unbuilt.** Every "next slice" page and row out of the dock, the palette and the
-      More sheet until it exists. (R-17)
+- [x] **Remove the unbuilt.** No dock, menu, sheet or palette lists a screen that is not built; the
+      index pages name what is coming in one line. (R-17, DEC-504)
 - [ ] **Less chrome.** The breadcrumb gone on top-level screens; the paper badge in the header
       only, not in every title; Audit and Connections into More on desktop as on the phone. (R-8)
 - [ ] **The set-up summary, short first.** The six sentences and the three dollar losses, then
@@ -72,12 +72,12 @@ the owl, the rules and the record.
       (R-15)
 - [ ] **Phone chart.** No axis on phones; levels as hairlines with the label at the right edge.
       (R-20)
-- [ ] **Phone More sheet order.** Approvals and Alerts first, then Search, then the rest; account
-      and workspace at the bottom with the theme. (R-21)
+- [x] **Phone More sheet order.** Approvals and Alerts first, then Search, then the rest; account
+      and workspace at the bottom with the theme. (R-21, DEC-504)
 - [ ] **Needs you holds requests only.** Degraded feeds go to the degraded bar; one line per
       agent, not per instrument. (R-11)
-- [ ] **The palette's first row.** "Stop…" is the first item with nothing typed, so it reads as
-      the default; Go to first, Safety after, or Stop in its own row below the list. (R-18)
+- [x] **The palette's first row.** Go to first, the agents, then Safety with "Stop…" last. (R-18,
+      DEC-504)
 - [ ] **One request, one place.** An approval appears as a page, a card in the thread and a row
       in Needs you; one representation that the others link to.
 - [ ] **Lists are the product.** The agent rows, the approvals and the decisions share one row

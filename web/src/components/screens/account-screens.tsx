@@ -167,21 +167,30 @@ export function SectionIndexScreen({ title, purpose, prefix }: { title: string; 
     <div className="grid">
       <PageHeader title={title} environment={ws.environment} description={purpose} />
       <ul className="grid max-w-3xl divide-y divide-border/70">
-        {screensIn(prefix).map((s) => (
-          <li key={s.key}>
-            <Link href={s.href} className="press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 hover:bg-background">
-              <span className="flex items-center justify-between gap-3 font-semibold">
-                {s.label}
-                <span className="flex items-center gap-2 text-caption font-normal text-muted-foreground">
-                  {s.built ? null : "Next slice"}
+        {screensIn(prefix)
+          .filter((s) => s.built)
+          .map((s) => (
+            <li key={s.key}>
+              <Link href={s.href} className="press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 hover:bg-background">
+                <span className="flex items-center justify-between gap-3 font-semibold">
+                  {s.label}
                   <ArrowRight className="size-6 shrink-0 text-foreground" aria-hidden />
                 </span>
-              </span>
-              <span className="text-sm text-muted-foreground">{s.purpose}</span>
-            </Link>
-          </li>
-        ))}
+                <span className="text-sm text-muted-foreground">{s.purpose}</span>
+              </Link>
+            </li>
+          ))}
       </ul>
+      {screensIn(prefix).some((s) => !s.built) ? (
+        <p data-slot="coming-list" className="mt-(--block-gap) max-w-3xl text-sm text-muted-foreground">
+          Coming during the beta:{" "}
+          {screensIn(prefix)
+            .filter((s) => !s.built)
+            .map((s) => s.label.toLowerCase())
+            .join(", ")}
+          .
+        </p>
+      ) : null}
     </div>
   );
 }

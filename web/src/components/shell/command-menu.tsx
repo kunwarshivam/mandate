@@ -6,7 +6,7 @@ import { CommandPalette } from "@cloudflare/kumo/components/command-palette";
 import { Search } from "pixelarticons/react/Search.js";
 import { useRuntime } from "@/lib/mock-runtime";
 import { can, useRole } from "@/lib/roles";
-import { GROUP_LABEL, SCREENS } from "@/lib/screens";
+import { GROUP_LABEL, listedScreens } from "@/lib/screens";
 import { OPEN_STOP_EVENT } from "./stop-control";
 
 /** Opens the palette from elsewhere: Search in the phone's More sheet. */
@@ -25,7 +25,8 @@ interface CommandGroup {
 }
 
 /**
- * ⌘K. "Stop…" is always the first command for a role that may stop. Titles come from the screen
+ * ⌘K. Go to comes first and "Stop…" last, under Safety, for a role that may stop (DEC-504): first in
+ * the list it read as the default act, and it is on every screen already. Titles come from the screen
  * list and from owner-given agent labels only: model output never becomes a command title. Nothing
  * typed here is kept; there are no recents. From `lg` the trigger is a wide bar, centred in the
  * header between its two sides; below it, Search in the tab bar's More sheet opens the same palette.
@@ -63,7 +64,7 @@ export function CommandMenu() {
     };
     const screens: CommandGroup = {
       label: "Go to",
-      items: SCREENS.filter((s) => can(role, s.needs)).map((s) => ({
+      items: listedScreens().filter((s) => can(role, s.needs)).map((s) => ({
         id: s.key,
         title: s.label,
         hint: GROUP_LABEL[s.group] ?? undefined,
@@ -75,7 +76,7 @@ export function CommandMenu() {
       items: can(role, "agents.view") ? ws.agents.map((a) => ({ id: a.agent_id, title: a.label, hint: "Agent", run: go(`/agents/${a.agent_id}`) })) : [],
     };
     const q = query.trim().toLowerCase();
-    return [safety, screens, agents]
+    return [screens, agents, safety]
       .map((g) => ({ ...g, items: q ? g.items.filter((i) => i.title.toLowerCase().includes(q)) : g.items }))
       .filter((g) => g.items.length > 0);
   }, [query, role, router, ws.agents]);

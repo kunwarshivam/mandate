@@ -90,7 +90,7 @@ test("the labels name every item: no tooltip on hover or focus, and a visible fo
   await open(page, "/");
   const items = dock(page).locator("a, button:not([data-slot=stop-control])");
   const names = await items.evaluateAll((els) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent));
-  expect(names).toEqual(["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions", "Connections", "Audit", "More"]);
+  expect(names).toEqual(["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions", "More"]);
   await items.nth(4).hover();
   await page.waitForTimeout(600);
   await expect(page.locator(".kumo-tooltip-popup")).toHaveCount(0);
@@ -121,18 +121,17 @@ test("the menus open, move and close from the keyboard, and focus comes back to 
   await expect(menu).toBeHidden();
   await expect(more).toBeFocused();
 
-  const audit = dock(page).getByRole("button", { name: "Audit" });
-  await audit.focus();
+  await more.focus();
   await page.keyboard.press("ArrowUp");
   await expect(page.getByRole("menu")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(audit).toBeFocused();
+  await expect(more).toBeFocused();
 });
 
-test("every screen the sidebar reached is one press or one menu away", async ({ page }) => {
+test("every built screen is one press or one menu away, and no screen still to come has a door (DEC-504)", async ({ page }) => {
   await open(page, "/");
   const reached = new Set(await dock(page).locator(":scope > a").evaluateAll((els) => els.map((el) => el.getAttribute("href"))));
-  for (const menu of ["Audit", "More"]) {
+  for (const menu of ["More"]) {
     await dock(page).getByRole("button", { name: menu, exact: true }).click();
     const list = page.getByRole("menu");
     await expect(list).toBeVisible();
@@ -140,21 +139,22 @@ test("every screen the sidebar reached is one press or one menu away", async ({ 
     await page.keyboard.press("Escape");
     await expect(list).toBeHidden();
   }
-  for (const href of [...SCREENS.map((s) => s.href), SECTION_INDEX.audit.href, SECTION_INDEX.workspace.href]) expect(reached, href).toContain(href);
+  for (const s of SCREENS) expect(reached.has(s.href), s.href).toBe(s.built);
+  for (const href of [SECTION_INDEX.audit.href, SECTION_INDEX.workspace.href]) expect(reached, href).toContain(href);
 });
 
 test("a menu item navigates, and the menu's button shows where you are", async ({ page }) => {
   await open(page, "/");
-  await dock(page).getByRole("button", { name: "Audit" }).click();
-  await page.getByRole("menuitem", { name: "Trace" }).click();
-  await expect(page).toHaveURL("/audit/trace");
-  const audit = dock(page).getByRole("button", { name: "Audit" });
-  await expect(audit).toHaveAttribute("aria-current", "true");
+  await dock(page).getByRole("button", { name: "More" }).click();
+  await page.getByRole("menuitem", { name: "Gate decisions" }).click();
+  await expect(page).toHaveURL("/audit/decisions");
+  const more = dock(page).getByRole("button", { name: "More" });
+  await expect(more).toHaveAttribute("aria-current", "true");
   await expect(async () => {
-    if ((await audit.getAttribute("aria-expanded")) !== "true") await audit.click();
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
     await expect(page.getByRole("menu")).toBeVisible({ timeout: 1000 });
   }).toPass({ timeout: 15_000 });
-  await expect(page.getByRole("menuitem", { name: "Trace" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("menuitem", { name: "Gate decisions" })).toHaveAttribute("aria-current", "page");
 });
 
 for (const [width, height] of [

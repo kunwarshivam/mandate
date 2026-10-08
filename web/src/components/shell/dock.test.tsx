@@ -22,13 +22,13 @@ async function openMenu(name: string) {
 }
 
 describe("the desktop dock", () => {
-  it("labels every item under its icon: the everyday screens in order, then the Audit and More menus", () => {
+  it("labels every item under its icon: the everyday screens in order, then the More menu; no unbuilt screen has a door (DEC-504)", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const names = (els: HTMLElement[]) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent);
-    expect(within(dock()).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/", "/messages", "/approvals", "/alerts", "/agents", "/positions", "/connections"]);
-    expect(names(within(dock()).getAllByRole("link"))).toEqual(["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions", "Connections"]);
+    expect(within(dock()).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/", "/messages", "/approvals", "/alerts", "/agents", "/positions"]);
+    expect(names(within(dock()).getAllByRole("link"))).toEqual(["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions"]);
     const menus = within(dock()).getAllByRole("button").filter((b) => b.getAttribute("data-slot") !== "stop-control");
-    expect(names(menus)).toEqual(["Audit", "More"]);
+    expect(names(menus)).toEqual(["More"]);
     expect(within(dock()).getByRole("link", { name: /^Approvals\s*\d+\s*open$/ })).toBeInTheDocument();
     expect(within(dock()).getByRole("link", { name: "Agents" })).toBeInTheDocument();
     for (const b of menus) {
@@ -56,7 +56,7 @@ describe("the desktop dock", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const divider = dock().querySelector("[data-slot=dock-divider]");
     expect(divider).toHaveAttribute("aria-hidden");
-    expect(divider?.nextElementSibling).toHaveTextContent(/^Audit/);
+    expect(divider?.nextElementSibling).toHaveTextContent(/^More/);
   });
 
   it("marks the current screen, and only it, with aria-current and the pill", () => {
@@ -81,22 +81,25 @@ describe("the desktop dock", () => {
     expect(within(dock()).getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "true");
   });
 
-  it("marks the Audit menu current on any audit screen, and the screen inside the menu", async () => {
-    setPathname("/audit/trace");
+  it("marks More current on any audit screen, and the screen inside the menu; an audit screen still to come has no menu item (DEC-504)", async () => {
+    setPathname("/audit/decisions");
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    expect(within(dock()).getByRole("button", { name: "Audit" })).toHaveAttribute("aria-current", "true");
-    const menu = await openMenu("Audit");
-    expect(within(menu).getByRole("menuitem", { name: "Trace" })).toHaveAttribute("aria-current", "page");
+    expect(within(dock()).getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "true");
+    const menu = await openMenu("More");
+    expect(within(menu).getByRole("menuitem", { name: "Gate decisions" })).toHaveAttribute("aria-current", "page");
     expect(within(menu).getByRole("menuitem", { name: "Audit overview" })).not.toHaveAttribute("aria-current");
+    expect(within(menu).queryByRole("menuitem", { name: "Trace" })).toBeNull();
+    expect(within(menu).queryByRole("menuitem", { name: "Connections" })).toBeNull();
   });
 
-  it("heads More with the account, then the workspace screens", async () => {
+  it("heads More with the account, then the workspace overview alone while every workspace screen is still to come", async () => {
     setPathname("/settings/policies");
     renderWithRuntime(<AppShell>{null}</AppShell>);
+    expect(within(dock()).getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "true");
     const menu = await openMenu("More");
     expect(menu).toHaveTextContent(/^Account/);
     expect(within(menu).getByRole("menuitem", { name: /Alpaca paper/ })).toBeInTheDocument();
-    expect(within(menu).getByRole("menuitem", { name: "Policies" })).toHaveAttribute("aria-current", "page");
+    expect(within(menu).queryByRole("menuitem", { name: "Policies" })).toBeNull();
     expect(within(menu).getByRole("menuitem", { name: "Workspace overview" })).toHaveAttribute("href", "/settings");
   });
 
@@ -140,19 +143,21 @@ describe("the desktop dock", () => {
 describe("what the dock reaches", () => {
   it.each(ROLES.map((r) => r.id))("as %s, reaches every screen the role may open, and only those", (role) => {
     const docked = SCREENS.filter((s) => (DOCK_LINKS as readonly string[]).includes(s.key) && can(role, s.needs)).map((s) => s.href);
-    const menus = [...menuGroups("audit", role), ...menuGroups("more", role)].flatMap((g) => g.links.map((l) => l.href));
+    const menus = menuGroups("more", role).flatMap((g) => g.links.map((l) => l.href));
     const reached = new Set([...docked, ...menus]);
     expect(reached.size).toBe(docked.length + menus.length);
-    for (const s of SCREENS) expect(reached.has(s.href), s.href).toBe(can(role, s.needs));
+    for (const s of SCREENS) expect(reached.has(s.href), s.href).toBe(s.built && can(role, s.needs));
     for (const href of reached) expect(canOpen(role, href), href).toBe(true);
     const audits = SCREENS.some((s) => s.group === "audit" && can(role, s.needs));
     expect(reached.has(SECTION_INDEX.audit.href)).toBe(audits);
   });
 
-  it("puts the audit screens in Audit and every other screen in More, under their group labels", () => {
-    for (const g of menuGroups("audit", "owner")) expect(g.label).toBe(GROUP_LABEL.audit);
-    expect(menuGroups("more", "owner").map((g) => g.label)).not.toContain(GROUP_LABEL.audit);
-    expect(menuFor("audit")).toBe("audit");
+  it("puts every screen that is not on the dock in More, under its group label, the audit and workspace groups opening with their overview", () => {
+    const groups = menuGroups("more", "owner");
+    expect(groups.map((g) => g.label)).toContain(GROUP_LABEL.audit);
+    expect(groups.find((g) => g.label === GROUP_LABEL.audit)?.links[0]).toMatchObject({ href: SECTION_INDEX.audit.href });
+    expect(groups.find((g) => g.label === GROUP_LABEL.workspace)?.links.map((l) => l.href)).toEqual([SECTION_INDEX.workspace.href]);
+    expect(menuFor("audit")).toBe("more");
     expect(menuFor("workspace")).toBe("more");
   });
 
