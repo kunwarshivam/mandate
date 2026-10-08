@@ -511,7 +511,9 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
   loopback), `crates/mandate-mcp/src/tests/budget.rs` (an oracle that steps one refill period at a
   time), `crates/mandate-mcp/src/tests/server.rs` (the scripted loopback server),
-  `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/errors.rs`.
+  `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/bounds.rs` (sessions,
+  redirects, timeouts, the exit budget, and a canary in server text),
+  `crates/mandate-mcp/src/tests/errors.rs`.
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
 
 ## The local vault (E10-13 V1)
@@ -1054,6 +1056,23 @@ proves each pending test fails on them (DEC-110).
 - **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime -p mandate-cli`;
   `cargo xtask ci pending`.
 
+## Web push encryption and VAPID (E8-14, slice S8a)
+
+- **Spec:** [notifications spec](../../../docs/specs/notifications.md) §4.2 (the closed payload),
+  §4.6 (web push and the relay's 512-byte cap), NT-1 and NT-3; DEC-438 items 1 and 13, DEC-700
+  item 3 (the envelope per class), DEC-790. RFC 8291, RFC 8188, RFC 8292.
+- **Code:** `mandate-webpush` (layer 0, pure, no workspace dependency):
+  `crates/mandate-webpush/src/lib.rs` (`build_request`, `encrypt`, `vapid_authorization`,
+  `Subscription`, `PushEndpoint`, `VapidSubject`, the `SecureRandom` and `VapidSigner` traits, and
+  `NoticeClass`'s fixed urgency and TTL) and `crates/mandate-webpush/src/payload.rs` (the closed
+  `PushPlaintext` and `PushText`), stubbed but for the closed tables.
+- **Tests:** `crates/mandate-webpush/src/tests.rs`, with the published vectors and their fixtures in
+  `crates/mandate-webpush/tests/vectors/mod.rs` (DEC-794): the RFC 8291 §5 and RFC 8188 §3.1 vectors
+  byte-exact, a receiver-side decrypt oracle, an ES256 check of the VAPID token against the
+  signer's public key, the size cap, refusals, and properties for the opaque payload and the
+  token's expiry, pending E8-14 but for the live closed-tables test.
+- **Run:** `cargo nextest run -p mandate-webpush`; `cargo xtask ci pending`.
+
 ## The CLI's Postgres control journal (E10-16, P0)
 
 - **Spec:** `docs/specs/journal.md` §5.1, §6.1, §11 check 6; the first paper trade brief
@@ -1335,8 +1354,12 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-rh-sim/tests/lifecycle.rs` (fills and positions, `ref_id` after a lost answer
   and its echo and changed-resend switches, `gfd` and `gtc`, sessions, scripted answers, and the
   refusals of cancel, fill and a sell that working sells already hold, a working sell holding
-  only its unfilled remainder), with fixtures
-  in `tests/common/mod.rs`. Pending E7-25.
+  only its unfilled remainder), and
+  `crates/mandate-rh-sim/tests/properties.rs` (over random scripts: a `ref_id` never yields a
+  second order; a terminal order never changes and is refused; a fill never exceeds the quantity;
+  every state change is a legal transition, and every legal one is accepted; each against the
+  test's own oracle), with fixtures in
+  `tests/common/mod.rs`. Pending E7-25.
 - **Run:** `cargo nextest run -p mandate-rh-sim`.
 
 ## Research-agent spike (E17-0)

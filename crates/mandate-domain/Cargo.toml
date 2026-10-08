@@ -12,3 +12,6 @@ workspace = true
 [dependencies]
 mandate-canon.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
