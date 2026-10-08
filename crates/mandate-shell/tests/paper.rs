@@ -403,6 +403,7 @@ fn assemble(
         account_ref: TEST_ACCOUNT_REF.to_owned(),
         executor: Some(contexts.executor),
         run: Some(contexts.run),
+        artifacts: None,
         transport: broker.clone(),
     });
     let inner = match journal {
