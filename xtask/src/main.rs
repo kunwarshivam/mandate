@@ -723,10 +723,14 @@ fn layers() -> Result<()> {
     eprintln!("    layers: checking xtask/layers.toml against cargo metadata");
     let policy: Layers = toml::from_str(&fs::read_to_string("xtask/layers.toml")?)
         .context("parsing xtask/layers.toml")?;
-    let meta = metadata()?;
-    let packages = workspace_packages(&meta);
+    report(layer_problems(&policy, &metadata()?)?, "layers")
+}
+
+/// Every way the workspace in `meta` breaks `policy`.
+fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
+    let packages = workspace_packages(meta);
     let names: BTreeSet<&str> = packages.iter().map(|p| p.name.as_str()).collect();
-    let closure = workspace_closure(&meta);
+    let closure = workspace_closure(meta);
     let mut problems = Vec::new();
 
     for listed in policy.crates.keys() {
@@ -800,7 +804,7 @@ fn layers() -> Result<()> {
             }
         }
     }
-    report(problems, "layers")
+    Ok(problems)
 }
 
 /// A problem for each crate in `forbidden` that `name` reaches, `reached` being every workspace
@@ -3106,10 +3110,10 @@ mod tests {
         actionlint_workflows, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
         contains_word, external_oracles, failure_cause, files_by_extension, first_panic_line,
         forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
-        is_stub_function, lint, listed_mutant_counts, live_test_counts, metadata_in,
-        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutated_crates,
-        names_a_stub, output_in, pending_problems, pending_tests, plain_comment_lines,
-        proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
+        is_stub_function, layer_problems, lint, listed_mutant_counts, live_test_counts,
+        metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
+        mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
+        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
         spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
         unjudged_mutants, verdicts, workspace_closure,
     };
@@ -3200,11 +3204,24 @@ mod tests {
             ["mandate-alpaca", "mandate-paper", "mandate-shell"],
             "the CLI may never reach the connector, the paper binary or the shell"
         );
-        let closure = workspace_closure(&metadata_in(&root)?);
-        let reached = closure
+        let meta = metadata_in(&root)?;
+        let reached = workspace_closure(&meta);
+        let reached = reached
             .get("mandate-cli")
             .context("mandate-cli is a member")?;
         assert!(forbidden_reached("mandate-cli", &cli.forbidden_internal, reached).is_empty());
+        let mut stricter = policy;
+        let cli = stricter
+            .crates
+            .get_mut("mandate-cli")
+            .context("mandate-cli has a policy")?;
+        cli.forbidden_internal.push("mandate-journal".to_owned());
+        let problems = layer_problems(&stricter, &meta)?;
+        let named = "`mandate-cli` reaches `mandate-journal`";
+        assert!(
+            problems.iter().any(|p| p.starts_with(named)),
+            "the layers check applies the list to the workspace as built: {problems:?}"
+        );
         Ok(())
     }
 
