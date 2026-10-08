@@ -434,7 +434,12 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-alpaca/tests/reads.rs` and the latest-quote scenarios under
   `crates/mandate-alpaca/tests/fixtures/alpaca-data/`; for DEC-471,
   `crates/mandate-alpaca/tests/bars.rs` (request construction and its refusals, exact volumes, and
-  every refused answer over a scripted transport) and the bars cases in `src/http.rs`. In prose: the hand cases of the brief
+  every refused answer over a scripted transport) and the bars cases in `src/http.rs`; for A1
+  (E7-19, [DEC-524](../../../docs/project/decisions/DEC-524.md)),
+  `crates/mandate-alpaca/tests/margin.rs` (`last_equity` and `maintenance_margin` parsed from the
+  recorded accounts and an edited body whose members all differ) and
+  `crates/mandate-executor/tests/margin.rs` (maintenance excess, hand cases and a whole-cent `i128`
+  property). In prose: the hand cases of the brief
   (the submission chain, the `Unknown` lookup discipline, the
   status mapping, the protective and kill-switch sequences, the ladder, the restriction table, error
   codes), twelve `fault::crash_at_*` cases at the enumerated submission steps, and property tests
