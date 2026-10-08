@@ -88,6 +88,6 @@ export const BTC_RAISE_REJECTED: MandateVersionRecord = {
   application: {
     result: "rejected",
     at: t("14:03:34", "2026-09-28"),
-    reason: "An allocation increase is refused while a limit is latched, and the drawdown ladder holds this agent at exits only.",
+    reason: "An allocation increase is refused while a limit is latched, and the drawdown ladder holds this agent at selling only.",
   },
 };

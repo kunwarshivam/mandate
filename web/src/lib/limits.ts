@@ -50,7 +50,7 @@ function rungAction(rung: LadderRung): string {
     case "scale_sizes":
       return `Sizes scaled to ${percent(rung.factor ?? "1", 0)}`;
     case "exits_only":
-      return "Exits only";
+      return "Selling only";
     case "flatten_and_pause":
       return "Close positions and pause";
     default: {
@@ -74,7 +74,7 @@ export function agentLimits(agent: Agent): AgentLimits {
   const dailyBudget = mul(dec(risk.max_daily_loss), E0);
   const lossToday = max(ZERO, sub(E0, E));
   const gross = add(...agent.positions.map((p) => dec(p.market_value)));
-  const dailyAction = risk.daily_loss_action === "exits_only" ? "Exits only until a new risk day" : "Close positions and pause";
+  const dailyAction = risk.daily_loss_action === "exits_only" ? "Selling only until a new risk day" : "Close positions and pause";
 
   const rails: Rail[] = [
     ...agent.positions.map((p) => ({

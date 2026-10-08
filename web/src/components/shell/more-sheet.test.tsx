@@ -21,7 +21,7 @@ describe("what the phone reaches (DEC-207)", () => {
     const more = moreGroups(role).flatMap((g) => g.links.map((l) => l.href));
     const reached = new Set([...tabbed, ...more]);
     expect(reached.size).toBe(tabbed.length + more.length);
-    for (const s of SCREENS) expect(reached.has(s.href), s.href).toBe(can(role, s.needs));
+    for (const s of SCREENS) expect(reached.has(s.href), s.href).toBe(s.built && can(role, s.needs));
     for (const href of reached) expect(canOpen(role, href), href).toBe(true);
     const audits = SCREENS.some((s) => s.group === "audit" && can(role, s.needs));
     expect(reached.has(SECTION_INDEX.audit.href)).toBe(audits);
@@ -43,13 +43,15 @@ describe("what the phone reaches (DEC-207)", () => {
     expect(moreGroups("auditor").flatMap((g) => g.links.map((l) => l.href))).not.toContain("/audit");
   });
 
-  it("groups Positions, Audit, Connections and Settings, in that order", () => {
+  it("groups Approvals and Alerts, then Positions, Audit and Settings, in that order, and lists no screen still to come (DEC-513)", () => {
     const groups = moreGroups("owner");
     const labels = groups.map((g) => g.label);
     const hrefs = groups.flatMap((g) => g.links.map((l) => l.href));
+    expect(hrefs.slice(0, 2)).toEqual(["/approvals", "/alerts"]);
     expect(hrefs.indexOf("/positions")).toBeLessThan(hrefs.indexOf("/audit"));
     expect(hrefs.indexOf("/audit")).toBeLessThan(hrefs.indexOf("/settings"));
-    expect(hrefs).toContain("/connections");
+    expect(hrefs).not.toContain("/connections");
+    expect(hrefs).not.toContain("/audit/trace");
     expect(labels).toContain("Audit");
     expect(labels).toContain("Settings");
   });
@@ -58,7 +60,7 @@ describe("what the phone reaches (DEC-207)", () => {
 describe("the More sheet", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("opens from the fourth tab with the account and workspace at the top, then Search, then every other screen", () => {
+  it("opens from the fourth tab with Approvals and Alerts first, then Search, then every other screen, and the account and workspace at the foot (DEC-513)", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const more = within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "More" });
     const sheet = openMore();
@@ -69,12 +71,15 @@ describe("the More sheet", () => {
     expect(account).toHaveTextContent("Alpaca paper");
     expect(within(account).getByRole("button", { name: /^Workspace: / })).toBeInTheDocument();
     const search = within(sheet).getByRole("button", { name: /^Search/ });
-    expect(account.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const approvals = within(sheet).getByRole("link", { name: /^Approvals/ });
+    expect(approvals.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(search.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const hrefs = within(sheet)
       .getAllByRole("link")
       .map((a) => a.getAttribute("href"));
     expect(hrefs).toEqual(moreGroups("owner").flatMap((g) => g.links.map((l) => l.href)));
-    for (const name of ["Positions", "Audit overview", "Connections", "All settings"]) expect(within(sheet).getByRole("link", { name })).toBeInTheDocument();
+    for (const name of ["Positions", "Audit overview", "All settings"]) expect(within(sheet).getByRole("link", { name })).toBeInTheDocument();
+    expect(within(sheet).queryByRole("link", { name: "Connections" })).toBeNull();
   });
 
   it("gives every row a 44px target and a visible focus ring", () => {
@@ -110,7 +115,7 @@ describe("the More sheet", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "stale");
     const feeds = within(openMore()).getByRole("region", { name: "Feeds" });
     expect(feeds).toHaveTextContent("Market data stale: as of 14:02:11");
-    expect(feeds).toHaveTextContent("Fixture data");
+    expect(feeds).not.toHaveTextContent("Fixture data");
   });
 
   it("hands Search to the command palette", () => {

@@ -77,7 +77,7 @@ export function PositionsTable({
                   </span>
                 </th>
                 <td className="py-3 pr-3 text-right font-mono tabular">{quantity(p.qty)}</td>
-                <td className="py-3 pr-3 text-right">
+                <td className="py-3 pr-3 text-right whitespace-nowrap">
                   <span className="font-mono tabular">{price(p.mark)}</span>
                   <span className="block">
                     <AsOf at={p.mark_as_of} now={now} stale={stale} />

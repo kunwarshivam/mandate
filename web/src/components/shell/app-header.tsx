@@ -34,7 +34,9 @@ const ICON_LINK =
 
 /**
  * Where the trail is narrower than 20rem it keeps only the current page, which never truncates, and
- * the earlier crumbs fold into a menu. Kumo renders the full trail as the nav's last child.
+ * the earlier crumbs fold into a menu. A top-level screen has only Home before it, which the brand
+ * already links to, so it folds nothing and shows no "…". Kumo renders the full trail as the nav's
+ * last child.
  */
 const CURRENT_ONLY = "@max-[20rem]:[&>div:last-child>*:not(:last-child)]:hidden";
 
@@ -200,7 +202,7 @@ export function AppHeader({ className }: { className?: string }) {
             <WorkspaceSwitcher />
           </div>
           <div className="@container hidden min-w-0 flex-1 items-center lg:flex [&>*]:@max-[10rem]:hidden">
-            {crumbs.length > 1 ? <EarlierCrumbs crumbs={crumbs.slice(0, -1)} /> : null}
+            {crumbs.length > 2 ? <EarlierCrumbs crumbs={crumbs.slice(0, -1)} /> : null}
             <Breadcrumbs size="sm" className={`mr-0 min-w-0 [&_[aria-current=page]]:shrink-0 [&_a]:min-w-0 [&_a]:shrink-[4] [&_a>span]:truncate ${CURRENT_ONLY}`}>
               {crumbs.flatMap((c, i) => [
                 ...(i > 0 ? [<Breadcrumbs.Separator key={`sep-${c.href}`} />] : []),

@@ -18,9 +18,8 @@ import { cn } from "@/lib/utils";
 import { homeFor } from "@/lib/access";
 import { useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
-import { GROUP_LABEL, SCREENS, SECTION_INDEX, type Screen, type ScreenGroup } from "@/lib/screens";
+import { GROUP_LABEL, GROUP_NEEDS, SCREENS, SECTION_INDEX, type Screen, type ScreenGroup, listedScreens } from "@/lib/screens";
 import { signOut, useSession } from "@/lib/session";
-import { FixtureTag } from "@/components/domain/placeholders";
 import { WorkspaceSwitcher } from "./app-header";
 import { OPEN_COMMAND_EVENT } from "./command-menu";
 import { isCurrent } from "./dock";
@@ -77,24 +76,29 @@ function linkOf(s: Screen): MoreLink {
 }
 
 /**
- * Every screen a role may open that is not on its tabs, in the order of `SCREENS`, under the group
- * labels the dock uses; Audit and Settings open with their overview.
+ * Every listed screen a role may open that is not on its tabs, in the order of `SCREENS`, under the
+ * group labels the dock uses; Audit and Settings open with their overview, which stays even while
+ * every screen under it is still to come, since the overview names what is coming (DEC-513).
  */
 export function moreGroups(role: Role): MoreGroup[] {
   const onTabs = new Set(phoneTabs(role).map((t) => t.href));
   const groups: MoreGroup[] = [];
   const byGroup = new Map<ScreenGroup, MoreGroup>();
-  for (const s of SCREENS) {
-    if (onTabs.has(s.href) || !can(role, s.needs)) continue;
-    let group = byGroup.get(s.group);
+  const groupFor = (g: ScreenGroup): MoreGroup => {
+    let group = byGroup.get(g);
     if (!group) {
-      const index = INDEX_LINK[s.group];
-      group = { label: MORE_LABEL[s.group], links: index && !onTabs.has(index.href) ? [index] : [] };
-      byGroup.set(s.group, group);
+      const index = INDEX_LINK[g];
+      group = { label: MORE_LABEL[g], links: index && !onTabs.has(index.href) ? [index] : [] };
+      byGroup.set(g, group);
       groups.push(group);
     }
-    group.links.push(linkOf(s));
+    return group;
+  };
+  for (const s of listedScreens()) {
+    if (onTabs.has(s.href) || !can(role, s.needs)) continue;
+    groupFor(s.group).links.push(linkOf(s));
   }
+  for (const g of ["audit", "workspace"] as const) if (can(role, GROUP_NEEDS[g])) groupFor(g);
   return groups;
 }
 
@@ -165,7 +169,35 @@ export function MoreSheet({
           <Dialog.Description className="sr-only">Your account and workspace, search, and every other screen.</Dialog.Description>
 
           <div className="grid gap-6 px-5 pt-2">
-            <section aria-label="Account and workspace" data-slot="more-account" className="grid gap-1 border-b border-border/70 pb-3">
+            {groups.slice(0, 1).map((g, i) => (
+              <section key={g.label ?? `group-${i}`} aria-label={g.label ?? "Screens"} className="grid gap-1">
+                {g.label ? <h3 className="field-label text-muted-foreground">{g.label}</h3> : null}
+                <ul className="grid">
+                  {g.links.map((l) => (
+                    <Row key={l.href} link={l} pathname={pathname} onGo={close} />
+                  ))}
+                </ul>
+              </section>
+            ))}
+
+            <button type="button" onClick={search} data-slot="more-search" className={cn(ROW, "mx-0 -mt-3 w-full border-t border-border/70 pt-3")}>
+              <Search className="size-6 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1">Search</span>
+              <span className="text-caption text-muted-foreground">Agents and screens</span>
+            </button>
+
+            {groups.slice(1).map((g, i) => (
+              <section key={g.label ?? `group-${i + 1}`} aria-label={g.label ?? "Screens"} className="grid gap-1">
+                {g.label ? <h3 className="field-label text-muted-foreground">{g.label}</h3> : null}
+                <ul className="grid">
+                  {g.links.map((l) => (
+                    <Row key={l.href} link={l} pathname={pathname} onGo={close} />
+                  ))}
+                </ul>
+              </section>
+            ))}
+
+            <section aria-label="Account and workspace" data-slot="more-account" className="grid gap-1 border-t border-border/70 pt-3">
               <div className="flex min-h-11 min-w-0 items-center gap-3">
                 <BuildingCommunity className="size-6 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="grid min-w-0">
@@ -185,24 +217,7 @@ export function MoreSheet({
               <WorkspaceSwitcher inSheet className="-mx-2.5 h-11 w-fit max-w-full" />
             </section>
 
-            <button type="button" onClick={search} data-slot="more-search" className={cn(ROW, "mx-0 -mt-3 w-full")}>
-              <Search className="size-6 shrink-0 text-muted-foreground" aria-hidden />
-              <span className="min-w-0 flex-1">Search</span>
-              <span className="text-caption text-muted-foreground">Agents and screens</span>
-            </button>
-
-            {groups.map((g, i) => (
-              <section key={g.label ?? `group-${i}`} aria-label={g.label ?? "Screens"} className="grid gap-1">
-                {g.label ? <h3 className="field-label text-muted-foreground">{g.label}</h3> : null}
-                <ul className="grid">
-                  {g.links.map((l) => (
-                    <Row key={l.href} link={l} pathname={pathname} onGo={close} />
-                  ))}
-                </ul>
-              </section>
-            ))}
-
-            <div className="flex min-h-11 items-center justify-between gap-3 border-t border-border/70 pt-3">
+            <div className="-mt-3 flex min-h-11 items-center justify-between gap-3">
               <span className="text-sm font-medium">Theme</span>
               <ThemeMenu className="press inline-flex size-11 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring" />
             </div>
@@ -223,7 +238,6 @@ export function MoreSheet({
                   </li>
                 ))}
               </ul>
-              <FixtureTag className="w-fit" />
             </section>
           </div>
         </Dialog.Popup>

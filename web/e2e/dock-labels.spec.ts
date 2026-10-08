@@ -10,8 +10,8 @@ import { SCREENS, SECTION_INDEX, type Screen } from "../src/lib/screens";
  */
 
 const WIDTHS = [1024, 1280, 1440, 1920] as const;
-const LABELS = ["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions", "Connections", "Audit", "More"];
-const DOCKED: Record<string, string> = { home: "Home", messages: "Messages", approvals: "Approvals", alerts: "Alerts", agents: "Agents", positions: "Positions", connections: "Connections" };
+const LABELS = ["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions", "More"];
+const DOCKED: Record<string, string> = { home: "Home", messages: "Messages", approvals: "Approvals", alerts: "Alerts", agents: "Agents", positions: "Positions" };
 
 const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 const items = (page: Page) => dock(page).locator("a, button:not([data-slot=stop-control])");
@@ -25,12 +25,13 @@ async function open(page: Page, path: string, width = 1440, height = 900) {
 }
 
 function sectionOf(s: Screen): string {
-  return DOCKED[s.key] ?? (s.group === "audit" ? "Audit" : "More");
+  return DOCKED[s.key] ?? "More";
 }
 
+/** Only a built screen has a door on the dock (DEC-513); one still to come marks nothing current. */
 const ROUTES: [string, string][] = [
-  ...SCREENS.map((s): [string, string] => [s.href, sectionOf(s)]),
-  [SECTION_INDEX.audit.href, "Audit"],
+  ...SCREENS.filter((s) => s.built).map((s): [string, string] => [s.href, sectionOf(s)]),
+  [SECTION_INDEX.audit.href, "More"],
   [SECTION_INDEX.workspace.href, "More"],
   [`/agents/${AGENT_IDS.btc}`, "Agents"],
   [`/agents/${AGENT_IDS.btc}/positions`, "Agents"],
@@ -39,9 +40,8 @@ const ROUTES: [string, string][] = [
   [`/approvals/${APPROVAL_IDS.swingXyz}`, "Approvals"],
   [`/messages/${AGENT_IDS.swing}`, "Messages"],
   [`/messages/${AGENT_IDS.swing}/desk`, "Messages"],
-  ["/audit/decisions", "Audit"],
-  ["/audit/timeline", "Audit"],
-  ["/settings/policies", "More"],
+  ["/audit/decisions", "More"],
+  ["/audit/timeline", "More"],
 ];
 
 for (const width of WIDTHS) {
@@ -82,7 +82,7 @@ test("the current section is marked on every top-level route and inside agents, 
     await expect(dock(page).locator("[data-current]"), path).toHaveCount(1);
     const current = dock(page).locator("[data-current]");
     await expect(current.locator("[data-slot=dock-label]"), path).toHaveText(section);
-    await expect(current, path).toHaveAttribute("aria-current", ["Audit", "More"].includes(section) ? "true" : "page");
+    await expect(current, path).toHaveAttribute("aria-current", section === "More" ? "true" : "page");
     expect(await current.locator("[data-slot=dock-label]").evaluate((el) => getComputedStyle(el).fontWeight), path).toBe("600");
   }
 });
@@ -141,7 +141,7 @@ test.describe("labels hold 4.5:1 on the dock's glass, whatever scrolls under it"
       await page.mouse.move(0, 0);
       const current = dock(page).getByRole("link", { name: "Positions" });
       const idle = dock(page).getByRole("link", { name: "Alerts" });
-      const hovered = dock(page).getByRole("link", { name: "Connections" });
+      const hovered = dock(page).getByRole("link", { name: "Agents" });
       await hovered.hover();
       await page.waitForTimeout(250);
       const colorOf = (item: Locator) => item.locator("[data-slot=dock-label]").evaluate((el) => getComputedStyle(el).color);

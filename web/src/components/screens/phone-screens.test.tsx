@@ -46,7 +46,7 @@ describe("Home on a phone", () => {
     expect(shownOnDesktop(needsYou())).toBe(true);
   });
 
-  it("lists the requests first, soonest deadline first, each with the static time it is skipped at, then the alerts", () => {
+  it("lists the requests first, soonest deadline first, each with the static time it is skipped at, then the agents' conditions, one line per agent and condition and no feed (DEC-513)", () => {
     const ws = buildWorkspace("approvals");
     const stale = buildWorkspace("stale");
     render(
@@ -58,7 +58,7 @@ describe("Home on a phone", () => {
     );
     const rows = [...needsYou().querySelectorAll<HTMLElement>("li")];
     const kinds = rows.map((r) => r.dataset.kind);
-    expect(kinds).toEqual(["request", "request", "request", "alert", "alert", "alert", "alert"]);
+    expect(kinds).toEqual(["request", "request", "request", "alert"]);
     const deadlines = rows.slice(0, 3).map((r) => Date.parse(r.querySelector("time")!.getAttribute("datetime")!));
     expect(deadlines).toEqual([...deadlines].sort((a, b) => a - b));
     for (const r of rows.slice(0, 3)) {
@@ -66,10 +66,9 @@ describe("Home on a phone", () => {
       expect(r).not.toHaveTextContent(/min left|left\)/);
       expect(within(r).getByRole("link")).toHaveAttribute("href", expect.stringMatching(/^\/approvals\/apr_/));
     }
-    expect(rows.slice(3).map((r) => r.textContent)).toEqual(["Market data stale", "Push relay down", "Agent 2: stale price (XYZ)", "Agent 2: stale price (QRS)"]);
-    expect(within(rows[3]).getByRole("link")).toHaveAttribute("href", "/alerts");
-    expect(within(rows[5]).getByRole("link")).toHaveAttribute("href", `/agents/${AGENT_IDS.swing}`);
-    expect(needsYou().querySelector("h2")).toHaveTextContent("Needs you7 items");
+    expect(rows.slice(3).map((r) => r.textContent)).toEqual(["Agent 2: stale price (XYZ, QRS)"]);
+    expect(within(rows[3]).getByRole("link")).toHaveAttribute("href", expect.stringMatching(/^\/agents\/agt_/));
+    expect(needsYou().querySelector("h2")).toHaveTextContent("Needs you4 items");
   });
 
   it("lays Needs you out as one row of cards that scrolls sideways on a phone, and as stacked rows on desktop", () => {
@@ -150,7 +149,8 @@ describe("Home on a phone", () => {
       expect(within(row).getByRole("link")).toHaveAttribute("href", `/agents/${agent.agent_id}`);
       expect(within(row).getByText(agent.label)).toHaveClass("font-semibold");
       expect(row.querySelector("[data-slot=mode-badge]")).toHaveTextContent(/\w/);
-      expect(row.querySelector("[data-slot=mode-badge] svg")).not.toBeNull();
+      expect(row.querySelector("[data-slot=mode-badge] [data-slot=mode-dot]")).not.toBeNull();
+      expect(row.querySelector("[data-slot=mode-badge] svg")).toBeNull();
       expect(row.querySelector("[data-slot=headroom]")).toHaveTextContent(/^\$[\d,]+\.\d{2} (above|below) its [a-z0-9%\- ]+$/);
       expect(row.querySelector("[data-direction], [data-placeholder=performance]")).toBeNull();
       expect(row).not.toHaveTextContent(/P&L|profit|today|since deployed|[+−]\$/);
@@ -215,7 +215,7 @@ describe("an agent on a phone", () => {
     expect(title.parentElement!.contains(badge)).toBe(true);
     expect(shownOnPhone(badge)).toBe(true);
     expect(shownOnDesktop(badge)).toBe(false);
-    expect(badge.querySelector("svg")).not.toBeNull();
+    expect(badge.querySelector("[data-slot=mode-dot]")).not.toBeNull();
     expect(onPhone(within(header()).getAllByRole("button", { name: "Stop this agent…" }))).toHaveLength(1);
     const order = onPhone(main().querySelectorAll("h2")).map((h) => h.textContent);
     expect(order).toEqual(["Waiting for you", "Equity against your mandate", "Headroom", "This agent"]);

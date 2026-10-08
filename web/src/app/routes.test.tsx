@@ -83,11 +83,10 @@ describe("route coverage", () => {
         .filter((h) => h.startsWith("/") && !h.startsWith("//"))
         .map((h) => h.split("#")[0].split("?")[0]),
     );
-    expect(hrefs).toContain("/connections");
     for (const href of hrefs) await expect(pageFor(href), href).resolves.toBeDefined();
   });
 
-  it.each(["Audit", "More"])("the dock's %s menu links only to paths with a page", async (menu) => {
+  it.each(["More"])("the dock's %s menu links only to paths with a page", async (menu) => {
     await renderPath("/");
     fireEvent.click(within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name: menu }));
     const hrefs = internalHrefs(await screen.findByRole("menu"));

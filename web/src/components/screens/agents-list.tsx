@@ -15,7 +15,6 @@ function Agents() {
     <div className="grid">
       <PageHeader
         title="Agents"
-        environment={ws.environment}
         description="Each agent trades on paper within its own confirmed mandate."
         actions={
           <LinkButton href="/agents/new" variant="secondary" size="lg" className={KEY}>

@@ -70,7 +70,7 @@ const CHART_RULES: Array<[string, string, string]> = [
 ];
 
 const SAMPLE_LEVELS: ChartLevel[] = [
-  { key: "daily", label: "Daily loss limit", price: 9701.5, tone: "mandate", meaning: "Exits only until a new risk day" },
+  { key: "daily", label: "Daily loss limit", price: 9701.5, tone: "mandate", meaning: "Selling only until a new risk day" },
   { key: "avg-cost", label: "Average cost", price: 9850, tone: "account", meaning: "What you paid per unit" },
   { key: "proposed", label: "Proposed limit", price: 9912.25, tone: "proposal" },
 ];
@@ -441,8 +441,8 @@ export default function DesignPage() {
             <div className="grid content-start gap-4 rounded-2xl bg-mandate p-5 text-mandate-foreground">
               <h3 className="text-h3 text-mandate-strong">Your mandate</h3>
               <LimitRail rail={{ key: "a", label: "Total holdings", used: dec("1618.09"), cap: dec("2000"), atCap: "No new buys" }} />
-              <LimitRail rail={{ key: "b", label: "Loss today", used: dec("0"), cap: dec("201"), atCap: "Exits only until a new risk day" }} />
-              <LimitRail rail={{ key: "c", label: "Loss today", used: dec("214.5"), cap: dec("201"), atCap: "Exits only until a new risk day" }} />
+              <LimitRail rail={{ key: "b", label: "Loss today", used: dec("0"), cap: dec("201"), atCap: "Selling only until a new risk day" }} />
+              <LimitRail rail={{ key: "c", label: "Loss today", used: dec("214.5"), cap: dec("201"), atCap: "Selling only until a new risk day" }} />
             </div>
           </div>
         </div>

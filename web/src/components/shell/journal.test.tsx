@@ -63,14 +63,16 @@ describe("Stop sheet", () => {
 });
 
 describe("command palette", () => {
-  it("opens on ⌘K with Stop… as the first command, and Stop… opens the sheet", () => {
+  it("opens on ⌘K with Go to first and Stop… as the last command, under Safety (DEC-513), and Stop… opens the sheet", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     act(() => {
       fireEvent.keyDown(window, { key: "k", metaKey: true });
     });
     const options = screen.getAllByRole("option");
-    expect(options[0]).toHaveTextContent("Stop…");
-    fireEvent.click(options[0]);
+    expect(options[0]).toHaveTextContent("Home");
+    expect(options.at(-1)).toHaveTextContent("Stop…");
+    expect(options.map((o) => o.textContent)).not.toContain("Connections");
+    fireEvent.click(options.at(-1)!);
     act(() => vi.advanceTimersByTime(0));
     expect(screen.getByRole("dialog", { name: /Stop/ })).toBeInTheDocument();
   });
@@ -81,7 +83,7 @@ describe("command palette", () => {
     expect(screen.queryByRole("option")).toBeNull();
     fireEvent.click(within(header).getByRole("button", { name: /^Jump to an agent or screen…/ }));
     const options = screen.getAllByRole("option");
-    expect(options[0]).toHaveTextContent("Stop…");
+    expect(options.at(-1)).toHaveTextContent("Stop…");
     expect(screen.getByRole("combobox", { name: "Command" })).toBeInTheDocument();
   });
 
@@ -92,7 +94,7 @@ describe("command palette", () => {
     fireEvent.click(within(screen.getByRole("dialog", { name: "More" })).getByRole("button", { name: /^Search/ }));
     act(() => vi.advanceTimersByTime(0));
     const options = screen.getAllByRole("option");
-    expect(options[0]).toHaveTextContent("Stop…");
+    expect(options.at(-1)).toHaveTextContent("Stop…");
     expect(screen.getByRole("combobox", { name: "Command" })).toBeInTheDocument();
   });
 

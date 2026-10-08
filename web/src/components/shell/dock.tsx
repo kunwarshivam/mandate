@@ -12,22 +12,22 @@ import { Script } from "pixelarticons/react/Script.js";
 import { type Icon, menuIcon } from "@/components/icon";
 import { useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
-import { GROUP_LABEL, SCREENS, SECTION_INDEX, type Screen, type ScreenGroup } from "@/lib/screens";
+import { GROUP_LABEL, GROUP_NEEDS, SCREENS, SECTION_INDEX, type Screen, type ScreenGroup, listedScreens } from "@/lib/screens";
 import { SCREEN_ICON } from "./screen-icons";
 import { StopButton } from "./stop-control";
 
 /** The screens that sit on the dock itself, in order; every other screen is one menu away. */
-export const DOCK_LINKS = ["home", "messages", "approvals", "alerts", "agents", "positions", "connections"] as const;
+export const DOCK_LINKS = ["home", "messages", "approvals", "alerts", "agents", "positions"] as const;
 
-export type DockMenu = "audit" | "more";
+/** One menu, More, holds every listed screen that is not on the dock (DEC-513 folded Audit into it). */
+export type DockMenu = "more";
 
 export function menuFor(group: ScreenGroup): DockMenu {
   switch (group) {
-    case "audit":
-      return "audit";
     case "main":
     case "agents":
     case "accounts":
+    case "audit":
     case "workspace":
       return "more";
     default: {
@@ -54,10 +54,14 @@ function linkOf(s: Screen): MenuLink {
   return { href: s.href, label: s.label, icon: SCREEN_ICON[s.key] ?? Home };
 }
 
-/** A menu's groups for a role: its section index first, then each screen group in the order of `SCREENS`. */
+/**
+ * A menu's groups for a role: each listed screen group in the order of `SCREENS`, the audit and
+ * workspace groups opening with their overview. A section whose screens are all still to come
+ * keeps its overview alone, which names what is coming.
+ */
 export function menuGroups(menu: DockMenu, role: Role): MenuGroup[] {
   const docked = new Set<string>(DOCK_LINKS);
-  const screens = SCREENS.filter((s) => !docked.has(s.key) && menuFor(s.group) === menu && can(role, s.needs));
+  const screens = listedScreens().filter((s) => !docked.has(s.key) && menuFor(s.group) === menu && can(role, s.needs));
   const groups: MenuGroup[] = [];
   for (const s of screens) {
     const label = GROUP_LABEL[s.group];
@@ -65,9 +69,13 @@ export function menuGroups(menu: DockMenu, role: Role): MenuGroup[] {
     if (last && last.label === label) last.links.push(linkOf(s));
     else groups.push({ label, links: [linkOf(s)] });
   }
-  const index = menu === "audit" ? "audit" : "workspace";
-  const home = groups.find((g) => g.label === GROUP_LABEL[index]);
-  if (home) home.links.unshift({ href: SECTION_INDEX[index].href, label: `${SECTION_INDEX[index].label} overview`, icon: INDEX_ICON[index] });
+  for (const index of ["audit", "workspace"] as const) {
+    if (!can(role, GROUP_NEEDS[index])) continue;
+    const overview = { href: SECTION_INDEX[index].href, label: `${SECTION_INDEX[index].label} overview`, icon: INDEX_ICON[index] };
+    const home = groups.find((g) => g.label === GROUP_LABEL[index]);
+    if (home) home.links.unshift(overview);
+    else groups.push({ label: GROUP_LABEL[index], links: [overview] });
+  }
   return groups;
 }
 
@@ -179,7 +187,6 @@ export function Dock({ approvals }: { approvals: number }) {
   const { role } = useRole();
   const { ws } = useRuntime();
   const links = DOCK_LINKS.map((key) => SCREENS.find((s) => s.key === key)!).filter((s) => can(role, s.needs));
-  const audit = menuGroups("audit", role);
   const more = menuGroups("more", role);
   const within = (groups: MenuGroup[]) => groups.some((g) => g.links.some((l) => isCurrent(pathname, l.href)));
 
@@ -193,12 +200,7 @@ export function Dock({ approvals }: { approvals: number }) {
         <DockLink key={s.key} screen={s} current={isCurrent(pathname, s.href)} count={approvals} />
       ))}
       {links.length > 0 ? <span aria-hidden data-slot="dock-divider" className="mx-1 h-8 w-px bg-(--dock-edge)" /> : null}
-      {audit.length > 0 ? (
-        <DockMenuButton label="Audit" icon={Script} current={pathname === "/audit" || pathname.startsWith("/audit/")}>
-          <MenuLinks groups={audit} pathname={pathname} />
-        </DockMenuButton>
-      ) : null}
-      <DockMenuButton label="More" icon={MoreHorizontal} current={within(more)}>
+      <DockMenuButton label="More" icon={MoreHorizontal} current={within(more) || pathname.startsWith("/audit/") || pathname.startsWith("/settings/")}>
         <DropdownMenu.Group>
           <DropdownMenu.Label>Account</DropdownMenu.Label>
           <DropdownMenu.Item icon={menuIcon(BuildingCommunity)} selected>

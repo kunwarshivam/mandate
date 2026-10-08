@@ -1,7 +1,6 @@
 "use client";
 
 import { PageHeader } from "@/components/kumo/page-header/page-header";
-import { FixtureTag } from "@/components/domain/placeholders";
 import { PositionsTable } from "@/components/domain/positions";
 import { quantity } from "@/lib/format";
 import { useRuntime } from "@/lib/mock-runtime";
@@ -16,7 +15,7 @@ function Positions() {
   const flat = ws.agents.filter((a) => a.positions.length === 0);
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
-      <PageHeader title="Positions" environment={ws.environment} description="Everything your agents hold on this paper account. Each row opens the position." className="mb-0" />
+      <PageHeader title="Positions" description="Everything your agents hold on this paper account. Each row opens the position." className="mb-0" />
       {holding.map((agent) => {
         const staleSymbols = marketStale
           ? new Set(agent.positions.map((p) => p.instrument.symbol))
@@ -51,7 +50,6 @@ function Positions() {
           </Panel>
         </Section>
       ) : null}
-      <FixtureTag className="w-fit" />
     </div>
   );
 }

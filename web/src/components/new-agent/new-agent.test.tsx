@@ -13,7 +13,7 @@ import { RuntimeProbe, probed } from "@/test/runtime-probe";
 import { failingPasskey, press, stepUpDialog } from "@/test/step-up";
 import { ADVICE_REPLY, type Compiler, type CompilerInput, fixtureCompiler } from "./compiler";
 import { INTRO, READY } from "./conversation";
-import { type Read, compile, mandateFrom, readAnswers, readLoss, readStrategy, unaskedUsd } from "./draft";
+import { MODELS, type Read, compile, mandateFrom, readAnswers, readLoss, readStrategy, unaskedUsd } from "./draft";
 import { NewAgentFlow } from "./new-agent-flow";
 import { GAP_NOTE, summaryLines } from "./summary";
 
@@ -193,6 +193,24 @@ describe("one conversation, as in any chat", () => {
     ]);
   });
 
+  it("says what shape of answer would be read on a second miss in a row, never a value, instead of the same sentence again", async () => {
+    renderFlow();
+    await send("yes");
+    expect(lastReply()).toEqual(["I couldn't find an amount in that. How much money can it use, in dollars?"]);
+    await send("yes");
+    expect(lastReply()).toEqual(["I still couldn't find an amount. Write the figure on its own, in dollars, with nothing else in the message."]);
+    expect(lastReply().join(" ")).not.toMatch(EXAMPLES);
+    await send("$3,000");
+    expect(lastReply()).toEqual(["Got it: $3,000.00 to use.", "What's it for, in your own words?"]);
+    await send("Grow it");
+    await send("yes");
+    expect(lastReply()).toEqual(["I couldn't find a loss in that. Write it in dollars, or as a percentage of the money."]);
+  });
+
+  it("names the range a model setting must fall in when it asks, so the owner never guesses, and still proposes no value", async () => {
+    for (const m of MODELS) for (const p of m.params) expect(p.question).toMatch(/from [\d.]+ to [\d.]+/i);
+  });
+
   it("refuses a loss above the workspace's ceiling, never moving the answer to fit", async () => {
     renderFlow();
     await send("$3,000");
@@ -245,15 +263,15 @@ describe("the strategy, the owner's choice", () => {
     await send("$300");
     await send("MSFT");
     await send("mean reversion");
-    expect(lastReply()).toEqual(["Got it: the Mean reversion model.", "How many bars should the model read back over?"]);
+    expect(lastReply()).toEqual(["Got it: the Mean reversion model.", "How many bars should the model read back over? A whole number from 2 to 500."]);
     await send("20");
-    expect(lastReply()).toEqual(["Got it: lookback of 20.", "How far below its average, in standard deviations, must a price be before the model scores a buy?"]);
+    expect(lastReply()).toEqual(["Got it: lookback of 20.", "How far below its average, in standard deviations, must a price be before the model scores a buy? From 0.5 to 4, with at most two decimals."]);
     await send("9");
     expect(lastReply()).toEqual(["Entry z-score: a number from 0.5 to 4, with at most two decimals."]);
     await send("1.5");
     expect(lastReply()).toEqual(["Got it: entry z-score of 1.5.", READY]);
     expect(row("Its settings")).toHaveTextContent("Lookback, in bars: 20; Entry z-score: 1.5");
-    expect(within(row("Its settings")).queryByText("proposed")).toBeNull();
+    expect(within(row("Its settings")).queryByText("Proposed")).toBeNull();
   });
 
   it("explains a model and refuses to choose for the owner, in plain text with no buttons", async () => {
@@ -290,10 +308,10 @@ describe("the agent, shown once and created in one step", () => {
     expect(summary().querySelector("[data-slot=mandate-version]")!.textContent).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(row("Money it may use")).toHaveTextContent("$3,000.00");
     expect(row("Money it may use").querySelector("[data-slot=tag]")).toBeNull();
-    expect(row("Where it runs").querySelector("[data-slot=tag]")).toHaveTextContent("default");
+    expect(row("Where it runs").querySelector("[data-slot=tag]")).toHaveTextContent("Default");
     const limits = sectionRows("limits");
     expect(limits.length).toBeGreaterThan(5);
-    for (const r of limits) expect(r.querySelector("[data-slot=tag]")).toHaveTextContent("proposed");
+    for (const r of limits) expect(r.querySelector("[data-slot=tag]")).toHaveTextContent("Proposed");
     expect(summary().querySelector("details, [aria-expanded=false]")).toBeNull();
     expect(screen.queryByRole("button", { name: /confirm section|accept all/i })).toBeNull();
     expect(button("Create agent")).toBeEnabled();
@@ -304,7 +322,7 @@ describe("the agent, shown once and created in one step", () => {
     renderFlow();
     await toSummary();
     expect(row("Most it may lose, in total")).toHaveTextContent("$300.00");
-    expect(row("Fall at which it closes everything").querySelector("[data-slot=tag]")).toHaveTextContent("proposed");
+    expect(row("Fall at which it closes everything").querySelector("[data-slot=tag]")).toHaveTextContent("Proposed");
     expect(row("Could buy without asking you")).toHaveTextContent("$0.00");
     expect(summary()).toHaveTextContent(GAP_NOTE);
     expect(summary()).toHaveTextContent("It asks you before every buy.");
@@ -453,6 +471,7 @@ describe("creating it", () => {
     expect(progress()).toHaveTextContent("Agent 4 is running on paper.");
     expect(progress()).toHaveTextContent("Recorded in the journal at 14:05:20 ET, as version 1.");
     expect(progress()!.querySelector("[data-slot=owl]")).toHaveAttribute("data-mood", "awake");
+    expect(progress()!.querySelector("[data-slot=hatch] [data-slot=egg]"), "the owl hatches once, answering the owner's act (DEC-514)").not.toBeNull();
     expect(within(progress()!).getByRole("link", { name: "Open Agent 4" })).toHaveAttribute("href", `/agents/${d.agentId}`);
 
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 2));
@@ -571,7 +590,7 @@ describe("the fixture compiler's draft", () => {
     expect(lines.slice(0, 2)).toEqual(["Your agent", "PAPER: simulated funds"]);
     expect(lines.at(-1)).toBe("Version 1: sha256:abc");
     expect(lines).toContain("Money it may use: $5,000.00");
-    expect(lines).toContain("Where it runs: Paper: simulated funds, no real money. (default)");
+    expect(lines).toContain("Where it runs: Paper: simulated funds, no real money. (Default)");
     expect(lines).toContain("Model: Momentum (quant.momentum 1.0.0)");
     expect(lines).toContain("Could buy without asking you: $0.00");
   });
