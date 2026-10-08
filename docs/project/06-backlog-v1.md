@@ -334,6 +334,14 @@ the spec invariants (DP-n) its tests cover.
   question 4.
   *Accepted when:* a bundle is produced within the configured deadline, its report reproduces
   byte for byte from the same inputs, and every part verifies through the cold checks.
+- **E5-10 (Should)** As an auditor, I want every closed record's step-up evidence and times typed
+  one way, so that a reader never has to know which record wrote integer risk-clock seconds and
+  which a §4.7 timestamp ([DEC-533](decisions/DEC-533.md) item 2). Journal spec v0.17's §9.7
+  writes `authenticated_at`, `submitted_at` and `effective_at` as integer seconds, while §9.2's and
+  §9.3's step-up evidence writes a timestamp. The fix is a version bump of the records on one side,
+  with their writers and readers, and the old versions kept registered (§8).
+  *Accepted when:* one type serves every step-up's `authenticated_at` at the records' newest
+  versions, and the vectors show the old versions still read.
 
 ### E6 Agent runtime and risk
 

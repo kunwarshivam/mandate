@@ -32,6 +32,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import account
+import approval
 import control
 import research
 import risk_state
@@ -3356,6 +3357,7 @@ def render(
     risk_section: dict,
     research_section: dict,
     account_section: dict,
+    approval_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3366,6 +3368,7 @@ def render(
             "risk_state": risk_section,
             "research": research_section,
             "account_stream": account_section,
+            "approval_answers": approval_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3407,6 +3410,7 @@ def main(argv: list[str] | None = None) -> int:
     risk_section = risk_state.build_section()
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
+    approval_section = approval.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3420,6 +3424,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += research.run_mutants(research_section)
     problems += account.check_section(account_section)
     problems += account.run_mutants(account_section)
+    problems += approval.check_section(approval_section)
+    problems += approval.run_mutants(approval_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3433,6 +3439,7 @@ def main(argv: list[str] | None = None) -> int:
         risk_section,
         research_section,
         account_section,
+        approval_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -3442,6 +3449,7 @@ def main(argv: list[str] | None = None) -> int:
         or risk_state.check_section(reread["risk_state"])
         or research.check_section(reread["research"])
         or account.check_section(reread["account_stream"])
+        or approval.check_section(reread["approval_answers"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -3479,7 +3487,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(account_section['chain'])} account-stream events, {len(account_section['invalid_drafts'])} invalid and "
         f"{len(account_section['valid_drafts'])} valid drafts, "
         f"{len(account_section['valid_batches']) + len(account_section['invalid_batches'])} rule-45 batches; "
-        f"{len(account.VALIDATOR_MUTANTS)} validator and {len(account.vector_mutants(account_section))} vector mutants caught"
+        f"{len(account.VALIDATOR_MUTANTS)} validator and {len(account.vector_mutants(account_section))} vector mutants caught; "
+        f"{len(approval_section['drafts'])} approval-answer drafts, {len(approval_section['invalid_drafts'])} invalid and "
+        f"{len(approval_section['valid_drafts'])} valid; {len(approval.VALIDATOR_MUTANTS)} validator and "
+        f"{len(approval.vector_mutants(approval_section))} vector mutants caught"
     )
     return 0
 
