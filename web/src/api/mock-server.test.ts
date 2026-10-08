@@ -45,9 +45,10 @@ function setup(scenario: Scenario = "normal") {
   return { server, api, sent };
 }
 
-function post(server: ReturnType<typeof setup>["server"], path: string, body: unknown, key: string | null) {
+function post(server: ReturnType<typeof setup>["server"], path: string, body: unknown, key: string | null, csrf = true) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (key) headers["Idempotency-Key"] = key;
+  if (csrf) headers["X-Mandate-Request"] = "1";
   return server.fetch(`/v1/workspaces/${WS}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
 }
 
@@ -107,6 +108,16 @@ describe("the fixture-backed mock server", () => {
     expect(answer.status).toBe(422);
     expect(await answer.json()).toMatchObject({ code: "invalid", effect: "none" });
     expect(server.recorded()).toHaveLength(0);
+  });
+
+  it("pending E11-9: refuses a command without X-Mandate-Request: 1 as forbidden, recording nothing (spec §3.3)", async () => {
+    const { server, api } = setup();
+    for (const answer of [await post(server, "/kill-switch", kill, "csrf-key-0000000001", false), await post(server, "/agents/agt_01/pause", { record: null }, "csrf-key-0000000002", false)]) {
+      expect(answer.status).toBe(403);
+      expect(await answer.json()).toMatchObject({ code: "forbidden", effect: "none", retryable: false });
+    }
+    expect(server.recorded()).toHaveLength(0);
+    expect(await api.send(api.prepareKillSwitch(kill))).toMatchObject({ ok: true, effect: "recorded" });
   });
 
   it("pending E11-9: answers 404 for an unknown route, another workspace, or any order route", async () => {

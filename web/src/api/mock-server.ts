@@ -1,11 +1,12 @@
 /**
  * A fixture-backed stand-in for the workspace API: a `fetch` implementation for tests and for
  * `npm run dev`. It answers from `src/fixtures/` in the shapes of the workspace API spec, keeps
- * commands in memory by idempotency key and route (API-4), plays `unreachable` as a network that
+ * commands in memory by idempotency key and route (API-4), refuses a command without
+ * `X-Mandate-Request: 1` as 403 `forbidden` before anything else (spec §3.3), plays `unreachable` as a network that
  * does not answer, and `result-unknown` as commands recorded whose answer is lost, so a later status
  * poll finds them (spec §5.5).
  */
-import { OPERATIONS, isIdempotencyKey, type Fetch } from "./client";
+import { CSRF_HEADER, OPERATIONS, isIdempotencyKey, type Fetch } from "./client";
 import type { Watermark } from "./types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import type { Health, Scenario } from "@/fixtures/types";
@@ -94,6 +95,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
   }
 
   function post(route: string, headers: Headers, body: string): Response {
+    if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
     const match = ROUTES.find((r) => r.pattern.test(route));
     if (!match) return problem(404, "not_found", "none");
     const key = headers.get("Idempotency-Key") ?? "";
