@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, to_canonical};
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
 use mandate_num::Usd;
 use mandate_shell::control::{
     ConfirmedVersion, ControlRecord, DeploymentRefusal as Refusal, RunFacts, confirmed_version,
@@ -131,6 +132,21 @@ fn run() -> RunFacts {
     }
 }
 
+/// An `AgentStopped` for `agent` (journal spec §9.2's shape).
+fn stop(agent: &str) -> String {
+    format!(
+        r#"{{"agent_id":"{agent}","connection_id":"{CONNECTION}","loss_added":"0","reason":"owner_stop","retired_on":"2026-10-06"}}"#
+    )
+}
+
+/// An artifact store that cannot be read.
+struct Unavailable;
+impl ArtifactSource for Unavailable {
+    fn read_artifact(&self, _: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+        Err(ArtifactError::Unavailable)
+    }
+}
+
 fn violations(rules: &[Violation]) -> Option<Refusal> {
     Some(Refusal::Violations(rules.iter().copied().collect()))
 }
@@ -139,22 +155,20 @@ fn violations(rules: &[Violation]) -> Option<Refusal> {
 /// parsed, and a context with the registry present (X-7), every envelope path confirmed, and `paper`
 /// for a connection the stream says nothing about (DEC-505 items 1 and 3).
 #[test]
-#[ignore = "pending E19-11"]
 fn the_input_is_the_deployed_confirmed_version() {
     let stream = Stream::deployed();
     let input = stream.read();
-    let version = input.as_ref().map(|i| i.version);
+    let version = input.as_ref().map(|i| i.version());
     assert_eq!(version, Ok(stream.version), "the AgentDeployed version");
     let input = input.unwrap();
-    assert_eq!(input.mandate, Mandate::parse(&json(MANDATE)).unwrap());
-    let registered = input.context.registry.as_ref().map(BTreeMap::len);
+    assert_eq!(*input.mandate(), Mandate::parse(&json(MANDATE)).unwrap());
+    let registered = input.context().registry.as_ref().map(BTreeMap::len);
     assert_eq!(registered, Some(1), "the one model_version registration");
     let paper = Some(mandate_domain::Environment::Paper);
-    assert_eq!(input.context.connection_environment, paper);
+    assert_eq!(input.context().connection_environment, paper);
 }
 
 #[test]
-#[ignore = "pending E19-11"]
 fn without_a_deployment_of_this_agent_there_is_no_input() {
     assert_eq!(Stream::deployed().refused(), None, "with it");
     let mut stream = Stream::deployed();
@@ -171,25 +185,19 @@ fn without_a_deployment_of_this_agent_there_is_no_input() {
 /// An `AgentStopped` after the latest `AgentDeployed` refuses, another agent's does not, and a
 /// deployment after the stop counts.
 #[test]
-#[ignore = "pending E19-11"]
 fn a_stopped_agent_refuses_until_it_is_deployed_again() {
-    let stop = format!(
-        r#"{{"agent_id":"{AGENT}","connection_id":"{CONNECTION}","loss_added":"0","reason":"owner_stop","retired_on":"2026-10-06"}}"#
-    );
-    let other = stop.replace(AGENT, "agent_other");
-    let others = Stream::deployed().then("AgentStopped", &other);
+    let others = Stream::deployed().then("AgentStopped", &stop("agent_other"));
     assert_eq!(others.refused(), None, "another agent's stop");
-    let stopped = Stream::deployed().then("AgentStopped", &stop);
+    let stopped = Stream::deployed().then("AgentStopped", &stop(AGENT));
     assert_eq!(stopped.refused(), Some(Refusal::Stopped));
     let deploy = stopped.text(3);
     let again = stopped.then("AgentDeployed", &deploy);
-    assert_eq!(again.read().map(|i| i.version), Ok(again.version));
+    assert_eq!(again.read().map(|i| i.version()), Ok(again.version));
 }
 
 /// The latest `AgentDeployed` names the version: a later one naming a document the store lacks
 /// refuses rather than falling back to the earlier version.
 #[test]
-#[ignore = "pending E19-11"]
 fn the_latest_deployment_counts_and_its_document_must_be_stored_intact() {
     let later = format!(
         r#"{{"agent_id":"{AGENT}","mandate_version":"sha256:{}","record_ref":"sha256:{}"}}"#,
@@ -203,11 +211,29 @@ fn the_latest_deployment_counts_and_its_document_must_be_stored_intact() {
     assert_eq!(corrupt.refused(), Some(Refusal::DocumentCorrupt));
 }
 
+/// The records are read in `seq` order, not slice order: a stop at seq 5 listed before the
+/// deployment at seq 4 still follows it.
+#[test]
+fn the_stream_is_read_in_seq_order() {
+    let mut reordered = Stream::deployed().then("AgentStopped", &stop(AGENT));
+    reordered.records.swap(3, 4);
+    assert_eq!(reordered.refused(), Some(Refusal::Stopped));
+}
+
+/// A stored document that re-hashes but is no mandate, and a store that cannot be read, refuse.
+#[test]
+fn an_unreadable_document_or_store_refuses() {
+    let unreadable = Stream::of(&json(r#"{"name":"not a mandate"}"#), &envelope());
+    assert_eq!(unreadable.refused(), Some(Refusal::DocumentUnreadable));
+    let stream = Stream::deployed();
+    let refused = confirmed_version(&stream.records, &Unavailable, &run()).err();
+    assert_eq!(refused, Some(Refusal::StoreUnavailable));
+}
+
 /// A path the owner did not confirm (V-020; `/name`, which no other rule reads), a confirmation of
 /// another version or none (V-020 and V-022), a model registered under another hash or not at all
 /// (V-007), and a connection revoked or established as `live` (V-001) each refuse.
 #[test]
-#[ignore = "pending E19-11"]
 fn every_v_rule_the_stream_decides_refuses() {
     let but_name: Vec<&str> = envelope().into_iter().filter(|p| *p != "name").collect();
     let unconfirmed = Stream::of(&json(MANDATE), &but_name);
@@ -237,7 +263,6 @@ fn every_v_rule_the_stream_decides_refuses() {
 
 /// A `live` mandate is refused before anything else is read about it.
 #[test]
-#[ignore = "pending E19-11"]
 fn a_live_mandate_is_refused() {
     let paper = Stream::deployed();
     assert_eq!(paper.refused(), None, "the paper document");
@@ -250,14 +275,13 @@ fn a_live_mandate_is_refused() {
 /// V-002 is phase 2's (DEC-505 item 3): the version phase 1 confirmed with no equity is refused on
 /// a preflight equity below the allocation, and carries an equity that covers it.
 #[test]
-#[ignore = "pending E19-11"]
 fn v_002_refuses_only_on_the_preflight_equity() {
     let input = Stream::deployed().read().unwrap();
     let usd = |text| Usd::parse(text).unwrap();
     let short = input.clone().with_equity(usd("999.99")).err();
     assert_eq!(short, violations(&[Violation::V002]), "below 1000");
     let input = input.with_equity(usd("1000")).unwrap();
-    assert_eq!(input.context.account_equity_usd, usd("1000"));
+    assert_eq!(input.context().account_equity_usd, usd("1000"));
 }
 
 /// Each refusal has its own stable code (ADR-0001 ES-09); a live test for the mutation gate.

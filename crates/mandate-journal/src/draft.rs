@@ -109,6 +109,7 @@ impl Draft {
                 int("schema_version"),
                 written,
                 fields.get("config_refs"),
+                fields.get("actor"),
             )?
         } else {
             let schema = payload_schema(event_type, int("schema_version"))

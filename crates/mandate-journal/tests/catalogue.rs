@@ -156,6 +156,16 @@ const CLOSED_BY_SECTION_9_2: &[(&str, &str)] = &[
     ("OwnerCommandRefused", AGENT),
 ];
 
+/// The records journal spec v0.17 §9.7 closes (DEC-533), each on its one stream with the
+/// configuration it names. Until J2's implementation catalogues and closes them, the journal refuses
+/// them as not catalogued or not registered; `the_approval_answers_are_catalogued_and_closed_on_their_streams`
+/// asserts what they become, so the table above leaves their schema reason alone.
+const CLOSED_BY_SECTION_9_7: &[(&str, &str, &[&str])] = &[
+    ("ApprovalResponseSubmitted", CTL, &[]),
+    ("ApprovalResponded", AGENT, &[MAN]),
+    ("ApprovalRevalidated", AGENT, &[MAN]),
+];
+
 /// The account stream's snapshot, which §9.2 closes with rule 24 and its registration routes there
 /// (DEC-402). It is kept apart from the eleven pairs until that registration is implemented.
 const SNAPSHOT_ON_ACCOUNT: (&str, &str) = ("AccountSnapshotRecorded", ACCT);
@@ -240,8 +250,12 @@ fn stream_types_and_required_config_refs_match_the_spec() {
             } else {
                 InvalidReason::UnknownSchema
             };
+            let section_9_7 = CLOSED_BY_SECTION_9_7
+                .iter()
+                .any(|(t, _, _)| t == event_type);
             if !(kind == AGENT && CLOSED_ON_AGENT.contains(event_type))
                 && !closed_by_section_9_2(event_type, kind)
+                && !section_9_7
             {
                 assert_eq!(with_all.reason, expected, "{event_type} in {kind}");
             }
@@ -1272,4 +1286,37 @@ fn a_provenance_entry_refuses_an_unlisted_member() {
             "payload.provenance[0].quoted_span".to_owned()
         )
     );
+}
+
+/// §9.7's three records are catalogued on their one stream with the configuration they name, and
+/// closed there: a payload §9.7 does not list is refused `schema`, never `unknown_schema`.
+#[test]
+fn the_approval_answers_are_catalogued_and_closed_on_their_streams() {
+    for (event_type, home, refs) in CLOSED_BY_SECTION_9_7 {
+        for kind in [ACCT, AGENT, CTL, CLOCK] {
+            let refused = Draft::parse(&draft(event_type, kind, refs)).unwrap_err();
+            let want = if kind == *home {
+                (InvalidReason::Schema, "payload.unregistered".to_owned())
+            } else {
+                (InvalidReason::WrongStream, "event_type".to_owned())
+            };
+            assert_eq!(
+                (refused.reason, refused.path),
+                want,
+                "{event_type} in {kind}"
+            );
+        }
+        for missing in refs.iter() {
+            let refused = Draft::parse(&draft(event_type, home, &[])).unwrap_err();
+            let want = (
+                InvalidReason::MissingConfigRef,
+                format!("config_refs.{missing}"),
+            );
+            assert_eq!(
+                (refused.reason, refused.path),
+                want,
+                "{event_type} without {missing}"
+            );
+        }
+    }
 }

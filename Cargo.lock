@@ -1383,7 +1383,9 @@ dependencies = [
  "mandate-journal-cold",
  "mandate-journal-pg",
  "mandate-marketdata",
+ "mandate-modelhost",
  "mandate-num",
+ "mandate-spec",
  "mandate-time",
  "proptest",
  "secrecy",
@@ -1476,6 +1478,19 @@ dependencies = [
  "reqwest",
  "rustls",
  "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "mandate-mcp"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "thiserror",
