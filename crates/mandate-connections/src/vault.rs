@@ -16,7 +16,8 @@ pub struct VaultKey(pub String);
 pub struct AuthorizationCode(pub SecretString);
 
 /// The OAuth access token. It exists only in the vault and, as a `SecretString`, in the memory
-/// of the connection's executor (DEC-821 item 3).
+/// of the token-exchange process until its vault write, and of the connection's executor
+/// through its lease (DEC-821 items 2 and 4).
 pub struct AccessToken(pub SecretString);
 
 impl fmt::Debug for AuthorizationCode {

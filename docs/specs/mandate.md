@@ -20,6 +20,15 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-529](../project/decisions/DEC-529.md) item 3, founder, Accepted
+  2026-10-08):** §6.1's `cli_confirm` and V-001 admit one founder-run live deployment. V-001 accepts
+  a `live` mandate only on a Robinhood connection the founder recorded through the CLI (E7-11's
+  first slice); the default build stays paper only. On that connection only, `cli_confirm` is the
+  step-up method for the version's confirmation, the deployment, and each grant, until E9-4's
+  signed assertions replace it. MC-E16 (`cli_confirm` on any other live connection is
+  `step_up_method`) and every other reference case is unchanged. The narrowing lapses once that
+  connection is spent (V-001); the agent deployed on it keeps `cli_confirm` for its controls until
+  its account is flat.
 - **v0.6, amended ([DEC-536](../project/decisions/DEC-536.md), under DEC-176):** §6.2 gains step 5c, the policy overlay of §4.3,
   which applies last and names itself `policy_overlay` only when it changed the decision: while the
   confirmed version is `policy_nonconforming` it denies an opening or an increase ([DEC-534](../project/decisions/DEC-534.md)
@@ -452,7 +461,7 @@ and is recorded in `MandateConfirmed`.
 
 | Code | Rule |
 |---|---|
-| V-001 | `connection_id` belongs to the workspace and matches `environment` (paper or live account) |
+| V-001 | `connection_id` belongs to the workspace and matches `environment` (paper or live account). A `live` mandate is accepted only on a Robinhood connection the founder recorded through the CLI and has not spent ([DEC-529](../project/decisions/DEC-529.md) item 3); the default build is paper only. The connection is spent once an order it placed fills, wholly or partly, or its answer is lost and the order is `Unknown`, until the founder reconciles it (DEC-529 item 1); "unspent" is checked when the version is confirmed and deployed and when the runner starts, never against an agent already deployed |
 | V-002 | Other active agents' allocations on the account + this allocation ≤ account equity. Checked at validation and again atomically when a version is applied |
 | V-003 | `accumulate`: the universe is pinned (`universe.pinned`), `pinned_instruments` is exactly the goal instrument, and `behavior.research` is null, so the goal admits nothing (DEC-97, ADR-0002 part 9) |
 | V-005 | `leveraged_etps_enabled = true` requires `leveraged_etp_disclosure_version`, a `DisclosureAccepted` by the owner (with step-up) for exactly that version, and policy allowing it (§4.3). A new disclosure version makes leveraged-ETP openings inactive until the owner accepts it |
@@ -815,7 +824,13 @@ stream with `causation_id` and judges it there; nothing the owner's client check
   step-up outcome is `OwnerExitRequested.step_up_status`.
 - **Methods.** v0's only method is `cli_confirm`: the owner re-types a confirmation code the CLI
   derives locally, with no network, runtime, or model state. It is allowed only in a `paper`
-  environment (DEC-155 item 4); live step-up waits for E9-4's signed assertions.
+  environment (DEC-155 item 4), and in `live` only on the founder's own Robinhood connection that
+  V-001 admits, for its confirmation, deployment, and each grant
+  ([DEC-529](../project/decisions/DEC-529.md) item 3). Once that connection is spent, the agent
+  deployed on it keeps `cli_confirm` for owner exits, pause, resume, stop, acknowledgments and
+  grants until its account is flat, so no control is lost (rule 13); no second opening is sent
+  (DEC-529 item 13). Any other live step-up waits for E9-4's signed assertions, which replace it
+  there too.
 - **Why a refused owner exit is not a denied exit (rule 13, MI-1).** What is refused is an
   instruction not shown to be the owner's, never the exit. Pause and the kill switch stay
   available, and every automated exit, protective order, and risk exit runs untouched (MI-23).
@@ -1028,8 +1043,9 @@ still decides; the dry run is never authority. No re-pricing in v1: anything sti
 proposed again at a later evaluation at its own price.
 
 **Step-up.** Every grant carries step-up evidence valid at its effective time (§6.1), one assertion
-per approval and never one gesture for several. Paper grants use `cli_confirm`; live approvals wait
-for E9-4's step-up methods.
+per approval and never one gesture for several. Paper grants use `cli_confirm`, and so do grants
+on the founder's own live connection (§6.1, DEC-529 item 3); other live approvals wait for E9-4's
+step-up methods.
 
 **Two approvers.** An ASKed action with `order_usd` above `two_approver_above_usd`, as bound or as
 the policy overlay lowers it while the approval is pending, needs two distinct approvers; when the

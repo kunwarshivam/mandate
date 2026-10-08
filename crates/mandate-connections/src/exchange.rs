@@ -1,5 +1,7 @@
-//! The code exchange (connections spec §5.2 step 4). **The connection's executor process
-//! only**: it is the one process with the client secret and the live-host token endpoint.
+//! The code exchange (connections spec §5.2 step 4). **The token-exchange process only**
+//! (DEC-821 item 2): it is the one process with the client secret and the live-host token
+//! endpoint. It is not the executor: it holds no order client and no token lease, and the
+//! executor's egress contains no live host (DEC-821 item 4).
 
 use std::fmt;
 
@@ -68,7 +70,7 @@ pub struct ExchangedGrant {
 /// Exchanges the waiting code for a token, in this order:
 ///
 /// 1. A connection that is not paper is refused before the vault or the endpoint is touched
-///    (DEC-821 item 3).
+///    (DEC-821 items 3 and 4).
 /// 2. The code is taken from the vault, so it is never used twice.
 /// 3. The endpoint receives the [`LiveTokenRequest`] and the form.
 /// 4. The token type must be `bearer` and the scope must pass [`crate::grant::check_scope`].

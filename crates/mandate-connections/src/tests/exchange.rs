@@ -1,5 +1,5 @@
 //! The code exchange runs only for paper, sends the one live-host request, and keeps the token
-//! in the vault alone (connections spec §5.2 step 4; DEC-821 item 3, guardrails a, c, d).
+//! in the vault alone (connections spec §5.2 step 4; DEC-821 items 2, 3 and 4).
 
 use std::collections::BTreeSet;
 
