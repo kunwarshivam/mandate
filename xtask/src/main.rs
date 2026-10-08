@@ -6634,6 +6634,48 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-610: a draft runs no `ci` job. `fast`, `full-checks` and the mutation plan are skipped
+    /// while the pull request is a draft, the matrix follows its plan, `full` is skipped too rather
+    /// than judging skipped jobs, marking a pull request ready starts its run, and a newer push
+    /// still cancels the older run of the same ref.
+    #[test]
+    fn ci_runs_nothing_on_a_draft() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        assert!(
+            workflow.contains(
+                "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n"
+            ),
+            "marking a pull request ready for review starts the run that judges it"
+        );
+        assert!(
+            workflow.contains(
+                "concurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: true\n"
+            ),
+            "a newer run of the same ref cancels the older one"
+        );
+        for (job, guard) in [
+            ("fast", "if: ${{ !github.event.pull_request.draft }}"),
+            ("full-checks", "if: ${{ !github.event.pull_request.draft }}"),
+            (
+                "mutants-plan",
+                "if: ${{ !github.event.pull_request.draft }}",
+            ),
+            (
+                "full",
+                "if: ${{ always() && !github.event.pull_request.draft }}",
+            ),
+            ("mutants", "needs: mutants-plan"),
+        ] {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            assert!(
+                lines.iter().any(|line| line.trim() == guard),
+                "`{job}` has `{guard}`, so a draft runs it not at all"
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn ci_leaves_the_base_to_the_event() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -6824,7 +6866,8 @@ mod tests {
     /// refuses a workflow-runs query that is not filtered to the pull request's head and to
     /// `pull_request` events, and answers `mergeable: UNKNOWN` while `unknown_reads` counts down.
     /// The label's events and the description's authorship come from `events.json` and
-    /// `graphql.json`.
+    /// `graphql.json`, and the jobs of `ci`'s latest run, the only run it answers them for, from
+    /// `jobs.json`.
     const STUB_GH: &str = r##"#!/usr/bin/env bash
 set -euo pipefail
 dir=$(dirname "$0")
@@ -6866,6 +6909,13 @@ else
   esac
   case "$path" in
     */actions/workflows/ci.yml/runs*) src="$dir/ci.json" ;;
+    */actions/runs/*/jobs*)
+      run=${path#*/actions/runs/}
+      run=${run%%/*}
+      latest=$(jq '.workflow_runs | max_by(.id) | .id' "$dir/ci.json")
+      [ "$run" = "$latest" ] || { echo "jobs asked of run $run, not the latest ci run $latest" >&2; exit 1; }
+      src="$dir/jobs.json"
+      ;;
     */actions/workflows/web.yml/runs*) src="$dir/web.json" ;;
     */files*) src="$dir/files.json" ;;
     */issues/*/events*) src="$dir/events.json" ;;
@@ -6895,6 +6945,8 @@ jq -r "$filter" "$src"
     struct MergeCase {
         view: Value,
         ci: Value,
+        /// The jobs of `ci`'s latest run.
+        jobs: Value,
         web: Value,
         files: Vec<String>,
         unknown_reads: u32,
@@ -6913,6 +6965,14 @@ jq -r "$filter" "$src"
             })
             .collect();
         json!({ "workflow_runs": runs })
+    }
+
+    fn run_jobs(list: &[(&str, &str)]) -> Value {
+        let jobs: Vec<Value> = list
+            .iter()
+            .map(|(name, conclusion)| json!({ "name": name, "conclusion": conclusion }))
+            .collect();
+        json!({ "jobs": jobs })
     }
 
     fn approved_body(approval: &str) -> String {
@@ -6942,6 +7002,13 @@ jq -r "$filter" "$src"
                 ci: workflow_runs(&[
                     (1, "completed", Some("failure")),
                     (2, "completed", Some("success")),
+                ]),
+                jobs: run_jobs(&[
+                    ("fast", "success"),
+                    ("full-checks", "success"),
+                    ("mutants-plan", "success"),
+                    ("mutants", "skipped"),
+                    ("full", "success"),
                 ]),
                 web: workflow_runs(&[]),
                 files: vec!["crates/c/src/lib.rs".to_owned()],
@@ -6973,6 +7040,7 @@ jq -r "$filter" "$src"
                 .collect();
             fs::write(dir.join("view.json"), self.view.to_string())?;
             fs::write(dir.join("ci.json"), self.ci.to_string())?;
+            fs::write(dir.join("jobs.json"), self.jobs.to_string())?;
             fs::write(dir.join("web.json"), self.web.to_string())?;
             fs::write(dir.join("files.json"), Value::from(files).to_string())?;
             fs::write(dir.join("unknown_reads"), self.unknown_reads.to_string())?;
@@ -7056,7 +7124,7 @@ jq -r "$filter" "$src"
     #[test]
     fn the_merge_script_refuses_anything_short_of_an_approved_green_head() -> Result<()> {
         let stale_head = "2".repeat(40);
-        let refusals: [Refusal<'_>; 22] = [
+        let refusals: [Refusal<'_>; 25] = [
             (
                 "closed",
                 &|c| c.view["state"] = json!("CLOSED"),
@@ -7154,6 +7222,29 @@ jq -r "$filter" "$src"
                     ])
                 },
                 "has ci.yml at in_progress",
+            ),
+            (
+                "ci-skipped-on-a-draft",
+                &|c| {
+                    c.jobs = run_jobs(&[
+                        ("fast", "skipped"),
+                        ("full-checks", "skipped"),
+                        ("mutants-plan", "skipped"),
+                        ("mutants", "skipped"),
+                        ("full", "skipped"),
+                    ])
+                },
+                "without fast and full both run and green (fast=skipped full=skipped)",
+            ),
+            (
+                "ci-full-skipped",
+                &|c| c.jobs = run_jobs(&[("fast", "success"), ("full", "skipped")]),
+                "without fast and full both run and green (fast=success full=skipped)",
+            ),
+            (
+                "ci-without-its-required-jobs",
+                &|c| c.jobs = run_jobs(&[("mutants-plan", "success")]),
+                "without fast and full both run and green (neither found)",
             ),
             (
                 "web-red",
