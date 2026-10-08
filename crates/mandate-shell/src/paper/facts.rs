@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
     AssetSnapshot, DataClient, DataTransport, LatestQuote, MinuteBars, Pause, RetryPolicy,
     TradingClient, TradingTransport,
@@ -18,8 +19,8 @@ use mandate_liquidity::{
 use mandate_num::{Price, Qty, Usd};
 use mandate_time::UtcNanos;
 
+use super::absent;
 use super::artifacts::Artifacts;
-use super::{SYMBOL, absent};
 use crate::adapters::{trusted_daily_bars, untrusted};
 use crate::error::Cause;
 
@@ -135,8 +136,10 @@ where
 /// - `daily` must pass the same trust check the signal's bars do, ending on the last completed
 ///   session; its stored close and volume fields are parsed into [`DailyBar`] values, and
 ///   [`daily_liquidity`] reads the last 20.
-/// - `minute_bars` must be AAPL's, as the preflight read them; [`trailing_volume`] sums those that
-///   start inside the five minutes before `now` and refuses one that ends after it.
+/// - `minute_bars` must be `symbol`'s, as the preflight read them; [`trailing_volume`] sums those
+///   that start inside the five minutes before `now` and refuses one that ends after it.
+///
+/// `symbol` is the run's instrument, the one its artifacts bind, so no instrument is pinned here.
 ///
 /// IEX volumes understate consolidated volume, so every figure errs toward the tighter limit.
 ///
@@ -144,14 +147,15 @@ where
 /// [`Cause::Untrusted`] or the dataset's own error when the daily bars cannot be trusted at `now`,
 /// and [`Cause::Absent`] naming the minute-bar fact that does not hold.
 pub fn liquidity_facts(
+    symbol: &InstrumentId,
     daily: &Path,
     minute_bars: &MinuteBars,
     now: UtcNanos,
 ) -> Result<LiquidityFacts, Cause> {
-    if minute_bars.instrument.as_str() != SYMBOL {
-        return Err(absent("AAPL's minute bars"));
+    if minute_bars.instrument != *symbol {
+        return Err(absent("the instrument's minute bars"));
     }
-    let daily: Vec<DailyBar> = trusted_daily_bars(daily, SYMBOL, now)?
+    let daily: Vec<DailyBar> = trusted_daily_bars(daily, symbol.as_str(), now)?
         .iter()
         .map(|bar| -> Result<DailyBar, LiquidityError> {
             Ok(DailyBar {
