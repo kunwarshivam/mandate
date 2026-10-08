@@ -318,7 +318,9 @@ crates.
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
   `src/bin/mandate-tracer.rs` the binary; `src/control.rs` the deployment input from the control
   stream (E19-11, DEC-505; tests in `crates/mandate-shell/tests/control.rs`) and the effective
-  registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`);
+  registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`),
+  and the policy set and model registry that govern the run, DEC-534 (tests in
+  `crates/mandate-shell/tests/governance.rs`);
   `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed E7-7 AAPL artifacts and
   binds the bytes it checked, reads the GET-only broker preflight (including the trailing window's
   IEX minute bars, DEC-471) and the liquidity facts into one `PaperFacts` snapshot, refuses any
@@ -396,7 +398,11 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-executor/src/ids.rs` (`ClientOrderId`, three derivations and one validating
   parser, no free constructor), `crates/mandate-executor/src/types.rs` (the vocabulary, including
   `BrokerRequest` and `AccountWideScope`), `crates/mandate-executor/src/reconcile.rs`,
-  `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/gate.rs` (the binding
+  `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/kill.rs` (the
+  agent-scoped kill switch of section 5.5: the final mode first, the agent's orders cancelled by
+  id, and its sub-ledger sold through the executor's own `k-<switch>-<n>` flatten intents once the
+  cancels confirm; the account and workspace scopes answer their stub; DEC-485),
+  `crates/mandate-executor/src/gate.rs` (the binding
   gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`,
   `crates/mandate-executor/src/opening.rs` (`equity_bracket_prices`, the bracket's stop and
   take-profit rounded up onto the Reg NMS grid, and `BrokerAccount::one_x_buying_power`, with
@@ -881,7 +887,8 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   identity the version hash rests on), `crates/mandate-spec/tests/document.rs` (the code and pointer
   each rejection carries), `crates/mandate-spec/tests/validate.rs` (the closed §7 list, the provenance
   rules, the confirmation screen's four figures), `crates/mandate-spec/tests/policy.rs` (the nearest
-  broken ancestor, each key kind, the absence asymmetry),
+  broken ancestor, each key kind, the absence asymmetry), `crates/mandate-spec/tests/policy_document.rs`
+  (a `policy.schema.json` document and a `policy_set` object read strictly, DEC-484 item 4),
   `crates/mandate-spec/tests/risk_day.rs` (the year tiled without gap or overlap),
   `crates/mandate-spec/tests/goal.rs` (each §3.1 "done when" row, and a `profit_stop` left to the risk
   state), `crates/mandate-spec/tests/risk.rs` (the §5 fold: the ladder and its hysteresis boundary,
@@ -1029,6 +1036,10 @@ proves each pending test fails on them (DEC-110).
   `kill`, `status`), stubbed; `crates/mandate-cli/tests/approvals.rs` and
   `crates/mandate-cli/tests/agent.rs`, pending E8-3 but for one live fixture check, with an
   in-memory journal in `crates/mandate-cli/tests/common/mod.rs`.
+- **The `approvals` commands (K1a, DEC-533):** `crates/mandate-cli/src/inbox.rs` (`list`, `show`,
+  `approve` and `skip` over P0's journal as D1b's paper owner; the renderers `list_lines`,
+  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`), stubbed, and `main`;
+  `crates/mandate-cli/tests/inbox.rs`, pending E8-3 but for the live flags test.
 - **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime -p mandate-cli`;
   `cargo xtask ci pending`.
 
@@ -1064,7 +1075,38 @@ proves each pending test fails on them (DEC-110).
   whose content and hash come only from `mandate_modelhost::content`; both paper only), stubbed.
 - **Tests:** `crates/mandate-cli/tests/config_register.rs`, pending E10-16, each committed draft
   read back through `Draft::parse`.
-- **Run:** `cargo nextest run -p mandate-cli --test config_register`; `cargo xtask ci pending`.
+- **The commands (D1b, DEC-527):** `crates/mandate-cli/src/register.rs` (`OwnerArgs`, the
+  required `--workspace` and `--user`, always in paper; `run` and `run_model` over P0's
+  `--journal` and `--store`), stubbed, and `main`; `crates/mandate-cli/tests/register_commands.rs`,
+  pending E10-16: the flags, the refusals without a database, and the binary against Postgres.
+- **`workspace open` (D1c, DEC-527 items 7 and 8):** `crates/mandate-cli/src/workspace.rs` (`open`,
+  the control stream's one `StreamOpened` as the `control_services` opener, in paper), stubbed;
+  `crates/mandate-cli/tests/workspace_open.rs`, pending E10-16 but for the live flags test.
+- **Run:** `cargo nextest run -p mandate-cli --test config_register --test register_commands`;
+  `cargo xtask ci pending`; `cargo xtask ci postgres` for the binary test.
+
+## The CLI's mandate version and confirmation (E10-16, D2a)
+
+- **Spec:** `docs/specs/journal.md` §9.2 (`MandateVersionCreated`, `MandateConfirmed`);
+  `docs/specs/mandate.md` §2.1, §4.1, §6.1 (`cli_confirm`), §9.1, §10; the first paper trade brief
+  (D2a); DEC-505, DEC-523, DEC-530.
+- **Code:** `crates/mandate-cli/src/version.rs` (`create`, which stores the canonical document and
+  its record and commits `MandateVersionCreated`, every envelope path `user_entered`; `confirm`,
+  which takes the code bound to the version, checks every V-rule but V-002 and the registered
+  instrument snapshots, and commits `MandateConfirmed`; both paper only).
+- **Tests:** `crates/mandate-cli/tests/version.rs`: payloads and records written
+  out from the vectors' shapes and read back through `Draft::parse`; the stream folded with
+  `JournaledFact::from_record` and `ValidationContext::from_journal`, leaving only V-001 and V-002;
+  every refusal code, each writing nothing; a store failing at each write committing nothing. The SPY mandate is
+  `crates/mandate-cli/tests/fixtures/spy_mandate.json`.
+- **Run:** `cargo nextest run -p mandate-cli --test version`.
+- **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
+  takes the stream's latest confirmed version and a code bound to the agent and the version, and
+  commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
+  stubbed; `crates/mandate-cli/tests/deploy.rs`, pending E10-16, over a control stream seeded in
+  §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
+  force; every refusal code, each writing nothing; a failing store committing nothing.
+  `cargo nextest run -p mandate-cli --test deploy`.
 
 ## Reference-case harness
 
@@ -1254,6 +1296,19 @@ proves each pending test fails on them (DEC-110).
   check order over every pair of stages, and the signal against an `i128` oracle with ties and a
   clock-independence check), with fixtures in `tests/common/mod.rs`.
 - **Run:** `cargo nextest run -p mandate-modelhost`.
+
+## Simulated Robinhood broker (E7-25)
+
+- **Spec:** the Robinhood tool contract (E7-15: "The equity order tools", "Order states") and
+  slice S1 of the first live trade brief, both from PR #706; connections spec §6; DEC-124;
+  DEC-441 items 11 and 16.
+- **Code:** `mandate-rh-sim`, `crates/mandate-rh-sim/` (layer 10, above every product crate, so
+  a dev-dependency only; safety-critical, pure):
+  `src/lib.rs` (`Sim`, its scripted `Event`s and `Fault`s, the order and request types,
+  `SimError`).
+- **Tests:** `crates/mandate-rh-sim/tests/rules.rs` (only an agentic account reviews or places;
+  account numbers are unique), with fixtures in `tests/common/mod.rs`. Pending E7-25.
+- **Run:** `cargo nextest run -p mandate-rh-sim`.
 
 ## Research-agent spike (E17-0)
 

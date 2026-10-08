@@ -6,13 +6,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_num::Ratio;
 use mandate_time::UtcNanos;
 
 use crate::schema::{Ty, is_ident};
 use crate::{Draft, Invalid, InvalidReason, StoredEvent, StreamId, StreamType, TrustedStart};
 
 /// The event types §9.1 closes on the agent stream.
-const CLOSED: [&str; 10] = [
+const CLOSED: [&str; 12] = [
     "StreamOpened",
     "ObservationRecorded",
     "ModelOutputRecorded",
@@ -20,6 +21,8 @@ const CLOSED: [&str; 10] = [
     "IntentProposed",
     "ApprovalRequested",
     "ApprovalDelivered",
+    "ApprovalResponded",
+    "ApprovalRevalidated",
     "AgentModeChanged",
     "KillSwitchActivated",
     "OwnerExitRequested",
@@ -54,6 +57,8 @@ pub(crate) fn payload(
             ensure(caused, InvalidReason::Schema, "causation_id")?;
         }
         "ApprovalRequested" => approval_requested_rules(view)?,
+        "ApprovalResponded" => responded_rules(view)?,
+        "ApprovalRevalidated" => revalidated_rules(view)?,
         "AgentModeChanged" => ensure(
             strictness(view.text("to")) >= strictness(view.text("lifecycle")),
             InvalidReason::Schema,
@@ -115,7 +120,7 @@ pub(crate) fn subject_and_copy(
         _ => {}
     }
     let copy = match event_type {
-        "OwnerExitRequested" => true,
+        "OwnerExitRequested" | "ApprovalResponded" => true,
         "KillSwitchActivated" => view.text("initiator") == "owner",
         "AgentModeChanged" => OWNER_MODE_REASONS.contains(&view.text("reason")),
         _ => false,
@@ -581,6 +586,8 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         "IntentProposed" => Some(&INTENT_PROPOSED),
         "ApprovalRequested" => Some(&APPROVAL_REQUESTED),
         "ApprovalDelivered" => Some(&APPROVAL_DELIVERED),
+        "ApprovalResponded" => Some(&APPROVAL_RESPONDED),
+        "ApprovalRevalidated" => Some(&APPROVAL_REVALIDATED),
         "AgentModeChanged" => Some(&AGENT_MODE_CHANGED),
         "KillSwitchActivated" => Some(&KILL_SWITCH_ACTIVATED),
         "OwnerExitRequested" => Some(&OWNER_EXIT_REQUESTED),
@@ -799,6 +806,149 @@ static APPROVAL_DELIVERED: Ty = Ty::Record(&[
     ),
     ("message_id", Ty::Nullable(&Ty::Str)),
 ]);
+
+/// Mandate spec §6.4's admission reasons, checks 1 to 7, in check order.
+const ADMISSION_REASONS: [&str; 11] = [
+    "not_pending",
+    "late",
+    "not_an_approver",
+    "not_delivered",
+    "content_mismatch",
+    "step_up_missing",
+    "step_up_stale",
+    "step_up_reused",
+    "step_up_method",
+    "duplicate_approver",
+    "not_independent",
+];
+
+static QUORUM: Ty = Ty::Record(&[("independent", Ty::Bool), ("required", Ty::Int)]);
+
+static APPROVAL_RESPONDED: Ty = Ty::Record(&[
+    ("approval", Ty::Ulid),
+    ("verdict", Ty::OneOf(&["approved", "skipped"])),
+    ("responder", Ty::Str),
+    ("role", Ty::OneOf(&["approver"])),
+    ("result", Ty::OneOf(&["admitted", "counted", "refused"])),
+    ("reason", Ty::Nullable(&Ty::OneOf(&ADMISSION_REASONS))),
+    ("effective_at", Ty::Int),
+    ("step_up", Ty::Nullable(&crate::control::ANSWER_STEP_UP)),
+    ("quorum", Ty::Nullable(&QUORUM)),
+    ("separation_of_duties", Ty::Null),
+    ("delegation", Ty::Null),
+]);
+
+static APPROVAL_REVALIDATED: Ty = Ty::Record(&[
+    ("approval", Ty::Ulid),
+    ("result", Ty::OneOf(&["act", "skip"])),
+    ("reason", Ty::Nullable(&Ty::Str)),
+    ("mandate_version_bound", Ty::DigestRef),
+    ("mandate_version_now", Ty::DigestRef),
+    ("mode", MODE),
+    ("instrument_restricted", Ty::Bool),
+    ("decided_by_bound", Ty::Str),
+    ("decided_by_now", Ty::Nullable(&Ty::Str)),
+    ("dry_run", Ty::OneOf(&["allow", "deny"])),
+    ("dry_run_reason", Ty::Nullable(&Ty::Str)),
+    ("m_req", Ty::Nullable(&Ty::Decimal)),
+    ("m_now", Ty::Nullable(&Ty::Decimal)),
+    ("band_bp", Ty::Int),
+]);
+
+/// Rules 47 to 49 (journal spec §9.7): a reason exactly when refused, a quorum exactly when check 7
+/// was judged, and a skip judged by checks 1 to 5 only.
+fn responded_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let refused = p.text("result") == "refused";
+    ensure(
+        p.is_null("reason") != refused,
+        InvalidReason::Schema,
+        "payload.reason",
+    )?;
+    let reason = p.text("reason");
+    let judged = p.text("verdict") == "approved"
+        && (matches!(p.text("result"), "admitted" | "counted")
+            || matches!(reason, "duplicate_approver" | "not_independent"));
+    ensure(
+        p.is_null("quorum") != judged,
+        InvalidReason::Schema,
+        "payload.quorum",
+    )?;
+    if p.text("verdict") == "skipped" {
+        ensure(
+            p.text("result") != "counted",
+            InvalidReason::Schema,
+            "payload.result",
+        )?;
+        ensure(
+            p.is_null("reason") || ADMISSION_REASONS[..5].contains(&reason),
+            InvalidReason::Schema,
+            "payload.reason",
+        )?;
+    }
+    Ok(())
+}
+
+/// Rules 51 to 53 (journal spec §9.7): a reason exactly on `skip`, a dry-run reason exactly on
+/// `deny`, a band of 100 or 200, and an `act` that passed every check it records, reported at the
+/// first member that shows a failure.
+fn revalidated_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    ensure(
+        p.is_null("reason") != (p.text("result") == "skip"),
+        InvalidReason::Schema,
+        "payload.reason",
+    )?;
+    ensure(
+        p.is_null("dry_run_reason") != (p.text("dry_run") == "deny"),
+        InvalidReason::Schema,
+        "payload.dry_run_reason",
+    )?;
+    let band = p.0.get("band_bp").and_then(Value::as_int);
+    let Some(band) = band.filter(|b| matches!(b, 100 | 200)) else {
+        return Err(Invalid::new(InvalidReason::Schema, "payload.band_bp"));
+    };
+    if p.text("result") != "act" {
+        return Ok(());
+    }
+    let decided =
+        p.is_null("decided_by_now") || p.text("decided_by_now") == p.text("decided_by_bound");
+    for (member, holds) in [
+        (
+            "mandate_version_now",
+            p.text("mandate_version_now") == p.text("mandate_version_bound"),
+        ),
+        ("mode", p.text("mode") == "normal"),
+        (
+            "instrument_restricted",
+            p.0.get("instrument_restricted") == Some(&Value::Bool(false)),
+        ),
+        ("decided_by_now", decided),
+        ("dry_run", p.text("dry_run") == "allow"),
+        ("m_req", !p.is_null("m_req")),
+        ("m_now", !p.is_null("m_now")),
+    ] {
+        ensure(holds, InvalidReason::Schema, &format!("payload.{member}"))?;
+    }
+    ensure(
+        inside_band(p.text("m_req"), p.text("m_now"), band).unwrap_or(false),
+        InvalidReason::Schema,
+        "payload.m_now",
+    )
+}
+
+/// Mandate spec §6.4's drift: |`m_now` − `m_req`| × 10 000 ≤ `band_bp` × `m_req`, on exact
+/// decimals; `None` when a value cannot be compared exactly, which refuses.
+fn inside_band(m_req: &str, m_now: &str, band: u64) -> Option<bool> {
+    let (m_req, m_now) = (Ratio::parse(m_req).ok()?, Ratio::parse(m_now).ok()?);
+    let drift = m_now.checked_sub(m_req).ok()?;
+    let drift = if drift.is_negative() {
+        drift.negated()
+    } else {
+        drift
+    };
+    let lhs = drift.times_int(10_000).ok()?;
+    let rhs = m_req.times_int(u32::try_from(band).ok()?).ok()?;
+    Some(lhs <= rhs)
+}
 
 static AGENT_MODE_CHANGED: Ty = Ty::Record(&[
     ("from", MODE),
