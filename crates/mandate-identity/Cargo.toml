@@ -10,6 +10,9 @@ description = "The pure identity core: principals, memberships, roles, the permi
 workspace = true
 
 [dependencies]
+mandate-identity-seal.workspace = true
 mandate-time.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
