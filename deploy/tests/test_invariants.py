@@ -219,6 +219,23 @@ def secrets_never_reported(f: dict[str, str]) -> list[str]:
     return problems
 
 
+def no_side_doors(f: dict[str, str]) -> list[str]:
+    """Nothing changes the vault's or the state directory's owners, modes, or ACLs outside
+    bootstrap's `install -d` lines; no unit adds a group; nothing writes /etc/group."""
+    problems = []
+    for name, text in f.items():
+        for line in text.splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            if re.search(r"\b(chmod|chown|chgrp|setfacl)\b", line) and re.search(r"\$VAULT|/var/lib/owlhead|tokens|pending", line):
+                problems.append(f"{name}: {line.strip()}")
+            if re.search(r"/etc/(group|gshadow)\b", line):
+                problems.append(f"{name}: {line.strip()}")
+        if name.startswith("systemd/") and re.search(r"^SupplementaryGroups=", text, re.M):
+            problems.append(f"{name}: SupplementaryGroups=")
+    return problems
+
+
 def units_umask(f: dict[str, str]) -> list[str]:
     """Both service units create files 0640 at most."""
     return [u for u in ("systemd/owlhead-api.service", "systemd/owlhead-executor.service") if "UMask=0027" not in f[u].splitlines()]
@@ -290,6 +307,7 @@ def keys_pinned(f: dict[str, str]) -> list[str]:
 
 
 CHECKS = (
+    no_side_doors,
     units_umask,
     no_cross_group,
     artifacts_shared,
@@ -319,6 +337,12 @@ def test_the_committed_files_hold(check):
 
 
 SEEDED = (
+    ("bootstrap.sh", 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"', 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"\nrun chmod 0777 "$VAULT"', no_side_doors),
+    ("bootstrap.sh", 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"', 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"\nrun chown -R owlhead_api /var/lib/owlhead', no_side_doors),
+    ("bootstrap.sh", 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"', 'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"\nrun setfacl -m u:owlhead_api:r "$VAULT/tokens"', no_side_doors),
+    ("systemd/owlhead-api.service", "User=owlhead_api\n", "User=owlhead_api\nSupplementaryGroups=owlhead_exec\n", no_side_doors),
+    ("systemd/owlhead-executor.service", "User=owlhead_exec\n", "User=owlhead_exec\nSupplementaryGroups=owlhead_api\n", no_side_doors),
+    ("bootstrap.sh", 'run groupadd --system "$ART_GROUP"', 'run groupadd --system "$ART_GROUP"\n  sed -i "s/^owlhead_exec:x:\\([0-9]*\\):/&owlhead_api/" /etc/group', no_side_doors),
     ("systemd/owlhead-executor.service", "UMask=0027", "UMask=0022", units_umask),
     ("bootstrap.sh", 'run gpasswd --add "$user" "$ART_GROUP"', 'run gpasswd --add "$user" "$ART_GROUP"\n    run usermod -aG owlhead_exec owlhead_api', no_cross_group),
     ("bootstrap.sh", 'run gpasswd --add "$user" "$ART_GROUP"', 'run gpasswd --add "$user" "$EXEC_USER"', no_cross_group),
