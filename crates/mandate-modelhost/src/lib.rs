@@ -25,13 +25,14 @@ mod ma_crossover;
 use std::collections::BTreeMap;
 
 use mandate_accounting::InstrumentId;
-use mandate_canon::Digest;
+use mandate_canon::{Digest, to_canonical};
 use mandate_num::Price;
-use mandate_runtime::ModelOutput;
+use mandate_runtime::{ModelOutput, RiskClock};
 use mandate_spec::document::{ModelId, SignalModel};
 use mandate_spec::validate::RegisteredModel;
-use mandate_time::{Date, ExchangeCalendar, UtcNanos};
+use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 
+use mandate_backtest::BacktestError;
 pub use mandate_backtest::Signal;
 
 /// The confirmed mandate's pin of one signal model, and the instrument it is evaluated for.
@@ -134,8 +135,12 @@ impl Refusal {
 /// The content object the host computes for `model_id` at `model_version`, from the source bytes
 /// it was built with, or [`Refusal::UnknownModel`] for a model it has no compiled content for.
 pub fn content(model_id: &str, model_version: &str) -> Result<Content, Refusal> {
-    let _ = (model_id, model_version, ma_crossover::SOURCES);
-    Err(Refusal::Unimplemented { story: "E15-13" })
+    if (model_id, model_version) != (ma_crossover::MODEL_ID, ma_crossover::MODEL_VERSION) {
+        return Err(Refusal::UnknownModel);
+    }
+    let canonical = to_canonical(&ma_crossover::content_object()?);
+    let hash = Digest::of(&canonical);
+    Ok(Content { canonical, hash })
 }
 
 /// The pinned model's output on `closes` at `now`, or why there is none.
@@ -146,6 +151,107 @@ pub fn evaluate(
     closes: &DailyCloses,
     now: UtcNanos,
 ) -> Result<Evaluation, Refusal> {
-    let _ = (pin, registry, calendar, closes, now);
-    Err(Refusal::Unimplemented { story: "E15-13" })
+    let model = &pin.model;
+    let host = content(model.id.as_str(), &model.version)?;
+    if model.content_hash != host.hash {
+        return Err(Refusal::PinHashMismatch);
+    }
+    let entry = registry.get(&model.id).ok_or(Refusal::NotRegistered)?;
+    let schema = ma_crossover::PARAMS.map(|(name, _, _)| name.to_owned());
+    if entry.version != model.version
+        || entry.content_hash != host.hash
+        || entry.params != schema.into()
+        || entry.admits_instruments
+        || model.admits_instruments
+    {
+        return Err(Refusal::RegistryMismatch);
+    }
+    let config = ma_crossover::config(&model.params)?;
+    if closes.instrument_id != pin.instrument_id {
+        return Err(Refusal::WrongInstrument);
+    }
+    complete(calendar, &closes.closes)?;
+    let last = calendar
+        .last_completed_regular_session(now)
+        .ok()
+        .flatten()
+        .ok_or(Refusal::CalendarCannotName)?;
+    let Some((end, _)) = closes.closes.last() else {
+        return Err(Refusal::TooFewCloses);
+    };
+    if *end != last {
+        return Err(Refusal::ClosesEnd);
+    }
+    let slow = usize::try_from(config.slow_periods).map_err(|_| Refusal::ParamValue {
+        key: "slow_periods",
+    })?;
+    if closes.closes.len() < slow {
+        return Err(Refusal::TooFewCloses);
+    }
+    let prices: Vec<Price> = closes.closes.iter().map(|(_, p)| *p).collect();
+    let signal = config
+        .signal(&prices)
+        .map_err(|_: BacktestError| Refusal::SignalArithmetic)?;
+    let Some((direction, conviction, confidence)) = ma_crossover::opinion(signal)? else {
+        return Ok(Evaluation::NoOutput(signal));
+    };
+    let close = calendar
+        .sessions(last)
+        .map_err(|_| Refusal::CalendarCannotName)?
+        .into_iter()
+        .find(|span| span.session() == Session::Regular)
+        .ok_or(Refusal::CalendarCannotName)?
+        .end();
+    let as_of = close.secs();
+    let expires = as_of
+        .checked_add(i64::from(model.max_output_age_s))
+        .ok_or(Refusal::ExpiryOverflow)?;
+    Ok(Evaluation::Long(Box::new(ModelOutput {
+        model_id: model.id.as_str().to_owned(),
+        model_version: model.version.clone(),
+        content_hash: host.hash,
+        instrument_id: pin.instrument_id.clone(),
+        as_of: RiskClock::from_secs(as_of),
+        expires_at: RiskClock::from_secs(expires),
+        direction,
+        conviction,
+        confidence,
+        horizon_s: ma_crossover::horizon_s(model.max_output_age_s),
+        thesis_ref: None,
+        evidence: Vec::new(),
+        invalidation: None,
+        thesis_id: None,
+        lineage_id: None,
+        ignored: None,
+    })))
+}
+
+/// Every close on a regular-session day, each the session after the one before.
+fn complete(calendar: &ExchangeCalendar, closes: &[(Date, Price)]) -> Result<(), Refusal> {
+    let trades = |day: Date| {
+        calendar
+            .is_trading_day(day)
+            .map_err(|_| Refusal::CalendarCannotName)
+    };
+    for pair in closes.windows(2) {
+        let [(before, _), (after, _)] = pair else {
+            return Err(Refusal::ClosesIncomplete);
+        };
+        let mut day = before.next().map_err(|_| Refusal::ClosesIncomplete)?;
+        while day < *after {
+            if trades(day)? {
+                return Err(Refusal::ClosesIncomplete);
+            }
+            day = day.next().map_err(|_| Refusal::ClosesIncomplete)?;
+        }
+        if day != *after {
+            return Err(Refusal::ClosesIncomplete);
+        }
+    }
+    for (day, _) in closes {
+        if !trades(*day)? {
+            return Err(Refusal::ClosesIncomplete);
+        }
+    }
+    Ok(())
 }
