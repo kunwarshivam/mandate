@@ -245,7 +245,6 @@ def tripwire_errors(m):
     return set()
 
 STOP_LIMIT_FIELD = {1: "crypto_stop_limit_offset", 2: "stop_limit_offset"}
-PAPER_STOP_LIMIT_CLASSES = ["crypto"]
 
 def stop_limit_offset(p, m):
     """DEC-539 item 5: version 1's `crypto_stop_limit_offset` reads as version 2's `stop_limit_offset`."""
@@ -262,9 +261,12 @@ def upcast(m):
 
 def stop_limit_protected(m, ctx):
     """V-008 and W-002 (DEC-539 items 2 and 3): whether any asset class the mandate may hold is protected by a
-    stop-limit under its connection's profile. `stop_limit_asset_classes` is that explicit input; absent, it is the
-    paper connection's profile, where only crypto is (trading spec §5.2)."""
-    classes = (ctx or {}).get("stop_limit_asset_classes", PAPER_STOP_LIMIT_CLASSES)
+    stop-limit under its connection's profile. `stop_limit_asset_classes` is that explicit input. Absent or null (no
+    profile, or an unknown broker), every allowed asset class counts as protected by a stop-limit: validation fails
+    closed, as DEC-539's fixed table does for any other or unknown broker (spec §4)."""
+    classes = (ctx or {}).get("stop_limit_asset_classes")
+    if classes is None:
+        return bool(m["universe"]["asset_classes"])
     return any(c in classes for c in m["universe"]["asset_classes"])
 
 def worst_case(m, ctx=None):
@@ -437,7 +439,8 @@ def semantic(m, ctx):
     if g.get("end_date") is not None and valid_date(g["end_date"]) and g["end_date"] < ctx["validation_date"]:
         errs.add("V-030")
     prev = ctx.get("previous_version")
-    if prev is not None and (prev["environment"] != m["environment"] or prev["connection_id"] != m["connection_id"]):
+    if prev is not None and (prev["environment"] != m["environment"] or prev["connection_id"] != m["connection_id"]
+                             or m["mandate_schema_version"] < prev.get("mandate_schema_version", m["mandate_schema_version"])):
         errs.add("V-031")
     if r["scale_action"] == "trim_to_target" and g["type"] == "accumulate":
         errs.add("V-033")

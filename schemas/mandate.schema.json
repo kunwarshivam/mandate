@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/mandate/1",
   "title": "Mandate",
-  "description": "Binding agent specification, schema versions 1 and 2 (spec v0.7; version 2 renames protection.crypto_stop_limit_offset to stop_limit_offset, DEC-539; envelope fields only; DEC-97). See docs/specs/mandate.md. The working universe and its theses are runtime state outside this document. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
+  "description": "Binding agent specification, schema versions 1 and 2 (spec v0.7; version 2 renames protection.crypto_stop_limit_offset to stop_limit_offset, DEC-539; new documents are version 2 and V-031 refuses a move back to 1; $id keeps /mandate/1 deliberately, since this one document admits both versions; envelope fields only; DEC-97). See docs/specs/mandate.md. The working universe and its theses are runtime state outside this document. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
   "type": "object",
   "additionalProperties": false,
   "required": [

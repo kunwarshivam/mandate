@@ -2048,8 +2048,9 @@ def fuzz_owner_controls(n):
 
 def fuzz_stop_limit_offset(n):
     """V-008 and W-002 under DEC-539: the offset is required when protection is enabled and any allowed asset class is
-    one the connection's profile protects with a stop-limit (`stop_limit_asset_classes`; absent, crypto only), and the
-    worst case adds it exactly then. A version-1 document reads `crypto_stop_limit_offset` as the offset, so the same
+    one the connection's profile protects with a stop-limit (`stop_limit_asset_classes`; absent or null, every allowed
+    class, so validation fails closed), and the worst case adds it exactly then. A version may move from schema version
+    1 to 2 but never back (V-031). A version-1 document reads `crypto_stop_limit_offset` as the offset, so the same
     mandate written at either version validates alike, a move between versions with the same offset is neutral and
     changes no path, and a larger offset across the move is increasing on `/protection/stop_limit_offset` alone. The
     oracle computes the required set and the figure itself, and builds the version-2 document by hand."""
@@ -2063,10 +2064,13 @@ def fuzz_stop_limit_offset(n):
         offset = rng.choice([None, "0.005", "0.01"])
         p["crypto_stop_limit_offset"] = offset
         ctx = dict(base.CTX)
-        classes = rng.choice([None, [], ["crypto"], ["us_equity"], ["crypto", "us_equity"]])
-        if classes is not None:
+        classes = rng.choice(["absent", None, [], ["crypto"], ["us_equity"], ["crypto", "us_equity"]])
+        if classes == "absent":
+            del ctx["stop_limit_asset_classes"]
+        else:
             ctx["stop_limit_asset_classes"] = classes
-        needed = bool(set(m["universe"]["asset_classes"]) & set(["crypto"] if classes is None else classes))
+        protected = set(m["universe"]["asset_classes"]) if classes in ("absent", None) else set(classes)
+        needed = bool(set(m["universe"]["asset_classes"]) & protected)
         v2 = copy.deepcopy(m)
         v2["mandate_schema_version"] = 2
         v2["protection"] = {"enabled": p["enabled"], "stop_distance": p["stop_distance"],
@@ -2089,6 +2093,10 @@ def fuzz_stop_limit_offset(n):
                   "W-002's figure adds the offset exactly where a stop-limit protects", (doc["protection"], classes, got, figure))
         check(classify(m, v2) == ("neutral", []), "moving to version 2 with the same offset changes nothing",
               (m["protection"], classify(m, v2)))
+        check("V-031" in semantic(m, dict(ctx, previous_version=v2))[0], "V-031 refuses a move back to version 1",
+              (m["protection"], classes))
+        check("V-031" not in semantic(v2, dict(ctx, previous_version=m))[0], "V-031 allows the move to version 2",
+              (m["protection"], classes))
         if p["enabled"] and offset is not None:
             raised = copy.deepcopy(v2)
             raised["protection"]["stop_limit_offset"] = norm(D(offset) + D("0.005"))

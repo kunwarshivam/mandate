@@ -14,6 +14,15 @@ MUTANTS = {
     "V-008 and W-002 read crypto, not the profile": (
         '    return any(c in classes for c in m["universe"]["asset_classes"])',
         '    return "crypto" in m["universe"]["asset_classes"]'),
+    "a missing profile reads as the paper profile": (
+        '    if classes is None:\n        return bool(m["universe"]["asset_classes"])',
+        '    if classes is None:\n        classes = ["crypto"]'),
+    "a missing profile needs no offset": (
+        '    if classes is None:\n        return bool(m["universe"]["asset_classes"])',
+        '    if classes is None:\n        return False'),
+    "a version may move back to schema version 1": (
+        '                             or m["mandate_schema_version"] < prev.get("mandate_schema_version", m["mandate_schema_version"])):',
+        '                             or False):'),
     "V-008 ignores the profile": (
         '        if stop_limit_protected(m, ctx) and stop_limit_offset(p, m) is None:',
         '        if "crypto" in m["universe"]["asset_classes"] and stop_limit_offset(p, m) is None:'),

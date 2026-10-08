@@ -236,6 +236,8 @@ SEM += [
      dict(LONE_UNDER_POLICY, previous_version=OVER_SCHEMA, current_mandate_version=version(OVER_SCHEMA))),
 ]
 STOP_LIMIT_EQUITIES = {"stop_limit_asset_classes": ["crypto", "us_equity"]}
+ALPACA_PROFILE = {"stop_limit_asset_classes": ["crypto"]}
+PROFILE_ABSENT = {"stop_limit_asset_classes": None}
 for cid, title, base, patch, ctx in SEM:
     m = apply_patch(MB[base], patch)
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
@@ -845,13 +847,21 @@ K = [
     ("MC-K06", "semantic", "With the offset set, it passes and the worst case adds it", "two_stock_swing", to_v2("0.01"),
      STOP_LIMIT_EQUITIES),
     ("MC-K07", "semantic", "An equity mandate on a profile with OCO and bracket passes without an offset", "two_stock_swing",
-     to_v2(None), {}),
+     to_v2(None), ALPACA_PROFILE),
     ("MC-K08", "semantic", "Version 1's crypto_stop_limit_offset is read as the offset, so it passes", "two_stock_swing",
      [rep("/protection/crypto_stop_limit_offset", "0.01")], STOP_LIMIT_EQUITIES),
     ("MC-K09", "change", "Raise the stop-limit offset", "btc_accumulator_v2", [rep("/protection/stop_limit_offset", "0.01")], {}),
     ("MC-K10", "change", "Move to version 2 with a smaller offset (version 1 reads as version 2)", "btc_accumulator",
      to_v2("0.004"), {}),
     ("MC-K11", "change", "Move to version 2 with the same offset", "btc_accumulator", to_v2("0.005"), {}),
+    ("MC-K12", "semantic", "Profile absent: an equity mandate without an offset fails V-008 (fails closed)",
+     "two_stock_swing", to_v2(None), PROFILE_ABSENT),
+    ("MC-K13", "semantic", "Profile absent: an equity mandate with the offset passes, but the worst case adds it and W-002 fires",
+     "two_stock_swing", to_v2("0.09"), PROFILE_ABSENT),
+    ("MC-K14", "semantic", "On the Alpaca profile the same equity mandate passes, its offset out of the worst case, with no W-002",
+     "two_stock_swing", to_v2("0.09"), ALPACA_PROFILE),
+    ("MC-K15", "semantic", "A version-1 document after a version-2 previous version is refused (V-031)",
+     "two_stock_swing", [], {"previous_version": apply_patch(MB["two_stock_swing"], to_v2(None))}),
 ]
 for cid, kind, title, base, patch, ctx in K:
     old = MB[base]
@@ -1019,7 +1029,7 @@ for cid, title, patch, ctx in SEM_D:
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
     errs, warns = semantic(m, dict(CTX, **ctx))
     cases.append({"id": cid, "kind": "semantic", "title": title, "base": "btc_accumulator", "patch": patch, "context": ctx,
-                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
 RECONFIRM = [{"op": "add", "path": "/autonomy/delegations", "value": [REVIEW_DELEGATION]}, rep("/autonomy/review_by", "2027-03-01")]
 for cid, title, extra in [
     ("MC-D11", "Re-confirming moves the review date and carries the delegation over", []),
@@ -1031,7 +1041,7 @@ for cid, title, extra in [
     ctx = {"previous_version": with_review_delegation}
     errs, warns = semantic(m, dict(CTX, **ctx))
     cases.append({"id": cid, "kind": "semantic", "title": title, "base": "btc_accumulator_reviewed", "patch": patch, "context": ctx,
-                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
 CH_D = [
     ("MC-D13", "Set a review date where there was none", "btc_accumulator", [{"op": "add", "path": "/autonomy/review_by", "value": REVIEW_BY}]),
     ("MC-D14", "Move the review date earlier", "btc_accumulator_reviewed", [rep("/autonomy/review_by", "2026-11-01")]),
@@ -1316,7 +1326,7 @@ for cid, title, base, patch, ctx in SEM_W:
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
     errs, warns = semantic(m, dict(CTX, **ctx))
     cases.append({"id": cid, "kind": "semantic", "title": title, "base": base, "patch": patch, "context": ctx,
-                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
 with_tw_delegation = apply_patch(MB[TWB], [{"op": "add", "path": "/autonomy/delegations", "value": [TW_DELEGATION]}])
 for cid, title, patch in [
     ("MC-W17", "Removing a tripwire is risk-increasing, so a delegation carried with it is refused (V-042)",
@@ -1330,7 +1340,7 @@ for cid, title, patch in [
     ctx = {"previous_version": with_tw_delegation}
     errs, warns = semantic(m, dict(CTX, **ctx))
     cases.append({"id": cid, "kind": "semantic", "title": title, "base": TWB, "patch": patch, "context": ctx,
-                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
 SCH_W = [
     ("MC-W01", "A tripwire with an unknown metric", tws(tw_with(TW_DAY, metric="unrealized_loss_usd"))),
     ("MC-W02", "A tripwire whose action is paused (rule 13)", tws(tw_with(TW_STREAK, action="paused"))),
@@ -1526,7 +1536,7 @@ assert all(c["id"].startswith("MC-W") for c in cases[W0:])
 cases[W0:] = sorted(cases[W0:], key=lambda c: c["id"])
 
 # =========================================================== output
-HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
+HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.7)
 #
 # Generated by a reference implementation that is fuzzed against invariants MI-1 to MI-32
 # (spec 1.1); every expected value is computed, not typed.
@@ -1542,6 +1552,9 @@ HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 # - semantic: `context` overrides `validation_context_defaults`. `provenance` maps a JSON Pointer to
 #   {source, confirmed}; absent paths are {user_entered, confirmed: true}. Expect the sorted V- and
 #   W-codes and the worst-case figures shown on the confirmation screen (spec 4.2).
+#   `stop_limit_asset_classes` is the asset classes the connection's profile protects with a
+#   stop-limit (spec 4, DEC-539); null means no profile was supplied, and then every allowed asset
+#   class counts as protected by one (V-008 and W-002 fail closed).
 # - policy: `policies` are listed outermost first; each violation reports the key, the violating
 #   level and value, and the nearest ancestor whose value it breaks (spec 4.3).
 # - risk_state: one agent, one instrument, zero fees. `goal_complete` steps apply the mandate's
