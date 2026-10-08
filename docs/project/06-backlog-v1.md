@@ -706,6 +706,14 @@ after U-A1 to U-A5 are recorded.
   `max_order_usd` exceeds §5.2's 200,000 USD is refused; every existing equity test still passes;
   and no crypto rule is relaxed (DEC-450 item 3). A gate check of the 200,000 USD cap is a later
   row.
+- **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
+  want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
+  so that a token that may reach both environments is on the record before it is used
+  ([DEC-821](decisions/DEC-821.md) item 4, DEC-441 item 22, spec §5.3; follows E7-17,
+  [DEC-800](decisions/DEC-800.md) item 14). *Accepted when:* a journal spec change after v0.20
+  defines the event that records, with the connection, whether the token may reach the other
+  environment, and the disclosure the owner confirmed, with vectors, tests first; and no Alpaca
+  OAuth connect appends `ConnectionEstablished` before that event.
 
 ### E8 Escalation and approvals
 
@@ -2600,12 +2608,14 @@ From E10-1's slice-V implementation (DEC-161):
     This follow-up row needs its own story id: its pins and stub cite E8-3, which
     `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
-    (HLD §8), as a new `schema_version` with its own vectors.
+    (HLD §8), as a new `schema_version` with its own vectors. Specified as version 2 in journal
+    §9.8 ([DEC-800](decisions/DEC-800.md) item 3); E7-1 writes it.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,
     which must name each action's members: the operator stop's subject, the global kill switch's
     scope, the acceptable-use action, and the row's "approval".
-  - **Proposed, item 10:** a clause binds an account stream to its connection, so that
-    `AccountSnapshotRecorded`'s fact needs no argument.
+  - **Item 10, closed by [DEC-800](decisions/DEC-800.md):** `ConnectionEstablished` version 2's
+    `account_ref` binds an account stream to its connection (journal §9.8); the mapping reads its
+    argument from that binding.
   - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** journal spec v0.8
     §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
     vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
@@ -3177,7 +3187,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `BEHAVIOUR_ONLY_TESTS` row and `#[ignore]` line. Minors from the same review, for the same PR or
   the backlog: `interval_limit` marks the first open interval alerted, which can re-alert a later
   one each tick; the fold's doc for these arms; and `awaiting.insert` replaces an instrument's
-  awaited set rather than adding to it.
+  awaited set rather than adding to it. #771's review added two tests before the fix: a hand case
+  with the awaited interval between two others (`a_new_start_ends_the_awaited_middle_interval_only`)
+  and a property lead where the awaited interval is the first open one and another is the latest
+  (`AWAITED_FIRST_LEAD`), so a fix that ends the latest open interval fails both. A fourth minor
+  from that review: the fix's match lets an unbracketed open interval (an exit's or a
+  re-placement's) be ended for any awaited bracket OCO; no script here has reached it yet, so pin
+  it with a case if one does.
 - **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
   ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
   while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on
