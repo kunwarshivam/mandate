@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import nextConfig from "../../next.config";
-import { WORKER_BUDGET, hostingProblems, sizeProblems, workerSize } from "../../scripts/workers.mjs";
+import { WORKER_BUDGET, hostingProblems, sizeCommand, sizeProblems, workerSize } from "../../scripts/workers.mjs";
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const MIB = 1024 * 1024;
@@ -96,11 +98,57 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(hostingProblems(tree({ [workflow]: yml.replace(/wrangler deploy --dry-run/g, "true") }))).toEqual(only("--dry-run"));
     expect(hostingProblems(tree({ [workflow]: yml.replace(/scripts\/workers\.mjs size/g, "true") }))).toEqual(only("workers.mjs size"));
     expect(hostingProblems(tree({ [workflow]: `${yml}\n# \${{ secrets.CLOUDFLARE_API_TOKEN }}\n` }))).toEqual(only("CLOUDFLARE"));
+    expect(hostingProblems(tree({ [workflow]: yml.replace("WRANGLER_SEND_METRICS:", "CLOUDFLARE_ACCOUNT_ID: abc123\n          WRANGLER_SEND_METRICS:") }))).toEqual(only("CLOUDFLARE"));
+    expect(hostingProblems(tree({ [workflow]: yml.replace("WRANGLER_SEND_METRICS:", "SUPABASE_SECRET: ${{ secrets.SUPABASE_SECRET }}\n          WRANGLER_SEND_METRICS:") }))).toEqual(only("secret"));
     expect(yml).not.toMatch(/CLOUDFLARE_(API_TOKEN|ACCOUNT_ID)|secrets\./);
   });
 });
 
+/** A dry run's output directory holding `files`, removed after `check`. */
+function dryRun<T>(files: Record<string, string | Uint8Array>, check: (dir: string) => T): T {
+  const dir = mkdtempSync(join(tmpdir(), "worker-dry-run-"));
+  try {
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
+    return check(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const SMALL = { "worker.js": "export default {};\n", "README.md": "dry run", "worker.js.map": "{}" };
+const NO_MODULES = { "README.md": "dry run", "worker.js.map": "{}" };
+
 describe("the Worker's size budget (DEC-731)", () => {
+  it.skip("pending E11-9: refuses a dry run that left no directory, or no module in it, rather than measuring nothing", () => {
+    expect(() => workerSize(join(tmpdir(), "owlhead-no-such-dry-run"))).toThrow(/no dry run output/);
+    dryRun({}, (dir) => expect(() => workerSize(dir)).toThrow(/no Worker module/));
+    dryRun(NO_MODULES, (dir) => expect(() => workerSize(dir)).toThrow(/no Worker module/));
+    dryRun(SMALL, (dir) => expect(workerSize(dir).rawBytes).toBe(Buffer.byteLength(SMALL["worker.js"])));
+  });
+
+  it.skip("pending E11-9: the size command passes a small Worker and fails one over budget, an empty dry run, and a bad command line", () => {
+    expect(dryRun(SMALL, (dir) => sizeCommand(["size", dir]).status)).toBe(0);
+    const over = { "worker.js": randomBytes(WORKER_BUDGET.gzipBytes + 64 * 1024) };
+    const overBudget = dryRun(over, (dir) => sizeCommand(["size", dir]));
+    expect(overBudget.status).toBe(1);
+    expect(overBudget.lines.join("\n")).toContain("gzip budget");
+    expect(dryRun(NO_MODULES, (dir) => sizeCommand(["size", dir]).status)).toBe(1);
+    expect(dryRun({}, (dir) => sizeCommand(["size", dir]).status)).toBe(1);
+    expect(sizeCommand(["size", join(tmpdir(), "owlhead-no-such-dry-run")]).status).toBe(1);
+    expect(sizeCommand([]).status).toBe(2);
+    expect(sizeCommand(["size"]).status).toBe(2);
+    expect(sizeCommand(["measure", "."]).status).toBe(2);
+  });
+
+  it.skip("pending E11-9: node scripts/workers.mjs size exits with the size command's status", () => {
+    expect(dryRun(SMALL, (dir) => sizeCommand(["size", dir]).status)).toBe(0);
+    const cli = (...args: string[]) => spawnSync(process.execPath, [join(WEB, "scripts", "workers.mjs"), ...args], { encoding: "utf8" }).status;
+    expect(dryRun(SMALL, (dir) => cli("size", dir))).toBe(0);
+    expect(dryRun(NO_MODULES, (dir) => cli("size", dir))).toBe(1);
+    expect(dryRun({ "worker.js": randomBytes(WORKER_BUDGET.gzipBytes + 64 * 1024) }, (dir) => cli("size", dir))).toBe(1);
+    expect(cli()).toBe(2);
+  });
+
   it.skip("pending E11-9: measures every module the dry run wrote, raw and gzip, leaving out source maps and the README", () => {
     const out = mkdtempSync(join(tmpdir(), "worker-size-"));
     try {

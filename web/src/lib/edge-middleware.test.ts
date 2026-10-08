@@ -3,15 +3,32 @@ import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { config, middleware } from "@/edge-middleware";
 import type * as AuthConfig from "./auth-config";
+import type * as ColourPref from "./colour-pref";
+import { CVD_COOKIE } from "./colour-pref";
+import type * as Scenario from "./scenario";
 import { SCENARIO_COOKIE } from "./scenario";
 import type * as SupabaseProxy from "./supabase/proxy";
 
 const session = vi.hoisted(() => ({ auth: true, signedIn: false, refresh: false, calls: 0 }));
+/** The dev switches, as `next dev` turns them on; off as in every other build unless a test says so. */
+const dev = vi.hoisted(() => ({ scenarios: false, cvd: false }));
 
 vi.mock("@/lib/auth-config", async (original) => ({
   ...(await original<typeof AuthConfig>()),
   get authEnabled() {
     return session.auth;
+  },
+}));
+vi.mock("@/lib/scenario", async (original) => ({
+  ...(await original<typeof Scenario>()),
+  get scenariosEnabled() {
+    return dev.scenarios;
+  },
+}));
+vi.mock("@/lib/colour-pref", async (original) => ({
+  ...(await original<typeof ColourPref>()),
+  get colourBlindEnabled() {
+    return dev.cvd;
   },
 }));
 vi.mock("@/lib/supabase/proxy", async (original) => {
@@ -41,6 +58,58 @@ beforeEach(() => {
   session.signedIn = false;
   session.refresh = false;
   session.calls = 0;
+  dev.scenarios = false;
+  dev.cvd = false;
+});
+
+const cookies = (response: Response) => response.headers.getSetCookie().join("; ");
+
+describe("the edge middleware's dev preference switch (next dev and the e2e build)", () => {
+  it.skip("pending E11-9: sets the scenario and colour cookies from ?scenario= and ?cvd=, and redirects without them", async () => {
+    dev.scenarios = true;
+    dev.cvd = true;
+    for (const auth of [false, true]) {
+      session.auth = auth;
+      session.signedIn = true;
+      const response = await middleware(request("/agents?scenario=stale&cvd=1&tab=open"));
+      expect(response.status, String(auth)).toBe(307);
+      expect(response.headers.get("location"), String(auth)).toBe("http://localhost:4317/agents?tab=open");
+      expect(cookies(response), String(auth)).toContain(`${SCENARIO_COOKIE}=stale`);
+      expect(cookies(response), String(auth)).toContain(`${CVD_COOKIE}=on`);
+    }
+    const off = await middleware(request("/?cvd=0"));
+    expect(off.headers.get("location")).toBe("http://localhost:4317/");
+    expect(cookies(off)).toContain(`${CVD_COOKIE}=off`);
+    expect(cookies(off)).not.toContain(SCENARIO_COOKIE);
+  });
+
+  it.skip("pending E11-9: drops an unknown scenario without a cookie, and takes each switch only while it is on", async () => {
+    dev.scenarios = true;
+    session.auth = false;
+    const unknown = await middleware(request("/agents?scenario=bogus"));
+    expect(unknown.headers.get("location")).toBe("http://localhost:4317/agents");
+    expect(cookies(unknown)).not.toContain(SCENARIO_COOKIE);
+    const cvdOff = await middleware(request("/agents?cvd=1"));
+    expect(cvdOff.headers.get("location")).toBeNull();
+    expect(cookies(cvdOff)).not.toContain(CVD_COOKIE);
+    dev.scenarios = false;
+    dev.cvd = true;
+    const scenarioOff = await middleware(request("/agents?scenario=stale"));
+    expect(scenarioOff.headers.get("location")).toBeNull();
+    expect(cookies(scenarioOff)).not.toContain(SCENARIO_COOKIE);
+  });
+
+  it.skip("pending E11-9: carries a refreshed session onto the preference redirect, before any sign-in route", async () => {
+    dev.scenarios = true;
+    session.refresh = true;
+    session.signedIn = false;
+    const response = await middleware(request("/agents?scenario=stale"));
+    expect(response.headers.get("location")).toBe("http://localhost:4317/agents");
+    expect(cookies(response)).toContain("sb-test-auth-token=refreshed");
+    expect(cookies(response)).toContain(`${SCENARIO_COOKIE}=stale`);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(session.calls).toBe(1);
+  });
 });
 
 describe("the edge middleware with sign-in on (DEC-823: it replaces the Node proxy, which OpenNext cannot run)", () => {

@@ -91,6 +91,16 @@ describe("the private beta store on Workers (DEC-823): the Supabase table in pro
     expect(disk.appendFile).not.toHaveBeenCalled();
   });
 
+  it.skip("pending E11-9: answers 503 in development when Supabase refuses the request for another reason, and writes no file", async () => {
+    expect(localFileAllowed("development")).toBe(true);
+    vi.stubEnv("NODE_ENV", "development");
+    configured({ code: "08006" });
+    const response = await post("ada@example.com");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "unavailable" });
+    expect(disk.appendFile).not.toHaveBeenCalled();
+  });
+
   it.skip("pending E11-9: keeps the local file in development while Supabase is unset or has no table", async () => {
     expect(localFileAllowed("development")).toBe(true);
     vi.stubEnv("NODE_ENV", "development");
