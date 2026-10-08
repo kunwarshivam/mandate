@@ -1409,9 +1409,9 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   response carries per-stream watermarks; values past their freshness limit are marked stale with
   their age; model text appears only in quoted, attributed members (API-18); scorecards appear only
   at their own route (FR-8.4); each fixture type of `web/src/fixtures/types.ts` has its source route.
-- **E11-10 (Should, M9, after the first paper trade and E11-9)** As an owner, I want the landing
-  page to show my connected accounts, their holdings and "no agents deployed", so that I start from
-  what I have ([DEC-528](decisions/DEC-528.md) item 4; PRD FR-8.5; product experience brief J-H, D1,
+- **E11-10 (Should, M9, after the first paper trade and E11-9)** As an owner, I want Home
+  (signed-in, D1) to show my connected accounts, their holdings and "no agents deployed", so that I
+  start from what I have ([DEC-528](decisions/DEC-528.md) item 4; PRD FR-8.5; product experience brief J-H, D1,
   H1).
   *Depends on:*
   - E11-9's journal-served read models;
@@ -1438,14 +1438,16 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
     journal.
 
   *Accepted when:*
-  - results are ordered by match to the query text, then alphabetically, and a test shows the order
-    is unchanged by any price, volume, return or model output;
+  - results are ordered by match to the query text, then alphabetically (the order DEC-528
+    proposes), and a test shows the order is unchanged by any price, volume, return or model output;
   - no route returns a ranking, score, flag or platform-authored list
     ([data-plane spec §1.4](../specs/data-plane.md#14-non-goals));
   - the instrument page offers "Ask an agent" (an owner request through the builder, gate and
     autonomy rules, DEC-141) and "Set up an agent", and never "buy" (Rule 12);
-  - watchlists are stored in the workspace and change no agent's universe unless pinned in a
-    confirmed mandate version (rule 11);
+  - a watchlist steers no agent's universe and is never read by an agent: no agent-side code path
+    reads a watchlist, tested at the read-model boundary (rule 11);
+  - "Set up an agent" opens the ordinary goal questions (A0); an instrument enters an agent only
+    through a mode the owner confirms in a mandate version (a pinned universe), never as a hint;
   - the Robinhood connector still calls no watchlist or scan tool
     ([connections spec §6.2](../specs/connections.md#62-how-mcp-maps-to-the-connector-interface)
     rule 2).
@@ -1965,14 +1967,18 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   than waiting for the interval ([DEC-528](decisions/DEC-528.md) item 4; PRD FR-11.2).
   *Depends on:*
   - agent harness spec §5.3's change (protected; not written yet): an event edge from `Idle` to
-    `Due` with its debounce, and the invariants that keep a trigger from bypassing the run's
-    preconditions, the mode, or E19-3's caps;
+    `Due` with its debounce, and an amendment of invariant HI-8 (no run starts before
+    `next_proposal_at`) so that a trigger never bypasses the run's preconditions, the mode, or
+    E19-3's caps;
+  - a mandate spec change: the event sources, debounce and caps under `behavior.cadence`;
   - a source evaluation for an earnings calendar and transcripts. A paid vendor is spending, which
     the founder decides (DEC-79), and any new source joins the allowlist (DEC-101).
 
   *Accepted when:*
-  - triggers are debounced, and rate- and cost-capped per agent, with the caps in the research
-    entry;
+  - event sources, debounce and caps are envelope fields under `behavior.cadence` (mandate spec);
+    no event triggers a run unless a confirmed mandate version enables it (rule 11), and a change
+    that adds event sources classifies as increasing;
+  - triggers are debounced, and rate- and cost-capped per agent;
   - only allowlisted sources can trigger, and a triggered run's admissions still need DEC-101's
     corroboration;
   - prompt-injection fixtures in every triggering source never reach an order (E17-7);

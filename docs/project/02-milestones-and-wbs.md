@@ -70,13 +70,14 @@ flowchart TD
 
 ### Placement of the 2026-10-08 product stories ([DEC-528](decisions/DEC-528.md))
 
-All four stories come after the first real paper trade (DEC-502). None changes the work tracker's
-current "Next, in order". Each waits on a spec change that is not yet written, and the backlog row
-names it.
+The four stories and adoption come after the first real paper trade (DEC-502). None changes the
+work tracker's current "Next, in order". Each waits on a spec change that is not yet written, and
+the backlog row names it. The placements are the recording agent's proposals, not founder
+decisions (DEC-528).
 
 | Story | Placed in | Depends on |
 |---|---|---|
-| E11-10 Landing and cross-account holdings view | M9, Phase 2 | E11-9; E7-6 for Robinhood; a workspace API spec change |
+| E11-10 Home (signed-in, D1) and cross-account holdings view | M9, Phase 2 | E11-9; E7-6 for Robinhood; a workspace API spec change |
 | E11-11 Instrument search and owner watchlists | M9, Phase 2 | E11-9; data-plane and workspace API spec changes |
 | E10-19 Monitor-only agents | Phase 3, unless pulled into Phase 2 once its mandate spec change lands | A mandate spec change and its reference cases; E8-5 |
 | E19-12 Event-triggered research | After the Phase 1 gate's research-agent evaluation (DEC-99); Phase 3 at the earliest | Agent harness spec §5.3's change; E19-3; a source evaluation for an earnings calendar and transcripts |

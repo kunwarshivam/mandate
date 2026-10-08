@@ -449,7 +449,7 @@ Lessons from this wave:
 
 ## 2026-10-08: the founder's product flow (DEC-528)
 
-The founder described the flow they want. An owner lands with several connected accounts and no
+The founder described the flow they want. An owner arrives with several connected accounts and no
 agents deployed. They find an instrument by name, ticker or list. They buy, or start an agent that
 seeks a goal or only monitors, or ask for an agent over what they already hold. Agents react to
 news, earnings and filings. Mapped against the documents, the founder decided three points:
@@ -458,7 +458,7 @@ news, earnings and filings. Mapped against the documents, the founder decided th
 - adoption deferred until basis and lots are modelled (DEC-46 stands).
 
 The new stories, all after the first paper trade:
-- E11-10, the landing and holdings view;
+- E11-10, Home (signed-in, D1) and the holdings view;
 - E11-11, search and watchlists;
 - E10-19, monitor-only agents;
 - E19-12, event-triggered research.

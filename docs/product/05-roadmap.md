@@ -81,7 +81,7 @@ Everything in the [PRD](04-prd-v1.md) P0 list:
 - Hybrid installer (Helm / Docker Compose).
 - Robinhood Agentic Trading connector (retail equities over MCP into a dedicated account); the
   retail profile and disclosures; live retail trading once counsel signs off ([DEC-98](../project/04-decision-log.md#decisions)).
-- The landing page with the owner's connected accounts and their holdings, read-only; display-only
+- Home (signed-in) with the owner's connected accounts and their holdings, read-only; display-only
   instrument search and owner-curated watchlists. Every buy still goes through an agent: there is
   no order ticket ([DEC-528](../project/decisions/DEC-528.md); PRD FR-8.5, FR-8.6).
 

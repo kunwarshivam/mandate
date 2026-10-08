@@ -5,7 +5,7 @@
 | **Owner** | Product (web stream W1) |
 | **Status** | Draft v0.1. The founder decided to start web design ahead of M9 ([DEC-134](../project/04-decision-log.md#decisions)); the product decisions in §6 were decided by the founder on 2026-09-27 ([DEC-135](../project/04-decision-log.md#decisions), [DEC-136](../project/04-decision-log.md#decisions)) |
 | **Related** | [PRD](04-prd-v1.md) · [Personas](02-personas-and-journeys.md) · [Compliance](08-compliance-and-regulatory.md) · [HLD](../HLD.md) · [Mandate spec](../specs/mandate.md) · [Trading domain spec](../specs/trading-domain.md) · [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) · [ADR-0003](../adr/0003-earned-autonomy.md) |
-| **Additions** | 2026-09-30, from [ADR-0003](../adr/0003-earned-autonomy.md): goal-first onboarding (A0, the contract card on A2), delegations on the approval screen (D6), the plan view (D12), the daily brief (D13), the chat thread (D14), autonomy settings (D15), and PX-15 to PX-18. The founder accepted [DEC-181](../project/04-decision-log.md#decisions) (delegations) and PX-15 to PX-18 ([DEC-198](../project/04-decision-log.md#decisions)) on 2026-09-30. 2026-10-08, from the founder's [DEC-528](../project/decisions/DEC-528.md): the landing journey with connected accounts (J-H), holdings (H1), instrument search, the instrument page and watchlists (I1 to I3), and the monitor agent (D16); all after the first paper trade |
+| **Additions** | 2026-09-30, from [ADR-0003](../adr/0003-earned-autonomy.md): goal-first onboarding (A0, the contract card on A2), delegations on the approval screen (D6), the plan view (D12), the daily brief (D13), the chat thread (D14), autonomy settings (D15), and PX-15 to PX-18. The founder accepted [DEC-181](../project/04-decision-log.md#decisions) (delegations) and PX-15 to PX-18 ([DEC-198](../project/04-decision-log.md#decisions)) on 2026-09-30. 2026-10-08, from the founder's [DEC-528](../project/decisions/DEC-528.md): the journey from Home (signed-in, D1) with connected accounts (J-H), holdings (H1), instrument search, the instrument page and watchlists (I1 to I3), and the monitor agent (D16); all after the first paper trade |
 
 This brief records the product-experience decisions that the designs and, later, the web code are
 built from: the principles that settle trade-offs, the journeys, every screen with its states, the
@@ -222,27 +222,31 @@ without them and why, and can take it back in one tap.
 Policies that only tighten [X1], members and roles [X2], notification channels, escalation chains,
 and quiet hours [X3], deployment health [X4], billing [X5], and disclosures [X6].
 
-**J-H. Landing, finding an instrument, and asking an agent** (Jordan, Alex;
-[DEC-528](../project/decisions/DEC-528.md), after the first paper trade)
+**J-H. Home, finding an instrument, and asking an agent** (Jordan, Alex;
+[DEC-528](../project/decisions/DEC-528.md), after the first paper trade). "Home" here is the
+signed-in Home (D1); the landing page stays the public site (DEC-212, DEC-213).
 
-1. **Land** [D1, H1]. The owner arrives with one or more connected accounts. The landing page shows:
+1. **Arrive** [D1, H1]. The owner signs in with one or more connected accounts. Home (signed-in, D1)
+   shows:
    - each account and its holdings, read-only, with their age;
    - "No agents deployed".
 
    A holding no agent bought is shown as the owner's, never as an agent's (CN-7). For Robinhood,
    only the agentic account appears (CN-8).
 2. **Find an instrument** [I1, I3]. The owner searches by name or ticker, or opens one of their own
-   watchlists. Results are ordered by how they match the query, then alphabetically. Nothing is
-   ranked, scored, flagged or suggested.
-3. **Open it** [I2]. The instrument page shows facts: name, ticker, asset class, whether an agent
-   may trade it (the eligibility floor's outcome, in words), the owner's holdings in it, and which
-   of the owner's agents watch or hold it.
+   watchlists. Results are ordered by how they match the query, then alphabetically (*proposed*,
+   DEC-528). Nothing is ranked, scored, flagged or suggested.
+3. **Open it** [I2]. The instrument page shows facts: name, ticker, asset class, the owner's
+   holdings in it, and which of the owner's agents watch or hold it. *Proposed, left to E11-11's
+   spec change:* whether an agent may trade it (the eligibility floor's outcome, in words).
 4. **Ask an agent, or set one up** [D14, A0]. The page offers no "buy" (§5, Rule 12). Each choice
    leads to the existing journeys:
    - **Ask an agent** opens the chat thread of an agent that already has this instrument in its
      universe, as an owner request: the builder, the gate and the autonomy rules decide (DEC-141).
-   - **Set up an agent** opens the goal questions with the instrument named. The owner then picks a
+   - **Set up an agent** opens the ordinary goal questions (A0). The owner then picks a
      goal-seeking agent (J-B) or a monitor agent [D16], which watches and alerts and never opens.
+     The instrument enters an agent only through a mode the owner already confirms in a mandate
+     version (a pinned universe, bring-your-own-strategy), never as a universe hint.
 5. **An agent over what the owner already holds** is not offered: adoption waits on cost basis and
    tax lots (DEC-46, DEC-528 item 3). The page says the holding stays the owner's.
 
@@ -668,8 +672,8 @@ activity, account restriction, surveillance), because each acknowledgment restor
 - *Governs:* CN-7, CN-8; trading §7.1; FR-8.5; P6, P9.
 
 **I1 Instrument search**
-- *Shows:* results for a name or ticker query, ordered by how they match the query text and then
-  alphabetically, with name, ticker and asset class.
+- *Shows:* results for a name or ticker query, with name, ticker and asset class, ordered by how
+  they match the query text and then alphabetically (*proposed*, DEC-528).
 - *Never:* a ranking, score, flag, "trending", "popular" or "interesting" list, or a suggestion the
   platform authors (data-plane §1.4; P3).
 - *Governs:* DEC-528 item 2; FR-8.6.
@@ -677,9 +681,10 @@ activity, account restriction, surveillance), because each acknowledgment restor
 **I2 Instrument page** ⚠
 - *Shows:* facts only:
   - name, ticker and asset class;
-  - whether an agent may trade it now (the eligibility floor's outcome and its reason, in words);
   - the owner's holdings in it (H1);
-  - the owner's agents that watch or hold it.
+  - the owner's agents that watch or hold it;
+  - *proposed, left to E11-11's spec change:* whether an agent may trade it now (the eligibility
+    floor's outcome and its reason, in words).
 - *Primary actions:* "Ask an agent" (D14, as an owner request), "Set up an agent" (A0), and
   "Add to a watchlist" (I3).
 - *Never:* "buy", a price target, a profit estimate, or a model's opinion outside quoted,
@@ -687,11 +692,12 @@ activity, account restriction, surveillance), because each acknowledgment restor
 - *Governs:* DEC-528 items 1 and 2; DEC-141; trading §3.2; FR-8.6.
 
 **I3 Watchlists**
-- *Shows:* the owner's own lists, curated by the owner and stored in the workspace.
+- *Shows:* the owner's own lists, curated by the owner (*proposed:* stored in the workspace; whether
+  edits are journaled stays open in E11-11).
 - *Primary actions:* create, rename, add or remove an instrument.
 - *Rules:*
-  - A watchlist is not an envelope field and steers no agent. Pinning it into a mandate is a version
-    the owner confirms (A5, rule 11).
+  - A watchlist is not an envelope field. A watchlist steers no agent's universe and is never read
+    by an agent.
   - Lists are never read from or written to a broker's watchlist tools (connections §6.2 rule 2).
 - *Governs:* DEC-528 item 2; FR-8.6.
 
@@ -819,7 +825,7 @@ A rung whose breach is still confirming is shown as `pending` with its time in b
 | DEC-189 | The unasked-dollars figure appears wherever autonomy is set or shown: A2, D6's delegation variant, D13, D15 |
 | DEC-195 | Asks past the daily budget never notify; the brief lists them once |
 | DEC-197 | A guardrail that fires narrows only its scope and says what lifts it; ending a delegation or turning on away mode needs no step-up |
-| DEC-528 | Rule 12 stands: no screen offers "buy". The landing flow is search, then the instrument page, then "Ask an agent" or "Set up an agent". Search results are ordered by match to the query text, then alphabetically, never by a market measure. A watchlist is the owner's and steers no agent. A holding no agent bought is shown as the owner's and is never offered for adoption. A monitor agent's alerts follow rule 6 |
+| DEC-528 | Rule 12 stands: no screen offers "buy". The flow from Home (signed-in, D1) is search, then the instrument page, then "Ask an agent" or "Set up an agent". Search results are ordered by match to the query text, then alphabetically, never by a market measure. A watchlist is the owner's, steers no agent's universe, and is never read by an agent. A holding no agent bought is shown as the owner's and is never offered for adoption. A monitor agent's alerts follow rule 6 |
 
 ## 6. Open product decisions for the founder
 
