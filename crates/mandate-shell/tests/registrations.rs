@@ -124,7 +124,6 @@ fn pinned() -> Pinned {
 /// Each kind's effective registration is its own record, naming its object and carrying the
 /// stored bytes; records of other types and kinds change nothing.
 #[test]
-#[ignore = "pending E19-11"]
 fn every_kind_has_its_registered_object() {
     let config = Stream::registered(SNAPSHOT).read(TODAY).unwrap();
     let kinds = [
@@ -145,7 +144,6 @@ fn every_kind_has_its_registered_object() {
 /// and both narrowed ones; a later fee schedule not yet effective on the trade date refuses rather
 /// than falling back, and counts from its `effective_from` on.
 #[test]
-#[ignore = "pending E19-11"]
 fn the_latest_registration_counts_and_a_future_fee_schedule_refuses() {
     let rules = r#"{"rules":"reviewed_v2"}"#;
     let newer = SNAPSHOT.replace("2026-10-05", "2026-10-06");
@@ -177,7 +175,6 @@ fn the_latest_registration_counts_and_a_future_fee_schedule_refuses() {
 /// included, do not displace them, and without one there is none. Nor does a record of another type
 /// carrying a registration's payload, for a plain kind or a narrowed one.
 #[test]
-#[ignore = "pending E19-11"]
 fn only_the_pinned_instrument_and_model_registrations_count() {
     let aapl = SNAPSHOT.replace(SPY, AAPL).replace("SPY", "AAPL");
     let other_model = r#"{"kind":"quant_model_content","model_id":"quant.other"}"#;
@@ -216,7 +213,6 @@ fn only_the_pinned_instrument_and_model_registrations_count() {
 /// A kind with no registration, a fee object without `effective_from`, and for every kind an object
 /// missing from the store, one that does not re-hash, or one the store is down for, each refuse.
 #[test]
-#[ignore = "pending E19-11"]
 fn a_missing_registration_or_object_refuses() {
     let mut no_rules = Stream::registered(SNAPSHOT);
     no_rules.records.remove(2);
@@ -280,7 +276,6 @@ fn later(snapshot: &str) -> Stream {
 /// The effective snapshot is read into SPY's id, symbol, exchange and classification instant, for
 /// both exchanges DEC-523 admits.
 #[test]
-#[ignore = "pending E19-11"]
 fn the_snapshot_is_read_as_dec_523_pins_it() {
     let read = Stream::registered(SNAPSHOT).read(TODAY).unwrap().instrument;
     assert_eq!(
@@ -300,7 +295,6 @@ fn the_snapshot_is_read_as_dec_523_pins_it() {
 /// any DEC-523 member, holds one as a number or `null`, has an extra member, is no object, or whose
 /// object is missing, corrupt or unreadable refuses rather than leaving the earlier one in force.
 #[test]
-#[ignore = "pending E19-11"]
 fn a_later_snapshot_that_fails_dec_523_refuses_rather_than_falling_back() {
     for member in MEMBERS {
         let rows = [
@@ -334,7 +328,6 @@ fn a_later_snapshot_that_fails_dec_523_refuses_rather_than_falling_back() {
 /// prefix of its one value), `exchange` is `arca` or `nasdaq`, the one-value members, an instant
 /// with an upper-case `T`, and the pinned symbol.
 #[test]
-#[ignore = "pending E19-11"]
 fn a_value_outside_dec_523s_sets_refuses() {
     let value = |member| Refusal::SnapshotValue { member };
     let rows = [
@@ -358,7 +351,6 @@ fn a_value_outside_dec_523s_sets_refuses() {
 /// A fee schedule effective tomorrow refuses today and counts tomorrow; an `effective_from` that is
 /// no date refuses as malformed.
 #[test]
-#[ignore = "pending E19-11"]
 fn the_fee_date_is_read_to_the_day() {
     let fee = FEE.replace("2026-01-01", "2026-10-08");
     let tomorrow = Stream::registered(SNAPSHOT).register("fee_config", &fee);
