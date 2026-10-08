@@ -5,9 +5,10 @@ use anyhow::{Context, bail};
 use clap::Parser;
 use mandate_cli::artifact::ArtifactCommand;
 use mandate_cli::control::Now;
+use mandate_cli::inbox::ApprovalsCommand;
 use mandate_cli::journal::JournalCommand;
 use mandate_cli::register::{ConfigCommand, ModelCommand};
-use mandate_cli::{Cli, Command, artifact, download, inspect, journal, register};
+use mandate_cli::{Cli, Command, artifact, download, inbox, inspect, journal, register};
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
 use mandate_time::{Date, UtcNanos};
@@ -77,6 +78,15 @@ fn main() -> anyhow::Result<()> {
         Command::Artifact(ArtifactCommand::Get(args)) => {
             artifact::get(&args, &mut io::stdout().lock())?;
             Ok(())
+        }
+        Command::Approvals(command) => {
+            let out = &mut io::stdout().lock();
+            match command {
+                ApprovalsCommand::List(args) => inbox::run_list(&args, now()?, out).map(drop),
+                ApprovalsCommand::Show(args) => inbox::run_show(&args, out).map(drop),
+                ApprovalsCommand::Approve(args) => inbox::run_approve(&args, now()?, out).map(drop),
+                ApprovalsCommand::Skip(args) => inbox::run_skip(&args, now()?, out).map(drop),
+            }
         }
         Command::Config(ConfigCommand::Register(args)) => {
             register::run(&args, now()?, &mut io::stdout().lock())?;
