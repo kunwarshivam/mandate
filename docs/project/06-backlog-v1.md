@@ -706,6 +706,14 @@ after U-A1 to U-A5 are recorded.
   `max_order_usd` exceeds §5.2's 200,000 USD is refused; every existing equity test still passes;
   and no crypto rule is relaxed (DEC-450 item 3). A gate check of the 200,000 USD cap is a later
   row.
+- **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
+  want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
+  so that a token that may reach both environments is on the record before it is used
+  ([DEC-821](decisions/DEC-821.md) item 4, DEC-441 item 22, spec §5.3; follows E7-17,
+  [DEC-800](decisions/DEC-800.md) item 14). *Accepted when:* a journal spec change after v0.20
+  defines the event that records, with the connection, whether the token may reach the other
+  environment, and the disclosure the owner confirmed, with vectors, tests first; and no Alpaca
+  OAuth connect appends `ConnectionEstablished` before that event.
 
 ### E8 Escalation and approvals
 
