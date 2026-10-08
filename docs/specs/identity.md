@@ -168,6 +168,15 @@ retail sign-up creates it).
 | Workspace | **Auditor** | Read records, verification, exports; nothing else | `info` only |
 | — | Client, service account, host CLI | — | None |
 
+**Where an org owner's notices land.** Notification addresses are per workspace (§4.2), so an org
+owner or admin who holds no workspace membership has none. The org-scope notices addressed to them
+(`role_granted`, `break_glass`, every identity and account-security notice of the org's
+workspaces) always reach their pull channels, the web inbox and the CLI inbox, which need no
+address, and reach push addresses only through a workspace membership they hold. An org-scope
+address store is a later change, not v0.3's ([DEC-816](../project/decisions/DEC-816.md) item 2).
+The E9-11 tests owe `every_org_owner_notice_has_a_deliverable_channel`: each notice kind addressed
+to org owners reaches the pull channels of an owner who holds no workspace membership.
+
 **Receiving is not acting** (notifications spec NT-11): a notice gives no permission, and the receive
 column only bounds who may be sent each class. An identity or account-security notice about a
 member also goes to that member.
