@@ -27,6 +27,11 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
+- **2026-10-08, after #669 merged: the faster process.** The founder asked for a process that is
+  not the bottleneck. DEC-516 (proposed) draws two lanes, makes a PR one item, puts the pictures
+  (`npm run shots`) at the centre of review, and limits what a session leaves behind to one tracker
+  row and one log paragraph. #669's decisions were renumbered DEC-511 to DEC-515 after a collision
+  with `main`, which item 6 of DEC-516 addresses.
 - **2026-10-07 to 10-08, the design conversation and plan.** The founder reviewed the web app from
   screenshots of every screen and scenario; thirty findings, a direction and one plan of action
   items (`web/design/`). DEC-511 split `web/DESIGN.md` into principles, a reference and a history

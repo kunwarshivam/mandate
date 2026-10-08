@@ -36,6 +36,10 @@ flowchart LR
    passed, on the head that review saw (DEC-79, DEC-175); safety-critical paths also need zero
    missed mutants and an adversarial review. The founder reviews after the fact and can revert;
    the decisions DEC-79 reserves still wait for the founder.
+   **Two lanes** ([DEC-516](decisions/DEC-516.md), proposed): that is the safety lane. A change
+   that touches no safety-critical path, spec, gate or safety surface runs on the light lane: one
+   item per PR, green CI, the author's checks and the screen's pictures in the body, then merge,
+   with the review reading the diff after the merge and the founder judging from the pictures.
 5. **No live secrets for agents.** Agents use paper and demo credentials and fixtures only.
 6. **Decisions are recorded.** An agent that needs to deviate from an accepted decision stops and
    writes a new decision instead, as a file under `docs/project/decisions/` (DEC-344).

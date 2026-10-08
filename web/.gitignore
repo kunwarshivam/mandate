@@ -33,3 +33,4 @@ npm-debug.log*
 # private beta requests, when Supabase has no beta_requests table yet
 /.data/
 .vercel
+/.shots/

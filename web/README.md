@@ -24,6 +24,7 @@ npm run lint
 npm run typecheck
 npm test
 npm run build && npm start
+npm run shots      # every screen as PNG files with a contact sheet in .shots/, against a running dev server (DEC-516)
 
 npx playwright install --with-deps --only-shell chromium   # once
 npm run test:e2e

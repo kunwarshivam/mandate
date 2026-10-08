@@ -39,10 +39,10 @@ review on a different model (DEC-79).
 
 ## Next, in order
 
-1. **Merge #669**, then revise the development process (the founder, 2026-10-08: the process has
-   become the bottleneck): one branch per plan item; `npm run shots` and a golden-path contact
-   sheet so review is visual; the test sort DEC-511 item 5 calls for; a lighter path for
-   reversible product changes. Decisions already taken may be revised.
+1. **The faster process** ([DEC-516](decisions/DEC-516.md), proposed): two lanes, one item per
+   PR, review from pictures (`npm run shots`), tests that pin invariants, one row and one paragraph
+   per session. Item 1's light-lane merge rule waits for the founder's yes; the rest is in force.
+   Then the test sort (DEC-511 item 5), its own light-lane PR.
 2. **E7-4 slice 7, the agent-scoped kill switch (DEC-485).** Nearly done; it finishes first.
 3. **The first real paper trade (DEC-502, DEC-509).** One SPY order on the founder's Alpaca paper
    account through the production cycle API, the deployment built from a confirmed mandate version
