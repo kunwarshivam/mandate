@@ -244,9 +244,11 @@ DEC-690 item 4; DEC-441 item 21). A live Alpaca OAuth connection needs a new dec
    - reads the code and PKCE verifier once from the pending connection's vault path;
    - exchanges the code at once, since a code lives 10 minutes (§5.5), with the one call of the
      token-exchange client below;
-   - parses the response only for the token fields (`access_token`, `token_type`, `scope`), writes
-     the token and the granted `scope` straight to the vault under the pending connection's path,
-     write-only, and deletes the code and verifier;
+   - parses the response only for the token fields (`access_token`, `token_type`, `scope`), and
+     refuses, before any vault write, a token whose `scope` is not exactly the request (§5.3), so
+     an over-scoped token is never stored (CN-2);
+   - writes the token and the granted `scope` straight to the vault under the pending connection's
+     path, write-only, and deletes the code and verifier;
    - drops every secret and stops. It reports to the connection manager only whether a token was
      stored, never a value. It appends nothing to the journal.
 
