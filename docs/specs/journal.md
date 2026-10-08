@@ -2,19 +2,19 @@
 
 | | |
 |---|---|
-| **Status** | v0.19 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.21 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, and `workspace_api` section of §9.8; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, and `workspace_api` section of §9.9; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
-- **v0.19 ([DEC-670](../project/decisions/DEC-670.md)):** §9.8 closes four control-stream records
+- **v0.21 ([DEC-670](../project/decisions/DEC-670.md)):** §9.9 closes four control-stream records
   the [workspace API](workspace-api.md) commits (its §4.1, §4.6, §5.1; DEC-436 item 14), with rules
-  54 to 65. `MandateDraftSaved` records one explicit draft save, its draft stored as an artifact.
+  69 to 80. `MandateDraftSaved` records one explicit draft save, its draft stored as an artifact.
   `ModelInvocationRecorded` may now be written on the control stream, for the compiler alone, closed
   there with [DEC-432](../project/decisions/DEC-432.md) item 11's members; this answers the
   [inference spec's §13 question 1](inference.md#13-open-questions). On the agent stream it stays
@@ -266,7 +266,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   originating event. **Owner input is journaled on the control stream first**: an answer to an
   approval as `ApprovalResponseSubmitted`, a pause, resume, Stop, owner exit, or kill switch as
   `OwnerCommandIssued` ([mandate spec §6.1](mandate.md#61-purposes)), and a request for an order as
-  `OwnerRequestSubmitted` (§9.8). The runtime hands a request to its order builder, which sizes,
+  `OwnerRequestSubmitted` (§9.9). The runtime hands a request to its order builder, which sizes,
   clips, and classifies it as it does any proposal, and its `DecisionMade` names the request as
   `causation_id`, with the request's `requested_by` and `client_id`. The link crosses streams, so
   `append` does not check it, as for the other copies. The agent runtime copies each
@@ -521,7 +521,7 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 |---|---|---|
 | `StreamOpened` | — | stream type, subject, environment |
 | `ObservationRecorded` | — | source, instrument, data (artifact) |
-| `ModelInvocationRecorded` | mod | purpose (fast model, research; the compiler's is on the control stream, §9.8), provider, model and version, parameters, seed, prompt and retrieved context (artifact), response (artifact), provider request ID |
+| `ModelInvocationRecorded` | mod | purpose (fast model, research; the compiler's is on the control stream, §9.9), provider, model and version, parameters, seed, prompt and retrieved context (artifact), response (artifact), provider request ID |
 | `ModelOutputRecorded` | v1: man; v2: man, reg | signal model id, version, content hash, instrument, as_of, expires_at, direction, conviction, confidence, horizon, thesis (artifact) and, for the research agent, its thesis and lineage ids; `ignored` reason if not used |
 | `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks; closed in §9.4 |
 | `DecisionMade` | v1: man; v2: man, pol, reg | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification and its source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling), `delegation_id` when a delegation lifted it ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003)), and `requested_by` (`agent`, `owner`, or `client`) with the client's id when a connected client asked (mandate §6.2 step 5a, DEC-185); `ask_suppressed` (`budget`, `skipped_today`, `recent_timeout`) when an `ask` was classified but not asked ([mandate spec §6.4](mandate.md#64-approvals)) |
@@ -539,9 +539,9 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 
 | Event type | Required refs | Key payload fields |
 |---|---|---|
-| `MandateDraftSaved` | — | One explicit save of a mandate draft: draft, the draft stored (artifact), origin, the save it replaces, the version it started from; closed in §9.8 |
-| `ModelInvocationRecorded` | mod | The compiler's model call, for a draft ([inference spec §3.6](inference.md#36-journaling)); closed in §9.8 |
-| `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-51-dec-97): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque); `MandateConfirmed` version 2 also names the agent and the version it replaces (§9.8) |
+| `MandateDraftSaved` | — | One explicit save of a mandate draft: draft, the draft stored (artifact), origin, the save it replaces, the version it started from; closed in §9.9 |
+| `ModelInvocationRecorded` | mod | The compiler's model call, for a draft ([inference spec §3.6](inference.md#36-journaling)); closed in §9.9 |
+| `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-51-dec-97): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque); `MandateConfirmed` version 2 also names the agent and the version it replaces (§9.9) |
 | `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason (`goal_complete`, `profit_stop_reached`, `end_date`, owner stop), net dollar loss added to the connection's loss carry; for `AgentDeployed`: the rendered go-live screen (artifact), backtest and paper-run IDs shown, performance legend and disclosure versions shown, approving users, step-up evidence ([mandate spec §10](mandate.md#10-records-dec-51-dec-97)) |
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
 | `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result |
@@ -549,7 +549,7 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 | `OwnerAlertSent` | — | Written by the owner of the subject event's stream, in that stream and in the subject's batch, on any stream type ([notifications spec §5.5](notifications.md#55-records)): subject event, kind (notifications spec §3.2), and for a kill switch the owner command it carries out, if any. It records that an alert was raised; delivery is the notice stream's |
 | `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
 | `ApprovalResponseSubmitted` | — | The owner's answer to an approval ([mandate spec §6.4](mandate.md#64-approvals)): agent, approval, verdict (`approved`, `skipped`), content hash, `submitted_at`, step-up evidence (assertion ID, authentication time, method) or null, responder (opaque) and role |
-| `OwnerRequestSubmitted` | — | An owner's request for an order (workspace API §4.6): agent, instrument, side, optional size, who asked; closed in §9.8 |
+| `OwnerRequestSubmitted` | — | An owner's request for an order (workspace API §4.6): agent, instrument, side, optional size, who asked; closed in §9.9 |
 | `OwnerCommandIssued` | — | The owner's command ([mandate spec §6.1](mandate.md#61-purposes)): agent or kill-switch scope, command (`pause`, `resume`, `stop`, `kill_switch`, `owner_exit`), the release choice and warning shown for a Stop with release, the bid, bid size, and floor confirmed for an owner exit, `submitted_at`, step-up evidence or null, user (opaque) |
 | `ConfigSnapshotRegistered` | — | configuration kind (fee, calendar, instrument snapshot, rule set, mandate), content hash |
 | `SurveillanceReportGenerated`, `BacktestRunRecorded` | rule | period, report (artifact), breaches; data snapshot, code build, configuration, results, paper/live/backtest marker |
@@ -1567,14 +1567,14 @@ with every value compared.
     reported at itself; and |`m_now` − `m_req`| × 10 000 ≤ `band_bp` × `m_req`, on exact decimals
     (`payload.m_now`).
 
-### 9.8 Workspace API records ([DEC-670](../project/decisions/DEC-670.md))
+### 9.9 Workspace API records ([DEC-670](../project/decisions/DEC-670.md))
 
 Four control-stream records the [workspace API](workspace-api.md) commits (its §4.1, §4.6, §5.1;
 [DEC-436](../project/decisions/DEC-436.md) item 14), closed as §9.7's are: every listed member is
 present, `null` only where the type is nullable, and any extra member is refused. §9.1's and §9.2's
 types apply, with §9.3's `asset_id`. The rules number on from §9.7's. Each record names the
-principal that committed it in `actor` (§3, [identity spec ID-1](identity.md)), and rules 55, 61,
-63, and 64 are the first that read `actor.kind`; each reports `schema` at `actor.kind`.
+principal that committed it in `actor` (§3, [identity spec ID-1](identity.md)), and rules 70, 76,
+78, and 79 are the first that read `actor.kind`; each reports `schema` at `actor.kind`.
 
 **What these records never do.** A draft, a compile, and a request change no envelope (`AGENTS.md`
 rule 11): a draft is not a version, nothing reads it as one, and it may fail validation; a request
@@ -1590,8 +1590,8 @@ document as edited, with each path's provenance (mandate spec §2.1), stored und
 | `draft_id` | `id` | The draft, the same across its saves |
 | `draft` | `ref` | This save's stored draft |
 | `origin` | `description` \| `goal_answers` \| `template` \| `version` \| `edit` \| `compile` | How this save came to be. The first four start a draft; `edit` is the owner's change to one; `compile` is the compiler's result written into one |
-| `base_draft` | `ref?` | The `draft` of the save this one replaces, as the API's `If-Match` named it (workspace API API-19): rule 54 |
-| `base_version` | `ref?` | The stored mandate version a draft of origin `version` starts from: rule 54 |
+| `base_draft` | `ref?` | The `draft` of the save this one replaces, as the API's `If-Match` named it (workspace API API-19): rule 69 |
+| `base_version` | `ref?` | The stored mandate version a draft of origin `version` starts from: rule 69 |
 
 **`ModelInvocationRecorded`** on the control stream: the compiler's model call. The compiler acts
 for a user and has no agent, so its record is on the workspace's control stream, written by the
@@ -1607,22 +1607,22 @@ members and the agent harness's.
 | `purpose` | `compiler` | The only purpose on the control stream |
 | `draft_id` | `id` | The draft compiled |
 | `draft` | `ref` | The saved draft the compiler read |
-| `model` | `{model_id: text, model_version: text, content_hash: ref}` | The registry entry called: rule 56 |
+| `model` | `{model_id: text, model_version: text, content_hash: ref}` | The registry entry called: rule 71 |
 | `endpoint` | `text` | The endpoint that served it |
 | `request_digest` | `ref` | SHA-256 of the canonical request (inference §3.1), which is stored |
 | `sampling` | `{temperature: decimal, seed: integer?}` | `seed` is `null` where the provider takes none |
 | `prompt_ref` | `ref` | The rendered prompt |
-| `response_ref` | `ref?` | The response, or `null` when no response bytes arrived: rules 57 to 59 |
+| `response_ref` | `ref?` | The response, or `null` when no response bytes arrived: rules 72 to 74 |
 | `reported_identity` | `text?` | What the provider says served the call (INF-2) |
 | `provider_request_id` | `text?` | |
 | `outcome` | `ok` \| `policy_denied` \| `budget_exhausted` \| `rate_limited_local` \| `meter_unavailable` \| `input_rejected` \| `model_withdrawn` \| `deadline_exceeded` \| `provider_unavailable` \| `rate_limited_provider` \| `credential_invalid` \| `content_refused` \| `schema_invalid` \| `identity_mismatch` | Inference §3.3. The API's `compile_failed` is `schema_invalid` |
-| `attempts` | `integer` | Attempts sent to a provider: rules 58 and 59 |
+| `attempts` | `integer` | Attempts sent to a provider: rules 73 and 74 |
 | `tokens` | `{input: integer, output: integer, cached: integer}` | |
-| `cost_usd` | `decimal` | From the price table in effect (inference §7.2): rule 60 |
+| `cost_usd` | `decimal` | From the price table in effect (inference §7.2): rule 75 |
 | `price_table_ref` | `ref` | The price table version used |
-| `cache_hit` | `boolean` | Served from the gateway's cache (inference §3.5): rule 59 |
+| `cache_hit` | `boolean` | Served from the gateway's cache (inference §3.5): rule 74 |
 | `deadline` | `timestamp` | The call's absolute deadline |
-| `completed_at` | `timestamp` | When the gateway finished with it: rule 60 |
+| `completed_at` | `timestamp` | When the gateway finished with it: rule 75 |
 
 **`MandateConfirmed`** version 2: version 1's members, then the agent link (DEC-436 item 14). Rules
 18 and §9.2's mapping apply to it as to version 1, and version 1 stays registered and unchanged
@@ -1633,7 +1633,7 @@ write version 1.
 |---|---|---|
 | `mandate_version`, `confirmed_paths`, `record_ref` | As version 1's | |
 | `agent_id` | `id?` | The deployed agent the version is for, or `null` for a new mandate |
-| `base_version` | `ref?` | The agent's version in force when the owner confirmed (workspace API §5.1): rule 62 |
+| `base_version` | `ref?` | The agent's version in force when the owner confirmed (workspace API §5.1): rule 77 |
 
 **`OwnerRequestSubmitted`**: an owner's request for an order (workspace API §4.6). The runtime
 hands it to the order builder, which sizes, clips, and classifies it as any proposal (§2).
@@ -1643,53 +1643,53 @@ hands it to the order builder, which sizes, clips, and classifies it as any prop
 | `agent_id` | `id` | |
 | `instrument_id` | `asset_id` | |
 | `side` | `buy` \| `sell` | |
-| `quantity` | `decimal?` | The size asked for, or `null` for the builder to size: rule 65 |
-| `requested_by` | `owner` \| `client` | Who asked, from the actor: rule 64. The builder carries it to `DecisionMade` (mandate spec §6.2 step 5a) |
-| `client_id` | `id?` | The client that asked: rule 64 |
+| `quantity` | `decimal?` | The size asked for, or `null` for the builder to size: rule 80 |
+| `requested_by` | `owner` \| `client` | Who asked, from the actor: rule 79. The builder carries it to `DecisionMade` (mandate spec §6.2 step 5a) |
+| `client_id` | `id?` | The client that asked: rule 79 |
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 
-54. `MandateDraftSaved`: `base_draft` is `null` exactly when `origin` is `description`,
+69. `MandateDraftSaved`: `base_draft` is `null` exactly when `origin` is `description`,
     `goal_answers`, `template`, or `version` (`payload.base_draft`); `base_version` is non-null
     exactly when `origin` is `version` (`payload.base_version`); and `causation_id` is non-null
     when `origin` is `compile`: the compiler's `ModelInvocationRecorded` (`causation_id`). The
     first that fails, in that order, is reported.
-55. `MandateDraftSaved`: the actor is a `user`, or a `client` whose `origin` is `version`
+70. `MandateDraftSaved`: the actor is a `user`, or a `client` whose `origin` is `version`
     (`actor.kind`): a client's `propose` scope creates a draft from a base version and nothing
     else (workspace API §3.8). No `client` actor is admitted at this version (§3), so until one is
     only a user saves a draft.
-56. `ModelInvocationRecorded` on the control stream: `model.content_hash` equals
+71. `ModelInvocationRecorded` on the control stream: `model.content_hash` equals
     `config_refs.model_version` (`payload.model.content_hash`), as rule 38 binds a thesis's model.
     A missing ref is already `missing_config_ref`.
-57. `ModelInvocationRecorded`: an `ok` has its response: `response_ref` and `reported_identity`
+72. `ModelInvocationRecorded`: an `ok` has its response: `response_ref` and `reported_identity`
     are non-null, each reported at itself in that order.
-58. `ModelInvocationRecorded`: a refusal (`policy_denied`, `budget_exhausted`,
+73. `ModelInvocationRecorded`: a refusal (`policy_denied`, `budget_exhausted`,
     `rate_limited_local`, `meter_unavailable`, `input_rejected`, `model_withdrawn`) sent nothing
     (inference §3.3): `response_ref`, `reported_identity`, and `provider_request_id` are `null`,
     `attempts` is 0, every `tokens` member is 0 (reported at `payload.tokens`), and `cost_usd` is
     0; the first that fails, in that order.
-59. `ModelInvocationRecorded`: `cache_hit` is true only when `outcome` is `ok`
+74. `ModelInvocationRecorded`: `cache_hit` is true only when `outcome` is `ok`
     (`payload.cache_hit`), and a hit made no attempt and no provider request and cost nothing:
     `attempts` 0, `provider_request_id` `null`, and `cost_usd` 0, the first that fails in that
     order. Any other call that is not a refusal reached a provider: `attempts` ≥ 1
     (`payload.attempts`).
-60. `ModelInvocationRecorded`: `cost_usd` ≥ 0 (`payload.cost_usd`), and an `ok` completed no later
+75. `ModelInvocationRecorded`: `cost_usd` ≥ 0 (`payload.cost_usd`), and an `ok` completed no later
     than its deadline: `completed_at` ≤ `deadline`, compared to the nanosecond
     (`payload.completed_at`). A response that completes late is `deadline_exceeded` and never used
     (inference INF-3).
-61. `ModelInvocationRecorded` on the control stream: the actor is a `system` (`actor.kind`), the
+76. `ModelInvocationRecorded` on the control stream: the actor is a `system` (`actor.kind`), the
     services that called the gateway.
-62. `MandateConfirmed` version 2: `base_version` is `null` exactly when `agent_id` is, and differs
+77. `MandateConfirmed` version 2: `base_version` is `null` exactly when `agent_id` is, and differs
     from `mandate_version` (`payload.base_version`): a confirmation for a deployed agent names the
     version it replaces, which is never itself.
-63. `MandateConfirmed` version 2: the actor is a `user` (`actor.kind`). Only a user confirms
+78. `MandateConfirmed` version 2: the actor is a `user` (`actor.kind`). Only a user confirms
     (workspace API §5.1, identity spec ID-11).
-64. `OwnerRequestSubmitted`: the actor is a `user` or a `client` (`actor.kind`); `requested_by`
+79. `OwnerRequestSubmitted`: the actor is a `user` or a `client` (`actor.kind`); `requested_by`
     is `owner` for a user and `client` for a client (`payload.requested_by`); and `client_id` is
     the actor's `id` for a client and `null` for a user (`payload.client_id`). So who asked is the
     authenticated principal's, never the request body's (workspace API API-6, DEC-185 item 2). No
     `client` actor is admitted at this version (§3), so a client's request is refused until one is.
-65. `OwnerRequestSubmitted`: a non-null `quantity` is greater than 0 (`payload.quantity`).
+80. `OwnerRequestSubmitted`: a non-null `quantity` is greater than 0 (`payload.quantity`).
 
 These records map to no `JournaledFact` except `MandateConfirmed` version 2, which maps as version 1
 does (§9.2), from the same members.

@@ -387,10 +387,10 @@ define yet; §11's E10-15 adds them before the operation ships.
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
-| Create a draft | `POST /mandate-drafts` | `MandateDraftSaved` (journal spec §9.8) | From a description, the three goal answers (A0, E10-7), a template, or a base version. Returns `draft_id` and its `etag` |
+| Create a draft | `POST /mandate-drafts` | `MandateDraftSaved` (journal spec §9.9) | From a description, the three goal answers (A0, E10-7), a template, or a base version. Returns `draft_id` and its `etag` |
 | Read, list drafts | `GET /mandate-drafts/{id}`, `GET /mandate-drafts` | — | With provenance per path (mandate spec §2.1) |
 | Save a draft | `PUT /mandate-drafts/{id}` with `If-Match` | `MandateDraftSaved` | Form and YAML are two views of this one document (FR-3.2). Stale `If-Match`: `stale_base` |
-| Compile | `POST /mandate-drafts/{id}/compile` | The compiler's `ModelInvocationRecorded` on the control stream (journal spec §9.8) | Asynchronous job. Fills only `user_stated` and `platform_proposed` values, never `auto` or a delegation (V-022, V-038). Output failing the schema is `compile_failed` with the description kept (A2) |
+| Compile | `POST /mandate-drafts/{id}/compile` | The compiler's `ModelInvocationRecorded` on the control stream (journal spec §9.9) | Asynchronous job. Fills only `user_stated` and `platform_proposed` values, never `auto` or a delegation (V-022, V-038). Output failing the schema is `compile_failed` with the description kept (A2) |
 | Validate | `POST /mandate-drafts/{id}/validate` | — | Schema, V-rules, the policy hierarchy; returns violations and warnings with each warning's code (A4). Writes nothing |
 | Create a version | `POST /mandate-drafts/{id}/versions` | `MandateVersionCreated` | Requires a passing validation. Canonicalizes and hashes (mandate spec §9.1); records provenance, validation results, the classification against the base version, and the diff (§10) |
 | Read a version | `GET /mandate-versions/{hash}` | — | The stored canonical document and its records |
@@ -453,7 +453,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | Dry run | `POST /agents/{id}/dry-run` | `RecordsAccessed` | DEC-190: the decision (`auto`, `ask`, `deny`) and the gate's reason code for a described order, with the client ceiling for a client. Places nothing, creates no approval |
-| Owner request | `POST /agents/{id}/requests` | `OwnerRequestSubmitted` (journal spec §9.8) | An instrument, side, and optional size the owner or client asks for. The runtime copies it to its builder, which sizes, clips, and classifies it as for any proposal (rule 4); `requested_by` from the channel (API-6) |
+| Owner request | `POST /agents/{id}/requests` | `OwnerRequestSubmitted` (journal spec §9.9) | An instrument, side, and optional size the owner or client asks for. The runtime copies it to its builder, which sizes, clips, and classifies it as for any proposal (rule 4); `requested_by` from the channel (API-6) |
 | Chat | `POST /agents/{id}/chat`, `GET .../chat` | The model call, on the agent stream | A reply is quoted model output (API-18). When a message asks for an action, deterministic code returns a card: an owner request with the builder's proposal, gate verdict, and autonomy outcome, or a draft version that opens A6. Sending the card is a separate call carrying its `card_digest` (D14, DEC-192) |
 
 ### 4.7 Read models
@@ -536,7 +536,7 @@ refused with `control_stream_frozen`; the API-7 operations, including §4.4's re
 are still recorded.
 
 It then commits `MandateConfirmed` version 2 with the agent link, `agent_id` and `base_version`
-(journal spec §9.8, DEC-436 item 14). Response `202`:
+(journal spec §9.9, DEC-436 item 14). Response `202`:
 
 | Member | Meaning |
 |---|---|
@@ -779,7 +779,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
 | Read-model projections | **Planned** (E11-9) |
 | Journal queries, trace, exports over the API | **Planned** (E12-6) |
-| Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.19 §9.8, DEC-670); `mandate-journal` registration planned (E10-15) |
+| Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.21 §9.9, DEC-670); `mandate-journal` registration planned (E10-15) |
 | The rest: `hold_openings`, `lift_hold`, the `client` actor, `ConnectionRevoked`'s reason, client events | **Planned** (E10-15, journal spec change first) |
 | Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
 
