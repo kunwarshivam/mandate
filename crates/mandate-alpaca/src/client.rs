@@ -8,6 +8,7 @@
 use std::future::Future;
 use std::time::Duration;
 
+use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     ActivityCursor, BrokerConnector, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerUnknown,
     ConnectorError,
@@ -363,6 +364,10 @@ fn query_value(raw: &str) -> String {
 /// [`ConnectorError::NotSent`]: the shell stops and alerts on both (DEC-85), and neither is ever
 /// reported as a rejection — treating an unread answer as a rejection is how a duplicate is born.
 impl<T: TradingTransport, P: Pause> BrokerConnector for TradingClient<T, P> {
+    fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+        crate::profile::alpaca()
+    }
+
     async fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         self.call_one(request)
             .await
