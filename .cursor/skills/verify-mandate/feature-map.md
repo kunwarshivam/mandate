@@ -317,13 +317,14 @@ crates.
   permitting arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
   `src/bin/mandate-tracer.rs` the binary; `src/control.rs` the deployment input from the control
-  stream (E19-11, DEC-505; tests in `crates/mandate-shell/tests/control.rs`); `src/paper.rs` the DEC-466 one-run loader that verifies the
-  reviewed E7-7 AAPL artifacts and binds the bytes it checked, reads the GET-only broker preflight
-  (including the trailing window's IEX minute bars, DEC-471) and the liquidity facts into one
-  `PaperFacts` snapshot, refuses any missing, stale, or
-  ambiguous fact or a non-clean account, and assembles the trusted run and executor contexts from
-  that snapshot alone (DEC-470); `src/adapters.rs` the production adapters: `StoredBars`, `MovingAverage`,
-  `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal, executor, and
+  stream (E19-11, DEC-505; tests in `crates/mandate-shell/tests/control.rs`) and the effective
+  registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`);
+  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed E7-7 AAPL artifacts and
+  binds the bytes it checked, reads the GET-only broker preflight (including the trailing window's
+  IEX minute bars, DEC-471) and the liquidity facts into one `PaperFacts` snapshot, refuses any
+  missing, stale, or ambiguous fact or a non-clean account, and assembles the trusted run and
+  executor contexts from that snapshot alone (DEC-470); `src/adapters.rs` the production adapters:
+  `StoredBars`, `MovingAverage`, `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal, executor, and
   reconciler. The risk exit plans over the journal, stream, clock, and agent the run's bridge hands
   it (DEC-449, amended by DEC-451). It holds no trading logic—no sizing, gating, pricing, state
   machine, or arithmetic on money or quantity—and binds the owning crates directly.
