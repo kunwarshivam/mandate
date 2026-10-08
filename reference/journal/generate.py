@@ -148,8 +148,9 @@ ASK_SUPPRESSED = one_of("budget", "skipped_today", "recent_timeout")
 REQUESTED_BY = one_of("agent", "owner", "client")
 BUILTIN_LABEL = "builtin_risk_reducing"
 DELEGATION_PREFIX = "delegation:"
+POLICY_OVERLAY_LABEL = "policy_overlay"
 DECIDED_BY = re.compile(
-    r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|(rule|delegation):[A-Za-z0-9_-]+)\Z"
+    r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|policy_overlay|(rule|delegation):[A-Za-z0-9_-]+)\Z"
 )
 
 SCHEMAS: dict[tuple[str, str], T] = {
@@ -280,11 +281,12 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         rule(4, (p["reason_code"] is None) == allow, "schema", "payload.reason_code")
         rule(5, (p["autonomy"] is not None) == allow, "schema", "payload.autonomy")
         by, classified = p["decided_by"], p["autonomy"] is not None
+        unlisted_overlay = by == POLICY_OVERLAY_LABEL and "regress.labels_without_policy_overlay" in skip
         labelled = (by is not None) == classified and (not classified or (by == BUILTIN_LABEL) != adds_risk)
         rule("5.decided_by", labelled, "schema", "payload.decided_by")
         rule(
             "5.decided_by_label",
-            by is None or bool(DECIDED_BY.match(by)),
+            by is None or (bool(DECIDED_BY.match(by)) and not unlisted_overlay),
             "non_canonical",
             "payload.decided_by",
         )
@@ -325,6 +327,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         )
         ceiling_label = by != "client_ceiling" or (client and asked)
         rule("7.client_ceiling_label", ceiling_label, "schema", "payload.decided_by")
+        overlay_label = by != POLICY_OVERLAY_LABEL or p["autonomy"] != "auto"
+        rule("7.policy_overlay_label", overlay_label, "schema", "payload.decided_by")
         discretionary = p["purpose"] == "discretionary_exit"
         rule(
             "8.exit_origin",
@@ -3340,6 +3344,150 @@ def build_section(v3: dict) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- policy_overlay
+
+
+OVERLAY_CLAUSE = "§9.1 rule 7; mandate spec §6.2 step 5c (DEC-536)"
+OVERLAY_VALIDATOR_MUTANTS = (
+    "rule.5.decided_by",
+    "rule.5.decided_by_label",
+    "rule.7.policy_overlay_label",
+    "regress.labels_without_policy_overlay",
+)
+
+
+def build_policy_overlay_section() -> dict:
+    """Journal spec v0.18 (DEC-536): `DecisionMade` drafts on the agent chain's opening that the
+    policy overlay of mandate spec §4.3 decided. The section is additive, so the agent-stream cases
+    and their counts stay as they are; each draft is built from `agent_stream`'s chain."""
+
+    def overlay() -> dict:
+        return change("payload.decided_by", POLICY_OVERLAY_LABEL)
+
+    return {
+        "spec": "docs/specs/journal.md v0.18 §9.1 rules 5 and 7 (DEC-536)",
+        "base": "agent_stream",
+        "invalid_drafts": [
+            invalid(
+                "decision_overlay_on_auto",
+                OVERLAY_CLAUSE,
+                "decision",
+                [overlay()],
+                "schema",
+                "payload.decided_by",
+            ),
+            invalid(
+                "decision_overlay_label_with_a_level",
+                "§9.1 rule 5",
+                "decision",
+                [
+                    change("payload.autonomy", "ask"),
+                    change("payload.decided_by", "policy_overlay:workspace"),
+                ],
+                "non_canonical",
+                "payload.decided_by",
+            ),
+            invalid(
+                "decision_overlay_after_a_denied_dry_run",
+                "§9.1 rule 5",
+                "decision",
+                [
+                    change("payload.dry_run", "deny"),
+                    change("payload.reason_code", "insufficient_buying_power"),
+                    change("payload.autonomy", None),
+                    overlay(),
+                ],
+                "schema",
+                "payload.decided_by",
+            ),
+        ],
+        "valid_drafts": [
+            valid(
+                "decision_overlay_narrows_auto_to_ask",
+                OVERLAY_CLAUSE,
+                "decision",
+                [change("payload.autonomy", "ask"), overlay()],
+            ),
+            valid(
+                "decision_overlay_ask_suppressed",
+                OVERLAY_CLAUSE,
+                "decision",
+                [
+                    change("payload.autonomy", "ask"),
+                    change("payload.ask_suppressed", "budget"),
+                    overlay(),
+                ],
+            ),
+            valid(
+                "decision_overlay_denies_a_nonconforming_opening",
+                "§9.1 rule 7; DEC-534 item 2",
+                "decision",
+                [change("payload.autonomy", "deny"), overlay()],
+            ),
+            valid(
+                "decision_overlay_denies_a_client_request",
+                "§9.1 rule 7; DEC-534 item 2",
+                "decision",
+                [
+                    change("payload.requested_by", "client"),
+                    change("payload.client_id", "client_dots"),
+                    change("payload.autonomy", "deny"),
+                    overlay(),
+                ],
+            ),
+        ],
+    }
+
+
+def overlay_case_failures(chain: list[dict], section: dict, skip: frozenset[str] = frozenset()) -> list[str]:
+    """Each invalid draft breaks exactly its one rule, with its reason and path; each valid draft
+    breaks none."""
+    problems = []
+    for case in section["invalid_drafts"]:
+        got = violations(apply_changes(chain, case), skip)
+        want = case["expect"]
+        if len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"]):
+            problems.append(f"policy_overlay invalid {case['name']}: {got}")
+    for case in section["valid_drafts"]:
+        got = violations(apply_changes(chain, case), skip)
+        if got:
+            problems.append(f"policy_overlay valid {case['name']}: {got}")
+    return problems
+
+
+def check_policy_overlay(section: dict, agent_section: dict) -> list[str]:
+    problems = overlay_case_failures(agent_section["chain"], section)
+    if section["base"] != "agent_stream":
+        problems.append("policy_overlay base: drafts are built from agent_stream's chain")
+    labels = {
+        change_["value"]
+        for case in section["valid_drafts"]
+        for change_ in case["changes"]
+        if change_["path"] == "payload.decided_by"
+    }
+    if labels != {POLICY_OVERLAY_LABEL}:
+        problems.append(f"policy_overlay valid drafts must each be decided by the overlay: {labels}")
+    return problems
+
+
+def run_policy_overlay_mutants(section: dict, agent_section: dict) -> list[str]:
+    """Every seeded validator bug and vector bug is caught by the section's own cases."""
+    escaped = []
+    chain = agent_section["chain"]
+    for mutant in OVERLAY_VALIDATOR_MUTANTS:
+        if not overlay_case_failures(chain, section, frozenset([mutant])):
+            escaped.append(f"policy_overlay validator mutant {mutant}")
+    unasked = copy.deepcopy(section)
+    unasked["valid_drafts"][0]["changes"][0]["value"] = "auto"
+    if not check_policy_overlay(unasked, agent_section):
+        escaped.append("policy_overlay vector mutant: the narrowed ask written as auto")
+    asked = copy.deepcopy(section)
+    asked["invalid_drafts"][0]["changes"].insert(0, change("payload.autonomy", "ask"))
+    if not check_policy_overlay(asked, agent_section):
+        escaped.append("policy_overlay vector mutant: the overlay on auto written as an ask")
+    return escaped
+
+
 class Dumper(yaml.SafeDumper):
     pass
 
@@ -3353,6 +3501,7 @@ def render(
     v3_text: str,
     section: dict,
     production_config_refs: dict,
+    policy_overlay: dict,
     control_section: dict,
     risk_section: dict,
     research_section: dict,
@@ -3364,6 +3513,7 @@ def render(
         {
             "agent_stream": section,
             "production_config_refs": production_config_refs,
+            "policy_overlay": policy_overlay,
             "control_stream": control_section,
             "risk_state": risk_section,
             "research": research_section,
@@ -3407,6 +3557,7 @@ def main(argv: list[str] | None = None) -> int:
     section = build_section(v3)
     control_section = control.build_section(v3)
     production_config_refs = build_production_config_refs_section(control_section)
+    policy_overlay = build_policy_overlay_section()
     risk_section = risk_state.build_section()
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
@@ -3416,6 +3567,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += run_mutants(section, v3)
     problems += check_production_config_refs(production_config_refs)
     problems += run_production_config_ref_mutants(production_config_refs)
+    problems += check_policy_overlay(policy_overlay, section)
+    problems += run_policy_overlay_mutants(policy_overlay, section)
     problems += control.check_section(control_section)
     problems += control.run_mutants(control_section)
     problems += risk_state.check_section(risk_section)
@@ -3435,6 +3588,7 @@ def main(argv: list[str] | None = None) -> int:
         text,
         section,
         production_config_refs,
+        policy_overlay,
         control_section,
         risk_section,
         research_section,
@@ -3445,6 +3599,7 @@ def main(argv: list[str] | None = None) -> int:
     if (
         check_chain(reread["agent_stream"], v3)
         or check_production_config_refs(reread["production_config_refs"])
+        or check_policy_overlay(reread["policy_overlay"], reread["agent_stream"])
         or control.check_section(reread["control_stream"])
         or risk_state.check_section(reread["risk_state"])
         or research.check_section(reread["research"])
@@ -3473,6 +3628,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(vector_mutants(section))} vector mutants caught; "
         f"{len(production_config_refs['valid_drafts'])} production config-ref drafts, "
         f"{len(production_config_refs['invalid_drafts'])} invalid, 3 validator and 5 vector mutants caught; "
+        f"{len(policy_overlay['invalid_drafts'])} invalid and {len(policy_overlay['valid_drafts'])} valid "
+        f"policy-overlay drafts, {len(OVERLAY_VALIDATOR_MUTANTS)} validator and 2 vector mutants caught; "
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
         f"and {len(control_section['valid_drafts'])} valid drafts; {len(control.VALIDATOR_MUTANTS)} validator and "

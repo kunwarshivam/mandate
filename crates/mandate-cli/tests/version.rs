@@ -217,7 +217,6 @@ fn refused(result: Result<Submitted, ControlError>) -> &'static str {
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn a_version_is_its_stored_document_created_with_every_path_user_entered() {
     let mut world = World::new();
     let before = world.appends();
@@ -233,7 +232,6 @@ fn a_version_is_its_stored_document_created_with_every_path_user_entered() {
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn a_confirmation_is_one_event_bound_to_the_version_shown_that_the_spec_fold_reads() {
     let mut world = World::new();
     world.run(Do::Create("v1")).unwrap();
@@ -300,7 +298,6 @@ fn a_confirmation_is_one_event_bound_to_the_version_shown_that_the_spec_fold_rea
 /// Every refusal carries one of DEC-530 item 10's codes, each case its own, and writes nothing:
 /// no append, no stored object, no assertion.
 #[test]
-#[ignore = "pending E10-16"]
 fn every_refusal_has_its_own_code_and_writes_nothing() {
     let unreadable = MODEL.replace(r#"["fast_periods","slow_periods"]"#, r#""x""#);
     let (v1, model) = (Create("v1"), Seed("ConfigSnapshotRegistered", &unreadable));
@@ -402,7 +399,6 @@ impl ArtifactStore for Failing {
 /// Each command stores every object, the document and then the record, before it commits, so a
 /// store that fails at any of those writes commits nothing.
 #[test]
-#[ignore = "pending E10-16"]
 fn a_store_that_fails_commits_nothing() {
     let (create, confirm) = (Do::Create("v1"), Do::Confirm("v1", None));
     for (setup, step, after) in [

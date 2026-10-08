@@ -792,10 +792,13 @@ fn the_quorum_is_recorded_exactly_when_check_7_judged_a_grant() {
                 None
             };
             prop_assert_eq!(
-                event.payload.get("quorum"),
+                event
+                    .payload
+                    .get("quorum")
+                    .filter(|recorded| !matches!(recorded, Value::Null)),
                 expected.as_ref(),
-                "`quorum` is recorded exactly when check 7 judged the grant, as the request bound \
-                 it: {:?}",
+                "`quorum` is non-null exactly when check 7 judged the grant, as the request bound \
+                 it; its presence as `null` otherwise is answer_records.rs's (DEC-533 item 3): {:?}",
                 event.payload
             );
         }
