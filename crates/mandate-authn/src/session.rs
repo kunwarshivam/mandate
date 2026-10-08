@@ -57,16 +57,21 @@ fn shortened(default_s: i64, setting: Option<i64>) -> Result<i64, SessionRefusal
 
 impl SessionLimits {
     /// The limits for `kind` under `policy`. A setting longer than the default, or not positive,
-    /// is refused: an organization may only shorten (§6.2).
+    /// is refused: an organization may only shorten (§6.2). So is an idle timeout longer than the
+    /// absolute lifetime it would run inside (DEC-652 item 2).
     pub fn resolve(kind: OrgKind, policy: SessionPolicy) -> Result<Self, SessionRefusal> {
         let (idle_s, absolute_s) = match kind {
             OrgKind::Individual => (INDIVIDUAL_IDLE_S, INDIVIDUAL_ABSOLUTE_S),
             OrgKind::Business => (BUSINESS_IDLE_S, BUSINESS_ABSOLUTE_S),
         };
-        Ok(Self {
+        let limits = Self {
             idle_s: shortened(idle_s, policy.idle_s)?,
             absolute_s: shortened(absolute_s, policy.absolute_s)?,
-        })
+        };
+        if limits.idle_s > limits.absolute_s {
+            return Err(SessionRefusal::IdleLongerThanAbsolute);
+        }
+        Ok(limits)
     }
 
     /// The idle timeout, in seconds.
@@ -90,6 +95,9 @@ impl fmt::Debug for RefreshSecret {
         f.write_str("RefreshSecret(..)")
     }
 }
+
+/// A refresh token's SHA-256 digest, the only form a session record keeps of it.
+pub type RefreshDigest = [u8; 32];
 
 /// What a request asks to do, as far as a session's reach goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,16 +186,15 @@ pub struct SubjectStanding {
 }
 
 impl SubjectStanding {
-    /// The standing after a session of this subject ended at `now` for `ended`: only
-    /// [`EndReason::Deprovisioned`] records a deprovision signal; every other reason, a failed
-    /// refresh included, leaves the standing as it was.
-    pub fn noting(self, ended: Option<EndReason>, now: UtcNanos) -> Self {
-        match ended {
-            Some(EndReason::Deprovisioned) => Self {
-                last_deprovision: Some(now),
-                ..self
-            },
-            _ => self,
+    /// The standing after the workspace saw a deprovision signal for this subject at `now`
+    /// (`invalid_grant`, a disabled or revoked subject, a back-channel logout), whatever state
+    /// any session of it is in, or with none open at all (§11.1, DEC-652 item 7). The latest
+    /// signal is kept, so an older one arriving late moves nothing back.
+    pub fn saw_deprovision(self, now: UtcNanos) -> Self {
+        let latest = self.last_deprovision.map_or(now, |seen| seen.max(now));
+        Self {
+            last_deprovision: Some(latest),
+            ..self
         }
     }
 }
@@ -201,6 +208,16 @@ pub enum SessionRefusal {
     /// An organization tried to lengthen a limit, or set one that is not positive.
     #[error("the session limit may only be shortened")]
     LimitNotShortened,
+    /// The idle timeout would be longer than the absolute lifetime.
+    #[error("the idle timeout is longer than the absolute lifetime")]
+    IdleLongerThanAbsolute,
+    /// `now` is earlier than the session's opening or its last admitted activity: the clock
+    /// went backwards, and the session refuses rather than guess.
+    #[error("the clock is behind the session")]
+    ClockBehind,
+    /// The refresh secret to rotate to is the presented one or one already rotated away.
+    #[error("the next refresh secret was used before")]
+    RefreshSecretReused,
     /// A time this transition would compute is outside the clock's range.
     #[error("the session's times cannot be represented")]
     Unrepresentable,
@@ -231,13 +248,18 @@ pub enum SessionRefusal {
     DeprovisionSeen,
 }
 
-/// A refresh token's SHA-256 digest, the only form a session keeps.
-type Digest = [u8; 32];
+type Digest = RefreshDigest;
 
 fn digest_of(secret: &RefreshSecret) -> Digest {
     let mut out = [0; 32];
     out.copy_from_slice(digest(&SHA256, &secret.0).as_ref());
     out
+}
+
+/// `now` plus `secs` seconds, but never past `cap`: a deadline inside a session's absolute
+/// lifetime, so the end of the clock's range never refuses a request (rule 13).
+fn capped(now: UtcNanos, secs: i64, cap: UtcNanos) -> UtcNanos {
+    plus(now, secs).map_or(cap, |t| t.min(cap))
 }
 
 /// `t` plus `secs` seconds, or a refusal when the clock cannot hold it.
@@ -254,6 +276,9 @@ pub struct SessionRecord {
     reach: Reach,
     ended: Option<EndReason>,
     idle_s: i64,
+    /// The opening, then the last admitted request or granted refresh: the idle timer runs from
+    /// it, and a `now` before it is a clock gone backwards.
+    last_activity: UtcNanos,
     absolute_until: UtcNanos,
     idle_until: UtcNanos,
     access_until: UtcNanos,
@@ -271,12 +296,14 @@ impl SessionRecord {
         refresh: &RefreshSecret,
         now: UtcNanos,
     ) -> Result<Self, SessionRefusal> {
+        let absolute_until = plus(now, limits.absolute_s)?;
         Ok(Self {
             reach: Reach::Full,
             ended: None,
             idle_s: limits.idle_s,
-            absolute_until: plus(now, limits.absolute_s)?,
-            idle_until: plus(now, limits.idle_s)?,
+            last_activity: now,
+            absolute_until,
+            idle_until: capped(now, limits.idle_s, absolute_until),
             access_until: plus(now, ACCESS_TOKEN_LIFETIME_S)?,
             current: Some(digest_of(refresh)),
             rotated: BTreeSet::new(),
@@ -302,6 +329,7 @@ impl SessionRecord {
             reach: Reach::ReductionOnly,
             ended: None,
             idle_s: REDUCTION_ONLY_LIFETIME_S,
+            last_activity: now,
             absolute_until: until,
             idle_until: until,
             access_until: until,
@@ -315,6 +343,17 @@ impl SessionRecord {
         self.reach
     }
 
+    /// The SHA-256 digest of the current refresh token, the only form the record keeps of it;
+    /// `None` for a reduction-only session, which has none.
+    pub fn refresh_digest(&self) -> Option<RefreshDigest> {
+        self.current
+    }
+
+    /// The digests of every refresh token rotated away, in byte order, kept to detect reuse.
+    pub fn rotated_digests(&self) -> Vec<RefreshDigest> {
+        self.rotated.iter().copied().collect()
+    }
+
     /// Why the session ended, if it has.
     pub fn ended(&self) -> Option<EndReason> {
         self.ended
@@ -325,10 +364,14 @@ impl SessionRecord {
         self.reach == Reach::Full && self.ended.is_none()
     }
 
-    /// The refusals every transition shares: an ended session, then the absolute lifetime.
+    /// The refusals every transition shares: an ended session, a clock behind the session, then
+    /// the absolute lifetime.
     fn live(&self, now: UtcNanos) -> Result<(), SessionRefusal> {
         if let Some(reason) = self.ended {
             return Err(SessionRefusal::Ended { reason });
+        }
+        if now < self.last_activity {
+            return Err(SessionRefusal::ClockBehind);
         }
         if now >= self.absolute_until {
             return Err(SessionRefusal::AbsoluteExpired);
@@ -339,20 +382,25 @@ impl SessionRecord {
     /// Admits `request` at `now`, and on success counts it as activity for the idle timeout.
     pub fn authorize(&mut self, request: Request, now: UtcNanos) -> Result<(), SessionRefusal> {
         self.live(now)?;
-        if self.reach != Reach::Full {
-            return match request {
-                Request::Pause | Request::KillSwitch => Ok(()),
-                Request::Other => Err(SessionRefusal::RiskReductionOnly),
-            };
+        if self.reach == Reach::Full {
+            if now >= self.idle_until {
+                return Err(SessionRefusal::IdleExpired);
+            }
+            if now >= self.access_until {
+                return Err(SessionRefusal::AccessExpired);
+            }
+        } else if request == Request::Other {
+            return Err(SessionRefusal::RiskReductionOnly);
         }
-        if now >= self.idle_until {
-            return Err(SessionRefusal::IdleExpired);
-        }
-        if now >= self.access_until {
-            return Err(SessionRefusal::AccessExpired);
-        }
-        self.idle_until = plus(now, self.idle_s)?;
+        self.active_at(now);
         Ok(())
+    }
+
+    /// Counts an admitted request or a granted refresh at `now` as activity, restarting the idle
+    /// timer, which never runs past the absolute lifetime.
+    fn active_at(&mut self, now: UtcNanos) {
+        self.last_activity = now;
+        self.idle_until = capped(now, self.idle_s, self.absolute_until);
     }
 
     /// Refreshes with the `presented` refresh token, given the provider's `answer`, rotating to
@@ -383,14 +431,21 @@ impl SessionRecord {
             }
             return Err(SessionRefusal::UnknownRefreshToken);
         }
+        let next = digest_of(next);
+        if next == current || self.rotated.contains(&next) {
+            return Err(SessionRefusal::RefreshSecretReused);
+        }
         match answer {
             ProviderAnswer::Granted => {
+                if now >= self.idle_until {
+                    return Err(SessionRefusal::IdleExpired);
+                }
                 let access_until = plus(now, ACCESS_TOKEN_LIFETIME_S)?;
-                self.idle_until = plus(now, self.idle_s)?;
                 self.access_until = access_until;
                 self.rotated.insert(current);
-                self.current = Some(digest_of(next));
+                self.current = Some(next);
                 self.reach = Reach::Full;
+                self.active_at(now);
                 Ok(Refreshed::Rotated {
                     access_expires_at: access_until,
                 })
@@ -413,11 +468,13 @@ impl SessionRecord {
     }
 
     /// Admits `request` at `now` as [`SessionRecord::authorize`] does, and on success builds the
-    /// identity session `authorize` in `mandate-identity` reads: this record's reference, its kind
+    /// identity session `authorize` in `mandate-identity` reads: the `reference` the caller's store
+    /// keeps for this record, its kind
     /// ([`Reach::Full`] is [`SessionKind::Full`]; an outage and a reduction-only session are
     /// [`SessionKind::ReductionOnly`]), and the roles snapshot the caller read for this request,
-    /// passed through as read. A refusal builds nothing, so the request gets no session (DEC-652
-    /// item 9).
+    /// passed through as read: the caller (H1) builds it, for route 2 from every workspace where
+    /// the verified credential has an unsuspended row. A refusal builds nothing, so the request
+    /// gets no session (DEC-652 item 9).
     pub fn admit(
         &mut self,
         request: Request,

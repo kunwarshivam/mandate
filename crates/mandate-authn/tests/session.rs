@@ -180,3 +180,121 @@ fn a_rotated_refresh_token_presented_again_revokes_the_whole_family() {
         "journaled once, as the reuse"
     );
 }
+
+#[test]
+fn an_idle_timeout_longer_than_the_absolute_lifetime_is_refused() {
+    let policy = |idle_s, absolute_s| SessionPolicy { idle_s, absolute_s };
+    let short_life = SessionLimits::resolve(OrgKind::Business, policy(None, Some(600)));
+    assert_eq!(
+        short_life,
+        Err(SessionRefusal::IdleLongerThanAbsolute),
+        "the default idle hour"
+    );
+    let equal = SessionLimits::resolve(OrgKind::Business, policy(Some(600), Some(600))).unwrap();
+    assert_eq!((equal.idle_s(), equal.absolute_s()), (600, 600));
+    let longer = SessionLimits::resolve(OrgKind::Individual, policy(Some(601), Some(600)));
+    assert_eq!(longer, Err(SessionRefusal::IdleLongerThanAbsolute));
+}
+
+#[test]
+fn a_refresh_never_rotates_to_a_secret_used_before() {
+    let mut s = open();
+    let same = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(1), at(60));
+    assert_eq!(
+        same,
+        Err(SessionRefusal::RefreshSecretReused),
+        "the presented secret"
+    );
+    assert!(
+        s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(61))
+            .is_ok()
+    );
+    let rotated = s.refresh(&secret(2), ProviderAnswer::Granted, &secret(1), at(62));
+    assert_eq!(
+        rotated,
+        Err(SessionRefusal::RefreshSecretReused),
+        "a rotated secret"
+    );
+    assert_eq!(s.ended(), None, "the refusal revokes nothing");
+    assert!(
+        s.refresh(&secret(2), ProviderAnswer::Granted, &secret(3), at(63))
+            .is_ok()
+    );
+}
+
+#[test]
+fn a_clock_behind_the_session_fails_closed() {
+    let mut s = open();
+    assert_eq!(
+        s.authorize(Request::Pause, at(-1)),
+        Err(SessionRefusal::ClockBehind),
+        "before the opening"
+    );
+    assert_eq!(s.authorize(Request::Other, at(100)), Ok(()));
+    assert_eq!(
+        s.authorize(Request::Pause, at(99)),
+        Err(SessionRefusal::ClockBehind),
+        "before the last activity"
+    );
+    let refresh = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(50));
+    assert_eq!(refresh, Err(SessionRefusal::ClockBehind));
+    assert_eq!(
+        s.authorize(Request::Other, at(100)),
+        Ok(()),
+        "the same instant is not behind"
+    );
+}
+
+#[test]
+fn the_record_holds_sha256_digests_and_never_a_raw_secret() {
+    let sha = |n: u8| {
+        let mut out = [0u8; 32];
+        out.copy_from_slice(ring::digest::digest(&ring::digest::SHA256, &[n; 32]).as_ref());
+        out
+    };
+    let mut s = open();
+    assert_eq!(s.refresh_digest(), Some(sha(1)));
+    assert_eq!(s.rotated_digests(), Vec::<[u8; 32]>::new());
+    for (n, t) in [(2u8, 60), (3, 120), (4, 180)] {
+        assert!(
+            s.refresh(&secret(n - 1), ProviderAnswer::Granted, &secret(n), at(t))
+                .is_ok()
+        );
+    }
+    assert_eq!(s.refresh_digest(), Some(sha(4)));
+    let mut rotated = vec![sha(1), sha(2), sha(3)];
+    rotated.sort();
+    assert_eq!(s.rotated_digests(), rotated);
+    let stored: Vec<[u8; 32]> = s
+        .rotated_digests()
+        .into_iter()
+        .chain(s.refresh_digest())
+        .collect();
+    for n in 1..=4u8 {
+        assert!(!stored.contains(&[n; 32]), "a raw secret {n} is stored");
+    }
+}
+
+#[test]
+fn the_idle_timer_never_runs_past_the_absolute_lifetime_at_the_clock_s_end() {
+    const MAX_SECS: i64 = 253_402_300_799;
+    let limits = SessionLimits::resolve(
+        OrgKind::Business,
+        SessionPolicy {
+            idle_s: Some(HOUR),
+            absolute_s: Some(HOUR),
+        },
+    )
+    .unwrap();
+    let start = MAX_SECS - HOUR;
+    let opened = UtcNanos::from_parts(start, 0).unwrap();
+    let mut s = SessionRecord::open(limits, &secret(1), opened).unwrap();
+    let late = UtcNanos::from_parts(start + 10, 0).unwrap();
+    assert_eq!(
+        s.authorize(Request::Other, late),
+        Ok(()),
+        "an hour past `late` is past the clock"
+    );
+    let last = UtcNanos::from_parts(start + 299, 0).unwrap();
+    assert_eq!(s.authorize(Request::KillSwitch, last), Ok(()));
+}
