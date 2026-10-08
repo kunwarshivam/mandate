@@ -1848,6 +1848,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-vault-local"
+version = "0.0.0"
+dependencies = [
+ "secrecy",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-webpush"
 version = "0.0.0"
 dependencies = [
