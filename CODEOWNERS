@@ -34,6 +34,7 @@
 /crates/mandate-passkey/    @kunwarshivam
 /crates/mandate-cli/        @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
+/crates/mandate-api/        @kunwarshivam
 /crates/mandate-accounting/ @kunwarshivam
 /crates/mandate-sim/        @kunwarshivam
 /crates/mandate-risk/       @kunwarshivam

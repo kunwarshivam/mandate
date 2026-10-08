@@ -1,0 +1,24 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-08T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    }
+  ],
+  "command_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+  "phase": "applied",
+  "steps": [
+    {
+      "stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_1",
+      "seq": 7,
+      "event_type": "AgentModeChanged",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z",
+      "reason": null
+    }
+  ]
+}
