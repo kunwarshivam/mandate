@@ -16,14 +16,16 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `RecordsAccessed`, `ExportCreated`, and `VerificationRun` at schema version 1, with rules 54 to
   59, from the members their §9 rows list (accessor and scope; export manifest; scope and result),
   and `RecordsAccessed` adds the opaque resources read and an optional stored result, so the audit
-  routes and the workspace API's other journaled reads write one record.
-  Each names what it covers as stream ranges of the writer's own workspace, bounded by event hashes,
-  and nothing else: no instrument, order, position, or mandate content. Two types join §9.1's:
-  `stream_id` (§2's form) and `event_hash` (§3's 64 lowercase hex, which is not a `ref` and so is
-  not listed in `artifact_refs`). Rule 54 refuses a range on another workspace's stream. The
-  examination bundle (§12), which may carry resolved identities, is not an `ExportCreated` form at
-  this version. §7 now says a read or export is journaled before it is served, as API-16 already
-  does for exports. The vectors gain a generated `records_access` section and stay version 3.
+  routes and the workspace API's other journaled reads write one record. Each names what it covers
+  as stream ranges of the writer's own workspace, bounded by event hashes, and nothing else: no
+  instrument, order, position, or mandate content. Two types join §9.1's: `stream_id` (§2's form)
+  and `digest` (64 lowercase hex: an event's hash, or the canonical export's verifier digest, which
+  is not a `ref` and so is not listed in `artifact_refs`). Rule 54 refuses a range on another
+  workspace's stream. The examination bundle (§12), which may carry resolved identities, is not an
+  `ExportCreated` form at this version, and an export is named by its verifier digest (DEC-265 item
+  3), so no second manifest shape is defined. §7 now says a read or export is journaled before it is
+  served, as API-16 already does for exports. The vectors gain a generated `records_access` section
+  and stay version 3.
   - **Order of the changes (ES-22).** Spec and vectors first; `mandate-journal` registers the three
     schemas in E12-3's tests PR and implementation PR, so no Rust test reads the new section yet.
 - **v0.18 ([DEC-536](../project/decisions/DEC-536.md)):** `DecisionMade`'s `decided_by` may be
@@ -1581,7 +1583,7 @@ Workspace services append one for each scheduled run of §11 and for a restore d
 a scheduled run, the verifying process (`system`). Every identifier is opaque (§6.4).
 
 **What they carry.** A payload names streams by §2's identifiers, positions by `seq`, and contents
-by hash: stream ranges, event hashes, artifact references, check codes, and opaque IDs. It never
+by hash: stream ranges, digests, artifact references, check codes, and opaque IDs. It never
 carries an instrument, an order, a position, a quantity, a price, or mandate content, so a record of
 an audit read discloses nothing the read itself did not authorize. **Tenant isolation:** every range
 names a stream of the control stream's own workspace (rule 54). A trace that follows a
@@ -1594,7 +1596,7 @@ and journals nothing about that stream.
 | Type | Values | Refused as |
 |---|---|---|
 | `stream_id` | §2's form: `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`, `clock:{workspace_id}`, or `ntf:{workspace_id}`, each segment `[A-Za-z0-9_-]+` | As `id` |
-| `event_hash` | 64 lowercase hex: an event's `hash` or `prev_hash` (§3). It is not a `ref`, so it is not listed in `artifact_refs` | As `id` |
+| `digest` | 64 lowercase hex SHA-256: an event's `hash` or `prev_hash` (§3), or a digest of bytes the journal does not store, such as §12's verifier digest. It is not a `ref`: it names no stored artifact, so it is not listed in `artifact_refs` and §11 check 6 does not read it | As `id` |
 
 **`range`**, the unit every record covers: one stream's events from `from_seq` to `to_seq`, both
 included.
@@ -1603,8 +1605,8 @@ included.
 |---|---|---|
 | `stream_id` | `stream_id` | The stream: rule 54 |
 | `from_seq`, `to_seq` | `integer` | The first and last `seq` covered |
-| `prev_hash` | `event_hash` | The hash before `from_seq`: the trusted start (§11), 64 zeros for seq 1 |
-| `to_hash` | `event_hash` | The hash of the event at `to_seq`, the head the read or export reflects (workspace API API-14) |
+| `prev_hash` | `digest` | The hash before `from_seq`: the trusted start (§11), 64 zeros for seq 1 |
+| `to_hash` | `digest` | The hash of the event at `to_seq`, the head the read or export reflects (workspace API API-14) |
 
 **`RecordsAccessed`**: a read outside the product views, journaled before it is served (§7).
 
@@ -1622,9 +1624,9 @@ export's ID.
 | Member | Type | Meaning |
 |---|---|---|
 | `form` | `canonical` \| `json` \| `csv` | The canonical export, or a JSON-lines or CSV view derived from one ([workspace API spec](workspace-api.md) §4.8). The examination bundle is not a form at this version |
-| `ranges` | `[range]` | The ranges exported; for the canonical form, each range's trusted start and head as its manifest records them |
-| `manifest` | `ref` | The canonical export's manifest (§12), stored as an artifact; for a view, the manifest of the canonical export it is derived from |
-| `view` | `ref?` | The view's bytes, stored as an artifact: rule 56 |
+| `ranges` | `[range]` | The ranges exported, each with its trusted start and its head as the export's segment manifests (§6.2) record them |
+| `verifier_digest` | `digest` | The canonical export's verifier digest (§12, [DEC-265](../project/04-decision-log.md#decisions) item 3): one SHA-256 over every segment manifest and file, anchor root, and timestamp token, length-prefixed. A view names the digest of the canonical export it is derived from. Anyone holding the export recomputes it |
+| `view` | `digest?` | The SHA-256 of the view's bytes as served: rule 56 |
 
 **`VerificationRun`**: one run of §11's verification and its result.
 
@@ -1634,7 +1636,7 @@ export's ID.
 | `ranges` | `[checked_range]` | Every range verified, each with its own result |
 | `result` | `pass` \| `fail` | Rule 59 |
 
-A `checked_range` is a `range` whose `to_hash` is `event_hash?` (the head the run verified, or
+A `checked_range` is a `range` whose `to_hash` is `digest?` (the head the run verified, or
 `null` when a failure left none: rule 58), followed by:
 
 | Member | Type | Meaning |
@@ -1740,7 +1742,8 @@ post-mortem is retained.
   produced within the configured deadline; verifier releases and format documents are retained for
   the retention period.
 - Human-readable views (for example, the causal trace from a fill to its observations) are derived
-  from the canonical export.
+  from the canonical export, and each names its verifier digest, which identifies the canonical
+  export ([DEC-265](../project/04-decision-log.md#decisions) item 3; `ExportCreated`, §9.8).
 
 ## 13. Open questions
 

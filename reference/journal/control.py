@@ -81,8 +81,8 @@ POINTER = T("pointer")
 ASSET_ID = T("asset_id")
 ASSET_ID_FORM = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 STREAM_ID = T("stream_id")
-EVENT_HASH = T("event_hash")
-EVENT_HASH_FORM = re.compile(r"^[0-9a-f]{64}\Z")
+DIGEST_HEX = T("digest")
+DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
 STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2}
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
@@ -335,13 +335,14 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
 
 # §9.8 (DEC-780): the records-access, export, and verification records. Each names what it covers
 # as stream ranges of its own workspace, bounded by event hashes, never by instrument or content.
+# A `digest` is bare hex, so it names no stored artifact and stays out of `artifact_refs`.
 GENESIS = "0" * 64
 RANGE = rec(
     ("stream_id", STREAM_ID),
     ("from_seq", INT),
     ("to_seq", INT),
-    ("prev_hash", EVENT_HASH),
-    ("to_hash", EVENT_HASH),
+    ("prev_hash", DIGEST_HEX),
+    ("to_hash", DIGEST_HEX),
 )
 # §11's codes: those reported at an event (checks 1 to 6, the anchored head, and the agent stream's
 # two range checks reported at their event), then those reported for the range as a whole.
@@ -360,7 +361,7 @@ EVENT_CHECKS = (
 RANGE_CHECKS = ("anchor_root_mismatch", "tsa_token_invalid", "segment_manifest_mismatch", "segment_gap")
 CHECKED_RANGE = rec(
     *RANGE.fields[:4],
-    ("to_hash", opt(EVENT_HASH)),
+    ("to_hash", opt(DIGEST_HEX)),
     ("failure", opt(rec(("check", one_of(*EVENT_CHECKS, *RANGE_CHECKS)), ("seq", opt(INT))))),
 )
 VIEW_FORMS = ("json", "csv")
@@ -375,8 +376,8 @@ SCHEMAS[("ctl", "RecordsAccessed")] = rec(
 SCHEMAS[("ctl", "ExportCreated")] = rec(
     ("form", one_of("canonical", *VIEW_FORMS)),
     ("ranges", list_of(RANGE)),
-    ("manifest", REF),
-    ("view", opt(REF)),
+    ("verifier_digest", DIGEST_HEX),
+    ("view", opt(DIGEST_HEX)),
 )
 SCHEMAS[("ctl", "VerificationRun")] = rec(
     ("trigger", one_of(*TRIGGERS)),
@@ -565,15 +566,15 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
         if not ok and "types.risk_clock" not in skip:
             return [Violation("types", "non_canonical", path)]
         return []
-    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "event_hash"):
+    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
         if ty.kind == "pointer":
             ok = is_pointer(value)
         elif ty.kind == "stream_id":
             ok = is_stream_id(value)
-        elif ty.kind == "event_hash":
-            ok = bool(EVENT_HASH_FORM.match(value))
+        elif ty.kind == "digest":
+            ok = bool(DIGEST_HEX_FORM.match(value))
         elif ty.kind == "asset_id":
             ok = bool(ASSET_ID_FORM.match(value)) or (
                 "types.asset_id_trailing_newline" in skip and bool(ASSET_ID_FORM.match(value.removesuffix("\n")))

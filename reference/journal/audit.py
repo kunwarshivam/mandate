@@ -47,8 +47,8 @@ IDS = {
 ACCOUNT_STREAM = f"acct:{WORKSPACE}:01J8Z2ACCT00000000000000A1"
 FOREIGN_STREAM = "acct:ws_01J8Z9:01J8Z9ACCT00000000000000A1"
 GENESIS = "0" * 64
-MANIFEST = "sha256:" + "e" * 64
-VIEW = "sha256:" + "f" * 64
+VERIFIER = "e" * 64
+VIEW = "f" * 64
 AUDITOR = {"kind": "user", "id": "user_auditor_01", "version": "1", "build": None}
 AGENT_ACTOR = {"kind": "agent", "id": "agent_a", "version": "0.1.0", "build": "sha256:" + "c" * 64}
 # Every member name a §9.8 payload may carry, at any depth: streams, positions, hashes, check
@@ -60,7 +60,7 @@ VOCABULARY = frozenset(
         "ranges",
         "resources",
         "form",
-        "manifest",
+        "verifier_digest",
         "view",
         "trigger",
         "result",
@@ -113,8 +113,8 @@ def base_drafts() -> dict[str, dict]:
         "resources": [],
         "result": None,
     }
-    export = {"form": "canonical", "ranges": copy.deepcopy(ranges), "manifest": MANIFEST, "view": None}
-    view = {"form": "csv", "ranges": copy.deepcopy(ranges[:1]), "manifest": MANIFEST, "view": VIEW}
+    export = {"form": "canonical", "ranges": copy.deepcopy(ranges), "verifier_digest": VERIFIER, "view": None}
+    view = {"form": "csv", "ranges": copy.deepcopy(ranges[:1]), "verifier_digest": VERIFIER, "view": VIEW}
     checked = [{**r, "failure": None} for r in copy.deepcopy(ranges)]
     failed = [
         {**span(ACCOUNT_STREAM, 1, 40, GENESIS, None), "failure": {"check": "rehash_mismatch", "seq": 17}},
@@ -194,9 +194,9 @@ MEMBER_CASES = {
     ),
     "export_canonical": (
         ("payload.form", 7, "examination_bundle"),
-        ("payload.manifest", 7, "sha256:" + "E" * 64),
+        ("payload.verifier_digest", 7, "sha256:" + "e" * 64),
     ),
-    "export_view": (("payload.view", 7, "f" * 64),),
+    "export_view": (("payload.view", 7, "F" * 64),),
     "verification_fail": (
         ("payload.trigger", 7, "hourly"),
         ("payload.result", True, "failed"),
@@ -219,7 +219,7 @@ NULLED = {
         f"{R0}.prev_hash",
         f"{R0}.to_hash",
     ),
-    "export_canonical": ("payload.form", "payload.manifest"),
+    "export_canonical": ("payload.form", "payload.verifier_digest"),
     "verification_fail": ("payload.trigger", "payload.result", f"{R0}.failure.check"),
 }
 
@@ -285,14 +285,23 @@ def invalid_drafts() -> list[dict]:
             "event_type",
         ),
         invalid(
-            "export_refs_not_listed",
-            "§3: `artifact_refs` lists the manifest and the view",
+            "export_digest_listed_as_an_artifact",
+            "§9.8 types: a `digest` names no stored artifact, so `artifact_refs` does not list it",
             view,
             [],
             "artifact_refs",
             "artifact_refs",
         )
-        | {"changes": [change("artifact_refs", [MANIFEST])]},
+        | {"changes": [change("artifact_refs", ["sha256:" + VERIFIER])]},
+        invalid(
+            "read_result_not_listed",
+            "§3: `artifact_refs` lists the stored result",
+            read,
+            [],
+            "artifact_refs",
+            "artifact_refs",
+        )
+        | {"changes": [change("payload.result", "sha256:" + "9" * 64)]},
         invalid("read_nothing", "rule 54: at least one range", read, [change("payload.ranges", [])], "schema", "payload.ranges"),
         invalid(
             "read_another_workspace",
@@ -682,7 +691,7 @@ VALIDATOR_MUTANTS = (
     "rule.58.to_hash",
     "rule.59",
     "types.stream_id",
-    "types.event_hash",
+    "types.digest",
     "record.extra",
     "record.missing",
     "artifact_refs",

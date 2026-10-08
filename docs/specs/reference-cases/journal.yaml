@@ -10407,10 +10407,9 @@ records_access:
           to_seq: 9
           prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
           to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
-        manifest: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+        verifier_digest: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
         view: null
-      artifact_refs:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      artifact_refs: []
       pii_refs: []
     export_view:
       envelope_version: 1
@@ -10437,11 +10436,9 @@ records_access:
           to_seq: 40
           prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
           to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
-        manifest: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-        view: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-      artifact_refs:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-      - sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        verifier_digest: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+        view: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      artifact_refs: []
       pii_refs: []
     verification_pass:
       envelope_version: 1
@@ -10762,8 +10759,7 @@ records_access:
     - path: payload.form
       value: 7
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -10775,36 +10771,36 @@ records_access:
     - path: payload.form
       value: examination_bundle
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: non_canonical
       path: payload.form
-  - name: export_canonical.manifest.kind
+  - name: export_canonical.verifier_digest.kind
     clause: §9.8 types
     base_draft: export_canonical
     changes:
-    - path: payload.manifest
+    - path: payload.verifier_digest
       value: 7
     - path: artifact_refs
       value: []
     expect:
       outcome: Invalid
       reason: schema
-      path: payload.manifest
-  - name: export_canonical.manifest.form
+      path: payload.verifier_digest
+  - name: export_canonical.verifier_digest.form
     clause: §9.8 types
     base_draft: export_canonical
     changes:
-    - path: payload.manifest
-      value: sha256:EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
+    - path: payload.verifier_digest
+      value: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
     - path: artifact_refs
-      value: []
+      value:
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
     expect:
       outcome: Invalid
       reason: non_canonical
-      path: payload.manifest
+      path: payload.verifier_digest
   - name: export_view.view.kind
     clause: §9.8 types
     base_draft: export_view
@@ -10812,8 +10808,7 @@ records_access:
     - path: payload.view
       value: 7
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -10823,10 +10818,9 @@ records_access:
     base_draft: export_view
     changes:
     - path: payload.view
-      value: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      value: FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: non_canonical
@@ -11175,24 +11169,23 @@ records_access:
     - path: payload.form
       value: null
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
       path: payload.form
-  - name: export_canonical.manifest.null
+  - name: export_canonical.verifier_digest.null
     clause: §9.8 types
     base_draft: export_canonical
     changes:
-    - path: payload.manifest
+    - path: payload.verifier_digest
       value: null
     - path: artifact_refs
       value: []
     expect:
       outcome: Invalid
       reason: schema
-      path: payload.manifest
+      path: payload.verifier_digest
   - name: verification_fail.trigger.null
     clause: §9.8 types
     base_draft: verification_fail
@@ -11274,8 +11267,7 @@ records_access:
     - path: payload.form
       delete: true
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -11287,8 +11279,7 @@ records_access:
     - path: payload.instrument
       value: x
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -11300,9 +11291,7 @@ records_access:
     - path: payload.form
       delete: true
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-      - sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -11314,9 +11303,7 @@ records_access:
     - path: payload.instrument
       value: x
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-      - sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -11442,13 +11429,23 @@ records_access:
       outcome: Invalid
       reason: wrong_stream
       path: event_type
-  - name: export_refs_not_listed
-    clause: '§3: `artifact_refs` lists the manifest and the view'
+  - name: export_digest_listed_as_an_artifact
+    clause: '§9.8 types: a `digest` names no stored artifact, so `artifact_refs` does not list it'
     base_draft: export_view
     changes:
     - path: artifact_refs
       value:
       - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: artifact_refs
+      path: artifact_refs
+  - name: read_result_not_listed
+    clause: '§3: `artifact_refs` lists the stored result'
+    base_draft: records_read
+    changes:
+    - path: payload.result
+      value: sha256:9999999999999999999999999999999999999999999999999999999999999999
     expect:
       outcome: Invalid
       reason: artifact_refs
@@ -11504,8 +11501,7 @@ records_access:
         prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
         to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -11562,8 +11558,7 @@ records_access:
         prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
         to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -11610,8 +11605,7 @@ records_access:
         prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
         to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -11655,8 +11649,7 @@ records_access:
         prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
         to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -11780,8 +11773,7 @@ records_access:
     - path: actor
       value: *id006
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -11791,11 +11783,9 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: payload.view
-      value: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      value: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-      - sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -11807,8 +11797,7 @@ records_access:
     - path: payload.view
       value: null
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Invalid
       reason: schema
@@ -12102,9 +12091,7 @@ records_access:
     - path: payload.form
       value: json
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-      - sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      value: []
     expect:
       outcome: Valid
   - name: export_by_a_service_account
@@ -12114,8 +12101,7 @@ records_access:
     - path: actor
       value: *id007
     - path: artifact_refs
-      value:
-      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      value: []
     expect:
       outcome: Valid
   - name: requested_run_by_a_service_account
