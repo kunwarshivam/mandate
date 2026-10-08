@@ -24,6 +24,7 @@ commands:
   markers               check for debt markers and #[ignore] without a pending story
   feature-map           check the verification skill's feature map against the workspace
   deps                  check every direct dependency against docs/dependencies.md
+  live-feature          check that only the runner may build `live`, and CI only compiles it
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
 ";
 
@@ -134,6 +135,7 @@ fn run() -> Result<()> {
         ["markers"] => markers(),
         ["feature-map"] => feature_map(),
         ["deps"] => deps(),
+        ["live-feature"] => live_feature(),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
         _ => {
@@ -623,6 +625,16 @@ struct Package {
     manifest_path: PathBuf,
     dependencies: Vec<Dependency>,
     targets: Vec<Target>,
+    /// The package's `[features]`: each name with what it enables.
+    #[serde(default)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by live_feature_problems in X1's implementation (E7-26)"
+        )
+    )]
+    features: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -630,6 +642,16 @@ struct Dependency {
     name: String,
     kind: Option<String>,
     path: Option<PathBuf>,
+    /// The features this dependency turns on in the crate it names.
+    #[serde(default)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by live_feature_problems in X1's implementation (E7-26)"
+        )
+    )]
+    features: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -735,6 +757,17 @@ struct CratePolicy {
     /// dependencies, dev-dependencies included, whatever the layers allow (DEC-525).
     #[serde(default)]
     forbidden_internal: Vec<String>,
+    /// The one crate that may declare a `live` cargo feature: the deployment runner (ES-23 as
+    /// DEC-529 item 3 narrows it). No crate is marked until the runner's G1a slice marks it.
+    #[serde(default)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by live_feature_problems in X1's implementation (E7-26)"
+        )
+    )]
+    live_feature: bool,
 }
 
 enum Layer {
@@ -1282,6 +1315,61 @@ fn feature_map() -> Result<()> {
         }
     }
     report(problems, "feature-map")
+}
+
+/// One file CI runs, a workflow or a script, by its path in the repository, with its text.
+struct CiFile {
+    #[expect(
+        dead_code,
+        reason = "read by live_feature_problems in X1's implementation (E7-26)"
+    )]
+    path: String,
+    #[expect(
+        dead_code,
+        reason = "read by live_feature_problems in X1's implementation (E7-26)"
+    )]
+    text: String,
+}
+
+/// Every workflow and script under `.github`, the files that decide which builds CI runs.
+fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
+    let mut files = files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])?;
+    files.extend(files_by_extension(&root.join(".github/scripts"), &["sh"])?);
+    files
+        .into_iter()
+        .map(|file| {
+            let text =
+                fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+            let path = file
+                .strip_prefix(root)
+                .unwrap_or(&file)
+                .display()
+                .to_string();
+            Ok(CiFile { path, text })
+        })
+        .collect()
+}
+
+fn live_feature() -> Result<()> {
+    eprintln!("    live-feature: checking that only the runner may build `live` (ES-23, DEC-529)");
+    let policy: Layers = toml::from_str(&fs::read_to_string("xtask/layers.toml")?)
+        .context("parsing xtask/layers.toml")?;
+    let files = ci_files(Path::new("."))?;
+    report(
+        live_feature_problems(&policy, &metadata()?, &files)?,
+        "live-feature",
+    )
+}
+
+/// Every way the workspace and its CI break ES-23's ban on a `live` build, as DEC-529 item 3
+/// narrows it for the founder's one live order (E7-26, X1): at most one crate is marked
+/// `live_feature` in `policy`, and only it may declare a `live` feature; no other feature of it
+/// (`default` included) and no dependency or feature of another crate turns `live` on; and CI
+/// never passes `--all-features`, and passes `live` only in at most one `cargo check` of the
+/// marked crate, so the feature compiles but no live build is ever produced or run.
+fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Result<Vec<String>> {
+    let _ = (policy, meta, ci);
+    bail!("live_feature_problems is not yet implemented (E7-26, X1)")
 }
 
 /// Code spans that look like repository paths: no spaces or globs, starting at a known root.
@@ -3377,19 +3465,19 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, CratePolicy, Dependency, Layers,
+        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency, Layers,
         MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, Metadata,
         MutantPlan, MutantShard, MutatedCrate, Package, PendingTest, PendingTestRun, REFCASES,
         TestOutcome, actionlint_workflows, backticked_paths, base_ref_in, check_schedule, ci,
-        classify, contains_dec_id, contains_word, external_oracles, failure_cause,
+        ci_files, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
         files_by_extension, first_panic_line, forbidden_reached, generated_pending_markers,
         has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
-        listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts, mutants,
-        mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
-        mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
-        unjudged_mutants, verdicts, workspace_closure,
+        listed_mutant_counts, live_feature_problems, live_test_counts, metadata_in,
+        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
+        mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
+        pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_outcomes, unjudged_mutants, verdicts, workspace_closure,
     };
 
     #[test]
@@ -3508,6 +3596,7 @@ mod tests {
                 name: (*dep).to_owned(),
                 kind: kind.map(str::to_owned),
                 path: Some(PathBuf::from(format!("/nowhere/{dep}"))),
+                features: Vec::new(),
             })
             .collect();
         Package {
@@ -3516,6 +3605,7 @@ mod tests {
             manifest_path: PathBuf::from(format!("/nowhere/{name}/Cargo.toml")),
             dependencies,
             targets: Vec::new(),
+            features: BTreeMap::new(),
         }
     }
 
@@ -3544,6 +3634,7 @@ mod tests {
                     pure: false,
                     allowed_external: Vec::new(),
                     forbidden_internal: banned.unwrap_or_default(),
+                    live_feature: false,
                 };
                 ((*name).to_owned(), policy)
             })
@@ -6861,6 +6952,233 @@ jq -r "$filter" "$src"
                 .is_some_and(|err| err.contains("unexpected key \"badopt\"")),
             "a planted unknown workflow key fails the lint job naming it, got {actionlint:?}"
         );
+        Ok(())
+    }
+
+    /// The runner for the live-feature tests, marked `live_feature` in its policy.
+    const RUNNER: &str = "the-runner";
+
+    /// A policy with `the-runner` at layer 9 marked `live_feature`, and `a-lib` and `a-tool` at
+    /// layers 5 and 6, none marked.
+    fn live_policy() -> Layers {
+        let mut policy = policy(&[(RUNNER, 9), ("a-lib", 5), ("a-tool", 6)], &[], &[]);
+        if let Some(runner) = policy.crates.get_mut(RUNNER) {
+            runner.live_feature = true;
+        }
+        policy
+    }
+
+    /// `pkg` with the `[features]` in `features`.
+    fn with_features(mut pkg: Package, features: &[(&str, &[&str])]) -> Package {
+        pkg.features = features
+            .iter()
+            .map(|(name, on)| {
+                (
+                    (*name).to_owned(),
+                    on.iter().map(|f| (*f).to_owned()).collect(),
+                )
+            })
+            .collect();
+        pkg
+    }
+
+    /// The three crates of [`live_policy`], with no features and no dependencies.
+    fn live_workspace() -> Vec<Package> {
+        vec![
+            member(RUNNER, &[]),
+            member("a-lib", &[]),
+            member("a-tool", &[]),
+        ]
+    }
+
+    fn ci_file(path: &str, text: &str) -> CiFile {
+        CiFile {
+            path: path.to_owned(),
+            text: text.to_owned(),
+        }
+    }
+
+    /// Only the marked runner may declare a `live` feature; any other crate that does is named
+    /// (ES-23 as DEC-529 item 3 narrows it).
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn only_the_marked_runner_may_declare_a_live_feature() -> Result<()> {
+        let marked = live_policy();
+        let mut crates = live_workspace();
+        crates[0] = with_features(member(RUNNER, &[]), &[("live", &[])]);
+        assert_eq!(
+            live_feature_problems(&marked, &workspace(crates), &[])?,
+            Vec::<String>::new(),
+            "the marked runner's own `live` feature is allowed"
+        );
+        let mut crates = live_workspace();
+        crates[1] = with_features(member("a-lib", &[]), &[("live", &[])]);
+        let problems = live_feature_problems(&marked, &workspace(crates), &[])?;
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("`a-lib`"), "{problems:?}");
+        let unmarked = policy(&[(RUNNER, 9), ("a-lib", 5), ("a-tool", 6)], &[], &[]);
+        let mut crates = live_workspace();
+        crates[0] = with_features(member(RUNNER, &[]), &[("live", &[])]);
+        let problems = live_feature_problems(&unmarked, &workspace(crates), &[])?;
+        assert_eq!(
+            problems.len(),
+            1,
+            "an unmarked runner is any crate: {problems:?}"
+        );
+        assert!(problems[0].contains(&format!("`{RUNNER}`")), "{problems:?}");
+        Ok(())
+    }
+
+    /// At most one crate is marked, and a marked crate must be a workspace member.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn at_most_one_member_crate_is_marked() -> Result<()> {
+        let mut two = live_policy();
+        if let Some(lib) = two.crates.get_mut("a-lib") {
+            lib.live_feature = true;
+        }
+        let problems = live_feature_problems(&two, &workspace(live_workspace()), &[])?;
+        assert_eq!(problems.len(), 1, "two marked crates: {problems:?}");
+        assert!(
+            problems[0].contains(&format!("`{RUNNER}`")) && problems[0].contains("`a-lib`"),
+            "both are named: {problems:?}"
+        );
+        let crates = vec![member("a-lib", &[]), member("a-tool", &[])];
+        let problems = live_feature_problems(&live_policy(), &workspace(crates), &[])?;
+        assert_eq!(
+            problems.len(),
+            1,
+            "a marked crate that is no member: {problems:?}"
+        );
+        assert!(problems[0].contains(&format!("`{RUNNER}`")), "{problems:?}");
+        Ok(())
+    }
+
+    /// Nothing else turns `live` on: no other feature of the runner (`default` included), no
+    /// feature of another crate naming `<runner>/live` or `<runner>?/live`, and no dependency
+    /// on the runner listing `live` among its features, whatever the dependency's kind.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn nothing_but_an_explicit_flag_turns_live_on() -> Result<()> {
+        let policy = live_policy();
+        let runner = |features: &[(&str, &[&str])]| with_features(member(RUNNER, &[]), features);
+        let enabling_live: Vec<Vec<Package>> = vec![
+            vec![
+                runner(&[("live", &[]), ("default", &["live"])]),
+                member("a-lib", &[]),
+            ],
+            vec![
+                runner(&[("live", &[]), ("all", &["live"])]),
+                member("a-lib", &[]),
+            ],
+            vec![
+                runner(&[("live", &[])]),
+                with_features(member("a-lib", &[]), &[("go", &["the-runner/live"])]),
+            ],
+            vec![
+                runner(&[("live", &[])]),
+                with_features(member("a-lib", &[]), &[("go", &["the-runner?/live"])]),
+            ],
+        ];
+        for crates in enabling_live {
+            let problems = live_feature_problems(&policy, &workspace(crates), &[])?;
+            assert_eq!(problems.len(), 1, "{problems:?}");
+        }
+        for kind in [None, Some("dev"), Some("build")] {
+            let mut dependent = member("a-tool", &[(RUNNER, kind)]);
+            dependent.dependencies[0].features = vec!["live".to_owned()];
+            let crates = vec![runner(&[("live", &[])]), dependent];
+            let problems = live_feature_problems(&policy, &workspace(crates), &[])?;
+            assert_eq!(problems.len(), 1, "a {kind:?} dependency: {problems:?}");
+            assert!(problems[0].contains("`a-tool`"), "{problems:?}");
+        }
+        let mut quiet = member("a-tool", &[(RUNNER, Some("dev"))]);
+        quiet.dependencies[0].features = vec!["other".to_owned()];
+        let crates = vec![runner(&[("live", &[]), ("other", &[])]), quiet];
+        assert_eq!(
+            live_feature_problems(&policy, &workspace(crates), &[])?,
+            Vec::<String>::new(),
+            "a dependency on the runner without `live` is allowed"
+        );
+        Ok(())
+    }
+
+    /// CI may pass `live` only in one `cargo check` of the marked runner, so the feature
+    /// compiles and nothing live is built, tested or run; `--all-features` is never allowed. Each
+    /// refusal names the file and its line.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn ci_only_compiles_the_runner_with_live() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let allowed = [
+            "      - run: cargo check -p the-runner --features live",
+            "      - run: cargo check --locked -p the-runner --features=live",
+            "cargo check -p the-runner -F live",
+        ];
+        for line in allowed {
+            let files = [ci_file(".github/workflows/ci.yml", line)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{line}"
+            );
+        }
+        let refused = [
+            "      - run: cargo build -p the-runner --features live",
+            "      - run: cargo test -p the-runner --features live",
+            "      - run: cargo nextest run -p the-runner --features live",
+            "      - run: cargo run -p the-runner --features a,live",
+            "      - run: cargo clippy -p the-runner -F live",
+            "      - run: cargo check -p a-lib --features live",
+            "      - run: cargo check --workspace --features live",
+            "      - run: cargo check --all-features",
+            "      - run: cargo test --workspace --all-features",
+            "cargo install --path crates/the-runner --features \"live\"",
+        ];
+        for line in refused {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh") && problems[0].contains(":2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let twice = [
+            ci_file(".github/workflows/a.yml", allowed[0]),
+            ci_file(".github/workflows/b.yml", allowed[0]),
+        ];
+        let problems = live_feature_problems(&policy, &meta(), &twice)?;
+        assert_eq!(
+            problems.len(),
+            1,
+            "at most one compile-only job: {problems:?}"
+        );
+        let harmless = [ci_file(
+            ".github/workflows/ci.yml",
+            "      - run: cargo xtask ci fast\n      # a live host is never compiled here\n",
+        )];
+        assert_eq!(
+            live_feature_problems(&policy, &meta(), &harmless)?,
+            Vec::<String>::new(),
+            "the word in prose or other commands is not a feature flag"
+        );
+        Ok(())
+    }
+
+    /// The repository as it stands: the policy, the workspace and every workflow and script
+    /// pass, with no crate marked and no `live` feature anywhere.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn the_repository_has_no_live_build() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
+        let problems = live_feature_problems(&policy, &metadata_in(&root)?, &ci_files(&root)?)?;
+        assert_eq!(problems, Vec::<String>::new());
         Ok(())
     }
 }
