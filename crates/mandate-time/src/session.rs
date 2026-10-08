@@ -334,7 +334,7 @@ impl ExchangeCalendar {
             if self
                 .sessions(day)?
                 .iter()
-                .any(|span| span.session == Session::Regular && span.end <= now)
+                .any(|span| span.end <= now && span.session == Session::Regular)
             {
                 completed = Some(day);
             }

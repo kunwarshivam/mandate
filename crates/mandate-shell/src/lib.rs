@@ -8,7 +8,7 @@
     clippy::float_cmp,
     clippy::as_conversions
 )]
-//! The process shell that binds the runtime, the executor, and the Alpaca paper connector
+//! The process shell (a DEC-519 measurement branch; never merged) that binds the runtime, the executor, and the Alpaca paper connector
 //! ([task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md), backlog E7-7, DEC-138), and the
 //! `mandate-tracer` binary that places **one** order on the owner's Alpaca **paper** account.
 //!
