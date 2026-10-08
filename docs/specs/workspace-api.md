@@ -497,6 +497,16 @@ export or a verification it returns the `ExportCreated` or `VerificationRun` dra
 control-stream writer appends it before anything is served (API-16). The payload schemas of
 `ExportCreated`, `VerificationRun`, and `RecordsAccessed` are journal spec §9's.
 
+**Shapes.** Every response composes the shared `Envelope` and every error is a `Problem`
+(`schemas/workspace-api/envelope.schema.json`); ids, event ids, timestamps, decimals, and refs are
+the `Id`, `EventId`, `Timestamp`, `Decimal`, and `ContentRef` of
+`schemas/workspace-api/common.schema.json`. Every response carries `as_of`, an `AsOf`: one
+`Watermark` `{stream_id, seq, hash, recorded_at}` per stream it read. Every union is tagged by a
+`kind` member and every enum here is closed (§3.2). The JSON Schemas of the trace, the gate view,
+exports, and verification follow under `schemas/workspace-api/audit/`. The timeline's response
+schema is the agent-timeline read model's (`schemas/workspace-api/read-models/`), and the timeline
+rules below are its semantics.
+
 **Invariants.** Each one is tested with an oracle of its own, as §2 says.
 
 | ID | Invariant | How it is tested |
@@ -610,8 +620,9 @@ of the section above, each with its `depth`. `hops` are `{from, link, to, status
 `event_id` or `null` for `not_recorded`. A start event outside the workspace is the 404 above.
 
 **Model output (API-18).** A node's `body` is the record, for checking. What a client renders as
-model output comes only from the node's `quoted` list: `[{author: {model_id, model_version,
-content_hash}, path, text | artifact_ref}]`, one per model-authored member: in
+model output comes only from the node's `quoted` list of `QuotedContent` items, each attributed
+to its model (`model_id`, `model_version`, `content_hash`) and naming the member `path` it quotes,
+with its `text` or its `artifact_ref`, one per model-authored member: in
 `ThesisProposed` and `ThesisRevised` `payload.invalidation`, `payload.evidence_sources`, and the
 prompt, response, and autopsy artifacts; in `ModelOutputRecorded` `payload.invalidation` and
 `payload.thesis_ref`; in `ModelInvocationRecorded` its prompt and response artifacts. Artifact
