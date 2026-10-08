@@ -56,9 +56,15 @@ function problem(status: number, code: string, effect: "none" | "recorded", retr
   return respond(status, { type: "about:blank", status, title: "Request refused", code, effect, event_id: null, retryable }, "application/problem+json");
 }
 
-function healthBody(health: Health) {
-  const feed = (f: Health["market_data"]) => ({ state: f.state, as_of: canonical(f.as_of) });
-  return { market_data: feed(health.market_data), broker: feed(health.broker), deployment: feed(health.deployment), relay: feed(health.relay) };
+/** `read-models/health.schema.json`: each component's state and freshness, aged against `servedAt`. An `ok` component is never stale. */
+function healthBody(health: Health, servedAt: string) {
+  const component = (name: keyof Health) => {
+    const { state, as_of } = health[name];
+    const observed = canonical(as_of);
+    const age = Math.max(0, Math.floor((Date.parse(servedAt) - Date.parse(observed)) / 1000));
+    return { state, freshness: { observed_at: observed, stale: state !== "ok", age_seconds: age, limit_source: `health.${name}` } };
+  };
+  return { market_data: component("market_data"), broker: component("broker"), deployment: component("deployment"), relay: component("relay") };
 }
 
 const ROUTES = Object.entries(OPERATIONS).map(([operation, route]) => ({
@@ -77,10 +83,11 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return [{ stream_id: "control", seq, hash: `sha256:${sha256Hex(`${workspaceId}:control:${seq}`)}`, recorded_at: canonical(workspace.now) }];
   }
 
-  const read = (body: object) => respond(200, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, as_of: asOf(), ...body });
+  const servedAt = canonical(workspace.now);
+  const read = (body: object) => respond(200, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), ...body });
 
   function get(route: string): Response {
-    if (route === "/health") return read(healthBody(workspace.health));
+    if (route === "/health") return read(healthBody(workspace.health, servedAt));
     const status = route.match(/^\/commands\/([0-9A-Z]{26})$/);
     if (status && commands.some((c) => c.event_id === status[1])) return read({ phase: "recorded", steps: [] });
     return problem(404, "not_found", "none");

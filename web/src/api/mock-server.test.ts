@@ -1,14 +1,35 @@
 import { describe, expect, it } from "vitest";
 import { createWorkspaceClient } from "./client";
-import { closedEnum, object, timestamp } from "./decode";
+import { closedEnum, integer, object, string, timestamp } from "./decode";
 import { createMockServer } from "./mock-server";
-import type { KillSwitchRequest } from "./types";
+import type { Decoder, KillSwitchRequest } from "./types";
 import type { Scenario } from "@/fixtures/types";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
 
-const feed = object<{ state: "ok" | "stale" | "down"; as_of: string }>({ state: closedEnum(["ok", "stale", "down"]), as_of: timestamp });
-const health = object<{ market_data: { state: string; as_of: string }; broker: { state: string; as_of: string } }>({ market_data: feed, broker: feed });
+interface Freshness {
+  observed_at: string;
+  stale: boolean;
+  age_seconds: number;
+  limit_source: string;
+}
+interface Component {
+  state: "ok" | "stale" | "down";
+  freshness: Freshness;
+}
+interface Health {
+  served_at: string;
+  market_data: Component;
+  broker: Component;
+  deployment: Component;
+  relay: Component;
+}
+
+const flag: Decoder<boolean> = (value, path) => (typeof value === "boolean" ? { ok: true, value } : { ok: false, issue: { path, problem: "wrong_type", value: null, allowed: null } });
+/** `read-models/health.schema.json` and `common.schema.json`'s Freshness, on A's S0a branch. */
+const freshness = object<Freshness>({ observed_at: timestamp, stale: flag, age_seconds: integer, limit_source: string });
+const component = object<Component>({ state: closedEnum(["ok", "stale", "down"]), freshness });
+const health = object<Health>({ served_at: timestamp, market_data: component, broker: component, deployment: component, relay: component });
 
 const kill: KillSwitchRequest = { scope: { kind: "workspace", id: null }, environment_shown: "paper", owner_exit: null, record: null, step_up: null };
 
@@ -31,13 +52,31 @@ function post(server: ReturnType<typeof setup>["server"], path: string, body: un
 }
 
 describe("the fixture-backed mock server", () => {
-  it("pending E11-9: serves health from the fixtures with canonical timestamps and watermarks", async () => {
+  it("pending E11-9: serves health from the fixtures with canonical timestamps, freshness and watermarks", async () => {
     const { api } = setup();
     const outcome = await api.read("/health", health);
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.as_of.length).toBeGreaterThan(0);
-    expect(outcome.value.market_data.as_of).toBe("2026-09-28T18:05:18.000000000Z");
+    expect(outcome.value.served_at).toBe("2026-09-28T18:05:20.000000000Z");
+    expect(outcome.value.market_data).toEqual({
+      state: "ok",
+      freshness: { observed_at: "2026-09-28T18:05:18.000000000Z", stale: false, age_seconds: 2, limit_source: "health.market_data" },
+    });
+    expect(outcome.value.relay.freshness).toEqual({ observed_at: "2026-09-28T18:05:10.000000000Z", stale: false, age_seconds: 10, limit_source: "health.relay" });
+  });
+
+  it("pending E11-9: marks a stale component stale in its freshness", async () => {
+    const { api } = setup("stale");
+    const outcome = await api.read("/health", health);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const components = [outcome.value.market_data, outcome.value.broker, outcome.value.deployment, outcome.value.relay];
+    expect(components.some((c) => c.state === "stale")).toBe(true);
+    for (const c of components) {
+      if (c.state === "ok") expect(c.freshness.stale).toBe(false);
+      if (c.state === "stale") expect(c.freshness.stale).toBe(true);
+    }
   });
 
   it("pending E11-9: records a kill switch and reports it through command status", async () => {
