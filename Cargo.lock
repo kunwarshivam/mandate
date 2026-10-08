@@ -1517,6 +1517,7 @@ name = "mandate-notify"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-time",
  "proptest",
  "thiserror",
 ]

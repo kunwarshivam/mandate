@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 mandate-canon.workspace = true
+mandate-time.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

@@ -28,16 +28,21 @@
 //! The one way back from text is [`NoticeId::parse`], to resolve a link: it takes exactly 32
 //! lowercase hex digits, which no ULID is (DEC-702 item 2).
 //!
-//! **It reaches no stream.** The crate sits at layer 1 over `mandate-canon` alone, so it cannot
-//! reach the journal or the control-stream writer (NT-3 at rung 1). It is pure: the random source
-//! is passed in, and the dispatcher (E8-10) supplies the operating system's.
+//! **It reaches no stream.** The crate sits at layer 1 over `mandate-canon` and `mandate-time`
+//! alone, so it cannot reach the journal or the control-stream writer (NT-3 at rung 1). It is pure:
+//! the random source is passed in, and the dispatcher (E8-10) supplies the operating system's.
 //!
 //! Every entry point returns a `Result` whose [`NotifyError::Unimplemented`] is the tests PR's stub
 //! (DEC-77).
 
+mod dispatch;
 mod kind;
 mod payload;
 
+pub use dispatch::{
+    Cause, Channel, Context, Dispatcher, Draft, EventId, Input, Member, Quiet, Reason,
+    ReceiveTable, Role, Send, SendResult, Status, Step, UserId,
+};
 pub use kind::{Class, NoticeKind, TextKey};
 pub use payload::{NoticeId, Notification, Origin, SecureRandom, link, payload};
 
