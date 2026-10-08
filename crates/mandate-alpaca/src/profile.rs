@@ -11,12 +11,19 @@ use mandate_domain::{
 
 /// The profile [`crate::TradingClient`] hands the executor.
 ///
-/// Whole shares take `day` or `gtc` and every protective form an order of that type may sit in:
-/// a bracket's entry (market, limit) or stop leg (stop, stop-limit), an OCO's take-profit (limit)
-/// or stop leg, and one resting stop-limit. Fractional and notional orders are `day` only and
-/// never in an OCO or bracket. Our `client_order_id` goes on the wire, a second order with one
-/// Alpaca holds is refused (`client::DUPLICATE_CLIENT_ORDER_ID`), and an order is read back by
-/// it (`/v2/orders:by_client_order_id`).
+/// Read from §5.2 and [Alpaca's order documentation](https://docs.alpaca.markets/docs/orders-at-alpaca)
+/// as DEC-630 item 1 says, taking the tighter set where the documentation is unclear (DEC-176):
+///
+/// - Whole shares take `day` or `gtc`.
+/// - A cell lists the forms its order may be *sent as*. A market or limit order may be a
+///   bracket's entry, and a limit order an OCO's parent ("the type parameter must always be
+///   `limit`"). A stop or stop-limit order is neither, since the documentation names no such
+///   entry. No equity order is the resting stop-limit, which DEC-36 gives to crypto.
+/// - Fractional and notional orders are `day` only and never in an OCO or bracket.
+///
+/// Our `client_order_id` goes on the wire, a second order with one Alpaca holds is refused
+/// (`client::DUPLICATE_CLIENT_ORDER_ID`), and an order is read back by it
+/// (`/v2/orders:by_client_order_id`).
 pub fn alpaca() -> Result<CapabilityProfile, ProfileError> {
     let cells = [
         (OrderType::Market, &[ProtectionForm::Bracket][..]),
@@ -24,18 +31,8 @@ pub fn alpaca() -> Result<CapabilityProfile, ProfileError> {
             OrderType::Limit,
             &[ProtectionForm::Bracket, ProtectionForm::Oco],
         ),
-        (
-            OrderType::Stop,
-            &[ProtectionForm::Bracket, ProtectionForm::Oco],
-        ),
-        (
-            OrderType::StopLimit,
-            &[
-                ProtectionForm::Bracket,
-                ProtectionForm::Oco,
-                ProtectionForm::StopLimit,
-            ],
-        ),
+        (OrderType::Stop, &[]),
+        (OrderType::StopLimit, &[]),
     ]
     .into_iter()
     .flat_map(|(order_type, protection)| {

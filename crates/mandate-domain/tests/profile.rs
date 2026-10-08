@@ -24,7 +24,11 @@ fn cell(
     }
 }
 
-/// Two rows, given out of canonical order, and a broker whose retries are of unknown effect.
+/// Three rows, given out of canonical order, and a broker whose retries are of unknown effect.
+///
+/// The two US equity rows pin the row order: sorted by asset class then session, `us_equity`'s
+/// `after_hours` row comes after `crypto` and before `regular`. Sorted by session first, or by the
+/// sessions' declaration order, it would not.
 fn rows() -> Vec<Row> {
     vec![
         Row {
@@ -55,6 +59,16 @@ fn rows() -> Vec<Row> {
                 &[ProtectionForm::StopLimit],
             )],
         },
+        Row {
+            asset_class: AssetClass::UsEquity,
+            session: MarketSession::AfterHours,
+            cells: vec![cell(
+                OrderType::Limit,
+                QuantityForm::Whole,
+                &[TimeInForce::Day, TimeInForce::Gtc],
+                &[],
+            )],
+        },
     ]
 }
 
@@ -72,6 +86,8 @@ const CANONICAL: &str = concat!(
     r#""kind":"broker_profile","profile_version":2,"rows":["#,
     r#"{"asset_class":"crypto","cells":[{"order_type":"stop_limit","protection_forms":["stop_limit"],"#,
     r#""quantity_form":"fractional","times_in_force":["gtc","ioc"]}],"session":"crypto"},"#,
+    r#"{"asset_class":"us_equity","cells":[{"order_type":"limit","protection_forms":[],"#,
+    r#""quantity_form":"whole","times_in_force":["day","gtc"]}],"session":"after_hours"},"#,
     r#"{"asset_class":"us_equity","cells":["#,
     r#"{"order_type":"limit","protection_forms":["bracket","oco"],"quantity_form":"whole","#,
     r#""times_in_force":["day","gtc"]},"#,
@@ -144,7 +160,7 @@ fn every_member_moves_the_hash() {
         }),
         ("row added", |_, r, _| {
             r.push(Row {
-                session: MarketSession::AfterHours,
+                session: MarketSession::PreMarket,
                 ..r[0].clone()
             });
         }),
@@ -248,11 +264,112 @@ fn every_profile_error_has_a_distinct_stable_code() {
         ProfileError::DuplicateCell,
         ProfileError::NoTimeInForce,
         ProfileError::ClaimWithoutClientId,
+        ProfileError::NotOffered,
         ProfileError::NonCanonical,
     ];
     let codes: BTreeSet<&str> = errors.iter().map(|e| e.code()).collect();
     assert_eq!(codes.len(), errors.len(), "ES-09: one code per variant");
     assert!(codes.iter().all(|c| !c.is_empty() && c.is_ascii()));
+}
+
+#[test]
+fn only_an_idempotent_broker_may_be_sent_an_order_again_blindly() {
+    assert!(Retry::Idempotent.may_resend_blindly());
+    assert!(
+        !Retry::NotIdempotent.may_resend_blindly(),
+        "a re-send could be a second order"
+    );
+    assert!(
+        !Retry::Unknown.may_resend_blindly(),
+        "DEC-630 item 2: unknown is read as not idempotent"
+    );
+}
+
+#[test]
+fn a_profile_reads_back_its_idempotency_and_the_one_cell_for_an_order() {
+    let profile = CapabilityProfile::new(2, rows(), IDEMPOTENCY).unwrap();
+    assert_eq!(profile.idempotency(), IDEMPOTENCY);
+    let read = |asset_class, session, order_type, quantity_form| {
+        profile.cell(asset_class, session, order_type, quantity_form)
+    };
+    let regular_limit = cell(
+        OrderType::Limit,
+        QuantityForm::Whole,
+        &[TimeInForce::Day, TimeInForce::Gtc],
+        &[ProtectionForm::Bracket, ProtectionForm::Oco],
+    );
+    assert_eq!(
+        read(
+            AssetClass::UsEquity,
+            MarketSession::Regular,
+            OrderType::Limit,
+            QuantityForm::Whole
+        ),
+        Ok(&regular_limit)
+    );
+    let after_hours_limit = cell(
+        OrderType::Limit,
+        QuantityForm::Whole,
+        &[TimeInForce::Day, TimeInForce::Gtc],
+        &[],
+    );
+    assert_eq!(
+        read(
+            AssetClass::UsEquity,
+            MarketSession::AfterHours,
+            OrderType::Limit,
+            QuantityForm::Whole
+        ),
+        Ok(&after_hours_limit),
+        "the same order in another session is another cell"
+    );
+    let crypto_stop_limit = cell(
+        OrderType::StopLimit,
+        QuantityForm::Fractional,
+        &[TimeInForce::Gtc, TimeInForce::Ioc],
+        &[ProtectionForm::StopLimit],
+    );
+    assert_eq!(
+        read(
+            AssetClass::Crypto,
+            MarketSession::Crypto,
+            OrderType::StopLimit,
+            QuantityForm::Fractional
+        ),
+        Ok(&crypto_stop_limit)
+    );
+    for (asset_class, session, order_type, quantity_form) in [
+        (
+            AssetClass::UsEquity,
+            MarketSession::PreMarket,
+            OrderType::Limit,
+            QuantityForm::Whole,
+        ),
+        (
+            AssetClass::Crypto,
+            MarketSession::Regular,
+            OrderType::Limit,
+            QuantityForm::Whole,
+        ),
+        (
+            AssetClass::UsEquity,
+            MarketSession::Regular,
+            OrderType::Stop,
+            QuantityForm::Whole,
+        ),
+        (
+            AssetClass::UsEquity,
+            MarketSession::Regular,
+            OrderType::Limit,
+            QuantityForm::Fractional,
+        ),
+    ] {
+        assert_eq!(
+            read(asset_class, session, order_type, quantity_form),
+            Err(ProfileError::NotOffered),
+            "{asset_class:?} {session:?} {order_type:?} {quantity_form:?} is not listed"
+        );
+    }
 }
 
 fn valid_profile() -> impl Strategy<Value = (u32, Vec<Row>, Idempotency)> {
@@ -296,9 +413,10 @@ fn valid_profile() -> impl Strategy<Value = (u32, Vec<Row>, Idempotency)> {
         vec![
             (AssetClass::UsEquity, MarketSession::Regular),
             (AssetClass::UsEquity, MarketSession::PreMarket),
+            (AssetClass::UsEquity, MarketSession::AfterHours),
             (AssetClass::Crypto, MarketSession::Crypto),
         ],
-        1..=3,
+        1..=4,
     );
     let rows = places.prop_flat_map(move |places| {
         proptest::collection::vec(cells.clone(), places.len()).prop_map(move |cells| {
