@@ -1479,6 +1479,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-modelhost"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-backtest",
+ "mandate-canon",
+ "mandate-num",
+ "mandate-runtime",
+ "mandate-spec",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-num"
 version = "0.0.0"
 dependencies = [
