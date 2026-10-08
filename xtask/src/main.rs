@@ -21,7 +21,8 @@ commands:
                         spec-guard | refcases | reference | supply-chain | postgres | mutants
   layers                check crate layering and safety-critical policy (xtask/layers.toml)
   markers               check for debt markers and #[ignore] without a pending story
-  feature-map           check the verification skill's feature map against the workspace
+  feature-map [--index] check the verification skill's feature map against the workspace, or
+                        list its feature files and titles
   deps                  check every direct dependency against docs/dependencies.md
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
 ";
@@ -76,8 +77,10 @@ const E77_ATOMIC_PR: u64 = 598;
 const E77_ATOMIC_BRANCH: &str = "cursor/e77-complete-tracer-4832";
 const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)";
 
-/// The verification skill's map of features to code, tests, and commands (AGENTS.md).
-const FEATURE_MAP: &str = ".cursor/skills/verify-mandate/feature-map.md";
+/// The verification skill's map of features to code, tests, and commands (AGENTS.md): one Markdown
+/// file a feature, so a PR adding a feature adds a file and one changing a feature edits only
+/// that feature's file. The directory is the map; `cargo xtask feature-map --index` lists it.
+const FEATURE_MAP: &str = ".cursor/skills/verify-mandate/features";
 /// Top-level entries a feature-map path may start with.
 const REPO_ROOTS: [&str; 11] = [
     ".cargo/",
@@ -123,6 +126,7 @@ fn run() -> Result<()> {
         ["layers"] => layers(),
         ["markers"] => markers(),
         ["feature-map"] => feature_map(),
+        ["feature-map", "--index"] => feature_map_index(),
         ["deps"] => deps(),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
@@ -1253,25 +1257,88 @@ fn is_pending_reason(reason: &str) -> bool {
 /// The feature map names every crate and reference-case suite, and every path it names exists.
 fn feature_map() -> Result<()> {
     eprintln!("    feature-map: checking {FEATURE_MAP} against the workspace");
-    let text = fs::read_to_string(FEATURE_MAP).with_context(|| format!("reading {FEATURE_MAP}"))?;
+    report(
+        feature_map_problems(Path::new("."), &metadata()?)?,
+        "feature-map",
+    )
+}
+
+/// Every feature file of the map under `root`, sorted by name, with its text: every `.md` file in
+/// [`FEATURE_MAP`] but its README.
+fn feature_files(root: &Path) -> Result<Vec<(String, String)>> {
+    let mut files = Vec::new();
+    for entry in
+        fs::read_dir(root.join(FEATURE_MAP)).with_context(|| format!("reading {FEATURE_MAP}"))?
+    {
+        let path = entry?.path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        if name.ends_with(".md") && name != "README.md" {
+            let text = fs::read_to_string(&path)
+                .with_context(|| format!("reading {FEATURE_MAP}/{name}"))?;
+            files.push((name, text));
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// The map's drift against the workspace under `root`, the checks the single `feature-map.md` had:
+/// every workspace crate is named in some feature as `` `crate` ``, every reference-case fixture
+/// as its path, and every repository path a feature names exists. Each feature file must also open
+/// with its `# ` title, which is what `--index` lists.
+fn feature_map_problems(root: &Path, meta: &Metadata) -> Result<Vec<String>> {
+    let files = feature_files(root)?;
     let mut problems = Vec::new();
-    for pkg in workspace_packages(&metadata()?) {
+    if files.is_empty() {
+        problems.push(format!("{FEATURE_MAP} has no feature files"));
+    }
+    let text: String = files
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for pkg in workspace_packages(meta) {
         if !text.contains(&format!("`{}`", pkg.name)) {
             problems.push(format!("crate `{}` has no entry", pkg.name));
         }
     }
-    for entry in fs::read_dir("fixtures/refcases")? {
+    for entry in fs::read_dir(root.join("fixtures/refcases"))? {
         let name = entry?.file_name().to_string_lossy().into_owned();
         if !text.contains(&format!("fixtures/refcases/{name}")) {
             problems.push(format!("fixtures/refcases/{name} has no entry"));
         }
     }
-    for path in backticked_paths(&text) {
-        if !Path::new(path).exists() {
-            problems.push(format!("names `{path}`, which does not exist"));
+    for (name, text) in &files {
+        if feature_title(text).is_none() {
+            problems.push(format!(
+                "{FEATURE_MAP}/{name} does not open with a `# ` title"
+            ));
+        }
+        for path in backticked_paths(text) {
+            if !root.join(path).exists() {
+                problems.push(format!("{name} names `{path}`, which does not exist"));
+            }
         }
     }
-    report(problems, "feature-map")
+    Ok(problems)
+}
+
+/// A feature file's title: its first line, when that is a `# ` heading.
+fn feature_title(text: &str) -> Option<&str> {
+    text.lines().next()?.strip_prefix("# ")
+}
+
+/// `cargo xtask feature-map --index`: the map's table of contents, derived from the files, so no
+/// hand-kept list can drift or become a file every feature PR edits.
+fn feature_map_index() -> Result<()> {
+    for (name, text) in feature_files(Path::new("."))? {
+        println!("{name}: {}", feature_title(&text).unwrap_or("(no title)"));
+    }
+    Ok(())
 }
 
 /// Code spans that look like repository paths: no spaces or globs, starting at a known root.
@@ -3207,18 +3274,19 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, CratePolicy, Dependency, Layers,
+        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, CratePolicy, Dependency, FEATURE_MAP, Layers,
         MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, Metadata, MutantShard,
         MutatedCrate, Package, PendingTest, PendingTestRun, REFCASES, TestOutcome,
         actionlint_workflows, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
-        contains_word, external_oracles, failure_cause, files_by_extension, first_panic_line,
-        forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
-        is_stub_function, layer_problems, lint, listed_mutant_counts, live_test_counts,
-        metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
-        mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
-        unjudged_mutants, verdicts, workspace_closure,
+        contains_word, external_oracles, failure_cause, feature_files, feature_map_problems,
+        files_by_extension, first_panic_line, forbidden_reached, generated_pending_markers,
+        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
+        listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts, mutants,
+        mutants_args, mutants_job_cargo, mutants_outcome, mutated_crates, names_a_stub, output_in,
+        pending_problems, pending_tests, plain_comment_lines, proptest_seeds_in, repo_root,
+        shellcheck_scripts, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
+        test_binary, test_outcomes, unjudged_mutants, verdicts, workspace_closure,
+        workspace_packages,
     };
 
     #[test]
@@ -3809,6 +3877,168 @@ mod tests {
         assert!(!is_pending_marker("#[ignore = \"pending E5\"]"));
         assert!(!is_pending_marker("#[ignore = \"pending E-1\"]"));
         assert!(!is_pending_marker("#[ignore = \"pending E5-x\"]"));
+    }
+
+    /// The single-file check as it was before the map became a directory, as an oracle: every
+    /// crate named as `` `crate` ``, every fixture by its path, every backticked repository path
+    /// existing, all over one text.
+    fn single_file_feature_map_problems(
+        root: &Path,
+        text: &str,
+        meta: &Metadata,
+    ) -> Result<BTreeSet<String>> {
+        let mut problems = BTreeSet::new();
+        for pkg in workspace_packages(meta) {
+            if !text.contains(&format!("`{}`", pkg.name)) {
+                problems.insert(format!("crate `{}` has no entry", pkg.name));
+            }
+        }
+        for entry in fs::read_dir(root.join("fixtures/refcases"))? {
+            let name = entry?.file_name().to_string_lossy().into_owned();
+            if !text.contains(&format!("fixtures/refcases/{name}")) {
+                problems.insert(format!("fixtures/refcases/{name} has no entry"));
+            }
+        }
+        for path in backticked_paths(text) {
+            if !root.join(path).exists() {
+                problems.insert(format!("`{path}`, which does not exist"));
+            }
+        }
+        Ok(problems)
+    }
+
+    /// The directory's problems in the oracle's terms: a missing path is named with the file it
+    /// is in, which the single file had no need to say, so that prefix is dropped to compare.
+    fn without_file_names(problems: Vec<String>) -> BTreeSet<String> {
+        problems
+            .into_iter()
+            .map(|problem| match problem.split_once(" names `") {
+                Some((_, rest)) if !problem.starts_with("crate ") => format!("`{rest}"),
+                _ => problem,
+            })
+            .collect()
+    }
+
+    /// One way a feature's text drifts from the workspace.
+    type Drift = fn(&str) -> String;
+
+    /// The feature map as a directory catches exactly the drift the single `feature-map.md` did,
+    /// in a fixture workspace: a crate named nowhere, a reference-case suite named nowhere, and a
+    /// path that does not exist, each with the map in one feature file and split across three, and
+    /// nothing when the map is complete. A feature file without its `# ` title is refused too.
+    #[test]
+    fn the_feature_map_directory_catches_the_drift_the_single_file_did() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-feature-map-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        let fx = Fixture(dir);
+        fx.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/alpha\", \"crates/beta\"]\nresolver = \"3\"\n",
+        )?;
+        for name in ["alpha", "beta"] {
+            fx.write(
+                &format!("crates/{name}/Cargo.toml"),
+                &format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n"),
+            )?;
+            fx.write(&format!("crates/{name}/src/lib.rs"), "")?;
+        }
+        fx.write("fixtures/refcases/one.json", "{}")?;
+        fs::copy(
+            repo_root()?.join("rust-toolchain.toml"),
+            fx.0.join("rust-toolchain.toml"),
+        )?;
+        output_in(&fx.0, "cargo", &["generate-lockfile", "--offline"])?;
+        let meta = metadata_in(&fx.0)?;
+
+        let sections = [
+            "# Alpha\n\n- **Code:** `alpha`: `crates/alpha/src/lib.rs`.\n",
+            "# Beta\n\n- **Code:** `beta`: `crates/beta/src/lib.rs`.\n",
+            "# Cases\n\n- **Reference cases:** `fixtures/refcases/one.json`.\n",
+        ];
+        let drifts: [(&str, Drift); 4] = [
+            ("complete", |s| s.to_owned()),
+            ("a crate named nowhere", |s| s.replace("`beta`", "beta")),
+            ("a suite named nowhere", |s| {
+                s.replace("`fixtures/refcases/one.json`", "the suite")
+            }),
+            ("a path that does not exist", |s| {
+                s.replace("crates/alpha/src/lib.rs", "crates/alpha/src/gone.rs")
+            }),
+        ];
+        let features = fx.0.join(FEATURE_MAP);
+        for (drift, apply) in drifts {
+            let drifted: Vec<String> = sections.iter().map(|s| apply(s)).collect();
+            let expected = single_file_feature_map_problems(&fx.0, &drifted.join("\n"), &meta)?;
+            assert_eq!(
+                expected.is_empty(),
+                drift == "complete",
+                "the oracle sees {drift}: {expected:?}"
+            );
+            for split in [false, true] {
+                if features.exists() {
+                    fs::remove_dir_all(&features)?;
+                }
+                fx.write(&format!("{FEATURE_MAP}/README.md"), "# Feature map\n")?;
+                if split {
+                    for (k, text) in drifted.iter().enumerate() {
+                        fx.write(&format!("{FEATURE_MAP}/f{k}.md"), text)?;
+                    }
+                } else {
+                    let joined = drifted
+                        .iter()
+                        .map(|s| s.replacen("# ", "## ", 1))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    fx.write(
+                        &format!("{FEATURE_MAP}/all.md"),
+                        &format!("# All\n\n{joined}"),
+                    )?;
+                }
+                assert_eq!(
+                    without_file_names(feature_map_problems(&fx.0, &meta)?),
+                    expected,
+                    "{drift}, the map {}",
+                    if split {
+                        "split across files"
+                    } else {
+                        "in one file"
+                    }
+                );
+            }
+        }
+
+        fx.write(&format!("{FEATURE_MAP}/untitled.md"), "no title\n")?;
+        let untitled = feature_map_problems(&fx.0, &meta)?;
+        assert!(
+            untitled.contains(&format!(
+                "{FEATURE_MAP}/untitled.md does not open with a `# ` title"
+            )),
+            "a feature file without its title is refused: {untitled:?}"
+        );
+        fs::remove_dir_all(&features)?;
+        fx.write(&format!("{FEATURE_MAP}/README.md"), "# Feature map\n")?;
+        assert!(
+            feature_map_problems(&fx.0, &meta)?
+                .iter()
+                .any(|p| p.ends_with("has no feature files")),
+            "and a map of nothing but its README is refused"
+        );
+        fs::remove_dir_all(&fx.0).ok();
+        Ok(())
+    }
+
+    /// The repository's own map passes, and every feature has a title for the index.
+    #[test]
+    fn the_repository_feature_map_is_complete() -> Result<()> {
+        let root = repo_root()?;
+        assert_eq!(
+            feature_map_problems(&root, &metadata_in(&root)?)?,
+            Vec::<String>::new()
+        );
+        assert!(feature_files(&root)?.len() > 1);
+        Ok(())
     }
 
     #[test]
