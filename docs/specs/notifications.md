@@ -306,7 +306,7 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 - **Encryption.** The workspace deployment encrypts the payload to the subscribing browser with Web
   Push message encryption (RFC 8291) and signs with its own application server key (RFC 8292). The
   browser's push service and the relay see only ciphertext, of a payload that is opaque anyway.
-- **Only the browsers' push services** (DEC-792, [#833](https://github.com/kunwarshivam/mandate/pull/833)).
+- **Only the browsers' push services** ([DEC-792](../project/decisions/DEC-792.md)).
   A subscription's endpoint is accepted, stored, and sent to only if it parses as `https`, port 443
   (none written, or `:443`), with no user information, and a host that is a lowercase ASCII name:
   an IP literal, a trailing dot, a non-ASCII or `xn--` (IDN) label, or a percent-encoded character
@@ -367,7 +367,10 @@ The dispatcher **tails the journal**, which is its outbox:
    every notice, subject to the allowlist, retried within the safety window (NT-6), and never
    repeated for a later notice. If the vault entry is already gone, that attempt is a terminal
    `failed` that marks nothing and raises no `channel_lost`; once the entry is swept, no exception
-   remains.
+   remains. **An active address whose vault entry is missing** (a failure the workspace API's
+   §5.7 repairs on retry) is a terminal `failed` with reason `address_missing`: it raises
+   `channel_lost` to the member's other channels, telling them to set the address again, and does
+   not mark the address `unreachable`.
 4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
    issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
    while the approval is still pending.
@@ -394,7 +397,7 @@ Every channel is one adapter behind one interface:
 - Adapters take no string from the caller except the address handle, which they dereference
   through the vault client. They cannot read the journal or write the control stream (NT-3).
 - `reason` is a closed enum (`timeout`, `rate_limited`, `provider_error`, `address_rejected`,
-  `auth_failed`, `too_large`); provider error text is never journaled or logged, since a provider
+  `auth_failed`, `too_large`, `address_missing`); provider error text is never journaled or logged, since a provider
   may echo the message.
 - A receipt can only mark an attempt or an address. It never changes an approval or any trading
   state (NT-5).
@@ -449,9 +452,10 @@ adds the notice stream and these records; E8-9's tests PR closes their payload s
 - An address comes back only when the signed-in user re-verifies it in the workspace.
 - **An allowlist change.** An address whose host leaves the allowlist is no longer sent to: its next
   attempt is journaled `failed` with `address_rejected`, which marks it `unreachable` and raises
-  `channel_lost` to the member's other channels, as for any rejected address. It stays unreachable
-  until the member sets it again, still counts toward their limit, and shows its status in the
-  workspace (workspace API spec §4.10).
+  `channel_lost` to the member's other channels, as for any rejected address. It stays unreachable,
+  still counts toward the member's limit, and shows its status in the workspace until the member
+  removes it or sets the same endpoint again, which replaces it with a new address in one batch
+  (workspace API spec §4.10, §5.7).
 - **A member's own change is not a loss.** Adding or removing a push address through the workspace
   API (workspace API spec §4.10) is journaled as `NotificationAddressChanged` on the control
   stream and raises a `notification_address_changed` notice, not `channel_lost`. Its one last send
