@@ -168,14 +168,16 @@ retail sign-up creates it).
 | Workspace | **Auditor** | Read records, verification, exports; nothing else | `info` only |
 | — | Client, service account, host CLI | — | None |
 
-**Where an org owner's notices land.** Notification addresses are per workspace (§4.2), so an org
-owner or admin who holds no workspace membership has none. The org-scope notices addressed to them
-(`role_granted`, `break_glass`, every identity and account-security notice of the org's
-workspaces) always reach their pull channels, the web inbox and the CLI inbox, which need no
-address, and reach push addresses only through a workspace membership they hold. An org-scope
-address store is a later change, not v0.3's ([DEC-816](../project/decisions/DEC-816.md) item 2).
-The E9-11 tests owe `every_org_owner_notice_has_a_deliverable_channel`: each notice kind addressed
-to org owners reaches the pull channels of an owner who holds no workspace membership.
+**Where an org owner's notices land.** Notification addresses are per workspace (§4.2), and every
+inbox is read through a workspace, so in v0.3 an org owner or admin who holds no workspace
+membership receives no notice at all: a retail sign-up always holds one (§3.2), and a business
+org's owner who is to receive the identity and account-security notices of its workspaces (`role_granted`,
+`break_glass`, and the rest of §4.1's receive column) holds a workspace membership for it. An
+org-scope inbox, listing the notices addressed to one's org role, is owed by lane L3's follow-up to
+the notifications spec; an org-scope push address waits for a later proposal
+([DEC-816](../project/decisions/DEC-816.md) item 2). The E9-11 tests owe
+`every_org_owner_notice_has_a_deliverable_channel`: for an org owner who holds a workspace
+membership, each notice kind addressed to org owners reaches a channel of theirs.
 
 **Receiving is not acting** (notifications spec NT-11): a notice gives no permission, and the receive
 column only bounds who may be sent each class. An identity or account-security notice about a
@@ -573,8 +575,8 @@ below). In order, workspace services:
    they ride in: on the request path the authenticated principal, the deactivating admin or the
    member who left (§4.5); when the separate process deactivates (a directory sync, SCIM, §11.1),
    `system`, in the same transaction there too. No step-up evidence is needed, since removing access
-   needs none. A reactivated member starts with no address in the workspace: the reactivation's
-   in-app notice (`web_inbox`) tells them to add one;
+   needs none. A reactivated member starts with no address in the workspace, and an in-app notice
+   (`web_inbox`, a kind lane L3's notifications follow-up names) tells them to add one;
 3. leave every committed event as it was. A response or command committed before step 1 was
    authorized when committed and is judged by the runtime as usual. One arriving after step 1 is
    refused at the API and never committed;
@@ -993,7 +995,7 @@ them to journal §9 with schemas (DEC-437 item 9):
 | `CredentialEnrolled`, `CredentialRemoved` | member, credential (opaque reference, never the key), kind, enrolment cool-off end |
 | `SessionOpened` | member, session (opaque), method, device (opaque), `first_seen_device` (true when the principal has not used the device before); the subject event of the notifications spec's `new_device` kind |
 | `SessionRevoked` | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `refresh_failed`, `expired`, `admin`; `expired` is a session ended by its idle or absolute limit, §6.2 and §6.4 route 1; `refresh_failed` is a refresh the provider answered with neither a grant nor a deprovision signal, §6.4 route 1; `deactivated` is a session closed because its principal's last membership that reached a scope in the deployment ended, §5.2 step 2); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
-| `NotificationAddressChanged` | member, channel, action (`added`, `removed`), opaque address reference, step-up evidence for an add or a member's own removal (null when it rides a deactivation, §5.2); defined with lane L3's web-push routes (workspace API §4.10, PR #827), the endpoint and keys only in the vault |
+| `NotificationAddressChanged` | member, channel, action (`added`, `removed`), opaque address reference, step-up evidence for an add or a member's own removal (null when it rides a deactivation, §5.2); defined with lane L3's web-push routes (PR #827), the endpoint and keys only in the vault |
 | `ClientConnected`, `ClientRevoked` | client id, user, scopes, step-up evidence |
 | `ServiceAccountIssued`, `ServiceAccountRevoked` | account, scopes, workspaces, expiry, issuing user |
 | `HostCliRegistered`, `HostCliRevoked` | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence |
