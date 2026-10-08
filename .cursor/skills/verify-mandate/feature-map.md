@@ -1291,6 +1291,16 @@ proves each pending test fails on them (DEC-110).
   clock-independence check), with fixtures in `tests/common/mod.rs`.
 - **Run:** `cargo nextest run -p mandate-modelhost`.
 
+## Passkey relying party (E9-1)
+
+- **Spec:** identity spec §6.1, §6.3, §7.2 step 4; DEC-660 (dependencies, algorithms, and the
+  strict readings).
+- **Code:** `mandate-passkey`, `crates/mandate-passkey/` (layer 2, pure, safety-critical):
+  `src/lib.rs` (`enrol`, `verify`, `RelyingParty`, `Challenge`, `Credential`, `PublicKey`,
+  `Refusal`).
+- **Tests:** `crates/mandate-passkey/tests/api.rs` (refusal codes, the challenge length).
+- **Run:** `cargo nextest run -p mandate-passkey`.
+
 ## Simulated Robinhood broker (E7-25)
 
 - **Spec:** the Robinhood tool contract (E7-15: "The equity order tools", "Order states") and
