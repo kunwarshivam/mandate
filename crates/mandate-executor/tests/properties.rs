@@ -1968,17 +1968,18 @@ proptest! {
     /// resolved by the order's own terminal state on the journal, or, for a protective order, by
     /// the `ProtectionChanged` that records it cancelled — never by the request being accepted.
     /// Two rulings bound the wait. Rule 5's wait ends when the cancel is journaled overdue
-    /// (`cancel_overdue`, DEC-160 (7), (13), (18)). And the OCO for a partly filled entry's filled
-    /// quantity is placed once that entry is terminal, whatever else is pending (DEC-346 item 6),
-    /// so a protective submission does not wait on any buy's cancel, plain or bracket (DEC-521
-    /// item 2). A plain buy that fills only adds to the position. A bracket entry's legs are held
-    /// until it is completely filled and are sized to its quantity (§5.4), so the fill that
-    /// activates them adds as much to the position as they can sell, and the OCO is at most its
-    /// own entry's fill; that bound holds while rule 12's sum of protective sells stays within the
-    /// position, which E1 and E5 track. Every other sell still waits on every outstanding cancel:
-    /// the sells are what §5.4's sequences order after a confirmation; an opening may be accepted
-    /// while an exit waits, and the exit then asks its cancel too (DEC-160 (13)), so a buy is not
-    /// judged here.
+    /// (`cancel_overdue`, DEC-160 (7), (13), (18)). And an entry that turns terminal partly
+    /// filled, "after that cancel or by any other path", gets its OCO for the filled quantity
+    /// (DEC-346 item 6), so a protective submission does not wait on any buy's cancel, plain or
+    /// bracket (DEC-521 item 2). A plain buy that fills only adds to the position. A bracket
+    /// entry's legs are held until it is completely filled and are sized to its quantity (§5.4),
+    /// so the fill that activates them adds as much to the position as they can sell, and the OCO
+    /// is at most its own entry's fill. That bound needs no live protective order or exit to cover
+    /// the filled shares of a bracket entry whose legs are held; a re-placement sized on the
+    /// position breaks it today, because held legs are counted by no cap (backlog E1), and so does
+    /// E5's overdue cancel. Every other sell still waits on every outstanding cancel: the sells are
+    /// what §5.4's sequences order after a confirmation; an opening may be accepted while an exit
+    /// waits, and the exit then asks its cancel too (DEC-160 (13)), so a buy is not judged here.
     #[test]
     #[ignore = "pending E7-4"]
     fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {

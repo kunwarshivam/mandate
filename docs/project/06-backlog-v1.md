@@ -2915,6 +2915,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   are not yet recorded `placed` counts as live protection for any exit sequence in the instrument,
   so the exit waits a step and cancels the legs through §5.4 before it submits, as DEC-485 item 16
   does for the flatten. Until then that property fails on #668's code.
+  The same root cause, held legs counted by no cap, reaches protection sizing too
+  ([DEC-521](decisions/DEC-521.md) item 2, #689's review): `re_place` (reached from `settle` →
+  `replace` after an exit sequence, and from `new_day`'s re-placement before expiry) sizes on
+  `long`, which includes a working bracket's ingested partial fills, while `covered` excludes its
+  held legs. Then a later OCO for another entry, placed while that bracket's cancel is unconfirmed
+  (DEC-346 item 6), oversells once the bracket completes: with B = 10 shares outside two entries, a
+  re-placement over the first entry's f1 = 1 covers 11; the second entry ends with f2 = 1 and its
+  OCO is 1; the first completes (Q1 = 2) and its legs activate, so sells are 11 + 1 + 2 = 14 against
+  a position of 13. The fix counts held legs, sized to their entry, in every cap and sizing,
+  re-placement included, and pins the arithmetic with a hand case.
 - **E7-4 (stream K), E2 from E7-4 slice 7's tests correction ([DEC-506](decisions/DEC-506.md)
   item 8): an opening rests inside an unprotected interval.** Minimal script
   (`properties::no_resting_order_is_submitted_inside_an_unprotected_interval`):
@@ -2939,10 +2949,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   first open interval in the instrument and ignores the `bracket` it names, so 02's end closes 01's
   interval and leaves 02's open; `bound` measures from 42, not 34. Trading spec §5.4 ("Bounded
   unprotected intervals": every interval is journaled from start to end and alerts at
-  `max_unprotected_s`). Fix tests-first, as its own PR: `UnprotectedInterval` carries the bracket
-  entry its start names, and an end that names a bracket closes only that bracket's interval. The
-  case is `hand::a_second_brackets_end_leaves_the_first_brackets_interval_bounded`, which the fix
-  takes live with its `BEHAVIOUR_ONLY_TESTS` row; the property goes live with #668.
+  `max_unprotected_s`). The acknowledgment path has the same defect: a partly filled second
+  bracket's OCO ends its interval at the broker's acknowledgment (DEC-348 item 2), with an
+  `unprotected_end` that names no bracket, and that arm too ends the first open interval. Fix
+  tests-first, as its own PR: `UnprotectedInterval` carries the bracket entry its start names; an
+  end that names a bracket, and the acknowledgment of the OCO placed for one, close only that
+  bracket's interval. The cases are `hand::a_second_brackets_end_leaves_the_first_brackets_interval_bounded`
+  and `hand::an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_bounded`,
+  which the fix takes live with their `BEHAVIOUR_ONLY_TESTS` rows; the property goes live with #668.
 - **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
   ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
   while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on

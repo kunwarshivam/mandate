@@ -2212,12 +2212,12 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The last row is E7-4's defect E4 (DEC-521 item 3; backlog: "E7-4 (stream K), E4 from E7-4 slice
-/// 7's second tests correction"): with two partly filled brackets in one instrument, the second's
-/// `unprotected_end` closes the first's interval, so the bound alerts late. The case involves no
-/// kill switch and reaches no stub; it fails on that behaviour until E4's fix deletes the row with
-/// its `#[ignore]` line.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 5] = [
+/// The last two rows are E7-4's defect E4 (DEC-521 item 3; backlog: "E7-4 (stream K), E4 from E7-4
+/// slice 7's second tests correction"): with two partly filled brackets in one instrument, the
+/// second's `unprotected_end`, or the acknowledgment of the OCO placed for it, closes the first's
+/// interval, so the bound alerts late. The cases involve no kill switch and reach no stub; they fail
+/// on that behaviour until E4's fix deletes the rows with their `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 6] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2234,6 +2234,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 5] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_second_brackets_end_leaves_the_first_brackets_interval_bounded",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_bounded",
     ),
 ];
 
