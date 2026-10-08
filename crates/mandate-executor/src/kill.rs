@@ -147,20 +147,23 @@ fn unplaced(view: &ExecutorState, order: &Order) -> bool {
             })
 }
 
-/// Whether an order is, in an instrument the switch closes, the agent's own or a `*` watchdog
-/// exit's (§2.3, §5.5), which every scope covering the instrument cancels by its own id. A
-/// switch's own flatten is never reached: it is what the switch sells through (#668 round 1,
-/// blocker 1; DEC-485 item 5).
+/// Whether an order is, in an instrument the switch closes, the agent's own, or a `*` watchdog
+/// exit's (§2.3, §5.5) where the agent holds lots for it to be selling: a switch whose agent holds
+/// none there leaves another party's exit alone, since a risk exit is never held for it (rule 13;
+/// #668 round 2). A switch's own flatten is never reached: it is what the switch sells through
+/// (#668 round 1, blocker 1; DEC-485 item 5).
 fn reached(view: &ExecutorState, order: &Order, agent: &AgentId, closing: &[InstrumentId]) -> bool {
     closing.contains(&order.instrument)
         && !order
             .intent_id
             .as_ref()
             .is_some_and(|intent| is_flatten(view, intent))
-        && order
-            .agent
-            .as_ref()
-            .is_some_and(|of| of == agent || of.0 == EVERY_AGENT)
+        && order.agent.as_ref().is_some_and(|of| {
+            of == agent
+                || (of.0 == EVERY_AGENT
+                    && sub_ledger(view, agent, &order.instrument)
+                        .is_ok_and(|lots| lots > Qty::ZERO))
+        })
 }
 
 /// §5.5: the non-protective orders the switch reaches that the broker holds accepted and no
@@ -1353,6 +1356,134 @@ mod tests {
         let confirmed = executor.run(cancel_accepted("md-oco-1"), &ports)?;
         assert_eq!(sold(&confirmed).len(), 1);
         assert!(raised(&confirmed).is_empty(), "{:?}", raised(&confirmed));
+        Ok(())
+    }
+
+    /// Agent-b's buy in the instrument agent-a's switch closes.
+    const OTHER_BUY: &str = "md-buy-of-b";
+    /// Agent-a's buy in MSFT, where it holds no lots.
+    const UNFILLED_BUY: &str = "md-msft-buy";
+    /// A watchdog exit of no agent's in MSFT, and a later one.
+    const WATCHDOG_EXITS: [&str; 2] = ["md-w-msft", "md-w-msft-later"];
+
+    /// One order of `agent`'s for 5, journaled `accepted`, nothing filled.
+    fn accepted_order(
+        executor: &mut Executor,
+        id: &str,
+        agent: &str,
+        instrument: &str,
+        side: &str,
+        purpose: &str,
+    ) -> Result<(), ExecutorError> {
+        commit(
+            executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(id)),
+                ("agent", text(agent)),
+                ("instrument", text(instrument)),
+                ("side", text(side)),
+                ("qty", text("5")),
+                ("limit", text("100")),
+                ("purpose", text(purpose)),
+            ],
+        )?;
+        commit(
+            executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(id)), ("state", text("accepted"))],
+        )
+    }
+
+    /// #668 round 2, major 3: agent-b's accepted buy in AAPL, where agent-a's switch closes its 10
+    /// protected lots, is never the switch's. Neither the switch nor any step after it cancels it,
+    /// it holds no flatten back, and the flatten sells agent-a's 10, not a share of agent-b's.
+    #[test]
+    fn another_agents_accepted_order_is_never_the_switchs() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        accepted_order(&mut executor, OTHER_BUY, "agent-b", "AAPL", "buy", "open")?;
+        executor.run(Input::Tick(RiskClock::from_secs(MONDAY)), &ports)?;
+        executor.run(quote_of("AAPL", "150", MONDAY)?, &ports)?;
+        let mut effects = executor.run(switch(Initiator::RiskLimit, false)?, &ports)?;
+        assert!(
+            !names(the_switch(&effects)?, "cancels").contains(&OTHER_BUY.to_owned()),
+            "the switch records no cancel of agent-b's order"
+        );
+        let confirmed = executor.run(cancel_accepted("md-oco-1"), &ports)?;
+        let [sell] = sold(&confirmed)
+            .try_into()
+            .map_err(|_| missing("one flatten sell"))?;
+        assert_eq!(
+            sell.qty,
+            Qty::parse("10")?,
+            "agent-a's 10 lots, the sub-ledger, and nothing of agent-b's (§5.5)"
+        );
+        effects.extend(confirmed);
+        effects.extend(executor.run(accepted(&sell), &ports)?);
+        for at in [MONDAY + 1, MONDAY + 2] {
+            effects.extend(executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?);
+        }
+        assert!(
+            !cancels(&effects).contains(&OTHER_BUY),
+            "agent-b's order is never cancelled, at the switch or after it: {:?}",
+            cancels(&effects)
+        );
+        Ok(())
+    }
+
+    /// #668 round 2, major 2 (rule 13): agent-a holds no lots in MSFT, only an accepted buy, so
+    /// a `*` watchdog exit there is not its switch's to cancel. The switch cancels the buy and
+    /// leaves the exit, and no later step cancels it or a new `*` exit, though the close stays
+    /// pending with nothing to sell.
+    #[test]
+    fn a_switch_with_no_lots_leaves_a_watchdog_exit_alone() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        accepted_order(
+            &mut executor,
+            UNFILLED_BUY,
+            "agent-a",
+            "MSFT",
+            "buy",
+            "open",
+        )?;
+        let [first_exit, later_exit] = WATCHDOG_EXITS;
+        accepted_order(&mut executor, first_exit, "*", "MSFT", "sell", "risk_exit")?;
+        executor.run(Input::Tick(RiskClock::from_secs(MONDAY)), &ports)?;
+        executor.run(quote_of("MSFT", "100", MONDAY)?, &ports)?;
+        let mut effects = executor.run(switch(Initiator::RiskLimit, false)?, &ports)?;
+        assert!(
+            cancels(&effects).contains(&UNFILLED_BUY),
+            "the agent's own buy is cancelled: {:?}",
+            cancels(&effects)
+        );
+        effects.extend(executor.run(cancel_accepted(UNFILLED_BUY), &ports)?);
+        accepted_order(&mut executor, later_exit, "*", "MSFT", "sell", "risk_exit")?;
+        for at in [MONDAY + 1, MONDAY + 2] {
+            effects.extend(executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?);
+        }
+        assert!(
+            WATCHDOG_EXITS
+                .iter()
+                .all(|exit| !cancels(&effects).contains(exit)),
+            "a risk exit of no agent's is never held for a switch with nothing to sell: {:?}",
+            cancels(&effects)
+        );
         Ok(())
     }
 }
