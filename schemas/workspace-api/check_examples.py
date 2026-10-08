@@ -26,14 +26,19 @@ Run from the repository root, in the reference environment (jsonschema 4.26.0, p
    cases guard against a schema that refuses what it should allow.
 
 A `$ref` that resolves to nothing is reported as a failure naming the schema.
+
+`pattern` is matched as ECMA-262 (JSON Schema's regex dialect) and Rust's `regex` match it: `$`
+matches only at the very end. Python's `$` also matches before a final newline, so `"1\\n"` would
+pass `^[0-9]+$`; the checker rewrites each unescaped `$` outside a character class to `\\Z` first.
 """
 
 import copy
 import json
+import re
 import sys
 from pathlib import Path
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, ValidationError, validators
 from referencing import Registry, Resource
 from referencing.exceptions import Unresolvable
 
@@ -41,6 +46,37 @@ ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / "schemas/workspace-api"
 EXAMPLES = HERE / "examples"
 ID_BASE = "https://mandate.dev/schemas/workspace-api/v1/"
+
+
+def ecma_regex(pattern: str) -> str:
+    """Rewrites each unescaped `$` outside a character class to `\\Z`, so it matches only at the end."""
+    out, escaped, in_class = [], False, False
+    for ch in pattern:
+        if escaped:
+            out.append(ch)
+            escaped = False
+        elif ch == "\\":
+            out.append(ch)
+            escaped = True
+        elif ch == "[":
+            in_class = True
+            out.append(ch)
+        elif ch == "]":
+            in_class = False
+            out.append(ch)
+        elif ch == "$" and not in_class:
+            out.append("\\Z")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def ecma_pattern(validator, pattern, instance, schema):
+    if validator.is_type(instance, "string") and not re.search(ecma_regex(pattern), instance):
+        yield ValidationError(f"{instance!r} does not match {pattern!r}")
+
+
+Validator = validators.extend(Draft202012Validator, {"pattern": ecma_pattern})
 
 
 def load(path: Path):
@@ -91,7 +127,7 @@ def main() -> int:
 
     def validator(schema: dict, definition: str | None = None) -> Draft202012Validator:
         root = {"$ref": f"{schema['$id']}#/$defs/{definition}"} if definition else schema
-        return Draft202012Validator(root, registry=registry)
+        return Validator(root, registry=registry)
 
     def expect(valid: bool, v: Draft202012Validator, instance, label: str) -> None:
         nonlocal checked

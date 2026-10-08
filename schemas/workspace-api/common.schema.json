@@ -10,9 +10,9 @@
       "pattern": "^(?!-0$)-?(0|[1-9][0-9]{0,28})(\\.[0-9]{0,27}[1-9])?$"
     },
     "Timestamp": {
-      "description": "Journal spec §4.7: UTC with nine fractional digits.",
+      "description": "Journal spec §4.7: UTC with nine fractional digits, years 1970 to 9999. The pattern also refuses a day past its month's length (31 only in the 31-day months, February at most 29); whether February 29 falls in a leap year is the parser's refusal (DEC-740 item 3).",
       "type": "string",
-      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{9}Z$"
+      "pattern": "^(19[7-9][0-9]|[2-9][0-9]{3})-((0[13578]|1[02])-(0[1-9]|[12][0-9]|3[01])|(0[469]|11)-(0[1-9]|[12][0-9]|30)|02-(0[1-9]|1[0-9]|2[0-9]))T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{9}Z$"
     },
     "ContentRef": {
       "description": "A SHA-256 content hash or artifact reference (§3.1).",
@@ -35,14 +35,15 @@
       "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
     },
     "Watermark": {
-      "description": "§6.1: the last event of one stream a response reflects. `stream_id` follows journal spec §2; `hash` is that event's hash written as a sha256: ref (§3.1).",
+      "description": "§6.1: the last event of one stream a response reflects. `stream_id` follows journal spec §2; `hash` is that event's hash written as a sha256: ref (§3.1): the journal stores and pages (API-15) the bare 64 lowercase hex digits as `hash` and `prev_hash`, and the API adds the `sha256:` prefix in watermarks.",
       "type": "object",
       "additionalProperties": false,
       "required": ["stream_id", "seq", "hash", "recorded_at"],
       "properties": {
         "stream_id": {
           "type": "string",
-          "pattern": "^(acct|agent|ctl|clock|ntf):[A-Za-z0-9_-]+(:[A-Za-z0-9_-]+)?$"
+          "description": "Journal spec §2: `acct:{workspace_id}:{account_ref}` and `agent:{workspace_id}:{agent_id}` have two segments; `ctl`, `clock`, and `ntf` have the workspace id alone. Every segment matches [A-Za-z0-9_-]+.",
+          "pattern": "^((acct|agent):[A-Za-z0-9_-]+:[A-Za-z0-9_-]+|(ctl|clock|ntf):[A-Za-z0-9_-]+)$"
         },
         "seq": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
         "hash": { "$ref": "#/$defs/ContentRef" },
