@@ -1381,11 +1381,15 @@ dependencies = [
  "mandate-canon",
  "mandate-journal",
  "mandate-journal-cold",
+ "mandate-journal-pg",
  "mandate-marketdata",
  "mandate-num",
  "mandate-time",
+ "proptest",
+ "secrecy",
  "serde",
  "serde_json",
+ "sqlx",
  "tokio",
  "toml",
 ]
@@ -1476,6 +1480,21 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "mandate-modelhost"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-backtest",
+ "mandate-canon",
+ "mandate-num",
+ "mandate-runtime",
+ "mandate-spec",
+ "mandate-time",
+ "proptest",
+ "thiserror",
 ]
 
 [[package]]

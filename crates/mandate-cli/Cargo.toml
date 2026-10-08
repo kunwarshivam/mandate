@@ -21,12 +21,17 @@ mandate-artifacts-fs.workspace = true
 mandate-canon.workspace = true
 mandate-journal.workspace = true
 mandate-journal-cold.workspace = true
+mandate-journal-pg.workspace = true
 mandate-marketdata.workspace = true
 mandate-time.workspace = true
+secrecy.workspace = true
 serde.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
 toml.workspace = true
 
 [dev-dependencies]
 mandate-num.workspace = true
+proptest.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }

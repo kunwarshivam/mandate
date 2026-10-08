@@ -27,7 +27,10 @@
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
 #   8  mandate-shell, the process shell and the `mandate-tracer` binary (E7-7, DEC-138): the lowest
 #      layer that sees both `mandate-backtest` (7, the tracer's signal) and the order path
-#      (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`)
+#      (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`); and mandate-modelhost, the
+#      quant model host (E15-13, DEC-503 item 2), beside the shell so that neither can depend on
+#      the other: the shell cannot run a model, and the host cannot reach sizing, the gate, the
+#      journal, the executor or the connector
 #   tool  mandate-refcases, xtask
 
 impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
@@ -148,7 +151,7 @@ allowed_external = ["thiserror"]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["anyhow", "clap", "serde", "tokio", "toml"]
+allowed_external = ["anyhow", "clap", "secrecy", "serde", "tokio", "toml"]
 
 [crates.mandate-executor]
 layer = 6
@@ -179,3 +182,9 @@ layer = 8
 safety_critical = true
 pure = false
 allowed_external = ["clap", "thiserror", "tokio"]
+
+[crates.mandate-modelhost]
+layer = 8
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
