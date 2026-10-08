@@ -519,8 +519,11 @@ safety notices that are a member's out-of-band signal of a takeover (identity sp
 may be refused for missing step-up, a rate limit, or a frozen control stream like any other change.
 **Only one's own.** `/me` resolves to the authenticated user; there is no route that sets or
 removes another member's address, and a client, a service account, the host CLI, and a platform
-operator have none (API-6). Which identity spec §4.2 row authorizes it is settled with the identity
-spec's owner before this section is final (DEC-795 item 3).
+operator have none (API-6). The identity spec §4.2 row "Add or remove one's own notification
+address (a push subscription; later an email or chat address)" authorizes it, **S** for both,
+`own` for every human role ([identity spec v0.3, #811](https://github.com/kunwarshivam/mandate/pull/811),
+DEC-816 item 2); §3.7's copy of the matrix carries the row once #811 merges. Holding an address
+grants nothing: what a member receives stays the receive column's (identity spec §4.1).
 
 ---
 
