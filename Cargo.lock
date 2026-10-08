@@ -1397,6 +1397,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-connections"
+version = "0.0.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-domain"
 version = "0.0.0"
 dependencies = [

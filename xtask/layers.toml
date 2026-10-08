@@ -163,6 +163,12 @@ safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "serde", "serde_json", "thiserror"]
 
+[crates.mandate-connections]
+layer = 6
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-journal-pg]
 layer = 6
 safety_critical = true

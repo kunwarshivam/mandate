@@ -510,6 +510,19 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   time), `crates/mandate-mcp/src/tests/errors.rs`.
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
 
+## Broker connections: the Alpaca OAuth connect core (E10-13)
+
+- **Spec:** `docs/specs/connections.md` §5.2 to §5.5, §8.1; `docs/specs/workspace-api.md` §1.4,
+  §4.5; DEC-690, DEC-691, DEC-821.
+- **Code:** `mandate-connections` (pure; stubs until E10-13 lands):
+  `crates/mandate-connections/src/hosts.rs` (`LiveTokenRequest`, the only live-host request;
+  `PaperRequest`; `admit`), `crates/mandate-connections/src/grant.rs` (exact scopes),
+  `crates/mandate-connections/src/error.rs` (`ConnectError`). The `state`, the code exchange,
+  and the vault follow in D2b and D2c.
+- **Tests:** `crates/mandate-connections/src/tests/` (the DEC-821 guardrails a to c, pending
+  E10-13), and the `compile_fail` doctest in `hosts.rs`.
+- **Run:** `cargo nextest run -p mandate-connections --run-ignored all`.
+
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
