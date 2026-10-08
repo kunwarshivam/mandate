@@ -153,7 +153,7 @@ subject's stream writes an `OwnerAlertSent` naming it, with the kind, in the sub
 | `integrity_incident` | `IntegrityIncidentRecorded` (journal spec §11) | safety | `attention_needed` | Owners and workspace admins |
 | `credential_added` | `CredentialEnrolled` (identity spec §12.1): a new passkey or device | safety | `account_changed` | The member, on every push channel |
 | `new_device` | `SessionOpened` with the first-seen-device flag (identity spec §6.2, §12.1): a sign-in from a device the member has not used, which a synced passkey makes possible with no enrolment | safety | `account_changed` | The member, on every push channel |
-| `notification_address_changed` | `NotificationAddressChanged`, `added` or `removed` (workspace API spec §4.10, §5.7): a member set or removed one of their own push addresses, with step-up ([DEC-795](../project/decisions/DEC-795.md)) | safety | `account_changed` | The member, on every push channel they hold after the change, once more on the address just removed, and in the pull channels |
+| `notification_address_changed` | `NotificationAddressChanged`, `added` or `removed` (workspace API spec §4.10, §5.7): a member set or removed one of their own push addresses, with step-up ([DEC-795](../project/decisions/DEC-795.md)) | safety | `account_changed` | The member, on every push channel they hold after the change (an address just added included), once more on the address just removed, and in the pull channels |
 | `recovery_used` | A sign-in by OIDC or a recovery code that starts an enrolment cool-off (identity spec §10.1) | safety | `account_changed` | The member, on every push channel |
 | `role_granted` | `MemberActivated` or `MemberRoleChanged` adding a role (identity spec §8.3) | safety | `account_changed` | Every other workspace admin and org owner, and the member |
 | `member_deactivated` | `MemberDeactivated` or `MemberRemoved` (identity spec §5.2) | safety | `account_changed` | The remaining workspace admins |
@@ -306,6 +306,13 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 - **Encryption.** The workspace deployment encrypts the payload to the subscribing browser with Web
   Push message encryption (RFC 8291) and signs with its own application server key (RFC 8292). The
   browser's push service and the relay see only ciphertext, of a payload that is opaque anyway.
+- **Only the browsers' push services** ([DEC-792](../project/decisions/DEC-792.md)). A subscription's
+  endpoint is accepted, stored, and sent to only if it is `https` on port 443, with no user
+  information and no IP literal, and its host is on the deployment's push-service allowlist: each
+  entry is an exact host or `*.` and a domain, whose subdomains are all allowed. The default list
+  is `fcm.googleapis.com`, `updates.push.services.mozilla.com`, `*.push.apple.com`, and
+  `*.notify.windows.com`. A send follows no redirect: a `3xx` answer is a permanent failure,
+  `address_rejected`.
 - **Direct or relayed.** A managed workspace deployment sends to the push service directly. A hybrid
   deployment whose egress allows only the global control plane sends through the relay over its
   existing outbound mutual-TLS link ([HLD §4](../HLD.md#workspace-deployment)).
@@ -349,6 +356,11 @@ The dispatcher **tails the journal**, which is its outbox:
    `NoticeIssued` before any send.
 3. For each recipient and push channel it reads the address from the vault and sends through the
    channel's adapter (§5.2), then journals the outcome as `NoticeAttempted`.
+   **It reads an address only when that address's last `NotificationAddressChanged` is `added`**
+   (workspace API spec §5.7), and only while its host is on the allowlist (§4.6). The single
+   exception is the one last send of a `notification_address_changed` notice to the very address
+   its `removed` event names: opaque like every notice, retried within the safety window (NT-6),
+   and never repeated for a later notice.
 4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
    issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
    while the approval is still pending.
@@ -428,6 +440,9 @@ adds the notice stream and these records; E8-9's tests PR closes their payload s
 - `auth_failed` (a revoked Slack webhook, a removed Telegram bot) does the same, and also raises an
   operator alert when the credential is the platform's (the Telegram bot token).
 - An address comes back only when the signed-in user re-verifies it in the workspace.
+- **An allowlist change.** An address whose host leaves the allowlist is no longer sent to: its next
+  attempt is journaled `failed` with `address_rejected`, which marks it `unreachable` and raises
+  `channel_lost` to the member's other channels, as for any rejected address.
 - **A member's own change is not a loss.** Adding or removing a push address through the workspace
   API (workspace API spec §4.10) is journaled as `NotificationAddressChanged` on the control
   stream and raises a `notification_address_changed` notice, not `channel_lost`. Its one last send
