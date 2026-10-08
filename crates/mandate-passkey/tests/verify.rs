@@ -119,26 +119,75 @@ fn an_assertion_for_another_rp_id_is_refused() {
     }
 }
 
+/// Verifies an assertion whose `clientDataJSON` is `json`, signed over that JSON.
+fn with_client_data(json: &str) -> Result<Verified, Refusal> {
+    let authenticator = Authenticator::new(Alg::Es256);
+    let mut assertion = authenticator.assert(&Ceremony::get(&CHALLENGE, 5));
+    assertion.client_data_json = json.as_bytes().to_vec();
+    assertion.signature =
+        authenticator.sign_response(&assertion.authenticator_data, &assertion.client_data_json);
+    verify_with(&authenticator.credential(4), &assertion)
+}
+
+fn good_client_data() -> String {
+    String::from_utf8(Ceremony::get(&CHALLENGE, 5).client_data_json()).expect("utf-8")
+}
+
 #[test]
 #[ignore = "pending E9-1"]
 fn client_data_that_is_not_the_expected_object_is_refused() {
-    let authenticator = Authenticator::new(Alg::Es256);
-    let ceremony = Ceremony::get(&CHALLENGE, 5);
-    let good = String::from_utf8(ceremony.client_data_json()).expect("utf-8");
-    let duplicate_type = good.replacen('{', r#"{"type":"webauthn.get","#, 1);
-    let no_origin = good.replace(r#","origin":"https://app.owlhead.ai""#, "");
-    for json in [
-        duplicate_type,
-        no_origin,
+    let good = good_client_data();
+    let challenge = format!(r#""challenge":"{}","#, common::b64url(&CHALLENGE));
+    let malformed = [
+        good.replacen('{', r#"{"type":"webauthn.get","#, 1),
+        good.replacen('{', &format!("{{{challenge}"), 1),
+        good.replace(r#","origin":"https://app.owlhead.ai""#, ""),
         "[]".to_owned(),
         good[..good.len() - 1].to_owned(),
-    ] {
-        let mut assertion = authenticator.assert(&ceremony);
-        assertion.client_data_json = json.clone().into_bytes();
+        format!(" {good}"),
+        format!("\u{feff}{good}"),
+    ];
+    for json in malformed {
+        assert_eq!(
+            with_client_data(&json),
+            Err(Refusal::ClientDataMalformed),
+            "{json}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn unknown_client_data_members_are_ignored_even_when_repeated() {
+    let unknown = [
+        r#"{"other_keys_can_be_added_here":"do not compare clientDataJSON against a template","topOrigin":"https://app.owlhead.ai","#,
+        r#"{"other_keys_can_be_added_here":1,"other_keys_can_be_added_here":2,"#,
+    ];
+    let expected = Verified {
+        sign_count: 5,
+        backup_state: false,
+    };
+    for members in unknown {
+        let json = good_client_data().replacen('{', members, 1);
+        assert_eq!(with_client_data(&json), Ok(expected), "{json}");
+    }
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn authenticator_data_shorter_than_its_header_is_malformed() {
+    let authenticator = Authenticator::new(Alg::Es256);
+    let mut assertion = authenticator.assert(&Ceremony::get(&CHALLENGE, 5));
+    for length in [36, 33, 32, 0] {
+        assertion.authenticator_data.truncate(length);
         assertion.signature =
             authenticator.sign_response(&assertion.authenticator_data, &assertion.client_data_json);
         let result = verify_with(&authenticator.credential(4), &assertion);
-        assert_eq!(result, Err(Refusal::ClientDataMalformed), "{json}");
+        assert_eq!(
+            result,
+            Err(Refusal::AuthenticatorDataMalformed),
+            "{length} bytes"
+        );
     }
 }
 
