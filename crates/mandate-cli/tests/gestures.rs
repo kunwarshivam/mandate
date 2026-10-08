@@ -432,7 +432,7 @@ fn the_binary_creates_confirms_and_deploys_in_postgres() {
         "the confirmation shown"
     );
     assert_eq!(count(), before, "showing commits nothing");
-    mandate(&["version", "confirm", &version, "--code", &code], true);
+    let confirmed = mandate(&["version", "confirm", &version, "--code", &code], true);
     let code = deploy_code(AGENT, &version);
     let shown = mandate(&["agent", "deploy", AGENT, &version], true);
     assert_eq!(
@@ -441,7 +441,7 @@ fn the_binary_creates_confirms_and_deploys_in_postgres() {
         "the deployment shown"
     );
     assert_eq!(count(), before + 1, "showing commits nothing");
-    mandate(&["agent", "deploy", AGENT, &version, "--code", &code], true);
+    let deployed = mandate(&["agent", "deploy", AGENT, &version, "--code", &code], true);
     let rows = read_stream(&journal, &ctl).unwrap();
     let types: Vec<&str> = rows.iter().map(|r| r.event_type.as_str()).collect();
     let expected = [
@@ -453,6 +453,15 @@ fn the_binary_creates_confirms_and_deploys_in_postgres() {
         "AgentDeployed",
     ];
     assert_eq!(types, expected);
+    let printed = |done: &str, row: &StoredEvent| {
+        format!("{done} as event {} at seq {}\n", row.event_id, row.seq)
+    };
+    assert_eq!(
+        confirmed,
+        printed("confirmed", &rows[4]),
+        "the confirmation"
+    );
+    assert_eq!(deployed, printed("deployed", &rows[5]), "the deployment");
     let files = FsArtifactStore::open(&store).unwrap();
     let assertion = |row: &StoredEvent| {
         let body = parse(&row.body).unwrap();
