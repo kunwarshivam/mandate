@@ -1042,7 +1042,12 @@ proves each pending test fails on them (DEC-110).
   whose content and hash come only from `mandate_modelhost::content`; both paper only), stubbed.
 - **Tests:** `crates/mandate-cli/tests/config_register.rs`, pending E10-16, each committed draft
   read back through `Draft::parse`.
-- **Run:** `cargo nextest run -p mandate-cli --test config_register`; `cargo xtask ci pending`.
+- **The commands (D1b, DEC-527):** `crates/mandate-cli/src/register.rs` (`OwnerArgs`, the
+  required `--workspace` and `--user`, always in paper; `run` and `run_model` over P0's
+  `--journal` and `--store`), stubbed, and `main`; `crates/mandate-cli/tests/register_commands.rs`,
+  pending E10-16: the flags, the refusals without a database, and the binary against Postgres.
+- **Run:** `cargo nextest run -p mandate-cli --test config_register --test register_commands`;
+  `cargo xtask ci pending`; `cargo xtask ci postgres` for the binary test.
 
 ## Reference-case harness
 
