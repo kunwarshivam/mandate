@@ -363,9 +363,15 @@ CHECKED_RANGE = rec(
     ("to_hash", opt(EVENT_HASH)),
     ("failure", opt(rec(("check", one_of(*EVENT_CHECKS, *RANGE_CHECKS)), ("seq", opt(INT))))),
 )
-VIEW_FORMS = ("json_view", "csv_view")
+VIEW_FORMS = ("json", "csv")
 TRIGGERS = ("startup", "segment_export", "weekly", "request", "restore_drill")
-SCHEMAS[("ctl", "RecordsAccessed")] = rec(("accessor", STR), ("operation", IDENT_T), ("ranges", list_of(RANGE)))
+SCHEMAS[("ctl", "RecordsAccessed")] = rec(
+    ("accessor", STR),
+    ("operation", IDENT_T),
+    ("ranges", list_of(RANGE)),
+    ("resources", list_of(IDENT_T)),
+    ("result", opt(REF)),
+)
 SCHEMAS[("ctl", "ExportCreated")] = rec(
     ("form", one_of("canonical", *VIEW_FORMS)),
     ("ranges", list_of(RANGE)),
@@ -866,6 +872,9 @@ def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list
         accessor = p["accessor"]
         rule("55.accessor", not isinstance(accessor, str) or accessor == draft["actor"]["id"], "payload.accessor")
         rule("55.actor", kind not in ("agent", "broker"), "actor.kind")
+        resources = p["resources"] if isinstance(p["resources"], list) else []
+        named = [r.encode() for r in resources if isinstance(r, str)]
+        rule("55.resources", all(a < b for a, b in zip(named, named[1:])), "payload.resources")
     if event_type == "ExportCreated":
         rule("56.actor", kind in ("user", "system"), "actor.kind")
         if p["form"] in ("canonical", *VIEW_FORMS) and (p["view"] is None or isinstance(p["view"], str)):

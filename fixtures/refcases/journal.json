@@ -15920,7 +15920,9 @@
        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
       }
-     ]
+     ],
+     "resources": [],
+     "result": null
     },
     "artifact_refs": [],
     "pii_refs": []
@@ -15995,7 +15997,7 @@
     },
     "config_refs": {},
     "payload": {
-     "form": "csv_view",
+     "form": "csv",
      "ranges": [
       {
        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
@@ -16211,6 +16213,66 @@
      "outcome": "Invalid",
      "reason": "schema",
      "path": "payload.ranges"
+    }
+   },
+   {
+    "name": "records_read.resources.kind",
+    "clause": "§9.8 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.resources",
+      "value": "agent_a"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.resources"
+    }
+   },
+   {
+    "name": "records_read.result.kind",
+    "clause": "§9.8 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": 7
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "records_read.result.form",
+    "clause": "§9.8 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.result"
     }
    },
    {
@@ -16942,6 +17004,26 @@
      "outcome": "Invalid",
      "reason": "schema",
      "path": "payload.ranges"
+    }
+   },
+   {
+    "name": "records_read.resources.null",
+    "clause": "§9.8 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.resources",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.resources"
     }
    },
    {
@@ -17973,6 +18055,74 @@
     }
    },
    {
+    "name": "read_resource_not_an_id",
+    "clause": "§9.8 types: a resource is an opaque `id`",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.resources",
+      "value": [
+       "agent a"
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.resources[0]"
+    }
+   },
+   {
+    "name": "read_resources_unsorted",
+    "clause": "rule 55: resources sort by bytes",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.resources",
+      "value": [
+       "notice_01",
+       "agent_a"
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.resources"
+    }
+   },
+   {
+    "name": "read_resource_twice",
+    "clause": "rule 55: each resource once",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.resources",
+      "value": [
+       "agent_a",
+       "agent_a"
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.resources"
+    }
+   },
+   {
     "name": "read_by_an_agent",
     "clause": "rule 55: an agent runtime reads no records outside the product views",
     "base_draft": "records_read",
@@ -18490,13 +18640,56 @@
     }
    },
    {
+    "name": "notice_resolved_by_a_client_read",
+    "clause": "rule 55: resources and a stored result (workspace API §3.9)",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.operation",
+      "value": "resolve_notice"
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "ntf:ws_01J8Z2",
+        "from_seq": 4,
+        "to_seq": 5,
+        "prev_hash": "7777777777777777777777777777777777777777777777777777777777777777",
+        "to_hash": "8888888888888888888888888888888888888888888888888888888888888888"
+       }
+      ]
+     },
+     {
+      "path": "payload.resources",
+      "value": [
+       "agent_a",
+       "notice_01J8Z3"
+      ]
+     },
+     {
+      "path": "payload.result",
+      "value": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "json_view",
     "clause": "rule 56",
     "base_draft": "export_view",
     "changes": [
      {
       "path": "payload.form",
-      "value": "json_view"
+      "value": "json"
      },
      {
       "path": "artifact_refs",

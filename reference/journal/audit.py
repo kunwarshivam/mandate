@@ -58,6 +58,7 @@ VOCABULARY = frozenset(
         "accessor",
         "operation",
         "ranges",
+        "resources",
         "form",
         "manifest",
         "view",
@@ -105,9 +106,15 @@ def base_drafts() -> dict[str, dict]:
         span(AGENT_STREAM, 12, 30, "2" * 64, "3" * 64),
         span(STREAM, 1, 9, GENESIS, "4" * 64),
     ]
-    read = {"accessor": AUDITOR["id"], "operation": "journal_events", "ranges": copy.deepcopy(ranges[1:2])}
+    read = {
+        "accessor": AUDITOR["id"],
+        "operation": "journal_events",
+        "ranges": copy.deepcopy(ranges[1:2]),
+        "resources": [],
+        "result": None,
+    }
     export = {"form": "canonical", "ranges": copy.deepcopy(ranges), "manifest": MANIFEST, "view": None}
-    view = {"form": "csv_view", "ranges": copy.deepcopy(ranges[:1]), "manifest": MANIFEST, "view": VIEW}
+    view = {"form": "csv", "ranges": copy.deepcopy(ranges[:1]), "manifest": MANIFEST, "view": VIEW}
     checked = [{**r, "failure": None} for r in copy.deepcopy(ranges)]
     failed = [
         {**span(ACCOUNT_STREAM, 1, 40, GENESIS, None), "failure": {"check": "rehash_mismatch", "seq": 17}},
@@ -177,6 +184,8 @@ MEMBER_CASES = {
         ("payload.accessor", 7, ""),
         ("payload.operation", 7, "journal events"),
         ("payload.ranges", "all", None),
+        ("payload.resources", "agent_a", None),
+        ("payload.result", 7, "sha256:" + "A" * 64),
         (f"{R0}.stream_id", 7, "acct:only_one_segment"),
         (f"{R0}.from_seq", "12", None),
         (f"{R0}.to_seq", "30", None),
@@ -203,6 +212,7 @@ NULLED = {
         "payload.accessor",
         "payload.operation",
         "payload.ranges",
+        "payload.resources",
         f"{R0}.stream_id",
         f"{R0}.from_seq",
         f"{R0}.to_seq",
@@ -374,6 +384,30 @@ def invalid_drafts() -> list[dict]:
             "payload.accessor",
         ),
         invalid(
+            "read_resource_not_an_id",
+            "§9.8 types: a resource is an opaque `id`",
+            read,
+            [change("payload.resources", ["agent a"])],
+            "non_canonical",
+            "payload.resources[0]",
+        ),
+        invalid(
+            "read_resources_unsorted",
+            "rule 55: resources sort by bytes",
+            read,
+            [change("payload.resources", ["notice_01", "agent_a"])],
+            "schema",
+            "payload.resources",
+        ),
+        invalid(
+            "read_resource_twice",
+            "rule 55: each resource once",
+            read,
+            [change("payload.resources", ["agent_a", "agent_a"])],
+            "schema",
+            "payload.resources",
+        ),
+        invalid(
             "read_by_an_agent",
             "rule 55: an agent runtime reads no records outside the product views",
             read,
@@ -522,7 +556,18 @@ def valid_drafts() -> list[dict]:
                 )
             ],
         ),
-        valid("json_view", "rule 56", view, [change("payload.form", "json_view")]),
+        valid(
+            "notice_resolved_by_a_client_read",
+            "rule 55: resources and a stored result (workspace API §3.9)",
+            read,
+            [
+                change("payload.operation", "resolve_notice"),
+                change("payload.ranges", [span(f"ntf:{WORKSPACE}", 4, 5, "7" * 64, "8" * 64)]),
+                change("payload.resources", ["agent_a", "notice_01J8Z3"]),
+                change("payload.result", "sha256:" + "9" * 64),
+            ],
+        ),
+        valid("json_view", "rule 56", view, [change("payload.form", "json")]),
         valid("export_by_a_service_account", "rule 56", export, [change("actor", SERVICES)]),
         valid("requested_run_by_a_service_account", "rule 57", bad, [change("actor", SERVICES)]),
         valid("requested_run_passed", "rules 57 and 59", ok, [change("actor", USER), change("payload.trigger", "request")]),
@@ -628,6 +673,7 @@ VALIDATOR_MUTANTS = (
     "boundary.rule_54_overlap",
     "rule.55.accessor",
     "rule.55.actor",
+    "rule.55.resources",
     "rule.56.actor",
     "rule.56.view",
     "rule.57",

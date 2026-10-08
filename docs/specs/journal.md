@@ -14,7 +14,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 - **v0.19 ([DEC-780](../project/decisions/DEC-780.md)):** §9.8 closes the control stream's
   `RecordsAccessed`, `ExportCreated`, and `VerificationRun` at schema version 1, with rules 54 to
-  59, from the members their §9 rows list (accessor and scope; export manifest; scope and result).
+  59, from the members their §9 rows list (accessor and scope; export manifest; scope and result),
+  and `RecordsAccessed` adds the opaque resources read and an optional stored result, so the audit
+  routes and the workspace API's other journaled reads write one record.
   Each names what it covers as stream ranges of the writer's own workspace, bounded by event hashes,
   and nothing else: no instrument, order, position, or mandate content. Two types join §9.1's:
   `stream_id` (§2's form) and `event_hash` (§3's 64 lowercase hex, which is not a `ref` and so is
@@ -1608,16 +1610,18 @@ included.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `accessor` | `text` | The principal that read (opaque): rule 55. A client is its own accessor ([workspace API spec](workspace-api.md) §3.8) |
+| `accessor` | `text` | The principal that read (opaque): rule 55. A client is its own accessor, and the human it acts for is the envelope's `actor.on_behalf_of` once §3 adds it ([workspace API spec](workspace-api.md) §3.3, §3.8) |
 | `operation` | `id` | The workspace API operation that read, by name ([workspace API spec](workspace-api.md) §4) |
 | `ranges` | `[range]` | Every stream range the response was built from, with the hashes it reflects |
+| `resources` | `[id]` | The opaque IDs of the other resources the operation read (an agent, a notice, an approval), strictly ascending by bytes: rule 55. Never a name, a ticker, or any other content |
+| `result` | `ref?` | The response served, stored as an artifact (§6.3), when the operation keeps it (a replay's result, [workspace API spec](workspace-api.md) §4.1); otherwise `null` |
 
 **`ExportCreated`**: an export (§12), journaled before it is served (API-16). Its `event_id` is the
 export's ID.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `form` | `canonical` \| `json_view` \| `csv_view` | The canonical export, or a derived view of one. The examination bundle is not a form at this version |
+| `form` | `canonical` \| `json` \| `csv` | The canonical export, or a JSON-lines or CSV view derived from one ([workspace API spec](workspace-api.md) §4.8). The examination bundle is not a form at this version |
 | `ranges` | `[range]` | The ranges exported; for the canonical form, each range's trusted start and head as its manifest records them |
 | `manifest` | `ref` | The canonical export's manifest (§12), stored as an artifact; for a view, the manifest of the canonical export it is derived from |
 | `view` | `ref?` | The view's bytes, stored as an artifact: rule 56 |
@@ -1651,10 +1655,12 @@ A verification a principal requested for an export names that export's `ExportCr
     (`prev_hash`); and after the first range, its `stream_id` sorts after the previous range's by
     bytes, or equals it with a `from_seq` greater than the previous range's `to_seq` (`stream_id`),
     so ranges are ordered and never overlap.
-55. `RecordsAccessed`: `accessor` equals the envelope's `actor.id` (`payload.accessor`), and
-    `actor.kind` is neither `agent` nor `broker` (`actor.kind`).
+55. `RecordsAccessed`: `accessor` equals the envelope's `actor.id` (`payload.accessor`);
+    `actor.kind` is neither `agent` nor `broker` (`actor.kind`), so a client is admitted once §3
+    adds its kind (identity spec §12.2); and each of `resources` sorts after the one before it by
+    bytes (`payload.resources`).
 56. `ExportCreated`: `actor.kind` is `user` or `system` (`actor.kind`), and `view` is non-null
-    exactly when `form` is `json_view` or `csv_view` (`payload.view`).
+    exactly when `form` is `json` or `csv` (`payload.view`).
 57. `VerificationRun`: `actor.kind` is `system`, or, for a `request`, `user` or `system`
     (`actor.kind`).
 58. `VerificationRun`: each range, in array order, at `payload.ranges[i].<member>`: a non-null
