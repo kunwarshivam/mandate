@@ -222,8 +222,8 @@ it names; outside such a window a platform operator has no permission at all (ID
 | Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
-| Add or remove one's own notification address (a push subscription; later an email or chat address) | S | self | self | self | self | self | self | self | self | | | | |
-| List one's own notification addresses (opaque references only) | | self | self | self | self | self | self | self | self | | | | |
+| Add or remove one's own notification address (a push subscription; later an email or chat address) | S | | | | own | own | own | own | own | | | | |
+| List one's own notification addresses (opaque references only) | | | | | own | own | own | own | own | | | | |
 | List one's own workspace memberships | | self | self | self | self | self | self | self | self | | | | |
 | Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
@@ -244,7 +244,8 @@ table, so its cells follow a closed grammar, and any other text is a spec defect
   needs it; deactivating or removing a member does not), or `S for grant` (only a grant needs it;
   removing a role does not).
 - **Principal cells:** blank (denied); `✓` (granted); `own` (granted for the principal's own
-  credential only, at the scope of any membership it holds that reaches that scope); `✓ (propose only)` (granted; confirming is its own row); `✓ (org)` (granted
+  credential, or its own notification addresses in that workspace, only, at the scope of any
+  membership it holds that reaches that scope); `✓ (propose only)` (granted; confirming is its own row); `✓ (org)` (granted
   at org scope only); `self` (granted to a user principal, through a full session, for its own
   data only, at **principal scope**: no workspace or organization, no membership read, and
   whatever its memberships' states, so a member whose every role is still cooling off still
@@ -389,8 +390,8 @@ transaction with `MemberDeactivated` or `MemberRoleChanged`. **The audit view
 shows the gap:** `membership_unverified: true` stays in the journaled record, and the workspace
 API's audit read model (§4.8) and the web audit trail display it (owed by those lanes).
 
-**Principal-scope rows** ([DEC-816](../project/decisions/DEC-816.md) items 1, 2, and 5). The three
-`self` rows of §4.2 are authorized at principal scope: `authorize` is given the principal scope,
+**Principal-scope rows** ([DEC-816](../project/decisions/DEC-816.md) items 1 and 5). The `self` row
+of §4.2 is authorized at principal scope: `authorize` is given the principal scope,
 reads no membership, yields no `TenantContext`, and grants the row to a user principal whose
 session is a full session (§6.2), and to no one else: a reduction-only session is refused
 `reduction_only`; a client, a service account, the host CLI, and a platform operator, whose
@@ -556,14 +557,12 @@ below). In order, workspace services:
    its open streams in the workspace within 60 s (ID-3). Its sessions keep serving its other
    workspaces, and a session left with no workspace and no org membership that reaches a scope is
    closed (`SessionRevoked` with reason `deactivated`);
-   and when that was the principal's last membership in the deployment that reaches a scope, its
-   notification addresses are removed too, one `NotificationAddressChanged` with `action: removed`
+   and the member's notification addresses in that workspace (they are per workspace, held in its
+   vault namespace, §9.1) are removed too, one `NotificationAddressChanged` with `action: removed`
    per address, in the same transaction, raising no address-change notice (the remaining admins get
    `member_deactivated`). Like every write of the request path, these carry the authenticated
    principal as actor: the deactivating admin, or the member who left (§4.5), never `system`, and
-   no step-up evidence, since removing access needs none. While the principal still holds a
-   reaching membership elsewhere, its addresses stay, and the receive column (§4.1) alone stops the
-   ended workspace's notices reaching it;
+   no step-up evidence, since removing access needs none;
 3. leave every committed event as it was. A response or command committed before step 1 was
    authorized when committed and is judged by the runtime as usual. One arriving after step 1 is
    refused at the API and never committed;
