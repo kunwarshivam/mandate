@@ -219,13 +219,20 @@ pub struct FoldedEvent {
     pub payload: Value,
 }
 
-/// A market-data or news observation, journaled as `ObservationRecorded`.
+/// A market-data or news observation, journaled as `ObservationRecorded` with exactly the members of
+/// journal spec §9.1's closed schema (DEC-177; DEC-503 item 7). The data itself is never inline: the
+/// shell stores it as an artifact first and hands in its digest, so the draft's `data_ref` names an
+/// object the append can re-hash (journal spec §11 check 6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Observation {
+    /// The feed or connector the data came from.
     pub source: String,
-    pub instrument: Option<InstrumentId>,
-    pub at: RiskClock,
-    pub data: Value,
+    /// `None` for data about no single instrument.
+    pub instrument_id: Option<InstrumentId>,
+    /// The data's cut-off, written as a §4.7 timestamp on the whole second.
+    pub as_of: RiskClock,
+    /// The stored artifact's digest, written as `sha256:` and its hex.
+    pub data_ref: Digest,
 }
 
 /// A signal model's output (mandate spec §8.1, §8.2). Freshness is judged from `expires_at`
