@@ -35,6 +35,7 @@ import account
 import approval
 import control
 import membership
+import membership_fold
 import research
 import risk_state
 import yaml
@@ -3509,6 +3510,7 @@ def render(
     account_section: dict,
     approval_section: dict,
     membership_section: dict,
+    fold_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3522,6 +3524,7 @@ def render(
             "account_stream": account_section,
             "approval_answers": approval_section,
             "membership": membership_section,
+            "membership_fold": fold_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3566,6 +3569,7 @@ def main(argv: list[str] | None = None) -> int:
     account_section = account.build_section(v3["genesis_prev_hash"])
     approval_section = approval.build_section()
     membership_section = membership.build_section()
+    fold_section = membership_fold.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3585,6 +3589,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += approval.run_mutants(approval_section)
     problems += membership.check_section(membership_section)
     problems += membership.run_mutants(membership_section)
+    problems += membership_fold.check_section(fold_section)
+    problems += membership_fold.run_mutants(fold_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3601,6 +3607,7 @@ def main(argv: list[str] | None = None) -> int:
         account_section,
         approval_section,
         membership_section,
+        fold_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -3613,6 +3620,7 @@ def main(argv: list[str] | None = None) -> int:
         or account.check_section(reread["account_stream"])
         or approval.check_section(reread["approval_answers"])
         or membership.check_section(reread["membership"])
+        or membership_fold.check_section(reread["membership_fold"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -3658,7 +3666,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(approval.vector_mutants(approval_section))} vector mutants caught; "
         f"{len(membership_section['drafts'])} membership drafts, {len(membership_section['invalid_drafts'])} invalid and "
         f"{len(membership_section['valid_drafts'])} valid; {len(membership.VALIDATOR_MUTANTS)} validator and "
-        f"{len(membership.vector_mutants(membership_section))} vector mutants caught"
+        f"{len(membership.vector_mutants(membership_section))} vector mutants caught; "
+        f"{len(fold_section['histories'])} membership histories; {len(membership_fold.FOLD_MUTANTS)} fold and "
+        f"{len(membership_fold.vector_mutants(fold_section))} vector mutants caught"
     )
     return 0
 
