@@ -11,3 +11,7 @@ extend-ignore-re = [
 [default.extend-words]
 marginable = "marginable"           # Alpaca's term (non_marginable_buying_power)
 caf = "caf"                         # "café" split by an escaped byte in journal vectors
+xdescribe = "xdescribe"             # Vitest's skipped-describe alias, refused by web/scripts/pending.mjs (DEC-750)
+xit = "xit"                         # Vitest's skipped-test alias, refused by web/scripts/pending.mjs (DEC-750)
+xtest = "xtest"                     # Vitest's skipped-test alias, refused by web/scripts/pending.mjs (DEC-750)
+cose = "cose"                       # CBOR Object Signing and Encryption (RFC 9052), WebAuthn's key format
