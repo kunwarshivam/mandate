@@ -19,6 +19,16 @@ pub enum Environment {
     Live,
 }
 
+impl Environment {
+    /// As the journal and a mandate write it (`paper`, `live`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Paper => "paper",
+            Self::Live => "live",
+        }
+    }
+}
+
 /// The broker or venue (connections spec §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Broker {
@@ -53,6 +63,17 @@ pub enum AuthKind {
     McpOauth,
 }
 
+impl AuthKind {
+    /// As connections spec §3 writes it.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::ApiKey => "api_key",
+            Self::Oauth => "oauth",
+            Self::McpOauth => "mcp_oauth",
+        }
+    }
+}
+
 /// The states a record can hold (connections spec §9.1). `connecting` keeps no record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ConnectionState {
@@ -68,6 +89,10 @@ pub enum ConnectionState {
 pub struct ConnectionId(pub(crate) String);
 
 impl ConnectionId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub fn new(text: &str) -> Result<Self, ConnectError> {
         let _ = text;
         Err(ConnectError::Unimplemented { story: "E7-11" })
@@ -80,6 +105,10 @@ impl ConnectionId {
 pub struct AccountRef(pub(crate) String);
 
 impl AccountRef {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub fn new(text: &str) -> Result<Self, ConnectError> {
         let _ = text;
         Err(ConnectError::Unimplemented { story: "E7-11" })
@@ -87,11 +116,22 @@ impl AccountRef {
 }
 
 /// The personal-data vault reference of the broker account id (journal spec §6.4): an opaque
-/// id, never the account id itself.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// id, never the account id itself. `Debug` prints none of it, so no record, candidate, or error
+/// chain that holds one shows it; the journal writer reads it through [`AccountPiiRef::as_str`].
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AccountPiiRef(pub(crate) String);
 
+impl fmt::Debug for AccountPiiRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("AccountPiiRef(redacted)")
+    }
+}
+
 impl AccountPiiRef {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub fn new(text: &str) -> Result<Self, ConnectError> {
         let _ = text;
         Err(ConnectError::Unimplemented { story: "E7-11" })
@@ -158,14 +198,27 @@ impl ConnectionRecord {
     }
 
     /// What an API response or the CLI may show.
-    pub fn view(&self) -> Result<ConnectionView, ConnectError> {
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+    pub fn view(&self) -> ConnectionView {
+        ConnectionView {
+            connection_id: self.connection_id.clone(),
+            broker: self.broker,
+            environment: self.environment,
+            auth_kind: self.auth_kind,
+            scopes: self.scopes.clone(),
+            state: self.state,
+        }
     }
 
     /// The members `ConnectionEstablished` version 2 takes from the record (journal spec §9.12);
     /// the caller adds the user and the step-up.
-    pub fn established_members(&self) -> Result<EstablishedMembers, ConnectError> {
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+    pub fn established_members(&self) -> EstablishedMembers {
+        EstablishedMembers {
+            connection_id: self.connection_id.clone(),
+            broker: self.broker,
+            environment: self.environment,
+            scopes: self.scopes.clone(),
+            account_ref: self.account_ref.clone(),
+        }
     }
 }
 

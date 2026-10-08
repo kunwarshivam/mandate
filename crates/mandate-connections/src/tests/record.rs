@@ -155,6 +155,30 @@ fn a_broker_is_read_back_from_its_name_only() {
 }
 
 #[test]
+fn names_read_back_as_the_journal_writes_them() {
+    assert_eq!(id("conn_a").as_str(), "conn_a");
+    assert_eq!(account_ref(7).as_str(), "01J8Z2ACCT0000000000000007");
+    assert_eq!(AccountPiiRef("pii_7".to_owned()).as_str(), "pii_7");
+    assert_eq!(Environment::Paper.as_str(), "paper");
+    assert_eq!(Environment::Live.as_str(), "live");
+    for (kind, code) in [
+        (AuthKind::ApiKey, "api_key"),
+        (AuthKind::Oauth, "oauth"),
+        (AuthKind::McpOauth, "mcp_oauth"),
+    ] {
+        assert_eq!(kind.code(), code);
+    }
+}
+
+#[test]
+fn a_pii_ref_prints_nothing_of_itself() {
+    let shown = format!("{:?}", AccountPiiRef("pii_acct_7Q2M".to_owned()));
+    assert_eq!(shown, "AccountPiiRef(redacted)");
+    let new_record = format!("{:?}", alpaca("conn_a", 3));
+    assert!(!new_record.contains("pii_3"), "{new_record}");
+}
+
+#[test]
 fn a_fingerprint_prints_no_byte() {
     let shown = format!("{:?}", AccountFingerprint::from_vault_hash(CANARY));
     assert_eq!(shown, "AccountFingerprint(redacted)");
@@ -168,32 +192,33 @@ fn a_record_shows_references_only() {
     let made = record(new);
     assert_eq!(
         made.view(),
-        Ok(ConnectionView {
+        ConnectionView {
             connection_id: id("conn_a"),
             broker: Broker::Alpaca,
             environment: Environment::Paper,
             auth_kind: AuthKind::ApiKey,
             scopes: scopes(),
             state: ConnectionState::Active,
-        })
+        }
     );
     assert_eq!(
         made.established_members(),
-        Ok(EstablishedMembers {
+        EstablishedMembers {
             connection_id: id("conn_a"),
             broker: Broker::Alpaca,
             environment: Environment::Paper,
             scopes: scopes(),
             account_ref: account_ref(1),
-        })
+        }
     );
     let printed = format!("{made:?}");
-    for byte_form in ["199", "c7", "C7"] {
+    for byte_form in ["199", "c7", "C7", "pii_1"] {
         assert!(
             !printed.contains(byte_form),
             "a fingerprint byte in {printed}"
         );
     }
+    assert!(printed.contains("AccountPiiRef(redacted)"), "{printed}");
     assert!(
         printed.contains("AccountFingerprint(redacted)"),
         "{printed}"
