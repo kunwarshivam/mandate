@@ -321,8 +321,9 @@ crates.
   registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`),
   and the policy set and model registry that govern the run, DEC-534 (tests in
   `crates/mandate-shell/tests/governance.rs`);
-  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed E7-7 AAPL artifacts and
-  binds the bytes it checked, reads the GET-only broker preflight (including the trailing window's
+  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed artifacts and binds the
+  bytes it checked (`Artifacts::from_registered` takes them from the confirmed version and the
+  registered objects instead of files, Q1; tests in `crates/mandate-shell/tests/registered.rs`), reads the GET-only broker preflight (including the trailing window's
   IEX minute bars, DEC-471) and the liquidity facts into one `PaperFacts` snapshot, refuses any
   missing, stale, or ambiguous fact or a non-clean account, and assembles the trusted run and
   executor contexts from that snapshot alone (DEC-470); `src/adapters.rs` the production adapters:
@@ -501,13 +502,16 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 - **Code:** `mandate-mcp`: `crates/mandate-mcp/src/endpoint.rs` (`PinnedEndpoint`: `https` on the
   pinned host only, plain `http` only to a loopback literal in the crate's own test build),
   `crates/mandate-mcp/src/budget.rs` (`RateBudget`: the ordinary bucket and the reserved one only
-  risk-reducing calls draw on), `crates/mandate-mcp/src/error.rs` (`McpError`, and `ServerText`,
-  which has no `Display` and whose `Debug` withholds what the server sent).
+  risk-reducing calls draw on), `crates/mandate-mcp/src/transport.rs` (`McpTransport`: one `POST`
+  per message, the `Mcp-Session-Id` carried, no redirect followed, bounded timeouts and answer size,
+  and the injected `Monotonic` clock), `crates/mandate-mcp/src/error.rs` (`McpError`, and
+  `ServerText`, which has no `Display` and whose `Debug` withholds what the server sent).
 - **Tests:** in-crate where a loopback server is needed, since loopback is accepted only in the
   crate's own test build: `crates/mandate-mcp/src/tests/endpoint.rs`,
   `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
   loopback), `crates/mandate-mcp/src/tests/budget.rs` (an oracle that steps one refill period at a
-  time), `crates/mandate-mcp/src/tests/errors.rs`.
+  time), `crates/mandate-mcp/src/tests/server.rs` (the scripted loopback server),
+  `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/errors.rs`.
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
 
 ## Risk gate
@@ -1097,7 +1101,7 @@ proves each pending test fails on them (DEC-110).
 - **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
   takes the stream's latest confirmed version and a code bound to the agent and the version, and
   commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
-  stubbed; `crates/mandate-cli/tests/deploy.rs`, pending E10-16, over a control stream seeded in
+  on `version.rs`'s checks; `crates/mandate-cli/tests/deploy.rs`, over a control stream seeded in
   §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
   force; every refusal code, each writing nothing; a failing store committing nothing.
   `cargo nextest run -p mandate-cli --test deploy`.
@@ -1290,6 +1294,16 @@ proves each pending test fails on them (DEC-110).
   check order over every pair of stages, and the signal against an `i128` oracle with ties and a
   clock-independence check), with fixtures in `tests/common/mod.rs`.
 - **Run:** `cargo nextest run -p mandate-modelhost`.
+
+## Passkey relying party (E9-1)
+
+- **Spec:** identity spec §6.1, §6.3, §7.2 step 4; DEC-660 (dependencies, algorithms, and the
+  strict readings).
+- **Code:** `mandate-passkey`, `crates/mandate-passkey/` (layer 2, pure, safety-critical):
+  `src/lib.rs` (`enrol`, `verify`, `RelyingParty`, `Challenge`, `Credential`, `PublicKey`,
+  `Refusal`).
+- **Tests:** `crates/mandate-passkey/tests/api.rs` (refusal codes, the challenge length).
+- **Run:** `cargo nextest run -p mandate-passkey`.
 
 ## Simulated Robinhood broker (E7-25)
 

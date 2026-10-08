@@ -19,6 +19,7 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | refcases | reference | supply-chain | postgres | mutants
+  ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
   layers                check crate layering and safety-critical policy (xtask/layers.toml)
   markers               check for debt markers and #[ignore] without a pending story
   feature-map           check the verification skill's feature map against the workspace
@@ -117,6 +118,15 @@ fn run() -> Result<()> {
             for job in PR_JOBS {
                 ci(job)?;
             }
+            Ok(())
+        }
+        ["ci", "mutants", "--plan"] => {
+            let plan = mutants_plan(Path::new("."), base_ref()?.as_deref())?;
+            eprintln!(
+                "    mutants: {} mutant(s) over {} shard(s)",
+                plan.mutants, plan.shards
+            );
+            print!("{}", plan.outputs());
             Ok(())
         }
         ["ci", job] => ci(job),
@@ -1291,10 +1301,92 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
 /// is the change's net effect on its base, main's tip on a `pull_request` run (`choose_base`): a
 /// line main already has was mutated when it landed there, so an edit main made independently is
 /// not mutated again.
+///
+/// CI runs it once per shard of the matrix [`mutants_plan`] sized, and passes the plan's count in
+/// [`MUTANTS_PLANNED_ENV`]; [`check_schedule`] refuses a shard whose own listing or shard total
+/// disagrees with that plan (DEC-538).
 fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
+    let shard = env::var(MUTANT_SHARD_ENV)
+        .ok()
+        .map(|value| MutantShard::parse(&value))
+        .transpose()
+        .with_context(|| format!("parsing {MUTANT_SHARD_ENV}"))?;
+    let planned = env::var(MUTANTS_PLANNED_ENV)
+        .ok()
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .with_context(|| format!("parsing {MUTANTS_PLANNED_ENV}"))?;
+    mutants_scheduled(root, base, shard, planned)
+}
+
+/// [`mutants`] with its schedule passed in rather than read from the environment, which the tests
+/// cannot set (`unsafe` environment mutation is forbidden workspace-wide).
+fn mutants_scheduled(
+    root: &Path,
+    base: Option<&str>,
+    shard: Option<MutantShard>,
+    planned: Option<usize>,
+) -> Result<()> {
+    let Some(diff) = gate_diff(root, base)? else {
+        return check_schedule(0, shard, planned);
+    };
+    let listed = gate_mutants(root, &diff)?;
+    check_schedule(listed.values().sum(), shard, planned)?;
+    if listed.is_empty() {
+        eprintln!("    mutants: the diff generates no mutants");
+        return Ok(());
+    }
+    live_tests_judge_every_mutant(root, &listed)?;
+    let mut test_packages: Vec<&str> = diff
+        .crates
+        .iter()
+        .filter(|krate| {
+            diff.touched
+                .iter()
+                .any(|file| file.starts_with(&krate.src_dir()))
+        })
+        .map(|krate| krate.package.as_str())
+        .collect();
+    external_oracles(&mut test_packages, &workspace_closure(&metadata_in(root)?));
+    let args = mutants_args(diff.path()?, shard, &test_packages);
+    fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
+    eprintln!("    $ cargo {}", args.join(" "));
+    let started = fs::metadata(&diff.file)
+        .and_then(|meta| meta.modified())
+        .context("timing the diff this run reads")?;
+    let status = mutants_job_cargo(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
+        .status()
+        .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
+    mutants_outcome(root, &diff.crates, status?.code(), started)
+}
+
+/// The source diff the mutation gate judges: the changed `.rs` files of safety-critical crates,
+/// written to a file `cargo mutants --in-diff` reads. Removed when dropped.
+struct GateDiff {
+    crates: Vec<MutatedCrate>,
+    touched: Vec<String>,
+    file: PathBuf,
+}
+
+impl GateDiff {
+    fn path(&self) -> Result<&str> {
+        self.file.to_str().context("non-UTF-8 temp path")
+    }
+}
+
+impl Drop for GateDiff {
+    fn drop(&mut self) {
+        fs::remove_file(&self.file).ok();
+    }
+}
+
+/// The diff [`mutants`] and [`mutants_plan`] both judge, or `None`, saying why, when there is no
+/// base or no safety-critical crate's source changed. One function, so the plan that sizes CI's
+/// matrix and the gate each shard runs cannot select different source (DEC-538).
+fn gate_diff(root: &Path, base: Option<&str>) -> Result<Option<GateDiff>> {
     let Some(base) = base else {
         eprintln!("    mutants: HEAD is the base; nothing to check");
-        return Ok(());
+        return Ok(None);
     };
     let crates = mutated_crates(root)?;
     let changed = output_in(
@@ -1302,65 +1394,120 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         "git",
         &["diff", "--name-only", &format!("{base}...HEAD")],
     )?;
-    let touched: Vec<&str> = changed
+    let touched: Vec<String> = changed
         .lines()
         .filter(|f| f.ends_with(".rs") && crates.iter().any(|c| f.starts_with(&c.src_dir())))
+        .map(str::to_owned)
         .collect();
     if touched.is_empty() {
         eprintln!("    mutants: no safety-critical crate's source changed");
-        return Ok(());
+        return Ok(None);
     }
     let mut args = vec!["diff".to_owned(), format!("{base}...HEAD"), "--".to_owned()];
-    args.extend(touched.iter().map(|f| (*f).to_owned()));
-    let diff = output_in(
+    args.extend(touched.iter().cloned());
+    let text = output_in(
         root,
         "git",
         &args.iter().map(String::as_str).collect::<Vec<_>>(),
     )?;
-    let diff_file = env::temp_dir().join(format!("mandate-mutants-{}.diff", std::process::id()));
-    fs::write(&diff_file, diff)?;
-    let diff_path = diff_file
-        .to_str()
-        .context("non-UTF-8 temp path")?
-        .to_owned();
-    match live_tests_judge_every_mutant(root, &diff_path) {
-        Ok(Listed::Mutants) => {}
-        Ok(Listed::Nothing) => {
-            fs::remove_file(&diff_file).ok();
-            eprintln!("    mutants: the diff generates no mutants");
-            return Ok(());
-        }
-        Err(unjudged) => {
-            fs::remove_file(&diff_file).ok();
-            return Err(unjudged);
+    let file = env::temp_dir().join(format!("mandate-mutants-{}.diff", std::process::id()));
+    fs::write(&file, text)?;
+    Ok(Some(GateDiff {
+        crates,
+        touched,
+        file,
+    }))
+}
+
+/// Every mutant the gate tests on `diff`, counted per package: `cargo mutants --list` with the
+/// same `--in-diff` and the same `.cargo/mutants.toml` exclusions as the run, which reads that file
+/// too. DEC-137's stub bodies are not filtered out here or in the run: their mutants are tested,
+/// and only a miss in one is exempted afterwards, so they count toward a shard's load.
+fn gate_mutants(root: &Path, diff: &GateDiff) -> Result<BTreeMap<String, usize>> {
+    let listed = output_in(
+        root,
+        "cargo",
+        &["mutants", "--list", "--json", "--in-diff", diff.path()?],
+    )?;
+    listed_mutant_counts(&listed)
+}
+
+/// The variable CI sets on each mutation shard to the count its plan reported (DEC-538).
+const MUTANTS_PLANNED_ENV: &str = "MANDATE_MUTANTS_PLANNED";
+
+/// The matrix width before DEC-538, and still its ceiling: DEC-498's 192 slice shards.
+const MUTANT_SHARDS: usize = 192;
+
+/// How CI's mutation matrix is sized for one diff (DEC-538): `mutants` is the count the gate tests
+/// and `shards` is `min(MUTANT_SHARDS, mutants)`.
+///
+/// cargo-mutants' `slice` sharding gives shard `k` of `N` the `k`-th run of `ceil(n / N)` listed
+/// mutants. For `n <= 192` that run is one mutant at either width, and for `n > 192` the width is
+/// 192 as before, so shard `k` of the plan tests exactly what shard `k` of 192 tested, and every
+/// shard the plan drops was one that tested nothing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MutantPlan {
+    mutants: usize,
+    shards: usize,
+}
+
+impl MutantPlan {
+    fn for_mutants(mutants: usize) -> Self {
+        Self {
+            mutants,
+            shards: mutants.min(MUTANT_SHARDS),
         }
     }
-    let shard = env::var(MUTANT_SHARD_ENV)
-        .ok()
-        .map(|value| MutantShard::parse(&value))
-        .transpose()
-        .with_context(|| format!("parsing {MUTANT_SHARD_ENV}"))?;
-    let mut test_packages: Vec<&str> = crates
-        .iter()
-        .filter(|krate| {
-            touched
-                .iter()
-                .any(|file| file.starts_with(&krate.src_dir()))
-        })
-        .map(|krate| krate.package.as_str())
-        .collect();
-    external_oracles(&mut test_packages, &workspace_closure(&metadata_in(root)?));
-    let args = mutants_args(&diff_path, shard, &test_packages);
-    fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
-    eprintln!("    $ cargo {}", args.join(" "));
-    let started = fs::metadata(&diff_file)
-        .and_then(|meta| meta.modified())
-        .context("timing the diff this run reads")?;
-    let status = mutants_job_cargo(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
-        .status()
-        .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
-    fs::remove_file(&diff_file).ok();
-    mutants_outcome(root, &crates, status?.code(), started)
+
+    /// The plan as `GITHUB_OUTPUT` lines: the count, the matrix's shard indices as a JSON array
+    /// (`[]` for none), and the shard total each shard's `INDEX/TOTAL` names.
+    fn outputs(self) -> String {
+        let indices: Vec<String> = (0..self.shards).map(|k| k.to_string()).collect();
+        format!(
+            "mutants={}\nshards=[{}]\ntotal={}\n",
+            self.mutants,
+            indices.join(","),
+            self.shards
+        )
+    }
+}
+
+/// `cargo xtask ci mutants --plan`: the mutant count the gate would test on this diff and the
+/// matrix it needs, without building anything (DEC-538). It goes through [`gate_diff`] and
+/// [`gate_mutants`], the gate's own selection.
+fn mutants_plan(root: &Path, base: Option<&str>) -> Result<MutantPlan> {
+    let mutants = match gate_diff(root, base)? {
+        Some(diff) => gate_mutants(root, &diff)?.values().sum(),
+        None => 0,
+    };
+    Ok(MutantPlan::for_mutants(mutants))
+}
+
+/// Refuses a shard whose schedule disagrees with the plan that launched it: a listing of another
+/// size, or a shard total other than the plan's. Either would mean the shards no longer cover the
+/// listing between them. Without a plan (a local run) any schedule is accepted.
+fn check_schedule(listed: usize, shard: Option<MutantShard>, planned: Option<usize>) -> Result<()> {
+    let Some(planned) = planned else {
+        return Ok(());
+    };
+    if listed != planned {
+        bail!(
+            "this shard lists {listed} mutant(s) but the plan that sized the matrix counted \
+             {planned}; the shards would not cover the gate's mutants (DEC-538)"
+        );
+    }
+    if let Some(shard) = shard {
+        let expected = MutantPlan::for_mutants(planned).shards;
+        if shard.total != expected {
+            bail!(
+                "shard {} names a total of {} but a plan of {planned} mutant(s) runs {expected} \
+                 shard(s) (DEC-538)",
+                shard.argument(),
+                shard.total
+            );
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1539,18 +1686,10 @@ fn mutants_job_cargo_output(root: &Path, args: &[&str]) -> Result<String> {
 /// workspace-wide test run ever configured, this count could only be stricter than it needs to be,
 /// never looser.
 ///
-/// A diff with no mutants, such as one that touches only `#[cfg(test)]` code, answers
-/// [`Listed::Nothing`], and the job ends there without starting a run that could only test nothing.
-fn live_tests_judge_every_mutant(root: &Path, diff_path: &str) -> Result<Listed> {
-    let listed = output_in(
-        root,
-        "cargo",
-        &["mutants", "--list", "--json", "--in-diff", diff_path],
-    )?;
-    let mutants = listed_mutant_counts(&listed)?;
-    if mutants.is_empty() {
-        return Ok(Listed::Nothing);
-    }
+/// The listing is [`gate_mutants`]'s, and it is never empty here: a diff with no mutants, such as one
+/// that touches only `#[cfg(test)]` code, ends the job before this check, without starting a run
+/// that could only test nothing.
+fn live_tests_judge_every_mutant(root: &Path, mutants: &BTreeMap<String, usize>) -> Result<()> {
     let packages: Vec<String> = mutants
         .keys()
         .map(|package| format!("--package={package}"))
@@ -1560,15 +1699,7 @@ fn live_tests_judge_every_mutant(root: &Path, diff_path: &str) -> Result<Listed>
     eprintln!("    $ cargo {}", args.join(" "));
     let listing = mutants_job_cargo_output(root, &args)?;
     let live = live_test_counts(&listing)?;
-    report(unjudged_mutants(&mutants, &live), "mutants")?;
-    Ok(Listed::Mutants)
-}
-
-/// Whether the diff's listing named any mutant for the run to test.
-#[derive(Debug, PartialEq)]
-enum Listed {
-    Mutants,
-    Nothing,
+    report(unjudged_mutants(mutants, &live), "mutants")
 }
 
 /// One mutant of `cargo mutants --list --json`. Only its package is read here: that is the package
@@ -2320,7 +2451,18 @@ const STUB_MARKERS: [&str; 5] = [
 /// 3): while a second bracket's OCO awaits its acknowledgment, a third bracket's start ends the
 /// first open interval in the instrument rather than the awaited one. It reaches no stub and fails
 /// on that behaviour until E4b's fix deletes the row with its `#[ignore]` line.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
+///
+/// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
+/// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
+/// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
+/// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
+///
+/// Four more `hand` rows are E1's sizing paths (DEC-532; backlog: "E7-4 (stream K), E1 from E7-4
+/// slice 7's tests correction"): `replace` after an exit, `new_day`'s re-placement, a passive
+/// exit's rest and `re_cover` each size protection on a position that includes a working bracket's
+/// filled shares, which its held legs will cover. They reach no stub and fail on that sizing until
+/// E1's fix deletes the rows with their `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 17] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2357,6 +2499,34 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
+    ),
+    (
+        "crates/mandate-runtime/tests/answer_records.rs",
+        "every_answer_record_the_runtime_writes_passes_the_journals_check",
+    ),
+    (
+        "crates/mandate-runtime/tests/answer_records.rs",
+        "a_responded_record_carries_its_quorum_only_where_check_7_was_judged",
+    ),
+    (
+        "crates/mandate-runtime/tests/answer_records.rs",
+        "decided_by_now_is_null_unless_the_reclassification_asks",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_re_cover_leaves_a_held_brackets_shares_to_its_legs",
     ),
 ];
 
@@ -3208,13 +3378,14 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, CratePolicy, Dependency, Layers,
-        MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, Metadata, MutantShard,
-        MutatedCrate, Package, PendingTest, PendingTestRun, REFCASES, TestOutcome,
-        actionlint_workflows, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
-        contains_word, external_oracles, failure_cause, files_by_extension, first_panic_line,
-        forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
-        is_stub_function, layer_problems, lint, listed_mutant_counts, live_test_counts,
-        metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
+        MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, Metadata,
+        MutantPlan, MutantShard, MutatedCrate, Package, PendingTest, PendingTestRun, REFCASES,
+        TestOutcome, actionlint_workflows, backticked_paths, base_ref_in, check_schedule, ci,
+        classify, contains_dec_id, contains_word, external_oracles, failure_cause,
+        files_by_extension, first_panic_line, forbidden_reached, generated_pending_markers,
+        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
+        listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts, mutants,
+        mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
         plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
         spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
@@ -5527,6 +5698,357 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-538: the plan's matrix is `min(192, n)` shards, as `GITHUB_OUTPUT` lines CI reads with
+    /// `fromJSON`, and an empty list when the diff has no mutant, which is what skips the matrix.
+    #[test]
+    fn the_plan_sizes_the_matrix_to_the_diff() -> Result<()> {
+        assert_eq!(
+            MutantPlan::for_mutants(0).outputs(),
+            "mutants=0\nshards=[]\ntotal=0\n",
+            "no mutants, no shards"
+        );
+        assert_eq!(
+            MutantPlan::for_mutants(10).outputs(),
+            "mutants=10\nshards=[0,1,2,3,4,5,6,7,8,9]\ntotal=10\n",
+            "ten mutants, one a shard"
+        );
+        for (mutants, shards) in [(1, 1), (191, 191), (192, 192), (193, 192), (500, 192)] {
+            let plan = MutantPlan::for_mutants(mutants);
+            assert_eq!(plan.shards, shards, "{mutants} mutants");
+            let outputs = plan.outputs();
+            let listed = outputs
+                .lines()
+                .find_map(|line| line.strip_prefix("shards="))
+                .context("the plan names its shards")?;
+            let indices: Vec<usize> = serde_json::from_str(listed)?;
+            assert_eq!(
+                indices,
+                (0..shards).collect::<Vec<_>>(),
+                "the matrix is every index below the plan's total, for {mutants} mutants"
+            );
+            assert!(
+                outputs.contains(&format!("\ntotal={shards}\n")),
+                "and each shard names that total: {outputs}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The slice shards `cargo-mutants` gives a mutant listing, computed the way its `--sharding
+    /// slice` documents them (runs of `ceil(n / N)`), as an oracle independent of the plan.
+    fn slices(n: usize, total: usize) -> Vec<std::ops::Range<usize>> {
+        let run = n.div_ceil(total);
+        (0..total)
+            .map(|k| {
+                let start = k.saturating_mul(run).min(n);
+                start..start.saturating_add(run).min(n)
+            })
+            .collect()
+    }
+
+    /// DEC-538's per-shard load, for every diff size up to well past the ceiling: shard `k` of the
+    /// plan's `N` takes exactly the mutants shard `k` of 192 took, so no shard carries more than it
+    /// did and a diff under 192 mutants still puts one in each; and every shard of 192 the plan
+    /// drops was empty.
+    #[test]
+    fn no_planned_shard_carries_more_than_its_slice_of_192() {
+        for n in 0..=1000 {
+            let plan = MutantPlan::for_mutants(n);
+            let planned = slices(n, plan.shards.max(1));
+            let before = slices(n, MUTANT_SHARDS);
+            for (k, slice) in before.iter().enumerate() {
+                if k < plan.shards {
+                    assert_eq!(
+                        planned.get(k),
+                        Some(slice),
+                        "shard {k} of {} tests what shard {k} of 192 did, for {n} mutants",
+                        plan.shards
+                    );
+                } else {
+                    assert!(
+                        slice.is_empty(),
+                        "shard {k} of 192 the plan drops tested nothing, for {n} mutants"
+                    );
+                }
+            }
+            if n > 0 && n < MUTANT_SHARDS {
+                assert!(planned.iter().all(|slice| slice.len() == 1), "{n} mutants");
+            }
+        }
+    }
+
+    /// `cargo mutants --list --json` over the whole diff from `base`, for one shard or unsharded,
+    /// each mutant as its JSON text. The oracle the plan is compared against: it writes its own
+    /// diff and asks the tool itself which mutants each shard tests.
+    fn listed_by_cargo_mutants(
+        fx: &Fixture,
+        diff: &Path,
+        shard: Option<(usize, usize)>,
+    ) -> Result<Vec<String>> {
+        let diff = diff.to_str().context("non-UTF-8 temp path")?;
+        let argument = shard.map(|(k, total)| format!("{k}/{total}"));
+        let mut args = vec!["mutants", "--list", "--json", "--in-diff", diff];
+        if let Some(argument) = argument.as_deref() {
+            args.extend(["--shard", argument, "--sharding", "slice"]);
+        }
+        let listing = output_in(&fx.0, "cargo", &args)?;
+        if listing.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let listed: Vec<Value> = serde_json::from_str(&listing)?;
+        Ok(listed.iter().map(Value::to_string).collect())
+    }
+
+    /// DEC-538 in a fixture repository, against `cargo mutants` itself: the plan counts the mutants
+    /// the tool lists for the diff; the plan's shards between them test that whole set; shard `k`
+    /// of the plan tests what shard `k` of 192 tests; the shards the plan drops test nothing; and a
+    /// shard is refused when its listing or its total disagrees with the plan that launched it.
+    #[test]
+    fn the_planned_shards_test_the_gates_mutants_and_no_more_per_shard() -> Result<()> {
+        let fx = Fixture::gated("mutants-plan")?;
+        let base = fs::read_to_string(fx.0.join("base"))?;
+        let base = base.trim();
+        let diff =
+            env::temp_dir().join(format!("mandate-xtask-plan-oracle-{}", std::process::id()));
+        fs::write(&diff, fx.git(&["diff", &format!("{base}...HEAD")])? + "\n")?;
+
+        let plan = mutants_plan(&fx.0, Some(base))?;
+        let mut everything = listed_by_cargo_mutants(&fx, &diff, None)?;
+        everything.sort();
+        assert!(
+            plan.mutants > 1,
+            "the fixture's diff has several mutants, so a shard split means something"
+        );
+        assert_eq!(
+            plan,
+            MutantPlan::for_mutants(everything.len()),
+            "the plan counts what `cargo mutants` lists for the diff"
+        );
+
+        let mut union = Vec::new();
+        for k in 0..MUTANT_SHARDS {
+            let before = listed_by_cargo_mutants(&fx, &diff, Some((k, MUTANT_SHARDS)))?;
+            if k < plan.shards {
+                let planned = listed_by_cargo_mutants(&fx, &diff, Some((k, plan.shards)))?;
+                assert_eq!(
+                    planned, before,
+                    "shard {k} of {} tests what shard {k} of 192 tests",
+                    plan.shards
+                );
+                assert_eq!(planned.len(), 1, "one mutant a shard, as under 192");
+                union.extend(planned);
+            } else {
+                assert!(
+                    before.is_empty(),
+                    "shard {k} of 192, which the plan drops, tests nothing: {before:?}"
+                );
+            }
+        }
+        union.sort();
+        assert_eq!(
+            union, everything,
+            "the plan's shards together test every mutant"
+        );
+        fs::remove_file(&diff).ok();
+
+        let wrong_count = mutants_scheduled(&fx.0, Some(base), None, Some(plan.mutants + 1))
+            .expect_err("a shard whose listing differs from the plan is refused");
+        assert!(wrong_count.to_string().contains("plan"), "{wrong_count}");
+        let wrong_total = mutants_scheduled(
+            &fx.0,
+            Some(base),
+            Some(MutantShard::parse(&format!("0/{MUTANT_SHARDS}"))?),
+            Some(plan.mutants),
+        )
+        .expect_err("a shard total other than the plan's is refused");
+        assert!(wrong_total.to_string().contains("shard"), "{wrong_total}");
+        assert!(
+            !fx.0.join(MUTANTS_OUT).exists(),
+            "both refusals come before the run"
+        );
+        Ok(())
+    }
+
+    /// DEC-538: the plan reports zero exactly when the gate would test nothing, for each of the
+    /// gate's three ways of having nothing to do: no base, no safety-critical source changed, and
+    /// changed source that generates no mutant. In each, a shard told the plan's zero passes.
+    #[test]
+    fn the_plan_counts_zero_exactly_when_the_gate_has_nothing_to_test() -> Result<()> {
+        let fx = Fixture::gated("mutants-plan-zero")?;
+        let head = fx.git(&["rev-parse", "HEAD"])?;
+        assert_eq!(mutants_plan(&fx.0, None)?, MutantPlan::for_mutants(0));
+        mutants_scheduled(&fx.0, None, None, Some(0))?;
+
+        fx.write(
+            "crates/covered/tests/more.rs",
+            "#[test]\nfn negates_true() {\n    assert!(!covered::negate(true));\n}\n",
+        )?;
+        fx.commit()?;
+        assert_eq!(
+            mutants_plan(&fx.0, Some(&head))?,
+            MutantPlan::for_mutants(0),
+            "a tests-only change"
+        );
+        mutants_scheduled(&fx.0, Some(&head), None, Some(0))?;
+
+        fx.write(
+            "crates/covered/src/lib.rs",
+            concat!(
+                "#[must_use]\npub fn negate(flag: bool) -> bool {\n    !flag\n}\n",
+                "\n#[cfg(test)]\nmod unit {\n    #[test]\n    fn negates_false() {\n",
+                "        assert!(super::negate(false));\n    }\n}\n",
+            ),
+        )?;
+        fx.commit()?;
+        assert_eq!(
+            mutants_plan(&fx.0, Some(&head))?,
+            MutantPlan::for_mutants(0),
+            "changed source that generates no mutant"
+        );
+        mutants_scheduled(&fx.0, Some(&head), None, Some(0))?;
+        assert!(
+            !fx.0.join(MUTANTS_OUT).exists(),
+            "and the gate never started a run"
+        );
+
+        fx.write(
+            "crates/covered/src/lib.rs",
+            "#[must_use]\npub fn negate(flag: bool) -> bool {\n    flag ^ true\n}\n",
+        )?;
+        fx.commit()?;
+        assert!(
+            mutants_plan(&fx.0, Some(&head))?.mutants > 0,
+            "and a change that does generate a mutant is counted"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_shards_schedule_must_match_its_plan() -> Result<()> {
+        check_schedule(5, None, None)?;
+        check_schedule(5, Some(MutantShard::parse("3/192")?), None)?;
+        check_schedule(5, Some(MutantShard::parse("3/5")?), Some(5))?;
+        check_schedule(500, Some(MutantShard::parse("191/192")?), Some(500))?;
+        check_schedule(0, None, Some(0))?;
+        assert!(check_schedule(4, None, Some(5)).is_err(), "fewer listed");
+        assert!(check_schedule(6, None, Some(5)).is_err(), "more listed");
+        assert!(
+            check_schedule(5, Some(MutantShard::parse("3/192")?), Some(5)).is_err(),
+            "a 192-way shard under a plan of five"
+        );
+        assert!(
+            check_schedule(500, Some(MutantShard::parse("3/191")?), Some(500)).is_err(),
+            "a total below the ceiling for a plan above it"
+        );
+        Ok(())
+    }
+
+    /// DEC-538 in `ci.yml`: the plan job runs the plan and exposes its three outputs; the matrix
+    /// comes from it, is skipped only on a zero count, and passes the plan's total and count to
+    /// each shard; and `full` needs all three jobs.
+    #[test]
+    fn ci_sizes_the_mutation_matrix_from_the_plan() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let trimmed = |job: &str| -> Result<Vec<String>> {
+            Ok(workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- ").to_owned())
+                .collect())
+        };
+        let plan = trimmed("mutants-plan")?;
+        for line in [
+            "cargo xtask ci mutants --plan >> \"$GITHUB_OUTPUT\"",
+            "mutants: ${{ steps.plan.outputs.mutants }}",
+            "shards: ${{ steps.plan.outputs.shards }}",
+            "total: ${{ steps.plan.outputs.total }}",
+            "printf 'mutants=0\\nshards=[]\\ntotal=0\\n' >> \"$GITHUB_OUTPUT\"",
+        ] {
+            assert!(
+                plan.iter().any(|l| l == line),
+                "`mutants-plan` has `{line}`"
+            );
+        }
+        let matrix = trimmed("mutants")?;
+        for line in [
+            "needs: mutants-plan",
+            "if: needs.mutants-plan.outputs.mutants != '0'",
+            "shard: ${{ fromJSON(needs.mutants-plan.outputs.shards) }}",
+            "MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }}",
+            "MANDATE_MUTANTS_PLANNED: ${{ needs.mutants-plan.outputs.mutants }}",
+        ] {
+            assert!(matrix.iter().any(|l| l == line), "`mutants` has `{line}`");
+        }
+        assert!(
+            !workflow.contains("/192"),
+            "no shard total is fixed in the workflow"
+        );
+        let full = trimmed("full")?;
+        assert!(
+            full.iter()
+                .any(|l| l == "needs: [full-checks, mutants-plan, mutants]"),
+            "`full` needs the plan as well as the matrix"
+        );
+        Ok(())
+    }
+
+    /// The `run:` script of the `full` job, as GitHub runs it.
+    fn full_verdict_script(workflow: &str) -> Result<String> {
+        let lines = workflow_job(workflow, "full").context("ci.yml has a `full` job")?;
+        let start = lines
+            .iter()
+            .position(|line| line.trim() == "run: |")
+            .context("`full` has a `run: |` script")?;
+        let script: Vec<&str> = lines
+            .iter()
+            .skip(start.saturating_add(1))
+            .take_while(|line| line.starts_with("          ") || line.trim().is_empty())
+            .map(|line| line.get(10..).unwrap_or(""))
+            .collect();
+        Ok(script.join("\n") + "\n")
+    }
+
+    /// DEC-538's `full` verdict, run as GitHub runs it (`bash -e`) over every combination of the
+    /// three jobs' results and the plan's count, against a truth table written out here: the
+    /// matrix's skip passes only beside a plan that succeeded and counted zero.
+    #[test]
+    fn full_accepts_a_skipped_matrix_only_beside_a_plan_of_zero() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let script = full_verdict_script(&workflow)?;
+        let results = ["success", "failure", "cancelled", "skipped"];
+        let mut checked = 0usize;
+        for checks in results {
+            for plan in results {
+                for planned in ["0", "1", "10", "500", "", "01", "x", "-1"] {
+                    for matrix in results {
+                        let expected = checks == "success"
+                            && plan == "success"
+                            && match planned {
+                                "0" => matrix == "skipped",
+                                "1" | "10" | "500" => matrix == "success",
+                                _ => false,
+                            };
+                        let status = Command::new("bash")
+                            .args(["-e", "-c", &script])
+                            .env("FULL_CHECKS_RESULT", checks)
+                            .env("PLAN_RESULT", plan)
+                            .env("PLANNED_MUTANTS", planned)
+                            .env("MUTANTS_RESULT", matrix)
+                            .status()?;
+                        assert_eq!(
+                            status.success(),
+                            expected,
+                            "full-checks {checks}, plan {plan} counting {planned:?}, mutants {matrix}"
+                        );
+                        checked = checked.saturating_add(1);
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 512);
+        Ok(())
+    }
+
     #[test]
     fn ci_leaves_the_base_to_the_event() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -5556,8 +6078,9 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            3,
-            "one checkout in each source-reading job: `fast`, `full-checks`, and the mutants matrix"
+            4,
+            "one checkout in each source-reading job: `fast`, `full-checks`, the mutation plan, and \
+             the mutants matrix"
         );
         for checkout in checkouts {
             assert!(
