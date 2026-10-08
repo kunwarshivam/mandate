@@ -74,6 +74,9 @@ issue, or the repository.
    - `mandate-api-server` (the API);
    - `mandate` (the CLI, used for restore checks).
 
+   The executor's binary comes from the live lane later; its unit is installed and stays off until
+   then.
+
    ```bash
    scp mandate-api-server mandate root@<IP>:/tmp/
    ssh root@<IP>
@@ -83,19 +86,21 @@ issue, or the repository.
 
 ## D. Secrets, last, then the first start
 
-9. **Fill `/etc/owlhead/api.env`** on the host. Have Alpaca's OAuth app page (paper, DEC-821)
-   open for its client id and secret.
+9. **Fill `/etc/owlhead/api.env` and `/etc/owlhead/executor.env`** on the host. Have Alpaca's OAuth
+   app page (paper, DEC-821) open for its client id and secret.
 
    ```bash
    cd /root/owlhead/deploy
    bash set-secrets.sh
    ```
 
-   It makes the session key and the vault key with `openssl` straight into the file, asks for the
+   It makes the session key and the vault key with `openssl` straight into the files, asks for the
    Alpaca client id and then the secret (the secret is not echoed), and keeps every value already
-   set. The database URL is already filled in; it has no password. Nothing is printed.
+   set. The secret goes only into `executor.env`: the API never holds it. The database URLs are
+   already filled in; they have no password. Nothing is printed.
 
-   Then copy the vault key into your password manager: losing it loses every stored connection.
+   Then copy the vault key into your password manager: it is never in a backup, and without it a
+   restored vault cannot be read, so every connection would need re-authorizing.
    `grep '^MANDATE_VAULT_KEY=' /etc/owlhead/api.env` shows it once; clear the screen after.
 
    If you edit the file by hand instead (`nano /etc/owlhead/api.env`): Ctrl+O, then Enter, saves;
@@ -172,9 +177,10 @@ issue, or the repository.
   protects against a bad migration, a mistaken delete, or a damaged table. It is on the same disk,
   so it does not protect against losing the VM.
 - **Hetzner Backups** (daily, 7 kept): an image of the whole disk, taken while the server runs.
-  This covers losing the VM, and it includes the local backups above **and**
-  `/etc/owlhead/api.env`, so an image holds the vault together with its key: keep the Hetzner
-  account protected accordingly. A database restored from
+  This covers losing the VM, and it includes the local backups above. Being a whole-disk copy, it
+  also holds `/etc/owlhead`, so an image holds the vault together with its key and the client
+  secret: protect the Hetzner account (two-factor sign-in) accordingly. The nightly backup never
+  holds them. A database restored from
   the image is crash-consistent, so after such a restore, run the restore check on the newest
   local dump.
 - **Neither is off-site** beyond Hetzner's own storage. An off-site copy comes before any customer

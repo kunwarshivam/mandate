@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # The nightly local backup, installed as /usr/local/sbin/owlhead-backup and run by
 # owlhead-backup.timer. It writes a consistent pg_dump of the owlhead database and a tarball of
-# the API's state directory (the artifact store and the minimal vault) into /var/backups/owlhead
-# (root only), and keeps 14 days of them. A failure runs owlhead-backup-failed.service.
+# /var/lib/owlhead's artifact store and minimal vault, with their owners and modes (DEC-692), into
+# /var/backups/owlhead (root only), and keeps 14 days of them. A failure runs
+# owlhead-backup-failed.service.
+#
+# It never copies /etc/owlhead: the env files hold the vault key and the client secret, and no
+# credential goes into a backup (infrastructure OPS-1). The vault in the tarball is encrypted under
+# a key that is not in it; restoring without that key means every connection is re-authorized.
 #
 # These copies sit on the VM's own disk: they protect against a bad migration, a mistaken delete,
-# or a corrupted table, not against losing the VM. Hetzner's backups (whole-disk images, taken while
-# running) cover losing the VM, and include this directory and /etc/owlhead/api.env, so an image
-# holds both the vault and its key.
+# or a corrupted table, not against losing the VM. Hetzner's backups (whole-disk images) cover
+# losing the VM; being whole-disk, they also hold /etc/owlhead (see README.md).
 set -euo pipefail
 
 DB=owlhead

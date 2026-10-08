@@ -1,24 +1,21 @@
-# The workspace API (DEC-822). This unit is also the template the runtime and executor units copy:
-# change Description, User and Group, ExecStart (with its --bind), EnvironmentFile, and keep every
-# hardening line below unless a service shows it needs one relaxed (and says why in a comment).
-#
-# It does not start until /usr/local/bin/mandate-api-server exists. It reads its settings and
-# secrets from /etc/owlhead/api.env (root:root 0600; systemd reads it before dropping to the user).
+# A connection's executor (DEC-692): its own process and user, never inside the API. A TEMPLATE,
+# installed and never enabled by bootstrap.sh: the live lane supplies the binary and its arguments
+# (the name below is provisional) and the founder enables it when they do. It reads its settings
+# and the Alpaca client secret from /etc/owlhead/executor.env (root:root 0600; systemd reads it
+# before dropping to the user). It listens on no port.
 [Unit]
-Description=Owlhead workspace API
+Description=Owlhead connection executor
 After=network-online.target postgresql.service
 Wants=network-online.target
 Requires=postgresql.service
-ConditionPathExists=/usr/local/bin/mandate-api-server
+ConditionPathExists=/usr/local/bin/mandate-executor
 
 [Service]
 Type=simple
-User=owlhead_api
-Group=owlhead_api
-EnvironmentFile=/etc/owlhead/api.env
-# Loopback only: Cloudflare's tunnel is the only way in (DEC-822 item 2). The bind is an argument,
-# not an Environment= line, which EnvironmentFile= would override.
-ExecStart=/usr/local/bin/mandate-api-server --bind 127.0.0.1:8080
+User=owlhead_exec
+Group=owlhead_exec
+EnvironmentFile=/etc/owlhead/executor.env
+ExecStart=/usr/local/bin/mandate-executor
 Restart=on-failure
 RestartSec=2s
 
@@ -53,7 +50,6 @@ RemoveIPC=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
-SocketBindAllow=tcp:8080
 SocketBindDeny=any
 
 [Install]

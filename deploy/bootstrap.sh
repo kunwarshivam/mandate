@@ -7,8 +7,13 @@
 #
 # It installs PostgreSQL 18 from apt.postgresql.org (localhost only), creates the database, its
 # roles and schema, applies migrations/, creates the API's system user and directories, installs
-# the API unit (not started), the backup timer, and /etc/owlhead/api.env from api.env.example if it
-# is absent. It never writes a secret: the founder fills api.env on the host, last.
+# the executor unit template, the backup timer, and /etc/owlhead/api.env and executor.env from
+# their examples if absent. It never writes a secret: set-secrets.sh fills them on the host, last.
+#
+# Two service users (DEC-692): owlhead_api runs the API (the control services), owlhead_exec the
+# connection executors, which never run inside the API process. The minimal vault's directories
+# let the filesystem enforce who may read what: the API writes pending authorization codes the
+# executor takes, and may unlink a token file it knows the name of, but never list or read one.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=lib.sh
@@ -24,6 +29,8 @@ PGDG_FINGERPRINT=B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
 PGDG_KEY=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
 DB=owlhead
 API_USER=owlhead_api
+EXEC_USER=owlhead_exec
+VAULT=/var/lib/owlhead/vault
 
 if [ ! -d "$MIGRATIONS_DIR" ]; then
   echo "no migrations directory at $MIGRATIONS_DIR; copy migrations/ beside deploy/ or set MIGRATIONS_DIR" >&2
@@ -76,16 +83,21 @@ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$API_USER') THEN
     CREATE ROLE $API_USER LOGIN IN ROLE mandate_journal_app;
   END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$EXEC_USER') THEN
+    CREATE ROLE $EXEC_USER LOGIN IN ROLE mandate_journal_app;
+  END IF;
 END
 \$\$;
 REVOKE ALL ON DATABASE $DB FROM PUBLIC;
 REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
 REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
 GRANT CONNECT ON DATABASE $DB TO $API_USER;
+GRANT CONNECT ON DATABASE $DB TO $EXEC_USER;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 CREATE SCHEMA IF NOT EXISTS journal AUTHORIZATION mandate_journal_owner;
 GRANT USAGE ON SCHEMA journal TO mandate_journal_app;
 ALTER ROLE $API_USER IN DATABASE $DB SET search_path = journal;
+ALTER ROLE $EXEC_USER IN DATABASE $DB SET search_path = journal;
 CREATE SCHEMA IF NOT EXISTS deploy;
 REVOKE ALL ON SCHEMA deploy FROM PUBLIC;
 CREATE TABLE IF NOT EXISTS deploy.migrations (
@@ -116,24 +128,35 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
   } | sql "$DB"
 done
 
-say "The API's system user and directories"
-if ! id -u "$API_USER" >/dev/null 2>&1; then
-  run useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$API_USER"
-fi
+say "Service users, directories, and the minimal vault's layout (DEC-692)"
+for user in "$API_USER" "$EXEC_USER"; do
+  if ! id -u "$user" >/dev/null 2>&1; then
+    run useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$user"
+  fi
+done
 run install -d -o root -g root -m 0700 /etc/owlhead
-run install -d -o "$API_USER" -g "$API_USER" -m 0700 /var/lib/owlhead /var/lib/owlhead/artifacts /var/lib/owlhead/vault
 run install -d -o root -g root -m 0700 /var/backups/owlhead
-if [ ! -f /etc/owlhead/api.env ]; then
-  put_file /etc/owlhead/api.env 0600 root:root <"$DEPLOY_DIR/api.env.example"
-else
-  echo "keeping the existing /etc/owlhead/api.env"
-  run chown root:root /etc/owlhead/api.env
-  run chmod 0600 /etc/owlhead/api.env
-fi
+run install -d -o root -g root -m 0755 /var/lib/owlhead "$VAULT"
+# The artifact store is written by both services; setgid keeps new entries in the shared group.
+run install -d -o "$API_USER" -g "$EXEC_USER" -m 2770 /var/lib/owlhead/artifacts
+# pending/: the API writes the encrypted code (0640), the executor reads it and deletes it. Setgid,
+# so each file the API creates is in owlhead_exec's group; without it the executor could not read it.
+run install -d -o "$API_USER" -g "$EXEC_USER" -m 2770 "$VAULT/pending"
+# tokens/: the executor writes tokens (0600); the API may unlink a known name but not list or read.
+run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"
+for name in api executor; do
+  if [ ! -f "/etc/owlhead/$name.env" ]; then
+    put_file "/etc/owlhead/$name.env" 0600 root:root <"$DEPLOY_DIR/$name.env.example"
+  else
+    echo "keeping the existing /etc/owlhead/$name.env"
+    run chown root:root "/etc/owlhead/$name.env"
+    run chmod 0600 "/etc/owlhead/$name.env"
+  fi
+done
 
-say "systemd units: the API (installed, not started) and the backup timer"
+say "systemd units: the API and the executor template (installed, not started) and the backup timer"
 put_file /usr/local/sbin/owlhead-backup 0755 root:root <"$DEPLOY_DIR/backup.sh"
-for unit in owlhead-api.service owlhead-backup.service owlhead-backup.timer owlhead-backup-failed.service; do
+for unit in owlhead-api.service owlhead-executor.service owlhead-backup.service owlhead-backup.timer owlhead-backup-failed.service; do
   put_file "/etc/systemd/system/$unit" 0644 root:root <"$DEPLOY_DIR/systemd/$unit"
 done
 run systemctl daemon-reload

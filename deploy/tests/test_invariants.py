@@ -11,13 +11,19 @@ from pathlib import Path
 import pytest
 
 DEPLOY = Path(__file__).resolve().parents[1]
-EXAMPLE_DB_URL = "postgresql://owlhead_api@localhost/owlhead?host=/var/run/postgresql"
+EXAMPLE_VALUES = {
+    "MANDATE_API_DATABASE_URL": "postgresql://owlhead_api@localhost/owlhead?host=/var/run/postgresql",
+    "MANDATE_EXECUTOR_DATABASE_URL": "postgresql://owlhead_exec@localhost/owlhead?host=/var/run/postgresql",
+    "MANDATE_VAULT_DIR": "/var/lib/owlhead/vault",
+}
+EXAMPLES = ("api.env.example", "executor.env.example")
 
 
 def files() -> dict[str, str]:
     paths = [*DEPLOY.glob("*.sh"), *DEPLOY.glob("systemd/*"), DEPLOY / "postgres/10-owlhead.conf"]
     texts = {str(p.relative_to(DEPLOY)): p.read_text() for p in paths}
-    texts["api.env.example"] = (DEPLOY / "api.env.example").read_text()
+    for name in EXAMPLES:
+        texts[name] = (DEPLOY / name).read_text()
     return texts
 
 
@@ -27,31 +33,90 @@ def strict_mode(f: dict[str, str]) -> list[str]:
 
 
 def env_files_private(f: dict[str, str]) -> list[str]:
-    """api.env and cloudflared.env are written only as root:root 0600."""
+    """api.env, executor.env, and cloudflared.env are written only as root:root 0600."""
     problems = []
-    for name, target in (("bootstrap.sh", "/etc/owlhead/api.env"), ("install-cloudflared.sh", '"$TOKEN_FILE"')):
+    for name, target in (("bootstrap.sh", '"/etc/owlhead/$name.env"'), ("install-cloudflared.sh", '"$TOKEN_FILE"')):
         writes = [line for line in f[name].splitlines() if "put_file" in line and target in line]
         if not writes or any("0600 root:root" not in line for line in writes):
             problems.append(f"{name}: {target} not written 0600 root:root")
+    if "for name in api executor; do" not in f["bootstrap.sh"]:
+        problems.append("bootstrap.sh: not both env files")
     if "TOKEN_FILE=/etc/owlhead/cloudflared.env" not in f["install-cloudflared.sh"]:
         problems.append("install-cloudflared.sh: the token file moved")
-    if not re.search(r"chmod 0600 /etc/owlhead/api\.env", f["bootstrap.sh"]):
-        problems.append("bootstrap.sh: an existing api.env is not reset to 0600")
+    if 'run chmod 0600 "/etc/owlhead/$name.env"' not in f["bootstrap.sh"]:
+        problems.append("bootstrap.sh: an existing env file is not reset to 0600")
+    if f["set-secrets.sh"].count("install -o root -g root -m 0600") != 1:
+        problems.append("set-secrets.sh: an env file is rewritten other than root:root 0600")
+    return problems
+
+
+HARDENING = ("NoNewPrivileges=yes", "CapabilityBoundingSet=", "AmbientCapabilities=", "ProtectSystem=strict")
+
+
+def unit_problems(unit: str, required: tuple[str, ...]) -> list[str]:
+    lines = set(unit.splitlines())
+    problems = [f"missing {line}" for line in (*HARDENING, *required) if line not in lines]
+    if re.search(r"^StateDirectory=", unit, re.M):
+        problems.append("StateDirectory= would chown /var/lib/owlhead to one user (DEC-692)")
     return problems
 
 
 def api_unit_hardened(f: dict[str, str]) -> list[str]:
-    """The API binds loopback by argument, cannot gain privileges, and holds no capability."""
+    """The API binds loopback by argument, runs as owlhead_api, cannot gain privileges, and holds no
+    capability."""
     unit = f["systemd/owlhead-api.service"]
-    lines = set(unit.splitlines())
-    problems = []
-    if "ExecStart=/usr/local/bin/mandate-api-server --bind 127.0.0.1:8080" not in lines:
-        problems.append("ExecStart does not bind 127.0.0.1:8080 by argument")
+    problems = unit_problems(
+        unit,
+        (
+            "ExecStart=/usr/local/bin/mandate-api-server --bind 127.0.0.1:8080",
+            "User=owlhead_api",
+            "EnvironmentFile=/etc/owlhead/api.env",
+        ),
+    )
     if re.search(r"^Environment=.*BIND", unit, re.M):
         problems.append("the bind is an Environment= line, which EnvironmentFile= overrides")
-    for required in ("NoNewPrivileges=yes", "CapabilityBoundingSet=", "AmbientCapabilities=", "User=owlhead_api"):
-        if required not in lines:
-            problems.append(f"missing {required}")
+    return problems
+
+
+def executor_unit_hardened(f: dict[str, str]) -> list[str]:
+    """The executor template runs as owlhead_exec with executor.env, the same hardening, and binds
+    no port; bootstrap never enables it."""
+    unit = f["systemd/owlhead-executor.service"]
+    problems = unit_problems(
+        unit, ("User=owlhead_exec", "EnvironmentFile=/etc/owlhead/executor.env", "SocketBindDeny=any")
+    )
+    if "SocketBindAllow" in unit:
+        problems.append("the executor binds a port")
+    if re.search(r"enable.*owlhead-executor", f["bootstrap.sh"]):
+        problems.append("bootstrap.sh enables the executor")
+    return problems
+
+
+def client_secret_executor_only(f: dict[str, str]) -> list[str]:
+    """The Alpaca client secret is the executor's alone (DEC-692, infrastructure §5.1)."""
+    problems = []
+    if "ALPACA_OAUTH_CLIENT_SECRET" in f["api.env.example"]:
+        problems.append("api.env.example names the client secret")
+    if "\nALPACA_OAUTH_CLIENT_SECRET=\n" not in f["executor.env.example"]:
+        problems.append("executor.env.example lacks the client secret")
+    api_fill = re.search(r'^fill "\$API_ENV".*?(?<!\\)\n', f["set-secrets.sh"], re.M | re.S)
+    if not api_fill or "CLIENT_SECRET" in api_fill.group(0):
+        problems.append("set-secrets.sh writes the client secret to api.env")
+    return problems
+
+
+def vault_layout(f: dict[str, str]) -> list[str]:
+    """The vault's directories have DEC-692's owners and modes: the API can unlink but never list or
+    read a token."""
+    text = f["bootstrap.sh"]
+    wanted = (
+        'run install -d -o root -g root -m 0755 /var/lib/owlhead "$VAULT"',
+        'run install -d -o "$API_USER" -g "$EXEC_USER" -m 2770 "$VAULT/pending"',
+        'run install -d -o "$EXEC_USER" -g "$API_USER" -m 0730 "$VAULT/tokens"',
+    )
+    problems = [f"bootstrap.sh lacks: {line}" for line in wanted if line not in text.splitlines()]
+    if "VAULT=/var/lib/owlhead/vault" not in text:
+        problems.append("the vault moved")
     return problems
 
 
@@ -66,12 +131,13 @@ def api_role_minimal(f: dict[str, str]) -> list[str]:
     more; no role is given a superuser-like attribute."""
     text = f["bootstrap.sh"]
     problems = []
-    grants = re.findall(r"^\s*GRANT .*\bTO \$API_USER\b.*$", text, re.M)
-    if grants != ["GRANT CONNECT ON DATABASE $DB TO $API_USER;"]:
-        problems.append(f"grants to the API role: {grants}")
-    created = re.findall(r"CREATE ROLE \$API_USER (.*);", text)
-    if created != ["LOGIN IN ROLE mandate_journal_app"]:
-        problems.append(f"the API role is created as {created}")
+    for role in ("API_USER", "EXEC_USER"):
+        grants = re.findall(rf"^\s*GRANT .*\bTO \${role}\b.*$", text, re.M)
+        if grants != [f"GRANT CONNECT ON DATABASE $DB TO ${role};"]:
+            problems.append(f"grants to {role}: {grants}")
+        created = re.findall(rf"CREATE ROLE \${role} (.*);", text)
+        if created != ["LOGIN IN ROLE mandate_journal_app"]:
+            problems.append(f"{role} is created as {created}")
     if re.search(r"\b(SUPERUSER|CREATEDB|CREATEROLE|BYPASSRLS|REPLICATION)\b", text):
         problems.append("a role attribute beyond LOGIN")
     return problems
@@ -96,15 +162,16 @@ def token_never_shown(f: dict[str, str]) -> list[str]:
 
 
 def example_names_only(f: dict[str, str]) -> list[str]:
-    """api.env.example holds names and comments; the database URL, which has no secret, is the only
-    value."""
+    """The env examples hold names and comments; the database URLs and the vault directory, which
+    hold no secret, are the only values."""
     problems = []
-    for line in f["api.env.example"].splitlines():
-        if not line or line.startswith("#"):
-            continue
-        name, _, value = line.partition("=")
-        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name) or (value and line != f"MANDATE_API_DATABASE_URL={EXAMPLE_DB_URL}"):
-            problems.append(line)
+    for example in EXAMPLES:
+        for line in f[example].splitlines():
+            if not line or line.startswith("#"):
+                continue
+            name, _, value = line.partition("=")
+            if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name) or (value and value != EXAMPLE_VALUES.get(name)):
+                problems.append(f"{example}: {line}")
     return problems
 
 
@@ -116,10 +183,32 @@ def restore_checks_heads(f: dict[str, str]) -> list[str]:
 
 
 def backup_covers_state(f: dict[str, str]) -> list[str]:
-    """The nightly backup holds the database, the artifact store, and the vault."""
+    """The nightly backup holds the database, the artifact store, and the vault, and never
+    /etc/owlhead (OPS-1)."""
     text = f["backup.sh"]
-    missing = [part for part in ("pg_dump", "artifacts vault") if part not in text]
-    return [f"backup.sh misses {missing}"] if missing else []
+    problems = [f"backup.sh misses {part}" for part in ("pg_dump", '-czf "$DEST/state-$stamp.tar.gz.partial" artifacts vault') if part not in text]
+    code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    if any("/etc/owlhead" in line or "/etc" in line.split() for line in code):
+        problems.append("backup.sh copies /etc/owlhead")
+    return problems
+
+
+def secrets_never_reported(f: dict[str, str]) -> list[str]:
+    """set-secrets.sh reports an empty value by its name only, judged on the value itself: a
+    base64 value ends in `=`, so matching the line's last character would print a secret."""
+    text = f["set-secrets.sh"]
+    problems = []
+    if 'missing="$missing ${file##*/}:${line%%=*}"' not in text or 'if [ -z "${line#*=}" ]; then' not in text:
+        problems.append("set-secrets.sh does not report empty values by name, judged on the value")
+    shown = [
+        line
+        for line in text.splitlines()
+        if re.search(r"(echo|printf).*\$\{?(line|values|vault_key|session_key|client_secret|client_id|value)\b", line)
+        and not line.rstrip().endswith('>>"$rebuilt"')
+    ]
+    if shown:
+        problems.append(f"set-secrets.sh shows a line or a value: {shown}")
+    return problems
 
 
 def keys_pinned(f: dict[str, str]) -> list[str]:
@@ -135,7 +224,11 @@ def keys_pinned(f: dict[str, str]) -> list[str]:
 
 
 CHECKS = (
+    secrets_never_reported,
     keys_pinned,
+    executor_unit_hardened,
+    client_secret_executor_only,
+    vault_layout,
     strict_mode,
     env_files_private,
     api_unit_hardened,
@@ -154,9 +247,25 @@ def test_the_committed_files_hold(check):
 
 
 SEEDED = (
+    ("set-secrets.sh", 'if [ -z "${line#*=}" ]; then', 'if [ "${line: -1}" = "=" ]; then', secrets_never_reported),
+    ("set-secrets.sh", 'missing="$missing ${file##*/}:${line%%=*}"', 'missing="$missing ${file##*/}:${line}"', secrets_never_reported),
+    ("set-secrets.sh", "unset vault_key exec_key session_key", 'echo "key: $vault_key" >&2\nunset vault_key exec_key session_key', secrets_never_reported),
     ("install-cloudflared.sh", '"$found" != "$CLOUDFLARE_FINGERPRINT"', '"$found" = "$found"', keys_pinned),
     ("backup.sh", "set -euo pipefail\n", "set -eu\n", strict_mode),
-    ("bootstrap.sh", "/etc/owlhead/api.env 0600 root:root", "/etc/owlhead/api.env 0644 root:root", env_files_private),
+    ("bootstrap.sh", '"/etc/owlhead/$name.env" 0600 root:root', '"/etc/owlhead/$name.env" 0644 root:root', env_files_private),
+    ("set-secrets.sh", "install -o root -g root -m 0600", "install -o root -g root -m 0644", env_files_private),
+    ("systemd/owlhead-executor.service", "User=owlhead_exec", "User=owlhead_api", executor_unit_hardened),
+    ("systemd/owlhead-executor.service", "SocketBindDeny=any", "SocketBindAllow=tcp:9090\nSocketBindDeny=any", executor_unit_hardened),
+    ("systemd/owlhead-executor.service", "NoNewPrivileges=yes", "NoNewPrivileges=no", executor_unit_hardened),
+    ("systemd/owlhead-api.service", "UMask=0027", "StateDirectory=owlhead\nUMask=0027", api_unit_hardened),
+    ("api.env.example", "ALPACA_OAUTH_CLIENT_ID=\n", "ALPACA_OAUTH_CLIENT_ID=\nALPACA_OAUTH_CLIENT_SECRET=\n", client_secret_executor_only),
+    ("set-secrets.sh", '  ALPACA_OAUTH_CLIENT_ID "$client_id"\nfill "$EXEC_ENV"', '  ALPACA_OAUTH_CLIENT_ID "$client_id" ALPACA_OAUTH_CLIENT_SECRET "$client_secret"\nfill "$EXEC_ENV"', client_secret_executor_only),
+    ("bootstrap.sh", '-m 0730 "$VAULT/tokens"', '-m 0770 "$VAULT/tokens"', vault_layout),
+    ("bootstrap.sh", '-m 2770 "$VAULT/pending"', '-m 0770 "$VAULT/pending"', vault_layout),
+    ("bootstrap.sh", '-o "$EXEC_USER" -g "$API_USER" -m 0730', '-o "$API_USER" -g "$API_USER" -m 0730', vault_layout),
+    ("bootstrap.sh", "GRANT CONNECT ON DATABASE $DB TO $EXEC_USER;", "GRANT CONNECT ON DATABASE $DB TO $EXEC_USER;\nGRANT ALL ON SCHEMA journal TO $EXEC_USER;", api_role_minimal),
+    ("executor.env.example", "ALPACA_OAUTH_CLIENT_SECRET=\n", "ALPACA_OAUTH_CLIENT_SECRET=s3cr3t\n", example_names_only),
+    ("backup.sh", 'artifacts vault\n', 'artifacts vault /etc/owlhead\n', backup_covers_state),
     ("install-cloudflared.sh", '"$TOKEN_FILE" 0600 root:root', '"$TOKEN_FILE" 0640 root:root', env_files_private),
     ("systemd/owlhead-api.service", "--bind 127.0.0.1:8080", "--bind 0.0.0.0:8080", api_unit_hardened),
     ("systemd/owlhead-api.service", "NoNewPrivileges=yes", "NoNewPrivileges=no", api_unit_hardened),
@@ -167,9 +276,9 @@ SEEDED = (
     ("bootstrap.sh", "LOGIN IN ROLE mandate_journal_app", "LOGIN SUPERUSER IN ROLE mandate_journal_app", api_role_minimal),
     ("install-cloudflared.sh", "  unset token\n", '  echo "token: $token"\n  unset token\n', token_never_shown),
     ("install-cloudflared.sh", "  unset token\n", '  cloudflared service install "$token"\n  unset token\n', token_never_shown),
-    ("api.env.example", "ALPACA_OAUTH_CLIENT_SECRET=\n", "ALPACA_OAUTH_CLIENT_SECRET=s3cr3t\n", example_names_only),
+    ("api.env.example", "MANDATE_VAULT_KEY=\n", "MANDATE_VAULT_KEY=c2VjcmV0\n", example_names_only),
     ("restore-check.sh", '  check_head "$verified"', '  : "$verified"', restore_checks_heads),
-    ("backup.sh", "artifacts vault", "artifacts", backup_covers_state),
+    ("backup.sh", '"$DEST/state-$stamp.tar.gz.partial" artifacts vault', '"$DEST/state-$stamp.tar.gz.partial" artifacts', backup_covers_state),
 )
 
 
