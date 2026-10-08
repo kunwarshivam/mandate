@@ -66,7 +66,6 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("GoalCompleted", &[ACCT], &[MAN]),
     ("ClockAdvanced", &[ACCT, CLOCK], &[]),
     ("ObservationRecorded", &[AGENT], &[]),
-    ("ModelInvocationRecorded", &[AGENT], &[MOD]),
     ("ThesisProposed", &[AGENT], &[MAN, MOD]),
     ("ThesisRevised", &[AGENT], &[MAN, MOD]),
     ("ModelOutputRecorded", &[AGENT], &[MAN]),
@@ -164,6 +163,19 @@ const CLOSED_BY_SECTION_9_7: &[(&str, &str, &[&str])] = &[
     ("ApprovalResponseSubmitted", CTL, &[]),
     ("ApprovalResponded", AGENT, &[MAN]),
     ("ApprovalRevalidated", AGENT, &[MAN]),
+];
+
+/// The control-stream records journal spec v0.19 to v0.21 close (§9.8 to §9.10, DEC-670 to
+/// DEC-672), with the configuration each names. `ModelInvocationRecorded` is also catalogued on the
+/// agent stream, where it stays open, so it is kept out of [`SPEC`] until E10-15's implementation;
+/// `the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream` asserts what each
+/// becomes.
+const CLOSED_BY_E10_15: &[(&str, &[&str])] = &[
+    ("MandateDraftSaved", &[]),
+    ("ModelInvocationRecorded", &[MOD]),
+    ("OwnerRequestSubmitted", &[]),
+    ("ClientConnected", &[]),
+    ("ClientRevoked", &[]),
 ];
 
 /// The account stream's snapshot, which §9.2 closes with rule 24 and its registration routes there
@@ -1318,5 +1330,56 @@ fn the_approval_answers_are_catalogued_and_closed_on_their_streams() {
                 "{event_type} without {missing}"
             );
         }
+    }
+}
+
+/// §9.8 to §9.10's records are catalogued on the control stream with the configuration they name,
+/// and closed there: an unlisted member is refused `schema`, never `unknown_schema`. The compiler's
+/// record stays catalogued, and open, on the agent stream. `OwnerCommandIssued` is catalogued on the
+/// control stream too: a payload with no `command` is refused at that member, since §9.10 reads it
+/// for every command.
+#[test]
+#[ignore = "pending E10-15"]
+fn the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream() {
+    for (event_type, refs) in CLOSED_BY_E10_15 {
+        for kind in [ACCT, AGENT, CTL, CLOCK] {
+            let refused = Draft::parse(&draft(event_type, kind, refs)).unwrap_err();
+            let want = match kind {
+                CTL => (InvalidReason::Schema, "payload.unregistered".to_owned()),
+                AGENT if *event_type == "ModelInvocationRecorded" => {
+                    (InvalidReason::UnknownSchema, "payload".to_owned())
+                }
+                _ => (InvalidReason::WrongStream, "event_type".to_owned()),
+            };
+            assert_eq!(
+                (refused.reason, refused.path),
+                want,
+                "{event_type} in {kind}"
+            );
+        }
+        for missing in refs.iter() {
+            let refused = Draft::parse(&draft(event_type, CTL, &[])).unwrap_err();
+            assert_eq!(
+                (refused.reason, refused.path),
+                (
+                    InvalidReason::MissingConfigRef,
+                    format!("config_refs.{missing}")
+                ),
+                "{event_type} without {missing}"
+            );
+        }
+    }
+    for kind in [ACCT, AGENT, CTL, CLOCK] {
+        let refused = Draft::parse(&draft("OwnerCommandIssued", kind, &[])).unwrap_err();
+        let want = if kind == CTL {
+            (InvalidReason::Schema, "payload.command".to_owned())
+        } else {
+            (InvalidReason::WrongStream, "event_type".to_owned())
+        };
+        assert_eq!(
+            (refused.reason, refused.path),
+            want,
+            "OwnerCommandIssued in {kind}"
+        );
     }
 }
