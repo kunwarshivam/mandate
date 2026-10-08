@@ -20,7 +20,12 @@ Run from the repository root, in the reference environment (jsonschema 4.26.0, p
    - For a `$defs`-only schema: `{"<Def>": [instance, ...]}`.
    - Otherwise: `[{"label": ..., "set": {"<JSON pointer>": value}, "remove": ["<pointer>"]}]`.
      Each case is applied to a copy of the valid example.
-   A case the schema accepts is a failure, so each one shows the schema refuses what it names.
+   `set` on a pointer whose last key is absent adds that member. A case the schema accepts is a
+   failure, so each one shows the schema refuses what it names.
+4. Every case in `examples/<name>.valid.json`, in the same form as 3, must be accepted. These
+   cases guard against a schema that refuses what it should allow.
+
+A `$ref` that resolves to nothing is reported as a failure naming the schema.
 """
 
 import copy
@@ -30,6 +35,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
+from referencing.exceptions import Unresolvable
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / "schemas/workspace-api"
@@ -90,7 +96,11 @@ def main() -> int:
     def expect(valid: bool, v: Draft202012Validator, instance, label: str) -> None:
         nonlocal checked
         checked += 1
-        errors = list(v.iter_errors(instance))
+        try:
+            errors = list(v.iter_errors(instance))
+        except Unresolvable as error:
+            problems.append(f"{label}: unresolvable $ref {error.ref!r}")
+            return
         if valid and errors:
             problems.append(f"{label}: should be valid: {errors[0].message[:160]}")
         if not valid and not errors:
@@ -103,11 +113,13 @@ def main() -> int:
             continue
         stem = name.replace("/", ".")
         good_path, bad_path = EXAMPLES / f"{stem}.json", EXAMPLES / f"{stem}.invalid.json"
+        more_path = EXAMPLES / f"{stem}.valid.json"
         if not good_path.exists():
             problems.append(f"{name}: no example at {good_path.relative_to(ROOT)}")
             continue
         good = load(good_path)
         bad = load(bad_path) if bad_path.exists() else None
+        more = load(more_path) if more_path.exists() else None
         if defs_only(schema):
             for definition in schema["$defs"]:
                 if not good.get(definition):
@@ -115,17 +127,22 @@ def main() -> int:
             for definition, instances in good.items():
                 for i, instance in enumerate(instances):
                     expect(True, validator(schema, definition), instance, f"{name}#{definition}[{i}]")
+            for definition, instances in (more or {}).items():
+                for i, instance in enumerate(instances):
+                    expect(True, validator(schema, definition), instance, f"{name}#{definition} valid[{i}]")
             for definition, instances in (bad or {}).items():
                 for i, instance in enumerate(instances):
                     label = f"{name}#{definition} invalid[{i}]"
                     expect(False, validator(schema, definition), instance, label)
         else:
             expect(True, validator(schema), good, name)
+            for case in more or []:
+                expect(True, validator(schema), apply_case(good, case), f"{name}: {case['label']}")
             for case in bad or []:
                 expect(False, validator(schema), apply_case(good, case), f"{name}: {case['label']}")
 
     for path in sorted(EXAMPLES.glob("*.json")):
-        stem = path.name.removesuffix(".json").removesuffix(".invalid")
+        stem = path.name.removesuffix(".json").removesuffix(".invalid").removesuffix(".valid")
         if stem.replace(".", "/") not in schemas:
             problems.append(f"{path.relative_to(ROOT)}: no schema for this example")
 
