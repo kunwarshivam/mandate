@@ -32,8 +32,8 @@
 //! reach the journal or the control-stream writer (NT-3 at rung 1). It is pure: the random source
 //! is passed in, and the dispatcher (E8-10) supplies the operating system's.
 //!
-//! Every entry point returns a `Result` whose [`NotifyError::Unimplemented`] is the tests PR's stub
-//! (DEC-77).
+//! Every entry point is implemented. Those whose answer is total keep the tests PR's `Result`
+//! (DEC-77), so a caller already handles the error an entry point may one day need.
 
 mod kind;
 mod payload;
@@ -44,7 +44,7 @@ pub use payload::{NoticeId, Notification, Origin, SecureRandom, link, payload};
 /// Every way an entry point can refuse to answer. None of them is ever a reason to send more.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NotifyError {
-    /// The body of every stub in the tests PR (DEC-77).
+    /// The body of every stub in a tests PR (DEC-77); no implemented entry point returns it.
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
     /// The random source could not fill an id. No notice id is minted, and nothing falls back to a

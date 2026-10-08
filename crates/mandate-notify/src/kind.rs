@@ -20,7 +20,11 @@ impl Class {
     /// # Errors
     /// Never once implemented: every class has a key.
     pub fn key(self) -> Result<&'static str, NotifyError> {
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(match self {
+            Self::Action => "action",
+            Self::Safety => "safety",
+            Self::Info => "info",
+        })
     }
 }
 
@@ -48,7 +52,12 @@ impl TextKey {
     /// # Errors
     /// Never once implemented.
     pub fn key(self) -> Result<&'static str, NotifyError> {
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(match self {
+            Self::ApprovalNeeded => "approval_needed",
+            Self::AttentionNeeded => "attention_needed",
+            Self::AccountChanged => "account_changed",
+            Self::BriefReady => "brief_ready",
+        })
     }
 
     /// The fixed English text every channel renders (spec §4.2).
@@ -56,7 +65,12 @@ impl TextKey {
     /// # Errors
     /// Never once implemented.
     pub fn text(self) -> Result<&'static str, NotifyError> {
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(match self {
+            Self::ApprovalNeeded => "An agent in your workspace needs your approval",
+            Self::AttentionNeeded => "Your workspace has a new alert",
+            Self::AccountChanged => "There was a change to your account or workspace access",
+            Self::BriefReady => "Your daily brief is ready",
+        })
     }
 }
 
@@ -116,13 +130,50 @@ impl NoticeKind {
     /// # Errors
     /// Never once implemented.
     pub fn key(self) -> Result<&'static str, NotifyError> {
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(match self {
+            Self::ApprovalRequested => "approval_requested",
+            Self::ApprovalReminder => "approval_reminder",
+            Self::RiskLimit => "risk_limit",
+            Self::KillSwitch => "kill_switch",
+            Self::AgentHeld => "agent_held",
+            Self::AccountRestriction => "account_restriction",
+            Self::Protection => "protection",
+            Self::ExitStalled => "exit_stalled",
+            Self::Reconciliation => "reconciliation",
+            Self::ExternalActivity => "external_activity",
+            Self::AccountState => "account_state",
+            Self::DataFeedDown => "data_feed_down",
+            Self::IntegrityIncident => "integrity_incident",
+            Self::CredentialAdded => "credential_added",
+            Self::NewDevice => "new_device",
+            Self::RecoveryUsed => "recovery_used",
+            Self::RoleGranted => "role_granted",
+            Self::MemberDeactivated => "member_deactivated",
+            Self::Deprovisioned => "deprovisioned",
+            Self::BreakGlass => "break_glass",
+            Self::VersionRiskIncreasing => "version_risk_increasing",
+            Self::DelegationAdded => "delegation_added",
+            Self::ConnectionAdded => "connection_added",
+            Self::WentLive => "went_live",
+            Self::ClientConnected => "client_connected",
+            Self::ChannelLost => "channel_lost",
+            Self::DailyBrief => "daily_brief",
+            Self::DelegationEnded => "delegation_ended",
+            Self::ModelStatus => "model_status",
+            Self::ResearchStatus => "research_status",
+            Self::SpendCap => "spend_cap",
+            Self::ApprovalClosed => "approval_closed",
+        })
     }
 
     /// # Errors
     /// Never once implemented.
     pub fn class(self) -> Result<Class, NotifyError> {
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(match self.text_key()? {
+            Some(TextKey::ApprovalNeeded) => Class::Action,
+            Some(TextKey::AttentionNeeded | TextKey::AccountChanged) => Class::Safety,
+            Some(TextKey::BriefReady) | None => Class::Info,
+        })
     }
 
     /// The text a push carries, or `None` for an `info` kind that goes only to the pull channels
@@ -131,6 +182,38 @@ impl NoticeKind {
     /// # Errors
     /// Never once implemented.
     pub fn text_key(self) -> Result<Option<TextKey>, NotifyError> {
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(match self {
+            Self::ApprovalRequested | Self::ApprovalReminder => Some(TextKey::ApprovalNeeded),
+            Self::RiskLimit
+            | Self::KillSwitch
+            | Self::AgentHeld
+            | Self::AccountRestriction
+            | Self::Protection
+            | Self::ExitStalled
+            | Self::Reconciliation
+            | Self::ExternalActivity
+            | Self::AccountState
+            | Self::DataFeedDown
+            | Self::IntegrityIncident => Some(TextKey::AttentionNeeded),
+            Self::CredentialAdded
+            | Self::NewDevice
+            | Self::RecoveryUsed
+            | Self::RoleGranted
+            | Self::MemberDeactivated
+            | Self::Deprovisioned
+            | Self::BreakGlass
+            | Self::VersionRiskIncreasing
+            | Self::DelegationAdded
+            | Self::ConnectionAdded
+            | Self::WentLive
+            | Self::ClientConnected
+            | Self::ChannelLost => Some(TextKey::AccountChanged),
+            Self::DailyBrief => Some(TextKey::BriefReady),
+            Self::DelegationEnded
+            | Self::ModelStatus
+            | Self::ResearchStatus
+            | Self::SpendCap
+            | Self::ApprovalClosed => None,
+        })
     }
 }

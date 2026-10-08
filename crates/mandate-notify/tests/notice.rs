@@ -45,7 +45,6 @@ fn ulid_bits(ulid: &str) -> [u8; 16] {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn a_notice_id_is_the_random_sources_bits_in_lowercase_hex() {
     let mut random = Recording::seeded(7);
     let notice = answer("mint", NoticeId::mint(&mut random));
@@ -54,7 +53,6 @@ fn a_notice_id_is_the_random_sources_bits_in_lowercase_hex() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn a_failing_random_source_mints_no_notice() {
     assert_eq!(
         NoticeId::mint(&mut Broken),
@@ -65,7 +63,6 @@ fn a_failing_random_source_mints_no_notice() {
 /// DEC-702 item 2: an id is written as its source's bits in 32 lowercase hex digits, text reads
 /// back only in that form, and the id it gives is the one that was minted.
 #[test]
-#[ignore = "pending E8-9"]
 fn a_notice_id_round_trips_only_through_32_lowercase_hex() {
     let mut random = Recording::seeded(21);
     let minted = answer("mint", NoticeId::mint(&mut random));
@@ -98,7 +95,6 @@ proptest! {
     /// NT-4: notices about one cause never share an id, and no id is, or parses as, a journaled
     /// event's ULID.
     #[test]
-    #[ignore = "pending E8-9"]
     fn notices_about_one_cause_differ_and_none_is_an_event_id(
         seed in any::<u64>(),
         count in 2usize..8,
