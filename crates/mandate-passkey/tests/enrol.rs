@@ -10,7 +10,8 @@ use common::{
 };
 use mandate_passkey::{Credential, Refusal, enrol};
 
-const CHALLENGE: [u8; 32] = [0x5a; 32];
+/// Encodes to `-_v7` repeated, so the standard alphabet and the URL-safe one differ.
+const CHALLENGE: [u8; 32] = [0xfb; 32];
 
 fn enrol_with(registration: &OwnedRegistration) -> Result<Credential, Refusal> {
     enrol(&rp(), &challenge(&CHALLENGE), &registration.view())
@@ -54,8 +55,14 @@ fn a_get_ceremony_is_not_an_enrolment() {
 #[test]
 #[ignore = "pending E9-1"]
 fn another_challenge_is_refused() {
-    let result = refused(|c| c.challenge = common::b64url(&[0x5b; 32]));
-    assert_eq!(result, Err(Refusal::ChallengeMismatch));
+    let padded = format!("{}=", common::b64url(&CHALLENGE));
+    let standard_alphabet = common::b64url(&CHALLENGE)
+        .replace('-', "+")
+        .replace('_', "/");
+    for encoded in [common::b64url(&[0xfc; 32]), padded, standard_alphabet] {
+        let result = refused(|c| c.challenge = encoded.clone());
+        assert_eq!(result, Err(Refusal::ChallengeMismatch), "{encoded}");
+    }
 }
 
 #[test]
@@ -69,6 +76,8 @@ fn an_origin_that_only_shares_the_prefix_is_refused() {
         "https://api.owlhead.ai",
         "https://evil.owlhead.ai",
         "https://owlhead.ai",
+        "https://app.owlhead.ai:443",
+        "HTTPS://APP.OWLHEAD.AI",
     ] {
         let result = refused(|c| c.origin = origin.to_owned());
         assert_eq!(result, Err(Refusal::OriginMismatch), "{origin}");
@@ -169,6 +178,10 @@ fn only_none_attestation_with_an_empty_statement_is_accepted() {
         enrol_with(&with("none", signed)),
         Err(Refusal::AttestationFormat)
     );
+    for fmt in ["packed", "fido-u2f"] {
+        let result = enrol_with(&with(fmt, cbor_map(&[])));
+        assert_eq!(result, Err(Refusal::AttestationFormat), "{fmt}");
+    }
 }
 
 #[test]
