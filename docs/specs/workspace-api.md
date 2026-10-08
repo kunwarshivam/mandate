@@ -235,6 +235,10 @@ Errors are RFC 9457 problem documents with these members:
 | `rate_limited` | 429 | Over the principal's limit; never for an API-7 operation |
 | `address_limit` | 409 | **(planned: E8-14)** A member already holds 10 notification addresses on the channel (§4.10). `effect: none`, `retryable: false`; title "Too many notification addresses". An endpoint already held is not an error: §5.7 answers `200` |
 
+Success is not only `202`: a command that records a change answers `202` with `phase: "recorded"`,
+and one whose change is already recorded answers `200` with that record and appends nothing, as
+ending an already-ended delegation and §5.7's notification addresses do.
+
 ### 3.6 Step-up
 
 The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
@@ -819,7 +823,8 @@ put) is repaired by step 6; if step 6 also fails, the dispatcher finds the entry
 1. Check the session and CSRF. Derive the event id and look it up (§3.4): an event with the same
    members returns its original outcome, without judging the step-up again.
 2. Check that the `address_ref` is the member's own and exists (otherwise 404, the same answer as
-   for a random id) and is active (otherwise `200`).
+   for a random id), and only then that it is active (otherwise `200`), so the `200` for an
+   already-removed address is never given for a foreign one.
 3. Check the step-up evidence.
 4. Append the batch with the expected head. From then on the dispatcher sends nothing to the
    address but the one last `notification_address_changed` notice about this removal
