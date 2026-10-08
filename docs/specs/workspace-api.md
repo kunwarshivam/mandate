@@ -538,20 +538,25 @@ like any other change.
 member's address, and a client, a service account, the host CLI, and a platform operator have none
 (API-6). The identity spec §4.2 row "Add or remove one's own notification address (a push
 subscription; later an email or chat address)" authorizes setting and removing: **S** for both,
-`self` (principal scope, a full user session) for every human role. The row "List one's own
-notification addresses (opaque references only)", `self` without **S**, authorizes the listing.
-Both are in [identity spec v0.3, #811](https://github.com/kunwarshivam/mandate/pull/811) (DEC-816
-item 2), which also prints them in §3.7 and the step-up kind `notification_address` in §3.6.
+`own` in the five workspace columns (workspace admin, operator, approver, viewer, auditor), at this
+workspace's scope through a membership that reaches it, and blank everywhere else. The row "List
+one's own notification addresses (opaque references only)", `own` in the same columns without
+**S**, authorizes the listing. Both are in identity spec §4.2 ([#811](https://github.com/kunwarshivam/mandate/pull/811),
+DEC-816 item 2), which also prints them in §3.7 and the step-up kind `notification_address` in §3.6.
+Addresses belong to the workspace: each workspace's addresses live in its own vault namespace
+(identity spec §9.1), and a member who belongs to two workspaces sets one in each.
 Holding an address grants nothing: what a member receives stays the receive column's (identity
 spec §4.1).
 
-**Deactivation.** When a member is deactivated or removed, workspace services append a `removed`
-`NotificationAddressChanged` for each of their active addresses inside the deactivation's own
-commit, all or nothing, with the `system` actor, `null` step-up evidence (the journal row for
-`NotificationAddressChanged` allows it for the `system` actor only), and no `OwnerAlertSent`: the
-dispatcher sends them nothing more (identity spec §5.2, which states it), and the workspace admins
-get `member_deactivated` (notifications spec §3.2). The vault entries are then swept as for any
-removal.
+**Deactivation.** When a deactivation or removal ends a member's membership in this workspace,
+workspace services append a `removed` `NotificationAddressChanged` for each of the member's active
+addresses in this workspace inside the deactivation's own commit, all or nothing (identity spec
+§5.2 step 2, [#811](https://github.com/kunwarshivam/mandate/pull/811), DEC-816 item 7). Each carries
+the authenticated principal who acted, the admin or the member who left (DEC-642, identity spec
+§4.5), `null` step-up evidence, which the journal row allows only for a `removed` inside a
+deactivation or removal commit, and no `OwnerAlertSent`. The dispatcher sends them nothing more, the
+workspace admins get `member_deactivated` (notifications spec §3.2), and the vault entries are then
+swept as for any removal.
 
 ---
 
@@ -959,7 +964,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Journal queries, trace, exports over the API | **Planned** (E12-6) |
 | Journal events this spec needs (`MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, `OwnerRequestSubmitted`, `hold_openings`, client events) | **Planned** (E10-15, journal spec change first) |
 | Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
-| Notification addresses (§4.10, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14). Mounted once the API's authentication middleware lands and the journal spec change for §9.11's notification records adds the event. The push-service allowlist's decision is DEC-792 (this spec change, #827); the web client's mirror of its table is #833, which merges after #827. Accepted when: a canary scan of responses, problems, logs, metrics and the journal finds no endpoint, key, or endpoint hash; the append is failed at every step of §5.7's tables (API-3's test) and crash injection gives each stated outcome; a replay after a lost `202` returns it; a same-key retry with a different body is `idempotency_conflict`; a retry racing the sweep ends with the entry present or `address_missing` recorded; inert and removed entries neither match an endpoint nor count to the limit; two concurrent PUTs of one endpoint, an eleventh address, and a double removal are each settled by the expected head; a PUT of an unreachable address's endpoint replaces it in one batch with no last send to the old address; a PUT of a held endpoint puts its entry back; a stream busy for 5 attempts answers `journal_unavailable` without a second vault write or step-up judgment; deactivation removes every address in its own commit; a foreign `address_ref` answers byte-for-byte as a random one; the shared allowlist table (DEC-792) passes; and a replayed or wrongly bound step-up is refused |
+| Notification addresses (§4.10, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14). Mounted once the API's authentication middleware lands and the journal spec change for §9.11's notification records adds the event. The push-service allowlist's decision is DEC-792 (this spec change, #827); the web client's mirror of its table is #833, which merges after #827. Accepted when: a canary scan of responses, problems, logs, metrics and the journal finds no endpoint, key, or endpoint hash; the append is failed at every step of §5.7's tables (API-3's test) and crash injection gives each stated outcome; a replay after a lost `202` returns it; a same-key retry with a different body is `idempotency_conflict`; a retry racing the sweep ends with the entry present or `address_missing` recorded; inert and removed entries neither match an endpoint nor count to the limit; two concurrent PUTs of one endpoint, an eleventh address, and a double removal are each settled by the expected head; a PUT of an unreachable address's endpoint replaces it in one batch with no last send to the old address; a PUT of a held endpoint puts its entry back; a stream busy for 5 attempts answers `journal_unavailable` without a second vault write or step-up judgment; deactivation removes every address in its own commit, under the acting principal; a foreign `address_ref` answers byte-for-byte as a random one; the shared allowlist table (DEC-792) passes; and a replayed or wrongly bound step-up is refused |
 | The relay's own allowlist check (DEC-792 item 3) | **Planned** (E20-8) |
 
 ---
