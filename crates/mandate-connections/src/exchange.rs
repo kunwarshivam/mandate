@@ -1,0 +1,86 @@
+//! The code exchange (connections spec §5.2 step 4). **The connection's executor process
+//! only**: it is the one process with the client secret and the live-host token endpoint.
+
+use std::fmt;
+
+use secrecy::SecretString;
+
+use crate::ConnectError;
+use crate::grant::GrantedScopes;
+use crate::hosts::LiveTokenRequest;
+use crate::start::{ClientId, Environment};
+use crate::vault::{AccessToken, AuthorizationCode, Vault, VaultKey};
+
+/// The platform's OAuth client secret (infrastructure §5.1).
+pub struct ClientSecret(pub SecretString);
+
+impl fmt::Debug for ClientSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ClientSecret(redacted)")
+    }
+}
+
+/// The form body of the exchange: `grant_type=authorization_code`, the code, the client id and
+/// secret, and the redirect URI of the authorization request.
+pub struct ExchangeForm<'a> {
+    pub code: &'a AuthorizationCode,
+    pub client_id: &'a ClientId,
+    pub client_secret: &'a ClientSecret,
+    pub redirect_uri: &'a str,
+}
+
+/// The token response's members (Alpaca: `access_token`, `token_type`, `scope`).
+#[derive(Debug)]
+pub struct TokenResponse {
+    pub access_token: AccessToken,
+    pub token_type: String,
+    pub scope: String,
+}
+
+/// Sends the one live-host request. The adapter implementing it receives a
+/// [`LiveTokenRequest`], so it has no URL of its own to choose.
+pub trait TokenEndpoint {
+    fn post(
+        &mut self,
+        request: LiveTokenRequest,
+        form: &ExchangeForm<'_>,
+    ) -> Result<TokenResponse, ConnectError>;
+}
+
+/// A connection the callback accepted and whose code waits in the vault.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingConnect {
+    pub connection_id: String,
+    pub environment: Environment,
+    pub vault_key: VaultKey,
+}
+
+/// What the permission checks (E7-12) receive. It carries no secret: the token stays in the
+/// vault under `vault_key`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExchangedGrant {
+    pub connection_id: String,
+    pub environment: Environment,
+    pub scopes: GrantedScopes,
+    pub vault_key: VaultKey,
+}
+
+/// Exchanges the waiting code for a token, in this order:
+///
+/// 1. A connection that is not paper is refused before the vault or the endpoint is touched
+///    (DEC-821 item 3).
+/// 2. The code is taken from the vault, so it is never used twice.
+/// 3. The endpoint receives the [`LiveTokenRequest`] and the form.
+/// 4. The token type must be `bearer` and the scope must pass [`crate::grant::check_scope`].
+///    On any refusal the token is dropped unstored and the vault entry is deleted.
+/// 5. The token is stored in the vault, and the grant, without it, is returned.
+pub fn exchange_code(
+    pending: &PendingConnect,
+    client_id: &ClientId,
+    client_secret: &ClientSecret,
+    vault: &mut impl Vault,
+    endpoint: &mut impl TokenEndpoint,
+) -> Result<ExchangedGrant, ConnectError> {
+    let _ = (pending, client_id, client_secret, vault, endpoint);
+    Err(ConnectError::Unimplemented { story: "E10-13" })
+}
