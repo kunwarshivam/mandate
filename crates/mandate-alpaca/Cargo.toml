@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 mandate-accounting.workspace = true
 mandate-canon.workspace = true
+mandate-domain.workspace = true
 mandate-executor.workspace = true
 mandate-num.workspace = true
 mandate-time.workspace = true

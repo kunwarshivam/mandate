@@ -2102,9 +2102,9 @@ proptest! {
     /// (`cancel_overdue`, DEC-160 (7), (13), (18)), and an exit never waits twice on the same
     /// submission of an opening: once that opening's wait went overdue, even before its cancel
     /// could be asked (an unacknowledged opening is queried, never cancelled blind), a cancel asked
-    /// later for the same submission holds no sell; a resubmission starts the wait afresh. And an
-    /// entry that turns terminal partly
-    /// filled, "after that cancel or by any other path", gets its OCO for the filled quantity
+    /// later for the same submission holds no sell; a resubmission starts the wait afresh (DEC-532
+    /// item 3). And an entry that turns terminal partly filled, "after that cancel or by any other
+    /// path", gets its OCO for the filled quantity
     /// (DEC-346 item 6), so a protective submission does not wait on any buy's cancel, plain or
     /// bracket (DEC-521 item 2). A plain buy that fills only adds to the position. A bracket
     /// entry's legs are held until it is completely filled and are sized to its quantity (§5.4),

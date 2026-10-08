@@ -19,8 +19,8 @@ use mandate_liquidity::{
 use mandate_num::{Price, Qty, Usd};
 use mandate_time::UtcNanos;
 
+use super::absent;
 use super::artifacts::Artifacts;
-use super::{SYMBOL, absent};
 use crate::adapters::{trusted_daily_bars, untrusted};
 use crate::error::Cause;
 
@@ -152,11 +152,10 @@ pub fn liquidity_facts(
     minute_bars: &MinuteBars,
     now: UtcNanos,
 ) -> Result<LiquidityFacts, Cause> {
-    let _ = symbol;
-    if minute_bars.instrument.as_str() != SYMBOL {
+    if minute_bars.instrument != *symbol {
         return Err(absent("the instrument's minute bars"));
     }
-    let daily: Vec<DailyBar> = trusted_daily_bars(daily, SYMBOL, now)?
+    let daily: Vec<DailyBar> = trusted_daily_bars(daily, symbol.as_str(), now)?
         .iter()
         .map(|bar| -> Result<DailyBar, LiquidityError> {
             Ok(DailyBar {
