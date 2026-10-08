@@ -223,6 +223,48 @@ fn build_ref() -> String {
 pub(crate) struct Shape {
     pub(crate) schema_version: u64,
     pub(crate) artifact_refs: Vec<String>,
+    /// The system actor that writes the event, or `None` for the owner.
+    pub(crate) system: Option<&'static str>,
+}
+
+/// Commits `ctl:{workspace}`'s `StreamOpened` in the owner's environment, as the vectors'
+/// `control_services` opener (DEC-527 item 7), its id derived at head 0 (DEC-290).
+///
+/// # Errors
+/// As [`commit`].
+pub(crate) fn open_control_stream(
+    journal: &mut dyn ControlJournal,
+    owner: &Owner,
+    now: Now,
+) -> Result<Submitted, ControlError> {
+    let stream = control_stream(owner)?;
+    let payload = object(vec![
+        ("stream_type", text("control")),
+        ("workspace_id", text(&owner.workspace)),
+    ])?;
+    let event_id = derive(&stream, "StreamOpened", &payload, false, 0)?;
+    let shape = Shape {
+        schema_version: 1,
+        artifact_refs: Vec::new(),
+        system: Some("control_services"),
+    };
+    let bytes = draft(
+        owner,
+        &stream,
+        &event_id,
+        "StreamOpened",
+        shape,
+        payload,
+        now,
+    )?;
+    settle(
+        journal,
+        &stream,
+        event_id,
+        Repeat::FindsEarlier,
+        &bytes,
+        now,
+    )
 }
 
 /// A schema version as the canonical integer the envelope carries.
@@ -252,8 +294,15 @@ fn draft(
             "actor",
             object(vec![
                 ("build", text(&build_ref())),
-                ("id", text(&owner.user)),
-                ("kind", text("user")),
+                ("id", text(shape.system.unwrap_or(&owner.user))),
+                (
+                    "kind",
+                    text(if shape.system.is_some() {
+                        "system"
+                    } else {
+                        "user"
+                    }),
+                ),
                 ("version", text(env!("CARGO_PKG_VERSION"))),
             ])?,
         ),
@@ -578,6 +627,7 @@ pub(crate) fn commit(
     let shape = Shape {
         schema_version: 1,
         artifact_refs: Vec::new(),
+        system: None,
     };
     let bytes = draft(owner, &stream, &event_id, event_type, shape, payload, now)?;
     settle(journal, &stream, event_id, repeat, &bytes, now)

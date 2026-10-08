@@ -120,7 +120,6 @@ fn refusals_without_a_database(tag: &str) {
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn a_bad_workspace_or_an_unreachable_journal_is_refused_without_a_database() {
     refusals_without_a_database("refusals");
 }
@@ -205,7 +204,6 @@ const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at
 /// `workspace_already_open`, with nothing printed, appended, or created. A second workspace opens
 /// its own stream, and D1b's `config register` appends to the opened one.
 #[test]
-#[ignore = "pending E10-16"]
 fn the_binary_opens_the_control_stream_once() {
     refusals_without_a_database("binary");
     let Some(db) = TestDb::new() else {
