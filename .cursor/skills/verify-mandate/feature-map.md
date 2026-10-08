@@ -318,7 +318,9 @@ crates.
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
   `src/bin/mandate-tracer.rs` the binary; `src/control.rs` the deployment input from the control
   stream (E19-11, DEC-505; tests in `crates/mandate-shell/tests/control.rs`) and the effective
-  registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`);
+  registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`),
+  and the policy set and model registry that govern the run, DEC-534 (tests in
+  `crates/mandate-shell/tests/governance.rs`);
   `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed E7-7 AAPL artifacts and
   binds the bytes it checked, reads the GET-only broker preflight (including the trailing window's
   IEX minute bars, DEC-471) and the liquidity facts into one `PaperFacts` snapshot, refuses any
