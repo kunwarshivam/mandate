@@ -227,6 +227,7 @@ fn a_version_is_its_stored_document_created_with_every_path_user_entered() {
 fn a_confirmation_is_one_event_bound_to_the_version_shown_that_the_spec_fold_reads() {
     let mut world = World::new();
     world.run(Do::Create("v1")).unwrap();
+    world.seed("ConnectionRevoked", &REVOKED.replace("_01", "_02"));
     let before = world.appends();
     let first = world.run(Do::Confirm("v1", None)).unwrap();
     world.committed("MandateConfirmed", CONFIRMED, CONFIRMATION_RECORD);
