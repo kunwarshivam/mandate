@@ -1,9 +1,13 @@
 [
-  {"label": "valid with a violation", "set": {"/violations": [{"kind": "rule", "code": "V-002", "path": "/capital/allocation_usd", "message": "Over the account's equity."}]}},
+  {"label": "valid with a violation", "set": {"/violations": [{"kind": "rule", "path": "/capital/allocation_usd", "code": "V-002", "message": "Other agents' allocations plus this one exceed the account's equity."}]}},
   {"label": "invalid with no violation", "set": {"/valid": false}},
   {"label": "an unknown warning code", "set": {"/warnings/0/code": "W-004"}},
   {"label": "a warning without its code", "remove": ["/warnings/0/code"]},
-  {"label": "a policy violation without its nearest ancestor (§4.3)", "set": {"/valid": false, "/violations": [{"kind": "policy", "key": "max_daily_loss", "level": "mandate", "value": "0.05", "path": "/risk/max_daily_loss", "message": "Too high."}]}},
-  {"label": "an untagged violation", "set": {"/valid": false, "/violations": [{"code": "V-002", "path": null, "message": "x"}]}},
-  {"label": "a policy value as a JSON float", "set": {"/valid": false, "/violations": [{"kind": "policy", "key": "max_daily_loss", "level": "mandate", "value": 0.05, "ancestor_level": "workspace", "ancestor_value": "0.03", "path": null, "message": "x"}]}}
+  {"label": "a policy violation without its ancestor level (§4.3)", "set": {"/valid": false, "/violations": [{"kind": "policy", "path": "/risk/max_daily_loss", "key": "max_daily_loss", "level": "mandate", "value": "0.05", "ancestor_value": "0.03", "message": "The daily loss limit is above the workspace's limit of 3%."}]}},
+  {"label": "a policy violation without its ancestor value (§4.3)", "set": {"/valid": false, "/violations": [{"kind": "policy", "path": "/risk/max_daily_loss", "key": "max_daily_loss", "level": "mandate", "value": "0.05", "ancestor_level": "workspace", "message": "The daily loss limit is above the workspace's limit of 3%."}]}},
+  {"label": "an untagged violation", "set": {"/valid": false, "/violations": [{"path": "/capital/allocation_usd", "code": "V-002", "message": "Other agents' allocations plus this one exceed the account's equity."}]}},
+  {"label": "a policy value as a JSON float", "set": {"/valid": false, "/violations": [{"kind": "policy", "path": "/risk/max_daily_loss", "key": "max_daily_loss", "level": "mandate", "value": 0.05, "ancestor_level": "workspace", "ancestor_value": "0.03", "message": "The daily loss limit is above the workspace's limit of 3%."}]}},
+  {"label": "a V-code in the wrong form", "set": {"/valid": false, "/violations": [{"kind": "rule", "path": "/capital/allocation_usd", "code": "V2", "message": "Other agents' allocations plus this one exceed the account's equity."}]}},
+  {"label": "a policy violation at the platform level", "set": {"/valid": false, "/violations": [{"kind": "policy", "path": "/risk/max_daily_loss", "key": "max_daily_loss", "level": "platform", "value": "0.05", "ancestor_level": "workspace", "ancestor_value": "0.03", "message": "The daily loss limit is above the workspace's limit of 3%."}]}},
+  {"label": "a violation with a null path", "set": {"/valid": false, "/violations": [{"kind": "rule", "path": null, "code": "V-002", "message": "Other agents' allocations plus this one exceed the account's equity."}]}}
 ]

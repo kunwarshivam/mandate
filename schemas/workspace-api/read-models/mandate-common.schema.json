@@ -89,38 +89,6 @@
         "message": { "type": "string", "minLength": 1 }
       }
     },
-    "PolicyLevel": { "enum": ["platform", "organization", "workspace", "mandate"] },
-    "Violation": {
-      "description": "A4: a violated V-rule, or a policy key whose value breaks its nearest ancestor (mandate spec §4.3). `message` is deterministic text.",
-      "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["kind", "code", "path", "message"],
-          "properties": {
-            "kind": { "const": "rule" },
-            "code": { "type": "string", "pattern": "^V-0[0-9]{2}$" },
-            "path": { "oneOf": [{ "$ref": "#/$defs/Pointer" }, { "type": "null" }] },
-            "message": { "type": "string", "minLength": 1 }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["kind", "key", "level", "value", "ancestor_level", "ancestor_value", "path", "message"],
-          "properties": {
-            "kind": { "const": "policy" },
-            "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
-            "level": { "enum": ["organization", "workspace", "mandate"] },
-            "value": { "type": ["string", "integer", "boolean"] },
-            "ancestor_level": { "enum": ["platform", "organization", "workspace"] },
-            "ancestor_value": { "type": ["string", "integer", "boolean"] },
-            "path": { "oneOf": [{ "$ref": "#/$defs/Pointer" }, { "type": "null" }] },
-            "message": { "type": "string", "minLength": 1 }
-          }
-        }
-      ]
-    },
     "WorstCase": {
       "description": "Mandate spec §4.2's dollar figures: one position's loss at its stop, the daily loss budget, the loss at which the agent flattens (max_drawdown × A), and the lifetime floor loss. Gaps and exit pricing can exceed each; the screen says so.",
       "type": "object",

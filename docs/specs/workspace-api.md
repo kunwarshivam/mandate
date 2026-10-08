@@ -589,7 +589,7 @@ commands.
 | Route (§4.1) | Schema (`read-models/`) |
 |---|---|
 | `GET /mandate-drafts/{id}` | `mandate-draft.schema.json`: the document as saved, each path's provenance, the `etag` for `If-Match`, the compiler's state, and the constraints flagged not enforced |
-| `POST /mandate-drafts/{id}/validate` (result) | `mandate-validation.schema.json`: violations (a V-rule, or a policy key with its value and the nearest ancestor it breaks) and warnings with their codes |
+| `POST /mandate-drafts/{id}/validate` (result) | `mandate-validation.schema.json`: violations as the envelope's shared `Violation` (a schema finding, a V-rule, or a policy key with its value and the nearest ancestor it breaks, §3.5) and warnings with their codes |
 | `GET /mandate-versions/{hash}` | `mandate-version.schema.json`: the canonical document and its `MandateVersionCreated` and `MandateConfirmed` records |
 | `GET /mandate-versions/{hash}/diff` | `mandate-diff.schema.json`: each changed path with its classification, the version's classification, and when it applies |
 | `GET /mandate-versions/{hash}/confirmation` | `mandate-confirmation.schema.json`: provenance, warnings, worst-case figures, the unasked dollars, the crypto gap disclosure, the research-agent statement, the constraints not enforced, and `screen_digest` |

@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/mandate-validation.schema.json",
   "title": "POST /mandate-drafts/{id}/validate (result)",
-  "description": "A4: every violated V-rule and policy limit (a policy violation names the key, the value, and the nearest ancestor it breaks, mandate spec §4.3), and every warning with its code to acknowledge one by one (§4.2). It writes nothing. A draft is valid exactly when nothing is violated. docs/specs/workspace-api.md §4.1, §4.10 (DEC-742).",
+  "description": "A4: every violation, as the envelope's shared Violation (a schema finding, a V-rule, or a policy key naming its value and the nearest ancestor it breaks, mandate spec §4.3), and every warning with its code to acknowledge one by one (§4.2). It writes nothing. A draft is valid exactly when nothing is violated. docs/specs/workspace-api.md §4.1, §4.10 (DEC-742).",
   "type": "object",
   "required": ["draft_id", "etag", "valid", "violations", "warnings"],
   "properties": {
     "draft_id": { "$ref": "../common.schema.json#/$defs/Id" },
     "etag": { "$ref": "../common.schema.json#/$defs/Id" },
     "valid": { "type": "boolean" },
-    "violations": { "type": "array", "items": { "$ref": "mandate-common.schema.json#/$defs/Violation" } },
+    "violations": { "type": "array", "items": { "$ref": "../envelope.schema.json#/$defs/Violation" } },
     "warnings": { "type": "array", "items": { "$ref": "mandate-common.schema.json#/$defs/Warning" } }
   },
   "unevaluatedProperties": false,

@@ -49,25 +49,6 @@
       "message": "One full position's loss at its stop ($850.00) is more than the daily loss budget ($200.00)."
     }
   ],
-  "PolicyLevel": ["workspace"],
-  "Violation": [
-    {
-      "kind": "rule",
-      "code": "V-002",
-      "path": "/capital/allocation_usd",
-      "message": "Other agents' allocations plus this one exceed the account's equity."
-    },
-    {
-      "kind": "policy",
-      "key": "max_daily_loss",
-      "level": "mandate",
-      "value": "0.05",
-      "ancestor_level": "workspace",
-      "ancestor_value": "0.03",
-      "path": "/risk/max_daily_loss",
-      "message": "The daily loss limit is above the workspace's limit of 3%."
-    }
-  ],
   "WorstCase": [
     {
       "position_loss_at_stop_usd": "850",
