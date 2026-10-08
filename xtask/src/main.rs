@@ -700,6 +700,10 @@ struct CratePolicy {
     pure: bool,
     #[serde(default)]
     allowed_external: Vec<String>,
+    /// Workspace crates this crate may never reach, directly or through any chain of path
+    /// dependencies, dev-dependencies included, whatever the layers allow (DEC-525).
+    #[serde(default)]
+    forbidden_internal: Vec<String>,
 }
 
 enum Layer {
@@ -722,6 +726,7 @@ fn layers() -> Result<()> {
     let meta = metadata()?;
     let packages = workspace_packages(&meta);
     let names: BTreeSet<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+    let closure = workspace_closure(&meta);
     let mut problems = Vec::new();
 
     for listed in policy.crates.keys() {
@@ -737,6 +742,13 @@ fn layers() -> Result<()> {
             continue;
         };
         let own_layer = layer_of(own, &pkg.name)?;
+        if let Some(reached) = closure.get(&pkg.name) {
+            problems.extend(forbidden_reached(
+                &pkg.name,
+                &own.forbidden_internal,
+                reached,
+            ));
+        }
         for dep in &pkg.dependencies {
             let internal = dep.path.is_some() && names.contains(dep.name.as_str());
             if internal {
@@ -789,6 +801,21 @@ fn layers() -> Result<()> {
         }
     }
     report(problems, "layers")
+}
+
+/// A problem for each crate in `forbidden` that `name` reaches, `reached` being every workspace
+/// crate it is built on through path dependencies of any kind (DEC-525).
+fn forbidden_reached(name: &str, forbidden: &[String], reached: &BTreeSet<String>) -> Vec<String> {
+    forbidden
+        .iter()
+        .filter(|crate_name| reached.contains(*crate_name))
+        .map(|crate_name| {
+            format!(
+                "`{name}` reaches `{crate_name}`, which its forbidden_internal list in \
+                 xtask/layers.toml rules out (DEC-525)"
+            )
+        })
+        .collect()
 }
 
 /// Rows of `docs/dependencies.md` shaped `| `name` | ecosystem | ...`.
@@ -3074,16 +3101,17 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT,
+        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT,
         MUTANTS_OUT, MutantShard, MutatedCrate, PendingTest, PendingTestRun, REFCASES, TestOutcome,
         actionlint_workflows, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
         contains_word, external_oracles, failure_cause, files_by_extension, first_panic_line,
-        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function, lint,
-        listed_mutant_counts, live_test_counts, metadata_in, mutant_verdicts, mutants,
-        mutants_args, mutants_job_cargo, mutants_outcome, mutated_crates, names_a_stub, output_in,
-        pending_problems, pending_tests, plain_comment_lines, proptest_seeds_in, repo_root,
-        shellcheck_scripts, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
-        test_binary, test_outcomes, unjudged_mutants, verdicts, workspace_closure,
+        forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
+        is_stub_function, lint, listed_mutant_counts, live_test_counts, metadata_in,
+        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutated_crates,
+        names_a_stub, output_in, pending_problems, pending_tests, plain_comment_lines,
+        proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
+        unjudged_mutants, verdicts, workspace_closure,
     };
 
     #[test]
@@ -3127,6 +3155,56 @@ mod tests {
                 "{invalid} must not select an incomplete or undefined shard"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_crate_that_reaches_a_forbidden_crate_is_a_problem_and_one_that_does_not_is_none() {
+        let forbidden = ["mandate-alpaca".to_owned(), "mandate-paper".to_owned()];
+        let through_a_chain: BTreeSet<String> =
+            ["mandate-cli", "mandate-journal", "mandate-alpaca"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+        assert_eq!(
+            forbidden_reached("mandate-cli", &forbidden, &through_a_chain),
+            [
+                "`mandate-cli` reaches `mandate-alpaca`, which its forbidden_internal list in \
+              xtask/layers.toml rules out (DEC-525)"
+            ],
+            "a forbidden crate reached through any chain is named, and only the one reached"
+        );
+        let clear: BTreeSet<String> = ["mandate-cli", "mandate-journal"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        assert!(forbidden_reached("mandate-cli", &forbidden, &clear).is_empty());
+        assert!(
+            forbidden_reached("mandate-cli", &[], &through_a_chain).is_empty(),
+            "a crate with no forbidden_internal list is held only by its layer"
+        );
+    }
+
+    /// The policy as written holds the CLI away from the connector, the shell and the paper
+    /// binary, and the workspace as built respects it (DEC-525).
+    #[test]
+    fn the_cli_reaches_no_crate_that_can_place_an_order() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
+        let cli = policy
+            .crates
+            .get("mandate-cli")
+            .context("mandate-cli has a policy")?;
+        assert_eq!(
+            cli.forbidden_internal,
+            ["mandate-alpaca", "mandate-paper", "mandate-shell"],
+            "the CLI may never reach the connector, the paper binary or the shell"
+        );
+        let closure = workspace_closure(&metadata_in(&root)?);
+        let reached = closure
+            .get("mandate-cli")
+            .context("mandate-cli is a member")?;
+        assert!(forbidden_reached("mandate-cli", &cli.forbidden_internal, reached).is_empty());
         Ok(())
     }
 

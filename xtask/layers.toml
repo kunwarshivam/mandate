@@ -10,6 +10,8 @@
 # The flag governs whatever the layer (DEC-253): a safety-critical `tool` crate is also mutated on
 # the diff by `cargo xtask ci mutants`, and ES-13's 400-line change limit applies to it.
 # `pure = true` crates (the core) may not depend on any crate in `impure_crates`.
+# `forbidden_internal` names workspace crates a crate may never reach, directly or through any
+# chain of path dependencies, dev-dependencies included, whatever its layer allows (DEC-525).
 #
 # Planned crates and layers, created only when a story needs them:
 #   0  mandate-num, mandate-time, mandate-canon
@@ -21,8 +23,7 @@
 #   5  mandate-builder
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
 #      mandate-runtime
-#   7  mandate-alpaca, mandate-backtest, mandate-cli (the CLI moves up when a command needs
-#      mandate-backtest or mandate-alpaca). `mandate-alpaca` is an adapter over the core (ES-02's
+#   7  mandate-alpaca, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
 #   8  mandate-shell, the process shell and the `mandate-tracer` binary (E7-7, DEC-138): the lowest
@@ -31,6 +32,10 @@
 #      quant model host (E15-13, DEC-503 item 2), beside the shell so that neither can depend on
 #      the other: the shell cannot run a model, and the host cannot reach sizing, the gate, the
 #      journal, the executor or the connector
+#   9  mandate-cli (DEC-525): above the model host, so `model register` takes the content object and
+#      its hash from `mandate_modelhost::content()` and no caller supplies a hash; its
+#      `forbidden_internal` list keeps it from ever reaching mandate-alpaca, mandate-shell or
+#      mandate-paper, so the founder's CLI cannot place an order
 #   tool  mandate-refcases, xtask
 
 impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
@@ -148,10 +153,13 @@ pure = true
 allowed_external = ["thiserror"]
 
 [crates.mandate-cli]
-layer = 7
+layer = 9
 safety_critical = true
 pure = false
 allowed_external = ["anyhow", "clap", "secrecy", "serde", "tokio", "toml"]
+# The founder's CLI can never place an order (AGENTS.md rules 8 and 12, DEC-525): it may not reach
+# the connector, the shell, or the paper binary, through any chain of dependencies.
+forbidden_internal = ["mandate-alpaca", "mandate-paper", "mandate-shell"]
 
 [crates.mandate-executor]
 layer = 6
