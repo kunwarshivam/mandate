@@ -2540,10 +2540,10 @@ const STUB_MARKERS: [&str; 5] = [
 /// first open interval in the instrument rather than the awaited one. It reaches no stub and fails
 /// on that behaviour until E4b's fix deletes the row with its `#[ignore]` line.
 ///
-/// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
+/// The 4 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
 /// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
-/// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
-/// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
+/// and write a text `decided_by_now` for an `auto` or `deny` re-classification, or for an `ask`
+/// whose label is empty (DEC-830), rather than a stub's report. The runtime writer change deletes the rows with their `#[ignore]` lines.
 ///
 /// The two rows for journal spec v0.18's `policy_overlay` label are J3's (DEC-536). They check
 /// `Draft::parse`, the journal's existing draft check, against the vectors' `policy_overlay`
@@ -2556,7 +2556,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// exit's rest and `re_cover` each size protection on a position that includes a working bracket's
 /// filled shares, which its held legs will cover. They reach no stub and fail on that sizing until
 /// E1's fix deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 19] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 20] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2605,6 +2605,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 19] = [
     (
         "crates/mandate-runtime/tests/answer_records.rs",
         "decided_by_now_is_null_unless_the_reclassification_asks",
+    ),
+    (
+        "crates/mandate-runtime/tests/answer_records.rs",
+        "an_ask_reclassification_with_an_empty_label_writes_a_null_decided_by_now",
     ),
     (
         "crates/mandate-journal/tests/policy_overlay.rs",
