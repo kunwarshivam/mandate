@@ -103,13 +103,13 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 
 | ID | Invariant | How it is tested |
 |---|---|---|
-| **API-1** | **Authenticated.** Every call except the liveness probe carries a valid session or token. Without one the API returns 401, reveals no data, and says nothing about whether the resource exists | A route table test: every registered route, called without credentials, returns 401 with the same body |
+| **API-1** | **Authenticated.** Every call except the liveness probe and a CORS preflight (§3.3 item 5) carries a valid session or token. Without one the API returns 401, reveals no data, and says nothing about whether the resource exists | A route table test: every registered route, called without credentials, returns 401 with the same body |
 | **API-2** | **Authorized on the server.** Each operation checks the principal's role in the workspace (§3.7) and, for a client, its scope (§3.8), on the server, before any read or write. The web app's role checks (`web/src/lib/roles.tsx`) are never authority | A matrix test: every route × every role and client scope, with the expected 403 or success from §3.7, computed from the table, not from the handler |
 | **API-3** | **Journal before effect.** Every call that can change what an agent, connection, policy, member, client, or approval may do commits its control-stream event (`Committed` or `AlreadyCommitted`, journal spec §5.1), with the caller's identity in `actor`, before it reports success and before anything acts on it. The API writes no agent or account stream | Fault injection: fail the append at every step; no stream owner ever sees an effect without its control-stream cause, and no response says `recorded` without a committed event |
 | **API-4** | **Idempotent.** Every mutating call carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
 | **API-5** | **The envelope changes only by a confirmed version.** No call changes an envelope field of a deployed agent except confirming a mandate version, by a **user** with the role for it. The server computes the classification itself (mandate spec §9.2) and requires step-up when it is risk-increasing; a client's claimed classification is never used (rule 11) | Fuzz random envelope edits through every operation; an oracle that diffs the confirmed documents shows every change came through a `MandateConfirmed` by a user, with step-up whenever its own §9.2 verdict is increasing |
-| **API-6** | **A client is owner input, never the owner.** A client token reaches only the operations of §3.8. `requested_by` is set from the authenticated channel, never from the request body (mandate spec §6.2 step 5a). A client can never confirm a version, answer an approval, create, widen, or pick a delegation, connect or revoke a connection, change a member, policy, or client, export, or use pause, resume, Stop, release, owner exit, acknowledgment, or the kill switch (DEC-141, DEC-185, DEC-191) | The route matrix for the client principal; a test that a client request carrying `requested_by: owner` in its body is journaled as `client` |
-| **API-7** | **Risk reduction is never blocked by the API.** Pause, holding new openings, the kill switch at any scope (including the kill-switch half of a revoke on compromise, §5.6), an owner exit, Skip on an approval, ending a delegation, and away mode (the **API-7 operations**) are refused only for a failed authentication, a role that may not act, a failed session-record read, or a malformed request. Never for a rate limit, a quota, a failed membership read (`membership_unavailable`: identity spec §4.5 authorizes them from the session's roles snapshot instead, and the event records `membership_unverified: true`), a stale or missing read model, missing step-up (except where mandate spec §6.1 requires it, below), a runtime, model, market-data, or global-control-plane outage, a pending approval, or a frozen control stream (journal spec §11). A kill switch or owner exit without valid step-up is still recorded and still stops or routes (mandate spec §6.1, DEC-158 option (c)) | A test per operation with every one of those conditions injected; each still commits its event. Resume, Stop, and acknowledgment are not risk reduction and may be refused without step-up, as mandate spec §6.1 says |
+| **API-6** | **A client is owner input, never the owner.** A client token reaches only the operations of §3.8. `requested_by` is set from the authenticated channel and never read from a request body (mandate spec §6.2 step 5a). A body naming `requested_by`, or any member its schema does not name, is refused `invalid` and journals nothing on a strict operation; on an API-7-lenient operation (§5) the member is dropped and listed in `dropped`, and the command still commits (DEC-681 item 6, DEC-682 item 27). A client can never confirm a version, answer an approval, create, widen, or pick a delegation, connect or revoke a connection, change a member, policy, or client, export, or use pause, resume, Stop, release, owner exit, acknowledgment, or the kill switch (DEC-141, DEC-185, DEC-191) | The route matrix for the client principal; a test that a client's owner request carrying `requested_by: owner` is refused `invalid` and commits nothing, and that a client's hold carrying it returns `202` with `dropped: ["/requested_by"]` and is journaled as `client` |
+| **API-7** | **Risk reduction is never blocked by the API.** Pause, holding new openings, the kill switch at any scope (including the kill-switch half of a revoke on compromise, §5.6), an owner exit, Skip on an approval, ending a delegation, and away mode (the **API-7 operations**) are refused only for a failed authentication (including the CSRF check of §3.3 item 1), a role that may not act, a failed session-record read, or a malformed request. Never for a rate limit, a quota, a failed membership read (`membership_unavailable`: identity spec §4.5 authorizes them from the session's roles snapshot instead, and the event records `membership_unverified: true`), a stale or missing read model, missing step-up (except where mandate spec §6.1 requires it, below), a runtime, model, market-data, or global-control-plane outage, a pending approval, or a frozen control stream (journal spec §11). A kill switch or owner exit without valid step-up is still recorded and still stops or routes (mandate spec §6.1, DEC-158 option (c)) | A test per operation with every one of those conditions injected; each still commits its event. Resume, Stop, and acknowledgment are not risk reduction and may be refused without step-up, as mandate spec §6.1 says |
 | **API-8** | **The kill-switch path needs only the API, its authentication, and Postgres.** Pause and the kill switch read no read model, call no model, runtime, market-data service, global control plane, or telemetry, and run on a reserved worker and database-connection pool that other traffic cannot exhaust (infrastructure §3.6) | A test with the model gateway, read-model tables, runtime, and metrics exporter all unavailable and every ordinary worker busy: the kill switch commits within its bound |
 | **API-9** | **Tenants never see each other.** Every resource lives under one workspace. A principal reaches only workspaces it belongs to. An id from another workspace, or one that does not exist, returns the same 404. No response, error, log line, metric label, or notification carries another workspace's data | Cross-workspace tests at the route, database (row-level security), and artifact layers (OPS-6); a test that the 404 bodies and timings for "foreign" and "absent" match |
 | **API-10** | **Nothing sensitive leaves through the API's side channels.** What the API hands to the relay or a notification provider is an opaque notice id and generic text only; approval links carry only that id; page titles, URLs, and error titles hold no instrument, size, price, thesis, or agent name (rule 6) | Payload capture tests on every notification the API emits; a URL lint over the route table |
@@ -165,16 +165,26 @@ the journal is the only channel (DEC-17).
   classification, phase, effect) are closed sets; a new value is a new major version, so an old
   client never meets a verdict it cannot render.
 - Each response carries `api_version` and the server build digest, so a record screen names what
-  rendered it (mandate spec §10's UI build covers the client half).
+  rendered it (mandate spec §10's UI build covers the client half). A problem document (§3.5) is
+  the exception: it is not wrapped in the envelope, and its `type` and `code` say what it is.
 
 ### 3.3 Authentication and sessions
 
 Owned by the [identity spec](identity.md). What the API requires of it:
 
 1. **Browser sessions** in a `Secure`, `HttpOnly`, `SameSite=Strict` cookie, with a CSRF defence on
-   every mutating call: the `Origin` header must be the app's own origin, and the call must carry a
-   custom request header a cross-site form cannot set. No bearer token is ever stored in browser
-   storage (brief §5, rule 6 row).
+   every mutating call that the session cookie authenticates. The `Origin` header must equal the
+   deployment's configured app origin (`https://app.owlhead.ai` for the demo), and the call must
+   carry the custom request header `X-Mandate-Request: 1`, which a cross-site form cannot set.
+   - The order is fixed: authentication first (401 `unauthenticated`, one body, API-1), then the
+     CSRF check (403 `forbidden`, `effect: none`, `retryable: false`), before any other read or
+     write.
+   - A call authenticated by a sender-constrained token (item 2: the CLI, a client, a service
+     account) sends no `Origin` and is not checked; a cross-site page cannot produce its proof.
+   - The check applies to the API-7 operations too. A cookie call that fails it is not the owner's
+     authenticated call, so its refusal is API-7's "failed authentication", not a new reason
+     (DEC-682 item 19).
+   - No bearer token is ever stored in browser storage (brief §5, rule 6 row).
 2. **CLI, client, and service-account tokens are sender-constrained** (DPoP, RFC 9449; identity
    spec §6.3, §6.5, §6.6): each request carries a proof signed by the key the token was issued to,
    and the API refuses a token presented without a matching proof. A copied token alone is useless.
@@ -194,14 +204,46 @@ Owned by the [identity spec](identity.md). What the API requires of it:
    so a version an operator proposes through their own client and then confirms is still their own
    (mandate spec §6.4, amended in this change). Events also record the channel (`web`, `cli`,
    `mcp`) and the authentication method.
+5. **Cross-origin requests** (the web app at `https://app.owlhead.ai` calls `https://api.owlhead.ai`
+   with `credentials: include`; DEC-682 item 32):
+   - Only the exact configured app origin is allowed: no wildcard and no reflected `Origin`. Its
+     responses carry `Access-Control-Allow-Origin` with that origin,
+     `Access-Control-Allow-Credentials: true`, and `Vary: Origin`, error responses (401, 403, and
+     every other problem) included. Any other origin gets no CORS header.
+   - The app origin must be same-site with the API: a subdomain of the same registrable domain,
+     so the `SameSite=Strict` cookie is sent. The app is served on `app.owlhead.ai`; an origin on
+     another site, such as `*.workers.dev`, can never work.
+   - A preflight `OPTIONS` allows the methods `GET`, `POST`, `PUT`, `DELETE`, and `PATCH`, and the
+     headers `Content-Type`, `Idempotency-Key`, `If-Match`, and `X-Mandate-Request`, with
+     `Access-Control-Max-Age: 600`. A preflight is never authenticated and reads no data (API-1's
+     exemption).
+   - Exposed headers: `ETag`, `Location`, and `Retry-After`. (§3.2's version and build are body
+     members, not headers.)
+   - The session cookie is host-only, `__Host-` prefixed, `Secure`, `HttpOnly`, `SameSite=Strict`,
+     and `Path=/`.
 
 ### 3.4 Idempotency
 
 Every mutating call carries `Idempotency-Key`: 16 to 64 characters from `[A-Za-z0-9_-]`, chosen by
-the client per user gesture. The API derives the control-stream `event_id` from it (DEC-436 item 4):
-the 128 bits of the ULID are the first 128 bits of SHA-256 over the workspace id, the principal id,
-the operation name, and the key. The ULID's time component carries no meaning (journal spec §3), so
-this is a valid id. Then:
+the client per user gesture. The API derives the control-stream `event_id` from it (DEC-436 item 4,
+DEC-681 item 5), and a client can compute the same id before it sends the call:
+
+- Build the JSON object `{"key", "operation", "principal", "workspace"}`: the key as sent; the
+  operation's name from the route table; the actor's own id (a client's id, never its user's); and
+  the workspace id. For each event of a call that commits several events, add `"position"`, an
+  integer from 0 in batch order.
+- Write it in journal spec §4's canonical form and take its SHA-256.
+- The first 128 bits of that digest, most significant first, are the ULID. It is written as 26
+  Crockford base-32 digits (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`), uppercase: 130 bits, so the
+  128-bit value is left-padded with two zero bits and the first digit is `0` to `7`.
+- A call that commits several events (§5.3, §5.6) reports position 0's id as its `command_id`: for
+  a revoke on compromise, the kill switch's.
+- **Worked vector.** Workspace `ws_01`, principal `user_7`, operation `kill_switch`, key
+  `k1Z-9_aaaaaaaaaa`, one event: the canonical object is
+  `{"key":"k1Z-9_aaaaaaaaaa","operation":"kill_switch","principal":"user_7","workspace":"ws_01"}`,
+  and the event id is `7KXV6BGDW36KYC7RE5BPQG28Z0`.
+
+The ULID's time component carries no meaning (journal spec §3), so this is a valid id. Then:
 
 1. The API looks the id up first. If an event exists and its semantic members (everything but
    server-set times) equal the request's, it returns that event's outcome. If they differ, 409
@@ -230,7 +272,7 @@ Errors are RFC 9457 problem documents with these members:
 | Code | Status | When |
 |---|---|---|
 | `unauthenticated` | 401 | No valid session or token |
-| `forbidden` | 403 | The role or scope may not do this (never sent for a resource the principal cannot see: that is 404) |
+| `forbidden` | 403 | The role or scope may not do this (never sent for a resource the principal cannot see: that is 404), or a cookie-authenticated mutating call failed the CSRF check of §3.3 item 1 |
 | `not_found` | 404 | Absent, or in another workspace (API-9) |
 | `invalid` | 422 | Schema, canonical form, or a value out of range |
 | `idempotency_conflict` | 409 | Same key, different body |
@@ -246,6 +288,7 @@ Errors are RFC 9457 problem documents with these members:
 | `last_owner`, `last_admin` | 409 | The change leaves no `active` org owner or workspace admin (identity spec §5.2) |
 | `reduction_only` | 403 | A reduction-only session asks for anything but pause or a kill switch (identity spec §4.5, §6.4) |
 | `membership_unavailable` | 503 | The membership read failed on an operation outside identity spec §4.5's risk-reducing set (API-7's operations, revoking a client, and tightening a policy); nothing was authorized; `retryable`. Never sent for an operation in that set |
+| `outcome_unknown` | 503 | (planned: E10-10) The append's outcome could not be confirmed (an ambiguous commit, or `Fenced` during an upgrade, §7); `effect: unknown`, the derived `event_id` given, `retryable: false`. The client polls §5.5 with that `event_id` and never resends with a new key. A resend with the same key is still safe (API-4: it resolves to the original outcome), so `retryable: false` is a rule for the UI, not for correctness |
 
 ### 3.6 Step-up
 
@@ -424,6 +467,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Go live | `POST /agents/{id}/go-live` | — | Always `live_unavailable` until counsel signs off (B5, DEC-98). The route exists so the refusal is tested |
 | Pause, resume | `POST /agents/{id}/pause`, `.../resume` | `OwnerCommandIssued` | Pause: no step-up, API-7. Resume: step-up, judged by the runtime |
 | Hold new openings | `POST /agents/{id}/hold` | `OwnerCommandIssued` with command `hold_openings` (journal change) | DEC-191. Sets `exits_only` and nothing else. Lifting it is the owner's alone, with step-up, as a `lift_hold` command (journal change); it lifts only the hold, never a latched limit (MI-3) |
+| Lift a hold | `POST /agents/{id}/hold/lift` | `OwnerCommandIssued` with command `lift_hold` (journal change) | (planned: E10-12) Users only, never a client; step-up required (`lift_hold`); not an API-7 operation, since it adds risk back (DEC-684 item 1) |
 | Stop | `POST /agents/{id}/stop` | `OwnerCommandIssued` | Step-up; `release` and the warning digest per DEC-290 item 2; the flat-or-release precondition is the runtime's (DEC-136) |
 | Owner exit | `POST /agents/{id}/exits` | `OwnerCommandIssued` (`owner_exit`) | §5.4. Never refused for step-up (mandate spec §6.1) |
 | Acknowledge | `POST /agents/{id}/acknowledgments` | `OwnerAcknowledged` | Names the event acknowledged; step-up; independence judged by the executor |
@@ -460,6 +504,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Revoke now, on compromise | `POST /connections/{id}/revoke` with `compromised: true` | `OwnerCommandIssued` (`kill_switch`, connection scope), then `ConnectionRevoked` (reason `compromised`, journal change), in one batch | §5.6. Never waits on positions: the kill switch runs first in the same command, then the credential is revoked |
 | Policies | `GET`, `PUT /policies/workspace` | `PolicyChanged` | A value looser than its parent is refused naming the nearest ancestor (FR-1.5); the response lists agents made nonconforming (X1). Step-up |
 | Members | `GET /members`, `POST /invitations`, `PATCH`, `DELETE /members/{id}` | Identity spec's events (journal change) | Removing a member ends their sessions and tokens at once |
+| My workspaces | `GET /v1/me/workspaces` | — | (planned: E10-10) The signed-in user's own workspace memberships, at the principal's own scope and outside every workspace path: identity spec §4.5's *List one's own workspace memberships*, which [#811](https://github.com/kunwarshivam/mandate/pull/811) adds. Returns only the caller's memberships (API-9) |
 | Clients | `GET /clients`, `POST /clients`, `DELETE /clients/{id}` | `ClientConnected`, `ClientRevoked` (journal change) | Create needs step-up and shows the scopes in words (E10-8); revoke needs none |
 
 ### 4.6 Owner requests, the dry run, and the chat thread
@@ -874,6 +919,25 @@ Members are listed in full. Every request also carries `Idempotency-Key`. `step_
 is always `{artifact: "sha256:…", ui_build: "sha256:…"}`: the rendered record screen the client
 uploaded to the artifact store, and the build that rendered it (brief §4.1, mandate spec §10).
 
+**The API-7 operations are lenient about their bodies** (DEC-682 item 27). Their shapes below are
+what a client should send, but only their hard members are strict: the path ids, the kill switch's
+`scope`, an owner exit's `instrument`, and a Skip's `verdict` and `content_hash`. Any other member
+that is omitted, unknown, or fails to parse is dropped, not refused, and the `202` lists each
+dropped member's JSON pointer in `dropped`. An owner exit's bid confirmation is all or nothing: if
+any part is missing or unparsable, every part sent is dropped and equities wait for the session.
+This applies to pause, holding new openings, the kill switch, an owner exit, Skip, ending a
+delegation, and away mode; an `approved` and every other operation is judged strictly.
+- A pause or hold body that is not JSON at all is read as `{}`, with `dropped: [""]`.
+- A workspace-scope kill switch naming a non-null `scope.id` has the id dropped and listed.
+- Skip's `content_hash` stays strict: an answer binds what was shown (API-12).
+- Idempotency (API-4) compares the members kept, not those dropped: a repeat that differs only in
+  a dropped member is the same call.
+- A repeat never applies a member the first call dropped. A repeat that differs only in dropped
+  members replays the original outcome, `dropped` included, so the client sees its fix was not
+  applied; one that now carries a valid value for a dropped member differs in a kept member and is
+  refused `idempotency_conflict`. Either way, a client that fixes a dropped member sends it under a
+  new key.
+
 ### 5.1 Confirm a mandate version
 
 `POST /mandate-versions/{mandate_version}/confirm`
@@ -921,11 +985,12 @@ Application is the executor's `MandateVersionApplied`, which may still reject (f
 | `content_hash` | ref | The content hash of the request the client rendered (API-12) |
 | `record` | record | The rendered D6 screen, including whether model output was expanded |
 | `step_up` | step-up or `null` | Required for `approved`, bound to the content hash (or to §5.3's digest with a delegation). `null` for `skipped` |
-| `delegation` | `null` or `{preview_id, mandate_version}` | The shape chosen on the card (§5.3) |
+| `delegation` | `null` or `{preview_id, mandate_version}` | The shape chosen on the card (§5.3); always `null` for `skipped` (a Skip naming one has it dropped, below) |
 
 The API refuses only: an unauthenticated or non-user principal, a user who is not listed in
 `autonomy.approval.approvers` and holding an approving role (§3.7), an unknown approval, and, for
-`approved` only, missing or unbound step-up. It does not judge the deadline, the quorum,
+`approved` only, missing or unbound step-up: bound to the content hash, or with a delegation to the
+preview's `step_up_digest` (§5.3), else 401 `step_up_required`. It does not judge the deadline, the quorum,
 independence, or re-validation: the runtime does (checks 1 to 12). A `skipped` is never refused for
 anything else (API-7).
 

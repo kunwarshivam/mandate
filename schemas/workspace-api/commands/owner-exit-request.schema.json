@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/owner-exit-request.schema.json",
+  "type": "object",
+  "required": [
+    "instrument"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "instrument": {
+      "$ref": "../common.schema.json#/$defs/AssetId"
+    },
+    "bid": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "bid_size": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "quoted_at": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "floor": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /agents/{agent_id}/exits (\u00a75.4). Bid members are null in the regular session and for crypto; without valid step-up it is still routed (API-7). API-7 leniency (DEC-682 item 27): this schema is what a client should send; the server is lenient. Only `instrument` is strict: without it there is nothing to exit. An unknown or unparsable member is dropped. A bid confirmation (`bid`, `bid_size`, `quoted_at`, `floor`) is all or nothing: if any of its members is missing or unparsable, every one sent is dropped and equities wait for the session. Without valid step-up it is still routed and loses only the owner-exit privilege (mandate spec \u00a76.1). The 202 lists every dropped member's JSON pointer in `dropped`.",
+  "x-api7-lenient": true
+}

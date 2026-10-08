@@ -1,0 +1,23 @@
+[
+  {
+    "label": "until_close, derived caps",
+    "set": {
+      "/shape": "until_close",
+      "/max_order_usd": null,
+      "/max_total_usd": null,
+      "/expires_at": null
+    }
+  },
+  {
+    "label": "auto: /shape = \"instrument_for_time\"",
+    "set": {
+      "/shape": "instrument_for_time"
+    }
+  },
+  {
+    "label": "auto: /shape = \"kind_for_time\"",
+    "set": {
+      "/shape": "kind_for_time"
+    }
+  }
+]

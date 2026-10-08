@@ -1,0 +1,17 @@
+[
+  {
+    "label": "members the server dropped",
+    "set": {
+      "/dropped": [
+        "/step_up",
+        "/owner_exit"
+      ]
+    }
+  },
+  {
+    "label": "auto: /phase = \"recorded\"",
+    "set": {
+      "/phase": "recorded"
+    }
+  }
+]
