@@ -1066,13 +1066,26 @@ after U-A1 to U-A5 are recorded.
   perfect delivery except asks that skip (NT-5); the kill-switch and exit suites pass with the
   dispatcher hung (NT-9); a lost address alerts on the other channels (spec §5.6).
 - **E8-11 (Must, M7; SC)** As an approver, I want email notices (spec §4.4). Provider per DEC-438
-  item 21; until the founder decides, the adapter runs against a recorded fixture only.
-  *Accepted when:* NT-1's canary test passes on captured messages; links match `<origin>/n/<ULID>`
-  (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider configuration check.
-- **E8-12 (Must, M7; SC)** As an approver, I want one chat channel (spec §4.5), Slack or Telegram
-  per DEC-438 item 20. *Accepted when:* NT-1's canary test passes; every inbound message, button, or
+  item 21, decided in DEC-820 item 3 for the founder's own address only; every other recipient waits
+  for counsel's general footer.
+  *Accepted when:* NT-1's canary test passes on captured messages; links match
+  `<origin>/n/<notice id>` (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider
+  configuration check; the founder-only SMTP transport (spec §4.4, DEC-820 items 3 and 4) sends only
+  to the one founder address the deployment's configuration names, read from the vault, with exactly
+  `Sent by your Mandate workspace to its owner.` as the footer; a notice for any other recipient, a
+  workspace owner who is not the founder included, is refused `recipient_not_permitted` before any
+  connection, is not retried, marks no address `unreachable`, and raises no `channel_lost`; the
+  `xtask` email-footer check (DEC-700 item 4) exists, runs in `cargo xtask ci fast`'s lint, and is
+  shown to fail on a planted third mail transport and on a planted deny-listed mail crate (`lettre`)
+  outside the founder-only transport while the general footer is unresolved.
+- **E8-12 (Deferred: not in v1; SC)** As an approver, I want one chat channel (spec §4.5). The
+  founder did not take DEC-438 item 20 (2026-10-08, DEC-824): v1 has no chat channel, and Telegram
+  at M10 is a later option. If it is built, *accepted when:* NT-1's canary test passes; every inbound message, button, or
   callback leaves the control stream unchanged (NT-3); the webhook URL or bot token is read only
-  from the vault and appears in no log (rule 7).
+  from the vault and appears in no log (rule 7). For Telegram (spec §4.5, DEC-700 item 2): a linking
+  code is refused once 10 minutes have passed since it was shown; it is spent by the first message
+  that carries it, even when no address is then recorded; showing a new code revokes the earlier
+  one; and the replies to an unknown, an expired, and a spent code are byte-identical.
 - **E8-13 (Must, M9 and M10; SC)** As an approver, I want to open a notice, sign in, and answer
   inside my workspace (spec §6, G4), with `web_inbox` as a pull channel (DEC-438 item 3). Depends on
   the workspace API and identity specs (DEC-436, DEC-437). *Accepted when:* a captured link with no
@@ -2426,6 +2439,16 @@ an agent on a different model, zero missed mutants, and green CI).
 
 ## Spec follow-ups (minor review findings, deferred by the freeze rule)
 
+From the review of workspace API spec §4.8.1 (the audit read contracts, #767):
+
+- Exports: define the file states `GET /exports/{id}` reports (recorded, building, ready). Map a
+  failed or `Ambiguous` `ExportCreated` append to §3.5's `journal_unavailable` or `effect:
+  unknown`, retryable with the same `Idempotency-Key`. Define the per-stream range when
+  `recorded_at` steps back (DEC-764 notes the clock may), for example by seq bounds read from a
+  monotone index. Make the view header's `format` match the request's (`json` against `jsonl`).
+- `mandate-audit` enforces tenant isolation, so it is safety-critical. Its `xtask/layers.toml`
+  entry, CODEOWNERS line, and lint header land with the crate (#797).
+
 From the final review of mandate spec v0.3:
 
 - Tie the loss carry to the broker account rather than `connection_id`; show the carry and its
@@ -3096,6 +3119,18 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   OCO is 1; the first completes (Q1 = 2) and its legs activate, so sells are 11 + 1 + 2 = 14 against
   a position of 13. The fix counts held legs, sized to their entry, in every cap and sizing,
   re-placement included, and pins the arithmetic with a hand case.
+  Two more paths size the same way (#689's round-2 review): `passive_exit`'s rest OCO, reachable
+  without E5 whenever another agent's bracket is working, and `re_cover` → `re_place`. The
+  re-placement alone oversells by f1 once the bracket completes, with no second entry: it covers
+  B + f1, and the bracket's legs then sell Q1 against a position of B + Q1. E1's tests
+  ([DEC-532](decisions/DEC-532.md)) pin all four paths as pending hand cases under
+  `BEHAVIOUR_ONLY_TESTS` rows, each with the protected 10 and a bracket holding 4 of 10:
+  `an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs` (8, not 12),
+  `a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs` (10, not 14),
+  `a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs` (7, not 11) and
+  `a_re_cover_leaves_a_held_brackets_shares_to_its_legs` (2, not 6). The fix sizes each path on
+  the position less every working bracket entry's filled quantity whose legs are held, deletes
+  the rows and the `#[ignore]` lines, and covers the original exit-beside-activated-legs case above.
 - **E7-4 (stream K), E2 from E7-4 slice 7's tests correction ([DEC-506](decisions/DEC-506.md)
   item 8): an opening rests inside an unprotected interval.** Minimal script
   (`properties::no_resting_order_is_submitted_inside_an_unprotected_interval`):
