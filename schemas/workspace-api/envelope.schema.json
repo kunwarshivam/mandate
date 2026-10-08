@@ -46,6 +46,12 @@
         "control_stream_frozen",
         "journal_unavailable",
         "rate_limited",
+        "own_roles",
+        "owner_role_reserved",
+        "last_owner",
+        "last_admin",
+        "reduction_only",
+        "membership_unavailable",
         "outcome_unknown"
       ],
       "x-planned": {
@@ -602,6 +608,174 @@
               },
               "type": {
                 "const": "https://mandate.dev/problems/rate_limited"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "own_roles"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 403
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Cannot change own roles"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/own_roles"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "owner_role_reserved"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 403
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Owner role reserved"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/owner_role_reserved"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "last_owner"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Owner must remain"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/last_owner"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "last_admin"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Admin must remain"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/last_admin"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "reduction_only"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 403
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Risk reduction only"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/reduction_only"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "membership_unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": true
+              },
+              "title": {
+                "const": "Membership unavailable"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/membership_unavailable"
               }
             }
           }

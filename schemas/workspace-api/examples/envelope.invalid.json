@@ -1124,6 +1124,86 @@
       "event_id": null,
       "retryable": false,
       "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/membership_unavailable",
+      "status": 503,
+      "code": "membership_unavailable",
+      "title": "Membership unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/membership_unavailable",
+      "status": 403,
+      "code": "membership_unavailable",
+      "title": "Membership unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/membership_unavailable",
+      "status": 503,
+      "code": "membership_unavailable",
+      "title": "Membership unavailable",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/last_owner",
+      "status": 403,
+      "code": "last_owner",
+      "title": "Owner must remain",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/reduction_only",
+      "status": 403,
+      "code": "reduction_only",
+      "title": "Risk reduction only",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/own_roles",
+      "status": 409,
+      "code": "own_roles",
+      "title": "Cannot change own roles",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/owner_role_reserved",
+      "status": 403,
+      "code": "owner_role_reserved",
+      "title": "Owner role reserved",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/last_admin",
+      "status": 409,
+      "code": "last_admin",
+      "title": "Last admin",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
     }
   ],
   "Actor": [
