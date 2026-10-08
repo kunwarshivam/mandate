@@ -1,4 +1,4 @@
-//! The granted scopes equal the request exactly (connections spec §5.3; DEC-821 item 3).
+//! The granted scopes equal the request exactly (connections spec §5.3; DEC-821 item 4).
 
 use std::collections::BTreeSet;
 
@@ -32,6 +32,22 @@ fn granted_scopes_must_equal_the_request() {
         "Trading data",
         "trading DATA",
         "trading,data",
+        "trading\rdata",
+        "trading\u{000B}data",
+        "trading\u{000C}data",
+        "trading\u{0085}data",
+        "trading\u{00A0}data",
+        "trading\u{2003}data",
+        "trading\u{2028}data",
+        "trading\u{3000}data",
+        "trading\u{200B}data",
+        "\u{FEFF}trading data",
+        "trading data\u{00A0}",
+        "trading\0data",
+        "trading data\0",
+        "\0trading data",
+        "trading\0 data",
+        "trad\u{0456}ng data",
     ] {
         assert_eq!(
             check_scope(granted),

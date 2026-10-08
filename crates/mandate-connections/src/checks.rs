@@ -15,11 +15,10 @@ use crate::grant::GrantedScopes;
 use crate::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, ConnectionState, Environment};
 
 /// Whether an Alpaca OAuth grant requested with `env=paper` counts as reaching paper only
-/// (check 2). The founder accepted this residual risk for paper connections in DEC-821 item 1
-/// (PR #762, with #769); until DEC-821 is in force, or to revert it, this is the one line to
-/// change. Flipping it to `false` refuses every Alpaca OAuth grant as `reaches_both`, paper ones
-/// included (DEC-441 item 21), and can never admit a live one: a live Alpaca OAuth grant is
-/// refused either way. This crate merges after #762, which carries DEC-821's file.
+/// (check 2). The founder accepted this residual risk for paper connections in DEC-821 item 1;
+/// to revert it, this is the one line to change. Flipping it to `false` refuses every Alpaca
+/// OAuth grant as `reaches_both`, paper ones included (DEC-441 item 21), and can never admit a
+/// live one: a live Alpaca OAuth grant is refused either way.
 pub const ALPACA_PAPER_OAUTH_REACHES_PAPER_ONLY: bool = true;
 
 /// When the checks run (journal spec §9.8 `ConnectionChecked.occasion`).
