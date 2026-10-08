@@ -37,6 +37,7 @@ import connections
 import control
 import research
 import risk_state
+import workspace
 import yaml
 from common import (
     BOOL,
@@ -3817,6 +3818,7 @@ def render(
     approval_section: dict,
     broker_profile: dict,
     connections_section: dict,
+    workspace_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3831,6 +3833,7 @@ def render(
             "approval_answers": approval_section,
             "broker_profile": broker_profile,
             "connections": connections_section,
+            "workspace_api": workspace_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3876,6 +3879,7 @@ def main(argv: list[str] | None = None) -> int:
     approval_section = approval.build_section()
     broker_profile = build_broker_profile_section(control_section)
     connections_section = connections.build_section()
+    workspace_section = workspace.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3897,6 +3901,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
     problems += connections.run_mutants(connections_section)
+    problems += workspace.check_section(workspace_section)
+    problems += workspace.run_mutants(workspace_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3914,6 +3920,7 @@ def main(argv: list[str] | None = None) -> int:
         approval_section,
         broker_profile,
         connections_section,
+        workspace_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -3927,6 +3934,7 @@ def main(argv: list[str] | None = None) -> int:
         or approval.check_section(reread["approval_answers"])
         or check_broker_profile(reread["broker_profile"])
         or connections.check_section(reread["connections"])
+        or workspace.check_section(reread["workspace_api"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -3977,7 +3985,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(connections_section['chains'])} cause chains; "
         f"{len(connections.VALIDATOR_MUTANTS)} validator, {len(connections.STREAM_MUTANTS)} stream, "
         f"{len(connections.CHAIN_MUTANTS)} chain, and "
-        f"{len(connections.vector_mutants(connections_section))} vector mutants caught"
+        f"{len(connections.vector_mutants(connections_section))} vector mutants caught; "
+        f"{len(workspace_section['drafts'])} workspace API drafts, {len(workspace_section['invalid_drafts'])} invalid and "
+        f"{len(workspace_section['valid_drafts'])} valid; {len(workspace.VALIDATOR_MUTANTS)} validator and "
+        f"{len(workspace.vector_mutants(workspace_section))} vector mutants caught"
     )
     return 0
 
