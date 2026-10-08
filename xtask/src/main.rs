@@ -2748,7 +2748,13 @@ const STUB_MARKERS: [&str; 5] = [
 /// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
 /// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
 /// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
+///
+/// Four more `hand` rows are E1's sizing paths (DEC-532; backlog: "E7-4 (stream K), E1 from E7-4
+/// slice 7's tests correction"): `replace` after an exit, `new_day`'s re-placement, a passive
+/// exit's rest and `re_cover` each size protection on a position that includes a working bracket's
+/// filled shares, which its held legs will cover. They reach no stub and fail on that sizing until
+/// E1's fix deletes the rows with their `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 17] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2797,6 +2803,22 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
     (
         "crates/mandate-runtime/tests/answer_records.rs",
         "decided_by_now_is_null_unless_the_reclassification_asks",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_re_cover_leaves_a_held_brackets_shares_to_its_legs",
     ),
 ];
 
