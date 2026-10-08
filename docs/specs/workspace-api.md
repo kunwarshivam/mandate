@@ -110,7 +110,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 | **API-13** | **No optimistic success.** A mutating call reports `recorded` only after the append returned `Committed` or `AlreadyCommitted`. A lost or `Ambiguous` append reports `unknown`, never success and never "nothing happened". `applied` is reported only when the owning stream's copy exists (§6.3) | Fault injection on the append's response path; the web app's `result-unknown` scenario becomes a contract test |
 | **API-14** | **Read models are derived and stamped.** Every read names, for each stream it read, the `seq` and hash it reflects, and the `recorded_at` of that event. No value comes from anywhere but the journal and stored artifacts. A value older than its freshness limit is returned marked stale with its age, never as current | Replay test: rebuilding every read model from the journal alone gives identical responses; a staleness test per freshness limit |
 | **API-15** | **Journal pages are complete and checkable.** Paging a stream by cursor yields every event in the range exactly once, in `seq` order, with each event's `hash` and `prev_hash`, so a client can check that each page joins the last | Fuzz: random page sizes and concurrent appends; concatenated pages equal the stream range, and the chain check passes |
-| **API-16** | **Exports are verifiable and recorded.** Every export is journaled (`ExportCreated`) before it is served. A canonical export verifies under journal spec §11 against its anchors; every derived JSON or CSV view names the manifest hash it came from | A test that runs the journal verifier over each export and fails a tampered one |
+| **API-16** | **Exports are verifiable and recorded.** Every export is journaled (`ExportCreated`) before it is served. A canonical export verifies under journal spec §11 against its anchors; every derived JSON or CSV view names the verifier digest of the canonical export it came from | A test that runs the journal verifier over each export and fails a tampered one |
 | **API-17** | **Step-up is bound to one action.** A step-up challenge the API issues names one action digest (§3.6). Evidence is accepted only on the call for that digest, and an assertion id is used once per workspace (DEC-173 item 3) | Tests that evidence for one approval, version, or command is refused on another; replay of a used assertion is refused; every step-up action **this API serves** (§1.4: identity spec ID-4's list and the **S** cells of the workspace-scope rows, never the org-scope rows, which are the global control plane's) has a kind and can issue a challenge |
 | **API-18** | **Model text is never an action.** Model output (chat replies, theses, compiler notes) is returned only in members typed as quoted, attributed content with an author label. Action cards come only from deterministic operations (§4.6), and acting on one needs its own call (rule 4, DEC-192) | A schema test: no action or button member's type can hold model text |
 | **API-19** | **Concurrent edits never merge silently.** A draft update and a version confirmation name the base they were made from; a call whose base is no longer current is refused with 409 and the current base, never applied over another person's change. Risk-reducing shortcuts (§4.5) rebase instead, and their result is re-classified | Fuzz with two writers; every version's recorded base is its real predecessor, and every rebased shortcut is still classified reducing |
@@ -481,7 +481,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Timeline | `GET /agents/{id}/timeline?types=&from=&to=` | J1: merged from the agent and account streams, with one cursor per stream; display order by `recorded_at` for readability only (journal spec §2) |
 | Causal trace | `GET /journal/events/{event_id}/trace` | J2: the `causation_id` chain back to observations; model output as quoted, attributed content |
 | Gate decision | `GET /journal/events/{event_id}/gate` | J6: every check with reason code, rule-set version, quotes and marks used |
-| Exports | `POST /exports`, `GET /exports/{id}` | J3, journal spec §12: canonical export, or JSON and CSV views naming the manifest hash. `ExportCreated` before serving (API-16) |
+| Exports | `POST /exports`, `GET /exports/{id}` | J3, journal spec §12: canonical export, or JSON and CSV views naming the verifier digest. `ExportCreated` before serving (API-16) |
 | Verification | `POST /verifications`, `GET /verifications/{id}` | J4: runs journal spec §11; `VerificationRun` |
 | Surveillance | `GET /surveillance/reports` | J5 |
 
@@ -502,7 +502,10 @@ control-stream writer appends it before anything is served (API-16). The payload
 the `Id`, `EventId`, `Timestamp`, `Decimal`, and `ContentRef` of
 `schemas/workspace-api/common.schema.json`. Every response carries `as_of`, an `AsOf`: one
 `Watermark` `{stream_id, seq, hash, recorded_at}` per stream it read. Every union is tagged by a
-`kind` member and every enum here is closed (§3.2).
+`kind` member and every enum here is closed (§3.2). **Planned:** the JSON Schemas of the trace, the
+gate view, exports, and verification will follow under `schemas/workspace-api/audit/`. The
+timeline's response schema is the agent-timeline read model's (`schemas/workspace-api/read-models/`),
+and the timeline rules below are its semantics.
 
 **Hash forms.** An event's own chain hashes are bare: every `hash` and `prev_hash` of a page item,
 a trace node, a gate view, or a JSON or CSV view row, and the `hash` of a stream `head`, is 64
@@ -510,10 +513,9 @@ lowercase hex exactly as journal spec §3 and the body re-hash give it. Everythi
 `sha256:` `ContentRef`: the `hash` of an `as_of` `Watermark` (the same digest, with the API adding
 the prefix), a segment manifest's `manifest_hash`, `artifact_ref`, `content_hash`, and every
 `config_refs` value. An export's `verifier_digest` is bare 64 hex where the journal records it
-(`ExportCreated`) and a `sha256:` ref where a view prints it. The JSON Schemas of the trace, the gate view,
-exports, and verification follow under `schemas/workspace-api/audit/`. The timeline's response
-schema is the agent-timeline read model's (`schemas/workspace-api/read-models/`), and the timeline
-rules below are its semantics.
+(`ExportCreated`) and a `sha256:` ref where a view prints it. An anchor leaf's `hash` is bare, as
+journal spec §10 records it. Everything inside `payload`, and `actor.build`, is served exactly as
+recorded, in whatever form the event's schema gives it.
 
 **Invariants.** Each one is tested with an oracle of its own, as §2 says.
 
@@ -587,11 +589,12 @@ its `artifact_refs` and `config_refs` as stored.
 the envelope's `causation_id` on every event, whatever its row, and the payload link members of the
 table below, and nothing else ([DEC-761](../project/decisions/DEC-761.md)). The journal spec
 requires a `causation_id` only on its copies of cross-stream facts (§2), on `IntentProposed` (§9.1
-rule 10), on `OrderSubmitted` version 2 (rule 45), and on `ApprovalResponded` (rule 50). So the
+rule 10), on `OwnerCommandRefused` (rule 27), on `OrderSubmitted` version 2 (rule 45), and on
+`ApprovalResponded` (rule 50). So the
 walk never depends on any other `causation_id`. It uses the payload members the closed schemas
-carry: a fill names its order, and an order request names its intent. Where a row names the
-`causation_id` target's types, a target of another type is `unexpected_type`; elsewhere any event
-in the workspace is followed.
+carry: a fill names its order, and an order request names its intent. Where a row names, in its
+parentheses, the types its `causation_id` targets, those are the expected types, and a target of
+another type is `unexpected_type`. Elsewhere any event in the workspace is followed.
 
 Every lookup is scoped (AU-1). An id is resolved only by the workspace-scoped lookup of §4.8.1's
 ids rule. A stream id the walk builds from a payload member, such as `agent:{ws}:{agent_id}`, uses
@@ -728,9 +731,9 @@ connection record. An unknown agent is the 404.
   spec §12: segment files, manifests, anchors with inclusion proofs). Its anchor is the canonical
   export's **verifier digest** (journal spec §12, DEC-265 item 3: `ExportBundle::verifier_digest` in
   `mandate-journal-cold`). `json` and `csv` are views derived from it, and each names that digest
-  as `verifier_digest`. This is the "manifest hash" API-16 and the §4.8 table name.
+  as `verifier_digest`.
 - The API appends `ExportCreated` (its members are journal spec §9's; it records the bare-hex
-  `verifier_digest`) and serves
+  `verifier_digest`, **Planned:** added by journal spec #772) and serves
   nothing until it is committed (AU-6). Response `202 {export_id, phase: "recorded"}`;
   `GET /exports/{id}` serves the files. Each download is journaled as `RecordsAccessed` before its
   bytes are served ([DEC-766](../project/decisions/DEC-766.md)).
