@@ -3,11 +3,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Unimplemented;
-use crate::wire::EventId;
+use crate::wire::{Decimal, EventId};
 
 /// One error response. `title` is generic text fixed by `code`, never content (rule 6, API-10);
 /// `event_id` is present exactly when `effect` is not [`Effect::None`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Problem {
     #[serde(rename = "type")]
     pub type_uri: String,
@@ -21,13 +22,17 @@ pub struct Problem {
 }
 
 impl Problem {
-    /// The problem for `code`, with the status §3.5's table gives it, its fixed title and type
-    /// URI, and `retryable` for `journal_unavailable` and `rate_limited` only (DEC-681 item 9). An
-    /// `event_id` with
-    /// [`Effect::None`], or none with `recorded` or `unknown`, is refused.
+    /// The problem for `code`: the status §3.5's table gives it, the type URI
+    /// `https://mandate.dev/problems/<code>`, a title fixed by the code that names no content, no
+    /// violations, and `retryable` for `journal_unavailable` and `rate_limited` only, with
+    /// `membership_unavailable` once #766's codes are served (DEC-681 items 9 and 11).
     ///
     /// # Errors
-    /// [`ProblemError::EventIdMismatch`] for that mismatch.
+    /// [`ProblemError::EventIdMismatch`] for an `event_id` with [`Effect::None`], or none with
+    /// `recorded` or `unknown`; [`ProblemError::EffectNotAllowed`] for an effect the code cannot
+    /// carry: every code is refused before anything is written except `step_up_required` and
+    /// `control_stream_frozen`, which may refuse the second half of a batch whose kill switch was
+    /// recorded (§5.6), and no code yet reports `unknown` (DEC-681 item 11).
     pub fn of(
         code: ProblemCode,
         effect: Effect,
@@ -67,13 +72,52 @@ pub enum Effect {
     Unknown,
 }
 
-/// One validation finding: a JSON pointer, a code (a mandate V-code, a policy key, or a wire
-/// code), and generic text.
+/// One finding of a 422 or of validation, shared with the validate read model
+/// (`envelope.schema.json#/$defs/Violation`, DEC-682 item 22). `path` is a JSON pointer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Violation {
-    pub path: String,
-    pub code: String,
-    pub message: String,
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Violation {
+    /// The body's shape or canonical form; `code` is a lowercase wire code.
+    Schema {
+        path: String,
+        code: String,
+        message: String,
+    },
+    /// A mandate V-rule; `code` is its id (`V-022`).
+    Rule {
+        path: String,
+        code: String,
+        message: String,
+    },
+    /// A value looser than the nearest ancestor that sets it (mandate spec §4.3, FR-1.5).
+    Policy {
+        path: String,
+        key: String,
+        level: PolicyLevel,
+        value: PolicyValue,
+        ancestor_level: PolicyLevel,
+        ancestor_value: PolicyValue,
+        message: String,
+    },
+}
+
+/// Mandate spec §4.3's hierarchy, top to bottom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyLevel {
+    Platform,
+    Organization,
+    Workspace,
+    Mandate,
+}
+
+/// A value as §4.3 compares it: a number, a permission or requirement, or a set's sorted members.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PolicyValue {
+    Number(Decimal),
+    Flag(bool),
+    Set(Vec<String>),
 }
 
 /// Why [`Problem::of`] refused.
@@ -83,4 +127,6 @@ pub enum ProblemError {
     Unimplemented(Unimplemented),
     #[error("event_id must be present exactly when effect is recorded or unknown")]
     EventIdMismatch,
+    #[error("this code cannot carry this effect")]
+    EffectNotAllowed,
 }

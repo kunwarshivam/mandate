@@ -20,7 +20,7 @@ impl IdempotencyKey {
 }
 
 /// What one event's id is derived from: the caller's workspace and principal, the operation's
-/// name (the route table's), the key, and, for a call that commits several events (§5.3, §5.6),
+/// name (the route table's, `[a-z][a-z_]*`, so it needs no escaping in the hashed object), the key, and, for a call that commits several events (§5.3, §5.6),
 /// the event's position in its batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Derivation<'a> {
@@ -39,7 +39,7 @@ pub struct Derivation<'a> {
 /// meaning (journal spec §3).
 ///
 /// # Errors
-/// [`KeyError::Unimplemented`] until E10-10.
+/// [`KeyError::Operation`] for an operation name outside `[a-z][a-z_]*`.
 pub fn event_id(derivation: &Derivation<'_>) -> Result<EventId, KeyError> {
     let _ = derivation;
     Err(KeyError::Unimplemented(Unimplemented))
@@ -52,4 +52,6 @@ pub enum KeyError {
     Unimplemented(Unimplemented),
     #[error("an Idempotency-Key is 16 to 64 characters from [A-Za-z0-9_-]")]
     Malformed,
+    #[error("an operation name is [a-z][a-z_]*")]
+    Operation,
 }

@@ -12,10 +12,16 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::Unimplemented;
 use crate::problem::Violation;
 
-/// The request body `body` as `T`, or every way it fails: not JSON, a member of the wrong JSON
-/// type (a number where a decimal string belongs), a scalar not in canonical form, an enum value
-/// outside its closed set, or a member `T` does not name, so a body carrying `requested_by` is
-/// refused and never read (API-6; DEC-681 item 6).
+/// The request body `body` as `T`, or every way it fails, each as one [`Violation::Schema`] with a
+/// JSON pointer and a code (DEC-681 item 10):
+/// - `malformed` at `""`: not JSON, empty, or bytes after the value;
+/// - `duplicate_member`: an object naming one member twice, at any depth;
+/// - `unknown_member` at the member: a member `T` does not name, so a body carrying `requested_by`
+///   is refused and never read (API-6; DEC-681 item 6);
+/// - `type`: a member of the wrong JSON type, such as a number where a decimal string belongs;
+/// - `non_canonical`: a scalar not in its canonical form;
+/// - `missing`: a required member absent;
+/// - `enum`: a value outside its closed set.
 ///
 /// # Errors
 /// [`Refused::Invalid`], which the server answers as `invalid` (422).

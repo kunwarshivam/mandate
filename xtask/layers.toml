@@ -22,7 +22,8 @@
 #   2  mandate-journal, mandate-accounting
 #   3  mandate-spec
 #   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
-#      mandate-spec and the planned mandate-audit (layer 3) it may use; its server sits higher (DEC-680)
+#      mandate-spec; it holds L5's audit wire types, and mandate-audit sits above it and converts
+#      into them; its server sits higher (DEC-680)
 #   5  mandate-builder
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
 #      mandate-runtime, mandate-mcp

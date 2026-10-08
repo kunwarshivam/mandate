@@ -7,30 +7,65 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 
 use mandate_api::idempotency::{Derivation, IdempotencyKey, KeyError, event_id};
-use mandate_api::problem::{Effect, Problem, ProblemCode, ProblemError};
+use mandate_api::problem::{Effect, Problem, ProblemCode, ProblemError, Violation};
 use mandate_api::wire::{Asset, Decimal, EventId, Id, Ref, Refused, Timestamp, decode, encode};
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 const SPEC: &str = include_str!("../../../docs/specs/workspace-api.md");
 
-/// `(code, status)` for each row of §3.5's code table: the rows of the section whose second cell is
-/// an HTTP status.
-fn spec_codes() -> Vec<(String, u16)> {
+/// One code of §3.5's table: its status, and the story that will serve it when the row carries a
+/// `(planned: <story>)` marker (DEC-683).
+struct SpecCode {
+    name: String,
+    status: u16,
+    planned: Option<String>,
+}
+
+/// Every code of §3.5's code table: the rows of the section whose second cell is an HTTP status,
+/// each naming one or more codes in its first cell.
+fn spec_codes() -> Vec<SpecCode> {
     let section = SPEC
         .split("### 3.5 Errors")
         .nth(1)
         .and_then(|rest| rest.split("### 3.6").next())
         .unwrap_or_default();
-    section
-        .lines()
-        .filter_map(|line| {
-            let cells: Vec<&str> = line.split('|').map(str::trim).collect();
-            let code = cells.get(1)?.strip_prefix('`')?.strip_suffix('`')?;
-            let status = cells.get(2)?.parse().ok()?;
-            Some((code.to_owned(), status))
-        })
+    let mut codes = Vec::new();
+    for line in section.lines() {
+        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+        let Some(status) = cells.get(2).and_then(|c| c.parse::<u16>().ok()) else {
+            continue;
+        };
+        let planned = line
+            .split("(planned: ")
+            .nth(1)
+            .and_then(|rest| rest.split(')').next())
+            .map(str::to_owned);
+        let names = cells.get(1).copied().unwrap_or_default();
+        for name in names.split('`').skip(1).step_by(2) {
+            codes.push(SpecCode {
+                name: name.to_owned(),
+                status,
+                planned: planned.clone(),
+            });
+        }
+    }
+    codes
+}
+
+/// The variants serde knows for `ProblemCode`, read from its own "expected one of" refusal.
+fn rust_codes() -> BTreeSet<String> {
+    let refusal = serde_json::from_str::<ProblemCode>("\"no_such_code\"")
+        .expect_err("no such code")
+        .to_string();
+    let listed = refusal.split("expected one of").nth(1).unwrap_or_default();
+    listed
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
         .collect()
 }
 
@@ -45,21 +80,27 @@ fn ulid(text: &str) -> EventId {
 #[test]
 #[ignore = "pending E10-10"]
 fn every_problem_code_has_the_spec_tables_status() {
-    let rows = spec_codes();
-    assert_eq!(rows.len(), 12, "§3.5 lists twelve codes");
-    let mut seen = BTreeSet::new();
-    for (name, status) in rows {
+    let served: Vec<SpecCode> = spec_codes()
+        .into_iter()
+        .filter(|c| c.planned.is_none())
+        .collect();
+    assert!(
+        served.len() >= 12,
+        "§3.5 lists at least the twelve codes of v0.1"
+    );
+    for SpecCode { name, status, .. } in served {
         let code: ProblemCode = decode(format!("\"{name}\"").as_bytes()).expect(&name);
         let problem = Problem::of(code, Effect::None, None).expect(&name);
         assert_eq!(problem.status, status, "{name}");
         assert_eq!(problem.code, code);
-        let retryable = matches!(name.as_str(), "journal_unavailable" | "rate_limited");
+        let retryable = matches!(
+            name.as_str(),
+            "journal_unavailable" | "rate_limited" | "membership_unavailable"
+        );
         assert_eq!(problem.retryable, retryable, "{name}");
         assert!(!problem.title.is_empty() && !problem.type_uri.is_empty());
         assert!(problem.event_id.is_none() && problem.violations.is_empty());
-        seen.insert(name);
     }
-    assert_eq!(seen.len(), 12, "no two rows decode to one code");
 }
 
 #[test]
@@ -68,11 +109,188 @@ fn event_id_is_present_exactly_when_something_may_be_recorded() {
     let event = ulid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     let invalid = Problem::of(ProblemCode::Invalid, Effect::None, Some(event.clone()));
     assert_eq!(invalid, Err(ProblemError::EventIdMismatch));
-    for effect in [Effect::Recorded, Effect::Unknown] {
-        let missing = Problem::of(ProblemCode::StepUpRequired, effect, None);
-        assert_eq!(missing, Err(ProblemError::EventIdMismatch));
-        let named = Problem::of(ProblemCode::StepUpRequired, effect, Some(event.clone()));
-        assert_eq!(named.map(|p| p.event_id), Ok(Some(event.clone())));
+    let missing = Problem::of(ProblemCode::StepUpRequired, Effect::Recorded, None);
+    assert_eq!(missing, Err(ProblemError::EventIdMismatch));
+    let named = Problem::of(
+        ProblemCode::StepUpRequired,
+        Effect::Recorded,
+        Some(event.clone()),
+    );
+    assert_eq!(named.map(|p| p.event_id), Ok(Some(event)));
+}
+
+/// The effects each code may carry, read from the spec: a refusal for authentication, role, scope,
+/// existence, shape, idempotency, base, classification, live, rate, identity, or an unavailable
+/// journal comes before anything is written (§3.5, API-1, API-2, API-13; "`effect: none`" in
+/// `journal_unavailable`'s row). Only §5.6's batch refuses its revocation after its kill switch was
+/// recorded, with `step_up_required` or while frozen with `control_stream_frozen`. No code of §3.5
+/// reports `unknown` (DEC-681 item 11).
+fn may_carry(name: &str, effect: Effect) -> bool {
+    match effect {
+        Effect::None => true,
+        Effect::Recorded => matches!(name, "step_up_required" | "control_stream_frozen"),
+        Effect::Unknown => false,
+    }
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn each_code_carries_only_the_effects_the_spec_allows_it() {
+    let event = ulid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    for SpecCode { name, .. } in spec_codes().into_iter().filter(|c| c.planned.is_none()) {
+        let code: ProblemCode = decode(format!("\"{name}\"").as_bytes()).expect(&name);
+        for effect in [Effect::None, Effect::Recorded, Effect::Unknown] {
+            let id = (effect != Effect::None).then(|| event.clone());
+            let made = Problem::of(code, effect, id);
+            if may_carry(&name, effect) {
+                assert_eq!(made.map(|p| p.effect), Ok(effect), "{name} {effect:?}");
+            } else {
+                assert_eq!(
+                    made,
+                    Err(ProblemError::EffectNotAllowed),
+                    "{name} {effect:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn a_problem_serializes_every_member_and_refuses_one_it_does_not_name() {
+    let problem = Problem::of(ProblemCode::Invalid, Effect::None, None).expect("invalid");
+    let written: Value = serde_json::from_slice(&encode(&problem).expect("encodes")).expect("json");
+    let members: BTreeSet<&str> = written
+        .as_object()
+        .expect("an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let expected = [
+        "type",
+        "status",
+        "code",
+        "title",
+        "effect",
+        "event_id",
+        "retryable",
+        "violations",
+    ];
+    assert_eq!(members, BTreeSet::from(expected));
+    assert_eq!(
+        written["type"],
+        json!("https://mandate.dev/problems/invalid")
+    );
+    assert_eq!(written["status"], json!(422));
+    assert_eq!(written["code"], json!("invalid"));
+    assert_eq!(written["effect"], json!("none"));
+    assert_eq!(written["event_id"], Value::Null);
+    assert_eq!(written["retryable"], json!(false));
+    assert_eq!(written["violations"], json!([]));
+    let title = written["title"].as_str().expect("a title");
+    assert!(
+        !title.is_empty() && !title.chars().any(|c| c.is_ascii_digit()),
+        "{title}"
+    );
+    let event = ulid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    let recorded = Problem::of(ProblemCode::StepUpRequired, Effect::Recorded, Some(event));
+    let written: Value =
+        serde_json::from_slice(&encode(&recorded.expect("recorded")).expect("encodes"))
+            .expect("json");
+    assert_eq!(written["event_id"], json!("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
+    assert_eq!(
+        written["type"],
+        json!("https://mandate.dev/problems/step_up_required")
+    );
+    let mut extra = serde_json::to_value(&problem).expect("json");
+    extra["detail"] = json!("anything");
+    let body = serde_json::to_vec(&extra).expect("json");
+    assert_eq!(
+        refusal::<Problem>(&body),
+        [("/detail".to_owned(), "unknown_member".to_owned())]
+    );
+}
+
+/// A closed request shape, standing for every request type: a decimal and a closed enum.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Fixture {
+    bid: Decimal,
+    effect: Effect,
+}
+
+/// The `(path, code)` of each violation `decode` reports for `body`.
+fn refusal<T: DeserializeOwned + Debug>(body: &[u8]) -> Vec<(String, String)> {
+    match decode::<T>(body) {
+        Err(Refused::Invalid { violations }) => violations
+            .into_iter()
+            .map(|v| match v {
+                Violation::Schema { path, code, .. } => (path, code),
+                other => panic!("a body's violation is a schema finding: {other:?}"),
+            })
+            .collect(),
+        other => panic!("expected invalid, got {other:?}"),
+    }
+}
+
+fn is_pointer(path: &str) -> bool {
+    path.is_empty() || path.starts_with('/')
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn decode_refuses_every_malformed_body_with_one_located_violation() {
+    let good = decode::<Fixture>(br#"{"bid": "1.5", "effect": "recorded"}"#);
+    assert!(good.is_ok(), "{good:?}");
+    let whole = [("".to_owned(), "malformed".to_owned())];
+    for body in [
+        &b"not json"[..],
+        b"",
+        b"   ",
+        br#"{"bid": "1.5", "effect": "none"} x"#,
+        b"{} {}",
+    ] {
+        assert_eq!(
+            refusal::<Fixture>(body),
+            whole,
+            "{}",
+            String::from_utf8_lossy(body)
+        );
+    }
+    let located: [(&[u8], &str, &str); 3] = [
+        (
+            br#"{"bid": "1.5", "effect": "none", "requested_by": "owner"}"#,
+            "/requested_by",
+            "unknown_member",
+        ),
+        (br#"{"bid": "1.5"}"#, "", "missing"),
+        (br#"{"bid": "1.5", "effect": "maybe"}"#, "/effect", "enum"),
+    ];
+    for (body, path, code) in located {
+        assert_eq!(
+            refusal::<Fixture>(body),
+            [(path.to_owned(), code.to_owned())]
+        );
+    }
+    let coded: [(&[u8], &str); 4] = [
+        (
+            br#"{"bid": "1", "bid": "2", "effect": "none"}"#,
+            "duplicate_member",
+        ),
+        (
+            br#"{"bid": {"a": 1, "a": 2}, "effect": "none"}"#,
+            "duplicate_member",
+        ),
+        (br#"{"bid": 1.5, "effect": "none"}"#, "type"),
+        (br#"{"bid": "1.50", "effect": "none"}"#, "non_canonical"),
+    ];
+    for (body, code) in coded {
+        let found = refusal::<Fixture>(body);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found.iter().all(|(p, c)| c == code && is_pointer(p)),
+            "{found:?}"
+        );
     }
 }
 
@@ -94,6 +312,7 @@ fn idempotency_keys_are_16_to_64_url_safe_characters() {
         format!("{}.", "a".repeat(16)),
         format!("{}é", "a".repeat(16)),
         format!("{}/", "a".repeat(16)),
+        format!("{}\n", "a".repeat(16)),
     ];
     for bad in refused {
         assert_eq!(
@@ -239,7 +458,8 @@ fn closed<T: Serialize + DeserializeOwned + PartialEq + Debug + Copy>(cases: &[(
 #[ignore = "pending E10-10"]
 fn scalars_are_canonical_strings_and_never_numbers() {
     let quoted = |text: &str| format!("\"{text}\"");
-    for good in ["101.5", "0", "-3", "0.000001"] {
+    let finest = format!("0.{}1", "0".repeat(27));
+    for good in ["101.5", "0", "-3", "0.000001", finest.as_str()] {
         let decimal = decode::<Decimal>(quoted(good).as_bytes()).expect(good);
         assert_eq!(encode(&decimal).expect(good), quoted(good).as_bytes());
     }
@@ -249,14 +469,34 @@ fn scalars_are_canonical_strings_and_never_numbers() {
             "the number {bad}"
         );
     }
-    for bad in ["1.50", "+1", "1e2", "01", "-0", "", " 1", "one"] {
+    let too_fine = format!("0.{}1", "0".repeat(28));
+    let too_large = [
+        "79000000000000000000000000000",
+        "100000000000000000000000000000",
+    ];
+    let more = [too_fine.as_str(), too_large[0], too_large[1]];
+    let spellings = [
+        ".5", "1.", "-", "NaN", "Infinity", "1_000", "-0.0", "1.50", "+1", "1e2",
+    ];
+    for bad in spellings
+        .iter()
+        .chain(more.iter())
+        .chain(["01", "-0", "", " 1", "one"].iter())
+    {
         assert!(
             is_invalid(decode::<Decimal>(quoted(bad).as_bytes())),
             "{bad:?}"
         );
     }
     let refs = [format!("sha256:{}", "ab".repeat(32))];
-    let ids = ["agent_1", "A-z_9", "01ARZ3NDEKTSV4RRFFQ69G5FAV"];
+    let widest = "a".repeat(64);
+    let ids = [
+        "a",
+        "agent_1",
+        "A-z_9",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        widest.as_str(),
+    ];
     let events = ["01ARZ3NDEKTSV4RRFFQ69G5FAV", "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"];
     let times = ["2026-10-08T14:30:00.000000000Z"];
     let assets = ["b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"];
@@ -270,6 +510,13 @@ fn scalars_are_canonical_strings_and_never_numbers() {
         assert!(
             is_invalid(decode::<Id>(quoted(bad).as_bytes())),
             "id {bad:?}"
+        );
+    }
+    for letter in ['I', 'L', 'O', 'U'] {
+        let ulid = format!("01ARZ3NDEKTSV4RRFFQ69G5FA{letter}");
+        assert!(
+            is_invalid(decode::<EventId>(quoted(&ulid).as_bytes())),
+            "{ulid}"
         );
     }
     let lower = "01arz3ndektsv4rrffq69g5fav";
@@ -291,9 +538,18 @@ fn scalars_are_canonical_strings_and_never_numbers() {
     assert!(is_invalid(decode::<Asset>(
         quoted(&assets[0].to_uppercase()).as_bytes()
     )));
-    assert!(is_invalid(decode::<Timestamp>(
-        quoted("2026-10-08T14:30:00Z").as_bytes()
-    )));
+    for bad in [
+        "2026-10-08T14:30:00Z",
+        "2026-10-08T14:30:00.000000000+00:00",
+        "2026-10-08T14:30:00.000Z",
+        "1969-12-31T23:59:59.000000000Z",
+        "2026-10-08 14:30:00.000000000Z",
+    ] {
+        assert!(
+            is_invalid(decode::<Timestamp>(quoted(bad).as_bytes())),
+            "{bad}"
+        );
+    }
 }
 
 fn round_trips<T: Serialize + DeserializeOwned + Debug>(texts: &[&str]) {
@@ -314,7 +570,8 @@ fn the_safety_enums_of_a_problem_are_closed() {
     ]);
     let codes: Vec<(ProblemCode, String)> = spec_codes()
         .into_iter()
-        .map(|(name, _)| {
+        .filter(|c| c.planned.is_none())
+        .map(|SpecCode { name, .. }| {
             let code = serde_json::from_str(&format!("\"{name}\"")).expect(&name);
             (code, name)
         })
@@ -323,19 +580,51 @@ fn the_safety_enums_of_a_problem_are_closed() {
     closed(&cases);
 }
 
+/// The stories whose planned values the code may already serve (DEC-683 item 5): a value both a
+/// variant and marked planned passes only under a story named here.
+const IN_FLIGHT: &[&str] = &[];
+
+/// DEC-683: every code the server can emit is in §3.5's table, and every code the table serves is a
+/// variant. A code the table marks `(planned: <story>)` may be absent, or present while its story is
+/// in flight.
 #[test]
 fn the_problem_code_enum_is_exactly_the_spec_tables_codes() {
-    let rows = spec_codes();
-    let spelled: BTreeSet<String> = rows.iter().map(|(name, _)| name.clone()).collect();
-    assert_eq!(spelled.len(), 12, "§3.5 lists twelve distinct codes");
-    for name in &spelled {
+    let codes = spec_codes();
+    let rust = rust_codes();
+    let listed: BTreeSet<String> = codes.iter().map(|c| c.name.clone()).collect();
+    assert_eq!(listed.len(), codes.len(), "no code is listed twice");
+    let served: BTreeSet<String> = codes
+        .iter()
+        .filter(|c| c.planned.is_none())
+        .map(|c| c.name.clone())
+        .collect();
+    assert!(rust.len() >= 12, "the refusal lists the variants: {rust:?}");
+    let unlisted: Vec<_> = rust.difference(&listed).collect();
+    assert!(
+        unlisted.is_empty(),
+        "variants §3.5 does not list: {unlisted:?}"
+    );
+    let missing: Vec<_> = served.difference(&rust).collect();
+    assert!(
+        missing.is_empty(),
+        "served codes with no variant: {missing:?}"
+    );
+    for code in codes.iter().filter(|c| rust.contains(&c.name)) {
+        if let Some(story) = &code.planned {
+            assert!(
+                IN_FLIGHT.contains(&story.as_str()),
+                "{} is served but still planned under {story}, which is not in flight",
+                code.name
+            );
+        }
+    }
+    for name in &rust {
         let code: ProblemCode = serde_json::from_str(&format!("\"{name}\"")).expect(name);
         assert_eq!(
             serde_json::to_string(&code).expect(name),
             format!("\"{name}\"")
         );
     }
-    assert!(serde_json::from_str::<ProblemCode>("\"unimplemented\"").is_err());
 }
 
 #[test]
@@ -344,4 +633,37 @@ fn every_stub_reports_its_story() {
         mandate_api::Unimplemented.to_string(),
         format!("{} has not been implemented yet", mandate_api::STORY)
     );
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn the_last_batch_position_and_only_route_names_derive_an_id() {
+    let text = "0123456789abcdef";
+    let last = Some(u32::MAX);
+    assert_eq!(
+        derived("ws_01", "user_7", "kill_switch", text, last),
+        oracle("ws_01", "user_7", "kill_switch", text, last)
+    );
+    let key = IdempotencyKey::parse(text).expect("a valid key");
+    for operation in [
+        "",
+        "Kill_switch",
+        "kill-switch",
+        "kill switch",
+        "kill\"switch",
+        "_pause",
+    ] {
+        let derivation = Derivation {
+            workspace: &id("ws_01"),
+            principal: &id("user_7"),
+            operation,
+            key: &key,
+            position: None,
+        };
+        assert_eq!(
+            event_id(&derivation),
+            Err(KeyError::Operation),
+            "{operation:?}"
+        );
+    }
 }
