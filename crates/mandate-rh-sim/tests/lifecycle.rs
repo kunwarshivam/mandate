@@ -5,7 +5,7 @@
 mod common;
 
 use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, limit, price, qty, ref_id, sim};
-use mandate_rh_sim::{Event, Fault, OrderRequest, Session, SimError, State};
+use mandate_rh_sim::{Event, Fault, OrderRequest, Session, Sim, SimError, State};
 
 type Outcome = Result<(), SimError>;
 
@@ -247,7 +247,7 @@ fn scripted_answers_and_broker_changes_follow_the_lifecycle() -> Outcome {
 fn a_ref_id_is_echoed_and_a_changed_resend_refused_only_when_switched_on() -> Outcome {
     let mut sim = sim()?;
     let order = sim.place(&limit("buy", "1", "501", 1))?;
-    let echoed = |sim: &mandate_rh_sim::Sim| -> Result<Option<String>, SimError> {
+    let echoed = |sim: &Sim| -> Result<Option<String>, SimError> {
         Ok(sim.orders(AGENTIC)?.first().and_then(|o| o.ref_id.clone()))
     };
     assert_eq!(
