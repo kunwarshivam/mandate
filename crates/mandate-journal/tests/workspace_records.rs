@@ -9,7 +9,9 @@
 use std::path::Path;
 
 use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
-use mandate_journal::{Draft, StoredEvent, TrustedStart, check_batch, verify_agent_stream};
+use mandate_journal::{
+    Draft, HeldAnchor, StoredEvent, TrustedStart, check_batch, verify_agent_stream_anchored,
+};
 
 fn section(name: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
@@ -287,12 +289,11 @@ fn stored(seq: u64, event_type: &str, version: u64, payload: &Value) -> StoredEv
     }
 }
 
-/// §11's `held_mismatch` (§9.10, DEC-672) over each of the `hold` section's ranges. A case's
-/// `anchor`, the stored chain before a later range, is given to the verifier as the version-2 hold
-/// or lift that set it, one `seq` before the range, so the check anchors on the chain rather than
-/// on the range's first record; a case with no anchor has none before its start and fails closed.
-/// The first failing record is reported at its `seq`, and only it: a case lists every violation
-/// the reference finds, and the verifier stops at the first.
+/// §11's `held_mismatch` (§9.10, DEC-672, DEC-673) over each of the `hold` section's ranges, with
+/// the anchor each case's caller derives from the stored chain before the range: none, no version
+/// 2 before it, or the `held` the last version 2 carried. The first failing record is reported at
+/// its `seq`, and only it: a case lists every violation the reference finds, and the verifier
+/// stops at the first.
 #[test]
 #[ignore = "pending E10-15"]
 fn the_owners_hold_is_carried_through_every_range() {
@@ -301,33 +302,29 @@ fn the_owners_hold_is_carried_through_every_range() {
     let mut failed = Vec::new();
     for case in cases {
         let from = case.get("from_seq").and_then(Value::as_int).unwrap();
-        let mut rows = Vec::new();
-        let mut first = from;
-        if let Some(anchor) = case.get("anchor").and_then(Value::as_object) {
-            let held = anchor.get("held") == Some(&Value::Bool(true));
-            let reason = if held {
-                "owner_hold"
-            } else {
-                "owner_lift_hold"
-            };
-            let payload = parse(
-                format!(
-                    r#"{{"from":"normal","held":{held},"lifecycle":"normal","reason":"{reason}","to":"{}"}}"#,
-                    if held { "exits_only" } else { "normal" }
-                )
-                .as_bytes(),
-            )
-            .unwrap();
-            first = from - 1;
-            rows.push(stored(first, "AgentModeChanged", 2, &payload));
-        }
-        for (event, seq) in list(case, "events").iter().zip(from..) {
-            let version = event.get("schema_version").and_then(Value::as_int).unwrap();
-            let payload = event.get("payload").unwrap();
-            rows.push(stored(seq, text(event, "event_type"), version, payload));
-        }
+        let rows: Vec<StoredEvent> = list(case, "events")
+            .iter()
+            .zip(from..)
+            .map(|(event, seq)| {
+                let version = event.get("schema_version").and_then(Value::as_int).unwrap();
+                let payload = event.get("payload").unwrap();
+                stored(seq, text(event, "event_type"), version, payload)
+            })
+            .collect();
+        let anchor = match case.get("anchor") {
+            Some(anchor @ Value::Object(_))
+                if anchor.get("v2_before") == Some(&Value::Bool(true)) =>
+            {
+                HeldAnchor::Carried {
+                    seq: from - 1,
+                    held: anchor.get("held") == Some(&Value::Bool(true)),
+                }
+            }
+            Some(Value::Object(_)) => HeldAnchor::NoVersionTwo,
+            _ => HeldAnchor::Unknown,
+        };
         let start = TrustedStart {
-            from_seq: first,
+            from_seq: from,
             prev_hash: Digest::of(b""),
         };
         let expect = list(case, "expect");
@@ -335,7 +332,7 @@ fn the_owners_hold_is_carried_through_every_range() {
             .first()
             .and_then(Value::as_int)
             .map(|i| (from + i, "held_mismatch"));
-        let got = verify_agent_stream(&rows, start)
+        let got = verify_agent_stream_anchored(&rows, start, anchor)
             .err()
             .map(|f| (f.seq, f.check.code()));
         if got != want {
@@ -347,12 +344,18 @@ fn the_owners_hold_is_carried_through_every_range() {
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     assert!(
-        cases.len() >= 17,
+        cases.len() >= 24,
         "{} range cases; never fewer",
         cases.len()
     );
     assert!(
         cases.iter().any(|c| list(c, "expect").len() >= 2),
         "a case with two violations shows only the first is reported"
+    );
+    assert!(
+        cases
+            .iter()
+            .any(|c| c.get("anchor").and_then(|a| a.get("v2_before")) == Some(&Value::Bool(false))),
+        "a case anchored on no version 2 before the range"
     );
 }
