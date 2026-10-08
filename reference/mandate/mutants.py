@@ -11,6 +11,28 @@ import pathlib, shutil, subprocess, sys, tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 MUTANTS = {
+    "V-008 and W-002 read crypto, not the profile": (
+        '    return any(c in classes for c in m["universe"]["asset_classes"])',
+        '    return "crypto" in m["universe"]["asset_classes"]'),
+    "a missing profile reads as the paper profile": (
+        '    if classes is None:\n        return bool(m["universe"]["asset_classes"])',
+        '    if classes is None:\n        classes = ["crypto"]'),
+    "a missing profile needs no offset": (
+        '    if classes is None:\n        return bool(m["universe"]["asset_classes"])',
+        '    if classes is None:\n        return False'),
+    "a version may move back to schema version 1": (
+        '                             or m["mandate_schema_version"] < prev.get("mandate_schema_version", m["mandate_schema_version"])):',
+        '                             or False):'),
+    "V-008 ignores the profile": (
+        '        if stop_limit_protected(m, ctx) and stop_limit_offset(p, m) is None:',
+        '        if "crypto" in m["universe"]["asset_classes"] and stop_limit_offset(p, m) is None:'),
+    "W-002 omits the stop-limit offset": (
+        '    offset = D(stop_limit_offset(p, m) or 0) if stop_limit_protected(m, ctx) else D(0)', '    offset = D(0)'),
+    "W-002 adds the offset without a stop-limit": (
+        '    offset = D(stop_limit_offset(p, m) or 0) if stop_limit_protected(m, ctx) else D(0)',
+        '    offset = D(stop_limit_offset(p, m) or 0)'),
+    "a version-1 document is compared unread": (
+        '    if old["mandate_schema_version"] != new["mandate_schema_version"]:', '    if False:'),
     "restart confirmation on every bounce": ("        if self.false_run >= need and not self.prev:\n            self.acc = 0.0",
                                              "        if not breached:\n            self.acc = 0.0"),
     "additive capital base": ("self.C, self.L = H1, E01, C1, L1", "self.C, self.L = H1, E01, self.C + d, L1"),
@@ -361,7 +383,7 @@ PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if 
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
          "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(2500); fuzz_client_ceiling(300); "
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
-         "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_independence_floor(300); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
+         "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_independence_floor(300); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); fuzz_stop_limit_offset(300); "
          "print(len(FAIL))")
 
 TW_PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
