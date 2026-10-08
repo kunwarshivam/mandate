@@ -447,6 +447,26 @@ Lessons from this wave:
   on `main`. Rebuild the branch on `main`'s tip (checkout the changed paths onto a fresh branch)
   rather than fighting the guard.
 
+## 2026-10-08: the founder's product flow (DEC-528)
+
+The founder described the flow they want. An owner arrives with several connected accounts and no
+agents deployed. They find an instrument by name, ticker or list. They buy, or start an agent that
+seeks a goal or only monitors, or ask for an agent over what they already hold. Agents react to
+news, earnings and filings. Mapped against the documents, the founder decided three points:
+- no order ticket: every buy goes through an agent;
+- display-only search and owner watchlists, with nothing ranked or suggested;
+- adoption deferred until basis and lots are modelled (DEC-46 stands).
+
+The new stories, all after the first paper trade:
+- E11-10, Home (signed-in, D1) and the holdings view;
+- E11-11, search and watchlists;
+- E10-19, monitor-only agents;
+- E19-12, event-triggered research.
+
+[DEC-528](decisions/DEC-528.md) records them, with the spec changes each still needs. The PRD,
+the product experience brief, the roadmap, the milestones and the glossary carry them. The
+tracker's Next list is unchanged.
+
 ## Next, in order
 
 As of 2026-10-07, after the founder's DEC-502. Open PRs and claims on GitHub are the live record.

@@ -35,6 +35,10 @@ all-or-nothing, and decisions cannot be explained or audited. See
 - Native mobile apps (web push, email, and one chat app cover approvals in v1; SMS and phone calls come next, per [DEC-19](../project/04-decision-log.md#decisions)).
 - User-supplied code (WebAssembly plug-ins).
 - Strategy marketplace or copy trading.
+- An order ticket, or any buy that does not go through an agent: the owner buys by asking an agent
+  or setting one up ([DEC-528](../project/decisions/DEC-528.md) item 1).
+- Platform-ranked, scored, "trending" or suggested instrument lists; search is display-only and
+  watchlists are the owner's (DEC-528 item 2).
 - Shared data plane.
 - SAML and SCIM (OIDC SSO only).
 
@@ -187,6 +191,8 @@ instrument, size, price, or thesis.
 | FR-8.2 | Pause, resume, stop per agent; kill switch per workspace and per connection | P0 |
 | FR-8.3 | Alerts: risk rung reached, reconciliation mismatch, data feed stale, agent paused | P0 |
 | FR-8.4 | Per-signal-model scorecards (hit rate, calibration measurement) from the user's own results only, for the user's review; never aggregated across users, shown in the model picker, or used in marketing; they never change weights. Delivered in Phase 1 for the research agent's forward-paper evaluation ([DEC-99](../project/04-decision-log.md#decisions)) | P0 |
+| FR-8.5 | Home (signed-in, D1) and holdings: Home shows the owner's connected accounts, each connection's own holdings read-only with their age, and "no agents deployed" when there are none. A holding no agent bought is the owner's and is never shown as an agent's (connections CN-7). For Robinhood, only the agentic account (CN-8). [DEC-528](../project/decisions/DEC-528.md); E11-10 | P1 (v1, Phase 2, after the first paper trade) |
+| FR-8.6 | Instrument search by name or ticker, display-only (ordered by match to the query and then alphabetically, as DEC-528 proposes); owner-curated watchlists, which steer no agent's universe and are never read by an agent. No ranking, scoring, flagging or platform-authored suggestion ([data-plane spec §1.4](../specs/data-plane.md#14-non-goals)). An instrument page offers "ask an agent" and "set up an agent", never "buy". DEC-528; E11-11 | P1 (v1, Phase 2, after the first paper trade) |
 
 ### 6.9 Deployment
 
@@ -203,6 +209,19 @@ instrument, size, price, or thesis.
 | FR-10.1 | Billing per organization through a billing provider; plan plus agent count | P0 |
 | FR-10.2 | Usage metering (agent-hours, model usage) from counts only | P1 |
 | FR-10.3 | Hybrid license key tied to the organization | P0 |
+
+### 6.11 After v1 ([DEC-528](../project/decisions/DEC-528.md))
+
+The founder's 2026-10-08 product flow added three requirements placed after v1. Each
+needs a spec change, or evidence, that is not scheduled. These are placed after v1 because whether
+they fit in v1 is not settled; the founder may pull FR-11.1 into Phase 2 once its spec change lands.
+The phases in the table are the recording agent's proposals, not founder decisions (DEC-528).
+
+| ID | Requirement | Phase |
+|---|---|---|
+| FR-11.1 | Monitor-only agents: an agent that watches the instruments and conditions its confirmed mandate names and alerts, and never opens a position. Its autonomy denies every opening, and its notifications carry only opaque IDs (rule 6). Needs a mandate spec change; E10-19 | Later (Phase 3 unless pulled forward) |
+| FR-11.2 | Event-triggered research: news, filings, price moves, and earnings dates and call transcripts may bring a research run forward. Event sources, debounce and caps are envelope fields under `behavior.cadence`, and no event triggers a run unless a confirmed mandate version enables it (rule 11). Debounced; rate- and cost-capped; allowlisted and corroborated sources ([DEC-101](../project/04-decision-log.md#decisions)); prompt-injection defences. Research produces opinions only (rule 4). Needs agent harness spec §5.3's change and a source evaluation for an earnings calendar and transcripts; E19-12 | Later (after the research agent's [DEC-99](../project/04-decision-log.md#decisions) evaluation passes) |
+| FR-11.3 | An agent over holdings the owner already has (adoption). Deferred: [DEC-46](../project/04-decision-log.md#decisions) stands until cost basis and tax lots are modelled, with wash-sale handling and an answer for trading-domain spec §7.1 and connections CN-7. The backlog's "Later" section | Deferred |
 
 ## 7. Non-functional requirements
 
