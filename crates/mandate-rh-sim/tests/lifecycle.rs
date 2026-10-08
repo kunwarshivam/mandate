@@ -273,3 +273,26 @@ fn a_ref_id_is_echoed_and_a_changed_resend_refused_only_when_switched_on() -> Ou
     assert_eq!(sim.orders(AGENTIC)?.len(), 1);
     Ok(())
 }
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_working_sell_reserves_only_its_unfilled_remainder() -> Outcome {
+    let mut sim = sim()?;
+    let bought = sim.place(&limit("buy", "3", "501", 1))?;
+    sim.fill(&bought.id, qty("3"), price("500"))?;
+    let first = sim.place(&limit("sell", "2", "499", 2))?;
+    sim.fill(&first.id, qty("1"), price("500"))?;
+    let rest = sim.place(&limit("sell", "1", "499", 3))?;
+    assert_eq!(
+        rest.quantity,
+        qty("1"),
+        "two held, one of them reserved by the working sell"
+    );
+    let more = sim.place(&limit("sell", "1", "499", 4));
+    assert_eq!(
+        more,
+        Err(SimError::InsufficientShares),
+        "nothing is left unreserved"
+    );
+    Ok(())
+}

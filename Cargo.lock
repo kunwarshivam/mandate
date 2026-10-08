@@ -1385,6 +1385,7 @@ dependencies = [
  "mandate-marketdata",
  "mandate-modelhost",
  "mandate-num",
+ "mandate-spec",
  "mandate-time",
  "proptest",
  "secrecy",
@@ -1399,6 +1400,7 @@ dependencies = [
 name = "mandate-domain"
 version = "0.0.0"
 dependencies = [
+ "mandate-canon",
  "thiserror",
 ]
 
@@ -1484,6 +1486,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-mcp"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-modelhost"
 version = "0.0.0"
 dependencies = [
@@ -1505,6 +1520,19 @@ dependencies = [
  "proptest",
  "ruint",
  "rust_decimal",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-passkey"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "mandate-canon",
+ "proptest",
+ "ring",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -1594,6 +1622,7 @@ dependencies = [
  "mandate-journal-pg",
  "mandate-liquidity",
  "mandate-marketdata",
+ "mandate-modelhost",
  "mandate-num",
  "mandate-risk",
  "mandate-runtime",

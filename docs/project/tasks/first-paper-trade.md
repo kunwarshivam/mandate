@@ -152,7 +152,8 @@ implementations are test doubles, `mandate-cli` does not depend on `mandate-jour
 `--store` (artifact root) plumbing; D1 and D2 add the commands. Each command stores every object
 it names in the artifact store before its append.
 
-The founder runs them against the deployment's Postgres journal. Each invocation commits exactly
+The founder runs them against the deployment's Postgres journal, after `mandate workspace open`
+(D1c, DEC-527 item 7) has opened the workspace control stream once. Each invocation commits exactly
 one control-stream event (DEC-155 item 5), so `config register` runs once per object, and every
 command refuses a `live` environment:
 
@@ -261,7 +262,8 @@ before `OrderSubmitted`, so the run refuses without sending).
 | Journal §5.1, §11 check 6 (artifacts stored before append) ↔ `PgJournal::append` | Version-2 configuration records | — | Appended once their objects are stored | **No**: Postgres refuses them all as `missing_artifact` (X-10); J0 |
 | DEC-502 "the journal verifies afterwards" ↔ `mandate journal verify` | The deployment's Postgres streams | — | Checks 1 to 7 | **No**: verify reads an exported segment file, and nothing exports one from Postgres (X-11); V0 |
 | Journal §9.1 `ObservationRecorded` ↔ runtime draft | Agent stream | `instrument_id`, `as_of`, `data_ref` vs `instrument`, `at`, inline `data` | Append | **No** (X-2); R0, ruled by the coordinator |
-| DEC-484 `model_registry` ↔ shell agent drafts | `ModelOutputRecorded`, `DecisionMade` | `config_refs` | v2 binds registry and policy | **No**: the shell writes version 1 with `mandate_version` only (X-1); D4 |
+| DEC-484 `model_registry` ↔ shell agent drafts | `ModelOutputRecorded`, `DecisionMade` | `config_refs` | v2 binds registry and policy | **No**: the shell writes version 1 with `mandate_version` only (X-1); D4c |
+| Mandate §4.3, §6.2 step 5c (the policy overlay) ↔ journal §9.1 `decided_by` ↔ the shell's classifier | `DecisionMade` for an opening or increase | `policy_overlay` | The overlay's `ask`, and DEC-534's `deny` while nonconforming | **No**: the label is new in journal spec v0.18 (DEC-536), and neither `mandate-journal` nor the shell has it; J3, D4d |
 | Agent harness §5.1 steps 1, 2, 4, 6 ↔ E19-11 | Construction | — | Exit on failure | Yes (DEC-505) |
 | Mandate §6.1 `cli_confirm` ↔ identity spec methods per environment | Paper step-up | — | Paper only | Yes |
 
@@ -286,25 +288,34 @@ E7-7's recorded tests and the existing dry run passing until E3 deletes them (DE
 | V0 | E10-16 | T, I | `mandate-cli` | `mandate journal export`: one Postgres stream to the segment file `journal verify` reads (journal spec §6.2), so the run's journal can be verified with its store (X-11) | P0 | T 120–200, I 100–180 |
 | D1 | E10-16 | T, I | `mandate-cli` | `config::register` (the instrument snapshot with `etp_source`, exactly DEC-523's object) and `config::register_model` (content and hash from `mandate_modelhost::content`): stored objects and `ConfigSnapshotRegistered` v1 and v2, paper only, as library functions (DEC-526) | P0, M2 (content object), M2b (the pinned hash) | T 300–400, I 250–350 |
 | D1b | E10-16 | T, I | `mandate-cli` | The `clap` commands `config register` and `model register` over P0's `--journal` and `--store`, the source of the `Owner` they run as, and a binary test against Postgres (DEC-526 item 1) | D1 | T 150–250, I 100–200 |
-| D2 | E10-16 | T, I | `mandate-cli` | `version create`, `version confirm` (`cli_confirm`), `agent deploy`, with their records | D1b (the commands and the `Owner` source) | T 300–400, I 300–400 |
-| D3 | E19-11 | T, I | `mandate-shell` | The deployment input from the control stream (DEC-505), replacing `--mandate` and `--config-dir`; the selection rule for registrations; the reader of D1's instrument snapshot (DEC-523); V-007 checked (X-7). Two tests PRs to stay under 400 lines: D3a (the confirmed version: deployment, stop, document, V-rules with the registry, DEC-505 item 3's two facts) and D3b (the registrations: latest by `seq` with the two narrowings, the fee date, the DEC-523 snapshot reader) | — (builds its own control-stream fixtures) | T 300–400 each, I 300–400 |
-| D4 | E7-19 slice 4 remainder | T, I | `mandate-shell` | `ModelOutputRecorded` and `DecisionMade` v2 with `policy_set` and `model_registry` refs (X-1), appended through J0 | D3, J0 | T 150–250, I 150–250 |
-| Q1 | E7-19 slice 2 remainder | T, I | `mandate-shell` | Liquidity facts and every preflight check take the instrument from the deployment input, not `SYMBOL` (X-8) | D3 | T 100–200, I 80–150 |
+| D1c | E10-16 | T, I | `mandate-cli` | `mandate workspace open`: commits only `StreamOpened` on `ctl:{workspace}` as the vectors' `control_services` opener, paper only, refused if the stream holds any event (DEC-527 item 7) | D1b | T 100–200, I 80–150 |
+| D2a | E10-16 | T, I | `mandate-cli` | `version::create` and `version::confirm` (`cli_confirm`) with their records, as library functions; split three ways because the formatted tests for these two alone are about 350 lines ([DEC-530](../decisions/DEC-530.md)) | D1 | T 350–400, I 250–350 |
+| D2b | E10-16 | T, I | `mandate-cli` | `agent deploy` as a library function, with its record (DEC-530 item 9) | D2a | T 250–350, I 150–250 |
+| D2c | E10-16 | T, I | `mandate-cli` | The `clap` commands `version create`, `version confirm` and `agent deploy` over DEC-527's owner flags, the read-only display of a gesture's code and warnings, and a binary test against Postgres; no message names the DSN | D1b, D2b | T 200–300, I 150–250 |
+| D3 | E19-11 | T, I | `mandate-shell` | The deployment input from the control stream (DEC-505), replacing `--mandate` and `--config-dir`; the selection rule for registrations; the reader of D1's instrument snapshot (DEC-523); V-007 checked (X-7). Three tests PRs to stay under 400 lines: D3a (the confirmed version: deployment, stop, document, V-rules with the registry, DEC-505 item 3's two facts, V-002 in a second phase), D3b (the registrations: latest by `seq` with the two narrowings, every object re-hashed, the fee date) and D3c (below) | — (builds its own control-stream fixtures) | T 300–400 each, I 300–400 |
+| D3c | E19-11 | T | `mandate-shell` | The DEC-523 reader of the effective instrument snapshot: every member, type and value set, `arca` and `nasdaq`, and no silent fallback, so a later SPY snapshot that fails refuses rather than leaving an earlier one in force (rule 3); the fee date to the day. One implementation PR then covers D3b and D3c | D3b | T 150–250 |
+| D4a | E7-19 slice 4 remainder | T, I | `mandate-spec` | A strict reader of `schemas/policy.schema.json` documents and of the `policy_set` object that holds them (DEC-484 item 4), so a registered policy set is validated before its levels fold into §4.3's overlay | — | T 300–400, I 150–250 |
+| D4b | E7-19 slice 4 remainder | T, I | `mandate-shell` | The effective `policy_set` and `model_registry` registrations: the policy set read through D4a, the registry's shape and its one entry equal to the pinned model's registration (DEC-484 item 5), and `policy::check` against the confirmed mandate, which can never be loosened (stricter-of); a nonconforming mandate denies only actions that add risk (DEC-534) | D3, D4a | T 200–350, I 150–250 |
+| D4c | E7-19 slice 4 remainder | T, I | `mandate-shell` | `ModelOutputRecorded` and `DecisionMade` v2 with `policy_set` and `model_registry` refs (X-1), appended through J0's `append_with_config_artifacts`; the run reads D4b's governance, the overlay and its violations, into the classifier, a registry or policy set missing from the store stops the run before any order, and every exit passes while the mandate is nonconforming (DEC-534). D4d owns the deny of an opening or increase. The overlay's narrowing of `auto` to `ask` stays in mandate spec §6.2 step 5c as defence in depth: it is unreachable, since a policy forbidding `auto` over a mandate that holds an `auto` or a delegation is itself a violation, which DEC-534 denies first | D4b, J0 | T 150–250, I 150–250 |
+| J3 | E7-19 slice 4 remainder | D (spec, ES-22), T, I | `docs/specs`, then `mandate-journal` | Journal spec v0.18: `policy_overlay` joins §9.1's closed `decided_by` labels, for mandate spec §6.2 step 5c's overlay `ask` and DEC-534's `deny` ([DEC-536](../decisions/DEC-536.md)); the vectors' additive `policy_overlay` section; then `mandate-journal` accepts the label | — | D 300–450 (half generated), T 100–200, I 30–80 |
+| D4d | E7-19 slice 4 remainder | T, I | `mandate-shell` | DEC-534's deny of an opening and of an increase while the mandate is nonconforming, recorded as `autonomy: deny` with `decided_by: policy_overlay` (mandate spec §6.2 step 5c, DEC-536); no intent, no `ApprovalRequested` and no order follow. The overlay's `ask` branch is unreachable and has no test (see D4c) | D4c, J3 | T 150–250, I 100–200 |
+| D4e | E7-19 slice 4 remainder | T, I | `mandate-shell`, `mandate-runtime` | DEC-534 item 4's owner alert: `OwnerAlertSent` of kind `account_state` (notifications spec §3.2), opaque ids and generic text only (`AGENTS.md` rule 6), written by its subject stream's owner as notifications spec §5.5 says. Off the first trade's path, since the paper mandate conforms and the deny never fires | E8-9 (closes `OwnerAlertSent`'s payload and its streams), D4d | T 150–250, I 100–200 |
+| Q1 | E7-19 slice 2 remainder | T, I | `mandate-shell` | Liquidity facts and every preflight check take the instrument from the deployment input, not `SYMBOL` (X-8): `Artifacts::from_registered` builds the run's artifacts from the phase-1 confirmed version and the effective registrations, judging each registered object as its file was, and `liquidity_facts` takes the symbol those artifacts bind | D3 | T 150–250, I 100–150 |
 | A1 | E7-19 slice 3 remainder | T, I | `mandate-alpaca`, `mandate-executor` | `BrokerAccount` gains `last_equity` and `maintenance_margin`, parsed by `wire::account` from the existing recorded account fixtures; the executor computes maintenance excess; `AccountSnapshotRecorded`'s payload unchanged | — | T 150–250, I 100–200 |
 | Q2 | E7-19 slice 3 remainder | T, I | `mandate-shell` | Account type and regime from the connector's declared Alpaca facts (§7.2); maintenance excess and prior-close equity from A1; no shell constants (X-9) | Q1, A1 | T 100–200, I 80–150 |
-| H3 | E15-13 | T, I | `mandate-shell` | The cycle takes the host's observation, whose artifact the paper adapter stored first, with its output; the runtime journals `ObservationRecorded` before `ModelOutputRecorded` | R0, M2, D4 | T 200–300, I 150–250 |
-| E1a | E7-19 slice 5 | T, I | **new** `mandate-paper` | The paper binary: E19-11 input, preflight, artifact store, host, `ProductionCycle::run`; `mandate-tracer` still builds | M2, D4, Q1 | T 300–400, I 250–350 |
+| H3 | E15-13 | T, I | `mandate-shell` | The cycle takes the host's observation, whose artifact the paper adapter stored first, with its output; the runtime journals `ObservationRecorded` before `ModelOutputRecorded` | R0, M2, D4c | T 200–300, I 150–250 |
+| E1a | E7-19 slice 5 | T, I | **new** `mandate-paper` | The paper binary: E19-11 input, preflight, artifact store, host, `ProductionCycle::run`; `mandate-tracer` still builds | M2, D4c, Q1 | T 300–400, I 250–350 |
 | E1b | E7-19 slice 5 | T, I | `mandate-paper` | After submission, bounded GETs and executor ticks until the entry is terminal and, after a partial fill, its OCO placed; an entry still working at a configured bound is cancelled (FT-11) | E1a | T 250–350, I 200–300 |
 | E3 | E7-19 slice 5 | Deletion PR under DEC-475 item 6 (not a DEC-77 pair) | `mandate-shell`, `xtask` | Delete `mandate-tracer`, `paper.rs`'s constants, `Artifacts::load` and the file reader, `legacy_identity`, `tracer::run`'s signal path, `MovingAverage`, `MOVING_AVERAGE`, the bars and signal stages, `map::model_output` (X-3), the E7-7 model artifact (X-4), `tests/tracer.rs` with its row in `xtask`'s `BEHAVIOUR_ONLY_TESTS` (F-3), and the `mandate-backtest` dependency | E1b, Q2, H3 | 400–900 deleted; two PRs if over 400 |
-| E2 | — | run, then D | — | The manual paper run (below); a docs PR records its evidence | E3, D2, V0 | — |
+| E2 | — | run, then D | — | The manual paper run (below); a docs PR records its evidence | E3, D1c, D2c, V0 | — |
 
-**Totals.** 36 PRs (37 if E3 splits) and about 6,450 to 10,050 changed lines.
+**Totals.** 42 PRs (43 if E3 splits) and about 6,630 to 10,400 changed lines.
 
 **Critical path.** Two chains meet at E2:
 
-- the shell chain, D3 → D4 → Q1 → E1a → E1b → E3: 11 to 12 merges, with Q2 and H3 fitted into
+- the shell chain, D3 → D4a → D4b → D4c → Q1 → E1a → E1b → E3: 11 to 12 merges, with Q2 and H3 fitted into
   the shell between E1a and E3, since `mandate-shell` slices cannot overlap;
-- the CLI chain, J0 → P0 → D1 → D1b → D2 (and V0): 10 to 12 merges. D4 also waits on J0, so J0 goes
+- the CLI chain, J0 → P0 → D1 → D1b → D1c → D2a → D2b → D2c (and V0): 16 to 18 merges. D4c also waits on J0, so J0 goes
   first.
 
 M0 to M2, R0 and A1 run beside them, by crate. At the recent pace of two to three review rounds
@@ -396,7 +407,7 @@ brief uses none of them.
 
 | # | Finding | Evidence | Fixed by |
 |---|---|---|---|
-| X-1 | E7-19 slice 4 is merged only on the journal side. The shell still writes agent records at schema version 1 with `mandate_version` alone and never loads a policy set or model registry | #644's "Not done"; `tracer.rs` `append_agent`; no `model_registry` in `crates/mandate-shell/src` | D4 |
+| X-1 | E7-19 slice 4 is merged only on the journal side. The shell still writes agent records at schema version 1 with `mandate_version` alone and never loads a policy set or model registry | #644's "Not done"; `tracer.rs` `append_agent`; no `model_registry` in `crates/mandate-shell/src` | D4c |
 | X-2 | The runtime's `ObservationRecorded` draft has `source`, `instrument`, `at` and inline `data`; journal spec §9.1 and `mandate-journal`'s registered schema have `source`, `instrument_id`, `as_of` and `data_ref` | `mandate-runtime/src/step.rs` `observed`; `mandate-journal/src/agent.rs` | R0 (the coordinator ruled the code moves to the spec, DEC-503 item 7) |
 | X-3 | The shell's model output takes the run clock as `as_of`; mandate spec §8.2 says the data cut-off | `mandate-shell/src/map.rs` `model_output` | M1 and M2 (the host follows §8.2); E3 deletes the old mapping |
 | X-4 | The pinned content hash today is the digest of `{"id","version"}`, which covers no code (mandate spec §8.1) | `paper/artifacts.rs`; `tests/fixtures/tracer/config/model-artifact.json` | M2 and D1 (DEC-504); E3 deletes the fixture |

@@ -19,12 +19,13 @@
 #   0  mandate-num, mandate-time, mandate-canon
 #   1  mandate-domain, mandate-approval, mandate-liquidity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1)
-#   2  mandate-journal, mandate-accounting
+#   2  mandate-journal, mandate-accounting, and mandate-passkey, the WebAuthn relying party
+#      (E9-1, DEC-660), which verifies and never signs
 #   3  mandate-spec
 #   4  mandate-risk
 #   5  mandate-builder
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
-#      mandate-runtime
+#      mandate-runtime, mandate-mcp
 #   7  mandate-alpaca, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
@@ -83,6 +84,12 @@ layer = 1
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+[crates.mandate-passkey]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
 
 [crates.mandate-liquidity]
 layer = 1
@@ -154,6 +161,14 @@ allowed_external = ["thiserror"]
 layer = 6
 safety_critical = false
 pure = false
+
+# The MCP client a broker connector uses inside itself (E7-16, connections spec §6.2): it knows
+# nothing of brokers or orders, so it sits beside the executor, below the connectors that use it.
+[crates.mandate-mcp]
+layer = 6
+safety_critical = true
+pure = false
+allowed_external = ["reqwest", "rustls", "serde", "serde_json", "thiserror"]
 
 [crates.mandate-journal-pg]
 layer = 6

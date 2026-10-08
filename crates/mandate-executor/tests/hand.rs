@@ -3245,6 +3245,313 @@ fn a_terminal_entry_oco_covers_its_own_fill_not_the_room() {
     );
 }
 
+/// A bracket entry of 10 AAPL at 150 for `who`, with 4 filled and its legs held until it completes
+/// (§5.4). Its legs, once active, sell its own 10, and its OCO, if it ends partly filled, its
+/// filled 4 (DEC-346 item 6), so no other protection may cover those 4 (DEC-532 item 1).
+fn a_held_bracket(
+    shell: &mut Shell,
+    ports: &mandate_executor::Ports<'_>,
+    who: &str,
+    intent: &str,
+) -> String {
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), ports);
+    let entry = shell
+        .run(
+            handoff(
+                intent,
+                who,
+                protected_opening(AAPL, "10", "150", "140", Some("170")),
+            ),
+            ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the bracket is sent: a new tranche is a new bracket (§5.4)");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-held",
+            Some(&entry),
+            "4",
+            "150",
+        ))),
+        ports,
+    );
+    entry
+}
+
+/// The quantity of the one protective OCO a step submits that is not `except`.
+fn re_placed(ran: &common::Ran, except: Option<&str>) -> mandate_num::Qty {
+    ran.submissions()
+        .into_iter()
+        .find(|o| o.oco.is_some() && Some(o.client_order_id.as_str()) != except)
+        .map(|o| o.qty)
+        .expect("protection is re-placed in this step")
+}
+
+/// E1 (DEC-532 item 2, `replace` after an exit sequence). The protected 10 and another agent's
+/// held bracket (4 of 10 filled) make a position of 14; a risk exit sells 2. Once it fills, the
+/// protection re-placed covers 8: the 10 the exit left outside the bracket. Sized on the whole
+/// 12, it and the bracket's legs would sell 12 + 10 = 22 once the bracket completes, against a
+/// position of 8 + 10 + 2 = 20 (§5.4's tranche model, rule 12).
+#[test]
+#[ignore = "pending E7-4"]
+fn an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    a_held_bracket(&mut shell, &ports, OTHER_AGENT, OTHER_INTENT);
+    shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "2", "155")),
+        &ports,
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let exit = format!("md-{INTENT}");
+    let ended = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-exit",
+            Some(&exit),
+            AAPL,
+            Side::Sell,
+            "2",
+            "2",
+            "filled",
+        ))),
+        &ports,
+    );
+
+    assert_eq!(
+        re_placed(&ended, None),
+        qty("8"),
+        "10 held, less the 2 sold; the bracket's 4 are its held legs' (§5.4, rule 12)"
+    );
+}
+
+/// E1 (DEC-532 item 2, `new_day`'s re-placement before expiry, through `replacements`). The
+/// protected 10 is re-placed at the buffer day while the agent's own bracket holds 4 of 10. Once
+/// the expiring OCO's cancel is confirmed, its replacement covers the 10 it covered, not 14:
+/// with the bracket's 10 legs that would be 24 against 20 once it completes.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    a_held_bracket(&mut shell, &ports, common::AGENT, OTHER_INTENT);
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    shell.run(Input::Journal(day), &ports);
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+
+    assert_eq!(
+        re_placed(&confirmed, None),
+        qty("10"),
+        "the 10 the expiring OCO covered; the bracket's 4 are its held legs' (§5.4, rule 12)"
+    );
+}
+
+/// E1 (DEC-532 item 2, `passive_exit`'s rest). The protected 10 and another agent's held bracket
+/// (4 of 10) make 14; this agent's passive exit of 3 becomes the take-profit of a new OCO, and
+/// the rest of the position keeps its stop. The rest is 7, not 11: 3 + 11 and the bracket's 10
+/// legs would sell 24 against 20 once it completes.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    a_held_bracket(&mut shell, &ports, OTHER_AGENT, OTHER_INTENT);
+    shell.run(
+        handoff(INTENT, common::AGENT, discretionary_exit(AAPL, "3", "160")),
+        &ports,
+    );
+    let placed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+
+    let exit = format!("md-{INTENT}");
+    assert_eq!(
+        re_placed(&placed, Some(&exit)),
+        qty("7"),
+        "the 10 outside the bracket, less the passive exit's 3 (§5.4, rule 12)"
+    );
+}
+
+/// E1 (DEC-532 item 2, `re_cover`). A completed bracket of 2 rests its legs beside the protected
+/// 10; then another bracket holds 4 of 10. When the broker cancels the first bracket's legs, the
+/// shares they covered are re-covered: 2, not the 6 that the whole position of 16 less the 10
+/// still resting leaves, since the held bracket's legs cover its 4.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_re_cover_leaves_a_held_brackets_shares_to_its_legs() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+    let first = shell
+        .run(
+            handoff(
+                INTENT,
+                common::AGENT,
+                protected_opening(AAPL, "2", "150", "140", Some("170")),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the first bracket is sent");
+    let completed = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-first",
+            Some(&first),
+            "2",
+            "150",
+        ))),
+        &ports,
+    );
+    let legs = completed
+        .drafts
+        .iter()
+        .find(|d| {
+            d.event_type == "ProtectionChanged"
+                && d.payload.get("action").and_then(|v| v.as_str()) == Some("placed")
+        })
+        .and_then(|d| d.payload.get("orders").and_then(|v| v.as_str()))
+        .map(str::to_owned)
+        .expect("the completed bracket's legs are recorded placed (§5.4)");
+    a_held_bracket(&mut shell, &ports, common::AGENT, OTHER_INTENT);
+    let lost = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-legs",
+            Some(&legs),
+            AAPL,
+            Side::Sell,
+            "2",
+            "0",
+            "canceled",
+        ))),
+        &ports,
+    );
+
+    assert_eq!(
+        re_placed(&lost, None),
+        qty("2"),
+        "the 2 the cancelled legs covered; the held bracket's 4 are its legs' (§5.4, rule 12)"
+    );
+}
+
+/// E1's boundary (DEC-532 item 1): only a bracket whose legs are still held is subtracted. Another
+/// agent's bracket that ended partly filled (4 of 10) has its OCO for those 4 already placed
+/// (DEC-346 item 6), so nothing of it is held. A risk exit of 2 cancels both resting OCOs, and
+/// once it fills, protection is re-placed for all 12 left: the OCO it cancelled covered the 4, and
+/// subtracting them again would leave 4 shares unprotected.
+#[test]
+fn a_terminal_brackets_placed_oco_is_not_subtracted_again() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    let entry = a_held_bracket(&mut shell, &ports, OTHER_AGENT, OTHER_INTENT);
+    let ended = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-held",
+            Some(&entry),
+            AAPL,
+            Side::Buy,
+            "10",
+            "4",
+            "canceled",
+        ))),
+        &ports,
+    );
+    let oco = ended
+        .submissions()
+        .first()
+        .filter(|o| o.oco.is_some())
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the bracket ended partly filled, so its 4 get an OCO (DEC-346 item 6)");
+    let begun = shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "2", "155")),
+        &ports,
+    );
+    let mut cancelled: Vec<String> = begun
+        .requests
+        .iter()
+        .filter_map(|r| match r {
+            BrokerRequest::Cancel { client_order_id } => Some(client_order_id.as_str().to_owned()),
+            _ => None,
+        })
+        .collect();
+    cancelled.sort();
+    let mut expected = vec!["md-oco-1".to_owned(), oco];
+    expected.sort();
+    assert_eq!(
+        cancelled, expected,
+        "the exit cancels every resting protective order first (§5.4)"
+    );
+    for id in expected {
+        shell.run(
+            Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                client_order_id: id,
+            })),
+            &ports,
+        );
+    }
+    let exit = format!("md-{INTENT}");
+    let done = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-exit",
+            Some(&exit),
+            AAPL,
+            Side::Sell,
+            "2",
+            "2",
+            "filled",
+        ))),
+        &ports,
+    );
+
+    assert_eq!(
+        re_placed(&done, None),
+        qty("12"),
+        "the 14 less the exit's 2; the ended bracket holds no legs, so nothing is subtracted"
+    );
+}
+
 /// §5.4's bound is per interval: two partly filled brackets in one instrument keep two intervals,
 /// and the second's legs, once placed, end the second's interval, not the first's. The first
 /// bracket's shares are still unprotected, so the owner is alerted at the first tick
@@ -3486,6 +3793,95 @@ fn an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_b
         !after.notifications.contains(&"unprotected_interval_limit"),
         "the first interval is alerted once, and the second ended at its acknowledgment, so 65 \
          seconds after the second partial fill nothing alerts again: {:?}",
+        after.notifications
+    );
+}
+
+/// E4b (backlog: "E7-4 (stream K), E4b from E4's fix"; DEC-521 item 3): while the OCO for a
+/// second bracket awaits the broker's acknowledgment (DEC-348 item 2), a third bracket's partial
+/// fill starts a new interval and ends the awaited one, the second bracket's, never the first's.
+/// The first bracket's 6 shares stay unprotected from 10, so the owner is alerted at 70, once.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    let partly_filled = |shell: &mut Shell, at: i64, intent: &str, broker: &str, filled: &str| {
+        shell.run(Input::Tick(clock(at)), &ports);
+        let entry = shell
+            .run(
+                handoff(
+                    intent,
+                    common::AGENT,
+                    protected_opening(AAPL, "10", "150", "140", Some("170")),
+                ),
+                &ports,
+            )
+            .submissions()
+            .first()
+            .map(|o| o.client_order_id.as_str().to_owned())
+            .expect("each bracket is sent: a new tranche is a new bracket (§5.4)");
+        shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+                broker,
+                Some(&entry),
+                AAPL,
+                Side::Buy,
+                "10",
+                filled,
+                "partially_filled",
+            ))),
+            &ports,
+        );
+        entry
+    };
+    partly_filled(&mut shell, 10, INTENT, "b-1", "6");
+    let second = partly_filled(&mut shell, 20, OTHER_INTENT, "b-2", "5");
+    shell.run(Input::Tick(clock(30)), &ports);
+    let awaited = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-2",
+            Some(&second),
+            AAPL,
+            Side::Buy,
+            "10",
+            "5",
+            "canceled",
+        ))),
+        &ports,
+    );
+    assert!(
+        awaited.submissions().iter().any(|o| o.oco.is_some()),
+        "the second bracket ends partly filled, so its 5 shares get an OCO, whose acknowledgment \
+         is awaited (DEC-346 item 6, DEC-348 item 2)"
+    );
+    partly_filled(&mut shell, 32, "01JABCDEFGHJKMNPQRSTVWXYZ2", "b-3", "3");
+
+    let early = shell.run(Input::Tick(clock(69)), &ports);
+    assert!(
+        !early.notifications.contains(&"unprotected_interval_limit"),
+        "59 seconds after the first partial fill is inside the bound: {:?}",
+        early.notifications
+    );
+    let bound = shell.run(Input::Tick(clock(70)), &ports);
+    assert!(
+        bound.notifications.contains(&"unprotected_interval_limit"),
+        "the first bracket's 6 shares have been unprotected since 10, so at 70 the owner is \
+         alerted; the third bracket's start at 32 ended the awaited second interval, not the first \
+         (§5.4): {:?}",
+        bound.notifications
+    );
+    let after = shell.run(Input::Tick(clock(85)), &ports);
+    assert!(
+        !after.notifications.contains(&"unprotected_interval_limit"),
+        "the first interval is alerted once, the second ended at 32 and the third is 53 seconds \
+         old, so nothing alerts again: {:?}",
         after.notifications
     );
 }
@@ -4200,7 +4596,6 @@ fn the_ladder_never_prices_below_the_floor() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_kill_switch_cancels_only_that_agents_orders() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4260,7 +4655,6 @@ fn an_agent_kill_switch_cancels_only_that_agents_orders() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4377,7 +4771,6 @@ fn an_account_cancel_all_covers_unknown_orders() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_applies_the_mode_before_it_cancels() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4452,7 +4845,6 @@ fn deferred(ran: &common::Ran) -> Vec<String> {
 /// sells nothing, and journals the instrument as `deferred`; the same switch in the regular
 /// session cancels the protection for its close and defers nothing.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_automated_flatten_defers_equity_sells_to_the_session() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4510,7 +4902,6 @@ fn an_automated_flatten_defers_equity_sells_to_the_session() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_automated_flatten_sells_crypto_at_once() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -4641,7 +5032,6 @@ fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
 /// pre-market, once the protection's cancel is confirmed, no sell goes with `extended_hours`; in
 /// the regular session, the control, the same switch's close is submitted.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unconfirmed_owner_exit_waits_for_the_session() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4704,7 +5094,6 @@ fn an_unconfirmed_owner_exit_waits_for_the_session() {
 /// laddered, and stepped while the agent is paused, each step's cancel confirmed before the next
 /// rung, and no step ends the sequence (#373 round 1, major 1).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_paused_flattens_ladder_steps_and_its_step_cancel_does_not_end_the_sequence() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4820,7 +5209,6 @@ fn a_paused_flattens_ladder_steps_and_its_step_cancel_does_not_end_the_sequence(
 /// [`the_ladder_never_prices_below_the_floor`] pins the alert only for `max_exit_offset`'s own
 /// floor.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4919,7 +5307,6 @@ fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
 /// its own `client_order_id`, never by cancel-all, and never treats it as the agent's own: the
 /// switch sells exactly the agent's attributed lots, not the position the exit was sized to.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_kill_switch_cancels_a_watchdog_exit_of_no_agent_and_sells_only_its_own_lots() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5528,7 +5915,6 @@ fn the_reducing_sell_waits_for_the_cancel_confirmation() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_jumps_a_full_queue() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5562,7 +5948,6 @@ fn a_kill_switch_jumps_a_full_queue() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_journaled_order_is_the_handling_order() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

@@ -12,6 +12,7 @@ use crate::gate::{
     PartialGateDecision, Proposal, SESSION_CLOSED, SESSION_UNKNOWN, UNPRICED, binding_checks,
 };
 use crate::ids::{ClientOrderId, IntentId};
+use crate::kill::is_flatten;
 use crate::payload::{int, text};
 use crate::protection::{
     ExitPrice, alone, awaits_cancel, begin_exit, crypto_add, exit_limit, fallback, passive_exit,
@@ -209,6 +210,7 @@ fn decide(
             protection: *protection,
             limit: *limit,
             tif: order_tif(batch, instrument),
+            flatten: is_flatten(&batch.view, intent),
         },
         pass,
         batch.ports,

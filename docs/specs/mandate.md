@@ -20,6 +20,22 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-529](../project/decisions/DEC-529.md) item 3, founder, Accepted
+  2026-10-08):** §6.1's `cli_confirm` and V-001 admit one founder-run live deployment. V-001 accepts
+  a `live` mandate only on a Robinhood connection the founder recorded through the CLI (E7-11's
+  first slice); the default build stays paper only. On that connection only, `cli_confirm` is the
+  step-up method for the version's confirmation, the deployment, and each grant, until E9-4's
+  signed assertions replace it. MC-E16 (`cli_confirm` on any other live connection is
+  `step_up_method`) and every other reference case is unchanged. The narrowing lapses once that
+  connection is spent (V-001); the agent deployed on it keeps `cli_confirm` for its controls until
+  its account is flat.
+- **v0.6, amended ([DEC-536](../project/decisions/DEC-536.md), under DEC-176):** §6.2 gains step 5c, the policy overlay of §4.3,
+  which applies last and names itself `policy_overlay` only when it changed the decision: while the
+  confirmed version is `policy_nonconforming` it denies an opening or an increase ([DEC-534](../project/decisions/DEC-534.md)
+  item 2), and otherwise it narrows an `auto` to `ask` when the effective `auto_allowed` is false.
+  §4.3 already required both; the step says where they apply and how the decision is labelled.
+  §6.4's `trigger.decided_by` gains the label, with `trigger.rule` `null`, and journal spec v0.18
+  adds it to `DecisionMade.decided_by`. Exits are untouched: step 3 decides them first.
 - **v0.6, amended ([DEC-445](../project/decisions/DEC-445.md) item 2):** §5.5's `trim_to_target`
   states the gate's order of operations: the agent's own non-protective sells resting in the
   instrument come off the excess before it is rounded up on the instrument's quantity grid
@@ -445,7 +461,7 @@ and is recorded in `MandateConfirmed`.
 
 | Code | Rule |
 |---|---|
-| V-001 | `connection_id` belongs to the workspace and matches `environment` (paper or live account) |
+| V-001 | `connection_id` belongs to the workspace and matches `environment` (paper or live account). A `live` mandate is accepted only on a Robinhood connection the founder recorded through the CLI and has not spent ([DEC-529](../project/decisions/DEC-529.md) item 3); the default build is paper only. The connection is spent once an order it placed fills, wholly or partly, or its answer is lost and the order is `Unknown`, until the founder reconciles it (DEC-529 item 1); "unspent" is checked when the version is confirmed and deployed and when the runner starts, never against an agent already deployed |
 | V-002 | Other active agents' allocations on the account + this allocation ≤ account equity. Checked at validation and again atomically when a version is applied |
 | V-003 | `accumulate`: the universe is pinned (`universe.pinned`), `pinned_instruments` is exactly the goal instrument, and `behavior.research` is null, so the goal admits nothing (DEC-97, ADR-0002 part 9) |
 | V-005 | `leveraged_etps_enabled = true` requires `leveraged_etp_disclosure_version`, a `DisclosureAccepted` by the owner (with step-up) for exactly that version, and policy allowing it (§4.3). A new disclosure version makes leveraged-ETP openings inactive until the owner accepts it |
@@ -551,10 +567,11 @@ limits, never pre-filled as values.
 - **Policy changes** are journaled as `PolicyChanged` (level, diff, author, step-up evidence,
   affected agents). They apply to running agents at the next evaluation as an **overlay**: the
   stricter value governs, and `auto` evaluates as `ask` when `auto_allowed` becomes false, including
-  an `auto` a delegation produced (§6.5). A pending
+  an `auto` a delegation produced (§6.5); §6.2 step 5c applies it. A pending
   approval's quorum and independence follow the same overlay at §6.4 check 7, which only tightens
   what the request bound. Affected agents are flagged `policy_nonconforming` and their owners are
-  alerted; a conforming version is required before any risk-increasing change.
+  alerted; a conforming version is required before any risk-increasing change. Until one is
+  confirmed, §6.2 step 5c denies every opening and increase, and exits go through ([DEC-534](../project/decisions/DEC-534.md)).
 
 ## 5. Risk state and limits
 
@@ -807,7 +824,13 @@ stream with `causation_id` and judges it there; nothing the owner's client check
   step-up outcome is `OwnerExitRequested.step_up_status`.
 - **Methods.** v0's only method is `cli_confirm`: the owner re-types a confirmation code the CLI
   derives locally, with no network, runtime, or model state. It is allowed only in a `paper`
-  environment (DEC-155 item 4); live step-up waits for E9-4's signed assertions.
+  environment (DEC-155 item 4), and in `live` only on the founder's own Robinhood connection that
+  V-001 admits, for its confirmation, deployment, and each grant
+  ([DEC-529](../project/decisions/DEC-529.md) item 3). Once that connection is spent, the agent
+  deployed on it keeps `cli_confirm` for owner exits, pause, resume, stop, acknowledgments and
+  grants until its account is flat, so no control is lost (rule 13); no second opening is sent
+  (DEC-529 item 13). Any other live step-up waits for E9-4's signed assertions, which replace it
+  there too.
 - **Why a refused owner exit is not a denied exit (rule 13, MI-1).** What is refused is an
   instruction not shown to be the owner's, never the exit. Pause and the kill switch stay
   available, and every automated exit, protective order, and risk exit runs untouched (MI-23).
@@ -852,6 +875,13 @@ stream with `causation_id` and judges it there; nothing the owner's client check
      by, the date has passed (`AGENTS.md` rule 3). Like the two ceilings before it, it names itself
      (`review_ceiling`) only when it changed the decision, so an `ask` keeps its own source and a
      `deny` its own.
+   - **5c. Policy overlay** (§4.3, [DEC-534](../project/decisions/DEC-534.md), [DEC-536](../project/decisions/DEC-536.md)). The effective policy applies last, so it only
+     tightens. While the confirmed version is `policy_nonconforming` (§4.3), the decision becomes
+     `deny`: no opening or increase runs until a conforming version is confirmed (DEC-534 item 2),
+     and exits, which step 3 already decided, are untouched. Otherwise, if the effective
+     `auto_allowed` is false, the decision becomes the stricter of the result so far and `ask`,
+     including an `auto` a delegation produced. Like the ceilings before it, it names itself
+     (`policy_overlay`) only when it changed the decision.
 6. `auto` → submit (the gate runs again at submission). `deny` → skip. `ask` → approval (§6.4).
 
 ### 6.3 Condition language
@@ -899,7 +929,7 @@ has exactly these keys, and everything an approver is shown comes from it:
 | Key | Content |
 |---|---|
 | `action` | `instrument`, `asset_class`, `side` (`buy`), `qty`, `limit` (the limit price), `order_usd` (limit price × quantity), and `purpose` |
-| `trigger` | `mandate_version`; `decided_by`, the label of what asked (`rule:<id>`, `default`, `admission_ceiling`, `client_ceiling`, or `review_ceiling`); `requested_by` (`agent`, `owner`, or `client`) and `client`, the name the owner gave the connected client when connecting it, or `null` unless `requested_by` is `client` (§6.2 step 5a; the approver is shown "Requested by your connected agent" with that name); and `rule`, the owner's confirmed rule `{id, when, then}` exactly as the mandate holds it, or `null` for `default`, `admission_ceiling`, `client_ceiling`, and `review_ceiling` |
+| `trigger` | `mandate_version`; `decided_by`, the label of what asked (`rule:<id>`, `default`, `admission_ceiling`, `client_ceiling`, `review_ceiling`, or `policy_overlay`); `requested_by` (`agent`, `owner`, or `client`) and `client`, the name the owner gave the connected client when connecting it, or `null` unless `requested_by` is `client` (§6.2 step 5a; the approver is shown "Requested by your connected agent" with that name); and `rule`, the owner's confirmed rule `{id, when, then}` exactly as the mandate holds it, or `null` for `default`, `admission_ceiling`, `client_ceiling`, `review_ceiling`, and `policy_overlay` |
 | `evidence` | `combined_score` as `{value, label}`, labeled "combined model score, not a probability of profit"; and `outputs`, one `{event_id, artifact, label}` per model output used (the artifact hash or `null`, and the author label below) |
 | `risk_impact` | One `{field, value, cap}` for each of `order_usd`, `position_usd_after`, `gross_usd_after`, `bought_today_usd`, `drawdown`, and `daily_pnl_fraction`: its §6.3 value at the request and the mandate cap it is measured against, respectively `max_order_usd`; min(`max_position_usd`, `max_position_fraction` × E); min(`max_gross_exposure_usd`, E); `null`; the lowest ladder rung's `at`; and `max_daily_loss` (§5.5, §8.3) |
 | `reference_mark` | The last `MarkUpdated` for the instrument as `{price, seq}`, or `null` |
@@ -1013,8 +1043,9 @@ still decides; the dry run is never authority. No re-pricing in v1: anything sti
 proposed again at a later evaluation at its own price.
 
 **Step-up.** Every grant carries step-up evidence valid at its effective time (§6.1), one assertion
-per approval and never one gesture for several. Paper grants use `cli_confirm`; live approvals wait
-for E9-4's step-up methods.
+per approval and never one gesture for several. Paper grants use `cli_confirm`, and so do grants
+on the founder's own live connection (§6.1, DEC-529 item 3); other live approvals wait for E9-4's
+step-up methods.
 
 **Two approvers.** An ASKed action with `order_usd` above `two_approver_above_usd`, as bound or as
 the policy overlay lowers it while the approval is pending, needs two distinct approvers; when the
