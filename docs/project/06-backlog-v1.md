@@ -2578,12 +2578,12 @@ From E10-1's slice-V implementation (DEC-161):
     `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
     (HLD §8), as a new `schema_version` with its own vectors. Specified as version 2 in journal
-    §9.8 ([DEC-800](decisions/DEC-800.md) item 3); E7-1 writes it.
+    §9.10 ([DEC-800](decisions/DEC-800.md) item 3); E7-1 writes it.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,
     which must name each action's members: the operator stop's subject, the global kill switch's
     scope, the acceptable-use action, and the row's "approval".
   - **Item 10, closed by [DEC-800](decisions/DEC-800.md):** `ConnectionEstablished` version 2's
-    `account_ref` binds an account stream to its connection (journal §9.8); the mapping reads its
+    `account_ref` binds an account stream to its connection (journal §9.10); the mapping reads its
     argument from that binding.
   - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** journal spec v0.8
     §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the

@@ -1,4 +1,4 @@
-"""Journal spec v0.20 §9.8's reference vectors (DEC-800): a connection's history.
+"""Journal spec v0.21 §9.10's reference vectors (DEC-800): a connection's history.
 
 The schemas and consistency rules 54 to 61 live in `control.py`, beside §9.2's to §9.7's, so one
 validator judges every closed schema. This module builds the `connections` section: a base draft of
@@ -28,7 +28,7 @@ from control import (
 from control import invalid as control_invalid
 from control import valid as control_valid
 
-SPEC = "docs/specs/journal.md v0.20 §9.8 (DEC-800)"
+SPEC = "docs/specs/journal.md v0.21 §9.10 (DEC-800)"
 AT = "2026-09-22T13:00:00.000000000Z"
 CLOCK = "2026-09-22T13:00:00.000000000Z"
 ACCOUNT_STREAM = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
@@ -184,16 +184,16 @@ def member_drafts() -> list[dict]:
     for base, cases in MEMBER_CASES.items():
         for member, wrong_kind, wrong_form in cases:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.kind", "§9.8 types", base, [change(path, wrong_kind)], "schema", path))
+            out.append(invalid(f"{base}.{member}.kind", "§9.10 types", base, [change(path, wrong_kind)], "schema", path))
             if wrong_form is not None:
                 form = [change(path, wrong_form)]
-                out.append(invalid(f"{base}.{member}.form", "§9.8 types", base, form, "non_canonical", path))
+                out.append(invalid(f"{base}.{member}.form", "§9.10 types", base, form, "non_canonical", path))
         for member in NULLED[base]:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.null", "§9.8 types", base, [change(path, None)], "schema", path))
+            out.append(invalid(f"{base}.{member}.null", "§9.10 types", base, [change(path, None)], "schema", path))
         last = MEMBER_CASES[base][-1][0]
-        out.append(invalid(f"{base}.missing", "§9.8 closed", base, [delete(f"payload.{last}")], "schema", f"payload.{last}"))
-        out.append(invalid(f"{base}.extra", "§9.8 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
+        out.append(invalid(f"{base}.missing", "§9.10 closed", base, [delete(f"payload.{last}")], "schema", f"payload.{last}"))
+        out.append(invalid(f"{base}.extra", "§9.10 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
     return out
 
 
@@ -206,7 +206,7 @@ def state(frm: str, to: str, reason: str) -> list[dict]:
 
 
 def invalid_drafts() -> list[dict]:
-    """Each draft breaks exactly one rule; together they cover every §9.8 member type and rule."""
+    """Each draft breaks exactly one rule; together they cover every §9.10 member type and rule."""
     est, ref, rot, chk, st, fresh = (
         "established_v2",
         "refused_scope",
@@ -219,16 +219,16 @@ def invalid_drafts() -> list[dict]:
         *member_drafts(),
         invalid(
             "established_v1_with_account_ref",
-            "§9.8: version 1 stays closed with its four members",
+            "§9.10: version 1 stays closed with its four members",
             est,
             [change("schema_version", 1), delete("payload.user"), delete("payload.step_up")],
             "schema",
             "payload.account_ref",
         ),
-        invalid("established_version_3", "§9.8: versions 1 and 2 only", est, [change("schema_version", 3)], "unknown_schema", "payload"),
+        invalid("established_version_3", "§9.10: versions 1 and 2 only", est, [change("schema_version", 3)], "unknown_schema", "payload"),
         invalid(
             "established_carries_a_secret",
-            "§9.8, CN-1: a credential has no member to sit in",
+            "§9.10, CN-1: a credential has no member to sit in",
             est,
             [change("payload.api_secret", "canary-secret")],
             "schema",
@@ -236,7 +236,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "refused_carries_the_fingerprint",
-            "§9.8, connections spec §3: the fingerprint is never journaled",
+            "§9.10, connections spec §3: the fingerprint is never journaled",
             ref,
             [change("payload.account_fingerprint", "hmac:" + "f" * 64)],
             "schema",
@@ -244,7 +244,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "established_step_up_extra",
-            "§9.8: the step-up evidence is closed",
+            "§9.10: the step-up evidence is closed",
             est,
             [change("payload.step_up.token", "x")],
             "schema",
@@ -258,8 +258,8 @@ def invalid_drafts() -> list[dict]:
             "non_canonical",
             "payload.scopes",
         ),
-        invalid("refused_on_the_account_stream", "§9.8: a control-stream record", ref, [change("stream_id", ACCOUNT_STREAM)], "wrong_stream", "event_type"),
-        invalid("state_on_the_control_stream", "§9.8: an account-stream record", st, [change("stream_id", STREAM)], "wrong_stream", "event_type"),
+        invalid("refused_on_the_account_stream", "§9.10: a control-stream record", ref, [change("stream_id", ACCOUNT_STREAM)], "wrong_stream", "event_type"),
+        invalid("state_on_the_control_stream", "§9.10: an account-stream record", st, [change("stream_id", STREAM)], "wrong_stream", "event_type"),
         invalid(
             "refused_reason_of_another_check",
             "rule 54",
@@ -324,7 +324,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "checked_uniqueness",
-            "§9.8: uniqueness is a connect-time check",
+            "§9.10: uniqueness is a connect-time check",
             chk,
             [change("payload.results", [result("account"), result("environment"), result("scope"), result("uniqueness")])],
             "non_canonical",
@@ -385,7 +385,7 @@ def valid_drafts() -> list[dict]:
     return [
         valid(
             "established_version_1",
-            "§9.8: version 1 stays registered",
+            "§9.10: version 1 stays registered",
             "established_v2",
             [
                 change("schema_version", 1),
@@ -503,7 +503,7 @@ def sequences() -> list[dict]:
         ),
         sequence(
             "revocation_is_never_refused",
-            "§9.8: no rule refuses a ConnectionRevoked",
+            "§9.10: no rule refuses a ConnectionRevoked",
             [revoked(1), established(2), revoked(3), revoked(4), established(5)],
         ),
         sequence(

@@ -2,17 +2,17 @@
 
 | | |
 |---|---|
-| **Status** | v0.18 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.21 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.21 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, and `connections` section of §9.8; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, and `connections` section of §9.10; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
-- **v0.20 ([DEC-800](../project/decisions/DEC-800.md)):** §9.8 journals a connection's history
+- **v0.21 ([DEC-800](../project/decisions/DEC-800.md)):** §9.10 journals a connection's history
   (connections spec CN-10, backlog E7-17). `ConnectionEstablished` gains `schema_version` 2, its
   version-1 members then `account_ref`, the connecting `user`, and `step_up`; `account_ref` binds
   the account stream to its connection (DEC-261 item 10). New records: `ConnectionRefused` and
@@ -508,7 +508,7 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | Closed `AgentModeApplied` version 1: agent (including `*`), mode, restriction, originated flag, and risk clock (§9.6); other gating facts copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
 | `OwnerAcknowledged` | — | copied from the control stream (with `causation_id`); a risk input |
-| `ConnectionChecked`, `ConnectionStateChanged`, `ConnectionCredentialRefreshed` | — | The executor's permission checks and their results; the connection's state (`active`, `degraded`, `suspended`) and why; a refreshed token's scopes; each with `risk_clock`, closed in §9.8 |
+| `ConnectionChecked`, `ConnectionStateChanged`, `ConnectionCredentialRefreshed` | — | The executor's permission checks and their results; the connection's state (`active`, `degraded`, `suspended`) and why; a refreshed token's scopes; each with `risk_clock`, closed in §9.10 |
 | `OwnerCommandRefused` | — | An acknowledgment the executor refused, for its step-up or, under `independent_approval_required`, because it is not independent ([mandate spec §6.1](mandate.md#61-purposes), [§6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`, `not_independent`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
 | `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N, and for a tripwire (limit `tripwire:<id>`, reason `tripwire_condition`, [mandate spec §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)) its metric, threshold, and the value reached; reset evidence; released positions; stale-mark and removed-instrument changes with the reason; goal completion |
 | `UniverseChanged` | man | The working universe changed ([mandate spec §2.3, §8.5](mandate.md#23-the-working-universe-at-runtime-dec-97)); a risk input, so it carries `risk_clock`: agent, instrument, change (`admitted`, `removed`), reason (`thesis_admitted`, `thesis_expired`, `thesis_invalidated`, `lineage_retired`, `eligibility_lost`, `operator_halt`, `version_applied`), thesis and lineage ids, working-universe size after |
@@ -540,8 +540,8 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 | `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-51-dec-97): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque) |
 | `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason (`goal_complete`, `profit_stop_reached`, `end_date`, owner stop), net dollar loss added to the connection's loss carry; for `AgentDeployed`: the rendered go-live screen (artifact), backtest and paper-run IDs shown, performance legend and disclosure versions shown, approving users, step-up evidence ([mandate spec §10](mandate.md#10-records-dec-51-dec-97)) |
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
-| `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result; closed in §9.2, version 2 of `ConnectionEstablished` with `account_ref`, user, and step-up in §9.8 |
-| `ConnectionRefused`, `ConnectionCredentialRotated` | — | A connect, reconnect, or credential replacement the permission checks refused, with the check and reason; a credential replaced on a connection that is not revoked; closed in §9.8 |
+| `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result; closed in §9.2, version 2 of `ConnectionEstablished` with `account_ref`, user, and step-up in §9.10 |
+| `ConnectionRefused`, `ConnectionCredentialRotated` | — | A connect, reconnect, or credential replacement the permission checks refused, with the check and reason; a credential replaced on a connection that is not revoked; closed in §9.10 |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
 | `OwnerAlertSent` | — | Written by the owner of the subject event's stream, in that stream and in the subject's batch, on any stream type ([notifications spec §5.5](notifications.md#55-records)): subject event, kind (notifications spec §3.2), and for a kill switch the owner command it carries out, if any. It records that an alert was raised; delivery is the notice stream's |
 | `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
@@ -1023,7 +1023,7 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 **The mapping to `JournaledFact`** ([DEC-169](../project/04-decision-log.md#decisions)). Each record
 maps to one fact, and the test vectors list them. `AccountSnapshotRecorded` does not name its
 connection. Which connection an account stream belongs to is journaled by version 2 of
-`ConnectionEstablished` (§9.8, DEC-800, closing DEC-261 item 10); the mapping still takes it as an
+`ConnectionEstablished` (§9.10, DEC-800, closing DEC-261 item 10); the mapping still takes it as an
 argument from its owner, who reads it from that binding. `ValidationContext` takes
 what no event carries the same way.
 
@@ -1564,12 +1564,12 @@ with every value compared.
     reported at itself; and |`m_now` − `m_req`| × 10 000 ≤ `band_bp` × `m_req`, on exact decimals
     (`payload.m_now`).
 
-### 9.8 Connection records ([DEC-800](../project/decisions/DEC-800.md))
+### 9.10 Connection records ([DEC-800](../project/decisions/DEC-800.md))
 
 A connection's history, from connect to revocation ([connections spec §3, §8.1,
 §9](connections.md), CN-10), closed at schema version 1 as §9.7's records are, except
 `ConnectionEstablished`, which gains version 2. §9.1's types and report order apply, with §9.2's
-`risk_clock`, and the rules number on from §9.7's. No member is a credential, a broker account
+`risk_clock`, and the rules number on from §9.9's. No member is a credential, a broker account
 number, or the account fingerprint (CN-1, connections spec §3.1): a draft carrying one has no member
 to sit in and is refused as `schema`.
 
@@ -1769,7 +1769,7 @@ anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_m
   `AgentModeChanged` on this stream with reason `kill_switch`, reported at the
   `KillSwitchActivated`.
 
-On a control or account stream ([§9.8](#98-connection-records-dec-800)):
+On a control or account stream ([§9.10](#910-connection-records-dec-800)):
 
 - `connection_lifecycle_mismatch` — a record that breaks stream rule 62, 63, or 64, reported at
   that record.

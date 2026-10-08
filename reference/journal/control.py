@@ -329,7 +329,7 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
     ("band_bp", INT),
 )
 
-# §9.8 (DEC-800): a connection's history. The control stream's three records and the account
+# §9.10 (DEC-800): a connection's history. The control stream's three records and the account
 # stream's three, with `ConnectionEstablished` at version 2 below.
 CHECK_REASONS = {
     "scope": ("scope_mismatch", "fund_movement", "permissions_unreadable"),
@@ -788,7 +788,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
 
 def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.8's consistency rules 54 to 60 (rule 61 is a copy rule), each reported once."""
+    """§9.10's consistency rules 54 to 60 (rule 61 is a copy rule), each reported once."""
     p = draft["payload"]
     out: list[Violation] = []
 

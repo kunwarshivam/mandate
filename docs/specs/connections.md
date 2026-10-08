@@ -80,7 +80,7 @@ deployment mode, every environment, and every state of §9.
 | **CN-7** | **Activity the platform did not originate is external activity.** An order, fill, or position change on the account that has no `client_order_id` of ours, or that the connector cannot attribute, is ingested as external activity (trading §7.1), never adopted as ours | Trading §7.1, §11; DEC-26 | Reconciliation fixtures per connector with an owner order, an order from another platform, and an unattributable fill |
 | **CN-8** | **The allocation boundary is the connected account.** Every request a connector sends names the connection's own account. A connector never reads, stores, or acts on another account of the same customer; data about other accounts that a broker returns anyway is dropped at the connector before it is hashed, stored, or journaled | E7-6; R-25; journal §6.4 | Robinhood fixtures where reads return several accounts: only the agentic account's data reaches the executor or the journal; a request naming another account is `NotSent` |
 | **CN-9** | **Broker metadata is data, never instructions.** Tool names, tool descriptions, schemas, error text, and any text field a broker returns never reach a model, a prompt, or a notification, and never change what the connector may call. The connector calls only an allowlist of tools pinned by contract hash | R-05; rule 4; DEC-441 item 8 | A fixture MCP server whose tool descriptions carry injection text and whose tool list adds a tool: the text appears nowhere downstream and the new tool is never called; a changed contract hash halts openings |
-| **CN-10** | **Every connection change is journaled before it takes effect,** without secrets: connect, each permission-check result (including refusals), state changes, credential rotation, revocation. Journal spec §9.8 (v0.20, DEC-800) carries them: `ConnectionRefused`, `ConnectionCredentialRotated`, `ConnectionChecked`, `ConnectionStateChanged`, and `ConnectionCredentialRefreshed`, beside connect, revoke, and the account state a failure sets | Rule 5; FR-2.2 acceptance; journal §9.2 | Fault injection on the append: no state change is acted on without its committed event; refusal events carry no credential |
+| **CN-10** | **Every connection change is journaled before it takes effect,** without secrets: connect, each permission-check result (including refusals), state changes, credential rotation, revocation. Journal spec §9.10 (v0.21, DEC-800) carries them: `ConnectionRefused`, `ConnectionCredentialRotated`, `ConnectionChecked`, `ConnectionStateChanged`, and `ConnectionCredentialRefreshed`, beside connect, revoke, and the account state a failure sets | Rule 5; FR-2.2 acceptance; journal §9.2 | Fault injection on the append: no state change is acted on without its committed event; refusal events carry no credential |
 | **CN-11** | **A connection cannot be switched under a running agent.** `connection_id` and `environment` never change across mandate versions (V-031); moving an agent to another account means stopping it and deploying a new agent | V-031; mandate §5.7 | A version draft that changes `connection_id` is invalid; a deployment on the new connection starts with that connection's loss carry |
 | **CN-12** | **Reconnecting cannot reset a limit.** A reconnect, a token refresh, or a revoke-and-reconnect of the same account keeps the connection's `connection_id`, `account_ref`, account stream, and loss carry | Mandate §5.7 (MI-14, V-032); DEC-441 item 6 | Revoke and reconnect the same account; the loss carry and stream are unchanged and V-032 still binds |
 
@@ -103,17 +103,17 @@ credential"). The workspace API returns these fields only (#560, API-11).
 | `environment` | `paper` or `live`, for life (CN-3) | Control stream | Yes: `ConnectionEstablished` |
 | `scopes` | Granted scopes, strictly ascending (journal §9.2 rule 19). For MCP, the allowlisted tool names | Control stream | Yes: `ConnectionEstablished` |
 | `auth_kind` | `api_key`, `oauth`, `mcp_oauth` | Connection record | No; not needed for replay |
-| `account_ref` | Opaque ULID naming the account stream `acct:{workspace_id}:{account_ref}` (journal §2) | Connection record; control stream | Yes: `ConnectionEstablished` version 2 (journal §9.8, DEC-800), which binds the account stream to its connection (DEC-261 item 10) |
+| `account_ref` | Opaque ULID naming the account stream `acct:{workspace_id}:{account_ref}` (journal §2) | Connection record; control stream | Yes: `ConnectionEstablished` version 2 (journal §9.10, DEC-800), which binds the account stream to its connection (DEC-261 item 10) |
 | `account_fingerprint` | A keyed hash of (broker, broker account id), §3.1. Detects a second connection to the same account (CN-5) without storing the number in clear | Connection record only | Never journaled, never returned |
 | `vault_path` | Derived from workspace id and `connection_id`; never sent to a client | Derived, not stored | Never |
-| `state` | §9 | Connection record | Through the account state it sets: `AccountRestrictionChanged` and `AgentModeApplied` (§9.1), then `ConnectionStateChanged` on the account stream (journal §9.8) |
-| `contract_hash` | MCP only: hash of the pinned tool contract (§6.2 rule 3) | Connection record | **No**; a drift is journaled as a failed `contract` check and the state change it causes (journal §9.8) |
-| `checks` | Latest result of each check in §8, with time | Connection record | Yes: `ConnectionChecked` (account stream) and `ConnectionRefused` (control stream), journal §9.8. A failed check still acts through `AccountRestrictionChanged`, committed first |
+| `state` | §9 | Connection record | Through the account state it sets: `AccountRestrictionChanged` and `AgentModeApplied` (§9.1), then `ConnectionStateChanged` on the account stream (journal §9.10) |
+| `contract_hash` | MCP only: hash of the pinned tool contract (§6.2 rule 3) | Connection record | **No**; a drift is journaled as a failed `contract` check and the state change it causes (journal §9.10) |
+| `checks` | Latest result of each check in §8, with time | Connection record | Yes: `ConnectionChecked` (account stream) and `ConnectionRefused` (control stream), journal §9.10. A failed check still acts through `AccountRestrictionChanged`, committed first |
 | `terms_version` | Hash of the broker terms text the owner saw at connect, where a broker has platform terms (Robinhood) | Control stream | Through the existing `DisclosureAccepted` (journal §9.2): `document` `robinhood_agentic_terms`, `version` the terms hash, the owner, and step-up. No new event is needed |
 
 **Reconnect (answers §13 question 2).** A reconnect is a second `ConnectionEstablished` for the same
 `connection_id`, valid only after that id's `ConnectionRevoked` and only with the same `broker`,
-`environment`, and `account_ref` (journal §9.8 rule 62, DEC-800). Replacing the credential of a
+`environment`, and `account_ref` (journal §9.10 rule 62, DEC-800). Replacing the credential of a
 connection that is not revoked, as a `suspended` connection needs, is not a reconnect: it is
 `ConnectionCredentialRotated` (DEC-800 item 5).
 
@@ -384,7 +384,7 @@ only through the transitions in §9; health never adds risk and never alone bloc
 | `connecting` | Step-up and connect started | No agent yet | — | Checks pass (`active`) or fail (refused, no record kept beyond the refusal event) | System |
 | `active` | All §8.1 checks pass | As the gate allows | Yes | Any transition below | — |
 | `degraded` | Network errors, low headroom, or contract drift | **Halted**: account state `closing_only`, agents `exits_only` | Yes, while the broker accepts | Good probes, or for drift a released connector version, **then** the owner's acknowledgment (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
-| `suspended` | Credential invalid: expired, revoked at the broker, refresh failed, or a later permission check failed | **Halted**: account state `closing_only`, agents `exits_only` | Attempted while any call succeeds; otherwise protection rests at the broker | The owner re-authorizes the same account (a replaced credential, journal §9.8; DEC-800 item 5), then acknowledges (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
+| `suspended` | Credential invalid: expired, revoked at the broker, refresh failed, or a later permission check failed | **Halted**: account state `closing_only`, agents `exits_only` | Attempted while any call succeeds; otherwise protection rests at the broker | The owner re-authorizes the same account (a replaced credential, journal §9.10; DEC-800 item 5), then acknowledges (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
 | `revoked` | Platform-side revoke, refused unless every agent on it is stopped with no positions | None | None (no agents) | Reconnect of the same account reuses the record (CN-12) | Owner, with step-up |
 
 **How `degraded` and `suspended` halt openings (DEC-441 items 7 and 23).** Trading spec §7.3
@@ -445,7 +445,7 @@ transient. A restriction that lifts with no acknowledgment would be a separate s
 | `BrokerConnector` trait, `ConnectorError`, the account-wide scope type (`mandate-executor`) | **Exists** |
 | Alpaca paper connector: paper host only, endpoint allowlist, `SecretString` credentials, account number redaction (`mandate-alpaca`) | **Exists** (E7-2, E7-3, E7-8) |
 | Writer-epoch fencing for one writer per account stream (`mandate-journal`) | **Exists** |
-| `ConnectionEstablished`, `ConnectionRevoked` payload schemas (journal §9.2) | **Exists** (registered, E7-10); version 2 with `account_ref` is specified in journal §9.8 (E7-17) and not yet registered |
+| `ConnectionEstablished`, `ConnectionRevoked` payload schemas (journal §9.2) | **Exists** (registered, E7-10); version 2 with `account_ref` is specified in journal §9.10 (E7-17) and not yet registered |
 | Connection manager service, connection record, fingerprint, states | Planned: E7-11 |
 | Permission checks (§8.1) and refusal events | Planned: E7-12 |
 | Alpaca OAuth | Planned: E7-1 (M8) |
@@ -454,7 +454,7 @@ transient. A restriction that lifts with no acknowledgment would be a separate s
 | Robinhood contract confirmation | Planned: E7-15 (no code) |
 | MCP client with allowlist and pinning | Planned: E7-16 |
 | Robinhood connector | Planned: E7-6 (M8), blocked on E7-15 |
-| Connection state, check, refusal, and rotation event schemas | **Specified** (journal §9.8, DEC-800); registration planned with E7-11 to E7-14 |
+| Connection state, check, refusal, and rotation event schemas | **Specified** (journal §9.10, DEC-800); registration planned with E7-11 to E7-14 |
 | Vault, leases | Planned (infrastructure §5; DEC-434 item 14, accepted by the founder on 2026-10-03) |
 | API routes | Planned: E10-13 (#560) |
 | Kraken connector | Planned: E16-1 |
@@ -491,7 +491,7 @@ refused until U-A4 is answered (item 21).
 
 1. U-A1 to U-A5 (Alpaca) and U-R1 to U-R12 (Robinhood), above.
 2. Answered in §3: a reconnect is a second `ConnectionEstablished` for the same `connection_id`,
-   valid only after its `ConnectionRevoked`; journal §9.8 rule 62 (DEC-800).
+   valid only after its `ConnectionRevoked`; journal §9.10 rule 62 (DEC-800).
 3. Whether cross-deployment duplicate detection (CN-5) is worth a fingerprint registry in the
    global control plane. A keyed hash of an account id is derived from personal data, so the control
    plane's ban on personal data applies to it (§3.1); it would also add a dependency the trade path

@@ -15889,7 +15889,7 @@
   ]
  },
  "connections": {
-  "spec": "docs/specs/journal.md v0.20 §9.8 (DEC-800)",
+  "spec": "docs/specs/journal.md v0.21 §9.10 (DEC-800)",
   "drafts": {
    "established_v2": {
     "envelope_version": 1,
@@ -16099,7 +16099,7 @@
   "invalid_drafts": [
    {
     "name": "established_v2.connection_id.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16115,7 +16115,7 @@
    },
    {
     "name": "established_v2.connection_id.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16131,7 +16131,7 @@
    },
    {
     "name": "established_v2.broker.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16147,7 +16147,7 @@
    },
    {
     "name": "established_v2.broker.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16163,7 +16163,7 @@
    },
    {
     "name": "established_v2.environment.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16179,7 +16179,7 @@
    },
    {
     "name": "established_v2.environment.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16195,7 +16195,7 @@
    },
    {
     "name": "established_v2.scopes.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16211,7 +16211,7 @@
    },
    {
     "name": "established_v2.account_ref.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16227,7 +16227,7 @@
    },
    {
     "name": "established_v2.account_ref.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16243,7 +16243,7 @@
    },
    {
     "name": "established_v2.user.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16259,7 +16259,7 @@
    },
    {
     "name": "established_v2.user.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16275,7 +16275,7 @@
    },
    {
     "name": "established_v2.step_up.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16291,7 +16291,7 @@
    },
    {
     "name": "established_v2.account_ref.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16307,7 +16307,7 @@
    },
    {
     "name": "established_v2.user.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16323,7 +16323,7 @@
    },
    {
     "name": "established_v2.step_up.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16339,7 +16339,7 @@
    },
    {
     "name": "established_v2.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16355,7 +16355,7 @@
    },
    {
     "name": "established_v2.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16371,7 +16371,7 @@
    },
    {
     "name": "refused_scope.connection_id.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16387,7 +16387,7 @@
    },
    {
     "name": "refused_scope.connection_id.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16403,7 +16403,7 @@
    },
    {
     "name": "refused_scope.broker.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16419,7 +16419,7 @@
    },
    {
     "name": "refused_scope.broker.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16435,7 +16435,7 @@
    },
    {
     "name": "refused_scope.environment.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16451,7 +16451,7 @@
    },
    {
     "name": "refused_scope.environment.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16467,7 +16467,7 @@
    },
    {
     "name": "refused_scope.occasion.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16483,7 +16483,7 @@
    },
    {
     "name": "refused_scope.occasion.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16499,7 +16499,7 @@
    },
    {
     "name": "refused_scope.check.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16515,7 +16515,7 @@
    },
    {
     "name": "refused_scope.check.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16531,7 +16531,7 @@
    },
    {
     "name": "refused_scope.reason.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16547,7 +16547,7 @@
    },
    {
     "name": "refused_scope.reason.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16563,7 +16563,7 @@
    },
    {
     "name": "refused_scope.existing_connection_id.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16579,7 +16579,7 @@
    },
    {
     "name": "refused_scope.existing_connection_id.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16595,7 +16595,7 @@
    },
    {
     "name": "refused_scope.user.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16611,7 +16611,7 @@
    },
    {
     "name": "refused_scope.user.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16627,7 +16627,7 @@
    },
    {
     "name": "refused_scope.step_up.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16643,7 +16643,7 @@
    },
    {
     "name": "refused_scope.connection_id.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16659,7 +16659,7 @@
    },
    {
     "name": "refused_scope.occasion.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16675,7 +16675,7 @@
    },
    {
     "name": "refused_scope.check.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16691,7 +16691,7 @@
    },
    {
     "name": "refused_scope.reason.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16707,7 +16707,7 @@
    },
    {
     "name": "refused_scope.user.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16723,7 +16723,7 @@
    },
    {
     "name": "refused_scope.step_up.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16739,7 +16739,7 @@
    },
    {
     "name": "refused_scope.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16755,7 +16755,7 @@
    },
    {
     "name": "refused_scope.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16771,7 +16771,7 @@
    },
    {
     "name": "rotated.connection_id.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16787,7 +16787,7 @@
    },
    {
     "name": "rotated.connection_id.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16803,7 +16803,7 @@
    },
    {
     "name": "rotated.scopes.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16819,7 +16819,7 @@
    },
    {
     "name": "rotated.user.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16835,7 +16835,7 @@
    },
    {
     "name": "rotated.user.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16851,7 +16851,7 @@
    },
    {
     "name": "rotated.step_up.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16867,7 +16867,7 @@
    },
    {
     "name": "rotated.connection_id.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16883,7 +16883,7 @@
    },
    {
     "name": "rotated.scopes.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16899,7 +16899,7 @@
    },
    {
     "name": "rotated.user.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16915,7 +16915,7 @@
    },
    {
     "name": "rotated.step_up.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16931,7 +16931,7 @@
    },
    {
     "name": "rotated.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16947,7 +16947,7 @@
    },
    {
     "name": "rotated.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16963,7 +16963,7 @@
    },
    {
     "name": "checked_start.occasion.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -16979,7 +16979,7 @@
    },
    {
     "name": "checked_start.occasion.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -16995,7 +16995,7 @@
    },
    {
     "name": "checked_start.results.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17011,7 +17011,7 @@
    },
    {
     "name": "checked_start.risk_clock.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17027,7 +17027,7 @@
    },
    {
     "name": "checked_start.risk_clock.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17043,7 +17043,7 @@
    },
    {
     "name": "checked_start.occasion.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17059,7 +17059,7 @@
    },
    {
     "name": "checked_start.results.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17075,7 +17075,7 @@
    },
    {
     "name": "checked_start.risk_clock.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17091,7 +17091,7 @@
    },
    {
     "name": "checked_start.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17107,7 +17107,7 @@
    },
    {
     "name": "checked_start.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17123,7 +17123,7 @@
    },
    {
     "name": "state_degraded.from.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17139,7 +17139,7 @@
    },
    {
     "name": "state_degraded.from.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17155,7 +17155,7 @@
    },
    {
     "name": "state_degraded.to.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17171,7 +17171,7 @@
    },
    {
     "name": "state_degraded.to.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17187,7 +17187,7 @@
    },
    {
     "name": "state_degraded.reason.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17203,7 +17203,7 @@
    },
    {
     "name": "state_degraded.reason.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17219,7 +17219,7 @@
    },
    {
     "name": "state_degraded.risk_clock.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17235,7 +17235,7 @@
    },
    {
     "name": "state_degraded.risk_clock.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17251,7 +17251,7 @@
    },
    {
     "name": "state_degraded.from.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17267,7 +17267,7 @@
    },
    {
     "name": "state_degraded.to.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17283,7 +17283,7 @@
    },
    {
     "name": "state_degraded.reason.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17299,7 +17299,7 @@
    },
    {
     "name": "state_degraded.risk_clock.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17315,7 +17315,7 @@
    },
    {
     "name": "state_degraded.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17331,7 +17331,7 @@
    },
    {
     "name": "state_degraded.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17347,7 +17347,7 @@
    },
    {
     "name": "refreshed.scopes.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17363,7 +17363,7 @@
    },
    {
     "name": "refreshed.risk_clock.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17379,7 +17379,7 @@
    },
    {
     "name": "refreshed.risk_clock.form",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17395,7 +17395,7 @@
    },
    {
     "name": "refreshed.scopes.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17411,7 +17411,7 @@
    },
    {
     "name": "refreshed.risk_clock.null",
-    "clause": "§9.8 types",
+    "clause": "§9.10 types",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17427,7 +17427,7 @@
    },
    {
     "name": "refreshed.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17443,7 +17443,7 @@
    },
    {
     "name": "refreshed.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.10 closed",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17459,7 +17459,7 @@
    },
    {
     "name": "established_v1_with_account_ref",
-    "clause": "§9.8: version 1 stays closed with its four members",
+    "clause": "§9.10: version 1 stays closed with its four members",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -17483,7 +17483,7 @@
    },
    {
     "name": "established_version_3",
-    "clause": "§9.8: versions 1 and 2 only",
+    "clause": "§9.10: versions 1 and 2 only",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -17499,7 +17499,7 @@
    },
    {
     "name": "established_carries_a_secret",
-    "clause": "§9.8, CN-1: a credential has no member to sit in",
+    "clause": "§9.10, CN-1: a credential has no member to sit in",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -17515,7 +17515,7 @@
    },
    {
     "name": "refused_carries_the_fingerprint",
-    "clause": "§9.8, connections spec §3: the fingerprint is never journaled",
+    "clause": "§9.10, connections spec §3: the fingerprint is never journaled",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -17531,7 +17531,7 @@
    },
    {
     "name": "established_step_up_extra",
-    "clause": "§9.8: the step-up evidence is closed",
+    "clause": "§9.10: the step-up evidence is closed",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -17566,7 +17566,7 @@
    },
    {
     "name": "refused_on_the_account_stream",
-    "clause": "§9.8: a control-stream record",
+    "clause": "§9.10: a control-stream record",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -17582,7 +17582,7 @@
    },
    {
     "name": "state_on_the_control_stream",
-    "clause": "§9.8: an account-stream record",
+    "clause": "§9.10: an account-stream record",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17813,7 +17813,7 @@
    },
    {
     "name": "checked_uniqueness",
-    "clause": "§9.8: uniqueness is a connect-time check",
+    "clause": "§9.10: uniqueness is a connect-time check",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -18148,7 +18148,7 @@
   "valid_drafts": [
    {
     "name": "established_version_1",
-    "clause": "§9.8: version 1 stays registered",
+    "clause": "§9.10: version 1 stays registered",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -18538,7 +18538,7 @@
    },
    {
     "name": "revocation_is_never_refused",
-    "clause": "§9.8: no rule refuses a ConnectionRevoked",
+    "clause": "§9.10: no rule refuses a ConnectionRevoked",
     "records": [
      {
       "base_draft": "rotated",

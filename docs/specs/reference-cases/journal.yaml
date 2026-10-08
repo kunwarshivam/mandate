@@ -57,7 +57,7 @@
 # (§5.7). `valid_batches` and `invalid_batches` are rule 45's batch cases; each member of their
 # `drafts` is built like a draft case, and an invalid one is refused whole at `draft_index`.
 #
-# `connections` (spec v0.20 §9.8, DEC-800) is generated and checked the same way, by
+# `connections` (spec v0.21 §9.10, DEC-800) is generated and checked the same way, by
 # reference/journal/connections.py. `drafts` are named base drafts of each connection record on the
 # control and account streams, and each invalid or valid draft names its base by `base_draft`.
 # `sequences` are the stream rules 62 to 64: each record is built like a draft case, the records are
@@ -10342,7 +10342,7 @@ approval_answers:
     expect:
       outcome: Valid
 connections:
-  spec: docs/specs/journal.md v0.20 §9.8 (DEC-800)
+  spec: docs/specs/journal.md v0.21 §9.10 (DEC-800)
   drafts:
     established_v2:
       envelope_version: 1
@@ -10513,7 +10513,7 @@ connections:
       pii_refs: []
   invalid_drafts:
   - name: established_v2.connection_id.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.connection_id
@@ -10523,7 +10523,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: established_v2.connection_id.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.connection_id
@@ -10533,7 +10533,7 @@ connections:
       reason: non_canonical
       path: payload.connection_id
   - name: established_v2.broker.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.broker
@@ -10543,7 +10543,7 @@ connections:
       reason: schema
       path: payload.broker
   - name: established_v2.broker.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.broker
@@ -10553,7 +10553,7 @@ connections:
       reason: non_canonical
       path: payload.broker
   - name: established_v2.environment.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.environment
@@ -10563,7 +10563,7 @@ connections:
       reason: schema
       path: payload.environment
   - name: established_v2.environment.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.environment
@@ -10573,7 +10573,7 @@ connections:
       reason: non_canonical
       path: payload.environment
   - name: established_v2.scopes.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.scopes
@@ -10583,7 +10583,7 @@ connections:
       reason: schema
       path: payload.scopes
   - name: established_v2.account_ref.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.account_ref
@@ -10593,7 +10593,7 @@ connections:
       reason: schema
       path: payload.account_ref
   - name: established_v2.account_ref.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.account_ref
@@ -10603,7 +10603,7 @@ connections:
       reason: non_canonical
       path: payload.account_ref
   - name: established_v2.user.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.user
@@ -10613,7 +10613,7 @@ connections:
       reason: schema
       path: payload.user
   - name: established_v2.user.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.user
@@ -10623,7 +10623,7 @@ connections:
       reason: non_canonical
       path: payload.user
   - name: established_v2.step_up.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.step_up
@@ -10633,7 +10633,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: established_v2.account_ref.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.account_ref
@@ -10643,7 +10643,7 @@ connections:
       reason: schema
       path: payload.account_ref
   - name: established_v2.user.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.user
@@ -10653,7 +10653,7 @@ connections:
       reason: schema
       path: payload.user
   - name: established_v2.step_up.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: established_v2
     changes:
     - path: payload.step_up
@@ -10663,7 +10663,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: established_v2.missing
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: established_v2
     changes:
     - path: payload.step_up
@@ -10673,7 +10673,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: established_v2.extra
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: established_v2
     changes:
     - path: payload.note
@@ -10683,7 +10683,7 @@ connections:
       reason: schema
       path: payload.note
   - name: refused_scope.connection_id.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.connection_id
@@ -10693,7 +10693,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: refused_scope.connection_id.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.connection_id
@@ -10703,7 +10703,7 @@ connections:
       reason: non_canonical
       path: payload.connection_id
   - name: refused_scope.broker.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.broker
@@ -10713,7 +10713,7 @@ connections:
       reason: schema
       path: payload.broker
   - name: refused_scope.broker.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.broker
@@ -10723,7 +10723,7 @@ connections:
       reason: non_canonical
       path: payload.broker
   - name: refused_scope.environment.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.environment
@@ -10733,7 +10733,7 @@ connections:
       reason: schema
       path: payload.environment
   - name: refused_scope.environment.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.environment
@@ -10743,7 +10743,7 @@ connections:
       reason: non_canonical
       path: payload.environment
   - name: refused_scope.occasion.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.occasion
@@ -10753,7 +10753,7 @@ connections:
       reason: schema
       path: payload.occasion
   - name: refused_scope.occasion.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.occasion
@@ -10763,7 +10763,7 @@ connections:
       reason: non_canonical
       path: payload.occasion
   - name: refused_scope.check.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.check
@@ -10773,7 +10773,7 @@ connections:
       reason: schema
       path: payload.check
   - name: refused_scope.check.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.check
@@ -10783,7 +10783,7 @@ connections:
       reason: non_canonical
       path: payload.check
   - name: refused_scope.reason.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.reason
@@ -10793,7 +10793,7 @@ connections:
       reason: schema
       path: payload.reason
   - name: refused_scope.reason.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.reason
@@ -10803,7 +10803,7 @@ connections:
       reason: non_canonical
       path: payload.reason
   - name: refused_scope.existing_connection_id.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.existing_connection_id
@@ -10813,7 +10813,7 @@ connections:
       reason: schema
       path: payload.existing_connection_id
   - name: refused_scope.existing_connection_id.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.existing_connection_id
@@ -10823,7 +10823,7 @@ connections:
       reason: non_canonical
       path: payload.existing_connection_id
   - name: refused_scope.user.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.user
@@ -10833,7 +10833,7 @@ connections:
       reason: schema
       path: payload.user
   - name: refused_scope.user.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.user
@@ -10843,7 +10843,7 @@ connections:
       reason: non_canonical
       path: payload.user
   - name: refused_scope.step_up.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.step_up
@@ -10853,7 +10853,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: refused_scope.connection_id.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.connection_id
@@ -10863,7 +10863,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: refused_scope.occasion.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.occasion
@@ -10873,7 +10873,7 @@ connections:
       reason: schema
       path: payload.occasion
   - name: refused_scope.check.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.check
@@ -10883,7 +10883,7 @@ connections:
       reason: schema
       path: payload.check
   - name: refused_scope.reason.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.reason
@@ -10893,7 +10893,7 @@ connections:
       reason: schema
       path: payload.reason
   - name: refused_scope.user.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.user
@@ -10903,7 +10903,7 @@ connections:
       reason: schema
       path: payload.user
   - name: refused_scope.step_up.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refused_scope
     changes:
     - path: payload.step_up
@@ -10913,7 +10913,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: refused_scope.missing
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: refused_scope
     changes:
     - path: payload.step_up
@@ -10923,7 +10923,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: refused_scope.extra
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: refused_scope
     changes:
     - path: payload.note
@@ -10933,7 +10933,7 @@ connections:
       reason: schema
       path: payload.note
   - name: rotated.connection_id.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: rotated
     changes:
     - path: payload.connection_id
@@ -10943,7 +10943,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: rotated.connection_id.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: rotated
     changes:
     - path: payload.connection_id
@@ -10953,7 +10953,7 @@ connections:
       reason: non_canonical
       path: payload.connection_id
   - name: rotated.scopes.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: rotated
     changes:
     - path: payload.scopes
@@ -10963,7 +10963,7 @@ connections:
       reason: schema
       path: payload.scopes
   - name: rotated.user.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: rotated
     changes:
     - path: payload.user
@@ -10973,7 +10973,7 @@ connections:
       reason: schema
       path: payload.user
   - name: rotated.user.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: rotated
     changes:
     - path: payload.user
@@ -10983,7 +10983,7 @@ connections:
       reason: non_canonical
       path: payload.user
   - name: rotated.step_up.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: rotated
     changes:
     - path: payload.step_up
@@ -10993,7 +10993,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: rotated.connection_id.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: rotated
     changes:
     - path: payload.connection_id
@@ -11003,7 +11003,7 @@ connections:
       reason: schema
       path: payload.connection_id
   - name: rotated.scopes.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: rotated
     changes:
     - path: payload.scopes
@@ -11013,7 +11013,7 @@ connections:
       reason: schema
       path: payload.scopes
   - name: rotated.user.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: rotated
     changes:
     - path: payload.user
@@ -11023,7 +11023,7 @@ connections:
       reason: schema
       path: payload.user
   - name: rotated.step_up.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: rotated
     changes:
     - path: payload.step_up
@@ -11033,7 +11033,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: rotated.missing
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: rotated
     changes:
     - path: payload.step_up
@@ -11043,7 +11043,7 @@ connections:
       reason: schema
       path: payload.step_up
   - name: rotated.extra
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: rotated
     changes:
     - path: payload.note
@@ -11053,7 +11053,7 @@ connections:
       reason: schema
       path: payload.note
   - name: checked_start.occasion.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: checked_start
     changes:
     - path: payload.occasion
@@ -11063,7 +11063,7 @@ connections:
       reason: schema
       path: payload.occasion
   - name: checked_start.occasion.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: checked_start
     changes:
     - path: payload.occasion
@@ -11073,7 +11073,7 @@ connections:
       reason: non_canonical
       path: payload.occasion
   - name: checked_start.results.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: checked_start
     changes:
     - path: payload.results
@@ -11083,7 +11083,7 @@ connections:
       reason: schema
       path: payload.results
   - name: checked_start.risk_clock.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: checked_start
     changes:
     - path: payload.risk_clock
@@ -11093,7 +11093,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: checked_start.risk_clock.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: checked_start
     changes:
     - path: payload.risk_clock
@@ -11103,7 +11103,7 @@ connections:
       reason: non_canonical
       path: payload.risk_clock
   - name: checked_start.occasion.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: checked_start
     changes:
     - path: payload.occasion
@@ -11113,7 +11113,7 @@ connections:
       reason: schema
       path: payload.occasion
   - name: checked_start.results.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: checked_start
     changes:
     - path: payload.results
@@ -11123,7 +11123,7 @@ connections:
       reason: schema
       path: payload.results
   - name: checked_start.risk_clock.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: checked_start
     changes:
     - path: payload.risk_clock
@@ -11133,7 +11133,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: checked_start.missing
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: checked_start
     changes:
     - path: payload.risk_clock
@@ -11143,7 +11143,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: checked_start.extra
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: checked_start
     changes:
     - path: payload.note
@@ -11153,7 +11153,7 @@ connections:
       reason: schema
       path: payload.note
   - name: state_degraded.from.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.from
@@ -11163,7 +11163,7 @@ connections:
       reason: schema
       path: payload.from
   - name: state_degraded.from.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.from
@@ -11173,7 +11173,7 @@ connections:
       reason: non_canonical
       path: payload.from
   - name: state_degraded.to.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.to
@@ -11183,7 +11183,7 @@ connections:
       reason: schema
       path: payload.to
   - name: state_degraded.to.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.to
@@ -11193,7 +11193,7 @@ connections:
       reason: non_canonical
       path: payload.to
   - name: state_degraded.reason.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.reason
@@ -11203,7 +11203,7 @@ connections:
       reason: schema
       path: payload.reason
   - name: state_degraded.reason.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.reason
@@ -11213,7 +11213,7 @@ connections:
       reason: non_canonical
       path: payload.reason
   - name: state_degraded.risk_clock.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.risk_clock
@@ -11223,7 +11223,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: state_degraded.risk_clock.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.risk_clock
@@ -11233,7 +11233,7 @@ connections:
       reason: non_canonical
       path: payload.risk_clock
   - name: state_degraded.from.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.from
@@ -11243,7 +11243,7 @@ connections:
       reason: schema
       path: payload.from
   - name: state_degraded.to.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.to
@@ -11253,7 +11253,7 @@ connections:
       reason: schema
       path: payload.to
   - name: state_degraded.reason.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.reason
@@ -11263,7 +11263,7 @@ connections:
       reason: schema
       path: payload.reason
   - name: state_degraded.risk_clock.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: state_degraded
     changes:
     - path: payload.risk_clock
@@ -11273,7 +11273,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: state_degraded.missing
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: state_degraded
     changes:
     - path: payload.risk_clock
@@ -11283,7 +11283,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: state_degraded.extra
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: state_degraded
     changes:
     - path: payload.note
@@ -11293,7 +11293,7 @@ connections:
       reason: schema
       path: payload.note
   - name: refreshed.scopes.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refreshed
     changes:
     - path: payload.scopes
@@ -11303,7 +11303,7 @@ connections:
       reason: schema
       path: payload.scopes
   - name: refreshed.risk_clock.kind
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refreshed
     changes:
     - path: payload.risk_clock
@@ -11313,7 +11313,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: refreshed.risk_clock.form
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refreshed
     changes:
     - path: payload.risk_clock
@@ -11323,7 +11323,7 @@ connections:
       reason: non_canonical
       path: payload.risk_clock
   - name: refreshed.scopes.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refreshed
     changes:
     - path: payload.scopes
@@ -11333,7 +11333,7 @@ connections:
       reason: schema
       path: payload.scopes
   - name: refreshed.risk_clock.null
-    clause: §9.8 types
+    clause: §9.10 types
     base_draft: refreshed
     changes:
     - path: payload.risk_clock
@@ -11343,7 +11343,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: refreshed.missing
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: refreshed
     changes:
     - path: payload.risk_clock
@@ -11353,7 +11353,7 @@ connections:
       reason: schema
       path: payload.risk_clock
   - name: refreshed.extra
-    clause: §9.8 closed
+    clause: §9.10 closed
     base_draft: refreshed
     changes:
     - path: payload.note
@@ -11363,7 +11363,7 @@ connections:
       reason: schema
       path: payload.note
   - name: established_v1_with_account_ref
-    clause: '§9.8: version 1 stays closed with its four members'
+    clause: '§9.10: version 1 stays closed with its four members'
     base_draft: established_v2
     changes:
     - path: schema_version
@@ -11377,7 +11377,7 @@ connections:
       reason: schema
       path: payload.account_ref
   - name: established_version_3
-    clause: '§9.8: versions 1 and 2 only'
+    clause: '§9.10: versions 1 and 2 only'
     base_draft: established_v2
     changes:
     - path: schema_version
@@ -11387,7 +11387,7 @@ connections:
       reason: unknown_schema
       path: payload
   - name: established_carries_a_secret
-    clause: '§9.8, CN-1: a credential has no member to sit in'
+    clause: '§9.10, CN-1: a credential has no member to sit in'
     base_draft: established_v2
     changes:
     - path: payload.api_secret
@@ -11397,7 +11397,7 @@ connections:
       reason: schema
       path: payload.api_secret
   - name: refused_carries_the_fingerprint
-    clause: '§9.8, connections spec §3: the fingerprint is never journaled'
+    clause: '§9.10, connections spec §3: the fingerprint is never journaled'
     base_draft: refused_scope
     changes:
     - path: payload.account_fingerprint
@@ -11407,7 +11407,7 @@ connections:
       reason: schema
       path: payload.account_fingerprint
   - name: established_step_up_extra
-    clause: '§9.8: the step-up evidence is closed'
+    clause: '§9.10: the step-up evidence is closed'
     base_draft: established_v2
     changes:
     - path: payload.step_up.token
@@ -11429,7 +11429,7 @@ connections:
       reason: non_canonical
       path: payload.scopes
   - name: refused_on_the_account_stream
-    clause: '§9.8: a control-stream record'
+    clause: '§9.10: a control-stream record'
     base_draft: refused_scope
     changes:
     - path: stream_id
@@ -11439,7 +11439,7 @@ connections:
       reason: wrong_stream
       path: event_type
   - name: state_on_the_control_stream
-    clause: '§9.8: an account-stream record'
+    clause: '§9.10: an account-stream record'
     base_draft: state_degraded
     changes:
     - path: stream_id
@@ -11579,7 +11579,7 @@ connections:
       reason: schema
       path: payload.results
   - name: checked_uniqueness
-    clause: '§9.8: uniqueness is a connect-time check'
+    clause: '§9.10: uniqueness is a connect-time check'
     base_draft: checked_start
     changes:
     - path: payload.results
@@ -11775,7 +11775,7 @@ connections:
       path: causation_id
   valid_drafts:
   - name: established_version_1
-    clause: '§9.8: version 1 stays registered'
+    clause: '§9.10: version 1 stays registered'
     base_draft: established_v2
     changes:
     - path: schema_version
@@ -11976,7 +11976,7 @@ connections:
     expect:
       outcome: Valid
   - name: revocation_is_never_refused
-    clause: '§9.8: no rule refuses a ConnectionRevoked'
+    clause: '§9.10: no rule refuses a ConnectionRevoked'
     records:
     - base_draft: rotated
       changes:
