@@ -22,7 +22,7 @@
       "$ref": "../common.schema.json#/$defs/AsOf"
     },
     "dropped": {
-      "description": "The JSON pointers of request members an API-7 operation dropped rather than refused (DEC-682 item 27). Absent when nothing was dropped.",
+      "description": "The JSON pointers of request members an API-7 operation dropped rather than refused (DEC-682 item 27). Absent when nothing was dropped. Never the root `\"\"`: only pause and hold read a body that is not JSON.",
       "type": "array",
       "uniqueItems": true,
       "minItems": 1,

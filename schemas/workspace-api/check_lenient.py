@@ -9,7 +9,8 @@ Run from the repository root, in the reference environment:
    lenient schema.
 2. Every case of `examples/lenient/api7.json` is for one of the six:
    - an `accept` case's pointers each name a member present in its body; a body that is not JSON
-     drops `""`, and only for pause and hold;
+     drops `""`, and only for pause and hold; a non-empty list is a valid `dropped` of the
+     operation's `202` schema;
    - a `refuse` case's body fails the operation's strict schema, or is not JSON.
 """
 
@@ -38,6 +39,8 @@ NOT_LENIENT = {
     "the kill-switch half of a revoke on compromise": "it is the revoke's own strict body",
 }
 UNPARSABLE_OK = {"pause", "hold"}
+# The `202` schema whose `dropped` lists an operation's accept case; the rest use command-accepted.
+ACCEPTED = {"respond_approval": "commands/approval-response-accepted"}
 
 
 def resolves(body, pointer: str) -> bool:
@@ -100,6 +103,13 @@ def main() -> int:
         body = case["body"]
         raw = isinstance(body, str)
         if "accept" in case:
+            accepted = schemas[ACCEPTED.get(case["operation"], "commands/command-accepted")]
+            if case["accept"] and not Draft202012Validator(
+                accepted["properties"]["dropped"], registry=registry
+            ).is_valid(case["accept"]):
+                problems.append(
+                    f"{label}: {case['accept']!r} is not a valid `dropped` of its 202"
+                )
             if raw:
                 if case["operation"] not in UNPARSABLE_OK or case["accept"] != [""]:
                     problems.append(

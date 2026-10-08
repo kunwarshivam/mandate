@@ -490,6 +490,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Revoke now, on compromise | `POST /connections/{id}/revoke` with `compromised: true` | `OwnerCommandIssued` (`kill_switch`, connection scope), then `ConnectionRevoked` (reason `compromised`, journal change), in one batch | §5.6. Never waits on positions: the kill switch runs first in the same command, then the credential is revoked |
 | Policies | `GET`, `PUT /policies/workspace` | `PolicyChanged` | A value looser than its parent is refused naming the nearest ancestor (FR-1.5); the response lists agents made nonconforming (X1). Step-up |
 | Members | `GET /members`, `POST /invitations`, `PATCH`, `DELETE /members/{id}` | Identity spec's events (journal change) | Removing a member ends their sessions and tokens at once |
+| My workspaces | `GET /v1/me/workspaces` | — | (planned: E10-10) The signed-in user's own workspace memberships, at the principal's own scope and outside every workspace path: identity spec §4.5's *List one's own workspace memberships*, which [#811](https://github.com/kunwarshivam/mandate/pull/811) adds. Returns only the caller's memberships (API-9) |
 | Clients | `GET /clients`, `POST /clients`, `DELETE /clients/{id}` | `ClientConnected`, `ClientRevoked` (journal change) | Create needs step-up and shows the scopes in words (E10-8); revoke needs none |
 
 ### 4.6 Owner requests, the dry run, and the chat thread
@@ -568,6 +569,11 @@ delegation, and away mode; an `approved` and every other operation is judged str
 - Skip's `content_hash` stays strict: an answer binds what was shown (API-12).
 - Idempotency (API-4) compares the members kept, not those dropped: a repeat that differs only in
   a dropped member is the same call.
+- A repeat never applies a member the first call dropped. A repeat that differs only in dropped
+  members replays the original outcome, `dropped` included, so the client sees its fix was not
+  applied; one that now carries a valid value for a dropped member differs in a kept member and is
+  refused `idempotency_conflict`. Either way, a client that fixes a dropped member sends it under a
+  new key.
 
 ### 5.1 Confirm a mandate version
 

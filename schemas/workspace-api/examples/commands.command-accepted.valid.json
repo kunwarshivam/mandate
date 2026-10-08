@@ -15,6 +15,14 @@
     }
   },
   {
+    "label": "a pause or hold body that is not JSON drops the root",
+    "set": {
+      "/dropped": [
+        ""
+      ]
+    }
+  },
+  {
     "label": "auto: /phase = \"recorded\"",
     "set": {
       "/phase": "recorded"

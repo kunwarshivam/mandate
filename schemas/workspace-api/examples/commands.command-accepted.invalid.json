@@ -44,14 +44,6 @@
     }
   },
   {
-    "label": "the whole body dropped",
-    "set": {
-      "/dropped": [
-        ""
-      ]
-    }
-  },
-  {
     "label": "auto: no /command_id",
     "remove": [
       "/command_id"
