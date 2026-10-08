@@ -13,7 +13,7 @@ import { RuntimeProbe, probed } from "@/test/runtime-probe";
 import { failingPasskey, press, stepUpDialog } from "@/test/step-up";
 import { ADVICE_REPLY, type Compiler, type CompilerInput, fixtureCompiler } from "./compiler";
 import { INTRO, READY } from "./conversation";
-import { type Read, compile, mandateFrom, readAnswers, readLoss, readStrategy, unaskedUsd } from "./draft";
+import { MODELS, type Read, compile, mandateFrom, readAnswers, readLoss, readStrategy, unaskedUsd } from "./draft";
 import { NewAgentFlow } from "./new-agent-flow";
 import { GAP_NOTE, summaryLines } from "./summary";
 
@@ -193,6 +193,24 @@ describe("one conversation, as in any chat", () => {
     ]);
   });
 
+  it("says what shape of answer would be read on a second miss in a row, never a value, instead of the same sentence again", async () => {
+    renderFlow();
+    await send("yes");
+    expect(lastReply()).toEqual(["I couldn't find an amount in that. How much money can it use, in dollars?"]);
+    await send("yes");
+    expect(lastReply()).toEqual(["I still couldn't find an amount. Write the figure on its own, in dollars, with nothing else in the message."]);
+    expect(lastReply().join(" ")).not.toMatch(EXAMPLES);
+    await send("$3,000");
+    expect(lastReply()).toEqual(["Got it: $3,000.00 to use.", "What's it for, in your own words?"]);
+    await send("Grow it");
+    await send("yes");
+    expect(lastReply()).toEqual(["I couldn't find a loss in that. Write it in dollars, or as a percentage of the money."]);
+  });
+
+  it("names the range a model setting must fall in when it asks, so the owner never guesses, and still proposes no value", async () => {
+    for (const m of MODELS) for (const p of m.params) expect(p.question).toMatch(/from [\d.]+ to [\d.]+/i);
+  });
+
   it("refuses a loss above the workspace's ceiling, never moving the answer to fit", async () => {
     renderFlow();
     await send("$3,000");
@@ -245,9 +263,9 @@ describe("the strategy, the owner's choice", () => {
     await send("$300");
     await send("MSFT");
     await send("mean reversion");
-    expect(lastReply()).toEqual(["Got it: the Mean reversion model.", "How many bars should the model read back over?"]);
+    expect(lastReply()).toEqual(["Got it: the Mean reversion model.", "How many bars should the model read back over? A whole number from 2 to 500."]);
     await send("20");
-    expect(lastReply()).toEqual(["Got it: lookback of 20.", "How far below its average, in standard deviations, must a price be before the model scores a buy?"]);
+    expect(lastReply()).toEqual(["Got it: lookback of 20.", "How far below its average, in standard deviations, must a price be before the model scores a buy? From 0.5 to 4, with at most two decimals."]);
     await send("9");
     expect(lastReply()).toEqual(["Entry z-score: a number from 0.5 to 4, with at most two decimals."]);
     await send("1.5");

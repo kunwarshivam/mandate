@@ -48,8 +48,10 @@ the owl, the rules and the record.
 - [x] **Landing windows.** Each window now cascades 28px down and right of the one in front,
       so a new one shows the last rather than covering it. "Try it." already had its button on
       the next line, and the windows scroll; the review's capture used overlay scrollbars. (R-30)
-- [ ] **Set-up replies say what they read** and, on a second miss, what shape of answer would
-      work; lookback and z-score default with "default" marked. (R-26, R-27)
+- [x] **Set-up replies on a miss.** A second miss in a row says what shape of answer would be
+      read, never a value; each model setting's question names its range, so nobody guesses.
+      Defaulting a setting would amend DEC-472 and brief A3 ("each setting empty"), so it waits
+      for a DEC. (R-26, R-27)
 
 ## C. The cutting pass (one PR, no new rules)
 

@@ -24,7 +24,7 @@ export type ModelId = "quant.mean_reversion" | "quant.momentum";
 interface ModelParam {
   key: string;
   label: string;
-  /** How the conversation asks for it, with no suggested value. */
+  /** How the conversation asks for it: the question and the range it must fall in, with no suggested value. */
   question: string;
   hint: string;
   read: (text: string) => CheckResult<string>;
@@ -59,7 +59,7 @@ function decimalBetween(label: string, low: string, high: string) {
 const LOOKBACK: ModelParam = {
   key: "lookback_bars",
   label: "Lookback, in bars",
-  question: "How many bars should the model read back over?",
+  question: "How many bars should the model read back over? A whole number from 2 to 500.",
   hint: "How many bars the model reads back over. A whole number from 2 to 500.",
   read: wholeNumber("Lookback", 2, 500),
 };
@@ -77,7 +77,7 @@ export const MODELS: readonly ModelChoice[] = [
       {
         key: "z_entry",
         label: "Entry z-score",
-        question: "How far below its average, in standard deviations, must a price be before the model scores a buy?",
+        question: "How far below its average, in standard deviations, must a price be before the model scores a buy? From 0.5 to 4, with at most two decimals.",
         hint: "How far below its average a price must be, in standard deviations, before the model scores a buy. From 0.5 to 4.",
         read: decimalBetween("Entry z-score", "0.5", "4"),
       },
