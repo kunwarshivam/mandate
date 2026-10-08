@@ -103,7 +103,7 @@ credential"). The workspace API returns these fields only (#560, API-11).
 | `environment` | `paper` or `live`, for life (CN-3) | Control stream | Yes: `ConnectionEstablished` |
 | `scopes` | Granted scopes, strictly ascending (journal §9.2 rule 19). For MCP, the allowlisted tool names | Control stream | Yes: `ConnectionEstablished` |
 | `auth_kind` | `api_key`, `oauth`, `mcp_oauth` | Connection record | No; not needed for replay |
-| `account_ref` | Opaque ULID naming the account stream `acct:{workspace_id}:{account_ref}` (journal §2) | Connection record; control stream once E7-17 lands | **No.** `ConnectionEstablished` is closed with four members. Journal spec change needed (E7-17): `account_ref` added to `ConnectionEstablished` as a new `schema_version`, the clause DEC-261 item 10 (Proposed) asks for that binds an account stream to its connection |
+| `account_ref` | Opaque ULID naming the account stream `acct:{workspace_id}:{account_ref}` (journal §2) | Connection record; control stream | Yes: `ConnectionEstablished` version 2 (journal §9.8, DEC-800), which binds the account stream to its connection (DEC-261 item 10). Version 2 carries `account_ref`, the connecting `user`, `step_up`, and `margin_attestation` (`cash_account` or `margin_disabled`), which is non-null exactly when the environment is `live` (rule 64): null for paper, so null for every Alpaca OAuth paper connection |
 | `account_fingerprint` | A keyed hash of (broker, broker account id), §3.1. Detects a second connection to the same account (CN-5) without storing the number in clear | Connection record only | Never journaled, never returned |
 | `vault_path` | Derived from workspace id and `connection_id`; never sent to a client | Derived, not stored | Never |
 | `state` | §9 | Connection record | Through the account state it sets: `AccountRestrictionChanged` and `AgentModeApplied` (§9.1). A connection-state event of its own waits for E7-17 |
@@ -228,17 +228,23 @@ reaches that connection's broker hosts.
 5. **Record the results.** The executor appends `ConnectionChecked` (journal spec change E7-17,
    PR #786) on that account stream. It carries the result of checks 1, 2, 3, and 7, pass or
    refusal, and `account_pii_ref`, the personal-data reference of the account id (null if the
-   account could not be read), never the id or the token (CN-10). The member and the fingerprint
-   step below are pending in #786. The API then acts on it as the connection manager:
+   account could not be read), never the id or the token (CN-10). The API then acts on it as the
+   connection manager (journal §9.8):
    - It reads the results from the journal.
    - It asks the vault to compute the account fingerprint from that reference, receiving only the
      result (§3.1), and writes the fingerprint to the pending connection record.
+   - It completes check 3 by comparing that fingerprint with the account the connection names
+     in its record. The connection manager alone refuses `account_mismatch`; the executor never
+     reports it.
    - It runs check 4 against every other record, because only the connection manager sees them all
      (CN-5).
+   - Its own refusals (check 3's `account_mismatch`, and check 4) have null causation, since no
+     executor check failed.
 
    Then:
    - **if all pass**, the API appends `ConnectionEstablished` (version 2, E7-17) on the control
-     stream, with `causation_id` set to the passing `ConnectionChecked`. That cross-stream
+     stream, carrying `account_ref`, `user`, `step_up`, and `margin_attestation` (null for a paper
+     connection, rule 64), with `causation_id` set to the passing `ConnectionChecked`. That cross-stream
      causation is permitted by E7-17 (#786, journal §9.8). The executor leaves `connecting` only
      when it reads that event from the control stream and copies it to the account stream, which
      stays `connecting` until then (E7-17, §9.8 rule 68). From then on it runs as the account's
