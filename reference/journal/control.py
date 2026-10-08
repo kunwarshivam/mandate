@@ -329,18 +329,22 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
     ("band_bp", INT),
 )
 
-# §9.11 (DEC-800): a connection's history. The control stream's three records and the account
+# §9.12 (DEC-800): a connection's history. The control stream's three records and the account
 # stream's three, with `ConnectionEstablished` at version 2 below.
 CHECK_REASONS = {
     "scope": ("scope_mismatch", "fund_movement", "permissions_unreadable"),
     "environment": ("wrong_environment", "reaches_both"),
-    "account": ("account_mismatch", "not_dedicated"),
+    "account": ("account_unreadable", "account_mismatch", "not_dedicated"),
     "uniqueness": ("already_connected",),
     "contract": ("tools_missing", "contract_drift"),
+    "one_x": ("not_one_x",),
+    "account_status": ("restricted",),
 }
 ALL_CHECK_REASONS = tuple(r for reasons in CHECK_REASONS.values() for r in reasons)
-EXECUTOR_CHECKS = ("account", "contract", "environment", "scope")
-REQUIRED_CHECKS = ("account", "environment", "scope")
+# Checks 5 and 6 never refuse a connection (connections spec §8.1): they are journaled, not refused.
+REFUSING_CHECKS = ("scope", "environment", "account", "uniqueness", "contract")
+EXECUTOR_CHECKS = ("account", "account_status", "contract", "environment", "one_x", "scope")
+REQUIRED_CHECKS = ("account", "account_status", "environment", "one_x", "scope")
 CONNECTION_STATES = ("active", "degraded", "suspended")
 DEGRADING = ("network_errors", "rate_headroom", "contract_drift")
 SUSPENDING = ("authorization_failed", "credential_expired", "refresh_failed", "check_failed", "lease_expired")
@@ -350,8 +354,8 @@ SCHEMAS[("ctl", "ConnectionRefused")] = rec(
     ("broker", STR),
     ("environment", one_of("paper", "live")),
     ("occasion", one_of("connect", "reconnect", "reauthorize")),
-    ("check", one_of(*CHECK_REASONS)),
-    ("reason", one_of(*ALL_CHECK_REASONS)),
+    ("check", one_of(*REFUSING_CHECKS)),
+    ("reason", one_of(*(r for c in REFUSING_CHECKS for r in CHECK_REASONS[c]))),
     ("existing_connection_id", opt(IDENT_T)),
     ("user", STR),
     ("step_up", STEP_UP),
@@ -372,6 +376,7 @@ SCHEMAS[("acct", "ConnectionChecked")] = rec(
             )
         ),
     ),
+    ("account_pii_ref", opt(IDENT_T)),
     ("risk_clock", RISK_CLOCK),
 )
 SCHEMAS[("acct", "ConnectionStateChanged")] = rec(
@@ -792,7 +797,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
 
 def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.11's consistency rules 54 to 60 (rule 61 is a copy rule), each reported once."""
+    """§9.12's consistency rules 54 to 60 (rule 61 is a copy rule), each reported once."""
     p = draft["payload"]
     out: list[Violation] = []
 
@@ -824,6 +829,11 @@ def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
             rule("58", fits, f"payload.results[{i}].reason")
             if not fits:
                 break
+        unread = any(r["check"] == "account" and r["reason"] == "account_unreadable" for r in p["results"])
+        reference = p["account_pii_ref"]
+        read_matches = (reference is None) == unread or "rule.62.null" in skip
+        listed = reference is None or reference in draft["pii_refs"] or "rule.62.listed" in skip
+        rule("62", read_matches and listed, "payload.account_pii_ref")
     if event_type == "ConnectionStateChanged":
         reason, to, frm = p["reason"], p["to"], p["from"]
         if reason in DEGRADING:
@@ -1003,8 +1013,8 @@ def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[
     checked_first = event_type == "ConnectionCredentialRotated" or (
         event_type == "ConnectionEstablished" and draft["schema_version"] == 2
     )
-    if checked_first and draft["causation_id"] is None and "rule.62" not in skip:
-        return [Violation("rule.62", "schema", "causation_id")]
+    if checked_first and draft["causation_id"] is None and "rule.63" not in skip:
+        return [Violation("rule.63", "schema", "causation_id")]
     acknowledged = event_type == "ConnectionStateChanged" and draft["payload"]["reason"] == "acknowledged"
     if acknowledged and draft["causation_id"] is None and "rule.61" not in skip:
         return [Violation("rule.61", "schema", "causation_id")]
