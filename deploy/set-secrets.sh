@@ -6,8 +6,8 @@
 #
 # It makes each random key on the host with openssl, asks for the Alpaca OAuth client id and secret
 # (the secret without echo), and leaves every value that is already set alone. The session key goes
-# to api.env only, the client secret to executor.env only (DEC-692), the vault key and the client id
-# to both. It never prints a value, never passes one on a command line, and keeps both files
+# to api.env only; the vault's token key and the client secret to executor.env only (DEC-692); the
+# vault's pending key and the client id to both. It never prints a value, never passes one on a command line, and keeps both files
 # root:root 0600.
 set -euo pipefail
 
@@ -18,16 +18,32 @@ require_host
 
 API_ENV=/etc/owlhead/api.env
 EXEC_ENV=/etc/owlhead/executor.env
+if [ "$DRY_RUN" = 1 ]; then
+  echo "+ fill the empty values of $API_ENV and $EXEC_ENV: random keys from openssl, Alpaca's id and secret asked for"
+  exit 0
+fi
 for file in "$API_ENV" "$EXEC_ENV"; do
   if [ ! -f "$file" ]; then
     echo "$file does not exist; run bootstrap.sh first" >&2
     exit 1
   fi
 done
-if [ "$DRY_RUN" = 1 ]; then
-  echo "+ fill the empty values of $API_ENV and $EXEC_ENV: random keys from openssl, Alpaca's id and secret asked for"
-  exit 0
-fi
+
+# Reads one answer, or stops with a clear message when stdin is empty or closed.
+ask() {
+  local prompt="$1" silent="$2"
+  if [ "$silent" = 1 ]; then
+    IFS= read -r -s -p "$prompt" answer || { echo; echo "no input; nothing written" >&2; exit 1; }
+    echo
+  else
+    IFS= read -r -p "$prompt" answer || { echo "no input; nothing written" >&2; exit 1; }
+  fi
+  answer="${answer//[[:space:]]/}"
+  if [ -z "$answer" ]; then
+    echo "an empty answer; nothing written" >&2
+    exit 1
+  fi
+}
 
 current() { sed -n "s/^$2=//p" "$1"; }
 
@@ -54,35 +70,36 @@ fill() {
 }
 
 umask 077
-vault_key="$(current "$API_ENV" MANDATE_VAULT_KEY)"
-exec_key="$(current "$EXEC_ENV" MANDATE_VAULT_KEY)"
-if [ -n "$vault_key" ] && [ -n "$exec_key" ] && [ "$vault_key" != "$exec_key" ]; then
-  unset vault_key exec_key
-  echo "the two files hold different vault keys; fix one by hand before going on" >&2
+pending_key="$(current "$API_ENV" MANDATE_VAULT_PENDING_KEY)"
+exec_key="$(current "$EXEC_ENV" MANDATE_VAULT_PENDING_KEY)"
+if [ -n "$pending_key" ] && [ -n "$exec_key" ] && [ "$pending_key" != "$exec_key" ]; then
+  unset pending_key exec_key
+  echo "the two files hold different pending keys; fix one by hand before going on" >&2
   exit 1
 fi
-vault_key="${vault_key:-$exec_key}"
-vault_key="${vault_key:-$(openssl rand -base64 32)}"
+pending_key="${pending_key:-$exec_key}"
+pending_key="${pending_key:-$(openssl rand -base64 32)}"
+token_key="$(openssl rand -base64 32)"
 session_key="$(openssl rand -base64 32)"
 
 client_id="$(current "$API_ENV" ALPACA_OAUTH_CLIENT_ID)"
 client_id="${client_id:-$(current "$EXEC_ENV" ALPACA_OAUTH_CLIENT_ID)}"
 if [ -z "$client_id" ]; then
-  read -r -p "Alpaca OAuth client id: " client_id
-  client_id="${client_id//[[:space:]]/}"
+  ask "Alpaca OAuth client id: " 0
+  client_id="$answer"
 fi
 client_secret=""
 if [ -z "$(current "$EXEC_ENV" ALPACA_OAUTH_CLIENT_SECRET)" ]; then
-  read -r -s -p "Alpaca OAuth client secret (not echoed): " client_secret
-  echo
-  client_secret="${client_secret//[[:space:]]/}"
+  ask "Alpaca OAuth client secret (not echoed): " 1
+  client_secret="$answer"
 fi
+unset answer
 
-fill "$API_ENV" MANDATE_API_SESSION_SIGNING_KEY "$session_key" MANDATE_VAULT_KEY "$vault_key" \
+fill "$API_ENV" MANDATE_API_SESSION_SIGNING_KEY "$session_key" MANDATE_VAULT_PENDING_KEY "$pending_key" \
   ALPACA_OAUTH_CLIENT_ID "$client_id"
-fill "$EXEC_ENV" MANDATE_VAULT_KEY "$vault_key" ALPACA_OAUTH_CLIENT_ID "$client_id" \
-  ALPACA_OAUTH_CLIENT_SECRET "$client_secret"
-unset vault_key exec_key session_key client_id client_secret
+fill "$EXEC_ENV" MANDATE_VAULT_PENDING_KEY "$pending_key" MANDATE_VAULT_TOKEN_KEY "$token_key" \
+  ALPACA_OAUTH_CLIENT_ID "$client_id" ALPACA_OAUTH_CLIENT_SECRET "$client_secret"
+unset pending_key exec_key token_key session_key client_id client_secret
 
 missing=""
 for file in "$API_ENV" "$EXEC_ENV"; do
@@ -98,12 +115,12 @@ for file in "$API_ENV" "$EXEC_ENV"; do
     esac
   done <"$file"
 done
-if grep -q '^ALPACA_OAUTH_CLIENT_SECRET=' "$API_ENV"; then
-  echo "$API_ENV must not hold the client secret (DEC-692); remove that line" >&2
+if grep -Eq '^(ALPACA_OAUTH_CLIENT_SECRET|MANDATE_VAULT_TOKEN_KEY)=' "$API_ENV"; then
+  echo "$API_ENV must not hold the client secret or the vault's token key (DEC-692); remove that line" >&2
   exit 1
 fi
 if [ -n "$missing" ]; then
   echo "still empty:$missing" >&2
   exit 1
 fi
-echo "every value is set in $API_ENV and $EXEC_ENV (root:root 0600). Copy MANDATE_VAULT_KEY to your password manager now."
+echo "every value is set in $API_ENV and $EXEC_ENV (root:root 0600). Copy both vault keys to your password manager now."

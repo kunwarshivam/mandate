@@ -60,10 +60,13 @@ issue, or the repository.
    This installs and configures:
    - PostgreSQL 18, listening on localhost only;
    - the `owlhead` database and its roles, with the migrations applied;
-   - the `owlhead_api` user;
-   - the API service, installed but not started;
+   - two service users, `owlhead_api` (the API) and `owlhead_exec` (the connection executors), and
+     the `owlhead_art` group they share for the artifact store;
+   - the vault's directories, `/var/lib/owlhead/vault/pending` and `/var/lib/owlhead/vault/tokens`,
+     and the artifact store, `/var/lib/owlhead/artifacts`, each with its own owner and mode;
+   - the API service and the executor template, installed but not started;
    - the nightly backup timer;
-   - an empty `/etc/owlhead/api.env`.
+   - `/etc/owlhead/api.env` and `/etc/owlhead/executor.env`, waiting for their secrets.
 
    It is safe to run again.
 
@@ -94,14 +97,15 @@ issue, or the repository.
    bash set-secrets.sh
    ```
 
-   It makes the session key and the vault key with `openssl` straight into the files, asks for the
+   It makes the session key and the vault's two keys with `openssl` straight into the files, asks for the
    Alpaca client id and then the secret (the secret is not echoed), and keeps every value already
    set. The secret goes only into `executor.env`: the API never holds it. The database URLs are
    already filled in; they have no password. Nothing is printed.
 
-   Then copy the vault key into your password manager: it is never in a backup, and without it a
-   restored vault cannot be read, so every connection would need re-authorizing.
-   `grep '^MANDATE_VAULT_KEY=' /etc/owlhead/api.env` shows it once; clear the screen after.
+   Then copy both vault keys into your password manager: they are never in a backup, and without
+   them a restored vault cannot be read, so every connection would need re-authorizing.
+   `grep '^MANDATE_VAULT_.*_KEY=' /etc/owlhead/executor.env` shows both once; clear the screen
+   after.
 
    If you edit the file by hand instead (`nano /etc/owlhead/api.env`): Ctrl+O, then Enter, saves;
    Ctrl+X quits. Check that it is still `root root` and `-rw-------` with

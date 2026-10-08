@@ -92,16 +92,24 @@ def executor_unit_hardened(f: dict[str, str]) -> list[str]:
     return problems
 
 
+EXECUTOR_ONLY = ("ALPACA_OAUTH_CLIENT_SECRET", "MANDATE_VAULT_TOKEN_KEY")
+
+
 def client_secret_executor_only(f: dict[str, str]) -> list[str]:
-    """The Alpaca client secret is the executor's alone (DEC-692, infrastructure §5.1)."""
+    """The Alpaca client secret and the vault's token key are the executor's alone (DEC-692,
+    infrastructure §5.1): the API can neither use the client secret nor write a token the executor
+    would accept."""
     problems = []
-    if "ALPACA_OAUTH_CLIENT_SECRET" in f["api.env.example"]:
-        problems.append("api.env.example names the client secret")
-    if "\nALPACA_OAUTH_CLIENT_SECRET=\n" not in f["executor.env.example"]:
-        problems.append("executor.env.example lacks the client secret")
     api_fill = re.search(r'^fill "\$API_ENV".*?(?<!\\)\n', f["set-secrets.sh"], re.M | re.S)
-    if not api_fill or "CLIENT_SECRET" in api_fill.group(0):
-        problems.append("set-secrets.sh writes the client secret to api.env")
+    for name in EXECUTOR_ONLY:
+        if name in f["api.env.example"]:
+            problems.append(f"api.env.example names {name}")
+        if f"\n{name}=\n" not in f["executor.env.example"]:
+            problems.append(f"executor.env.example lacks {name}")
+        if not api_fill or name in api_fill.group(0):
+            problems.append(f"set-secrets.sh writes {name} to api.env")
+    if "MANDATE_VAULT_KEY" in "".join(f[e] for e in EXAMPLES):
+        problems.append("a single vault key again")
     return problems
 
 
@@ -203,11 +211,69 @@ def secrets_never_reported(f: dict[str, str]) -> list[str]:
     shown = [
         line
         for line in text.splitlines()
-        if re.search(r"(echo|printf).*\$\{?(line|values|vault_key|session_key|client_secret|client_id|value)\b", line)
+        if re.search(r"(echo|printf).*\$\{?(line|values|pending_key|token_key|exec_key|session_key|client_secret|client_id|answer|value)\b", line)
         and not line.rstrip().endswith('>>"$rebuilt"')
     ]
     if shown:
         problems.append(f"set-secrets.sh shows a line or a value: {shown}")
+    return problems
+
+
+def units_umask(f: dict[str, str]) -> list[str]:
+    """Both service units create files 0640 at most."""
+    return [u for u in ("systemd/owlhead-api.service", "systemd/owlhead-executor.service") if "UMask=0027" not in f[u].splitlines()]
+
+
+def no_cross_group(f: dict[str, str]) -> list[str]:
+    """No service user joins the other's group: the only membership bootstrap grants is the shared
+    artifact group, so the API never reads a token."""
+    text = f["bootstrap.sh"]
+    problems = []
+    for line in text.splitlines():
+        if re.search(r"\b(usermod|adduser|addgroup)\b", line):
+            problems.append(line.strip())
+        if "gpasswd" in line and line.strip() != 'run gpasswd --add "$user" "$ART_GROUP"':
+            problems.append(line.strip())
+        if "useradd" in line and "--groups" in line and '--groups "$ART_GROUP"' not in line:
+            problems.append(line.strip())
+    if "ART_GROUP=owlhead_art" not in text:
+        problems.append("the shared group is not owlhead_art")
+    return problems
+
+
+def artifacts_shared(f: dict[str, str]) -> list[str]:
+    """The artifact store and every directory it uses are root:owlhead_art 2770, made by bootstrap."""
+    text = f["bootstrap.sh"]
+    wanted = ('install -d -o root -g "$ART_GROUP" -m 2770 "${shards[@]}"', 'shards+=("$ARTIFACTS/sha256/$hi$lo")')
+    return [f"bootstrap.sh lacks: {w}" for w in wanted if w not in text]
+
+
+def etc_private(f: dict[str, str]) -> list[str]:
+    """/etc/owlhead is made root:root 0700 wherever it is made, and nothing loosens it."""
+    made = "run install -d -o root -g root -m 0700 /etc/owlhead"
+    problems = []
+    for name in ("bootstrap.sh", "install-cloudflared.sh"):
+        lines = f[name].splitlines()
+        if made not in lines:
+            problems.append(f"{name} does not make /etc/owlhead 0700")
+        problems += [f"{name}: {l.strip()}" for l in lines if re.search(r"(chmod|chown)\b.*/etc/owlhead/?(\s|$)", l)]
+    return problems
+
+
+def unit_paths(f: dict[str, str]) -> list[str]:
+    """Each service may write exactly the artifact store and the vault's two directories."""
+    wanted = "ReadWritePaths=/var/lib/owlhead/artifacts /var/lib/owlhead/vault/pending /var/lib/owlhead/vault/tokens"
+    return [u for u in ("systemd/owlhead-api.service", "systemd/owlhead-executor.service") if [l for l in f[u].splitlines() if l.startswith("ReadWritePaths=")] != [wanted]]
+
+
+def restore_strict(f: dict[str, str]) -> list[str]:
+    """A restore stops at its first error, and bootstrap refuses a host without the peer rule."""
+    problems = []
+    if "runuser -u postgres -- pg_restore --exit-on-error -d" not in f["restore-check.sh"]:
+        problems.append("restore-check.sh restores without --exit-on-error")
+    hba = re.search(r'^if \[ "\$DRY_RUN" = 0 \] && \[ -z "\$\(query postgres "SELECT 1 FROM pg_hba_file_rules WHERE type = \'local\' AND \'all\' = ANY \(user_name\) AND auth_method = \'peer\'"\)" \]; then\n  echo [^\n]*\n  exit 1\nfi$', f["bootstrap.sh"], re.M)
+    if not hba:
+        problems.append("bootstrap.sh no longer refuses a host without the local peer rule")
     return problems
 
 
@@ -224,6 +290,12 @@ def keys_pinned(f: dict[str, str]) -> list[str]:
 
 
 CHECKS = (
+    units_umask,
+    no_cross_group,
+    artifacts_shared,
+    etc_private,
+    unit_paths,
+    restore_strict,
     secrets_never_reported,
     keys_pinned,
     executor_unit_hardened,
@@ -247,9 +319,22 @@ def test_the_committed_files_hold(check):
 
 
 SEEDED = (
+    ("systemd/owlhead-executor.service", "UMask=0027", "UMask=0022", units_umask),
+    ("bootstrap.sh", 'run gpasswd --add "$user" "$ART_GROUP"', 'run gpasswd --add "$user" "$ART_GROUP"\n    run usermod -aG owlhead_exec owlhead_api', no_cross_group),
+    ("bootstrap.sh", 'run gpasswd --add "$user" "$ART_GROUP"', 'run gpasswd --add "$user" "$EXEC_USER"', no_cross_group),
+    ("bootstrap.sh", '--groups "$ART_GROUP"', '--groups "$ART_GROUP,$EXEC_USER"', no_cross_group),
+    ("bootstrap.sh", 'install -d -o root -g "$ART_GROUP" -m 2770 "${shards[@]}"', 'install -d -o root -g "$ART_GROUP" -m 2750 "${shards[@]}"', artifacts_shared),
+    ("bootstrap.sh", "run install -d -o root -g root -m 0700 /etc/owlhead", "run install -d -o root -g root -m 0755 /etc/owlhead", etc_private),
+    ("install-cloudflared.sh", "run install -d -o root -g root -m 0700 /etc/owlhead", "run install -d -o root -g root -m 0700 /etc/owlhead\nrun chmod 0755 /etc/owlhead", etc_private),
+    ("systemd/owlhead-api.service", " /var/lib/owlhead/vault/tokens", "", unit_paths),
+    ("restore-check.sh", "pg_restore --exit-on-error -d", "pg_restore -d", restore_strict),
+    ("bootstrap.sh", 'if [ "$DRY_RUN" = 0 ] && [ -z "$(query postgres "SELECT 1 FROM pg_hba_file_rules', 'if false && [ "$DRY_RUN" = 0 ] && [ -z "$(query postgres "SELECT 1 FROM pg_hba_file_rules', restore_strict),
+    ("bootstrap.sh", 'run install -d -o root -g root -m 0755 /var/lib/owlhead "$VAULT"', 'run install -d -o root -g root -m 0777 /var/lib/owlhead "$VAULT"', vault_layout),
+    ("executor.env.example", "MANDATE_VAULT_TOKEN_KEY=\n", "", client_secret_executor_only),
+    ("set-secrets.sh", 'MANDATE_VAULT_PENDING_KEY "$pending_key" \\\n  ALPACA_OAUTH_CLIENT_ID "$client_id"\nfill', 'MANDATE_VAULT_PENDING_KEY "$pending_key" MANDATE_VAULT_TOKEN_KEY "$token_key" \\\n  ALPACA_OAUTH_CLIENT_ID "$client_id"\nfill', client_secret_executor_only),
     ("set-secrets.sh", 'if [ -z "${line#*=}" ]; then', 'if [ "${line: -1}" = "=" ]; then', secrets_never_reported),
     ("set-secrets.sh", 'missing="$missing ${file##*/}:${line%%=*}"', 'missing="$missing ${file##*/}:${line}"', secrets_never_reported),
-    ("set-secrets.sh", "unset vault_key exec_key session_key", 'echo "key: $vault_key" >&2\nunset vault_key exec_key session_key', secrets_never_reported),
+    ("set-secrets.sh", "unset pending_key exec_key token_key", 'echo "key: $token_key" >&2\nunset pending_key exec_key token_key', secrets_never_reported),
     ("install-cloudflared.sh", '"$found" != "$CLOUDFLARE_FINGERPRINT"', '"$found" = "$found"', keys_pinned),
     ("backup.sh", "set -euo pipefail\n", "set -eu\n", strict_mode),
     ("bootstrap.sh", '"/etc/owlhead/$name.env" 0600 root:root', '"/etc/owlhead/$name.env" 0644 root:root', env_files_private),
@@ -276,7 +361,7 @@ SEEDED = (
     ("bootstrap.sh", "LOGIN IN ROLE mandate_journal_app", "LOGIN SUPERUSER IN ROLE mandate_journal_app", api_role_minimal),
     ("install-cloudflared.sh", "  unset token\n", '  echo "token: $token"\n  unset token\n', token_never_shown),
     ("install-cloudflared.sh", "  unset token\n", '  cloudflared service install "$token"\n  unset token\n', token_never_shown),
-    ("api.env.example", "MANDATE_VAULT_KEY=\n", "MANDATE_VAULT_KEY=c2VjcmV0\n", example_names_only),
+    ("api.env.example", "MANDATE_VAULT_PENDING_KEY=\n", "MANDATE_VAULT_PENDING_KEY=c2VjcmV0\n", example_names_only),
     ("restore-check.sh", '  check_head "$verified"', '  : "$verified"', restore_checks_heads),
     ("backup.sh", '"$DEST/state-$stamp.tar.gz.partial" artifacts vault', '"$DEST/state-$stamp.tar.gz.partial" artifacts', backup_covers_state),
 )

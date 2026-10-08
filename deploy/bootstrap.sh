@@ -30,6 +30,10 @@ PGDG_KEY=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
 DB=owlhead
 API_USER=owlhead_api
 EXEC_USER=owlhead_exec
+# The one group both service users share: the artifact store's. Neither user is ever in the other's
+# own group, so the API never reads the executor's tokens.
+ART_GROUP=owlhead_art
+ARTIFACTS=/var/lib/owlhead/artifacts
 VAULT=/var/lib/owlhead/vault
 
 if [ ! -d "$MIGRATIONS_DIR" ]; then
@@ -129,16 +133,33 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
 done
 
 say "Service users, directories, and the minimal vault's layout (DEC-692)"
+if ! getent group "$ART_GROUP" >/dev/null; then
+  run groupadd --system "$ART_GROUP"
+fi
 for user in "$API_USER" "$EXEC_USER"; do
   if ! id -u "$user" >/dev/null 2>&1; then
-    run useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$user"
+    run useradd --system --user-group --groups "$ART_GROUP" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$user"
+  elif ! id -nG "$user" | tr ' ' '\n' | grep -qx "$ART_GROUP"; then
+    run gpasswd --add "$user" "$ART_GROUP"
   fi
 done
 run install -d -o root -g root -m 0700 /etc/owlhead
 run install -d -o root -g root -m 0700 /var/backups/owlhead
 run install -d -o root -g root -m 0755 /var/lib/owlhead "$VAULT"
-# The artifact store is written by both services; setgid keeps new entries in the shared group.
-run install -d -o "$API_USER" -g "$EXEC_USER" -m 2770 /var/lib/owlhead/artifacts
+# The artifact store is written and read by both services, through the shared group. Every
+# directory the store uses is made here, setgid, so each object lands in that group (and with
+# UMask=0027 is group-readable); a shard one user created on demand would be closed to the other.
+shards=("$ARTIFACTS" "$ARTIFACTS/tmp" "$ARTIFACTS/sha256")
+for hi in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do
+  for lo in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do
+    shards+=("$ARTIFACTS/sha256/$hi$lo")
+  done
+done
+if [ "$DRY_RUN" = 1 ]; then
+  echo "+ install -d -o root -g $ART_GROUP -m 2770 $ARTIFACTS, its tmp/, sha256/, and the 256 shards sha256/00 to sha256/ff"
+else
+  install -d -o root -g "$ART_GROUP" -m 2770 "${shards[@]}"
+fi
 # pending/: the API writes the encrypted code (0640), the executor reads it and deletes it. Setgid,
 # so each file the API creates is in owlhead_exec's group; without it the executor could not read it.
 run install -d -o "$API_USER" -g "$EXEC_USER" -m 2770 "$VAULT/pending"

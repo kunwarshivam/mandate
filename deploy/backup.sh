@@ -5,7 +5,7 @@
 # /var/backups/owlhead (root only), and keeps 14 days of them. A failure runs
 # owlhead-backup-failed.service.
 #
-# It never copies /etc/owlhead: the env files hold the vault key and the client secret, and no
+# It never copies /etc/owlhead: the env files hold the vault keys and the client secret, and no
 # credential goes into a backup (infrastructure OPS-1). The vault in the tarball is encrypted under
 # a key that is not in it; restoring without that key means every connection is re-authorized.
 #

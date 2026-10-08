@@ -48,7 +48,11 @@ The founder runs everything here; agents never get host access. The order of the
   secret is only in `executor.env` (infrastructure §5.1). `owlhead-executor.service` is a template
   installed but never enabled; the live lane supplies its binary.
 - **The minimal vault** (V1) lives in `MANDATE_VAULT_DIR`, `/var/lib/owlhead/vault` (root, 0755),
-  encrypted with `MANDATE_VAULT_KEY`, and V1 refuses to start if these modes differ:
+  and V1 will refuse to start if these owners and modes differ. Two keys (DEC-692):
+  `MANDATE_VAULT_PENDING_KEY`, in both env files, encrypts `pending/`; `MANDATE_VAULT_TOKEN_KEY`,
+  in `executor.env` only, encrypts `tokens/`. The API can therefore unlink a token but never write
+  one the executor would accept, and V1 will also check each token file is `owlhead_exec`'s, mode
+  0600, before using it.
   - `pending/` is `owlhead_api:owlhead_exec` 2770: the API writes an encrypted authorization code
     (0640), and the executor reads it and deletes it. The setgid bit puts each new file in
     `owlhead_exec`'s group; without it the file would carry the API's group and the executor could
@@ -56,11 +60,13 @@ The founder runs everything here; agents never get host access. The order of the
   - `tokens/` is `owlhead_exec:owlhead_api` 0730: the executor writes tokens (0600), and the API
     can unlink a token file it knows the name of, but cannot list the directory or read a token.
 
-  The artifact store, `/var/lib/owlhead/artifacts`, is `owlhead_api:owlhead_exec` 2770, written by
-  both.
+  The artifact store, `/var/lib/owlhead/artifacts`, is shared through a third group,
+  `owlhead_art`, whose only members are the two service users: it, `tmp/`, `sha256/`, and all 256
+  shards are `root:owlhead_art` 2770, made by bootstrap, so every object is group-readable by both
+  services. Neither user is in the other's own group.
 - **Backups never hold a credential** (infrastructure OPS-1). The nightly tarball carries the
-  encrypted vault but never `/etc/owlhead`, so the vault key and the client secret are not in it.
-  Keep the vault key in a password manager; restoring without it means every connection is
+  encrypted vault but never `/etc/owlhead`, so the vault keys and the client secret are not in it.
+  Keep both vault keys in a password manager; restoring without them means every connection is
   re-authorized. **Hetzner's whole-disk images are the exception:** an image necessarily holds
   `/etc/owlhead` and the vault together. Turning Hetzner backups off removes the only copy that
   survives losing the VM (DEC-822 item 1 turned them on), so this is flagged to the founder rather
@@ -87,8 +93,9 @@ bash bootstrap.sh                                         # re-asserts the vault
 bash restore-check.sh /root/restore/owlhead-<stamp>.dump /root/restore/state-<stamp>.tar.gz
 ```
 
-Then put the vault key back from your password manager into both env files (it must be the one the
-vault was written with; without it, re-authorize every connection instead), run
+Then put the vault keys back from your password manager (the pending key into both env files, the
+token key into `executor.env` only; they must be the ones the vault was written with; without them,
+re-authorize every connection instead), run
 `bash set-secrets.sh` for the rest, and start the API (FOUNDER-STEPS step 10). After a whole-disk image
 restore instead, run only the last line on the newest dump: an image is crash-consistent.
 
