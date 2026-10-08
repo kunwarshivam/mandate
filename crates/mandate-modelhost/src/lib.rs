@@ -26,8 +26,8 @@ use std::collections::BTreeMap;
 
 use mandate_accounting::InstrumentId;
 use mandate_canon::{Digest, to_canonical};
-use mandate_num::{Conviction, Price, Unit};
-use mandate_runtime::{ModelDirection, ModelOutput, RiskClock};
+use mandate_num::Price;
+use mandate_runtime::{ModelOutput, RiskClock};
 use mandate_spec::document::{ModelId, SignalModel};
 use mandate_spec::validate::RegisteredModel;
 use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
@@ -192,9 +192,9 @@ pub fn evaluate(
     let signal = config
         .signal(&prices)
         .map_err(|_: BacktestError| Refusal::SignalArithmetic)?;
-    if !ma_crossover::is_output(signal) {
+    let Some((direction, conviction, confidence)) = ma_crossover::opinion(signal)? else {
         return Ok(Evaluation::NoOutput(signal));
-    }
+    };
     let close = calendar
         .sessions(last)
         .map_err(|_| Refusal::CalendarCannotName)?
@@ -213,10 +213,10 @@ pub fn evaluate(
         instrument_id: pin.instrument_id.clone(),
         as_of: RiskClock::from_secs(as_of),
         expires_at: RiskClock::from_secs(expires),
-        direction: ModelDirection::Long,
-        conviction: Conviction::parse("1").map_err(|_| Refusal::OutputUnrepresentable)?,
-        confidence: Unit::ONE,
-        horizon_s: u64::from(model.max_output_age_s),
+        direction,
+        conviction,
+        confidence,
+        horizon_s: ma_crossover::horizon_s(model.max_output_age_s),
         thesis_ref: None,
         evidence: Vec::new(),
         invalidation: None,

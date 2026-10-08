@@ -6,7 +6,8 @@
 
 use mandate_backtest::{Signal, StrategyConfig};
 use mandate_canon::{Int, Key, Value};
-use mandate_num::{Bps, Usd};
+use mandate_num::{Bps, Conviction, Unit, Usd};
+use mandate_runtime::ModelDirection;
 use mandate_spec::document::{ModelParam, ParamValue};
 
 use crate::Refusal;
@@ -156,7 +157,22 @@ pub(crate) fn config(params: &[ModelParam]) -> Result<StrategyConfig, Refusal> {
     })
 }
 
-/// Whether a signal is the model's one output (DEC-157 item 4).
-pub(crate) fn is_output(signal: Signal) -> bool {
-    matches!(signal, Signal::Long)
+/// The model's opinion on a signal (DEC-157 item 4): `Long` is direction `long`, conviction 1
+/// and confidence 1; `Flat` and `Undecided` are no output.
+pub(crate) fn opinion(
+    signal: Signal,
+) -> Result<Option<(ModelDirection, Conviction, Unit)>, Refusal> {
+    match signal {
+        Signal::Long => {
+            let conviction = Conviction::parse("1").map_err(|_| Refusal::OutputUnrepresentable)?;
+            Ok(Some((ModelDirection::Long, conviction, Unit::ONE)))
+        }
+        Signal::Flat | Signal::Undecided => Ok(None),
+    }
+}
+
+/// The holding horizon an output states: the pinned `max_output_age_s`, since the model has no
+/// horizon of its own and the output stops being fresh at the same instant (DEC-518 item 5).
+pub(crate) fn horizon_s(max_output_age_s: u32) -> u64 {
+    u64::from(max_output_age_s)
 }
