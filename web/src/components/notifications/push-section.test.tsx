@@ -41,10 +41,18 @@ describe("PushSection", () => {
     expect(screen.getByText("Fixture: this build does not send the subscription anywhere yet.")).toBeInTheDocument();
   });
 
-  it.skip("pending E8-14: is off without the deployment's VAPID key", () => {
-    render(<PushSection vapidPublicKey="" browser={browser("granted")} />);
-    expect(screen.getByRole("button", { name: "Turn on notifications" })).toBeDisabled();
+  it.skip("pending E8-14: is off without the deployment's VAPID key, and never asks the browser", () => {
+    const requestPermission = vi.fn(async () => "granted" as const);
+    const register = vi.fn(async () => ({}));
+    const send = vi.fn(async () => {});
+    render(<PushSection vapidPublicKey="" send={send} browser={{ requestPermission, serviceWorker: { register } }} />);
+    const button = screen.getByRole("button", { name: "Turn on notifications" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
     expect(screen.getByText("Browser notifications aren’t set up for this deployment.")).toBeInTheDocument();
+    expect(requestPermission).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("says only generic things: no instrument, amount, or agent in any copy (rule 6)", () => {
