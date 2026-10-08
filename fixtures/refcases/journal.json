@@ -15889,7 +15889,7 @@
   ]
  },
  "connections": {
-  "spec": "docs/specs/journal.md v0.21 §9.10 (DEC-800)",
+  "spec": "docs/specs/journal.md v0.23 §9.11 (DEC-800)",
   "drafts": {
    "established_v2": {
     "envelope_version": 1,
@@ -15900,7 +15900,7 @@
     "schema_version": 2,
     "event_time": "2026-09-22T13:00:00.000000000Z",
     "clock_source": "local",
-    "causation_id": null,
+    "causation_id": "01J8Z4C4A000000000000000C4",
     "correlation_id": null,
     "actor": {
      "kind": "system",
@@ -15973,7 +15973,7 @@
     "schema_version": 1,
     "event_time": "2026-09-22T13:00:00.000000000Z",
     "clock_source": "local",
-    "causation_id": null,
+    "causation_id": "01J8Z4C4A000000000000000C4",
     "correlation_id": null,
     "actor": {
      "kind": "system",
@@ -16017,7 +16017,8 @@
     },
     "config_refs": {},
     "payload": {
-     "occasion": "executor_start",
+     "connection_id": "conn_alpaca_paper",
+     "occasion": "connect",
      "results": [
       {
        "check": "account",
@@ -16059,6 +16060,7 @@
     },
     "config_refs": {},
     "payload": {
+     "connection_id": "conn_alpaca_paper",
      "from": "active",
      "to": "degraded",
      "reason": "network_errors",
@@ -16086,6 +16088,7 @@
     },
     "config_refs": {},
     "payload": {
+     "connection_id": "conn_alpaca_paper",
      "scopes": [
       "data",
       "trading"
@@ -16099,7 +16102,7 @@
   "invalid_drafts": [
    {
     "name": "established_v2.connection_id.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16115,7 +16118,7 @@
    },
    {
     "name": "established_v2.connection_id.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16131,7 +16134,7 @@
    },
    {
     "name": "established_v2.broker.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16147,7 +16150,7 @@
    },
    {
     "name": "established_v2.broker.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16163,7 +16166,7 @@
    },
    {
     "name": "established_v2.environment.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16179,7 +16182,7 @@
    },
    {
     "name": "established_v2.environment.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16195,7 +16198,7 @@
    },
    {
     "name": "established_v2.scopes.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16211,7 +16214,7 @@
    },
    {
     "name": "established_v2.account_ref.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16227,7 +16230,7 @@
    },
    {
     "name": "established_v2.account_ref.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16243,7 +16246,7 @@
    },
    {
     "name": "established_v2.user.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16259,7 +16262,7 @@
    },
    {
     "name": "established_v2.user.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16275,7 +16278,7 @@
    },
    {
     "name": "established_v2.step_up.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16291,7 +16294,7 @@
    },
    {
     "name": "established_v2.account_ref.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16307,7 +16310,7 @@
    },
    {
     "name": "established_v2.user.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16323,7 +16326,7 @@
    },
    {
     "name": "established_v2.step_up.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16339,7 +16342,7 @@
    },
    {
     "name": "established_v2.missing",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16355,7 +16358,7 @@
    },
    {
     "name": "established_v2.extra",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -16371,7 +16374,7 @@
    },
    {
     "name": "refused_scope.connection_id.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16387,7 +16390,7 @@
    },
    {
     "name": "refused_scope.connection_id.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16403,7 +16406,7 @@
    },
    {
     "name": "refused_scope.broker.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16419,7 +16422,7 @@
    },
    {
     "name": "refused_scope.broker.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16435,7 +16438,7 @@
    },
    {
     "name": "refused_scope.environment.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16451,7 +16454,7 @@
    },
    {
     "name": "refused_scope.environment.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16467,7 +16470,7 @@
    },
    {
     "name": "refused_scope.occasion.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16483,7 +16486,7 @@
    },
    {
     "name": "refused_scope.occasion.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16499,7 +16502,7 @@
    },
    {
     "name": "refused_scope.check.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16515,7 +16518,7 @@
    },
    {
     "name": "refused_scope.check.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16531,7 +16534,7 @@
    },
    {
     "name": "refused_scope.reason.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16547,7 +16550,7 @@
    },
    {
     "name": "refused_scope.reason.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16563,7 +16566,7 @@
    },
    {
     "name": "refused_scope.existing_connection_id.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16579,7 +16582,7 @@
    },
    {
     "name": "refused_scope.existing_connection_id.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16595,7 +16598,7 @@
    },
    {
     "name": "refused_scope.user.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16611,7 +16614,7 @@
    },
    {
     "name": "refused_scope.user.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16627,7 +16630,7 @@
    },
    {
     "name": "refused_scope.step_up.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16643,7 +16646,7 @@
    },
    {
     "name": "refused_scope.connection_id.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16659,7 +16662,7 @@
    },
    {
     "name": "refused_scope.occasion.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16675,7 +16678,7 @@
    },
    {
     "name": "refused_scope.check.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16691,7 +16694,7 @@
    },
    {
     "name": "refused_scope.reason.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16707,7 +16710,7 @@
    },
    {
     "name": "refused_scope.user.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16723,7 +16726,7 @@
    },
    {
     "name": "refused_scope.step_up.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16739,7 +16742,7 @@
    },
    {
     "name": "refused_scope.missing",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16755,7 +16758,7 @@
    },
    {
     "name": "refused_scope.extra",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -16771,7 +16774,7 @@
    },
    {
     "name": "rotated.connection_id.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16787,7 +16790,7 @@
    },
    {
     "name": "rotated.connection_id.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16803,7 +16806,7 @@
    },
    {
     "name": "rotated.scopes.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16819,7 +16822,7 @@
    },
    {
     "name": "rotated.user.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16835,7 +16838,7 @@
    },
    {
     "name": "rotated.user.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16851,7 +16854,7 @@
    },
    {
     "name": "rotated.step_up.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16867,7 +16870,7 @@
    },
    {
     "name": "rotated.connection_id.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16883,7 +16886,7 @@
    },
    {
     "name": "rotated.scopes.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16899,7 +16902,7 @@
    },
    {
     "name": "rotated.user.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16915,7 +16918,7 @@
    },
    {
     "name": "rotated.step_up.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16931,7 +16934,7 @@
    },
    {
     "name": "rotated.missing",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16947,7 +16950,7 @@
    },
    {
     "name": "rotated.extra",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "rotated",
     "changes": [
      {
@@ -16962,8 +16965,40 @@
     }
    },
    {
+    "name": "checked_start.connection_id.kind",
+    "clause": "§9.11 types",
+    "base_draft": "checked_start",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "checked_start.connection_id.form",
+    "clause": "§9.11 types",
+    "base_draft": "checked_start",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": "conn:alpaca"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.connection_id"
+    }
+   },
+   {
     "name": "checked_start.occasion.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -16979,7 +17014,7 @@
    },
    {
     "name": "checked_start.occasion.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -16995,7 +17030,7 @@
    },
    {
     "name": "checked_start.results.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17011,7 +17046,7 @@
    },
    {
     "name": "checked_start.risk_clock.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17027,7 +17062,7 @@
    },
    {
     "name": "checked_start.risk_clock.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17042,8 +17077,24 @@
     }
    },
    {
+    "name": "checked_start.connection_id.null",
+    "clause": "§9.11 types",
+    "base_draft": "checked_start",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
     "name": "checked_start.occasion.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17059,7 +17110,7 @@
    },
    {
     "name": "checked_start.results.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17075,7 +17126,7 @@
    },
    {
     "name": "checked_start.risk_clock.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17091,7 +17142,7 @@
    },
    {
     "name": "checked_start.missing",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17107,7 +17158,7 @@
    },
    {
     "name": "checked_start.extra",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -17122,8 +17173,40 @@
     }
    },
    {
+    "name": "state_degraded.connection_id.kind",
+    "clause": "§9.11 types",
+    "base_draft": "state_degraded",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "state_degraded.connection_id.form",
+    "clause": "§9.11 types",
+    "base_draft": "state_degraded",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": "conn:alpaca"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.connection_id"
+    }
+   },
+   {
     "name": "state_degraded.from.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17139,7 +17222,7 @@
    },
    {
     "name": "state_degraded.from.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17155,7 +17238,7 @@
    },
    {
     "name": "state_degraded.to.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17171,7 +17254,7 @@
    },
    {
     "name": "state_degraded.to.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17187,7 +17270,7 @@
    },
    {
     "name": "state_degraded.reason.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17203,7 +17286,7 @@
    },
    {
     "name": "state_degraded.reason.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17219,7 +17302,7 @@
    },
    {
     "name": "state_degraded.risk_clock.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17235,7 +17318,7 @@
    },
    {
     "name": "state_degraded.risk_clock.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17250,8 +17333,24 @@
     }
    },
    {
+    "name": "state_degraded.connection_id.null",
+    "clause": "§9.11 types",
+    "base_draft": "state_degraded",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
     "name": "state_degraded.from.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17267,7 +17366,7 @@
    },
    {
     "name": "state_degraded.to.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17283,7 +17382,7 @@
    },
    {
     "name": "state_degraded.reason.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17299,7 +17398,7 @@
    },
    {
     "name": "state_degraded.risk_clock.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17315,7 +17414,7 @@
    },
    {
     "name": "state_degraded.missing",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17331,7 +17430,7 @@
    },
    {
     "name": "state_degraded.extra",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17346,8 +17445,40 @@
     }
    },
    {
+    "name": "refreshed.connection_id.kind",
+    "clause": "§9.11 types",
+    "base_draft": "refreshed",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "refreshed.connection_id.form",
+    "clause": "§9.11 types",
+    "base_draft": "refreshed",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": "conn:alpaca"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.connection_id"
+    }
+   },
+   {
     "name": "refreshed.scopes.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17363,7 +17494,7 @@
    },
    {
     "name": "refreshed.risk_clock.kind",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17379,7 +17510,7 @@
    },
    {
     "name": "refreshed.risk_clock.form",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17394,8 +17525,24 @@
     }
    },
    {
+    "name": "refreshed.connection_id.null",
+    "clause": "§9.11 types",
+    "base_draft": "refreshed",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
     "name": "refreshed.scopes.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17411,7 +17558,7 @@
    },
    {
     "name": "refreshed.risk_clock.null",
-    "clause": "§9.10 types",
+    "clause": "§9.11 types",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17427,7 +17574,7 @@
    },
    {
     "name": "refreshed.missing",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17443,7 +17590,7 @@
    },
    {
     "name": "refreshed.extra",
-    "clause": "§9.10 closed",
+    "clause": "§9.11 closed",
     "base_draft": "refreshed",
     "changes": [
      {
@@ -17459,7 +17606,7 @@
    },
    {
     "name": "established_v1_with_account_ref",
-    "clause": "§9.10: version 1 stays closed with its four members",
+    "clause": "§9.11: version 1 stays closed with its four members",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -17483,7 +17630,7 @@
    },
    {
     "name": "established_version_3",
-    "clause": "§9.10: versions 1 and 2 only",
+    "clause": "§9.11: versions 1 and 2 only",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -17499,7 +17646,7 @@
    },
    {
     "name": "established_carries_a_secret",
-    "clause": "§9.10, CN-1: a credential has no member to sit in",
+    "clause": "§9.11, CN-1: a credential has no member to sit in",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -17515,7 +17662,7 @@
    },
    {
     "name": "refused_carries_the_fingerprint",
-    "clause": "§9.10, connections spec §3: the fingerprint is never journaled",
+    "clause": "§9.11, connections spec §3: the fingerprint is never journaled",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -17531,7 +17678,7 @@
    },
    {
     "name": "established_step_up_extra",
-    "clause": "§9.10: the step-up evidence is closed",
+    "clause": "§9.11: the step-up evidence is closed",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -17566,7 +17713,7 @@
    },
    {
     "name": "refused_on_the_account_stream",
-    "clause": "§9.10: a control-stream record",
+    "clause": "§9.11: a control-stream record",
     "base_draft": "refused_scope",
     "changes": [
      {
@@ -17582,7 +17729,7 @@
    },
    {
     "name": "state_on_the_control_stream",
-    "clause": "§9.10: an account-stream record",
+    "clause": "§9.11: an account-stream record",
     "base_draft": "state_degraded",
     "changes": [
      {
@@ -17813,7 +17960,7 @@
    },
    {
     "name": "checked_uniqueness",
-    "clause": "§9.10: uniqueness is a connect-time check",
+    "clause": "§9.11: uniqueness is a connect-time check",
     "base_draft": "checked_start",
     "changes": [
      {
@@ -18143,12 +18290,44 @@
      "reason": "schema",
      "path": "causation_id"
     }
+   },
+   {
+    "name": "established_without_its_check",
+    "clause": "rule 62: names the passing ConnectionChecked",
+    "base_draft": "established_v2",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "rotated_without_its_check",
+    "clause": "rule 62: a replaced credential passed its checks first",
+    "base_draft": "rotated",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
    }
   ],
   "valid_drafts": [
    {
     "name": "established_version_1",
-    "clause": "§9.10: version 1 stays registered",
+    "clause": "§9.11: version 1 stays registered",
     "base_draft": "established_v2",
     "changes": [
      {
@@ -18166,6 +18345,10 @@
      {
       "path": "payload.step_up",
       "delete": true
+     },
+     {
+      "path": "causation_id",
+      "value": null
      }
     ],
     "expect": {
@@ -18253,6 +18436,20 @@
         "reason": null
        }
       ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "checked_for_a_reauthorization",
+    "clause": "§9.11: the executor checks a replaced credential before it is accepted",
+    "base_draft": "checked_start",
+    "changes": [
+     {
+      "path": "payload.occasion",
+      "value": "reauthorize"
      }
     ],
     "expect": {
@@ -18377,7 +18574,7 @@
   "sequences": [
    {
     "name": "connect_revoke_reconnect",
-    "clause": "rule 62: a reconnect after its revocation, same broker, environment, and account_ref",
+    "clause": "rule 63: a reconnect after its revocation, same broker, environment, and account_ref",
     "records": [
      {
       "base_draft": "established_v2",
@@ -18432,7 +18629,7 @@
    },
    {
     "name": "every_occasion_in_its_place",
-    "clause": "rule 63",
+    "clause": "rule 64",
     "records": [
      {
       "base_draft": "refused_scope",
@@ -18538,7 +18735,7 @@
    },
    {
     "name": "revocation_is_never_refused",
-    "clause": "§9.10: no rule refuses a ConnectionRevoked",
+    "clause": "§9.11: no rule refuses a ConnectionRevoked",
     "records": [
      {
       "base_draft": "rotated",
@@ -18622,7 +18819,7 @@
    },
    {
     "name": "a_refused_id_connects_later",
-    "clause": "rule 63: a refused connect leaves no connection",
+    "clause": "rule 64: a refused connect leaves no connection",
     "records": [
      {
       "base_draft": "refused_scope",
@@ -18657,7 +18854,7 @@
    },
    {
     "name": "established_twice",
-    "clause": "rule 62: not revoked",
+    "clause": "rule 63: not revoked",
     "records": [
      {
       "base_draft": "established_v2",
@@ -18682,12 +18879,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 1,
-     "rule": "62"
+     "rule": "63"
     }
    },
    {
     "name": "reconnect_another_account",
-    "clause": "rule 62",
+    "clause": "rule 63",
     "records": [
      {
       "base_draft": "established_v2",
@@ -18735,12 +18932,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 2,
-     "rule": "62"
+     "rule": "63"
     }
    },
    {
     "name": "reconnect_another_environment",
-    "clause": "rule 62",
+    "clause": "rule 63",
     "records": [
      {
       "base_draft": "established_v2",
@@ -18792,12 +18989,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 2,
-     "rule": "62"
+     "rule": "63"
     }
    },
    {
     "name": "reconnect_another_broker",
-    "clause": "rule 62",
+    "clause": "rule 63",
     "records": [
      {
       "base_draft": "established_v2",
@@ -18845,12 +19042,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 2,
-     "rule": "62"
+     "rule": "63"
     }
    },
    {
     "name": "version_1_never_reestablished",
-    "clause": "rule 62",
+    "clause": "rule 63",
     "records": [
      {
       "base_draft": "established_v2",
@@ -18910,12 +19107,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 2,
-     "rule": "62"
+     "rule": "63"
     }
    },
    {
     "name": "two_connections_one_account",
-    "clause": "rule 62: one account_ref, one connection (CN-5)",
+    "clause": "rule 63: one account_ref, one connection (CN-5)",
     "records": [
      {
       "base_draft": "established_v2",
@@ -18944,12 +19141,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 1,
-     "rule": "62"
+     "rule": "63"
     }
    },
    {
     "name": "established_again_after_reconnect",
-    "clause": "rule 62",
+    "clause": "rule 63",
     "records": [
      {
       "base_draft": "established_v2",
@@ -19002,12 +19199,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 3,
-     "rule": "62"
+     "rule": "63"
     }
    },
    {
     "name": "rotated_never_established",
-    "clause": "rule 63",
+    "clause": "rule 64",
     "records": [
      {
       "base_draft": "rotated",
@@ -19023,12 +19220,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 0,
-     "rule": "63"
+     "rule": "64"
     }
    },
    {
     "name": "rotated_after_revocation",
-    "clause": "rule 63",
+    "clause": "rule 64",
     "records": [
      {
       "base_draft": "established_v2",
@@ -19072,12 +19269,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 2,
-     "rule": "63"
+     "rule": "64"
     }
    },
    {
     "name": "reauthorize_after_revocation",
-    "clause": "rule 63",
+    "clause": "rule 64",
     "records": [
      {
       "base_draft": "established_v2",
@@ -19129,12 +19326,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 2,
-     "rule": "63"
+     "rule": "64"
     }
    },
    {
     "name": "reconnect_while_connected",
-    "clause": "rule 63",
+    "clause": "rule 64",
     "records": [
      {
       "base_draft": "established_v2",
@@ -19167,12 +19364,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 1,
-     "rule": "63"
+     "rule": "64"
     }
    },
    {
     "name": "connect_an_established_id",
-    "clause": "rule 63",
+    "clause": "rule 64",
     "records": [
      {
       "base_draft": "established_v2",
@@ -19224,12 +19421,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 2,
-     "rule": "63"
+     "rule": "64"
     }
    },
    {
     "name": "reconnect_refused_for_another_environment",
-    "clause": "rule 63",
+    "clause": "rule 64",
     "records": [
      {
       "base_draft": "established_v2",
@@ -19289,12 +19486,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 2,
-     "rule": "63"
+     "rule": "64"
     }
    },
    {
     "name": "degraded_cleared_acknowledged_then_suspended",
-    "clause": "rule 64",
+    "clause": "rule 65",
     "records": [
      {
       "base_draft": "state_degraded",
@@ -19314,6 +19511,10 @@
        {
         "path": "payload.reason",
         "value": "network_errors"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      },
@@ -19335,6 +19536,10 @@
        {
         "path": "payload.reason",
         "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      },
@@ -19381,6 +19586,10 @@
        {
         "path": "payload.reason",
         "value": "credential_expired"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      },
@@ -19402,6 +19611,43 @@
        {
         "path": "payload.reason",
         "value": "refresh_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S06A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
        }
       ]
      },
@@ -19410,7 +19656,7 @@
       "changes": [
        {
         "path": "event_id",
-        "value": "01J8Z4S06A0000000000000000"
+        "value": "01J8Z4S07A0000000000000000"
        },
        {
         "path": "payload.from",
@@ -19423,6 +19669,10 @@
        {
         "path": "payload.reason",
         "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S06A0000000000000000"
        }
       ]
      },
@@ -19431,7 +19681,7 @@
       "changes": [
        {
         "path": "event_id",
-        "value": "01J8Z4S07A0000000000000000"
+        "value": "01J8Z4S08A0000000000000000"
        },
        {
         "path": "payload.from",
@@ -19457,8 +19707,248 @@
     }
    },
    {
+    "name": "suspension_cleared_without_a_passing_check",
+    "clause": "rule 65: the credential passed every check first",
+    "records": [
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "authorization_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 1,
+     "rule": "65"
+    }
+   },
+   {
+    "name": "suspension_cleared_by_a_failed_check",
+    "clause": "rule 65",
+    "records": [
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "authorization_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "failed",
+          "reason": "account_mismatch"
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S02A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 2,
+     "rule": "65"
+    }
+   },
+   {
+    "name": "two_connections_on_one_account_stream",
+    "clause": "rule 65: one account stream, one connection (CN-5)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "degraded"
+       },
+       {
+        "path": "payload.reason",
+        "value": "network_errors"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "refreshed",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 2,
+     "rule": "65"
+    }
+   },
+   {
     "name": "first_change_not_from_active",
-    "clause": "rule 64",
+    "clause": "rule 65",
     "records": [
      {
       "base_draft": "state_degraded",
@@ -19478,6 +19968,10 @@
        {
         "path": "payload.reason",
         "value": "check_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      }
@@ -19486,12 +19980,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 0,
-     "rule": "64"
+     "rule": "65"
     }
    },
    {
     "name": "from_not_the_last_state",
-    "clause": "rule 64",
+    "clause": "rule 65",
     "records": [
      {
       "base_draft": "state_degraded",
@@ -19511,6 +20005,10 @@
        {
         "path": "payload.reason",
         "value": "check_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      },
@@ -19532,6 +20030,10 @@
        {
         "path": "payload.reason",
         "value": "contract_drift"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      }
@@ -19540,12 +20042,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 1,
-     "rule": "64"
+     "rule": "65"
     }
    },
    {
     "name": "acknowledged_before_cleared",
-    "clause": "rule 64: the acknowledgment never lifts a cause that has not cleared",
+    "clause": "rule 65: the acknowledgment never lifts a cause that has not cleared",
     "records": [
      {
       "base_draft": "state_degraded",
@@ -19565,6 +20067,10 @@
        {
         "path": "payload.reason",
         "value": "contract_drift"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      },
@@ -19598,12 +20104,12 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 1,
-     "rule": "64"
+     "rule": "65"
     }
    },
    {
     "name": "acknowledged_after_the_cause_returned",
-    "clause": "rule 64",
+    "clause": "rule 65",
     "records": [
      {
       "base_draft": "state_degraded",
@@ -19623,6 +20129,10 @@
        {
         "path": "payload.reason",
         "value": "network_errors"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      },
@@ -19644,6 +20154,10 @@
        {
         "path": "payload.reason",
         "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      },
@@ -19665,6 +20179,10 @@
        {
         "path": "payload.reason",
         "value": "network_errors"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      },
@@ -19698,7 +20216,7 @@
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
      "index": 3,
-     "rule": "64"
+     "rule": "65"
     }
    }
   ]

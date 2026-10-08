@@ -2,26 +2,29 @@
 
 | | |
 |---|---|
-| **Status** | v0.21 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.21 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.23 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.23 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, and `connections` section of §9.10; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, and `connections` section of §9.11; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
-- **v0.21 ([DEC-800](../project/decisions/DEC-800.md)):** §9.10 journals a connection's history
+- **v0.23 ([DEC-800](../project/decisions/DEC-800.md)):** §9.11 journals a connection's history
   (connections spec CN-10, backlog E7-17). `ConnectionEstablished` gains `schema_version` 2, its
   version-1 members then `account_ref`, the connecting `user`, and `step_up`; `account_ref` binds
   the account stream to its connection (DEC-261 item 10). New records: `ConnectionRefused` and
   `ConnectionCredentialRotated` on the control stream, and `ConnectionChecked`,
   `ConnectionStateChanged`, and `ConnectionCredentialRefreshed` on the account stream, with
-  consistency rules 54 to 61. Stream rules 62 to 64 allow a second `ConnectionEstablished` for a
-  `connection_id` only after its `ConnectionRevoked`, with the same broker, environment, and
-  `account_ref`, keep one `account_ref` to one connection, and let the owner's acknowledgment
-  return a connection to `active` only after its cause cleared. The connection's owner checks them
+  consistency rules 54 to 61 and copy rule 62. The connecting executor journals its permission
+  checks on the account stream, and `ConnectionEstablished` names them as its cause. Stream rules
+  63 to 65 allow a second `ConnectionEstablished` for a `connection_id` only after its
+  `ConnectionRevoked`, with the same broker, environment, and `account_ref`, keep one
+  `account_ref` and one account stream to one connection, and let the owner's acknowledgment
+  return a connection to `active` only after its cause cleared, a suspension only on a credential
+  that passed every check. The connection's owner checks them
   before appending, and §11's new `connection_lifecycle_mismatch` checks every range. No rule
   refuses a `ConnectionRevoked`. The vectors gain a generated, additive `connections` section and
   stay version 3.
@@ -508,7 +511,7 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | Closed `AgentModeApplied` version 1: agent (including `*`), mode, restriction, originated flag, and risk clock (§9.6); other gating facts copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
 | `OwnerAcknowledged` | — | copied from the control stream (with `causation_id`); a risk input |
-| `ConnectionChecked`, `ConnectionStateChanged`, `ConnectionCredentialRefreshed` | — | The executor's permission checks and their results; the connection's state (`active`, `degraded`, `suspended`) and why; a refreshed token's scopes; each with `risk_clock`, closed in §9.10 |
+| `ConnectionChecked`, `ConnectionStateChanged`, `ConnectionCredentialRefreshed` | — | The executor's permission checks and their results; the connection's state (`active`, `degraded`, `suspended`) and why; a refreshed token's scopes; each with `risk_clock`, closed in §9.11 |
 | `OwnerCommandRefused` | — | An acknowledgment the executor refused, for its step-up or, under `independent_approval_required`, because it is not independent ([mandate spec §6.1](mandate.md#61-purposes), [§6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`, `not_independent`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
 | `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N, and for a tripwire (limit `tripwire:<id>`, reason `tripwire_condition`, [mandate spec §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)) its metric, threshold, and the value reached; reset evidence; released positions; stale-mark and removed-instrument changes with the reason; goal completion |
 | `UniverseChanged` | man | The working universe changed ([mandate spec §2.3, §8.5](mandate.md#23-the-working-universe-at-runtime-dec-97)); a risk input, so it carries `risk_clock`: agent, instrument, change (`admitted`, `removed`), reason (`thesis_admitted`, `thesis_expired`, `thesis_invalidated`, `lineage_retired`, `eligibility_lost`, `operator_halt`, `version_applied`), thesis and lineage ids, working-universe size after |
@@ -540,8 +543,8 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 | `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-51-dec-97): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque) |
 | `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason (`goal_complete`, `profit_stop_reached`, `end_date`, owner stop), net dollar loss added to the connection's loss carry; for `AgentDeployed`: the rendered go-live screen (artifact), backtest and paper-run IDs shown, performance legend and disclosure versions shown, approving users, step-up evidence ([mandate spec §10](mandate.md#10-records-dec-51-dec-97)) |
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
-| `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result; closed in §9.2, version 2 of `ConnectionEstablished` with `account_ref`, user, and step-up in §9.10 |
-| `ConnectionRefused`, `ConnectionCredentialRotated` | — | A connect, reconnect, or credential replacement the permission checks refused, with the check and reason; a credential replaced on a connection that is not revoked; closed in §9.10 |
+| `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result; closed in §9.2, version 2 of `ConnectionEstablished` with `account_ref`, user, and step-up in §9.11 |
+| `ConnectionRefused`, `ConnectionCredentialRotated` | — | A connect, reconnect, or credential replacement the permission checks refused, with the check and reason; a credential replaced on a connection that is not revoked; closed in §9.11 |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
 | `OwnerAlertSent` | — | Written by the owner of the subject event's stream, in that stream and in the subject's batch, on any stream type ([notifications spec §5.5](notifications.md#55-records)): subject event, kind (notifications spec §3.2), and for a kill switch the owner command it carries out, if any. It records that an alert was raised; delivery is the notice stream's |
 | `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
@@ -1023,7 +1026,7 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 **The mapping to `JournaledFact`** ([DEC-169](../project/04-decision-log.md#decisions)). Each record
 maps to one fact, and the test vectors list them. `AccountSnapshotRecorded` does not name its
 connection. Which connection an account stream belongs to is journaled by version 2 of
-`ConnectionEstablished` (§9.10, DEC-800, closing DEC-261 item 10); the mapping still takes it as an
+`ConnectionEstablished` (§9.11, DEC-800, closing DEC-261 item 10); the mapping still takes it as an
 argument from its owner, who reads it from that binding. `ValidationContext` takes
 what no event carries the same way.
 
@@ -1564,12 +1567,12 @@ with every value compared.
     reported at itself; and |`m_now` − `m_req`| × 10 000 ≤ `band_bp` × `m_req`, on exact decimals
     (`payload.m_now`).
 
-### 9.10 Connection records ([DEC-800](../project/decisions/DEC-800.md))
+### 9.11 Connection records ([DEC-800](../project/decisions/DEC-800.md))
 
 A connection's history, from connect to revocation ([connections spec §3, §8.1,
 §9](connections.md), CN-10), closed at schema version 1 as §9.7's records are, except
 `ConnectionEstablished`, which gains version 2. §9.1's types and report order apply, with §9.2's
-`risk_clock`, and the rules number on from §9.9's. No member is a credential, a broker account
+`risk_clock`, and the rules number on from §9.10's. No member is a credential, a broker account
 number, or the account fingerprint (CN-1, connections spec §3.1): a draft carrying one has no member
 to sit in and is refused as `schema`.
 
@@ -1577,8 +1580,22 @@ to sit in and is refused as `schema`.
 the control stream: a connect, a reconnect, a credential the owner replaces, and each one refused.
 The account's executor writes what it finds on the account stream: its permission checks, the
 connection's state, and a token it refreshes. Each account-stream record carries `risk_clock`, as
-the executor writes it on every event (§2). The account stream names no `connection_id`: it belongs
-to the connection whose `ConnectionEstablished` names its `account_ref` (below).
+the executor writes it on every event (§2), and the `connection_id` it acts for, since the stream
+exists before the connection is established.
+
+**The connect sequence** (connections spec §5.2). The connection manager assigns the connection's
+`connection_id` and `account_ref` when the connect starts. The connecting executor opens the account
+stream `acct:{workspace_id}:{account_ref}` and runs §8.1 checks 1, 2, 3, and 7 against the
+credential in the vault, journaling `ConnectionChecked` (occasion `connect`) there. The control
+services read that record, run check 4 (uniqueness) against the connection records, and append
+`ConnectionEstablished` version 2, whose `causation_id` is that `ConnectionChecked` (rule 62).
+Before appending, they confirm it is on the stream `account_ref` names, has the same
+`connection_id`, an occasion of `connect` or `reconnect`, and every result `passed`; a record on
+another stream is not something §11 can check, so the writer does. A refusal by either side is
+`ConnectionRefused`, whose `causation_id` is the failed `ConnectionChecked` when the executor's check
+failed. A refused connect leaves its account stream with that check and nothing after it; its
+`account_ref` is never bound. A reconnect and a credential replacement run the same sequence,
+with occasion `reconnect` or `reauthorize`.
 
 **`ConnectionEstablished` version 2** on the control stream: version 1's four members, then:
 
@@ -1588,9 +1605,10 @@ to the connection whose `ConnectionEstablished` names its `account_ref` (below).
 | `user` | `text` | The workspace admin who connected (opaque) |
 | `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}` | Never `null`: connecting needs step-up (identity spec ID-4). This is the connecting user and step-up DEC-261 item 8 owed the connect flow |
 
-Rule 19 applies to both versions. Version 1 stays registered and replayable, and maps to its
-`JournaledFact` as before; version 2 maps the same way. A writer that has an `account_ref` writes
-version 2.
+Rule 19 applies to both versions, and rule 62 to version 2: its `causation_id` is the passing
+`ConnectionChecked` of the connect sequence. Version 1 stays registered and replayable, and maps to
+its `JournaledFact` as before; version 2 maps the same way. A writer that has an `account_ref`
+writes version 2.
 
 **`ConnectionRefused`** on the control stream: a connect, reconnect, or credential replacement the
 §8.1 checks refused. Nothing else is kept of a refused connect (connections spec §9.1); the
@@ -1609,9 +1627,15 @@ credential was deleted from the vault before this record is written.
 | `step_up` | As `ConnectionEstablished`'s | Never `null`: the attempt started only after step-up |
 
 **`ConnectionCredentialRotated`** on the control stream: the owner replaced the credential of a
-connection that is not revoked, and every §8.1 check passed. It is how a `suspended` connection
-gets a working credential again: a revocation is refused while an agent holds positions (workspace
-API §4.5), so a reconnect could never reach a suspended connection that still has them.
+connection that is not revoked, and every §8.1 check passed against it. Its `causation_id` is the
+executor's `ConnectionChecked` with occasion `reauthorize` and every result `passed` (rule 62),
+which the control services confirm as for `ConnectionEstablished`. Check 3 compares the account the
+new credential reaches with the connection's fingerprint, so the replacement is the same account;
+the connection keeps its `connection_id`, and with it its `broker`, `environment`, and `account_ref`
+(rule 64). It is how a `suspended` connection gets a working credential again: a revocation is
+refused while an agent holds positions (workspace API §4.5), so a reconnect could never reach a
+suspended connection that still has them. The rotation alone does not leave `suspended`: rule 65
+requires a `condition_cleared` that names a passing check, then the owner's acknowledgment.
 
 | Member | Type | Meaning |
 |---|---|---|
@@ -1620,12 +1644,14 @@ API §4.5), so a reconnect could never reach a suspended connection that still h
 | `user` | `text` | The owner who replaced it (opaque) |
 | `step_up` | As `ConnectionEstablished`'s | Never `null` (identity spec ID-4: changing a connection) |
 
-**`ConnectionChecked`** on the account stream: the executor's §8.1 checks at its start, daily, and
-after a credential change.
+**`ConnectionChecked`** on the account stream: the executor's §8.1 checks, at a connect, a reconnect,
+or a credential replacement (before the control stream records it), at each executor start, and
+daily.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `occasion` | `executor_start` \| `daily` \| `credential_changed` | |
+| `connection_id` | `id` | The connection the checks are for: rule 65 |
+| `occasion` | `connect` \| `reconnect` \| `reauthorize` \| `executor_start` \| `daily` | |
 | `results` | `[{check: scope \| environment \| account \| contract, result: passed \| failed, reason: (see the reasons table)?}]` | Every check run: rules 57 and 58. `uniqueness` is a connect-time check (connections spec §8.1) |
 | `risk_clock` | `risk_clock` | |
 
@@ -1638,6 +1664,7 @@ no record but a `ConnectionRefused`, and `revoked` is the control stream's `Conn
 
 | Member | Type | Meaning |
 |---|---|---|
+| `connection_id` | `id` | As `ConnectionChecked`'s |
 | `from`, `to` | `active` \| `degraded` \| `suspended` | Rules 59 and 60 |
 | `reason` | `network_errors` \| `rate_headroom` \| `contract_drift` \| `authorization_failed` \| `credential_expired` \| `refresh_failed` \| `check_failed` \| `lease_expired` \| `condition_cleared` \| `acknowledged` | Why: rule 59 |
 | `risk_clock` | `risk_clock` | |
@@ -1664,6 +1691,7 @@ through the vault (connections spec §5.4), only where the broker issues refresh
 
 | Member | Type | Meaning |
 |---|---|---|
+| `connection_id` | `id` | As `ConnectionChecked`'s |
 | `scopes` | `[text]` | The scopes the refreshed token grants, strictly ascending by bytes: rule 56 |
 | `risk_clock` | `risk_clock` | |
 
@@ -1699,27 +1727,33 @@ and rule 58 (`ConnectionChecked`).
     not made better by a network error.
 61. `ConnectionStateChanged` with reason `acknowledged` has a non-null `causation_id`
     (`causation_id`).
+62. `ConnectionEstablished` version 2 and `ConnectionCredentialRotated` have a non-null
+    `causation_id` (`causation_id`): the passing `ConnectionChecked` of their connect sequence.
 
 **Stream rules** (connections spec §3, CN-5, §9.1). These need the stream's earlier records, which
 `append` does not fold. The stream's owner checks them against its own fold and refuses the draft
 before appending; §11's `connection_lifecycle_mismatch` checks them on every range. Each holds on its
 own stream:
 
-62. Control stream, `ConnectionEstablished`: when an earlier `ConnectionEstablished` names the same
+63. Control stream, `ConnectionEstablished`: when an earlier `ConnectionEstablished` names the same
     `connection_id`, the latest earlier `ConnectionEstablished` or `ConnectionRevoked` of that id is
     a `ConnectionRevoked`, and `broker`, `environment`, and `account_ref` equal the first
     establishment's. A version-1 first establishment has no `account_ref`, so it is never
     re-established. No earlier `ConnectionEstablished` of another `connection_id` names the same
     `account_ref` (CN-5).
-63. Control stream: a `ConnectionCredentialRotated`, or a `ConnectionRefused` with `occasion`
+64. Control stream: a `ConnectionCredentialRotated`, or a `ConnectionRefused` with `occasion`
     `reauthorize`, names a connection established and not since revoked; a `ConnectionRefused` with
     `reconnect` names one whose latest record is `ConnectionRevoked`; one with `connect` names an id
     never established. For `reconnect` and `reauthorize`, `broker` and `environment` equal the
     establishment's.
-64. Account stream, `ConnectionStateChanged`: `from` equals the state the stream's previous
-    `ConnectionStateChanged` left, or `active` when there is none; and `acknowledged` follows a
-    `condition_cleared`, with no other state change between them. The owner's acknowledgment never
-    lifts a cause that has not cleared.
+65. Account stream: every connection record on it names the same `connection_id` (CN-5: one
+    account stream, one connection). On `ConnectionStateChanged`: `from` equals the state the
+    stream's previous `ConnectionStateChanged` left, or `active` when there is none; `acknowledged`
+    follows a `condition_cleared`, with no other state change between them; and a
+    `condition_cleared` out of `suspended` names as its `causation_id` an earlier `ConnectionChecked`
+    on the stream whose every result is `passed`. The owner's acknowledgment never lifts a cause
+    that has not cleared, and a suspended connection clears only on a credential that passed every
+    check.
 
 No rule here refuses a `ConnectionRevoked`, so §5.6's compromised revocation, whose kill switch
 shares its batch, is never held by one.
@@ -1769,9 +1803,9 @@ anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_m
   `AgentModeChanged` on this stream with reason `kill_switch`, reported at the
   `KillSwitchActivated`.
 
-On a control or account stream ([§9.10](#910-connection-records-dec-800)):
+On a control or account stream ([§9.11](#911-connection-records-dec-800)):
 
-- `connection_lifecycle_mismatch` — a record that breaks stream rule 62, 63, or 64, reported at
+- `connection_lifecycle_mismatch` — a record that breaks stream rule 63, 64, or 65, reported at
   that record.
 
 A reference to an event before the range's trusted start is not checked by that range; the weekly

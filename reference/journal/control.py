@@ -329,7 +329,7 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
     ("band_bp", INT),
 )
 
-# §9.10 (DEC-800): a connection's history. The control stream's three records and the account
+# §9.11 (DEC-800): a connection's history. The control stream's three records and the account
 # stream's three, with `ConnectionEstablished` at version 2 below.
 CHECK_REASONS = {
     "scope": ("scope_mismatch", "fund_movement", "permissions_unreadable"),
@@ -360,7 +360,8 @@ SCHEMAS[("ctl", "ConnectionCredentialRotated")] = rec(
     ("connection_id", IDENT_T), ("scopes", list_of(STR)), ("user", STR), ("step_up", STEP_UP)
 )
 SCHEMAS[("acct", "ConnectionChecked")] = rec(
-    ("occasion", one_of("executor_start", "daily", "credential_changed")),
+    ("connection_id", IDENT_T),
+    ("occasion", one_of("connect", "reconnect", "reauthorize", "executor_start", "daily")),
     (
         "results",
         list_of(
@@ -374,12 +375,15 @@ SCHEMAS[("acct", "ConnectionChecked")] = rec(
     ("risk_clock", RISK_CLOCK),
 )
 SCHEMAS[("acct", "ConnectionStateChanged")] = rec(
+    ("connection_id", IDENT_T),
     ("from", one_of(*CONNECTION_STATES)),
     ("to", one_of(*CONNECTION_STATES)),
     ("reason", one_of(*STATE_REASONS)),
     ("risk_clock", RISK_CLOCK),
 )
-SCHEMAS[("acct", "ConnectionCredentialRefreshed")] = rec(("scopes", list_of(STR)), ("risk_clock", RISK_CLOCK))
+SCHEMAS[("acct", "ConnectionCredentialRefreshed")] = rec(
+    ("connection_id", IDENT_T), ("scopes", list_of(STR)), ("risk_clock", RISK_CLOCK)
+)
 
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
@@ -788,7 +792,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
 
 def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.10's consistency rules 54 to 60 (rule 61 is a copy rule), each reported once."""
+    """§9.11's consistency rules 54 to 60 (rule 61 is a copy rule), each reported once."""
     p = draft["payload"]
     out: list[Violation] = []
 
@@ -996,6 +1000,11 @@ def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[
     kind = draft["stream_id"].split(":")[0]
     if event_type == "ApprovalResponded" and draft["causation_id"] is None and "rule.50" not in skip:
         return [Violation("rule.50", "schema", "causation_id")]
+    checked_first = event_type == "ConnectionCredentialRotated" or (
+        event_type == "ConnectionEstablished" and draft["schema_version"] == 2
+    )
+    if checked_first and draft["causation_id"] is None and "rule.62" not in skip:
+        return [Violation("rule.62", "schema", "causation_id")]
     acknowledged = event_type == "ConnectionStateChanged" and draft["payload"]["reason"] == "acknowledged"
     if acknowledged and draft["causation_id"] is None and "rule.61" not in skip:
         return [Violation("rule.61", "schema", "causation_id")]

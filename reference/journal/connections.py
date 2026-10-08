@@ -1,9 +1,9 @@
-"""Journal spec v0.21 §9.10's reference vectors (DEC-800): a connection's history.
+"""Journal spec v0.23 §9.11's reference vectors (DEC-800): a connection's history.
 
 The schemas and consistency rules 54 to 61 live in `control.py`, beside §9.2's to §9.7's, so one
 validator judges every closed schema. This module builds the `connections` section: a base draft of
 each record, an invalid draft for every member type and rule, valid drafts for the cases a rule
-might be misread to refuse, and `sequences` for the stream rules 62 to 64, which need a stream's
+might be misread to refuse, and `sequences` for the stream rules 64 to 65, which need a stream's
 earlier records. It folds each sequence by its own path, checks that no base draft carries a
 secret-shaped member (CN-1) and that the account-stream drafts are on the stream the establishment
 binds, and shows every seeded bug caught.
@@ -28,7 +28,7 @@ from control import (
 from control import invalid as control_invalid
 from control import valid as control_valid
 
-SPEC = "docs/specs/journal.md v0.21 §9.10 (DEC-800)"
+SPEC = "docs/specs/journal.md v0.23 §9.11 (DEC-800)"
 AT = "2026-09-22T13:00:00.000000000Z"
 CLOCK = "2026-09-22T13:00:00.000000000Z"
 ACCOUNT_STREAM = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
@@ -88,6 +88,7 @@ def base_drafts() -> dict[str, dict]:
                 "account_ref": ACCOUNT_STREAM_REF,
                 **owner,
             },
+            causation=IDS["checked_start"],
             version=2,
         ),
         "refused_scope": envelope(
@@ -105,20 +106,25 @@ def base_drafts() -> dict[str, dict]:
             },
         ),
         "rotated": envelope(
-            "rotated", "ConnectionCredentialRotated", {"connection_id": CONNECTION, "scopes": list(SCOPES), **owner}
+            "rotated",
+            "ConnectionCredentialRotated",
+            {"connection_id": CONNECTION, "scopes": list(SCOPES), **owner},
+            causation=IDS["checked_start"],
         ),
         "checked_start": envelope(
             "checked_start",
             "ConnectionChecked",
-            {"occasion": "executor_start", "results": passed, "risk_clock": CLOCK},
+            {"connection_id": CONNECTION, "occasion": "connect", "results": passed, "risk_clock": CLOCK},
         ),
         "state_degraded": envelope(
             "state_degraded",
             "ConnectionStateChanged",
-            {"from": "active", "to": "degraded", "reason": "network_errors", "risk_clock": CLOCK},
+            {"connection_id": CONNECTION, "from": "active", "to": "degraded", "reason": "network_errors", "risk_clock": CLOCK},
         ),
         "refreshed": envelope(
-            "refreshed", "ConnectionCredentialRefreshed", {"scopes": list(SCOPES), "risk_clock": CLOCK}
+            "refreshed",
+            "ConnectionCredentialRefreshed",
+            {"connection_id": CONNECTION, "scopes": list(SCOPES), "risk_clock": CLOCK},
         ),
     }
 
@@ -157,25 +163,31 @@ MEMBER_CASES = {
         ("step_up", "cli_confirm", None),
     ),
     "checked_start": (
+        ("connection_id", 7, "conn:alpaca"),
         ("occasion", 7, "hourly"),
         ("results", {}, None),
         ("risk_clock", 1790000000, "2026-09-22T13:00:00.500000000Z"),
     ),
     "state_degraded": (
+        ("connection_id", 7, "conn:alpaca"),
         ("from", 7, "connecting"),
         ("to", 7, "revoked"),
         ("reason", 7, "outage"),
         ("risk_clock", 1790000000, "2026-09-22T13:00:00.500000000Z"),
     ),
-    "refreshed": (("scopes", "trading", None), ("risk_clock", 1790000000, "2026-09-22")),
+    "refreshed": (
+        ("connection_id", 7, "conn:alpaca"),
+        ("scopes", "trading", None),
+        ("risk_clock", 1790000000, "2026-09-22"),
+    ),
 }
 NULLED = {
     "established_v2": ("account_ref", "user", "step_up"),
     "refused_scope": ("connection_id", "occasion", "check", "reason", "user", "step_up"),
     "rotated": ("connection_id", "scopes", "user", "step_up"),
-    "checked_start": ("occasion", "results", "risk_clock"),
-    "state_degraded": ("from", "to", "reason", "risk_clock"),
-    "refreshed": ("scopes", "risk_clock"),
+    "checked_start": ("connection_id", "occasion", "results", "risk_clock"),
+    "state_degraded": ("connection_id", "from", "to", "reason", "risk_clock"),
+    "refreshed": ("connection_id", "scopes", "risk_clock"),
 }
 
 
@@ -184,16 +196,16 @@ def member_drafts() -> list[dict]:
     for base, cases in MEMBER_CASES.items():
         for member, wrong_kind, wrong_form in cases:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.kind", "§9.10 types", base, [change(path, wrong_kind)], "schema", path))
+            out.append(invalid(f"{base}.{member}.kind", "§9.11 types", base, [change(path, wrong_kind)], "schema", path))
             if wrong_form is not None:
                 form = [change(path, wrong_form)]
-                out.append(invalid(f"{base}.{member}.form", "§9.10 types", base, form, "non_canonical", path))
+                out.append(invalid(f"{base}.{member}.form", "§9.11 types", base, form, "non_canonical", path))
         for member in NULLED[base]:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.null", "§9.10 types", base, [change(path, None)], "schema", path))
+            out.append(invalid(f"{base}.{member}.null", "§9.11 types", base, [change(path, None)], "schema", path))
         last = MEMBER_CASES[base][-1][0]
-        out.append(invalid(f"{base}.missing", "§9.10 closed", base, [delete(f"payload.{last}")], "schema", f"payload.{last}"))
-        out.append(invalid(f"{base}.extra", "§9.10 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
+        out.append(invalid(f"{base}.missing", "§9.11 closed", base, [delete(f"payload.{last}")], "schema", f"payload.{last}"))
+        out.append(invalid(f"{base}.extra", "§9.11 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
     return out
 
 
@@ -206,7 +218,7 @@ def state(frm: str, to: str, reason: str) -> list[dict]:
 
 
 def invalid_drafts() -> list[dict]:
-    """Each draft breaks exactly one rule; together they cover every §9.10 member type and rule."""
+    """Each draft breaks exactly one rule; together they cover every §9.11 member type and rule."""
     est, ref, rot, chk, st, fresh = (
         "established_v2",
         "refused_scope",
@@ -219,16 +231,16 @@ def invalid_drafts() -> list[dict]:
         *member_drafts(),
         invalid(
             "established_v1_with_account_ref",
-            "§9.10: version 1 stays closed with its four members",
+            "§9.11: version 1 stays closed with its four members",
             est,
             [change("schema_version", 1), delete("payload.user"), delete("payload.step_up")],
             "schema",
             "payload.account_ref",
         ),
-        invalid("established_version_3", "§9.10: versions 1 and 2 only", est, [change("schema_version", 3)], "unknown_schema", "payload"),
+        invalid("established_version_3", "§9.11: versions 1 and 2 only", est, [change("schema_version", 3)], "unknown_schema", "payload"),
         invalid(
             "established_carries_a_secret",
-            "§9.10, CN-1: a credential has no member to sit in",
+            "§9.11, CN-1: a credential has no member to sit in",
             est,
             [change("payload.api_secret", "canary-secret")],
             "schema",
@@ -236,7 +248,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "refused_carries_the_fingerprint",
-            "§9.10, connections spec §3: the fingerprint is never journaled",
+            "§9.11, connections spec §3: the fingerprint is never journaled",
             ref,
             [change("payload.account_fingerprint", "hmac:" + "f" * 64)],
             "schema",
@@ -244,7 +256,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "established_step_up_extra",
-            "§9.10: the step-up evidence is closed",
+            "§9.11: the step-up evidence is closed",
             est,
             [change("payload.step_up.token", "x")],
             "schema",
@@ -258,8 +270,8 @@ def invalid_drafts() -> list[dict]:
             "non_canonical",
             "payload.scopes",
         ),
-        invalid("refused_on_the_account_stream", "§9.10: a control-stream record", ref, [change("stream_id", ACCOUNT_STREAM)], "wrong_stream", "event_type"),
-        invalid("state_on_the_control_stream", "§9.10: an account-stream record", st, [change("stream_id", STREAM)], "wrong_stream", "event_type"),
+        invalid("refused_on_the_account_stream", "§9.11: a control-stream record", ref, [change("stream_id", ACCOUNT_STREAM)], "wrong_stream", "event_type"),
+        invalid("state_on_the_control_stream", "§9.11: an account-stream record", st, [change("stream_id", STREAM)], "wrong_stream", "event_type"),
         invalid(
             "refused_reason_of_another_check",
             "rule 54",
@@ -324,7 +336,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "checked_uniqueness",
-            "§9.10: uniqueness is a connect-time check",
+            "§9.11: uniqueness is a connect-time check",
             chk,
             [change("payload.results", [result("account"), result("environment"), result("scope"), result("uniqueness")])],
             "non_canonical",
@@ -376,6 +388,22 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid("degraded_from_suspended", "rule 60", st, state("suspended", "degraded", "contract_drift"), "schema", "payload.from"),
         invalid("acknowledged_without_the_owner", "rule 61", st, state("degraded", "active", "acknowledged"), "schema", "causation_id"),
+        invalid(
+            "established_without_its_check",
+            "rule 62: names the passing ConnectionChecked",
+            est,
+            [change("causation_id", None)],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "rotated_without_its_check",
+            "rule 62: a replaced credential passed its checks first",
+            rot,
+            [change("causation_id", None)],
+            "schema",
+            "causation_id",
+        ),
     ]
 
 
@@ -385,13 +413,14 @@ def valid_drafts() -> list[dict]:
     return [
         valid(
             "established_version_1",
-            "§9.10: version 1 stays registered",
+            "§9.11: version 1 stays registered",
             "established_v2",
             [
                 change("schema_version", 1),
                 delete("payload.account_ref"),
                 delete("payload.user"),
                 delete("payload.step_up"),
+                change("causation_id", None),
             ],
         ),
         valid(
@@ -427,6 +456,12 @@ def valid_drafts() -> list[dict]:
                 ),
             ],
         ),
+        valid(
+            "checked_for_a_reauthorization",
+            "§9.11: the executor checks a replaced credential before it is accepted",
+            chk,
+            [change("payload.occasion", "reauthorize")],
+        ),
         valid("degraded_again", "rules 59 and 60: a cause returns before the acknowledgment", st, state("degraded", "degraded", "rate_headroom")),
         valid("suspended_while_degraded", "rule 60", st, state("degraded", "suspended", "authorization_failed")),
         valid("suspended_again", "rule 60", st, state("suspended", "suspended", "lease_expired")),
@@ -440,13 +475,16 @@ def valid_drafts() -> list[dict]:
     ]
 
 
-# --------------------------------------------------------------------------- stream rules 62 to 64
+# --------------------------------------------------------------------------- stream rules 64 to 65
+
+
+def record_id(index: int) -> str:
+    return f"01J8Z4S{index:02d}A0000000000000000"[:26]
 
 
 def record(base: str, index: int, *changes: dict) -> dict:
     """One record of a sequence: a base draft, its own event id, then the changes."""
-    event_id = f"01J8Z4S{index:02d}A0000000000000000"[:26]
-    return {"base_draft": base, "changes": [change("event_id", event_id), *changes]}
+    return {"base_draft": base, "changes": [change("event_id", record_id(index)), *changes]}
 
 
 def revoked(index: int, connection: str = CONNECTION) -> dict:
@@ -466,9 +504,15 @@ def established(index: int, *more: dict) -> dict:
     return record("established_v2", index, *more)
 
 
-def moved(index: int, frm: str, to: str, reason: str) -> dict:
-    extra = [change("causation_id", OWNER_ACK)] if reason == "acknowledged" else []
-    return record("state_degraded", index, *state(frm, to, reason), *extra)
+def moved(index: int, frm: str, to: str, reason: str, cause: str | None = None) -> dict:
+    if reason == "acknowledged":
+        cause = OWNER_ACK
+    return record("state_degraded", index, *state(frm, to, reason), change("causation_id", cause))
+
+
+def checked(index: int, *results: dict) -> dict:
+    listed = list(results) or [result("account"), result("environment"), result("scope")]
+    return record("checked_start", index, change("payload.occasion", "reauthorize"), change("payload.results", listed))
 
 
 def sequence(name: str, clause: str, records: list[dict], mismatch: tuple[int, str] | None = None) -> dict:
@@ -485,12 +529,12 @@ def sequences() -> list[dict]:
     return [
         sequence(
             "connect_revoke_reconnect",
-            "rule 62: a reconnect after its revocation, same broker, environment, and account_ref",
+            "rule 63: a reconnect after its revocation, same broker, environment, and account_ref",
             [established(1), record("rotated", 2), revoked(3), established(4)],
         ),
         sequence(
             "every_occasion_in_its_place",
-            "rule 63",
+            "rule 64",
             [
                 refused(1, "connect", OTHER_CONNECTION),
                 established(2),
@@ -503,82 +547,105 @@ def sequences() -> list[dict]:
         ),
         sequence(
             "revocation_is_never_refused",
-            "§9.10: no rule refuses a ConnectionRevoked",
+            "§9.11: no rule refuses a ConnectionRevoked",
             [revoked(1), established(2), revoked(3), revoked(4), established(5)],
         ),
         sequence(
             "a_refused_id_connects_later",
-            "rule 63: a refused connect leaves no connection",
+            "rule 64: a refused connect leaves no connection",
             [refused(1, "connect"), established(2)],
         ),
-        sequence("established_twice", "rule 62: not revoked", [established(1), established(2)], (1, "62")),
-        sequence("reconnect_another_account", "rule 62", [established(1), revoked(2), established(3, other_ref)], (2, "62")),
+        sequence("established_twice", "rule 63: not revoked", [established(1), established(2)], (1, "63")),
+        sequence("reconnect_another_account", "rule 63", [established(1), revoked(2), established(3, other_ref)], (2, "63")),
         sequence(
             "reconnect_another_environment",
-            "rule 62",
+            "rule 63",
             [established(1), revoked(2), established(3, change("payload.environment", "live"), change("environment", "live"))],
-            (2, "62"),
+            (2, "63"),
         ),
-        sequence("reconnect_another_broker", "rule 62", [established(1), revoked(2), established(3, change("payload.broker", "kraken_derivatives_us"))], (2, "62")),
-        sequence("version_1_never_reestablished", "rule 62", [established(1, *v1), revoked(2), established(3)], (2, "62")),
+        sequence("reconnect_another_broker", "rule 63", [established(1), revoked(2), established(3, change("payload.broker", "kraken_derivatives_us"))], (2, "63")),
+        sequence("version_1_never_reestablished", "rule 63", [established(1, *v1), revoked(2), established(3)], (2, "63")),
         sequence(
             "two_connections_one_account",
-            "rule 62: one account_ref, one connection (CN-5)",
+            "rule 63: one account_ref, one connection (CN-5)",
             [established(1), established(2, change("payload.connection_id", OTHER_CONNECTION))],
-            (1, "62"),
+            (1, "63"),
         ),
-        sequence("established_again_after_reconnect", "rule 62", [established(1), revoked(2), established(3), established(4)], (3, "62")),
-        sequence("rotated_never_established", "rule 63", [record("rotated", 1)], (0, "63")),
-        sequence("rotated_after_revocation", "rule 63", [established(1), revoked(2), record("rotated", 3)], (2, "63")),
-        sequence("reauthorize_after_revocation", "rule 63", [established(1), revoked(2), refused(3, "reauthorize")], (2, "63")),
-        sequence("reconnect_while_connected", "rule 63", [established(1), refused(2, "reconnect")], (1, "63")),
-        sequence("connect_an_established_id", "rule 63", [established(1), revoked(2), refused(3, "connect")], (2, "63")),
+        sequence("established_again_after_reconnect", "rule 63", [established(1), revoked(2), established(3), established(4)], (3, "63")),
+        sequence("rotated_never_established", "rule 64", [record("rotated", 1)], (0, "64")),
+        sequence("rotated_after_revocation", "rule 64", [established(1), revoked(2), record("rotated", 3)], (2, "64")),
+        sequence("reauthorize_after_revocation", "rule 64", [established(1), revoked(2), refused(3, "reauthorize")], (2, "64")),
+        sequence("reconnect_while_connected", "rule 64", [established(1), refused(2, "reconnect")], (1, "64")),
+        sequence("connect_an_established_id", "rule 64", [established(1), revoked(2), refused(3, "connect")], (2, "64")),
         sequence(
             "reconnect_refused_for_another_environment",
-            "rule 63",
+            "rule 64",
             [
                 established(1),
                 revoked(2),
                 refused(3, "reconnect", CONNECTION, change("payload.environment", "live"), change("environment", "live")),
             ],
-            (2, "63"),
+            (2, "64"),
         ),
         sequence(
             "degraded_cleared_acknowledged_then_suspended",
-            "rule 64",
+            "rule 65",
             [
                 moved(1, "active", "degraded", "network_errors"),
                 moved(2, "degraded", "degraded", "condition_cleared"),
                 moved(3, "degraded", "active", "acknowledged"),
                 moved(4, "active", "suspended", "credential_expired"),
                 moved(5, "suspended", "suspended", "refresh_failed"),
-                moved(6, "suspended", "suspended", "condition_cleared"),
-                moved(7, "suspended", "active", "acknowledged"),
+                checked(6),
+                moved(7, "suspended", "suspended", "condition_cleared", record_id(6)),
+                moved(8, "suspended", "active", "acknowledged"),
             ],
         ),
-        sequence("first_change_not_from_active", "rule 64", [moved(1, "degraded", "suspended", "check_failed")], (0, "64")),
+        sequence(
+            "suspension_cleared_without_a_passing_check",
+            "rule 65: the credential passed every check first",
+            [moved(1, "active", "suspended", "authorization_failed"), moved(2, "suspended", "suspended", "condition_cleared")],
+            (1, "65"),
+        ),
+        sequence(
+            "suspension_cleared_by_a_failed_check",
+            "rule 65",
+            [
+                moved(1, "active", "suspended", "authorization_failed"),
+                checked(2, result("account", "failed", "account_mismatch"), result("environment"), result("scope")),
+                moved(3, "suspended", "suspended", "condition_cleared", record_id(2)),
+            ],
+            (2, "65"),
+        ),
+        sequence(
+            "two_connections_on_one_account_stream",
+            "rule 65: one account stream, one connection (CN-5)",
+            [checked(1), moved(2, "active", "degraded", "network_errors"), record("refreshed", 3, change("payload.connection_id", OTHER_CONNECTION))],
+            (2, "65"),
+        ),
+        sequence("first_change_not_from_active", "rule 65", [moved(1, "degraded", "suspended", "check_failed")], (0, "65")),
         sequence(
             "from_not_the_last_state",
-            "rule 64",
+            "rule 65",
             [moved(1, "active", "suspended", "check_failed"), moved(2, "degraded", "degraded", "contract_drift")],
-            (1, "64"),
+            (1, "65"),
         ),
         sequence(
             "acknowledged_before_cleared",
-            "rule 64: the acknowledgment never lifts a cause that has not cleared",
+            "rule 65: the acknowledgment never lifts a cause that has not cleared",
             [moved(1, "active", "degraded", "contract_drift"), moved(2, "degraded", "active", "acknowledged")],
-            (1, "64"),
+            (1, "65"),
         ),
         sequence(
             "acknowledged_after_the_cause_returned",
-            "rule 64",
+            "rule 65",
             [
                 moved(1, "active", "degraded", "network_errors"),
                 moved(2, "degraded", "degraded", "condition_cleared"),
                 moved(3, "degraded", "degraded", "network_errors"),
                 moved(4, "degraded", "active", "acknowledged"),
             ],
-            (3, "64"),
+            (3, "65"),
         ),
     ]
 
@@ -588,11 +655,12 @@ def sequence_drafts(section: dict, case: dict) -> list[dict]:
 
 
 def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> tuple[int, str] | None:
-    """The first record that breaks rule 62, 63, or 64, folding the stream in order."""
+    """The first record that breaks rule 63, 64, or 65, folding the stream in order."""
     first: dict[str, dict] = {}
     latest: dict[str, str] = {}
     bound: dict[str, str] = {}
-    current, cleared = "active", False
+    current, cleared, owner = "active", False, None
+    passing: set[str] = set()
     for i, d in enumerate(drafts):
         p, kind = d["payload"], d["event_type"]
         cid = p.get("connection_id")
@@ -600,13 +668,13 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
             prior = first.get(cid)
             if prior is not None:
                 same = all(
-                    p[m] == prior[m] or f"stream.62.{m}" in skip for m in ("broker", "environment")
-                ) and (p.get("account_ref") == prior.get("account_ref") or "stream.62.account_ref" in skip)
-                if (latest[cid] != "ConnectionRevoked" and "stream.62.revoked" not in skip) or not same:
-                    return i, "62"
+                    p[m] == prior[m] or f"stream.63.{m}" in skip for m in ("broker", "environment")
+                ) and (p.get("account_ref") == prior.get("account_ref") or "stream.63.account_ref" in skip)
+                if (latest[cid] != "ConnectionRevoked" and "stream.63.revoked" not in skip) or not same:
+                    return i, "63"
             holder = bound.get(p.get("account_ref"))
-            if holder is not None and holder != cid and "stream.62.unique" not in skip:
-                return i, "62"
+            if holder is not None and holder != cid and "stream.63.unique" not in skip:
+                return i, "63"
             first.setdefault(cid, p)
             if p.get("account_ref") is not None:
                 bound.setdefault(p["account_ref"], cid)
@@ -614,21 +682,31 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
         elif kind == "ConnectionRevoked":
             latest[cid] = kind
         elif kind == "ConnectionCredentialRotated":
-            if latest.get(cid) != "ConnectionEstablished" and "stream.63.rotated" not in skip:
-                return i, "63"
+            if latest.get(cid) != "ConnectionEstablished" and "stream.64.rotated" not in skip:
+                return i, "64"
         elif kind == "ConnectionRefused":
             want = {"connect": None, "reconnect": "ConnectionRevoked", "reauthorize": "ConnectionEstablished"}
-            if latest.get(cid) != want[p["occasion"]] and f"stream.63.{p['occasion']}" not in skip:
-                return i, "63"
+            if latest.get(cid) != want[p["occasion"]] and f"stream.64.{p['occasion']}" not in skip:
+                return i, "64"
             prior = first.get(cid)
-            if prior is not None and p["occasion"] != "connect" and "stream.63.same" not in skip:
+            if prior is not None and p["occasion"] != "connect" and "stream.64.same" not in skip:
                 if p["broker"] != prior["broker"] or p["environment"] != prior["environment"]:
-                    return i, "63"
-        elif kind == "ConnectionStateChanged":
-            if p["from"] != current and "stream.64.from" not in skip:
-                return i, "64"
-            if p["reason"] == "acknowledged" and not cleared and "stream.64.cleared" not in skip:
-                return i, "64"
+                    return i, "64"
+        else:
+            owner = cid if owner is None else owner
+            if cid != owner and "stream.65.one_connection" not in skip:
+                return i, "65"
+            if kind == "ConnectionChecked" and all(r["result"] == "passed" for r in p["results"]):
+                passing.add(d["event_id"])
+            if kind != "ConnectionStateChanged":
+                continue
+            if p["from"] != current and "stream.65.from" not in skip:
+                return i, "65"
+            if p["reason"] == "acknowledged" and not cleared and "stream.65.cleared" not in skip:
+                return i, "65"
+            out_of_suspension = p["reason"] == "condition_cleared" and p["from"] == "suspended"
+            if out_of_suspension and d["causation_id"] not in passing and "stream.65.passing" not in skip:
+                return i, "65"
             cleared = p["reason"] == "condition_cleared"
             current = p["to"]
     return None
@@ -718,6 +796,7 @@ VALIDATOR_MUTANTS = (
     "rule.59",
     "rule.60",
     "rule.61",
+    "rule.62",
     "record.extra",
     "record.missing",
     "types.risk_clock",
@@ -725,18 +804,20 @@ VALIDATOR_MUTANTS = (
     *sorted({f"nullable.payload.{m}" for members in NULLED.values() for m in members} - set(RULE_TYPED)),
 )
 STREAM_MUTANTS = (
-    "stream.62.revoked",
-    "stream.62.broker",
-    "stream.62.environment",
-    "stream.62.account_ref",
-    "stream.62.unique",
-    "stream.63.rotated",
-    "stream.63.connect",
-    "stream.63.reconnect",
-    "stream.63.reauthorize",
-    "stream.63.same",
-    "stream.64.from",
-    "stream.64.cleared",
+    "stream.63.revoked",
+    "stream.63.broker",
+    "stream.63.environment",
+    "stream.63.account_ref",
+    "stream.63.unique",
+    "stream.64.rotated",
+    "stream.64.connect",
+    "stream.64.reconnect",
+    "stream.64.reauthorize",
+    "stream.64.same",
+    "stream.65.from",
+    "stream.65.cleared",
+    "stream.65.passing",
+    "stream.65.one_connection",
 )
 
 
