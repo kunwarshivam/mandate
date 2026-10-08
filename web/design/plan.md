@@ -25,18 +25,19 @@ the owl, the rules and the record.
 
 ## B. Quick fixes (small, no DEC)
 
-- [ ] **The drawdown scenario's chart cliff.** `buildWorkspace("drawdown")` changes the agent's
-      equity but not the series, so the account line drops vertically at the right edge. Fix the
-      fixture and add a test that every series ends at the live equity. (R-9)
-- [ ] **The dead prototype route.** `/design/new-agent` renders "No such page"; the docs name it.
-      Fix the doc or the route. (R-29)
-- [ ] **Positions table wrap.** Agent 2's Mark column wraps "as of 14:05:17, 5 s ago" with a stray
-      comma; two "Fixture data" tags at the foot. (R-16)
-- [ ] **Keyboard focus.** No visible ring after three Tabs on Home. Check the order and that every
-      stop paints the ring. (R-19)
-- [ ] **Approvals countdown.** "(8 min left)" on open rows: confirm it is static per render and
-      never ticks. (R-14)
-- [ ] **Breadcrumb ellipsis** on top-level screens. (R-8)
+- [x] **The drawdown scenario's chart cliff.** The scenario kept the normal scenario's buy resting
+      at $55,900 until 14:01 while the mark at 14:05 was $51,843, so the bars were held above
+      $55,900 and fell 7% in four minutes. It now rests at $51,700, below the price's path, and
+      `market.test.ts` fails if any curve in any scenario moves more than 2% in one minute. (R-9)
+- [x] **The dead prototype route.** Not dead: DEC-472 moved the prototype to `/agents/new` and
+      removed the route; the mention the review found is in the history. No change. (R-29)
+- [x] **Positions table wrap.** The Mark cell no longer wraps, and the screen's own "Fixture
+      data" tag is gone (the shell draws one). (R-16)
+- [x] **Keyboard focus.** Verified: the ring paints (a 3px volt ring) on every header stop; the
+      review's screenshot was too small to show it. No change. (R-19)
+- [x] **Approvals countdown.** By the brief: whole minutes, quantized to 15 seconds, in a slot
+      that holds the width of "(59 min left)", never seconds, never colour. No change. (R-14)
+- [x] **Breadcrumb ellipsis** on top-level screens: the fold shows only past the top level. (R-8)
 - [ ] **Landing windows.** Open beside the last rather than on top; "Try it." gets a button;
       Questions shows its scrollbar. (R-30)
 - [ ] **Set-up replies say what they read** and, on a second miss, what shape of answer would

@@ -1,7 +1,6 @@
 "use client";
 
 import { PageHeader } from "@/components/kumo/page-header/page-header";
-import { FixtureTag } from "@/components/domain/placeholders";
 import { PositionsTable } from "@/components/domain/positions";
 import { quantity } from "@/lib/format";
 import { useRuntime } from "@/lib/mock-runtime";
@@ -51,7 +50,6 @@ function Positions() {
           </Panel>
         </Section>
       ) : null}
-      <FixtureTag className="w-fit" />
     </div>
   );
 }

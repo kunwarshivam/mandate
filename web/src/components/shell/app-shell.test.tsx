@@ -42,6 +42,26 @@ describe("every screen in every scenario", () => {
     },
   );
 
+  it("folds earlier crumbs into a menu only past the top level: a top-level screen has only Home before it, which the brand links to, so it shows no …", () => {
+    setPathname("/agents");
+    const { unmount } = renderWithRuntime(
+      <AppShell>
+        <agents.default />
+      </AppShell>,
+    );
+    const [header] = screen.getAllByRole("banner");
+    expect(within(header).queryByRole("button", { name: "Earlier pages" })).toBeNull();
+    expect(within(header).getByRole("navigation", { name: "breadcrumb" })).not.toHaveTextContent("…");
+    unmount();
+    setPathname(`/agents/${AGENT_IDS.btc}`);
+    renderWithRuntime(
+      <AppShell>
+        <agents.default />
+      </AppShell>,
+    );
+    expect(within(screen.getAllByRole("banner")[0]).getByRole("button", { name: "Earlier pages" })).toBeInTheDocument();
+  });
+
   it("keeps page titles generic: no agent names, tickers, or amounts", () => {
     const titles = [dashboard, agents, agentsNew, approvals, audit, settings, design].map(({ metadata }) => {
       const title = metadata.title;

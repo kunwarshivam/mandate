@@ -25,6 +25,13 @@ export const APPROVAL_IDS = {
 
 const t = (hms: string, date = "2026-09-28") => `${date}T${hms}-04:00`;
 
+/**
+ * In the drawdown scenario BTC has fallen about 8% from the high-water mark by 14:01, so the normal
+ * scenario's buy resting at $55,900 would have filled on the way down; it rests at this limit, below
+ * the price's path, which keeps the fixture's bars on one path and off a cliff (`market.test.ts`).
+ */
+const DRAWDOWN_RESTING_LIMIT = "51700";
+
 const btc: Agent = {
   agent_id: AGENT_IDS.btc,
   label: "Agent 1",
@@ -599,8 +606,12 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
       const canceled = b.orders.filter((o) => o.purpose !== "protective");
       b.orders = b.orders.filter((o) => o.purpose === "protective");
       b.past_orders.unshift(
-        ...canceled.map((o) => ({ ...o, state: "Canceled" as const, closed_at: t("14:01:12"), note: "Canceled on entering exits-only." })),
+        ...canceled.map((o) => ({ ...o, limit_price: DRAWDOWN_RESTING_LIMIT, state: "Canceled" as const, closed_at: t("14:01:12"), note: "Canceled on entering exits-only." })),
       );
+      for (const d of ws.decisions) {
+        if (d.agent_id === AGENT_IDS.btc && d.client_order_id && canceled.some((o) => o.client_order_id === d.client_order_id)) d.action = { ...d.action, limit_price: DRAWDOWN_RESTING_LIMIT };
+      }
+      for (const e of ws.timeline[AGENT_IDS.btc]) e.text = e.text.replace("$55,900.00", "$51,700.00");
       ws.decisions.unshift({
         event_id: "01JBEZT39S3D19T33BSWM75ANC",
         at: t("14:04:30"),
