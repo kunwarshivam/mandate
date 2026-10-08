@@ -1341,7 +1341,6 @@ fn the_approval_answers_are_catalogued_and_closed_on_their_streams() {
 /// the control stream and is catalogued on the account stream too, where only the executor's
 /// version-2 copy is registered, so a version-1 draft there is `unknown_schema`.
 #[test]
-#[ignore = "pending E7-17"]
 fn the_connection_records_are_catalogued_and_closed_on_their_streams() {
     for (event_type, homes) in CLOSED_BY_E7_17 {
         for kind in [ACCT, AGENT, CTL, CLOCK] {
