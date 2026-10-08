@@ -1656,6 +1656,8 @@ fn the_connector_runtime_drives_tokio_io_without_network() {
 /// A policy set of no levels, which the first paper trade registers, so the overlay neither
 /// narrows nor denies anything on it.
 const OPEN_POLICY: &str = r#"{"kind":"policy_set","levels":[],"policy_set_version":1}"#;
+/// An earlier registered policy set that a later one replaced, so it never governs.
+const OLDER_POLICY: &str = r#"{"kind":"policy_set","levels":[{"level":"workspace","policy_schema_version":1,"values":{"max_orders_per_day":100}}],"policy_set_version":1}"#;
 /// A workspace level that forbids `auto`, which the E7-7 mandate's `auto` default exceeds.
 const NO_AUTO_POLICY: &str = r#"{"kind":"policy_set","levels":[{"level":"workspace","policy_schema_version":1,"values":{"auto_allowed":false}}],"policy_set_version":1}"#;
 
@@ -1733,7 +1735,10 @@ fn governed_run(
 #[ignore = "pending E7-19"]
 fn a_governed_run_writes_version_2_records_with_the_registered_refs() {
     let governed = governance(OPEN_POLICY, &[]);
-    let store = governed_store(&governed);
+    let older = registered(1, OLDER_POLICY);
+    assert_ne!(older.content_hash, governed.policy_set.content_hash);
+    let mut store = governed_store(&governed);
+    store.insert(older.content_hash, older.bytes.clone());
     let (outcome, stages, seen) = governed_run("governed", Some(Arc::new(store.clone())));
     assert_eq!(outcome.unwrap().submitted.len(), 1);
     assert_eq!(seen.borrow().posts(), 1);
@@ -1760,6 +1765,14 @@ fn a_governed_run_writes_version_2_records_with_the_registered_refs() {
         let refs = mandate_canon::parse(refs.as_bytes()).unwrap();
         assert_eq!(refs_of(&rows[0]), Some(refs), "{event_type}");
     }
+    let decision = refs_of(&of_type(&agent, "DecisionMade")[0]).unwrap();
+    let policy_ref = decision.get("policy_set").and_then(Value::as_str);
+    let effective = format!("sha256:{}", governed.policy_set.content_hash);
+    assert_eq!(
+        policy_ref,
+        Some(effective.as_str()),
+        "the seq-2 set, never the older one"
+    );
     for row in &agent {
         let governed = ["ModelOutputRecorded", "DecisionMade"].contains(&row.event_type.as_str());
         let version = if governed { 2 } else { 1 };
@@ -1817,9 +1830,10 @@ fn a_registry_or_policy_missing_from_the_store_stops_the_run_before_any_order() 
     }
 }
 
-/// DEC-534 item 2 and `AGENTS.md` rules 2 and 13 (D4c): an exit is classified `auto`, decided by
-/// the built-in risk-reducing step, while the confirmed mandate is nonconforming and the overlay
-/// forbids `auto`. The opening that the same governance denies is D4d's.
+/// DEC-534 item 2 and `AGENTS.md` rules 2 and 13 (D4c): every exit is classified `auto`, decided
+/// by the built-in risk-reducing step, while the confirmed mandate is nonconforming and the overlay
+/// forbids `auto`: the discretionary sell the builder sized, and the same sell as a risk exit, a
+/// protective order and an owner exit. The opening that the same governance denies is D4d's.
 #[test]
 fn an_exit_is_auto_while_the_mandate_is_nonconforming() {
     let no_auto = PolicyLevel {
@@ -1844,19 +1858,37 @@ fn an_exit_is_auto_while_the_mandate_is_nonconforming() {
     builder.execution.protection = None;
     context.governance = Some(governed);
     let (model, instrument) = (output.model_id.clone(), output.instrument_id.clone());
-    let proposal = size_output(context.clone(), &view, output, model, instrument);
-    let proposal = proposal.unwrap().unwrap();
-    assert_eq!(proposal.purpose, RuntimePurpose::DiscretionaryExit);
-    let plan = BuilderPlan {
-        mandate: fixtures().join("mandate.json"),
-        context: Some(Rc::new(context)),
-    };
+    let sized = size_output(context.clone(), &view, output, model, instrument);
+    let sized = sized.unwrap().unwrap();
+    assert_eq!(sized.purpose, RuntimePurpose::DiscretionaryExit);
     let classified = Classified {
         autonomy: Autonomy::Auto,
         decided_by: Some("builtin_risk_reducing".to_owned()),
     };
-    let answer = plan
-        .classify(&view, &proposal)
-        .map_err(|cause| cause.to_string());
-    assert_eq!(answer, Ok(classified));
+    let exits = [
+        (
+            Purpose::DiscretionaryExit,
+            RuntimePurpose::DiscretionaryExit,
+        ),
+        (Purpose::RiskExit, RuntimePurpose::RiskExit),
+        (Purpose::Protective, RuntimePurpose::Protective),
+        (Purpose::OwnerExit, RuntimePurpose::OwnerExit),
+    ];
+    for (purpose, runtime) in exits {
+        let mut context = context.clone();
+        let builder = context.decision.as_mut().unwrap().builder.as_mut().unwrap();
+        builder.action.purpose = purpose;
+        let proposal = Proposal {
+            purpose: runtime,
+            ..sized.clone()
+        };
+        let plan = BuilderPlan {
+            mandate: fixtures().join("mandate.json"),
+            context: Some(Rc::new(context)),
+        };
+        let answer = plan
+            .classify(&view, &proposal)
+            .map_err(|cause| cause.to_string());
+        assert_eq!(answer, Ok(classified.clone()), "{purpose:?}");
+    }
 }
