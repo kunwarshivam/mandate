@@ -31,6 +31,7 @@ pub mod inspect;
 pub mod journal;
 pub mod postgres;
 pub mod register;
+pub mod version;
 pub mod workspace;
 
 /// Mandate research and audit tools.
