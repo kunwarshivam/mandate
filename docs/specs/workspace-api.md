@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -488,6 +488,243 @@ define yet; §11's E10-15 adds them before the operation ships.
 Every read outside the product views (exports, examination bundles, break-glass) is journaled as
 `RecordsAccessed` or `ExportCreated` (journal spec §7).
 
+### 4.8.1 Audit read contracts
+
+This subsection closes the rows above so that tests can be written from it
+([DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md)). The
+reads are served by the pure crate `mandate-audit`: it reads the journal and writes nothing. For an
+export or a verification it returns the `ExportCreated` or `VerificationRun` draft, and the API's
+control-stream writer appends it before anything is served (API-16). The payload schemas of
+`ExportCreated`, `VerificationRun`, and `RecordsAccessed` are journal spec §9's.
+
+**Invariants.** Each one is tested with an oracle of its own, as §2 says.
+
+| ID | Invariant | How it is tested |
+|---|---|---|
+| **AU-1** | **No link leaves the workspace.** A page, trace, timeline, gate view, export, or verification reads only streams whose `stream_id` names the path's workspace. An id of another workspace, an absent id, and a malformed id give the same result: 404 for the requested resource, `not_recorded` for a trace hop | Two workspaces in one journal, with forged `causation_id`s, `intent_id`s, and `evidence` ids in each naming the other's events; no byte of the other workspace appears in any response, and the 404 bodies are equal byte for byte |
+| **AU-2** | **Pages are complete.** API-15, with the head read in the same snapshot as the page | Fuzz of page sizes with concurrent appends: concatenated pages equal the stream range, and a chain check over them passes from 64 zeros |
+| **AU-3** | **A trace ends.** Every trace returns within its depth and node bounds, and visits each event once, whatever the links (cycles and self-links included) | Fuzz random link graphs with cycles; an independent breadth-first walk gives the same node set and hop statuses |
+| **AU-4** | **Model text is only quoted.** In a trace, a gate view, or a timeline, model-authored content appears only in `quoted` members with an author (API-18) | A schema test over the response types; a test with injected text in every model-authored member |
+| **AU-5** | **A timeline misses nothing and repeats nothing.** Paging a timeline with its per-stream cursor yields every matching event of each stream exactly once, in that stream's `seq` order | Fuzz with filters and concurrent appends against a k-way merge oracle over the two streams |
+| **AU-6** | **Served after recorded.** No export byte and no verification result is served before its `ExportCreated` or `VerificationRun` is `Committed` or `AlreadyCommitted` | Fault injection on the append: a failed or `Ambiguous` append serves nothing |
+| **AU-7** | **CSV cells are inert.** No CSV cell starts with `=`, `+`, `-`, `@`, a tab, or a carriage return | Fuzz payload strings over those characters; an independent scan of every cell |
+
+**Who may call.** Every route here is the matrix row "Read records, verification; export": a
+workspace admin, an auditor, or a service account (§3.7). The role is checked before any id is
+resolved, so a viewer, an operator, or an approver gets 403 `forbidden` for every id, present or
+not, and learns nothing about existence. A client never reaches these routes (§3.8: `read` never
+includes the journal) and gets 403. A principal with no membership in the path's workspace gets the
+404 of API-9 for every route under it.
+
+#### Ids and the 404 ([DEC-760](../project/decisions/DEC-760.md))
+
+1. A `stream_id` or `event_id` is resolved only among the streams of the path's workspace
+   (`acct:{ws}:…`, `agent:{ws}:…`, `ctl:{ws}`, `clock:{ws}`, `ntf:{ws}`, journal spec §2), by the
+   same scoped lookup whatever its form. A malformed id is not rejected before the lookup: it is
+   looked up and found absent. An id that is absent, malformed, or in another workspace returns
+   §3.5's `not_found` problem document with exactly the members `type`, `status` (404), `code`
+   (`not_found`), `title`, `effect` (`none`), and `retryable` (`false`): the same bytes for every
+   such id, with no `event_id`, `stream_id`, or other member added.
+2. Query members that are not ids are validated as usual: an out-of-range `limit`, a malformed
+   timestamp, or an unknown event type is 422 `invalid` with its `violations`, and is checked
+   before any id is resolved, so it reveals nothing about one.
+
+#### Streams and pages (API-15, [DEC-760](../project/decisions/DEC-760.md))
+
+`GET /journal/streams?after=&limit=` lists the workspace's streams in ascending byte order of
+`stream_id`, after the `after` stream id if given. Each item is `{stream_id, stream_type, head:
+{seq, hash, recorded_at}}`; `stream_type` is `account`, `agent`, `control`, `scheduler`, or
+`notice`. A stream with no event yet is not listed.
+
+`GET /journal/streams/{stream_id}/events?after_seq=&limit=` returns one page:
+
+| Member | Meaning |
+|---|---|
+| `stream_id` | As requested |
+| `head` | `{seq, hash, recorded_at}`: the stream's head in the snapshot the page was read from |
+| `events` | Up to `limit` events with `after_seq < seq ≤ head.seq`, in ascending `seq`. Each is `{seq, event_id, event_type, recorded_at, prev_hash, hash, body}`: `body` is the stored canonical body bytes (journal spec §6.1), standard base64 with padding (RFC 4648 §4); `hash` and `prev_hash` are 64 lowercase hex, as journal spec §3. The other members repeat the body for convenience; the body is what a client checks |
+| `next_after_seq` | The last returned `seq`, or `after_seq` when `events` is empty; the next page's cursor |
+| `at_head` | `true` when the page ends at `head.seq` |
+| `as_of` | API-14's watermark for this stream: the `head` |
+
+- `after_seq` is an integer from 0 to 2^53 − 1, default 0. `limit` is an integer from 1 to 1,000,
+  default 100. Outside those bounds, or not an integer, is 422 `invalid`; a value is never clamped.
+- The page and its `head` are read in one database snapshot, so an append that lands while the
+  page is read appears in neither and is on the next page.
+- `after_seq` at or beyond `head.seq` returns `200` with an empty `events`, `at_head: true`, and the
+  head: the stream exists in the workspace, so this reveals nothing. It is never 404.
+- A client checks a page by re-hashing each body against `hash` and chaining `prev_hash` from the
+  previous page's last `hash` (64 zeros before `seq` 1). The API never re-serializes a body.
+
+`GET /journal/events/{event_id}` returns one event in the same item shape, with its `stream_id` and
+its `artifact_refs` and `config_refs` as stored.
+
+#### Causal trace (J2, FR-7.2, E12-1)
+
+`GET /journal/events/{event_id}/trace` walks from the start event back to its causes. It follows the
+links of the table below, the envelope's `causation_id` on every event, and nothing else: the
+executor writes `IntentReceived`, `GateDecided`, and `FillApplied` with a null `causation_id`, so a
+walk on `causation_id` alone would stop at the fill ([DEC-761](../project/decisions/DEC-761.md)).
+Each target is looked up by the rule in its row, only among the workspace's own streams.
+
+| From | Link member | Target and where it is looked up |
+|---|---|---|
+| `FillApplied`, `LateFillApplied` | `payload.client_order_id` | Every `OrderSubmitted` with that `client_order_id` and a lower `seq`, on the same account stream (one per attempt) |
+| `OrderSubmitted` version 2 | `causation_id` | Its `OrderRequestRecorded`, the same account stream (journal spec rule 45) |
+| `OrderSubmitted` version 1 | none | `not_recorded`: version 1 has no companion and names no intent |
+| `OrderRequestRecorded` | `payload.intent_id` | The `IntentReceived` and every `GateDecided` with that `intent_id` on the same account stream, and the `IntentProposed` whose `event_id` is the `intent_id` on `agent:{ws}:{payload.agent_id}`. A null `intent_id` (protective orders, a flatten) is no link |
+| `IntentReceived`, `GateDecided`, `OrderAbandoned`, `ProtectionChanged` | `payload.intent_id` | As the row above, with `agent_id` from the `IntentReceived` |
+| `IntentProposed` | `causation_id` | Its `DecisionMade`, `ApprovalRevalidated`, or `OwnerExitRequested` on the same agent stream (journal spec §9.1) |
+| `ApprovalRevalidated` | `causation_id`; `payload.approval` | Its `ApprovalResponded`; and the `ApprovalRequested` whose `event_id` is `approval`, both on the same agent stream |
+| `ApprovalResponded`, `OwnerExitRequested`, `OwnerCommandRefused` | `causation_id` | The `ApprovalResponseSubmitted` or `OwnerCommandIssued` on `ctl:{ws}` |
+| `ApprovalRequested` | `causation_id` | Its `DecisionMade` on the same agent stream |
+| `DecisionMade` | `payload.outputs_used[]` | Each `ModelOutputRecorded` on the same agent stream |
+| `ModelOutputRecorded` | `payload.evidence[]`; `payload.thesis_id` | Each event named in `evidence`, on any stream of the workspace (observations, model invocations); and the `ThesisProposed` or `ThesisRevised` with that `thesis_id` on the same agent stream |
+| `UniverseChanged`, `AgentModeApplied`, `OwnerAcknowledged`, any other event | `causation_id` | The event it names, on any stream of the workspace |
+
+So the chain of a fill an agent proposed, approved by its owner, is: `FillApplied` →
+`OrderSubmitted` → `OrderRequestRecorded` → `IntentReceived`, `GateDecided`, and the agent stream's
+`IntentProposed` → `ApprovalRevalidated` → `ApprovalResponded` → the control stream's
+`ApprovalResponseSubmitted`, and `ApprovalRevalidated` → `ApprovalRequested` → `DecisionMade` →
+each `ModelOutputRecorded` → its `ObservationRecorded` and other evidence, and its thesis. Without an
+approval, `IntentProposed` → `DecisionMade` directly. `ModelInvocationRecorded` is reached when an
+event names it (in `evidence`); its own link members close with its schema (§12 question 7).
+
+The walk is breadth first from the start event (depth 0), in the table's order and, within a list
+member, in the list's order. Bounds and outcomes ([DEC-762](../project/decisions/DEC-762.md)):
+
+- **Depth** at most 16 hops and **at most 256 events** in one trace. A link not followed because of
+  either bound is a hop with status `beyond_bound`, and the response has `truncated: true`.
+- **Each event once.** A link to an event already in the trace is a hop with status
+  `already_shown` naming that event; it is not followed again. Cycles and self-links end here.
+- **A target that cannot be shown** (absent, malformed, in another workspace, or on a stream the row
+  does not name) is a hop with status `not_recorded`, and nothing else: no id echoed beyond the link
+  member's own value, which the caller's event already holds. Foreign and absent are identical.
+- **A target of the wrong type** in the workspace (a `causation_id` that names, say, a `MarkUpdated`
+  where the row names `DecisionMade`) is a hop with status `unexpected_type` and the found
+  `event_type`; it is shown and not followed.
+
+The response is `{start, nodes, hops, truncated, as_of}`. `nodes` are events in the page item shape
+of the section above, each with its `depth`. `hops` are `{from, link, to, status}` with `from` an
+`event_id`, `link` the member name (`causation_id`, `payload.intent_id`, …), and `to` the target's
+`event_id` or `null` for `not_recorded`. A start event outside the workspace is the 404 above.
+
+**Model output (API-18).** A node's `body` is the record, for checking. What a client renders as
+model output comes only from the node's `quoted` list: `[{author: {model_id, model_version,
+content_hash}, path, text | artifact_ref}]`, one per model-authored member: in
+`ThesisProposed` and `ThesisRevised` `payload.invalidation`, `payload.evidence_sources`, and the
+prompt, response, and autopsy artifacts; in `ModelOutputRecorded` `payload.invalidation` and
+`payload.thesis_ref`; in `ModelInvocationRecorded` its prompt and response artifacts. Artifact
+content is named by `artifact_ref` and is not inlined. No other member of any node is ever typed to
+hold model text, and no hop or status is derived from it.
+
+#### Gate view (J6)
+
+`GET /journal/events/{event_id}/gate` serves one `GateDecided`, allows included. Any other event
+type in the workspace is 422 `invalid` with violation `not_a_gate_decision`; outside it, the 404.
+Members ([DEC-763](../project/decisions/DEC-763.md)):
+
+| Member | Source in the `GateDecided` |
+|---|---|
+| `event_id`, `stream_id`, `seq`, `recorded_at`, `hash` | The envelope |
+| `intent_id`, `verdict`, `reason_code`, `data_profile`, `risk_clock` | The payload, as recorded |
+| `checks` | `payload.checks` in recorded order, each `{id, result, inputs, computed, reason_code}`. `result` is as recorded (`pass`, `fail`, `not_reached`). `reason_code` is the decision's `reason_code` on the first check whose result is `fail`, and `null` on every other, as trading spec §9.1 reports the first failing check's code |
+| `rule_set` | `config_refs.rule_set`: the rule-set version the gate ran |
+| `config_refs` | Every `config_refs` entry as stored (`fee_config`, `trading_calendar`, `instrument_snapshot`, `mandate_version`, `rule_set`) |
+| `quotes_used`, `marks_used` | The payload's, as recorded, each with its `as_of` or `source` |
+| `body` | The canonical body, base64, to check the rest against |
+
+The gate view adds nothing the record does not hold: no value is recomputed or looked up elsewhere.
+
+#### Timeline (J1, FR-7.3, E12-2)
+
+`GET /agents/{agent_id}/timeline?after=&types=&from=&to=&limit=` merges the agent's stream
+`agent:{ws}:{agent_id}` with the account stream of each connection the agent was deployed on, as its
+`AgentDeployed` events name them, through the connection's `account_ref` (connections spec §3,
+CN-5). Until `ConnectionEstablished` journals `account_ref` (E7-17), the API reads it from the
+connection record. An unknown agent is the 404.
+
+- **Which account-stream events belong to the agent** ([DEC-764](../project/decisions/DEC-764.md)):
+  one whose `payload.agent_id` (or `payload.agent`, as `AgentModeApplied` names it) is the agent
+  or `*`; one whose `payload.intent_id` is an intent whose
+  `IntentReceived` names the agent; one whose `payload.client_order_id` is an order whose
+  `OrderRequestRecorded` names the agent; one whose `causation_id` names an event of the agent's
+  stream; and the account-wide records that change what every agent there may do:
+  `AccountRestrictionChanged`, and `KillSwitchActivated` at connection or workspace scope.
+  Everything else on the account stream (marks, fees, settlement, snapshots) is not the agent's and
+  is reached through the stream pages.
+- **Cursor:** one per stream. `after` is repeated, `after=<stream_id>:<seq>`, one per stream; a
+  stream not named starts at 0. The response's `next` is the same list for the next page. A
+  `stream_id` in `after` that is not one of this timeline's streams is the 404.
+- **Order:** a k-way merge. Each stream is read in `seq` order; at each step the next event is the
+  stream head with the least `(recorded_at, stream_id)`. So events display by `recorded_at`, then
+  `stream_id`, then `seq`, except that one stream's own events never leave `seq` order. The order is
+  for readability only; nothing is inferred from it across streams (journal spec §2).
+- **Filters:** `types` is a comma-separated list of journal spec §9 event types (an unknown one is
+  422); `from` (inclusive) and `to` (exclusive) are journal spec §4.7 timestamps compared with
+  `recorded_at`. An event a filter excludes is still consumed: its stream's cursor moves past it, so
+  pages stay complete (AU-5).
+- **Page:** `limit` 1 to 1,000, default 100. One page consumes at most 10,000 events per stream; a
+  page that reaches that bound may return fewer than `limit` events, with `more: true` and the
+  cursor advanced. The response is `{events, next, more, as_of}`; each event is the page item shape
+  plus its `stream_id`, read in one snapshot per stream.
+
+#### Exports and derived views (J3, FR-7.4, API-16)
+
+`POST /exports` (with `Idempotency-Key`) takes `{scope, from, to, format}`:
+
+- `scope` is `{kind: "agent", agent_id}` (the timeline's streams) or `{kind: "streams",
+  stream_ids}`. `from` and `to` are timestamps. Per stream, the export holds the contiguous `seq`
+  range from the first event with `recorded_at ≥ from` to the last with `recorded_at < to`, so each
+  range has a trusted start (the previous event's `hash`) and verifies under journal spec §11.
+- `format` is `canonical`, `json`, or `csv`. Every export builds the canonical export first (journal
+  spec §12: segment files, manifests, anchors with inclusion proofs, the verifier digest), and its
+  **manifest hash** is the SHA-256 of the canonical manifest that lists them. `json` and `csv` are
+  views derived from it, and each names that manifest hash.
+- The API appends `ExportCreated` (its members are journal spec §9's; it names the manifest hash) and serves
+  nothing until it is committed (AU-6). Response `202 {export_id, phase: "recorded"}`;
+  `GET /exports/{id}` serves the files. Each download is journaled as `RecordsAccessed` before its
+  bytes are served ([DEC-766](../project/decisions/DEC-766.md)).
+
+The views ([DEC-765](../project/decisions/DEC-765.md)), in event order per stream, streams in
+ascending `stream_id` bytes:
+
+- **JSON lines.** UTF-8, LF after every line. The first line is the canonical JSON (journal spec §4)
+  of `{"kind": "audit_view", "view_version": 1, "format": "jsonl", "manifest_hash": "sha256:…"}`.
+  Every other line is the canonical JSON of `{stream_id, seq, event_id, event_type, schema_version,
+  environment, recorded_at, event_time, actor, causation_id, correlation_id, config_refs, payload,
+  prev_hash, hash}`, the members copied from the body.
+- **CSV.** RFC 4180: UTF-8 without a byte-order mark, comma separators, CRLF after every record,
+  every field enclosed in double quotes and an embedded double quote doubled. The header row is
+  `manifest_hash,stream_id,seq,event_id,event_type,schema_version,environment,recorded_at,event_time,actor_kind,actor_id,causation_id,correlation_id,prev_hash,hash,payload`.
+  `manifest_hash` repeats on every row, so a cut-out row still names its source. `payload` is the
+  payload's canonical JSON. A null is an empty field.
+- **Formula injection.** A CSV cell whose first character is `=`, `+`, `-`, `@`, a tab (U+0009), or a
+  carriage return (U+000D) is written with a single quote (`'`) before it. The canonical export is
+  the record; the view is for reading, and that leading quote is the view's, not the record's.
+
+#### Verification (J4, FR-7.5, E12-3)
+
+`POST /verifications` (with `Idempotency-Key`) takes `{stream_id, from_seq, to_seq, trusted_start}`:
+
+- `to_seq` is an integer or `null` for the head read at start; `to_seq < from_seq` is 422.
+- `trusted_start` is `{kind: "genesis"}` (only with `from_seq` 1: 64 zeros), `{kind: "manifest",
+  manifest_hash}` (a `SegmentExported` manifest of this stream whose `first_seq` is `from_seq`), or
+  `{kind: "anchor", anchor_event_id}` (an `AnchorComputed` whose leaf for this stream has `seq` =
+  `from_seq` − 1). The trusted `prev_hash` is read from that manifest or anchor in the workspace's
+  journal and artifact store, never from the request ([DEC-767](../project/decisions/DEC-767.md)). A
+  manifest or anchor that is absent, foreign, or does not fit the range is 422 `invalid` with
+  violation `trusted_start`, the same for absent and foreign.
+- One run covers at most 1,000,000 events; more is 422.
+- It runs journal spec §11's per-event checks in order over the range, then the per-range checks
+  that apply to it. The result is `{stream_id, from_seq, to_seq, trusted_start, result: "pass" |
+  "fail", checked, first_failure: {seq, check} | null}`, with `check` one of §11's codes and `seq`
+  the event it is reported at.
+- The API appends `VerificationRun` with that result and serves the result only once it is
+  committed (AU-6). Response `202 {verification_id, phase: "recorded" | "running"}`;
+  `GET /verifications/{id}` returns the result. A failure is the same `VerificationRun` §11's
+  response keys on; the API takes no other action on it.
+
 ### 4.9 How the web app's fixtures map
 
 The web app runs on recorded fixtures today (`web/src/fixtures/`). Each fixture shape has its source
@@ -750,6 +987,11 @@ risk-reducing call never consults one (API-7, API-8).
 | **Insider with the viewer role** | Pause an agent, read the journal, export | The route matrix (API-2): a viewer acts on nothing and reads no journal; an auditor reads but acts on nothing. Exports are journaled (API-16) |
 | **Insider who is an approver** | Approve their own agent's large orders | Runtime check 7 with `independent_approval_required` (mandate spec §6.4); the API adds no weaker copy |
 | **Tenant probing** | Guess ids in other workspaces | Random ids; foreign and absent both 404 (API-9); row-level security under the request's workspace |
+| **Forged cross-workspace link** | An event whose `causation_id`, `intent_id`, or `evidence` names another workspace's event, so a trace or timeline pulls it in | Every link is resolved only among the path's workspace's streams; the hop reads `not_recorded`, identical to an absent target (§4.8.1, AU-1) |
+| **Auditor or viewer probing the audit routes** | A viewer reads the journal; anyone pages with a huge `limit` or an `after_seq` far past the head | The role is checked before any id is resolved (403 for every id); `limit` above 1,000 is 422, never clamped; an `after_seq` past the head returns an empty page with the head (§4.8.1) |
+| **Causation cycle or fan-out bomb** | Events that link in a cycle, or a decision with thousands of outputs, to hang or exhaust a trace | Each event visited once; at most 16 hops and 256 events; `truncated` says so (AU-3) |
+| **Spreadsheet formula in a CSV view** | A payload string such as `=HYPERLINK(…)` runs when the export is opened | Leading `=`, `+`, `-`, `@`, tab, and CR are prefixed with `'` (AU-7) |
+| **Forged trusted start** | Verify a tampered range against a `prev_hash` the caller chose | The trusted start is read from a manifest or anchor in the workspace, never from the request (§4.8.1) |
 | **Malicious owner-connected agent** | Confirm a version, approve its own ask, kill-switch, pause during a fall | Closed scope list (§3.8, API-6): it can request and propose, and hold openings, nothing else. Its openings always ask (MI-30); a hold never holds exits (DEC-191) |
 | **Prompt-injected agent calling the API** | Flood asks; request buys in an illiquid name; propose a looser envelope | Every client opening asks a human (MI-30); the ask budget and suppression (mandate spec §6.4) bound the flood; a proposal is only a draft until a user confirms in Owlhead with step-up (DEC-185 item 4); the dry run and requests are rate-limited (§3.10) |
 | **Injected text in model output** shown by the API | A thesis or chat reply that reads as an instruction or a button | Model text is typed quoted content (API-18); action cards come from deterministic code |
@@ -778,7 +1020,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
 | Read-model projections | **Planned** (E11-9) |
-| Journal queries, trace, exports over the API | **Planned** (E12-6) |
+| Journal queries, trace, exports over the API | **Planned** (E12-6); contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | Journal events this spec needs (`MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, `OwnerRequestSubmitted`, `hold_openings`, client events) | **Planned** (E10-15, journal spec change first) |
 | Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
 
@@ -786,7 +1028,9 @@ risk-reducing call never consults one (API-7, API-8).
 
 ## 10. Decisions
 
-Recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
+§4.8.1's readings are [DEC-760](../project/decisions/DEC-760.md) to
+[DEC-767](../project/decisions/DEC-767.md), each Accepted under DEC-176: each adds a bound or a
+refusal and loosens nothing. The rest are recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
 engineering readings an agent accepts (DEC-79, DEC-176): each adds no trading rule, or only tightens
 one. Items 9, 19, 20, and 21 carry the coordinator's round-1 settlements X1, X2, X3, and X5 and its
 ruling on M2 and M3.
@@ -825,3 +1069,8 @@ follow-ups" there (freeze rule). **SC** marks a safety-critical story.
    applies, and the scanning method is journal spec §13 question 3.
 6. **Server-sent events through corporate proxies** in hybrid: polling is the fallback; whether it
    is enough at the change rates of a busy workspace.
+7. **Trace links the journal does not record yet.** `ModelInvocationRecorded` names no event it
+   served, so a trace reaches it only when an output's `evidence` names it; a flatten's or a
+   protective order's `OrderRequestRecorded` carries no link to the `KillSwitchActivated` or the
+   opening it serves; a version-1 `OrderSubmitted` names no intent. Each needs a journal spec
+   member; until then the trace reports the hop as `not_recorded` or ends (§4.8.1).
