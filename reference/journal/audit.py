@@ -52,6 +52,10 @@ VIEW = "f" * 64
 AUDITOR = {"kind": "user", "id": "user_auditor_01", "version": "1", "build": None}
 # §3's client actor (DEC-671): an owner-connected agent, recorded with the user it acts for.
 CLIENT = {"kind": "client", "id": "client_01", "version": "1", "build": None, "on_behalf_of": OWNER}
+BROKER_ACTOR = {"kind": "broker", "id": "alpaca", "version": "v2", "build": None}
+# The `PlatformOperatorAction` that opened a customer-approved break-glass window (§7).
+BREAK_GLASS = "01J8Z3R9A000000000000000B1"
+OPERATOR_ACTOR = {"kind": "platform_operator", "id": "operator_01", "version": "1", "build": None}
 AGENT_ACTOR = {"kind": "agent", "id": "agent_a", "version": "0.1.0", "build": "sha256:" + "c" * 64}
 # Every member name a §9.10 payload may carry, at any depth: streams, positions, hashes, check
 # codes, and opaque IDs. An instrument, order, position, or mandate member is none of them.
@@ -459,6 +463,54 @@ def invalid_drafts() -> list[dict]:
             "actor.kind",
         ),
         invalid(
+            "read_by_a_broker",
+            "rule 76: a broker reads no records",
+            read,
+            [change("actor", BROKER_ACTOR), change("payload.accessor", BROKER_ACTOR["id"])],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "operator_read_without_its_break_glass",
+            "rule 76: platform staff read only under an approved break-glass action (§7)",
+            read,
+            [change("actor", OPERATOR_ACTOR), change("payload.accessor", OPERATOR_ACTOR["id"])],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "export_by_a_broker",
+            "rule 77: a user or a service account exports",
+            export,
+            [change("actor", BROKER_ACTOR)],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "export_by_an_operator",
+            "rule 77: platform staff do not export; a break-glass export fails closed (§9.10)",
+            export,
+            [change("actor", OPERATOR_ACTOR)],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "scheduled_run_by_a_broker",
+            "rule 78: a scheduled run is the verifier's own",
+            ok,
+            [change("actor", BROKER_ACTOR)],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "requested_run_by_an_operator",
+            "rule 78: platform staff do not run a verification; it fails closed (§9.10)",
+            bad,
+            [change("actor", OPERATOR_ACTOR)],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
             "export_by_an_agent",
             "rule 77: a user or a service account exports",
             export,
@@ -592,6 +644,16 @@ def valid_drafts() -> list[dict]:
             [change("actor", CLIENT), change("payload.accessor", CLIENT["id"]), change("payload.operation", "agent_status")],
         ),
         valid(
+            "read_by_an_operator",
+            "rule 76 and §7: platform staff's break-glass reads are journaled where the customer reads them",
+            read,
+            [
+                change("actor", OPERATOR_ACTOR),
+                change("payload.accessor", OPERATOR_ACTOR["id"]),
+                change("causation_id", BREAK_GLASS),
+            ],
+        ),
+        valid(
             "read_scheduler_and_notice_streams",
             "§9.10 types: every stream type of §2",
             read,
@@ -606,7 +668,7 @@ def valid_drafts() -> list[dict]:
             ],
         ),
         valid(
-            "notice_resolved_by_a_client_read",
+            "notice_resolved_with_resources_and_result",
             "rule 76: resources and a stored result (workspace API §3.9)",
             read,
             [
@@ -728,6 +790,13 @@ VALIDATOR_MUTANTS = (
     "boundary.rule_75_overlap",
     "rule.76.accessor",
     "rule.76.actor",
+    "rule.76.break_glass",
+    "kinds.76.agent",
+    "kinds.76.broker",
+    "kinds.77.broker",
+    "kinds.77.platform_operator",
+    "kinds.78.broker",
+    "kinds.78.platform_operator",
     "rule.76.resources",
     "rule.77.actor",
     "rule.77.view",

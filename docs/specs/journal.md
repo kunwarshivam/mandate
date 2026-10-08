@@ -1902,14 +1902,20 @@ A verification a principal requested for an export names that export's `ExportCr
     so ranges are ordered and never overlap.
 76. `RecordsAccessed`: `accessor` equals the envelope's `actor.id` (`payload.accessor`);
     `actor.kind` is neither `agent` nor `broker` (`actor.kind`), so a `client` actor, in §3's one
-    shape (rules 66 to 68), records its own reads with its own `id` as `accessor`; and each of
-    `resources` sorts after the one before it by bytes (`payload.resources`). Rule 68 already keeps
+    shape (rules 66 to 68), records its own reads with its own `id` as `accessor`; a
+    `platform_operator`'s read has a non-null `causation_id`, the `PlatformOperatorAction` that
+    opened its customer-approved break-glass window (§7) (`causation_id`); and each of `resources`
+    sorts after the one before it by bytes (`payload.resources`). Rule 68 already keeps
     a client to `RecordsAccessed`, so rules 77 and 78 refuse it again only as a second statement of
     workspace API §3.8 (a client never exports or verifies).
 77. `ExportCreated`: `actor.kind` is `user` or `system` (`actor.kind`), and `view` is non-null
     exactly when `form` is `json` or `csv` (`payload.view`).
 78. `VerificationRun`: `actor.kind` is `system`, or, for a `request`, `user` or `system`
-    (`actor.kind`).
+    (`actor.kind`). Rules 77 and 78 refuse a `platform_operator`, so a §7 break-glass export or
+    verification by platform staff cannot be journaled and is not served: it fails closed on
+    purpose. Platform staff's break-glass reads are journaled as `RecordsAccessed` (rule 76 admits
+    them); an export or a verification for them is run by the workspace's own user or service
+    account.
 79. `VerificationRun`: each range, in array order, at `payload.ranges[i].<member>`: a non-null
     `failure`'s `seq` is non-null exactly when its check is reported at an event (§11's per-event
     checks 1 to 6, `anchor_head_mismatch` at the anchored `seq`, `anchor_self_mismatch`,
