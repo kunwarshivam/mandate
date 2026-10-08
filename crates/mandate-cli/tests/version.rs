@@ -6,6 +6,7 @@ mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use Do::{As, Confirm, Corrupt, Create, Lose, Seed};
 use common::{AGENT, CONTROL, FixedIds, Journal, OWNER, at, owner, stream};
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_cli::control::{ControlError, ControlJournal, Owner, Submitted};
@@ -29,6 +30,8 @@ const VERSION_RECORD: &str =
     r#"{"kind":"mandate_version_record","mandate_version":"@V","user":"user-owner"}"#;
 const CONFIRMED: &str = r#"{"confirmed_paths":[@C],"mandate_version":"@V","record_ref":"@R"}"#;
 const CONFIRMATION_RECORD: &str = r#"{"kind":"mandate_confirmation_record","mandate_version":"@V","step_up":{"assertion_id":"cli-assertion-1","authenticated_at":1790000000,"method":"cli_confirm"},"user":"user-owner","warnings":["W-002"]}"#;
+/// A retired agent's loss on the fixture's connection, above its floor of 0.1 x 1000 (V-032).
+const STOPPED: &str = r#"{"agent_id":"agent-b","connection_id":"conn_alpaca_paper_01","loss_added":"500","reason":"owner_stop","retired_on":"2026-09-20"}"#;
 const REVOKED: &str = r#"{"connection_id":"conn_alpaca_paper_01"}"#;
 /// The fixture's top-level members but the two system fields (mandate spec §4.1 V-020).
 const PATHS: &str = "autonomy behavior capital connection_id environment goal name notifications \
@@ -62,6 +65,13 @@ fn document(name: &str) -> String {
         "live" => (r#"environment":"paper"#, r#"environment":"live"#),
         "m101" => (r#""version":"1.0.0""#, r#""version":"1.0.1""#),
         "qqq" => (r#""symbol":"SPY""#, r#""symbol":"QQQ""#),
+        "big_order" => (r#""max_order_usd":"300""#, r#""max_order_usd":"2000""#),
+        "short_floor" => (r#"allocation":"0.1""#, r#"allocation":"0.05""#),
+        "wide_hysteresis" => (r#""hysteresis":"0.01""#, r#""hysteresis":"0.05""#),
+        "unpinned" => (r#""pinned":true"#, r#""pinned":false"#),
+        "unprotected" => (r#""enabled":true"#, r#""enabled":false"#),
+        "ended" => (r#""end_date":null"#, r#""end_date":"2026-01-02""#),
+        "quiet" => (r#""start":"23:00""#, r#""start":"07:00""#),
         _ => ("b0b6dd9d-", "a0b6dd9d-"),
     };
     assert!(MANDATE.contains(from), "{from}");
@@ -82,7 +92,7 @@ enum Do<'a> {
     Confirm(&'a str, Option<&'a str>),
     Seed(&'a str, &'a str),
     As(Environment),
-    /// Remove, or overwrite, the stored fixture.
+    /// Remove the stored fixture, or overwrite it with another mandate, `v2`.
     Lose,
     Corrupt,
 }
@@ -151,7 +161,7 @@ impl World {
             Do::Seed(event_type, payload) => self.seed(event_type, payload),
             Do::As(environment) => self.environment = Some(environment),
             Do::Lose => drop(self.store.remove(&fixture)),
-            Do::Corrupt => drop(self.store.insert(fixture, b"{}".to_vec())),
+            Do::Corrupt => drop(self.store.insert(fixture, canonical(&document("v2")))),
         }
         let (event_id, seq) = (String::new(), 0);
         Ok(Submitted { event_id, seq })
@@ -232,9 +242,29 @@ fn a_confirmation_is_one_event_bound_to_the_version_shown_that_the_spec_fold_rea
     let first = world.run(Do::Confirm("v1", None)).unwrap();
     world.committed("MandateConfirmed", CONFIRMED, CONFIRMATION_RECORD);
     let again = world.run(Do::Confirm("v1", None));
-    assert_eq!(again, Ok(first), "a re-run finds it");
+    assert_eq!(again, Ok(first.clone()), "a re-run finds it");
     let spent = (world.appends(), world.ids.assertions);
     assert_eq!(spent, (before + 1, 1), "one event, one assertion");
+    for step in [Do::Create("v2"), Do::Confirm("v2", None)] {
+        world.run(step).unwrap();
+    }
+    let before = world.appends();
+    let again = world.run(Do::Confirm("v1", None)).unwrap();
+    assert_ne!(
+        again, first,
+        "after v2's, v1 is confirmed anew (DEC-530 item 7)"
+    );
+    let rows = world.journal.rows(&stream(CONTROL)).unwrap();
+    let latest = rows
+        .iter()
+        .rev()
+        .find(|r| r.event_type == "MandateConfirmed");
+    assert_eq!(
+        latest.map(|r| &r.event_id),
+        Some(&again.event_id),
+        "the latest"
+    );
+    assert_eq!(world.appends(), before + 1, "one event");
 
     let documents = |d: &Digest| world.store.get(d).map(|bytes| parse(bytes).unwrap());
     let rows = world.journal.rows(&stream(CONTROL)).unwrap();
@@ -261,7 +291,10 @@ fn a_confirmation_is_one_event_bound_to_the_version_shown_that_the_spec_fold_rea
     let context = ValidationContext::from_journal(&mandate, args, &facts).unwrap();
     let violations = validate(&mandate, &context).unwrap().violations;
     let supplied = BTreeSet::from([Violation::V001, Violation::V002]);
-    assert_eq!(violations, supplied, "the run's two facts (DEC-505)");
+    assert_eq!(
+        violations, supplied,
+        "the run's two facts; V-002 alone did not refuse"
+    );
 }
 
 /// Every refusal carries one of DEC-530 item 10's codes, each case its own, and writes nothing:
@@ -269,13 +302,18 @@ fn a_confirmation_is_one_event_bound_to_the_version_shown_that_the_spec_fold_rea
 #[test]
 #[ignore = "pending E10-16"]
 fn every_refusal_has_its_own_code_and_writes_nothing() {
-    use Do::{As, Confirm, Corrupt, Create, Lose, Seed};
     let unreadable = MODEL.replace(r#"["fast_periods","slow_periods"]"#, r#""x""#);
     let (v1, model) = (Create("v1"), Seed("ConfigSnapshotRegistered", &unreadable));
     let revoke = Seed("ConnectionRevoked", REVOKED);
+    let deployed = (reference(MANDATE), "6".repeat(64));
+    let deployed = format!(
+        r#"{{"agent_id":"agent-b","mandate_version":"{}","record_ref":"sha256:{}"}}"#,
+        deployed.0, deployed.1
+    );
+    let claim = Seed("AgentDeployed", &deployed);
     let (live, backtest) = (As(Environment::Live), As(Environment::Backtest));
     let (confirm, other) = (|name| Confirm(name, None), confirm_code("v2"));
-    let cases: [(&str, &[Do<'_>], Do<'_>); 15] = [
+    let cases: [(&str, &[Do<'_>], Do<'_>); 24] = [
         ("paper_only", &[live], v1),
         ("paper_only", &[v1, backtest], confirm("v1")),
         ("mandate_invalid", &[], Create("junk")),
@@ -293,6 +331,39 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
         ("control_stream_invalid", &[model, v1], confirm("v1")),
         ("version_invalid", &[revoke, v1], confirm("v1")),
         ("version_invalid", &[Create("m101")], confirm("m101")),
+        ("version_invalid", &[v1, claim, Create("v2")], confirm("v2")),
+        (
+            "version_invalid",
+            &[Seed("AgentStopped", STOPPED), v1],
+            confirm("v1"),
+        ),
+        (
+            "version_invalid",
+            &[Create("big_order")],
+            confirm("big_order"),
+        ),
+        (
+            "version_invalid",
+            &[Create("short_floor")],
+            confirm("short_floor"),
+        ),
+        (
+            "version_invalid",
+            &[Create("wide_hysteresis")],
+            confirm("wide_hysteresis"),
+        ),
+        (
+            "version_invalid",
+            &[Create("unpinned")],
+            confirm("unpinned"),
+        ),
+        (
+            "version_invalid",
+            &[Create("unprotected")],
+            confirm("unprotected"),
+        ),
+        ("version_invalid", &[Create("ended")], confirm("ended")),
+        ("version_invalid", &[Create("quiet")], confirm("quiet")),
         ("instrument_unregistered", &[Create("qqq")], confirm("qqq")),
         ("instrument_unregistered", &[Create("aid")], confirm("aid")),
     ];
