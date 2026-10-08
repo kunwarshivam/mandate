@@ -3368,8 +3368,7 @@ fn a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs() {
     assert_eq!(
         re_placed(&confirmed, None),
         qty("10"),
-        "the 10 the expiring OCO covered; the bracket's 4, its cancel unconfirmed, are its held \
-         legs' (§5.4, rule 12)"
+        "the 10 the expiring OCO covered; the bracket's 4 are its held legs' (§5.4, rule 12)"
     );
 }
 
@@ -3470,6 +3469,86 @@ fn a_re_cover_leaves_a_held_brackets_shares_to_its_legs() {
         re_placed(&lost, None),
         qty("2"),
         "the 2 the cancelled legs covered; the held bracket's 4 are its legs' (§5.4, rule 12)"
+    );
+}
+
+/// E1's boundary (DEC-532 item 1): only a bracket whose legs are still held is subtracted. Another
+/// agent's bracket that ended partly filled (4 of 10) has its OCO for those 4 already placed
+/// (DEC-346 item 6), so nothing of it is held. A risk exit of 2 cancels both resting OCOs, and
+/// once it fills, protection is re-placed for all 12 left: the OCO it cancelled covered the 4, and
+/// subtracting them again would leave 4 shares unprotected.
+#[test]
+fn a_terminal_brackets_placed_oco_is_not_subtracted_again() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    let entry = a_held_bracket(&mut shell, &ports, OTHER_AGENT, OTHER_INTENT);
+    let ended = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-held",
+            Some(&entry),
+            AAPL,
+            Side::Buy,
+            "10",
+            "4",
+            "canceled",
+        ))),
+        &ports,
+    );
+    let oco = ended
+        .submissions()
+        .first()
+        .filter(|o| o.oco.is_some())
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the bracket ended partly filled, so its 4 get an OCO (DEC-346 item 6)");
+    let begun = shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "2", "155")),
+        &ports,
+    );
+    let mut cancelled: Vec<String> = begun
+        .requests
+        .iter()
+        .filter_map(|r| match r {
+            BrokerRequest::Cancel { client_order_id } => Some(client_order_id.as_str().to_owned()),
+            _ => None,
+        })
+        .collect();
+    cancelled.sort();
+    let mut expected = vec!["md-oco-1".to_owned(), oco];
+    expected.sort();
+    assert_eq!(
+        cancelled, expected,
+        "the exit cancels every resting protective order first (§5.4)"
+    );
+    for id in expected {
+        shell.run(
+            Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                client_order_id: id,
+            })),
+            &ports,
+        );
+    }
+    let exit = format!("md-{INTENT}");
+    let done = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-exit",
+            Some(&exit),
+            AAPL,
+            Side::Sell,
+            "2",
+            "2",
+            "filled",
+        ))),
+        &ports,
+    );
+
+    assert_eq!(
+        re_placed(&done, None),
+        qty("12"),
+        "the 14 less the exit's 2; the ended bracket holds no legs, so nothing is subtracted"
     );
 }
 
