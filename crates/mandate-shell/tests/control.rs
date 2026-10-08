@@ -157,6 +157,9 @@ fn the_input_is_the_deployed_confirmed_version() {
 #[test]
 #[ignore = "pending E19-11"]
 fn without_a_deployment_of_this_agent_there_is_no_input() {
+    let deployed = Stream::deployed();
+    let version = Ok(deployed.version);
+    assert_eq!(deployed.read().map(|i| i.version), version, "with it");
     let mut stream = Stream::deployed();
     stream.records.retain(|r| r.event_type != "AgentDeployed");
     assert_eq!(
@@ -268,6 +271,12 @@ fn every_v_rule_the_stream_decides_refuses() {
 #[test]
 #[ignore = "pending E19-11"]
 fn a_live_mandate_is_refused() {
+    let paper = Stream::deployed();
+    assert_eq!(
+        paper.read().map(|i| i.version),
+        Ok(paper.version),
+        "the paper document"
+    );
     let live = json(&MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#));
     let stream = Stream::of(&live, &ENVELOPE);
     assert_ne!(
