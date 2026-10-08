@@ -39,6 +39,36 @@ case "$unit" in
     ;;
 esac
 
+rejection_reason() {
+  local address
+  address="$(printf '%s' "$1" | tr 'A-F' 'a-f')"
+  if [[ "$address" == *:* ]]; then
+    case "$address" in
+      ::) echo "the unspecified address" ;;
+      ::1) echo "loopback" ;;
+      ::ffff:*) echo "an IPv4-mapped address" ;;
+      fe[89ab]*) echo "link-local (fe80::/10)" ;;
+      f[cd]*) echo "unique local (fc00::/7)" ;;
+      ff*) echo "multicast (ff00::/8)" ;;
+    esac
+    return 0
+  fi
+  local a b
+  IFS=. read -r a b _ <<<"$address"
+  a=$((10#$a))
+  b=$((10#$b))
+  if [ "$a" -eq 0 ]; then echo "this-network or unspecified (0.0.0.0/8)"
+  elif [ "$a" -eq 10 ]; then echo "private (10.0.0.0/8)"
+  elif [ "$a" -eq 127 ]; then echo "loopback (127.0.0.0/8)"
+  elif [ "$a" -eq 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ]; then echo "shared address space (100.64.0.0/10)"
+  elif [ "$a" -eq 169 ] && [ "$b" -eq 254 ]; then echo "link-local (169.254.0.0/16)"
+  elif [ "$a" -eq 172 ] && [ "$b" -ge 16 ] && [ "$b" -le 31 ]; then echo "private (172.16.0.0/12)"
+  elif [ "$a" -eq 192 ] && [ "$b" -eq 168 ]; then echo "private (192.168.0.0/16)"
+  elif [ "$a" -ge 224 ] && [ "$a" -le 239 ]; then echo "multicast (224.0.0.0/4)"
+  elif [ "$a" -ge 240 ]; then echo "reserved (240.0.0.0/4)"
+  fi
+}
+
 allow=""
 for host in "${args[@]:1}"; do
   if ! [[ "$host" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
@@ -46,11 +76,23 @@ for host in "${args[@]:1}"; do
     exit 2
   fi
   found="$(getent ahosts "$host" | awk '{ print $1 }' | sort -u)"
-  if [ -z "$found" ]; then
-    echo "$host does not resolve; nothing written" >&2
+  usable=""
+  while read -r address; do
+    if [ -z "$address" ] || ! [[ "$address" =~ ^[0-9A-Fa-f:.]+$ ]]; then
+      continue
+    fi
+    reason="$(rejection_reason "$address")"
+    if [ -n "$reason" ]; then
+      echo "$host resolves to $address, rejected: $reason" >&2
+    else
+      usable="$usable"$'\n'"$address"
+    fi
+  done <<<"$found"
+  if [ -z "$usable" ]; then
+    echo "$host resolves to no global address; nothing written" >&2
     exit 1
   fi
-  allow="$allow"$'\n'"$found"
+  allow="$allow$usable"
 done
 
 dropin="/etc/systemd/system/$unit.service.d"
@@ -58,7 +100,7 @@ run install -d -o root -g root -m 0755 "$dropin"
 {
   printf '[Service]\n'
   printf '%s\n' "$allow" | sort -u | while read -r address; do
-    if [ -n "$address" ] && [[ "$address" =~ ^[0-9A-Fa-f:.]+$ ]] && [ "$address" != 0.0.0.0 ] && [ "$address" != :: ]; then
+    if [ -n "$address" ]; then
       printf 'IPAddressAllow=%s\n' "$address"
     fi
   done

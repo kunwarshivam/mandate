@@ -369,6 +369,57 @@ def egress_denied(f: dict[str, str]) -> list[str]:
     return problems
 
 
+REJECTED = {
+    "0.0.0.0": "0.0.0.0/8", "0.1.2.3": "0.0.0.0/8", "127.0.0.1": "127.0.0.0/8", "127.255.255.254": "127.0.0.0/8",
+    "10.0.0.1": "10.0.0.0/8", "172.16.0.1": "172.16.0.0/12", "172.31.255.255": "172.16.0.0/12",
+    "192.168.1.1": "192.168.0.0/16", "169.254.169.254": "169.254.0.0/16", "100.64.0.1": "100.64.0.0/10",
+    "100.127.255.255": "100.64.0.0/10", "224.0.0.1": "224.0.0.0/4", "239.255.255.255": "224.0.0.0/4",
+    "240.0.0.1": "240.0.0.0/4", "255.255.255.255": "240.0.0.0/4",
+    "::": "unspecified", "::1": "loopback", "fe80::1": "fe80::/10", "febf::1": "fe80::/10",
+    "fc00::1": "fc00::/7", "fd12:3456::1": "fc00::/7", "FD00::1": "fc00::/7", "ff02::1": "ff00::/8",
+    "::ffff:10.0.0.1": "IPv4-mapped", "::ffff:8.8.8.8": "IPv4-mapped",
+}
+GLOBAL = ["1.1.1.1", "8.8.8.8", "100.63.255.255", "100.128.0.1", "172.15.255.255", "172.32.0.1", "169.253.0.1",
+          "192.167.1.1", "223.255.255.255", "11.0.0.1", "126.0.0.1", "128.0.0.1", "2606:4700::1111", "2001:db8::1"]
+
+
+def run_filter(script: str, getent_output: str) -> subprocess.CompletedProcess:
+    """Runs the script's own address filter and host loop with `getent` replaced by a fixed answer."""
+    start, end = script.index("rejection_reason() {"), script.index('dropin="/etc')
+    harness = (
+        "set -euo pipefail\n"
+        f"getent() {{ printf '%s' \"$GETENT_OUT\"; }}\n"
+        "args=(unit example.test)\n"
+        f"{script[start:end]}\n"
+        "printf 'ALLOW:%s\\n' \"$allow\"\n"
+    )
+    return subprocess.run(["bash", "-c", harness], capture_output=True, text=True, env={"GETENT_OUT": getent_output, "PATH": "/usr/bin:/bin"})
+
+
+def egress_rejects_non_global(f: dict[str, str]) -> list[str]:
+    """DEC-822 item 5: a poisoned DNS answer cannot allow an internal address. Every non-global
+    class is rejected with its address and reason named, a host that resolves only to such
+    addresses exits 1 having produced no allow list, and global addresses pass."""
+    script = f["allow-egress.sh"]
+    problems = []
+    for address, why in REJECTED.items():
+        done = run_filter(script, f"{address} STREAM example.test\n")
+        if done.returncode != 1 or "ALLOW:" in done.stdout:
+            problems.append(f"{address} was not refused: exit {done.returncode}")
+        if address not in done.stderr or "rejected:" not in done.stderr:
+            problems.append(f"{address} was refused without naming it and the reason: {done.stderr!r}")
+    for address in GLOBAL:
+        done = run_filter(script, f"{address} STREAM example.test\n")
+        if done.returncode != 0 or address not in done.stdout:
+            problems.append(f"{address} is global but was not allowed: {done.stderr!r}")
+    mixed = run_filter(script, "10.0.0.1 STREAM a\n1.1.1.1 STREAM a\n")
+    if mixed.returncode != 0 or "10.0.0.1" in mixed.stdout or "1.1.1.1" not in mixed.stdout:
+        problems.append(f"a mixed answer did not keep only the global address: {mixed.stdout!r}")
+    if run_filter(script, "").returncode != 1:
+        problems.append("an empty answer did not exit 1")
+    return problems
+
+
 def sshd_hardened(f: dict[str, str]) -> list[str]:
     """DEC-822 item 7: bootstrap writes an sshd drop-in that wins over cloud-init's (a 00- name) with
     keys only, no root login, and one allowed admin user; it creates that user with a key first,
@@ -402,6 +453,7 @@ def sshd_hardened(f: dict[str, str]) -> list[str]:
 
 CHECKS = (
     egress_denied,
+    egress_rejects_non_global,
     sshd_hardened,
     no_side_doors,
     units_umask,
@@ -440,6 +492,24 @@ SEEDED = (
     ("systemd/owlhead-backup-failed.service", "IPAddressDeny=any\n", "", egress_denied),
     ("allow-egress.sh", "  printf '[Service]\\n'\n", "  printf '[Service]\\nIPAddressDeny=\\n'\n", egress_denied),
     ("allow-egress.sh", "owlhead-api | owlhead-executor | cloudflared)", "owlhead-api | owlhead-executor | cloudflared | owlhead-backup)", egress_denied),
+    ("allow-egress.sh", '  elif [ "$a" -eq 10 ]; then', '  elif [ "$a" -eq 11 ]; then', egress_rejects_non_global),
+    ("allow-egress.sh", '  if [ "$a" -eq 0 ]; then', '  if [ "$a" -eq 255 ]; then', egress_rejects_non_global),
+    ("allow-egress.sh", '  elif [ "$a" -eq 127 ]; then', '  elif [ "$a" -eq 128 ]; then', egress_rejects_non_global),
+    ("allow-egress.sh", '[ "$b" -le 127 ]', '[ "$b" -le 100 ]', egress_rejects_non_global),
+    ("allow-egress.sh", '[ "$b" -eq 254 ]', '[ "$b" -eq 253 ]', egress_rejects_non_global),
+    ("allow-egress.sh", '[ "$b" -le 31 ]', '[ "$b" -le 30 ]', egress_rejects_non_global),
+    ("allow-egress.sh", '[ "$b" -eq 168 ]', '[ "$b" -eq 169 ]', egress_rejects_non_global),
+    ("allow-egress.sh", '[ "$a" -le 239 ]', '[ "$a" -le 230 ]', egress_rejects_non_global),
+    ("allow-egress.sh", 'elif [ "$a" -ge 240 ]', 'elif [ "$a" -ge 241 ]', egress_rejects_non_global),
+    ("allow-egress.sh", "      ::1) echo", "      ::2) echo", egress_rejects_non_global),
+    ("allow-egress.sh", "      ::) echo", "      ::0) echo", egress_rejects_non_global),
+    ("allow-egress.sh", "      ::ffff:*) echo", "      ::fffe:*) echo", egress_rejects_non_global),
+    ("allow-egress.sh", "      fe[89ab]*)", "      fe[89a]*)", egress_rejects_non_global),
+    ("allow-egress.sh", "      f[cd]*)", "      fc*)", egress_rejects_non_global),
+    ("allow-egress.sh", "      ff*)", "      fe*)", egress_rejects_non_global),
+    ("allow-egress.sh", "tr 'A-F' 'a-f'", "cat", egress_rejects_non_global),
+    ("allow-egress.sh", '  if [ -z "$usable" ]; then\n    echo "$host resolves to no global address; nothing written" >&2\n    exit 1', '  if [ -z "$usable" ]; then\n    echo "$host resolves to no global address; nothing written" >&2\n    exit 0', egress_rejects_non_global),
+    ("allow-egress.sh", 'rejected: $reason" >&2', 'rejected" >&2', egress_rejects_non_global),
     ("bootstrap.sh", "PasswordAuthentication no\n", "PasswordAuthentication yes\n", sshd_hardened),
     ("bootstrap.sh", "PermitRootLogin no\n", "PermitRootLogin prohibit-password\n", sshd_hardened),
     ("bootstrap.sh", "AllowUsers $ADMIN_USER\n", "", sshd_hardened),

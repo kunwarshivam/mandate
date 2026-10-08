@@ -1400,6 +1400,14 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - every notification carries only an opaque ID and generic text (rule 6);
   - turning a monitor agent into one that trades is a new mandate the owner confirms, never an
     in-place change.
+- **E10-20 (Must, M6, blocker for starting an agent on the L2 host; SC)** As the founder, I want
+  `mandate agent pause` and `mandate agent kill` reachable from the CLI, so that the SSH
+  kill-switch fallback of [DEC-822](decisions/DEC-822.md) item 7 works and the rehearsal in
+  FOUNDER-STEPS step 16 (`deploy/README.md`) can pass. The code exists in
+  `crates/mandate-cli/src/agent.rs` and `control.rs`; `AgentCommand` in `gestures.rs` does not name
+  them. *Accepted when:* `AgentCommand` carries `pause` and `kill`, wired to that code; an agent
+  kill touches only its own scope (rule 13); and a test runs each command through the binary
+  against the journal. No agent starts on the L2 host before this lands.
 
 ### E11 Web app: dashboard and controls
 
