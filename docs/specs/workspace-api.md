@@ -69,7 +69,9 @@ under the client's token. It has no path of its own.
   **Hybrid and on-prem:** on the customer's network; reaching it from a phone is HLD §12 item 7,
   open.
 - **Process:** the workspace control services process of infrastructure §3.1. It holds the control
-  stream's writer epoch (DEC-436 item 3), session keys, and no broker credential. It reads the
+  stream's writer epoch (DEC-436 item 3), session keys, and no broker credential: an OAuth
+  authorization code passes through it only in transit, during the callback, on its way to the
+  vault (connections spec §5.2, CN-1). It reads the
   journal and its read-model tables; it writes only the control stream, the artifact store, and its
   own read-model and draft tables.
 
@@ -77,7 +79,13 @@ under the client's token. It has no path of its own.
 
 - **No trading authority.** The API never places, cancels, or sizes an order, never writes an agent
   or account stream, and never calls a broker or a runtime directly (`AGENTS.md` rule 12). Its
-  checks are a convenience; the stream owners make every check again.
+  checks are a convenience; the stream owners make every check again. This holds at connect too:
+  the API checks the OAuth `state`, writes the authorization code or key straight to the vault,
+  starts the pending connection's token-exchange process (OAuth) or executor (keys), and reports.
+  The code exchange runs in the token-exchange process, which is not the executor, and the
+  permission checks run in the executor; the API appends `ConnectionEstablished` only after it
+  reads their passing results from the journal (connections spec §5.2, §8.1; DEC-690 item 1;
+  [DEC-821](../project/decisions/DEC-821.md) item 2).
 - **No identity design.** Sign-in, sessions, roles, separation of duties, and step-up ceremonies
   are the identity spec's. This spec states only what the API needs from them.
 - **No notification delivery.** Channels, escalation, and quiet hours are the notifications spec's.
@@ -440,7 +448,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | List, read connections | `GET /connections`, `GET /connections/{id}` | — | Opaque id, broker, environment, scopes, the 1× check, data profile, restrictions, agents granted, loss carry (O4). **References only**: no account number, key, or token (API-11) |
-| Connect | `POST /connections/oauth/start`, then the broker redirects to `GET /connections/oauth/callback` | `ConnectionEstablished` | Step-up before start. PKCE and a single-use `state`; the token exchange goes straight to the vault; scopes beyond trading reject the connection (FR-2.2). Flow details are the connections spec's |
+| Connect | `POST /connections/oauth/start`, then the broker redirects to the fixed `GET /v1/oauth/alpaca/callback`, outside the workspace prefix because a registered redirect URI cannot carry a workspace id; the workspace comes from the single-use `state` | `ConnectionEstablished` | Step-up before start. PKCE and a single-use `state`; the callback refuses a `state` that does not name a server-issued `env=paper` request for that workspace (DEC-821 item 3), writes the code straight to the vault, and calls no broker; the token-exchange process exchanges it and the executor runs the permission checks, and the API appends the event once their passing results are journaled (§1.4); scopes beyond trading reject the connection (FR-2.2). Flow details are the connections spec's |
 | Revoke | `POST /connections/{id}/revoke` | `ConnectionRevoked` | Step-up. Refused while any agent on it holds positions or is not stopped: without the connection nothing can exit or re-protect, so an ordinary revoke is not risk reduction. For a credential the owner believes is compromised, use the next row |
 | Revoke now, on compromise | `POST /connections/{id}/revoke` with `compromised: true` | `OwnerCommandIssued` (`kill_switch`, connection scope), then `ConnectionRevoked` (reason `compromised`, journal change), in one batch | §5.6. Never waits on positions: the kill switch runs first in the same command, then the credential is revoked |
 | Policies | `GET`, `PUT /policies/workspace` | `PolicyChanged` | A value looser than its parent is refused naming the nearest ancestor (FR-1.5); the response lists agents made nonconforming (X1). Step-up |
@@ -1154,6 +1162,13 @@ Items 17 and 18 stay **Proposed** for the founder:
   pause needs a valid session, and the kill switch a locally verified passkey.
 - **Item 18:** whether the API is offered to third parties (DEC-149, E18). Recommended: first-party
   only in v1 (the web app, the CLI, the Owlhead MCP server). Until decided: first-party only.
+
+[DEC-690](../project/decisions/DEC-690.md) item 1 (agent-accepted under DEC-79) settles where
+connect reaches the broker: never in the API process. The code exchange runs in the token-exchange
+process, which is not the executor, and the permission checks run in the connection's executor
+(§1.4; [DEC-821](../project/decisions/DEC-821.md) item 2). DEC-690 items 6 and 7 are accepted by
+the founder for paper only (DEC-821): Alpaca OAuth connects paper accounts only, and a live Alpaca
+OAuth connection needs a new decision.
 
 ---
 
