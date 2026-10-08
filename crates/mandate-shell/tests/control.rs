@@ -177,12 +177,21 @@ fn without_a_deployment_of_this_agent_there_is_no_input() {
     );
 }
 
-/// An `AgentStopped` after the latest `AgentDeployed` refuses; a deployment after the stop counts.
+/// An `AgentStopped` after the latest `AgentDeployed` refuses, another agent's does not, and a
+/// deployment after the stop counts.
 #[test]
 #[ignore = "pending E19-11"]
 fn a_stopped_agent_refuses_until_it_is_deployed_again() {
     let stop = format!(
         r#"{{"agent_id":"{AGENT}","connection_id":"{CONNECTION}","loss_added":"0","reason":"owner_stop","retired_on":"2026-10-06"}}"#
+    );
+    let other = stop.replace(AGENT, "agent_other");
+    let others = Stream::deployed().then("AgentStopped", &other);
+    let deployed = Ok(others.version);
+    assert_eq!(
+        others.read().map(|i| i.version),
+        deployed,
+        "another agent's stop"
     );
     let stopped = Stream::deployed().then("AgentStopped", &stop);
     assert_eq!(stopped.read().map(|_| ()), Err(DeploymentRefusal::Stopped));
