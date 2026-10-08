@@ -96,6 +96,8 @@ export const OPERATIONS: Readonly<Record<Operation, `/${string}`>> = {
   confirm_version: "/mandate-versions/{version}/confirm",
 };
 
+/** Spec §3.3's CSRF defence (L2's pin, DEC-681): a header a cross-site form cannot set, on every command. */
+export const CSRF_HEADER = "X-Mandate-Request";
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,64}$/;
 const WORKSPACE_ID = /^[A-Za-z0-9_-]+$/;
 const KEY_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -250,7 +252,7 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
       response = await fetch(baseUrl + command.path, {
         method: command.method,
         credentials: "same-origin",
-        headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": command.idempotency_key },
+        headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": command.idempotency_key, [CSRF_HEADER]: "1" },
         body: command.body,
       });
     } catch {
