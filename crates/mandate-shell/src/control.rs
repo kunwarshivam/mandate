@@ -1,16 +1,9 @@
-//! The deployment input from the workspace control stream (E19-11, [DEC-505](../../../docs/project/decisions/DEC-505.md),
-//! the first paper trade brief's slice D3): the confirmed mandate version a paper run deploys,
-//! folded from the stream's records and the artifact store, never from a mandate or configuration
-//! file.
-//!
-//! [`confirmed_version`] reads the records the run read once (a registration committed during the
-//! run applies from the next one), takes the latest `AgentDeployed` for the agent with no
-//! `AgentStopped` after it, re-hashes the stored document its version names, and folds the
-//! stream's facts with `ValidationContext::from_journal`. The model registry is therefore present
-//! and V-007 is checked (X-7). Two facts come from their owners rather than the stream (DEC-505
-//! item 3): the account equity V-002 reads is the run's broker read, and the connection's
-//! environment is `paper` only when the stream holds no fact about the connection, so a
-//! `ConnectionRevoked` still refuses. Every refusal comes before any credential is read.
+//! The confirmed mandate version a paper run deploys, folded from the control stream's records,
+//! read once, and the artifact store, never from a file (E19-11, slice D3, [DEC-505](../../../docs/project/decisions/DEC-505.md)).
+//! The latest `AgentDeployed` for the agent with no `AgentStopped` after it names the version;
+//! the stored document must re-hash to it; `ValidationContext::from_journal` folds the facts, so
+//! the model registry is present and V-007 is checked (X-7). The run supplies the equity V-002
+//! reads, and the connection is `paper` only when the stream holds no fact about it (DEC-505 item 3).
 
 use std::collections::BTreeSet;
 

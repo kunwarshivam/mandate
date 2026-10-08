@@ -15,20 +15,31 @@ use mandate_time::Date;
 const MANDATE: &str = include_str!("fixtures/tracer/mandate.json");
 const AGENT: &str = "agent_spy";
 const CONNECTION: &str = "conn_alpaca_paper_01";
-const MODEL: &str = r#""content_hash":"sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc","model_id":"quant.ma_crossover","model_version":"1.0.0""#;
-const ENVELOPE: [&str; 11] = [
-    "autonomy",
-    "behavior",
-    "capital",
-    "connection_id",
-    "environment",
-    "goal",
-    "name",
-    "notifications",
-    "protection",
-    "risk",
-    "universe",
+/// The four records of a deployed, confirmed version: `@V` is the version, `@P` the provenance list
+/// and `@C` the confirmed paths (journal spec §9.2's shapes).
+const RECORDS: [(&str, &str); 4] = [
+    (
+        "ConfigSnapshotRegistered",
+        r#"{"admits_instruments":false,"content_hash":"sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}"#,
+    ),
+    (
+        "MandateVersionCreated",
+        r#"{"mandate_version":"@V","provenance":[@P],"record_ref":"sha256:7777777777777777777777777777777777777777777777777777777777777777"}"#,
+    ),
+    (
+        "MandateConfirmed",
+        r#"{"confirmed_paths":[@C],"mandate_version":"@V"}"#,
+    ),
+    (
+        "AgentDeployed",
+        r#"{"agent_id":"agent_spy","mandate_version":"@V","record_ref":"sha256:6666666666666666666666666666666666666666666666666666666666666666"}"#,
+    ),
 ];
+const ENVELOPE: &str = "autonomy behavior capital connection_id environment goal name notifications protection risk universe";
+
+fn envelope() -> Vec<&'static str> {
+    ENVELOPE.split(' ').collect()
+}
 
 fn json(text: &str) -> Value {
     mandate_canon::parse(text.as_bytes()).unwrap()
@@ -55,46 +66,19 @@ impl Stream {
     fn of(document: &Value, confirmed: &[&str]) -> Self {
         let bytes = to_canonical(document);
         let version = Digest::of(&bytes);
-        let paths = |source: &str| -> Vec<String> {
-            let path = |p: &&str| format!(r#"{{"path":"/{p}","source":"{source}"}}"#);
-            ENVELOPE.iter().map(path).collect()
-        };
+        let path = |p: &&str| format!(r#"{{"path":"/{p}","source":"user_entered"}}"#);
+        let provenance: Vec<String> = envelope().iter().map(path).collect();
         let confirmed: Vec<String> = confirmed.iter().map(|p| format!(r#""/{p}""#)).collect();
-        let v = format!("sha256:{version}");
-        let records = vec![
-            record(
-                1,
-                "ConfigSnapshotRegistered",
-                &format!(
-                    r#"{{"admits_instruments":false,{MODEL},"kind":"model_version","params":["fast_periods","slow_periods"]}}"#,
-                ),
-            ),
-            record(
-                2,
-                "MandateVersionCreated",
-                &format!(
-                    r#"{{"mandate_version":"{v}","provenance":[{}],"record_ref":"sha256:{}"}}"#,
-                    paths("user_entered").join(","),
-                    "7".repeat(64),
-                ),
-            ),
-            record(
-                3,
-                "MandateConfirmed",
-                &format!(
-                    r#"{{"confirmed_paths":[{}],"mandate_version":"{v}"}}"#,
-                    confirmed.join(","),
-                ),
-            ),
-            record(
-                4,
-                "AgentDeployed",
-                &format!(
-                    r#"{{"agent_id":"{AGENT}","mandate_version":"{v}","record_ref":"sha256:{}"}}"#,
-                    "6".repeat(64),
-                ),
-            ),
-        ];
+        let fill = |payload: &str| {
+            let payload = payload.replace("@V", &format!("sha256:{version}"));
+            payload
+                .replace("@P", &provenance.join(","))
+                .replace("@C", &confirmed.join(","))
+        };
+        let records = (1..)
+            .zip(RECORDS)
+            .map(|(seq, (event_type, payload))| record(seq, event_type, &fill(payload)))
+            .collect();
         Self {
             version,
             records,
@@ -103,7 +87,7 @@ impl Stream {
     }
 
     fn deployed() -> Self {
-        Self::of(&json(MANDATE), &ENVELOPE)
+        Self::of(&json(MANDATE), &envelope())
     }
 
     fn then(mut self, event_type: &str, payload: &str) -> Self {
@@ -235,7 +219,7 @@ fn the_latest_deployment_counts_and_its_document_must_be_stored_intact() {
 #[test]
 #[ignore = "pending E19-11"]
 fn every_v_rule_the_stream_decides_refuses() {
-    let but_name: Vec<&str> = ENVELOPE.into_iter().filter(|p| *p != "name").collect();
+    let but_name: Vec<&str> = envelope().into_iter().filter(|p| *p != "name").collect();
     let unconfirmed = Stream::of(&json(MANDATE), &but_name);
     assert_eq!(
         unconfirmed.read().map(|_| ()),
@@ -278,7 +262,7 @@ fn a_live_mandate_is_refused() {
         "the paper document"
     );
     let live = json(&MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#));
-    let stream = Stream::of(&live, &ENVELOPE);
+    let stream = Stream::of(&live, &envelope());
     assert_ne!(
         stream.version,
         Stream::deployed().version,
@@ -290,30 +274,22 @@ fn a_live_mandate_is_refused() {
 /// Each refusal has its own stable code (ADR-0001 ES-09); a live test for the mutation gate.
 #[test]
 fn every_deployment_refusal_has_its_own_code() {
-    let codes = [
-        DeploymentRefusal::Unimplemented { story: "E19-11" },
-        DeploymentRefusal::NotDeployed,
-        DeploymentRefusal::Stopped,
-        DeploymentRefusal::DocumentMissing,
-        DeploymentRefusal::DocumentCorrupt,
-        DeploymentRefusal::StoreUnavailable,
-        DeploymentRefusal::DocumentUnreadable,
-        DeploymentRefusal::Live,
-        DeploymentRefusal::Fold,
-        DeploymentRefusal::Violations(BTreeSet::new()),
-    ]
-    .map(|r| r.code());
-    let want = [
-        "unimplemented",
-        "not_deployed",
-        "stopped",
-        "document_missing",
-        "document_corrupt",
-        "store_unavailable",
-        "document_unreadable",
-        "live",
-        "fold",
-        "violations",
+    let rows = [
+        (
+            DeploymentRefusal::Unimplemented { story: "E19-11" },
+            "unimplemented",
+        ),
+        (DeploymentRefusal::NotDeployed, "not_deployed"),
+        (DeploymentRefusal::Stopped, "stopped"),
+        (DeploymentRefusal::DocumentMissing, "document_missing"),
+        (DeploymentRefusal::DocumentCorrupt, "document_corrupt"),
+        (DeploymentRefusal::StoreUnavailable, "store_unavailable"),
+        (DeploymentRefusal::DocumentUnreadable, "document_unreadable"),
+        (DeploymentRefusal::Live, "live"),
+        (DeploymentRefusal::Fold, "fold"),
+        (DeploymentRefusal::Violations(BTreeSet::new()), "violations"),
     ];
-    assert_eq!(codes, want);
+    for (refusal, code) in rows {
+        assert_eq!(refusal.code(), code, "{refusal:?}");
+    }
 }
