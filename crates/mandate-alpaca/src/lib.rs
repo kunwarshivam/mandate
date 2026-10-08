@@ -58,6 +58,7 @@ pub mod client;
 pub mod data;
 pub mod error;
 pub mod http;
+pub mod profile;
 pub mod read;
 pub mod record;
 pub mod wire;
@@ -71,5 +72,6 @@ pub use http::{
     AlpacaPaperHttp, Credentials, ENDPOINTS, Endpoint, HttpRequest, KEY_ID_VAR, Method, PAPER_HOST,
     Response, SECRET_VAR, TradingTransport, endpoint_for, is_paper_trading_path,
 };
+pub use profile::alpaca as alpaca_profile;
 pub use read::{Asset, AssetSnapshot, Exchange, Feed, LatestQuote, MinuteBar, MinuteBars};
 pub use record::{Direction, INLINE_LIMIT, RecordedBody, RecordedExchange};
