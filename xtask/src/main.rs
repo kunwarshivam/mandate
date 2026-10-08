@@ -2289,11 +2289,38 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
+/// Three more are E7-4's, let past the kill switch's stub by slice 7 (#668; DEC-485 item 17), each
+/// failing on behaviour the slice does not own:
+/// - `protective_sell_quantity_never_exceeds_the_position_in_any_script` (defect E1): an exit is
+///   submitted beside a bracket's just-activated legs, leaving protection of 2 against a position
+///   of 1 (backlog: "E7-4 (stream K), E1 from E7-4 slice 7's tests correction", DEC-506).
+/// - `no_resting_order_is_submitted_inside_an_unprotected_interval` (defect E2): an opening rests
+///   while protection is cancelled for an exit (backlog: "E7-4 (stream K), E2 from E7-4 slice 7's
+///   tests correction", DEC-506 item 8).
+/// - `hand::an_owner_exit_outside_the_session_prices_from_the_confirmed_bid` (DEC-485 item 11):
+///   outside the regular session a confirmed owner's flatten is queued for the session at the
+///   floor rather than sold in extended hours from the confirmed bid. A loud stub there would fail
+///   the whole step that prices the close: the switch's own step where nothing needs cancelling
+///   first, so its mode and record would never be journaled (`AGENTS.md` rule 13: the kill switch
+///   is always available), or the step confirming the protection's cancel, leaving the position
+///   unprotected and unsold. The session slice deletes this row with the extended-hours path.
+///
+/// Two more `properties` rows went back to pending in #668's round 2, failing on executor defects
+/// at random seeds the pinned one missed; each property's scripts now lead with its defect's shape
+/// (`STEP_BESIDE_LEAD`, `AWAITED_LEAD`), so it fails at every seed until the fix lands:
+/// - `no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` (defect E5b): the exit
+///   ladder steps a rung the broker has not yet acknowledged, asking its cancel, and another exit
+///   goes beside that cancel (backlog: "E7-4 (stream K), E5b from #668's round-2 review").
+/// - `no_interval_exceeds_the_limit_without_an_alert` (defect E4b): while a bracket's OCO awaits
+///   its acknowledgment, a new interval's start ends the first open interval rather than the
+///   awaited one, so the bound alerts late (E4b, from #698's review; its backlog row comes with
+///   E4b's tests PR).
+///
 /// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
 /// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
 /// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
 /// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2306,6 +2333,26 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "protective_sell_quantity_never_exceeds_the_position_in_any_script",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_resting_order_is_submitted_inside_an_unprotected_interval",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "an_owner_exit_outside_the_session_prices_from_the_confirmed_bid",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_interval_exceeds_the_limit_without_an_alert",
     ),
     (
         "crates/mandate-runtime/tests/answer_records.rs",

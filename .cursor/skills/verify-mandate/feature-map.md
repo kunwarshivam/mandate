@@ -396,7 +396,11 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-executor/src/ids.rs` (`ClientOrderId`, three derivations and one validating
   parser, no free constructor), `crates/mandate-executor/src/types.rs` (the vocabulary, including
   `BrokerRequest` and `AccountWideScope`), `crates/mandate-executor/src/reconcile.rs`,
-  `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/gate.rs` (the binding
+  `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/kill.rs` (the
+  agent-scoped kill switch of section 5.5: the final mode first, the agent's orders cancelled by
+  id, and its sub-ledger sold through the executor's own `k-<switch>-<n>` flatten intents once the
+  cancels confirm; the account and workspace scopes answer their stub; DEC-485),
+  `crates/mandate-executor/src/gate.rs` (the binding
   gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`,
   `crates/mandate-executor/src/opening.rs` (`equity_bracket_prices`, the bracket's stop and
   take-profit rounded up onto the Reg NMS grid, and `BrokerAccount::one_x_buying_power`, with
@@ -1022,6 +1026,10 @@ proves each pending test fails on them (DEC-110).
   `kill`, `status`), stubbed; `crates/mandate-cli/tests/approvals.rs` and
   `crates/mandate-cli/tests/agent.rs`, pending E8-3 but for one live fixture check, with an
   in-memory journal in `crates/mandate-cli/tests/common/mod.rs`.
+- **The `approvals` commands (K1a, DEC-533):** `crates/mandate-cli/src/inbox.rs` (`list`, `show`,
+  `approve` and `skip` over P0's journal as D1b's paper owner; the renderers `list_lines`,
+  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`), stubbed, and `main`;
+  `crates/mandate-cli/tests/inbox.rs`, pending E8-3 but for the live flags test.
 - **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime -p mandate-cli`;
   `cargo xtask ci pending`.
 
@@ -1075,13 +1083,13 @@ proves each pending test fails on them (DEC-110).
 - **Code:** `crates/mandate-cli/src/version.rs` (`create`, which stores the canonical document and
   its record and commits `MandateVersionCreated`, every envelope path `user_entered`; `confirm`,
   which takes the code bound to the version, checks every V-rule but V-002 and the registered
-  instrument snapshots, and commits `MandateConfirmed`; both paper only), stubbed.
-- **Tests:** `crates/mandate-cli/tests/version.rs`, pending E10-16: payloads and records written
+  instrument snapshots, and commits `MandateConfirmed`; both paper only).
+- **Tests:** `crates/mandate-cli/tests/version.rs`: payloads and records written
   out from the vectors' shapes and read back through `Draft::parse`; the stream folded with
   `JournaledFact::from_record` and `ValidationContext::from_journal`, leaving only V-001 and V-002;
-  every refusal code, each writing nothing; a failing store committing nothing. The SPY mandate is
+  every refusal code, each writing nothing; a store failing at each write committing nothing. The SPY mandate is
   `crates/mandate-cli/tests/fixtures/spy_mandate.json`.
-- **Run:** `cargo nextest run -p mandate-cli --test version`; `cargo xtask ci pending`.
+- **Run:** `cargo nextest run -p mandate-cli --test version`.
 - **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
   takes the stream's latest confirmed version and a code bound to the agent and the version, and
   commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),

@@ -84,6 +84,7 @@ mod fold;
 mod gate;
 mod ids;
 mod intent;
+mod kill;
 mod margin;
 mod opening;
 mod orders;

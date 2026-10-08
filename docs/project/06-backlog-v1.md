@@ -2884,15 +2884,18 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
   for the startup reconciliation, so the plant gets weight only with the first opening through
   `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
-- **E7-4 slice 7's tests PR (stream K; moved from slice 6 when slice 6 took #400 round 2's two items), from [#373](https://github.com/kunwarshivam/mandate/pull/373)
-  round 1 (major 1):** §5.5 exempts kill-switch and mandate-limit flatten exits from the agent's
+- ~~**E7-4 slice 7's tests PR (stream K; moved from slice 6 when slice 6 took #400 round 2's two items), from [#373](https://github.com/kunwarshivam/mandate/pull/373)
+  round 1 (major 1):**~~ Done: the test landed with #655 and slice 7's agent-scoped implementation
+  makes it live, narrowing `climbs` and the gate together through `kill::mode_holds` ([DEC-485](decisions/DEC-485.md) item 12). §5.5 exempts kill-switch and mandate-limit flatten exits from the agent's
   mode, but slice 4a's ladder stops stepping while the agent is `paused` or `stopped`
   ([DEC-260](04-decision-log.md#decisions) (3)), and the gate's `mode_failure` holds every
   risk-reducing order at `paused` or stricter. Add a pending test: while the agent is paused, a
   flatten's ladder steps, its step cancel does not end the sequence, and `mode_failure` lets that
   flatten through. Slice 7 narrows `climbs` and the gate together to make it pass.
-- **E7-4 slice 7 (stream K; moved from slice 5 by the coordinator's ruling D3 on #174, then from slice 6), from
-  [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1 (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
+- ~~**E7-4 slice 7 (stream K; moved from slice 5 by the coordinator's ruling D3 on #174, then from slice 6), from
+  [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1 (minor 1):**~~ Done for a kill switch's confirmed
+  floor (`hand::an_owner_flattens_rung_rests_at_the_confirmed_floor`, DEC-485 item 11); an owner exit handed over as
+  an intent carries no floor until `OwnerExitRequested` reaches the executor. wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
   `exit_limit` and `next_rung`, which pass none today, so §5.6's "never below an owner exit's
   floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
   `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
@@ -2900,7 +2903,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 slice 5 (stream K), from slice 4b ([DEC-260](04-decision-log.md#decisions) (12)):**
   a crypto stop-limit is watchdogged as soon as a sane mark is below its limit price, once slice 5
   places stop-limits. The session condition landed with slice 5's session part (DEC-260 (15)).
-- **E7-4 slice 7's tests PR (stream K, moved from slice 6), from slice 4b (DEC-160 (11), (24)):** add pending tests
+- **E7-4 slice 7's tests PR (stream K, moved from slice 6), from slice 4b (DEC-160 (11), (24)):** the agent-scoped half
+  is done (`hand::an_agent_kill_switch_cancels_a_watchdog_exit_of_no_agent_and_sells_only_its_own_lots`, #655, live with
+  slice 7's agent scope; DEC-485 items 5 and 13); the account and workspace scopes' half stays open. Add pending tests
   that every kill switch whose scope covers an instrument cancels a working `*` watchdog exit
   there by its own `client_order_id` (`md-w-<record>`), an agent-scoped one included when it
   closes that instrument (§5.5's table), and that an agent-scoped kill switch never treats it as
@@ -3031,6 +3036,35 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   by that fill (rule 12). The same lag sizes §5.4's re-placement. Size from the broker's own
   report of the cancelled order, or hold the rung for it, before slice 2 lets protected
   positions exist outside the tests (DEC-160 (4)).
+- ~~**E7-4 slice 7's tests correction, before the agent-scoped kill switch's implementation can pass `xtask ci pending`
+  (stream K, [DEC-485](decisions/DEC-485.md))**~~ Done by [DEC-506](decisions/DEC-506.md) (#671, #672, #673): nine
+  corrected properties and both session hand tests go live with #668; E1, E2 and the confirmed owner's pre-market
+  pricing stay pending in `BEHAVIOUR_ONLY_TESTS` (DEC-485 items 11 and 17). The record as written before it: with the
+  switch live, no property script stops at its stub any more, so every executor property marked pending runs to its
+  own verdict. Those that now pass go live with the implementation (DEC-485 item 17).
+  These still need a DEC-77 tests correction, or a coordinator-approved `BEHAVIOUR_ONLY_TESTS` row, because each passes
+  vacuously or fails away from any stub on behaviour that predates the switch:
+  - the `risk_clock` readers (the #456 round 1 row above): `no_interval_exceeds_the_limit_without_an_alert` and
+    `no_submission_carries_an_intent_older_than_its_maximum_age` pass while checking nothing,
+    `no_recovery_submits_without_a_confirmed_absence` would fail any resubmission's window check, and
+    `every_risk_input_draft_carries_a_non_decreasing_risk_clock` fails on `FillApplied carries no risk_clock`;
+  - `a_client_order_id_is_a_function_of_the_intent_id_alone` rejects every script (`OrderSubmitted` version 2 carries no
+    `intent_id`; read it from the `OrderRequestRecorded` companion, DEC-446 rule 45) and aborts after 385 s;
+  - `no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding`: the rule-5 carve-out in the row below, and DEC-346
+    item 6's protective placement (minimal script: a protected entry partly filled, a kill switch, its cancel confirmed);
+  - `a_reservation_is_never_released_before_a_terminal_state` and `folding_the_journaled_drafts_reproduces_the_live_state`
+    (a broker-created leg `…-p…` in `pending_cancel`: the oracle says unreserved, the fold reserved),
+    `no_resting_order_is_submitted_inside_an_unprotected_interval` (a plain opening beside the protected lead's interval),
+    `protective_sell_quantity_never_exceeds_the_position_in_any_script` (an exit beside a bracket that completes), and
+    `protective_sell_quantity_never_exceeds_the_position` (passes at the pending gate's seed but fails at seeds 1 and 77:
+    an exit, its cancel confirmed, then fills leave CPHC protected for 1 against a position of 0):
+    each minimal script has no kill switch in it, so the oracle or the behaviour needs a ruling;
+  - `an_owner_exit_outside_the_session_prices_from_the_confirmed_bid`: the clock-0 row above; the suite's clock is the
+    regular session, so the confirmed bid and `extended_hours` cannot be reached.
+- **E7-4 (stream K), from slice 7 ([DEC-485](decisions/DEC-485.md) items 13 and 15):** raise a kill switch's close again
+  after `max_unprotected_s` ended its sell; register the executor's own intent ids (`w-<record>`, `k-<switch>-<n>`)
+  in journal spec §9.5's `IntentReceived`; and, with the account scope, add `KillSwitchActivated` to
+  `properties::every_catalogue_event_is_interpreted_or_named`'s `INTERPRETED`.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
@@ -3108,6 +3142,23 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   1 + 1 + 2 against a position of 3, so a short of 1 is possible; a whole-position exit gets there
   with no OCO. This is arithmetic: the harness cannot fill 01 behind the newer orders. Trading spec
   §5.4 (Σ protective sells ≤ position) and `AGENTS.md` rule 12.
+- **E7-4 (stream K), E5b from #668's round-2 review: the exit ladder steps a rung the broker has
+  not acknowledged, and another exit goes beside that cancel.** Script, the same on `main`
+  (`properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding`, seed 209):
+  `Intent 0 (AAPL open), Acknowledge, Fill, Intent 1 (CPHC protected open), Acknowledge, Fill, Fill,
+  Intent 3 (CPHC risk exit), Cancelled, Cancelled, Intent 2 (CPHC risk exit)`. At 46 the OCO's
+  cancel is confirmed and exit 03 is submitted; the second `Cancelled` re-delivers the OCO's
+  `canceled` (journaled `ignored`); at 54, 03 still `submitting`, its ladder step asks
+  `Cancel{03}` (`ladder_step`, `attempted: pending_cancel`, `ignored`), a cancel of an order the
+  broker has not acknowledged, and exit 02 is submitted in the same step while that cancel is
+  outstanding. CI's shard-81 script on #668 (`Intent 0, Acknowledge, Fill, Intent 1 (CPHC
+  protected), Acknowledge, Fill, Fill, Intent 2 (CPHC exit), Cancelled, Intent 0, Intent 3 (CPHC
+  exit)`) is the same shape. No short follows from it alone: the gate sizes 02 on the position less
+  every live sell, 03 included (`available`). Trading spec §5.6 (a rung steps by cancel, confirm,
+  resubmit) and §5.7 (an order the broker has not acknowledged is queried, never cancelled blind);
+  `AGENTS.md` rule 13. Decide whether the ladder may step an unacknowledged rung, and whether another
+  exit may go beside a rung's step cancel, then fix tests-first; until then the property is pending
+  under a `BEHAVIOUR_ONLY_TESTS` row. To be fixed before any real-money run.
 - **E7-4 (stream K), from E7-4 slice 7's tests correction: an unconfirmed owner exit pre-market
   cancels protection for a sell that cannot fill before 09:30 (open question for the
   coordinator).** At 2026-09-22 08:00 ET an owner kill switch without confirmation cancels the
