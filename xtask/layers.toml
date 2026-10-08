@@ -50,7 +50,13 @@
 impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
-planned = ["mandate-paper"]
+planned = [
+    "mandate-paper",
+    "mandate-identity-system",
+    "mandate-tenant",
+    "mandate-identity-seal",
+    "mandate-identity-testkit",
+]
 
 [crates.xtask]
 layer = "tool"
@@ -187,6 +193,12 @@ layer = 6
 safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "serde", "serde_json", "thiserror"]
+
+[crates.mandate-connections]
+layer = 6
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
 
 [crates.mandate-journal-pg]
 layer = 6
