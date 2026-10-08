@@ -114,6 +114,26 @@ impl MembershipLookup for Failing {
     }
 }
 
+/// A store that cannot answer at all: neither memberships, nor an organization's workspaces, nor a
+/// workspace's own record, so no pair can be checked (identity spec §4.5).
+pub(crate) struct Unreadable;
+
+impl sealed::Sealed for Unreadable {}
+
+impl MembershipLookup for Unreadable {
+    fn memberships(&self, _: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed> {
+        Err(LookupFailed)
+    }
+
+    fn workspaces(&self, _: OrgId) -> Result<BTreeSet<WorkspaceId>, LookupFailed> {
+        Err(LookupFailed)
+    }
+
+    fn workspace_org(&self, _: WorkspaceId) -> Result<Option<OrgId>, LookupFailed> {
+        Err(LookupFailed)
+    }
+}
+
 /// The control for the first `compile_fail` doctest: the same literal compiles inside the
 /// crate, so outside it fails on the private fields alone (rustdoc does not check error
 /// codes on stable).
@@ -170,7 +190,8 @@ fn the_doctests_literal_builds_inside_the_crate() {
 }
 
 /// The control for the `OrgContext` and `PrincipalContext` `compile_fail` doctests: the same
-/// literals compile inside the crate.
+/// literals compile inside the crate. Each accessor is read on two literals with opposite values,
+/// so no constant answer passes.
 #[test]
 fn the_org_and_principal_doctests_literals_build_inside_the_crate() {
     let org = OrgContext {
@@ -179,8 +200,8 @@ fn the_org_and_principal_doctests_literals_build_inside_the_crate() {
         kind: PrincipalKind::User,
         session: SessionRef(4),
         permission: Permission::KillSwitchOrg,
-        membership_unverified: false,
-        workspaces: Some(BTreeSet::new()),
+        membership_unverified: true,
+        workspaces: Some(BTreeSet::from([W1, W2])),
     };
     assert_eq!(
         (
@@ -198,17 +219,31 @@ fn the_org_and_principal_doctests_literals_build_inside_the_crate() {
             PrincipalKind::User,
             SessionRef(4),
             Permission::KillSwitchOrg,
-            false,
-            Some(&BTreeSet::new())
+            true,
+            Some(&BTreeSet::from([W1, W2]))
         )
     );
+    let outage = OrgContext {
+        membership_unverified: false,
+        workspaces: None,
+        ..org
+    };
+    assert_eq!(
+        (outage.membership_unverified(), outage.workspaces()),
+        (false, None)
+    );
+    let empty = OrgContext {
+        workspaces: Some(BTreeSet::new()),
+        ..outage
+    };
+    assert_eq!(empty.workspaces(), Some(&BTreeSet::new()));
     let own = PrincipalContext {
         principal: PrincipalId(3),
         kind: PrincipalKind::User,
         session: SessionRef(4),
         permission: Permission::OwnPasskey,
         scope: Scope::Principal,
-        membership_unverified: false,
+        membership_unverified: true,
     };
     assert_eq!(
         (
@@ -225,7 +260,12 @@ fn the_org_and_principal_doctests_literals_build_inside_the_crate() {
             SessionRef(4),
             Permission::OwnPasskey,
             Scope::Principal,
-            false
+            true
         )
     );
+    let verified = PrincipalContext {
+        membership_unverified: false,
+        ..own
+    };
+    assert!(!verified.membership_unverified());
 }
