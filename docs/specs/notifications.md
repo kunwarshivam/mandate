@@ -1,10 +1,10 @@
-# Notifications and Approval Channels Spec (v0.1, draft)
+# Notifications and Approval Channels Spec (v0.2, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed |
+| **Status** | Draft v0.2: round 1's minors fixed (E8-16, freeze rule); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 19 to 26 Proposed for the founder) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 19 to 26 Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent) |
 | **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
@@ -90,12 +90,12 @@ the dispatcher's own predicate (`AGENTS.md`, "Getting it right the first time").
 
 | ID | Invariant | How it is tested |
 |---|---|---|
-| NT-1 | **Payloads are opaque.** Anything that leaves the workspace deployment as a notice carries exactly a notice id (random, never a journal event id) and one text key from a closed set (§4.2), rendered through fixed templates. Never an instrument, side, quantity, price, order value, P&L, score, thesis, rule, deadline, agent name, mandate content, broker account, or personal data, the recipient's name included (`AGENTS.md` rule 6, [DEC-11](../project/04-decision-log.md#decisions), PX-6). The payload type has no field and no constructor that takes free text from domain data (rung 1) | Type test: the payload and every channel's rendered message are built only from `Notification`, whose id type has no constructor from an event id; a captured-payload test seeds a workspace whose instruments, agent names, rule ids, prices, and user names are unique canary strings, drives every notice kind through every channel adapter and the relay, and scans every captured byte for every canary (E8-5's acceptance) |
+| NT-1 | **Payloads are opaque.** Anything that leaves the workspace deployment as a notice carries exactly a notice id (random, never a journal event id) and one text key from a closed set (§4.2), rendered through fixed templates. Never an instrument, side, quantity, price, order value, P&L, score, thesis, rule, deadline, agent name, mandate content, broker account, or personal data, the recipient's name included (`AGENTS.md` rule 6, [DEC-11](../project/04-decision-log.md#decisions), PX-6). The payload type has no field and no constructor that takes free text from domain data (rung 1). A web push also travels in an envelope the relay and the push service read (§4.6): its `urgency` and TTL are fixed per class, never taken from a deadline or any subject's time, so they reveal at most the class; the push endpoint is an address, under NT-2 | Type test: the payload and every channel's rendered message are built only from `Notification`, whose id type has no constructor from an event id; a captured-payload test seeds a workspace whose instruments, agent names, rule ids, prices, and user names are unique canary strings, drives every notice kind through every channel adapter and the relay, and scans every captured byte for every canary (E8-5's acceptance); an envelope test that every relayed request's `urgency` and TTL equal its class's fixed pair (§4.6) whatever the subject's deadline |
 | NT-2 | **Addresses stay minimal and private.** A recipient is journaled and logged only as an opaque user id and a channel. The address is read from the vault at send time, passed to the one provider that needs it, and never journaled, logged, or put in a metric | Log, metric, and journal scans for canary addresses after a full run; a test that the dispatcher's only path to an address is the vault client |
 | NT-3 | **Approval happens only inside the workspace.** A grant, a skip, an acknowledgment, or any owner command reaches the runtime only as a control-stream event that workspace services write after authenticating the user in the workspace deployment ([mandate spec §6.4](mandate.md#64-approvals) "Responses"). No channel adapter, relay, provider webhook, email reply, or chat message can write one | Layering: the notification crates cannot depend on the control-stream writer (`xtask/layers.toml`); a fuzz test feeds every inbound path (replies, chat messages, button callbacks, provider webhooks) and asserts the control stream is unchanged |
 | NT-4 | **Links carry no authority.** A link holds the workspace app's fixed origin and the notice id, nothing else, so it reveals neither an event reference nor a creation time: no session, token, one-time code, or sign-in. Opening it requires sign-in; a grant requires step-up as mandate spec §6.1 and §6.4 require | Template test: every link matches `<origin>/n/<notice id>`; a property test that two notices about one cause get different ids and no id parses as a ULID of any journaled event; an end-to-end test opens a captured link with no session and reaches only the sign-in screen |
-| NT-5 | **Delivery never adds risk** (rule 3). Failure, delay, duplication, or loss of any notice changes no order, intent, limit, or mode. Its only effect on trading state is check 4 (`not_delivered`), which can only refuse a response. An approval nobody could see times out to `skip` | Fault injection: with every push channel failing, hung, or duplicating, a soak run's intents, gate decisions, and modes are identical to a run with perfect delivery, except asks that time out to `skip` |
-| NT-6 | **Nothing suppresses a safety notice.** Retry de-duplication, rate limits, coalescing, quiet hours, unsubscribe, and provider quotas never drop a `safety` notice. Every `safety` cause (§3.4) produces, within 60 seconds of its commit while the dispatcher runs, a send attempt on every configured push channel the recipient has not lost (§5.6) and an entry in the pull channels | Property test: random storms of safety events across quiet hours, rate limits, and provider 429s; an oracle that derives the causes from the subject streams on its own (one per `OwnerAlertSent`, one per kill-switch command however many streams journal `KillSwitchActivated`) counts the attempts per cause, recipient, and channel and requires every one within the bound |
+| NT-5 | **Delivery never adds risk** (rule 3). Failure, delay, duplication, or loss of any notice changes no order, intent, limit, or mode. Its only effect on trading state is check 4 (`not_delivered`), which can only refuse a response. An approval nobody could see times out to `skip`. Check 4 is the only effect because only an approval reads delivery, and an approval gates only a risk-adding action: no exit, protective order, risk exit, owner exit, or kill switch is ever gated by an approval (`AGENTS.md` rules 2 and 13). So the claim holds under any later autonomy change that keeps those rules, and one that gated a risk-reducing action on an approval would break rule 13 first | Fault injection: with every push channel failing, hung, or duplicating, a soak run's intents, gate decisions, and modes are identical to a run with perfect delivery, except asks that time out to `skip` |
+| NT-6 | **Nothing suppresses a safety notice.** Retry de-duplication, rate limits, coalescing, quiet hours, unsubscribe, and provider quotas never drop a `safety` notice. Every `safety` cause (§3.4) produces, within 60 seconds of its commit while the dispatcher runs, a send attempt on every configured push channel the recipient has not lost (§5.6) and an entry in the pull channels. A notice that joins a coalescing window (§5.4) meets the bound at the window's end: it joins only if its cause committed after the window's first message was sent, and the window ends 60 seconds after that send | Property test: random storms of safety events across quiet hours, rate limits, and provider 429s; an oracle that derives the causes from the subject streams on its own (one per `OwnerAlertSent`, one per kill-switch command however many streams journal `KillSwitchActivated`) counts the attempts per cause, recipient, and channel and requires every one within the bound |
 | NT-7 | **Quiet hours never delay a safety notice.** Quiet hours apply only to `action` push sends (suppressed, as mandate spec §6.4 says) and `info` push sends (deferred to the window's end). Pull channels are never affected, so a request stays listed and grantable | Property test over random quiet-hour windows, including ones spanning midnight and the DST changes (`mandate_approval::deliver_now`'s DST cases extended per class) |
 | NT-8 | **Every send is journaled, and only after its cause.** The dispatcher sends nothing about an event that is not committed, journals `NoticeIssued` before the first send, and journals every attempt's outcome as `NoticeAttempted` (recipient (opaque), channel, attempt, status, provider message id, time), all on the notice stream, of which it is the only writer (journal spec §2). A crash between a send and its record re-sends the notice (at least once); it never loses one | Crash injection at every step of a send, and a second dispatcher started for the same workspace (the older is `Fenced`, journal spec §5.1, and the newer re-sends); an oracle that reads only the journal finds, for every cause, a terminal outcome per recipient and channel |
 | NT-9 | **The notification path is never in the trade path.** No exit, protective order, risk exit, kill switch, owner exit, or gate decision waits on, is ordered after, or fails because of the dispatcher, a provider, or the relay (rule 13; [OPS-4](../design/infrastructure.md), [OPS-12](../design/infrastructure.md)) | Fault injection: the kill-switch and exit suites pass with the dispatcher hung and the relay unreachable |
@@ -132,9 +132,11 @@ The kind is an internal key. It is journaled and shown inside the workspace, and
 payload carries only the text key (§4.2), so a provider learns at most whether a notice is an
 approval, an alert, an account change, or the brief.
 
-For every kind except the two approval kinds, the trigger is the **subject**: the owner of the
-subject's stream writes an `OwnerAlertSent` naming it, with the kind, in the subject's own batch
-(§5.5), and that record is the notice's cause. The approval kinds' cause is the `ApprovalRequested`.
+For every kind except the two approval kinds and `channel_lost`, the trigger is the **subject**: the
+owner of the subject's stream writes an `OwnerAlertSent` naming it, with the kind, in the subject's
+own batch (§5.5), and that record is the notice's cause. The approval kinds' cause is the
+`ApprovalRequested`. `channel_lost`'s cause is the dispatcher's own `NoticeAttempted` that marks the
+address `unreachable` (§3.4, §5.6), so no other stream is written for it.
 
 | Kind | Trigger (committed subject event) | Class | Text key | Recipients |
 |---|---|---|---|---|
@@ -244,15 +246,19 @@ replaced by a notice id:
 | `account_changed` | "There was a change to your account or workspace access" |
 | `brief_ready` | "Your daily brief is ready" (D13) |
 
-- **The notice id** is 128 bits from the operating system's secure random source, minted by the
-  dispatcher when it issues the notice and journaled on `NoticeIssued` beside the cause. It is
+- **The notice id** is 128 bits from a secure random source, minted by the dispatcher when it
+  issues the notice and journaled on `NoticeIssued` beside the cause. The source is injected: the
+  operating system's CSPRNG in production, a deterministic fixture in tests (DEC-702), and
+  `NoticeId` has no constructor from an event id or any other journal value; parsing one takes
+  exactly 32 lowercase hex digits, which no ULID is. It is
   never a journal event id: a ULID's leading 48 bits are its creation time to the millisecond, so
   an event id in a payload would hand every provider the exact time of an approval or a limit
   breach. Inside the workspace the API resolves the notice id to its cause for an authorized user
   (workspace API spec §3.9, `GET /notices/{notice_id}`).
 - **What changes in code** (E8-9): `ApprovalRef::of_requested_event` stays as the in-workspace
   reference to the request, and stops being what a payload carries; the payload's id type becomes a
-  minted `NoticeId` with no constructor from an event id. M7 v0 sends nothing out of the workspace
+  minted `NoticeId` with no constructor from an event id. This is the one place that sentence
+  lives; workspace API spec §3.9 points here. M7 v0 sends nothing out of the workspace
   (`cli_inbox` only), so nothing has leaked a timestamp so far.
 - The kind, the class, the agent, the workspace, and the cause are not in the payload.
 - The text set is a closed enum. Adding a key is a spec change; no key may name a kind more
@@ -285,6 +291,12 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
   through its own domain; message retention at the provider set to the minimum it offers.
 - **No greeting by name** (NT-1). The address is the only personal data the provider receives.
 - **Unsubscribe:** `List-Unsubscribe` appears only on `info` mail (the brief). §5.7.
+- **No mail leaves while the footer is a placeholder** (rung 2, DEC-700 item 4). While the email
+  template's footer is `[[EMAIL-FOOTER]]`, the only mail transport that can be constructed is the
+  recorded-fixture transport, which writes each rendered message to a test capture and sends
+  nothing. A check in CI fails if any other mail transport exists while the placeholder stands, so
+  an adapter that reaches a mail server ships only in the same change that replaces the placeholder
+  with the wording DEC-438 item 24 leaves to the founder and counsel.
 
 ### 4.5 Chat
 
@@ -292,7 +304,13 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
   it lives in the vault and is never logged (rule 7). Link unfurling is turned off in the message.
 - **Telegram:** the platform's bot posts to the owner's chat. The owner links the chat by sending the
   bot a short-lived code that the web app or CLI shows to the signed-in owner; this is the only
-  inbound message the bot acts on, and it can only record a chat address for that owner.
+  inbound message the bot acts on, and it can only record a chat address for that owner. The
+  **linking code** (DEC-700 item 2) is 128 bits from the same secure random source as the notice id
+  (DEC-702), written as 26 base32 characters; it lives 10 minutes from when it is shown; it is
+  single use, spent by the first message that carries it whether or not the address is then
+  recorded; and showing a new code revokes the owner's earlier one. A code that is unknown,
+  expired, or spent records nothing and gets no reply that tells those cases apart. The residual is
+  §9's: whoever obtains a live code binds their own chat.
 - **Outbound only.** No buttons, no slash commands, no interactive callbacks. Every other inbound
   message, reaction, or callback is discarded unread (NT-3). The message is the rendered text and
   the link.
@@ -310,7 +328,14 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
   existing outbound mutual-TLS link ([HLD §4](../HLD.md#workspace-deployment)).
 - **The relay** accepts `{relay_id, endpoint, urgency, ttl_s, ciphertext}`. It checks that the
   ciphertext is at most 512 bytes and `urgency` is `high` (`action`, `safety`) or `normal`
-  (`info`), forwards, and returns the push service's status. It stores no ciphertext after the
+  (`info`), forwards, and returns the push service's status.
+- **The envelope is fixed per class** (NT-1, DEC-700 item 3). `urgency` and `ttl_s` are a pair per
+  class, the same whether the push goes through the relay or straight to the push service:
+  `action` `high` and 3 600 s, `safety` `high` and 86 400 s (its retry window), `info` `normal` and
+  21 600 s (its retry window). Neither is taken from an approval's deadline or any subject's time,
+  which would tell the relay and the push service when a request expires. The `endpoint` is the
+  subscription's push endpoint: an address, held and handled under NT-2, and the relay logs only
+  its `relay_id`. It stores no ciphertext after the
   attempt, logs opaque ids and counts only, and has no route into any workspace deployment. The size
   cap bounds what a compromised deployment could smuggle through it.
 - **The service worker** shows the rendered text and, on a tap, opens the link. It caches no
@@ -393,11 +418,15 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 ### 5.4 Coalescing and rate limits
 
 - **Safety notices are coalesced, never dropped.** The first `safety` notice to a recipient on a
-  channel goes at once. Further `safety` notices to the same recipient and channel within the next
-  60 seconds are combined into one message sent at the window's end, whose notice id is the first's
-  and whose link opens the alerts center. Every combined notice gets its own outcome record
-  pointing to the combined message's provider id, so the oracle of NT-6 counts it. No `safety`
-  notice waits more than 60 seconds.
+  channel goes at once, and its send opens a 60-second window. A further `safety` notice to the
+  same recipient and channel whose cause committed after that send, and before the window ends,
+  joins the window; the joined notices are combined into one message sent at the window's end,
+  whose notice id is the first joined notice's and whose link opens the alerts center. A cause that
+  committed before the first send (read in the same pass) goes in the first message itself. Every
+  combined notice gets its own outcome record pointing to the combined message's provider id, so
+  the oracle of NT-6 counts it. A joined notice meets NT-6's bound at the window's end, at most 60
+  seconds after the first send and so after its own commit (DEC-700 item 5); no `safety` notice
+  waits more than 60 seconds.
 - **Action notices** are bounded by the ask budget (10 `ApprovalRequested` per agent per risk day,
   mandate spec §6.4), one pending risk-adding approval per agent, and one reminder each.
 - **Info notices** push only the brief, once per recipient per risk day.
@@ -417,6 +446,20 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 new record for the same provider message id with `failed` and reason `bounced`; it never retracts an
 earlier `delivered`, and check 4 is satisfied by the pull channel in any case. Journal spec v0.12
 adds the notice stream and these records; E8-9's tests PR closes their payload schemas.
+
+**The stream type in code.** Journal spec v0.12 (its version history, and the stream table of
+journal spec §2) is where the notice stream's type is described. In code, `mandate_journal::StreamType`
+is a closed four-variant type (`Account`, `Agent`, `Control`, `Scheduler`) and `StreamId::parse`
+refuses an `ntf:` id, so E8-10's tests PR extends both first, before any dispatcher record can be
+appended.
+
+**`OwnerAlertSent`'s shape** (DEC-700 item 6). The mandate reference cases still journal a fired
+tripwire as `OwnerAlertSent {subject, text: "tripwire_fired"}`, the shape from before journal spec
+v0.12. This spec reads that record as `{subject, kind: risk_limit}`: `tripwire_fired` is neither a
+kind nor one of §4.2's text keys, a fired tripwire is the `risk_limit` kind (§3.2), and the text key
+`attention_needed` is derived from the kind when a notice is rendered, never journaled on the record.
+The reference cases and the code change to `kind` in E8-9 (slice S4); until then the cases'
+`text` member is read as that kind.
 
 ### 5.6 Bounces, complaints, and lost addresses
 
@@ -554,6 +597,7 @@ stateDiagram-v2
 |---|---|---|---|
 | **Phisher** | Sends a lookalike email or chat message ("Approve now") linking to a lookalike origin to harvest a sign-in | Our notices carry only generic text and a link to the fixed origin; DMARC `p=reject` stops spoofing of our exact domain; passkeys are bound to the real origin and fail on a lookalike; no notice ever asks for a reply, a code, or a password, and the app says so on X3 | A user who signs in with a password-based OIDC provider on a lookalike can lose that password; step-up for live grants still needs the passkey |
 | **Someone with the user's email or chat account** | Reads notices; follows links; tries a password reset | They learn that an approval or alert exists, and its timing. A link opens only a sign-in; nothing is approved by reply (NT-3); recovery must not rest on email alone (§8, identity spec) | Activity timing is visible to them |
+| **Someone who obtains a Telegram linking code** (shoulder-surfing, a shared screen, a screenshot) | Sends the code to the bot from their own chat before the owner does | The code lives 10 minutes, is single use, and a new code revokes the old one (§4.5); it can only record a chat address, never act or read content; the owner's own later attempt with that code records nothing | Whoever uses a live code first binds their own chat and receives the opaque notices (generic text and a link that opens only a sign-in) until the owner links their own chat with a new code, which replaces the address |
 | **A leaked Slack webhook** | Posts fake messages into the owner's channel | They can post phishing text but not act; same defences as the phisher | Phishing surface |
 | **Malicious relay operator or push service** | Reads, drops, delays, replays, or forges push | Reads only ciphertext of an opaque payload. Dropping or delaying turns into a `skip` or a later alert, and email and chat do not pass through the relay. A replay is a duplicate. A forged push can only show our generic text or a link to the fixed origin the service worker opens | Traffic analysis: the count and timing of notices per workspace reveal activity levels (§12 item 4) |
 | **Malicious insider at the platform** | Tries to approve through the notification path, or to read content from it | The notification path has no write to the control stream (NT-3); check 3 refuses any actor that is not a listed user; there is no content in the path to read | Insider risks elsewhere belong to the threat model |
@@ -569,16 +613,41 @@ stateDiagram-v2
 
 ## 10. What exists and what is planned
 
+**Where the code goes** ([DEC-701](../project/decisions/DEC-701.md)). Two new crates, both
+safety-critical (notification payloads), each with its `xtask/layers.toml` entry, CODEOWNERS line,
+and lint header in the change that creates it:
+
+- **`mandate-notify`**, a pure layer-1 crate: the notice id and its source trait, the kinds, the
+  classes, the text keys, the payload, the channel templates, the quiet-hours rule by class, the
+  retry schedule, the coalescing fold, and the provider trait. It does no I/O and depends on no
+  impure crate. Quiet hours' window arithmetic stays `mandate_approval::deliver_now`'s (DEC-165
+  item 12): `mandate-notify` maps a class and the window's verdict to send, suppress, or defer, and
+  the dispatcher computes the verdict, so there is one window rule and one time base.
+- **`mandate-dispatcher`**, the process crate: tails the journal, mints notice ids, resolves
+  recipients, reads addresses through the vault client, drives the adapters, and appends to the
+  notice stream. Its `forbidden_internal` list in `xtask/layers.toml` bars it from reaching, by any
+  chain of dependencies, every crate that writes an agent, account, or control stream
+  (`mandate-runtime`, `mandate-executor`, `mandate-mcp`, `mandate-shell`, `mandate-cli`,
+  `mandate-paper`, and the broker connectors), which is NT-3's layering test. The journal crate it
+  must use also builds control-stream drafts, so its appends go through a writer that takes only an
+  `ntf:` stream id, which E8-10's tests pin.
+
+The notice id's source ([DEC-702](../project/decisions/DEC-702.md)) is a trait in `mandate-notify`;
+`mandate-dispatcher` implements it over the operating system's CSPRNG, and tests inject a
+deterministic fixture, so every id-dependent test replays.
+
 | Piece | Exists today | Planned |
 |---|---|---|
-| Approval payload | `mandate_approval::Notification` with `ApprovalRef` (ULID only) and `GenericText::ApprovalNeeded`; `notification_payload` gives `{"subject", "text"}`, with the event's ULID as subject | E8-9 replaces the subject with a minted notice id (`{"notice", "text"}`) and adds `attention_needed`, `account_changed`, and `brief_ready` |
+| Approval payload | `mandate_approval::Notification` with `ApprovalRef` (ULID only) and `GenericText::ApprovalNeeded`; `notification_payload` gives `{"subject", "text"}`, with the event's ULID as subject | E8-9 moves the payload into `mandate-notify`, replaces the subject with a minted notice id (`{"notice", "text"}`), and adds `attention_needed`, `account_changed`, and `brief_ready`; `ApprovalRef` stays in `mandate-approval` (§4.2) |
+| Notice id | None | `mandate_notify::NoticeId`, minted through the injected source (DEC-702): no constructor from an event id |
+| Notice stream type | `mandate_journal::StreamType` has four closed variants and `StreamId::parse` refuses `ntf:` (§5.5) | E8-10's tests PR adds the notice stream type first (journal spec v0.12) |
 | Alert payload | `NotificationRef { subject_event, message_key: &'static str }` in `mandate-runtime` and `mandate-executor`, emitted as `Effect::Notify` with nine executor keys and one runtime key | E8-9 replaces `message_key` with the closed kind enum (rung 1: a `&'static str` can be any literal) and maps each kind to a text key |
 | Quiet hours | `mandate_approval::deliver_now` (push vs `cli_inbox`, DST-tested) | E8-10 judges by class (§5.8) |
 | Pull channel | `cli_inbox`: `ApprovalDelivered` in the request's own batch; `mandate approvals list` and `show` | `web_inbox` with the web app (E8-13) |
 | Delivery records | `ApprovalDelivered` written by the runtime; `OwnerAlertSent` catalogued but **not written by anything**: executor alerts reach only the tracer's report today; no notice stream | E8-9 has each stream owner write `OwnerAlertSent`; E8-10 adds the notice stream and writes every outcome (NT-8) |
-| Dispatcher | None. The shell collects alerts into the tracer report | E8-10, as its own process with its own stream |
+| Dispatcher | None. The shell collects alerts into the tracer report | E8-10: `mandate-dispatcher`, its own process with its own stream, over `mandate-notify`'s pure core |
 | Identity and account-security notices | None; the identity events are proposed in #556 | E8-10 issues them once E9-7 journals the events |
-| Email, chat | None | E8-11, E8-12 (M7) |
+| Email, chat | None | E8-11, E8-12 (M7). Email has only the recorded-fixture transport while `[[EMAIL-FOOTER]]` stands (§4.4) |
 | Web push, relay | None; the relay is an HLD box | E8-14 (M10) |
 | Deep-link landing | None; the web app renders fixtures (DEC-200) | E8-13 (M9/M10), with the workspace API and identity specs |
 | SMS, phone, escalation chain | None | E8-7 |
@@ -589,7 +658,10 @@ stateDiagram-v2
 ## 11. Decisions
 
 [DEC-438](../project/decisions/DEC-438.md) records them. Items 1 to 18 and 27 to 29 are reversible engineering
-readings the agent accepted; most only tighten what the specs already say. Items 19 to 26 are the
+readings the agent accepted; most only tighten what the specs already say. v0.2's readings are
+[DEC-700](../project/decisions/DEC-700.md), with the code layout in
+[DEC-701](../project/decisions/DEC-701.md) and the notice id's source in
+[DEC-702](../project/decisions/DEC-702.md); each only tightens (DEC-176). Items 19 to 26 are the
 founder's (DEC-79: spending, vendors, legal wording, or a new restriction); until each is decided,
 the most conservative option holds: `cli_inbox` only, no vendor, no spend.
 
