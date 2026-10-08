@@ -2325,7 +2325,13 @@ const STUB_MARKERS: [&str; 5] = [
 /// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
 /// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
 /// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
+///
+/// The eight `notices` rows are E8-9 slice S2's (DEC-720). They check `StreamId::parse`,
+/// `Draft::parse`, and `check_batch`, the journal's existing checks, so there is no stub to stop
+/// at: until S2's implementation, the journal refuses `ntf:` as a stream id and `OwnerAlertSent` off
+/// the control stream, which is the behaviour they fail on. S2's implementation deletes the eight
+/// rows with the `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 21] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2374,6 +2380,38 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
     (
         "crates/mandate-runtime/tests/answer_records.rs",
         "decided_by_now_is_null_unless_the_reclassification_asks",
+    ),
+    (
+        "crates/mandate-journal/tests/notices.rs",
+        "the_notice_stream_id_parses_to_its_own_stream_type",
+    ),
+    (
+        "crates/mandate-journal/tests/notices.rs",
+        "the_alert_and_notice_records_are_catalogued_and_closed_on_their_streams",
+    ),
+    (
+        "crates/mandate-journal/tests/notices.rs",
+        "every_member_is_required_and_no_unlisted_member_is_admitted",
+    ),
+    (
+        "crates/mandate-journal/tests/notices.rs",
+        "no_alert_or_notice_record_can_carry_trading_content",
+    ),
+    (
+        "crates/mandate-journal/tests/notices.rs",
+        "the_member_types_refuse_event_ids_and_foreign_vocabulary",
+    ),
+    (
+        "crates/mandate-journal/tests/notices.rs",
+        "every_kind_and_vocabulary_member_is_admitted_where_dec_720_allows_it",
+    ),
+    (
+        "crates/mandate-journal/tests/notices.rs",
+        "the_consistency_rules_refuse_at_their_paths",
+    ),
+    (
+        "crates/mandate-journal/tests/notices.rs",
+        "the_batch_rule_binds_an_alert_to_an_earlier_subject_in_its_batch",
     ),
 ];
 
