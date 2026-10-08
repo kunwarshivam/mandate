@@ -314,8 +314,8 @@ break-glass. Their columns are printed so the copy stays exact. The cells read b
 | Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
 | Revoke a client | | | | | ✓ | ✓ | | | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
-| Add or remove one's own notification address (a push subscription; later an email or chat address) | S | own | own | own | own | own | own | own | own | | | | |
-| List one's own workspace memberships | | own | own | own | own | own | own | own | own | | | | |
+| Add or remove one's own notification address (a push subscription; later an email or chat address) | S | self | self | self | self | self | self | self | self | | | | |
+| List one's own workspace memberships | | self | self | self | self | self | self | self | self | | | | |
 | Leave: deactivate one's own membership | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
 | Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | | | |
