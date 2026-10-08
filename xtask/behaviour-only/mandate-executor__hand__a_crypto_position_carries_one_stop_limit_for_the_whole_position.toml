@@ -1,0 +1,9 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_crypto_position_carries_one_stop_limit_for_the_whole_position"
+reason = """
+E7-4's protective sequence (DEC-140's addendum, the coordinator's ruling (d) on #174): one of slice 5's
+crypto stop-limit cases, which sees no stop-limit or whole-share protection where E7-4's
+protective sequence belongs, instead of a stub's report. It still runs and fails, and the slice
+that implements it deletes this file with its `#[ignore]` line; slice 2 deleted the four bracket
+and partial-fill OCO rows (DEC-346).
+"""
