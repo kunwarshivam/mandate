@@ -184,6 +184,37 @@ the owl, the rules and the record.
 - [ ] **Tour.mp4** is the one pre-rendered thing in the product and the one place a video tool
       belongs; its re-render with the product's owls is already tracked.
 
+## I. Process and codebase (the founder, 2026-10-08: "let's fix all of it")
+
+The speed has become too slow; the process must not be the bottleneck. Once #669 merges, the
+process is revised, and decisions already taken may be revised with it.
+
+- [ ] **One branch per plan item.** A short-lived branch and PR per item, each with its DEC, so the
+      review agent and CI judge one change; the plan file is the unit of work.
+- [ ] **Scenarios as journals.** A fixture scenario is a journal of events from which the
+      workspace, the market and the timeline are derived, so a scenario cannot contradict itself;
+      the 2%-step test is the tripwire until then.
+- [ ] **`npm run shots`.** Every route × scenario × two widths × two themes into a folder, and the
+      golden path as one Playwright spec that writes a contact sheet, so a weekly critique and a
+      founder's review are one command away.
+- [x] **The tracker on one page.** `08-work-tracker.md` is where things stand; `11-work-log.md`
+      is how they got there. (2026-10-08)
+- [ ] **A decisions index by area** (web, journal, risk, process) so an agent finds what was
+      decided before deciding it again.
+- [ ] **A first-load budget per route in CI.** The largest chunk is 906 KB and `static/chunks`
+      4.2 MB; measure, then budget: Kumo's reach, Motion, Lightweight Charts only where a chart is.
+- [ ] **The real model behind set-up** (DEC-476 item 7). The hero flow runs on a fixture parser
+      until the founder decides the model, the route, the spend cap and the data terms.
+- [ ] **Three nouns** for the owner's screens: agent, rules, account; the rest stay in audit and
+      settings. A vocabulary decision, written once.
+- [ ] **Dependabot:** six alerts on `main`, one high.
+- [ ] **A screen-reader pass** over the golden path.
+- [ ] **A read-aloud copy pass**, cutting a third.
+- [ ] **A faster process** (to design after #669 merges): where the DEC-77 sequence and the
+      cross-model review are required (safety-critical crates) and where a lighter path serves
+      (reversible product changes under DEC-79), what a session must leave behind (one tracker
+      row, one log paragraph), and how a founder reviews from pictures rather than diffs.
+
 ## Learnings (not action items)
 
 - **The cringe test.** Quirk is a consistent world; cringe is a joke the product tells about
