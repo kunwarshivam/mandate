@@ -1,0 +1,66 @@
+//! The model host's content object, output mapping and `as_of` (E15-13 M1a; DEC-503, DEC-504,
+//! DEC-518). The oracles are written out by hand: the content object as canonical JSON text with
+//! the listed files' SHA-256 read from disk, and every time from NYSE's published hours.
+
+mod common;
+
+use common::{Case, ID, RISING, VERSION, WEEK, at, long, oracle_content};
+use mandate_canon::Digest;
+use mandate_modelhost::{Content, Evaluation, Refusal, Signal, content};
+use mandate_time::ExchangeCalendar;
+
+/// DEC-504 item 2 and DEC-518: the host computes the content object from the bytes it was built
+/// with, so it equals the object written from the files on disk; it has content for no other model.
+#[test]
+#[ignore = "pending E15-13"]
+fn the_content_object_lists_the_source_bytes_the_host_was_built_from() {
+    let text = oracle_content();
+    let hash = Digest::of(text.as_bytes());
+    let want = Ok(Content {
+        canonical: text.into_bytes(),
+        hash,
+    });
+    assert_eq!(content(ID, VERSION), want, "DEC-504 item 1's object");
+    for (id, version) in [(ID, "1.0.1"), ("quant.other", VERSION)] {
+        let unknown = Err(Refusal::UnknownModel);
+        assert_eq!(content(id, version), unknown, "{id} {version}");
+    }
+}
+
+/// DEC-157 item 4: `Long` is the one output; `Flat`, a tie included, is none (100.5 and 100 are
+/// not above 304/3 and 100).
+#[test]
+#[ignore = "pending E15-13"]
+fn a_long_is_the_one_output_and_a_flat_or_a_tie_is_none() {
+    let rising = Case::rising().run();
+    assert_eq!(rising, Ok(long("2026-10-07T20:00:00Z")), "102 above 304/3");
+    for prices in [["103", "101", "100"], ["100"; 3]] {
+        let flat = Case::new(WEEK, prices, "2026-10-07T21:00:00Z").run();
+        assert_eq!(flat, Ok(Evaluation::NoOutput(Signal::Flat)), "{prices:?}");
+    }
+}
+
+/// `as_of` is the end of the last completed regular session in the calendar handed in, never the
+/// run clock (X-3, mandate spec §8.2): an early close's 13:00 EST with the holiday before it
+/// skipped, a Monday morning reading Friday's 16:00 EDT, and a parsed calendar's own early close.
+#[test]
+#[ignore = "pending E15-13"]
+fn as_of_is_the_last_completed_sessions_close_in_the_calendar_given() {
+    let thanksgiving = ["2025-11-25", "2025-11-26", "2025-11-28"];
+    let early = Case::new(thanksgiving, RISING, "2025-11-28T19:00:00Z").run();
+    assert_eq!(early, Ok(long("2025-11-28T18:00:00Z")), "the early close");
+    let to_friday = ["2026-09-30", "2026-10-01", "2026-10-02"];
+    let monday = Case::new(to_friday, RISING, "2026-10-05T14:00:00Z").run();
+    assert_eq!(monday, Ok(long("2026-10-02T20:00:00Z")), "Friday's close");
+    let header = "valid 2026-01-01 2026-12-31\nhours 04:00 09:30 16:00 20:00\n";
+    let text = format!("{header}early_close 2026-10-07 13:00 17:00 t\n");
+    let mut parsed = Case::rising();
+    parsed.calendar = ExchangeCalendar::parse(&text).unwrap();
+    parsed.now = at("2026-10-07T17:30:00Z");
+    let given = parsed.run();
+    assert_eq!(
+        given,
+        Ok(long("2026-10-07T17:00:00Z")),
+        "the given calendar's close"
+    );
+}
