@@ -73,7 +73,7 @@ fn rfc_random() -> Scripted {
 }
 
 fn subject() -> Result<VapidSubject, WebPushError> {
-    VapidSubject::parse("mailto:push@example.com")
+    VapidSubject::parse("mailto:push@example.invalid")
 }
 
 /// The receiver's side of RFC 8291 §3 and RFC 8188 §2, written apart from the sender's.
@@ -193,6 +193,13 @@ fn a_notice_decrypts_with_the_subscriptions_key_to_its_padded_payload() -> Resul
         Some(b64(SALT).as_slice()),
         "the salt is the second draw"
     );
+    let brief = PushPlaintext::new([0xab; 16], PushText::BriefReady);
+    let shorter = encrypt(&subscription(ENDPOINT)?, &brief, &mut rfc_random())?;
+    assert_eq!(
+        shorter.len(),
+        body.len(),
+        "the text key's length never shows"
+    );
     Ok(())
 }
 
@@ -219,7 +226,7 @@ fn the_vapid_token_verifies_against_the_signers_public_key() -> Result<(), WebPu
     let claims = String::from_utf8(b64(claims)).unwrap_or_default();
     let exp = NOW + 43_200;
     let want = format!(
-        r#"{{"aud":"https://push.example.net:8443","exp":{exp},"sub":"mailto:push@example.com"}}"#
+        r#"{{"aud":"https://push.example.net:8443","exp":{exp},"sub":"mailto:push@example.invalid"}}"#
     );
     assert_eq!(claims, want, "aud is the origin, exp is 12 h ahead");
     let verifying = VerifyingKey::from_sec1_bytes(&b64(key)).unwrap_or_else(|_| unreachable!());
