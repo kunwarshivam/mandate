@@ -653,13 +653,14 @@ fn workspace_packages(meta: &Metadata) -> Vec<&Package> {
 /// harness's dependency list into the full set of packages its suites can fail on (DEC-497),
 /// without anyone auditing which call reaches which layer.
 fn workspace_closure(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
+    let dirs = member_dirs(meta);
     let direct: BTreeMap<&str, Vec<&str>> = workspace_packages(meta)
         .into_iter()
         .map(|pkg| {
             let deps = pkg
                 .dependencies
                 .iter()
-                .filter(|dep| dep.path.is_some())
+                .filter(|dep| on_member(dep, &dirs))
                 .map(|dep| dep.name.as_str())
                 .collect();
             (pkg.name.as_str(), deps)
@@ -678,6 +679,22 @@ fn workspace_closure(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
             ((*package).to_owned(), reached)
         })
         .collect()
+}
+
+/// Each workspace member's directory, by name: where a path dependency on it must point.
+fn member_dirs(meta: &Metadata) -> BTreeMap<&str, &Path> {
+    workspace_packages(meta)
+        .into_iter()
+        .filter_map(|pkg| Some((pkg.name.as_str(), pkg.manifest_path.parent()?)))
+        .collect()
+}
+
+/// Whether `dep` is a path dependency on the workspace member it names, by that member's
+/// directory, not by name alone: a crate outside the workspace can take a member's name (DEC-525).
+fn on_member(dep: &Dependency, dirs: &BTreeMap<&str, &Path>) -> bool {
+    dep.path
+        .as_deref()
+        .is_some_and(|path| dirs.get(dep.name.as_str()) == Some(&path))
 }
 
 fn workspace_has_library() -> Result<bool> {
@@ -735,6 +752,7 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
     let packages = workspace_packages(meta);
     let names: BTreeSet<&str> = packages.iter().map(|p| p.name.as_str()).collect();
     let closure = workspace_closure(meta);
+    let dirs = member_dirs(meta);
     let mut problems = Vec::new();
 
     for listed in policy.crates.keys() {
@@ -770,11 +788,15 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
             ));
         }
         for dep in &pkg.dependencies {
-            if dep.path.is_some() && !names.contains(dep.name.as_str()) {
+            if let Some(path) = dep.path.as_deref()
+                && !on_member(dep, &dirs)
+            {
                 problems.push(format!(
-                    "`{}` has a path dependency on `{}`, which is not a workspace member, so the \
-                     layers cannot see what it reaches (DEC-525)",
-                    pkg.name, dep.name
+                    "`{}` has a path dependency on `{}`, which is not a workspace member at {}, so \
+                     the layers cannot see what it reaches (DEC-525)",
+                    pkg.name,
+                    dep.name,
+                    path.display()
                 ));
                 continue;
             }
@@ -3361,6 +3383,46 @@ mod tests {
             assert!(
                 problems.iter().any(|p| p.starts_with(named)),
                 "{kind:?}: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A path dependency that names a workspace member but points at another directory, a crate
+    /// outside the workspace that took the member's name, is refused of any kind, and the closure
+    /// does not follow it as that member (#697 review, round 2).
+    #[test]
+    fn a_crate_outside_the_workspace_with_a_members_name_is_a_problem() -> Result<()> {
+        let layers = [
+            ("mandate-cli", 9),
+            ("mandate-alpaca", 7),
+            ("mandate-liquidity", 1),
+        ];
+        let forbidden: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpaca"])];
+        let rules = policy(&layers, &forbidden, &[]);
+        for kind in [None, Some("dev"), Some("build")] {
+            let mut cli = member("mandate-cli", &[("mandate-liquidity", kind)]);
+            for dep in &mut cli.dependencies {
+                dep.path = Some(PathBuf::from("/nowhere/tools/evader"));
+            }
+            let shadowed = workspace(vec![
+                cli,
+                member("mandate-alpaca", &[]),
+                member("mandate-liquidity", &[]),
+            ]);
+            let problems = layer_problems(&rules, &shadowed)?;
+            let named = "`mandate-cli` has a path dependency on `mandate-liquidity`, which is not a \
+                         workspace member at /nowhere/tools/evader";
+            assert!(
+                problems.iter().any(|p| p.starts_with(named)),
+                "{kind:?}: {problems:?}"
+            );
+            let closure = workspace_closure(&shadowed);
+            let reached: Vec<&str> = closure["mandate-cli"].iter().map(String::as_str).collect();
+            assert_eq!(
+                reached,
+                ["mandate-cli"],
+                "{kind:?}: the shadow is not the member"
             );
         }
         Ok(())
