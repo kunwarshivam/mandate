@@ -300,6 +300,42 @@ fn bad_stream_property() {
     assert!(!why.contains(secret) && !out.exists(), "{why}");
 }
 
+/// With no database: an existing file is refused before the journal is read, and an unreachable
+/// journal's error is reported; each refusal carries its code, none names any part of the DSN (its
+/// user, password or host), and nothing is created beside the existing file, which is left as it
+/// was (DEC-522 item 3; `AGENTS.md` rule 7).
+#[test]
+#[ignore = "pending E10-16"]
+fn no_refusal_names_the_dsn_or_creates_a_file() {
+    let sentinels = [
+        "v0-user-sentinel",
+        "v0-password-sentinel",
+        "v0-host-sentinel.invalid",
+    ];
+    let [user, password, host] = sentinels;
+    let dsn = format!("postgres://{user}:{password}@{host}:1/j");
+    let dir = scratch("sentinels");
+    std::fs::create_dir_all(&dir).unwrap();
+    let kept = dir.join("kept.jsonl");
+    std::fs::write(&kept, b"kept").unwrap();
+    let cases = [
+        (kept.clone(), "export_file_exists"),
+        (dir.join("new.jsonl"), "the journal failed: unavailable"),
+    ];
+    for (out, code) in cases {
+        let why = refusal(export(&export_args(&dsn, CONTROL, &out), &mut Vec::new()));
+        assert!(why.contains(code), "{code}: {why}");
+        let named: Vec<&str> = sentinels.into_iter().filter(|s| why.contains(s)).collect();
+        assert!(named.is_empty(), "{code} names {named:?}: {why}");
+    }
+    let left: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left, ["kept.jsonl"], "nothing is created");
+    assert_eq!(std::fs::read(&kept).unwrap(), b"kept");
+}
+
 /// After [`bad_stream_property`], a database holding the control-stream vectors, its DSN, and a
 /// store holding their artifacts; `None` where `TestDb` skips.
 fn seeded(name: &str) -> Option<(TestDb, String, PathBuf)> {
