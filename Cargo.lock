@@ -1400,6 +1400,7 @@ dependencies = [
 name = "mandate-domain"
 version = "0.0.0"
 dependencies = [
+ "mandate-canon",
  "thiserror",
 ]
 
@@ -1621,6 +1622,7 @@ dependencies = [
  "mandate-journal-pg",
  "mandate-liquidity",
  "mandate-marketdata",
+ "mandate-modelhost",
  "mandate-num",
  "mandate-risk",
  "mandate-runtime",

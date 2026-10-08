@@ -2548,6 +2548,12 @@ const STUB_MARKERS: [&str; 5] = [
 /// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
 /// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
 ///
+/// The two rows for journal spec v0.18's `policy_overlay` label are J3's (DEC-536). They check
+/// `Draft::parse`, the journal's existing draft check, against the vectors' `policy_overlay`
+/// section. There is no stub to stop at: until J3's implementation adds the label, the journal
+/// answers `non_canonical`, which is the behaviour they fail on. J3's implementation deletes the
+/// two rows with the `#[ignore]` lines.
+///
 /// Four more `hand` rows are E1's sizing paths (DEC-532; backlog: "E7-4 (stream K), E1 from E7-4
 /// slice 7's tests correction"): `replace` after an exit, `new_day`'s re-placement, a passive
 /// exit's rest and `re_cover` each size protection on a position that includes a working bracket's
@@ -2559,7 +2565,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// of, so they fail on what today's code does: the lint job does not yet run the check, and
 /// `ci_files` neither reads `.github/actions` and `.cargo/config.toml` nor tolerates an absent
 /// directory. X1's implementation deletes both rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 19] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 21] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2608,6 +2614,14 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 19] = [
     (
         "crates/mandate-runtime/tests/answer_records.rs",
         "decided_by_now_is_null_unless_the_reclassification_asks",
+    ),
+    (
+        "crates/mandate-journal/tests/policy_overlay.rs",
+        "every_policy_overlay_valid_draft_parses",
+    ),
+    (
+        "crates/mandate-journal/tests/policy_overlay.rs",
+        "every_policy_overlay_invalid_draft_is_refused_with_its_reason_at_its_path",
     ),
     (
         "crates/mandate-executor/tests/hand.rs",
