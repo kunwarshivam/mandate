@@ -3,6 +3,16 @@
 Agents land their own work (DEC-79). Green CI is necessary, not sufficient: an independent review
 decides.
 
+**Which lane** ([DEC-516](../../../../docs/project/decisions/DEC-516.md)). A change on a
+safety-critical path, a spec, a schema, a reference case, CI, xtask, a workflow, `CODEOWNERS`,
+`xtask/layers.toml`, or `web/`'s safety surface (Stop, Approve and Skip, the kill-switch and release
+records, the step-up, notification payloads, sign-in) takes every step below. Everything else is
+the **light lane**: one item per PR (a plan tick or a story, named in the title), the author's
+checks in the body, the pictures from `npm run shots` for a screen change, green CI, then merge;
+the independent review reads the diff after the merge and posts findings as backlog rows or a fix
+PR, and reverts a merge that touched the safety surface. Item 1's merge rule waits for the
+founder's yes; until then the light lane still takes step 3 before merging.
+
 1. Open every PR against `main`. Never base a PR on another PR's branch: a merge into that branch
    never reaches `main`. When work is sequenced (tests, implementation, status), open the next PR
    only after the previous one has merged, from the updated `main`.

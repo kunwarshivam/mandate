@@ -198,13 +198,11 @@ impl Both {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn an_unreachable_database_is_unavailable_whatever_the_artifacts() {
     unreachable_database_property();
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn a_missing_or_changed_object_is_refused_until_it_is_stored() {
     let Some(mut both) = Both::new() else { return };
     for (name, paths) in CHECKED {
@@ -235,7 +233,6 @@ fn a_missing_or_changed_object_is_refused_until_it_is_stored() {
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn every_invalid_reference_is_refused_as_the_reference_cases_say() {
     let Some(mut both) = Both::new() else { return };
     let fx = fixture();
@@ -260,7 +257,6 @@ fn every_invalid_reference_is_refused_as_the_reference_cases_say() {
 
 /// Journal spec §5.1's order: idempotency, then the objects, then fencing and the head check.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_object_check_follows_idempotency_and_precedes_fencing_and_the_head_check() {
     let Some(mut both) = Both::new() else { return };
     let (d, all, none) = (draft("decision"), stored(), Artifacts::new());
@@ -306,7 +302,6 @@ enum Damage {
 /// sometimes another, give the memory journal's outcomes and the outcome each step was built to
 /// have, from this test's own record of what committed.
 #[test]
-#[ignore = "pending E7-19"]
 fn random_sessions_match_the_memory_journal_and_their_construction() {
     let Some(both) = Both::new() else { return };
     drop(both);
