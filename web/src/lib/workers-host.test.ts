@@ -104,6 +104,37 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(hostingProblems(tree({ [workflow]: yml.replace("WRANGLER_SEND_METRICS:", "SUPABASE_SECRET: ${{ secrets.SUPABASE_SECRET }}\n          WRANGLER_SEND_METRICS:") }))).toEqual(only("secret"));
     expect(yml).not.toMatch(/CLOUDFLARE_(API_TOKEN|ACCOUNT_ID)|secrets\./);
   });
+
+  it.skip("pending E11-9: flags a workflow that runs wrangler deploy or wrangler login, and passes one that only dry-runs", () => {
+    expect(hostingProblems(tree())).toEqual([]);
+    const workflow = "../.github/workflows/web.yml";
+    const yml = real(workflow);
+    expect(yml).toContain("wrangler deploy --dry-run");
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run --outdir dist\n` }))).toEqual([]);
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy\n` }))).toEqual(only("wrangler deploy"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --minify\n` }))).toEqual(only("wrangler deploy"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run && npx wrangler deploy\n` }))).toEqual(only("wrangler deploy"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler login\n` }))).toEqual(only("wrangler login"));
+    expect(yml).not.toMatch(/wrangler login/);
+  });
+
+  it.skip("pending E11-9: flags an account ID, a secret-looking value or a vars token committed in wrangler.jsonc, and passes the clean one", () => {
+    expect(hostingProblems(tree())).toEqual([]);
+    const text = wrangler();
+    expect(hostingProblems(tree({ "wrangler.jsonc": text }))).toEqual([]);
+    const config = JSON.parse(text.replace(/^\s*\/\/.*$/gm, ""));
+    const planted = (change: (c: Record<string, unknown>) => void) => {
+      const copy = structuredClone(config);
+      change(copy);
+      return hostingProblems(tree({ "wrangler.jsonc": JSON.stringify(copy, null, 2) }));
+    };
+    expect(planted((c) => (c.account_id = "0123456789abcdef0123456789abcdef"))).toEqual(only("account_id"));
+    expect(planted((c) => (c.upload_key = `sb_secret_${"x".repeat(32)}`))).toEqual(only("secret"));
+    expect(planted((c) => (c.vars = { CLOUDFLARE_API_TOKEN: "y".repeat(40) }))).toEqual(only("vars"));
+    expect(hostingProblems(tree({ "wrangler.jsonc": `${text}\n// account_id: 0123456789abcdef0123456789abcdef\n` }))).toEqual(only("account_id"));
+    expect(config).not.toHaveProperty("account_id");
+    expect(config).not.toHaveProperty("vars");
+  });
 });
 
 /** A dry run's output directory holding `files`, removed after `check`. */
