@@ -690,6 +690,10 @@ fn workspace_has_library() -> Result<bool> {
 #[derive(Deserialize)]
 struct Layers {
     impure_crates: Vec<String>,
+    /// Crates planned but not yet created, which a `forbidden_internal` list may already name
+    /// (DEC-525).
+    #[serde(default)]
+    planned: Vec<String>,
     crates: BTreeMap<String, CratePolicy>,
 }
 
@@ -740,6 +744,18 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
             ));
         }
     }
+    for (listed, own) in &policy.crates {
+        let unknown = own
+            .forbidden_internal
+            .iter()
+            .filter(|name| !names.contains(name.as_str()) && !policy.planned.contains(name));
+        problems.extend(unknown.map(|name| {
+            format!(
+                "`{listed}` forbids `{name}`, which is neither a workspace member nor in `planned`, \
+                 so a misspelt name would guard nothing (DEC-525)"
+            )
+        }));
+    }
     for pkg in &packages {
         let Some(own) = policy.crates.get(&pkg.name) else {
             problems.push(format!("`{}` has no entry in xtask/layers.toml", pkg.name));
@@ -754,6 +770,14 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
             ));
         }
         for dep in &pkg.dependencies {
+            if dep.path.is_some() && !names.contains(dep.name.as_str()) {
+                problems.push(format!(
+                    "`{}` has a path dependency on `{}`, which is not a workspace member, so the \
+                     layers cannot see what it reaches (DEC-525)",
+                    pkg.name, dep.name
+                ));
+                continue;
+            }
             let internal = dep.path.is_some() && names.contains(dep.name.as_str());
             if internal {
                 let Some(dep_policy) = policy.crates.get(&dep.name) else {
@@ -3105,8 +3129,9 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT,
-        MUTANTS_OUT, MutantShard, MutatedCrate, PendingTest, PendingTestRun, REFCASES, TestOutcome,
+        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, CratePolicy, Dependency, Layers,
+        MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, Metadata, MutantShard,
+        MutatedCrate, Package, PendingTest, PendingTestRun, REFCASES, TestOutcome,
         actionlint_workflows, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
         contains_word, external_oracles, failure_cause, files_by_extension, first_panic_line,
         forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
@@ -3222,6 +3247,132 @@ mod tests {
             problems.iter().any(|p| p.starts_with(named)),
             "the layers check applies the list to the workspace as built: {problems:?}"
         );
+        Ok(())
+    }
+
+    /// A workspace member named `name` with path dependencies on `deps`, each with its kind
+    /// (`None` for a normal one), as `cargo metadata --no-deps` reports them.
+    fn member(name: &str, deps: &[(&str, Option<&str>)]) -> Package {
+        let dependencies = deps
+            .iter()
+            .map(|(dep, kind)| Dependency {
+                name: (*dep).to_owned(),
+                kind: kind.map(str::to_owned),
+                path: Some(PathBuf::from(format!("/nowhere/{dep}"))),
+            })
+            .collect();
+        Package {
+            id: format!("{name} 0.0.0"),
+            name: name.to_owned(),
+            manifest_path: PathBuf::from(format!("/nowhere/{name}/Cargo.toml")),
+            dependencies,
+            targets: Vec::new(),
+        }
+    }
+
+    fn workspace(members: Vec<Package>) -> Metadata {
+        let workspace_members = members.iter().map(|p| p.id.clone()).collect();
+        Metadata {
+            packages: members,
+            workspace_members,
+        }
+    }
+
+    /// A policy putting every crate in `layers` at its layer, none safety-critical, with the
+    /// `forbidden_internal` lists in `forbidden` and the `planned` crates.
+    fn policy(layers: &[(&str, i64)], forbidden: &[(&str, &[&str])], planned: &[&str]) -> Layers {
+        let owned = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
+        let crates = layers
+            .iter()
+            .map(|(name, layer)| {
+                let banned = forbidden
+                    .iter()
+                    .find(|(f, _)| f == name)
+                    .map(|(_, b)| owned(b));
+                let policy = CratePolicy {
+                    layer: toml::Value::Integer(*layer),
+                    safety_critical: false,
+                    pure: false,
+                    allowed_external: Vec::new(),
+                    forbidden_internal: banned.unwrap_or_default(),
+                };
+                ((*name).to_owned(), policy)
+            })
+            .collect();
+        Layers {
+            impure_crates: Vec::new(),
+            planned: owned(planned),
+            crates,
+        }
+    }
+
+    /// The closure the guard reads follows every kind of path dependency: normal, dev and build,
+    /// and through a dev-dependency of a dependency (DEC-525 item 2).
+    #[test]
+    fn the_closure_follows_normal_dev_and_build_path_dependencies() {
+        let meta = workspace(vec![
+            member(
+                "a",
+                &[("b", None), ("c", Some("dev")), ("d", Some("build"))],
+            ),
+            member("b", &[("e", Some("dev"))]),
+            member("c", &[]),
+            member("d", &[]),
+            member("e", &[]),
+        ]);
+        let closure = workspace_closure(&meta);
+        let reached: Vec<&str> = closure["a"].iter().map(String::as_str).collect();
+        assert_eq!(reached, ["a", "b", "c", "d", "e"]);
+    }
+
+    /// A path dependency on a crate outside the workspace, which `cargo metadata --no-deps` does not
+    /// walk, is refused, of any kind: it could reach a forbidden crate unseen (#697 review, M1).
+    #[test]
+    fn a_path_dependency_outside_the_workspace_is_a_problem() -> Result<()> {
+        let layers = [("mandate-cli", 9), ("mandate-alpaca", 7)];
+        let forbidden: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpaca"])];
+        let rules = policy(&layers, &forbidden, &[]);
+        let clean = workspace(vec![
+            member("mandate-cli", &[]),
+            member("mandate-alpaca", &[]),
+        ]);
+        assert_eq!(layer_problems(&rules, &clean)?, Vec::<String>::new());
+        for kind in [None, Some("dev"), Some("build")] {
+            let evading = workspace(vec![
+                member("mandate-cli", &[("evader", kind)]),
+                member("mandate-alpaca", &[]),
+            ]);
+            let problems = layer_problems(&rules, &evading)?;
+            let named = "`mandate-cli` has a path dependency on `evader`, which is not a workspace";
+            assert!(
+                problems.iter().any(|p| p.starts_with(named)),
+                "{kind:?}: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A `forbidden_internal` name that is neither a member nor planned is a problem, so a typo
+    /// cannot leave the guard empty (#697 review, m1).
+    #[test]
+    fn a_forbidden_name_must_be_a_member_or_planned() -> Result<()> {
+        let layers = [("mandate-cli", 9), ("mandate-alpaca", 7)];
+        let members = || {
+            workspace(vec![
+                member("mandate-cli", &[]),
+                member("mandate-alpaca", &[]),
+            ])
+        };
+        let typo: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpacca"])];
+        let problems = layer_problems(&policy(&layers, &typo, &[]), &members())?;
+        let named = "`mandate-cli` forbids `mandate-alpacca`";
+        assert!(
+            problems.iter().any(|p| p.starts_with(named)),
+            "{problems:?}"
+        );
+        let planned: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpaca", "mandate-paper"])];
+        let problems = layer_problems(&policy(&layers, &planned, &["mandate-paper"]), &members())?;
+        assert_eq!(problems, Vec::<String>::new());
         Ok(())
     }
 
