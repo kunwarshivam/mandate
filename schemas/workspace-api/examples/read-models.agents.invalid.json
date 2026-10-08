@@ -1,0 +1,8 @@
+[
+  {"label": "paper not labeled simulated", "set": {"/agents/0/simulated": false}},
+  {"label": "an account number (API-11)", "set": {"/agents/0/account_number": "123456789"}},
+  {"label": "a scorecard in a list (FR-8.4)", "set": {"/agents/0/scorecard": {"win_rate": "0.6"}}},
+  {"label": "model text in a list (API-18)", "set": {"/agents/0/summary": "doing well"}},
+  {"label": "a mandate name as label (PX-6 (c))", "set": {"/agents/0/label": "two-stock-swing"}},
+  {"label": "an unknown mode", "set": {"/agents/0/mode": "halted"}}
+]

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/orders.schema.json",
+  "title": "GET /agents/{id}/orders",
+  "description": "D3: working orders with their state (`Unknown` is its own value, shown as unknown, never mapped to another state), finished orders, and fills, from the account stream. docs/specs/workspace-api.md §4.7, §4.10 (DEC-741).",
+  "allOf": [{ "$ref": "../envelope.schema.json#/$defs/Envelope" }, { "$ref": "agent.schema.json#/$defs/PaperIsSimulated" }],
+  "type": "object",
+  "required": ["agent_id", "environment", "simulated", "orders", "past_orders", "fills"],
+  "properties": {
+    "agent_id": { "$ref": "../common.schema.json#/$defs/Id" },
+    "environment": { "$ref": "agent.schema.json#/$defs/Environment" },
+    "simulated": { "type": "boolean" },
+    "orders": { "type": "array", "items": { "$ref": "#/$defs/WorkingOrder" } },
+    "past_orders": { "type": "array", "items": { "$ref": "#/$defs/PastOrder" } },
+    "fills": { "type": "array", "items": { "$ref": "#/$defs/Fill" } }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Side": { "enum": ["buy", "sell"] },
+    "Purpose": { "enum": ["open", "increase", "discretionary_exit", "owner_exit", "risk_exit", "protective"] },
+    "WorkingState": {
+      "description": "Trading-domain spec §5.7's non-final states.",
+      "enum": ["Intent", "Submitting", "Accepted", "PartiallyFilled", "PendingCancel", "PendingReplace", "Unknown"]
+    },
+    "FinalState": { "enum": ["Filled", "Canceled", "Rejected", "Expired", "Replaced", "Abandoned"] },
+    "WorkingOrder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["client_order_id", "instrument", "side", "qty", "filled_qty", "limit_price", "stop_price", "purpose", "state", "submitted_at", "time_in_force"],
+      "properties": {
+        "client_order_id": { "$ref": "../common.schema.json#/$defs/Id" },
+        "instrument": { "$ref": "positions.schema.json#/$defs/InstrumentRef" },
+        "side": { "$ref": "#/$defs/Side" },
+        "qty": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "filled_qty": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "limit_price": { "$ref": "positions.schema.json#/$defs/OptionalDecimal" },
+        "stop_price": { "$ref": "positions.schema.json#/$defs/OptionalDecimal" },
+        "purpose": { "$ref": "#/$defs/Purpose" },
+        "state": { "$ref": "#/$defs/WorkingState" },
+        "submitted_at": { "$ref": "../common.schema.json#/$defs/Timestamp" },
+        "time_in_force": { "enum": ["day", "gtc"] }
+      }
+    },
+    "PastOrder": {
+      "description": "An order in a final state. `note` is deterministic text from the closing event's reason, never model text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["client_order_id", "instrument", "side", "qty", "filled_qty", "limit_price", "stop_price", "purpose", "state", "submitted_at", "time_in_force", "closed_at", "note"],
+      "properties": {
+        "client_order_id": { "$ref": "../common.schema.json#/$defs/Id" },
+        "instrument": { "$ref": "positions.schema.json#/$defs/InstrumentRef" },
+        "side": { "$ref": "#/$defs/Side" },
+        "qty": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "filled_qty": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "limit_price": { "$ref": "positions.schema.json#/$defs/OptionalDecimal" },
+        "stop_price": { "$ref": "positions.schema.json#/$defs/OptionalDecimal" },
+        "purpose": { "$ref": "#/$defs/Purpose" },
+        "state": { "$ref": "#/$defs/FinalState" },
+        "submitted_at": { "$ref": "../common.schema.json#/$defs/Timestamp" },
+        "time_in_force": { "enum": ["day", "gtc"] },
+        "closed_at": { "$ref": "../common.schema.json#/$defs/Timestamp" },
+        "note": { "type": "string" }
+      }
+    },
+    "Fill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fill_id", "client_order_id", "instrument", "side", "qty", "price", "at"],
+      "properties": {
+        "fill_id": { "$ref": "../common.schema.json#/$defs/Id" },
+        "client_order_id": { "$ref": "../common.schema.json#/$defs/Id" },
+        "instrument": { "$ref": "positions.schema.json#/$defs/InstrumentRef" },
+        "side": { "$ref": "#/$defs/Side" },
+        "qty": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "price": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "at": { "$ref": "../common.schema.json#/$defs/Timestamp" }
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+[
+  {"label": "no agents", "set": {"/agents": []}},
+  {"label": "an agent with no positions", "set": {"/agents/1/positions_count": 0, "/agents/1/marks_freshness": null}}
+]

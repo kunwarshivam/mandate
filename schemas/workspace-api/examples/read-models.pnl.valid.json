@@ -1,0 +1,5 @@
+[
+  {"label": "live, not simulated", "set": {"/environment": "live", "/simulated": false}},
+  {"label": "no positions, so no marks", "set": {"/marks_freshness": null, "/unrealized_pnl": "0"}},
+  {"label": "a loss", "set": {"/pnl_total": "-67.89", "/pnl_today": "-17.89"}}
+]

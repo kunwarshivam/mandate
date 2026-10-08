@@ -1,0 +1,10 @@
+[
+  {"label": "paper not labeled simulated", "set": {"/simulated": false}},
+  {"label": "live labeled simulated", "set": {"/environment": "live"}},
+  {"label": "a scorecard outside its route (FR-8.4)", "set": {"/scorecard": {"win_rate": "0.6", "sharpe": "1.2"}}},
+  {"label": "a profit estimate (DEC-126)", "set": {"/expected_pnl": "250"}},
+  {"label": "drafted disclosure text (rule 9)", "set": {"/disclosures/0/text": "Past performance does not guarantee future results."}},
+  {"label": "model text outside QuotedContent (API-18)", "set": {"/commentary": "a strong week"}},
+  {"label": "a figure as a JSON number", "set": {"/pnl_total": 123.45}},
+  {"label": "an unrealized figure without its marks' freshness (API-14)", "remove": ["/marks_freshness"]}
+]

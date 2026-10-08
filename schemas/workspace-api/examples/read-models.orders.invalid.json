@@ -1,0 +1,12 @@
+[
+  {"label": "paper not labeled simulated", "set": {"/simulated": false}},
+  {"label": "Unknown mapped to a final state", "set": {"/past_orders/0/state": "Unknown"}},
+  {"label": "a final state among working orders", "set": {"/orders/0/state": "Filled"}},
+  {"label": "an unlisted state", "set": {"/orders/0/state": "Pending"}},
+  {"label": "a lowercase unknown", "set": {"/orders/0/state": "unknown"}},
+  {"label": "a quantity as a JSON number", "set": {"/orders/0/qty": 0.01}},
+  {"label": "an account number on a fill (API-11)", "set": {"/fills/0/account_number": "123456789"}},
+  {"label": "model text on an order (API-18)", "set": {"/orders/0/rationale": "momentum is strong"}},
+  {"label": "a past order without its note", "remove": ["/past_orders/0/note"]},
+  {"label": "a time in force the venue spec lacks", "set": {"/orders/0/time_in_force": "ioc"}}
+]

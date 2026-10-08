@@ -1,0 +1,61 @@
+{
+  "api_version": "v1",
+  "build": "sha256:4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+  "as_of": [
+    {
+      "stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC",
+      "seq": 1842,
+      "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "recorded_at": "2026-09-28T18:05:19.000000000Z"
+    },
+    {
+      "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:acc_01JB3K7N2P4R6T8V0X2Z4B6D8F",
+      "seq": 977,
+      "hash": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "recorded_at": "2026-09-28T18:05:18.000000000Z"
+    },
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "recorded_at": "2026-09-28T17:12:09.000000000Z"
+    }
+  ],
+  "agent_id": "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC",
+  "label": "Agent 1",
+  "environment": "paper",
+  "simulated": true,
+  "mandate_version": "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee",
+  "mode": "normal",
+  "restrictions": [],
+  "startup": "ready",
+  "deployed_at": "2026-09-21T13:30:00.000000000Z",
+  "state": {
+    "equity": "10123.45",
+    "equity_day_start": "10050",
+    "high_water_mark": "10150",
+    "capital_base": "10000",
+    "inherited_loss": "0",
+    "orders_today": 3,
+    "size_factor": "1",
+    "pending": [],
+    "freshness": {
+      "observed_at": "2026-09-28T18:05:18.000000000Z",
+      "stale": false,
+      "age_seconds": 2,
+      "limit_source": "executor.head"
+    }
+  },
+  "goal_progress": {"spent_usd": "6666.67", "held_qty": "0.12"},
+  "versions": [
+    {
+      "mandate_version": "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee",
+      "previous": null,
+      "confirmed_at": "2026-09-21T13:24:10.000000000Z",
+      "step_up": true,
+      "classification": null,
+      "changes": [],
+      "application": {"kind": "applied", "at": "2026-09-21T13:30:00.000000000Z", "approvals_canceled": 0}
+    }
+  ]
+}

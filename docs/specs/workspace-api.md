@@ -502,6 +502,83 @@ here, so replacing fixtures with calls changes no screen contract:
 | `Connection` | `GET /connections/{id}` |
 | `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`) | §5.5's phases; `undelivered` is `effect: none` |
 
+### 4.10 Read-model response shapes
+
+Part 1 of the read models' response bodies: the routes the dashboard, agent detail, positions,
+orders, P&L, and status strip read ([DEC-741](../project/decisions/DEC-741.md)). Each is a JSON
+Schema 2020-12 document under [`schemas/workspace-api/read-models/`](../../schemas/workspace-api/read-models/).
+Each has a fixture-shaped example and cases that must be accepted or refused under
+`schemas/workspace-api/examples/`, and `schemas/workspace-api/check_examples.py` runs them
+([DEC-740](../project/decisions/DEC-740.md) item 10). The schemas add no trading rule and remove
+nothing above. Where this section and a schema differ, the schema is the defect.
+
+| Route | Schema (`read-models/`) |
+|---|---|
+| `GET /health` | `health.schema.json` |
+| `GET /dashboard` | `dashboard.schema.json` |
+| `GET /agents` | `agents.schema.json` |
+| `GET /agents/{id}` | `agent.schema.json` |
+| `GET /agents/{id}/positions` | `positions.schema.json` |
+| `GET /agents/{id}/orders` | `orders.schema.json` |
+| `GET /agents/{id}/pnl` | `pnl.schema.json` |
+
+Value types (`Decimal`, `Timestamp`, `ContentRef`, `Id`, `AssetId`, `EventId`, `Watermark`, `AsOf`,
+`Freshness`, `QuotedContent`) are `common.schema.json`'s (DEC-740). The members every response
+carries (`Envelope`, including `as_of`) and the problem document (§3.5) are `envelope.schema.json`'s.
+
+**Rules every shape keeps:**
+
+1. **Closed bodies.** Each body is the envelope plus its own members, closed with
+   `unevaluatedProperties: false`; each nested object is closed with
+   `additionalProperties: false`. A member no schema names cannot appear, so these bodies can
+   never carry:
+   - an account number, key, or token (API-11);
+   - a scorecard (FR-8.4: scorecards are served only at `GET /agents/{id}/scorecards`);
+   - model text (API-18). None of these routes carries model text, and a later route that does
+     uses `QuotedContent`.
+
+   New members come only by a schema change (§3.2).
+2. **Paper is labeled simulated.** Every agent-scoped body and agent summary carries `environment`
+   and `simulated`, and `simulated` is `true` exactly when `environment` is `paper`.
+3. **Freshness.** Each value with a freshness limit (§6.1) carries a `Freshness`:
+   - a position's mark and broker quantity;
+   - the limit state (the executor's head);
+   - the P&L's oldest mark;
+   - each health component (an `ok` component is never stale).
+
+   `stale` is the server's judgment against the limit `limit_source` names, and the value is still
+   returned (API-14). `age_seconds` is the age when the body was built; a client showing a cached
+   body adds the time since it fetched it.
+4. **Order states.** `orders` holds trading-domain spec §5.7's non-final states and `past_orders`
+   its final ones. `Unknown` is a working state of its own, served as `Unknown`, shown as unknown,
+   and never mapped to another state.
+5. **Values.**
+   - Money, quantities, prices, and fractions are `Decimal`; counts and whole-second durations are
+     integers.
+   - Every instant is a UTC `Timestamp`. The fixtures' offset times (`-04:00`) are the same
+     instants, and the client formats them for display.
+   - A union carries a `kind` tag.
+   - A nullable member is `null`, never absent.
+
+**Where each fixture member comes from.** Each member of the `web/src/fixtures/types.ts` types
+that §4.9 maps here has a schema home, or is a value the client derives:
+
+| Fixture type and members | Home |
+|---|---|
+| `Workspace.health` (`Health`) | `health`; each component's `as_of` is `freshness.observed_at` |
+| `Agent`: `agent_id`, `label`, `mode`, `restrictions`, `startup`, `deployed_at`, `goal_progress`, `mandate_version`, `versions` | `agent`; `VersionApplication`'s `result` tag is `kind`; `MandateChange.from` and `to` are in the document's own form (a decimal string, an integer, or another string such as a time) |
+| `Agent.state` (`LimitState`, `PendingBreach`) | `agent.state`, plus its `freshness` |
+| `Agent.positions` (`Position`, `Protection`, `InstrumentRef`) | `positions`; `mark_as_of` is `mark_freshness.observed_at`. Adds `broker_freshness` and `protection.unprotected_since` (§4.7's unprotected intervals) |
+| `Agent.orders`, `past_orders`, `fills` (`WorkingOrder`, `PastOrder`, `Fill`) | `orders`; `PastOrder.note` is deterministic text from the closing event, never model text |
+| `Agent.pnl_total`, `pnl_today`, `realized_pnl` | `pnl`, with `unrealized_pnl`, `marks_freshness`, and disclosures by document and version (rule 9). `agents` and `dashboard` repeat the first two per agent |
+| `Agent.mandate`, `Agent.provenance` | `GET /mandate-versions/{hash}` (§4.1): `mandate` is a [mandate schema](../../schemas/mandate.schema.json) document; the response shape, provenance included, is E10-11's |
+| `ActiveRestriction.symbol` | Always present, `null` for an agent-wide restriction |
+| What a restriction blocks and how it lifts (brief §4.3), limit headroom in dollars | **Derived** by the client from the closed `RestrictionCode`, `state`, and the mandate (`web/src/lib/restrictions.ts`, `limits.ts`) |
+| `Workspace.now`, `status`, `scenario`, `journal` | **Derived** or fixture-only: the client's clock, whether the API answers, and the scenario switch, which a production build never has |
+
+`GateDecision` and `TimelineEvent` (§4.8), and the approvals, alerts, and connections routes, are
+not in this part.
+
 ---
 
 ## 5. Safety-relevant request and response shapes
@@ -778,6 +855,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
 | Read-model projections | **Planned** (E11-9) |
+| Read-model response schemas, part 1 (§4.10, `schemas/workspace-api/read-models/`) | **Exists** as schemas and examples (DEC-741); served by E11-9 |
 | Journal queries, trace, exports over the API | **Planned** (E12-6) |
 | Journal events this spec needs (`MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, `OwnerRequestSubmitted`, `hold_openings`, client events) | **Planned** (E10-15, journal spec change first) |
 | Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
@@ -786,7 +864,10 @@ risk-reducing call never consults one (API-7, API-8).
 
 ## 10. Decisions
 
-Recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
+Recorded in [DEC-436](../project/decisions/DEC-436.md), except §4.10's read-model response shapes, which
+are [DEC-741](../project/decisions/DEC-741.md), on the shared value types of
+[DEC-740](../project/decisions/DEC-740.md) (both Accepted, additive engineering readings under DEC-176).
+DEC-436's items 1 to 16 and 19 to 21 are reversible
 engineering readings an agent accepts (DEC-79, DEC-176): each adds no trading rule, or only tightens
 one. Items 9, 19, 20, and 21 carry the coordinator's round-1 settlements X1, X2, X3, and X5 and its
 ruling on M2 and M3.

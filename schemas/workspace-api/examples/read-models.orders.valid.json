@@ -1,0 +1,6 @@
+[
+  {"label": "Unknown is its own working state", "set": {"/orders/0/state": "Unknown"}},
+  {"label": "a pending cancel", "set": {"/orders/0/state": "PendingCancel"}},
+  {"label": "an abandoned order", "set": {"/past_orders/0/state": "Abandoned"}},
+  {"label": "an empty note", "set": {"/past_orders/1/note": ""}}
+]

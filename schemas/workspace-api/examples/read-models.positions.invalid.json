@@ -1,0 +1,12 @@
+[
+  {"label": "paper not labeled simulated", "set": {"/simulated": false}},
+  {"label": "a mark without freshness (API-14)", "remove": ["/positions/0/mark_freshness"]},
+  {"label": "a broker quantity without freshness (API-14)", "remove": ["/positions/0/broker_freshness"]},
+  {"label": "a quantity as a JSON number", "set": {"/positions/0/qty": 0.12}},
+  {"label": "a non-canonical price", "set": {"/positions/0/mark": "56789.010"}},
+  {"label": "a broker key in a position (API-11)", "set": {"/positions/0/api_key": "PKTEST123"}},
+  {"label": "an account number in an instrument (API-11)", "set": {"/positions/0/instrument/account_number": "123456789"}},
+  {"label": "an uppercase asset id", "set": {"/positions/0/instrument/asset_id": "7B4A1C2E-1111-4A2B-9C3D-000000000001"}},
+  {"label": "a scorecard (FR-8.4)", "set": {"/positions/0/scorecard": {"hit_rate": "0.7"}}},
+  {"label": "an unknown protection kind", "set": {"/positions/0/protection/kind": "trailing"}}
+]

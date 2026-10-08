@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/dashboard.schema.json",
+  "title": "GET /dashboard",
+  "description": "D1: agent summaries with environment, effective mode, and P&L (paper labeled simulated); counts of open approvals and unread alerts; and the event ids of recent gate decisions. Their content is at their own routes. docs/specs/workspace-api.md §4.7, §4.10 (DEC-741).",
+  "allOf": [{ "$ref": "../envelope.schema.json#/$defs/Envelope" }],
+  "type": "object",
+  "required": ["agents", "open_approvals", "unread_alerts", "recent_decisions"],
+  "properties": {
+    "agents": { "type": "array", "items": { "$ref": "agents.schema.json#/$defs/AgentSummary" } },
+    "open_approvals": { "type": "integer", "minimum": 0 },
+    "unread_alerts": { "type": "integer", "minimum": 0 },
+    "recent_decisions": {
+      "description": "Gate-decision event ids, newest first; each is read at GET /journal/events/{id}/gate (§4.8).",
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "../common.schema.json#/$defs/EventId" }
+    }
+  },
+  "unevaluatedProperties": false
+}

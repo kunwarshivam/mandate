@@ -1,0 +1,5 @@
+[
+  {"label": "a stale mark is still returned, marked", "set": {"/positions/0/mark_freshness/stale": true, "/positions/0/mark_freshness/age_seconds": 900}},
+  {"label": "unprotected since a time", "set": {"/positions/0/protection": {"kind": "none", "stop_price": null, "limit_price": null, "take_profit_price": null, "unprotected_fraction": "1", "unprotected_since": "2026-09-28T18:01:00.000000000Z"}}},
+  {"label": "no positions", "set": {"/positions": []}}
+]

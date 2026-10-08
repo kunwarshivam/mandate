@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/health.schema.json",
+  "title": "GET /health",
+  "description": "The status strip (G1): each component's state and its freshness. docs/specs/workspace-api.md §4.7, §4.10 (DEC-741).",
+  "allOf": [{ "$ref": "../envelope.schema.json#/$defs/Envelope" }],
+  "type": "object",
+  "required": ["market_data", "broker", "deployment", "relay"],
+  "properties": {
+    "market_data": { "$ref": "#/$defs/Component" },
+    "broker": { "$ref": "#/$defs/Component" },
+    "deployment": { "$ref": "#/$defs/Component" },
+    "relay": { "$ref": "#/$defs/Component" }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Component": {
+      "description": "An `ok` component is never stale.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "freshness"],
+      "properties": {
+        "state": { "enum": ["ok", "stale", "down"] },
+        "freshness": { "$ref": "../common.schema.json#/$defs/Freshness" }
+      },
+      "if": { "properties": { "state": { "const": "ok" } } },
+      "then": { "properties": { "freshness": { "properties": { "stale": { "const": false } } } } }
+    }
+  }
+}

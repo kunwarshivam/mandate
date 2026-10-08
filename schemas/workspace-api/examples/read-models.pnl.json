@@ -1,0 +1,31 @@
+{
+  "api_version": "v1",
+  "build": "sha256:4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+  "as_of": [
+    {
+      "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:acc_01JB3K7N2P4R6T8V0X2Z4B6D8F",
+      "seq": 977,
+      "hash": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "recorded_at": "2026-09-28T18:05:18.000000000Z"
+    }
+  ],
+  "agent_id": "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC",
+  "environment": "paper",
+  "simulated": true,
+  "pnl_total": "123.45",
+  "pnl_today": "73.45",
+  "realized_pnl": "-24.56",
+  "unrealized_pnl": "148.01",
+  "marks_freshness": {
+    "observed_at": "2026-09-28T18:05:18.000000000Z",
+    "stale": false,
+    "age_seconds": 2,
+    "limit_source": "data_profile.max_mark_age_s"
+  },
+  "disclosures": [
+    {
+      "document": "simulated_results",
+      "version": "sha256:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    }
+  ]
+}

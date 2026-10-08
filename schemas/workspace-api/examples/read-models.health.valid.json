@@ -1,0 +1,4 @@
+[
+  {"label": "a stale component is still returned, marked", "set": {"/market_data/state": "stale", "/market_data/freshness/stale": true}},
+  {"label": "a down component", "set": {"/relay/state": "down", "/relay/freshness/stale": true}}
+]

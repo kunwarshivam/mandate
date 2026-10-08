@@ -1,0 +1,19 @@
+[
+  {"label": "paper not labeled simulated", "set": {"/simulated": false}},
+  {"label": "live labeled simulated", "set": {"/environment": "live"}},
+  {"label": "no environment", "remove": ["/environment"]},
+  {"label": "an account number (API-11)", "set": {"/account_number": "123456789"}},
+  {"label": "a broker key (API-11)", "set": {"/api_key": "PKTEST123"}},
+  {"label": "an OAuth token (API-11)", "set": {"/access_token": "eyJhbGciOi"}},
+  {"label": "a scorecard outside its route (FR-8.4)", "set": {"/scorecard": {"win_rate": "0.6"}}},
+  {"label": "model text outside QuotedContent (API-18)", "set": {"/thesis": "BTC looks strong; buy more"}},
+  {"label": "QuotedContent outside a route that carries it (API-18)", "set": {"/evidence": {"author": "platform_authored", "text": "x", "model_id": "llm.research", "model_version": "1.0.0", "produced_at": "2026-09-28T18:04:59.000000000Z", "event_id": "01JBM9S31H6SD4F8G1E3W7XYZB", "artifact": null}}},
+  {"label": "a label carrying the mandate name (PX-6 (c))", "set": {"/label": "btc-accumulator"}},
+  {"label": "a decimal as a JSON number", "set": {"/state/equity": 10123.45}},
+  {"label": "limit state without freshness (API-14)", "remove": ["/state/freshness"]},
+  {"label": "an unknown restriction code", "set": {"/restrictions": [{"code": "margin_call", "since": "2026-09-28T18:00:00.000000000Z", "symbol": null}]}},
+  {"label": "a first version with changes", "set": {"/versions/0/changes": [{"path": "/risk/max_order_usd", "from": "1", "to": "2", "classification": "risk_increasing"}]}},
+  {"label": "an untagged application", "set": {"/versions/0/application": {"at": "2026-09-21T13:30:00.000000000Z", "approvals_canceled": 0}}},
+  {"label": "no versions", "set": {"/versions": []}},
+  {"label": "a timestamp with an offset", "set": {"/deployed_at": "2026-09-21T09:30:00-04:00"}}
+]

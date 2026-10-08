@@ -20,7 +20,8 @@ Run from the repository root, in the reference environment (jsonschema 4.26.0, p
    - For a `$defs`-only schema: `{"<Def>": [instance, ...]}`.
    - Otherwise: `[{"label": ..., "set": {"<JSON pointer>": value}, "remove": ["<pointer>"]}]`.
      Each case is applied to a copy of the valid example.
-   `set` on a pointer whose last key is absent adds that member. A case the schema accepts is a
+   `set` on a pointer whose last key is absent adds that member; a last token `-` appends to an
+   array (RFC 6901). A case the schema accepts is a
    failure, so each one shows the schema refuses what it names.
 4. Every case in `examples/<name>.valid.json`, in the same form as 3, must be accepted. These
    cases guard against a schema that refuses what it should allow.
@@ -100,7 +101,9 @@ def apply_case(body, case: dict):
     for pointer, value in case.get("set", {}).items():
         *parent, last = pointer_parts(pointer)
         target = walk(body, parent)
-        if isinstance(target, list):
+        if isinstance(target, list) and last == "-":
+            target.append(value)
+        elif isinstance(target, list):
             target[int(last)] = value
         else:
             target[last] = value

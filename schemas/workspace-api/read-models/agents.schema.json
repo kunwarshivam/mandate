@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/agents.schema.json",
+  "title": "GET /agents",
+  "description": "The workspace's agents, one summary each. docs/specs/workspace-api.md §4.2, §4.7, §4.10 (DEC-741).",
+  "allOf": [{ "$ref": "../envelope.schema.json#/$defs/Envelope" }],
+  "type": "object",
+  "required": ["agents"],
+  "properties": {
+    "agents": { "type": "array", "items": { "$ref": "#/$defs/AgentSummary" } }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "AgentSummary": {
+      "description": "The members of GET /agents/{id} and its P&L that a list shows.",
+      "type": "object",
+      "allOf": [{ "$ref": "agent.schema.json#/$defs/PaperIsSimulated" }],
+      "additionalProperties": false,
+      "required": ["agent_id", "label", "environment", "simulated", "mode", "restrictions", "startup", "positions_count", "pnl_total", "pnl_today", "marks_freshness"],
+      "properties": {
+        "agent_id": { "$ref": "../common.schema.json#/$defs/Id" },
+        "label": { "$ref": "agent.schema.json#/$defs/Label" },
+        "environment": { "$ref": "agent.schema.json#/$defs/Environment" },
+        "simulated": { "type": "boolean" },
+        "mode": { "$ref": "agent.schema.json#/$defs/AgentMode" },
+        "restrictions": { "type": "array", "items": { "$ref": "agent.schema.json#/$defs/ActiveRestriction" } },
+        "startup": { "$ref": "agent.schema.json#/$defs/Startup" },
+        "positions_count": { "type": "integer", "minimum": 0 },
+        "pnl_total": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "pnl_today": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "marks_freshness": { "$ref": "pnl.schema.json#/$defs/MarksFreshness" }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+[
+  {"label": "live, not simulated", "set": {"/environment": "live", "/simulated": false}},
+  {"label": "no goal", "set": {"/goal_progress": null}},
+  {"label": "an instrument restriction", "set": {"/restrictions": [{"code": "stale_mark", "since": "2026-09-28T18:00:00.000000000Z", "symbol": "BTC/USD"}]}},
+  {"label": "an agent-wide restriction while paused", "set": {"/mode": "paused", "/restrictions": [{"code": "owner_pause", "since": "2026-09-28T18:00:00.000000000Z", "symbol": null}]}},
+  {"label": "a later version, pending a safe point", "set": {"/versions/-": {"mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "previous": "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee", "confirmed_at": "2026-09-28T12:15:00.000000000Z", "step_up": true, "classification": "risk_increasing", "changes": [{"path": "/notifications/quiet_hours/start", "from": "22:30", "to": "23:00", "classification": "neutral"}, {"path": "/risk/max_orders_per_day", "from": 20, "to": 25, "classification": "risk_increasing"}], "application": {"kind": "pending"}}}},
+  {"label": "a later version, rejected", "set": {"/versions/-": {"mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "previous": "sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee", "confirmed_at": "2026-09-28T12:15:00.000000000Z", "step_up": true, "classification": "risk_increasing", "changes": [], "application": {"kind": "rejected", "at": "2026-09-28T12:15:04.000000000Z", "reason": "increase_blocked_while_latched"}}}},
+  {"label": "a pending breach", "set": {"/state/pending": [{"limit": "max_daily_loss", "seconds_in_breach": 40, "confirm_after_s": 120}]}}
+]

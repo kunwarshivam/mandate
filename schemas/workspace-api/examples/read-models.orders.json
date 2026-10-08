@@ -1,0 +1,86 @@
+{
+  "api_version": "v1",
+  "build": "sha256:4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+  "as_of": [
+    {
+      "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:acc_01JB3K7N2P4R6T8V0X2Z4B6D8F",
+      "seq": 977,
+      "hash": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "recorded_at": "2026-09-28T18:05:18.000000000Z"
+    }
+  ],
+  "agent_id": "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC",
+  "environment": "paper",
+  "simulated": true,
+  "orders": [
+    {
+      "client_order_id": "cid_01JBH3BV4H15G5E4G7X0NTH82F",
+      "instrument": {"asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001", "symbol": "BTC/USD", "asset_class": "crypto"},
+      "side": "buy",
+      "qty": "0.01",
+      "filled_qty": "0",
+      "limit_price": "55900",
+      "stop_price": null,
+      "purpose": "increase",
+      "state": "Accepted",
+      "submitted_at": "2026-09-28T17:12:09.000000000Z",
+      "time_in_force": "gtc"
+    },
+    {
+      "client_order_id": "cid_01JB7AG3BCKKDJWBHP1G201CYF",
+      "instrument": {"asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001", "symbol": "BTC/USD", "asset_class": "crypto"},
+      "side": "sell",
+      "qty": "0.12",
+      "filled_qty": "0",
+      "limit_price": "50855.55",
+      "stop_price": "51111.11",
+      "purpose": "protective",
+      "state": "Accepted",
+      "submitted_at": "2026-09-24T13:44:31.000000000Z",
+      "time_in_force": "gtc"
+    }
+  ],
+  "past_orders": [
+    {
+      "client_order_id": "cid_01JC353JVN063YY6HMEA1BTNYV",
+      "instrument": {"asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001", "symbol": "BTC/USD", "asset_class": "crypto"},
+      "side": "buy",
+      "qty": "0.06",
+      "filled_qty": "0.06",
+      "limit_price": "56130",
+      "stop_price": null,
+      "purpose": "increase",
+      "state": "Filled",
+      "submitted_at": "2026-09-24T13:44:16.000000000Z",
+      "time_in_force": "gtc",
+      "closed_at": "2026-09-24T13:44:20.000000000Z",
+      "note": "Filled in full."
+    },
+    {
+      "client_order_id": "cid_01JC9EVY6RVM89FMB5S78BHK6V",
+      "instrument": {"asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001", "symbol": "BTC/USD", "asset_class": "crypto"},
+      "side": "sell",
+      "qty": "0.06",
+      "filled_qty": "0",
+      "limit_price": "50347",
+      "stop_price": "50600",
+      "purpose": "protective",
+      "state": "Replaced",
+      "submitted_at": "2026-09-22T20:45:20.000000000Z",
+      "time_in_force": "gtc",
+      "closed_at": "2026-09-24T13:44:31.000000000Z",
+      "note": "Replaced by protection for the whole 0.12."
+    }
+  ],
+  "fills": [
+    {
+      "fill_id": "fil_01JC7RK5R27E63QGJG1284FHTB",
+      "client_order_id": "cid_01JC353JVN063YY6HMEA1BTNYV",
+      "instrument": {"asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001", "symbol": "BTC/USD", "asset_class": "crypto"},
+      "side": "buy",
+      "qty": "0.06",
+      "price": "56111.1",
+      "at": "2026-09-24T13:44:20.000000000Z"
+    }
+  ]
+}

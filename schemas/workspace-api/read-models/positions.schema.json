@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/positions.schema.json",
+  "title": "GET /agents/{id}/positions",
+  "description": "D3: ledger and broker quantities, cost basis, the risk mark and its age, protection and the current unprotected interval. docs/specs/workspace-api.md §4.7, §4.10 (DEC-741).",
+  "allOf": [{ "$ref": "../envelope.schema.json#/$defs/Envelope" }, { "$ref": "agent.schema.json#/$defs/PaperIsSimulated" }],
+  "type": "object",
+  "required": ["agent_id", "environment", "simulated", "positions"],
+  "properties": {
+    "agent_id": { "$ref": "../common.schema.json#/$defs/Id" },
+    "environment": { "$ref": "agent.schema.json#/$defs/Environment" },
+    "simulated": { "type": "boolean" },
+    "positions": { "type": "array", "items": { "$ref": "#/$defs/Position" } }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "InstrumentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "symbol", "asset_class"],
+      "properties": {
+        "asset_id": { "$ref": "../common.schema.json#/$defs/AssetId" },
+        "symbol": { "type": "string", "pattern": "^[A-Z0-9./-]{1,24}$" },
+        "asset_class": { "enum": ["crypto", "us_equity"] }
+      }
+    },
+    "Position": {
+      "description": "`qty` is the ledger's, `broker_qty` the last account snapshot's; each value with a freshness limit carries its own freshness.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument", "qty", "broker_qty", "broker_freshness", "avg_cost", "mark", "mark_freshness", "market_value", "unrealized_pnl", "protection"],
+      "properties": {
+        "instrument": { "$ref": "#/$defs/InstrumentRef" },
+        "qty": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "broker_qty": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "broker_freshness": { "$ref": "../common.schema.json#/$defs/Freshness" },
+        "avg_cost": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "mark": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "mark_freshness": { "$ref": "../common.schema.json#/$defs/Freshness" },
+        "market_value": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "unrealized_pnl": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "protection": { "$ref": "#/$defs/Protection" }
+      }
+    },
+    "Protection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "stop_price", "limit_price", "take_profit_price", "unprotected_fraction", "unprotected_since"],
+      "properties": {
+        "kind": { "enum": ["bracket", "oco", "crypto_stop_limit", "none"] },
+        "stop_price": { "$ref": "#/$defs/OptionalDecimal" },
+        "limit_price": { "$ref": "#/$defs/OptionalDecimal" },
+        "take_profit_price": { "$ref": "#/$defs/OptionalDecimal" },
+        "unprotected_fraction": { "$ref": "#/$defs/OptionalDecimal" },
+        "unprotected_since": {
+          "description": "When the current unprotected interval began, or null while fully protected.",
+          "oneOf": [{ "$ref": "../common.schema.json#/$defs/Timestamp" }, { "type": "null" }]
+        }
+      }
+    },
+    "OptionalDecimal": { "oneOf": [{ "$ref": "../common.schema.json#/$defs/Decimal" }, { "type": "null" }] }
+  }
+}

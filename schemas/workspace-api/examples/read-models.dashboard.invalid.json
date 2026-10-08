@@ -1,0 +1,9 @@
+[
+  {"label": "paper not labeled simulated", "set": {"/agents/0/simulated": false}},
+  {"label": "a scorecard on the dashboard (FR-8.4)", "set": {"/scorecards": []}},
+  {"label": "an account number (API-11)", "set": {"/account_number": "123456789"}},
+  {"label": "a token (API-11)", "set": {"/session_token": "abc"}},
+  {"label": "model text on the dashboard (API-18)", "set": {"/headline": "Markets look good today"}},
+  {"label": "a decision id that is not an event id", "set": {"/recent_decisions": ["decision-1"]}},
+  {"label": "a negative count", "set": {"/open_approvals": -1}}
+]

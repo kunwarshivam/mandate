@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/agent.schema.json",
+  "title": "GET /agents/{id}",
+  "description": "D2: one agent's effective mode, restrictions, limit state, goal progress, and version history. Positions, orders, and P&L are their own routes; the mandate document and its provenance are §4.1's GET /mandate-versions/{hash}. docs/specs/workspace-api.md §4.7, §4.10 (DEC-741).",
+  "allOf": [{ "$ref": "../envelope.schema.json#/$defs/Envelope" }, { "$ref": "#/$defs/PaperIsSimulated" }],
+  "type": "object",
+  "required": ["agent_id", "label", "environment", "simulated", "mandate_version", "mode", "restrictions", "startup", "deployed_at", "state", "goal_progress", "versions"],
+  "properties": {
+    "agent_id": { "$ref": "../common.schema.json#/$defs/Id" },
+    "label": { "$ref": "#/$defs/Label" },
+    "environment": { "$ref": "#/$defs/Environment" },
+    "simulated": { "type": "boolean" },
+    "mandate_version": { "$ref": "../common.schema.json#/$defs/ContentRef" },
+    "mode": { "$ref": "#/$defs/AgentMode" },
+    "restrictions": { "type": "array", "items": { "$ref": "#/$defs/ActiveRestriction" } },
+    "startup": { "$ref": "#/$defs/Startup" },
+    "deployed_at": { "$ref": "../common.schema.json#/$defs/Timestamp" },
+    "state": { "$ref": "#/$defs/LimitState" },
+    "goal_progress": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["spent_usd", "held_qty"],
+      "properties": {
+        "spent_usd": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "held_qty": { "$ref": "../common.schema.json#/$defs/Decimal" }
+      }
+    },
+    "versions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/MandateVersionRecord" } }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Environment": { "enum": ["paper", "live"] },
+    "PaperIsSimulated": {
+      "description": "Paper is labeled simulated: `simulated` is true exactly when `environment` is paper. Every agent-scoped read model applies this.",
+      "if": { "properties": { "environment": { "const": "paper" } } },
+      "then": { "properties": { "simulated": { "const": true } } },
+      "else": { "properties": { "simulated": { "const": false } } }
+    },
+    "Label": {
+      "description": "Platform-assigned opaque label (PX-6 (c)); never the mandate's name.",
+      "type": "string",
+      "pattern": "^Agent [1-9][0-9]{0,5}$"
+    },
+    "AgentMode": { "enum": ["normal", "exits_only", "paused", "stopped"] },
+    "Startup": { "enum": ["reconciling", "ready"] },
+    "RestrictionCode": {
+      "enum": [
+        "drawdown_scale_sizes", "drawdown_exits_only", "drawdown_flatten", "daily_loss", "hard_breach",
+        "lifetime_floor", "goal_complete", "external_activity", "account_closing_only", "account_blocked",
+        "reconciliation_mismatch", "startup_reconciliation", "leverage_check_failed", "owner_pause",
+        "stopped", "stale_mark", "removed_instrument"
+      ]
+    },
+    "ActiveRestriction": {
+      "description": "What it blocks and how it lifts are derived by the client from the closed code (§4.10). `symbol` names the instrument an instrument restriction blocks, else null.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "since", "symbol"],
+      "properties": {
+        "code": { "$ref": "#/$defs/RestrictionCode" },
+        "since": { "$ref": "../common.schema.json#/$defs/Timestamp" },
+        "symbol": { "type": ["string", "null"], "pattern": "^[A-Z0-9./-]{1,24}$" }
+      }
+    },
+    "LimitState": {
+      "description": "The ledger fold's limit inputs (mandate spec §5). `freshness` is the executor head's.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["equity", "equity_day_start", "high_water_mark", "capital_base", "inherited_loss", "orders_today", "size_factor", "pending", "freshness"],
+      "properties": {
+        "equity": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "equity_day_start": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "high_water_mark": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "capital_base": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "inherited_loss": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "orders_today": { "type": "integer", "minimum": 0 },
+        "size_factor": { "$ref": "../common.schema.json#/$defs/Decimal" },
+        "pending": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["limit", "seconds_in_breach", "confirm_after_s"],
+            "properties": {
+              "limit": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+              "seconds_in_breach": { "type": "integer", "minimum": 0 },
+              "confirm_after_s": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "freshness": { "$ref": "../common.schema.json#/$defs/Freshness" }
+      }
+    },
+    "ChangeClass": { "enum": ["risk_increasing", "risk_reducing", "neutral"] },
+    "MandateVersionRecord": {
+      "description": "One confirmed version, from MandateVersionCreated, MandateConfirmed, and MandateVersionApplied (mandate spec §2.2, §10). Oldest first; the last applied one is `mandate_version`. The first has no `previous`, no classification, and no changes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mandate_version", "previous", "confirmed_at", "step_up", "classification", "changes", "application"],
+      "properties": {
+        "mandate_version": { "$ref": "../common.schema.json#/$defs/ContentRef" },
+        "previous": { "oneOf": [{ "$ref": "../common.schema.json#/$defs/ContentRef" }, { "type": "null" }] },
+        "confirmed_at": { "$ref": "../common.schema.json#/$defs/Timestamp" },
+        "step_up": { "type": "boolean" },
+        "classification": { "oneOf": [{ "$ref": "#/$defs/ChangeClass" }, { "type": "null" }] },
+        "changes": { "type": "array", "items": { "$ref": "#/$defs/MandateChange" } },
+        "application": { "$ref": "#/$defs/VersionApplication" }
+      },
+      "if": { "properties": { "previous": { "type": "null" } } },
+      "then": { "properties": { "classification": { "type": "null" }, "changes": { "maxItems": 0 } } },
+      "else": { "properties": { "classification": { "type": "string" } } }
+    },
+    "MandateChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "from", "to", "classification"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^(/[^/]*)+$" },
+        "from": { "$ref": "#/$defs/ChangedValue" },
+        "to": { "$ref": "#/$defs/ChangedValue" },
+        "classification": { "$ref": "#/$defs/ChangeClass" }
+      }
+    },
+    "ChangedValue": {
+      "description": "The value at the path in the mandate document's own form: a canonical decimal string for a decimal path, an integer for an integer path, another string for an enum or a time, or null.",
+      "type": ["string", "integer", "null"]
+    },
+    "VersionApplication": {
+      "description": "MandateVersionApplied: applied, with the approvals it canceled; rejected, with the reason code; or pending, a confirmed risk-increasing version not yet at a safe point.",
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "at", "approvals_canceled"],
+          "properties": {
+            "kind": { "const": "applied" },
+            "at": { "$ref": "../common.schema.json#/$defs/Timestamp" },
+            "approvals_canceled": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "at", "reason"],
+          "properties": {
+            "kind": { "const": "rejected" },
+            "at": { "$ref": "../common.schema.json#/$defs/Timestamp" },
+            "reason": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind"],
+          "properties": { "kind": { "const": "pending" } }
+        }
+      ]
+    }
+  }
+}
