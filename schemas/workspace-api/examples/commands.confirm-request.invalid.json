@@ -1,0 +1,26 @@
+[
+  {
+    "label": "an unknown classification",
+    "set": {
+      "/classification_shown": "increasing"
+    }
+  },
+  {
+    "label": "a missing screen digest",
+    "remove": [
+      "/screen_digest"
+    ]
+  },
+  {
+    "label": "no record",
+    "set": {
+      "/record": null
+    }
+  },
+  {
+    "label": "an extra member",
+    "set": {
+      "/classification": "neutral"
+    }
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "label": "classified neutral",
+    "set": {
+      "/classification": "neutral"
+    }
+  },
+  {
+    "label": "a number for dollars",
+    "set": {
+      "/unasked_usd_after": 1200
+    }
+  }
+]

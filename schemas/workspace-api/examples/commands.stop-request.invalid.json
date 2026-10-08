@@ -1,0 +1,20 @@
+[
+  {
+    "label": "release without the warning digest",
+    "set": {
+      "/warning_shown": null
+    }
+  },
+  {
+    "label": "a missing release",
+    "remove": [
+      "/release"
+    ]
+  },
+  {
+    "label": "a warning digest without release",
+    "set": {
+      "/release": false
+    }
+  }
+]

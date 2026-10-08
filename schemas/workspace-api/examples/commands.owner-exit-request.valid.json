@@ -1,0 +1,23 @@
+[
+  {
+    "label": "instrument only",
+    "remove": [
+      "/bid",
+      "/bid_size",
+      "/quoted_at",
+      "/floor",
+      "/record",
+      "/step_up"
+    ]
+  },
+  {
+    "label": "regular session, no step-up",
+    "set": {
+      "/bid": null,
+      "/bid_size": null,
+      "/quoted_at": null,
+      "/floor": null,
+      "/step_up": null
+    }
+  }
+]

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/lift-hold-request.schema.json",
+  "type": "object",
+  "required": [
+    "record",
+    "step_up"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "Lift a hold a client set (\u00a74.2, DEC-191): the owner's alone, with step-up the runtime judges."
+}

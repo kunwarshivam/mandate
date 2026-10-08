@@ -1,0 +1,18 @@
+[
+  {
+    "label": "skipped with step_up null",
+    "set": {
+      "/verdict": "skipped",
+      "/step_up": null
+    }
+  },
+  {
+    "label": "approved with a delegation",
+    "set": {
+      "/delegation": {
+        "preview_id": "prv_1",
+        "mandate_version": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+      }
+    }
+  }
+]

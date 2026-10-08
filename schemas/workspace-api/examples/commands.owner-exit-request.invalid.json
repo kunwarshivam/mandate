@@ -1,0 +1,20 @@
+[
+  {
+    "label": "a float floor",
+    "set": {
+      "/floor": 99.5
+    }
+  },
+  {
+    "label": "no instrument",
+    "remove": [
+      "/instrument"
+    ]
+  },
+  {
+    "label": "a ticker for the instrument",
+    "set": {
+      "/instrument": "AAPL"
+    }
+  }
+]

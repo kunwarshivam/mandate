@@ -1,0 +1,14 @@
+[
+  {
+    "label": "a missing acknowledged event",
+    "remove": [
+      "/acknowledged"
+    ]
+  },
+  {
+    "label": "an id that is not an event id",
+    "set": {
+      "/acknowledged": "evt_1"
+    }
+  }
+]

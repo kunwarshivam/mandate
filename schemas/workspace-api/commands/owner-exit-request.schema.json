@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/owner-exit-request.schema.json",
+  "type": "object",
+  "required": [
+    "instrument"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "instrument": {
+      "$ref": "../common.schema.json#/$defs/AssetId"
+    },
+    "bid": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "bid_size": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "quoted_at": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "floor": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /agents/{agent_id}/exits (\u00a75.4). Bid members are null in the regular session and for crypto; without valid step-up it is still routed (API-7)."
+}

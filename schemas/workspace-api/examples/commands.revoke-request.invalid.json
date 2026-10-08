@@ -1,0 +1,14 @@
+[
+  {
+    "label": "compromised as a string",
+    "set": {
+      "/compromised": "true"
+    }
+  },
+  {
+    "label": "a reason member",
+    "set": {
+      "/reason": "leaked"
+    }
+  }
+]

@@ -1,0 +1,16 @@
+{
+  "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+  "bid": "101.5",
+  "bid_size": "10",
+  "quoted_at": "2026-10-08T14:30:00.000000000Z",
+  "floor": "99.5",
+  "record": {
+    "artifact": "sha256:abababababababababababababababababababababababababababababababab",
+    "ui_build": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+  },
+  "step_up": {
+    "assertion_id": "asr_01JBH3C0Q0",
+    "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+    "method": "passkey"
+  }
+}

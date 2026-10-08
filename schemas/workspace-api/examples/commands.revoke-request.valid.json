@@ -1,0 +1,10 @@
+[
+  {
+    "label": "an empty body is the ordinary revoke",
+    "remove": [
+      "/compromised",
+      "/record",
+      "/step_up"
+    ]
+  }
+]

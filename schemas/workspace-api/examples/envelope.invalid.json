@@ -1,0 +1,94 @@
+{
+  "Envelope": [
+    {
+      "api_version": "v2",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "served_at": "2026-10-08T14:30:00.000000000Z",
+      "as_of": []
+    },
+    {
+      "api_version": "v1",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "as_of": []
+    }
+  ],
+  "ProblemCode": [
+    "unimplemented",
+    "Invalid"
+  ],
+  "Effect": [
+    "maybe"
+  ],
+  "Problem": [
+    {
+      "type": "about:blank",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid",
+      "effect": "none",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "about:blank",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Stale",
+      "effect": "recorded",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "about:blank",
+      "status": 500,
+      "code": "invalid",
+      "title": "Invalid",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "about:blank",
+      "status": 409,
+      "code": "rate_limited",
+      "title": "Slow down",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    }
+  ],
+  "Actor": [
+    {
+      "kind": "client",
+      "id": "cli_1"
+    },
+    {
+      "kind": "user",
+      "id": "usr_1",
+      "on_behalf_of": "usr_2"
+    },
+    {
+      "kind": "agent",
+      "id": "agt_1"
+    }
+  ],
+  "StepUpEvidence": [
+    {
+      "assertion_id": "a",
+      "authenticated_at": "2026-10-08T14:30:00Z",
+      "method": "passkey"
+    }
+  ],
+  "StepUpStatus": [
+    "valid"
+  ],
+  "Record": [
+    {
+      "artifact": "sha256:abababababababababababababababababababababababababababababababab"
+    }
+  ]
+}

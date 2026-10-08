@@ -1,0 +1,17 @@
+[
+  {
+    "label": "recorded with no steps",
+    "set": {
+      "/phase": "recorded",
+      "/steps": []
+    }
+  },
+  {
+    "label": "refused with its reason",
+    "set": {
+      "/phase": "refused",
+      "/steps/0/reason": "step_up_stale",
+      "/steps/0/event_type": "OwnerCommandRefused"
+    }
+  }
+]

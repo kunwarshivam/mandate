@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/approval-response-accepted.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "response_id",
+    "phase"
+  ],
+  "properties": {
+    "response_id": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "phase": {
+      "const": "recorded"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "description": "The 202 of an approval response (\u00a75.2): recorded, never approved (API-12).",
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "label": "verdict approve_all",
+    "set": {
+      "/verdict": "approve_all"
+    }
+  },
+  {
+    "label": "a missing content hash",
+    "remove": [
+      "/content_hash"
+    ]
+  },
+  {
+    "label": "a missing step_up member",
+    "remove": [
+      "/step_up"
+    ]
+  },
+  {
+    "label": "a null record",
+    "set": {
+      "/record": null
+    }
+  }
+]

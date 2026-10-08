@@ -1,0 +1,444 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/envelope.schema.json",
+  "title": "Workspace API envelope, problem document, actor, step-up evidence, and record",
+  "description": "Workspace API spec \u00a73.2 (api_version and build), \u00a73.3 item 4 (actor), \u00a73.5 (problem), \u00a75 (step_up, record), \u00a76.1 (as_of). Closed safety enums per \u00a73.2.",
+  "$defs": {
+    "Envelope": {
+      "description": "Members every response carries (\u00a73.2, \u00a76.1). Open: each response adds its own members with allOf and unevaluatedProperties: false. as_of may be empty only for a response that reads no stream; every response that reads or commits on a stream tightens it to common AsOf (minItems 1), and a command's 202 carries the committed control-stream watermark (DEC-682).",
+      "type": "object",
+      "required": [
+        "api_version",
+        "build",
+        "served_at",
+        "as_of"
+      ],
+      "properties": {
+        "api_version": {
+          "const": "v1"
+        },
+        "build": {
+          "$ref": "common.schema.json#/$defs/ContentRef"
+        },
+        "served_at": {
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        },
+        "as_of": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Watermark"
+          }
+        }
+      }
+    },
+    "ProblemCode": {
+      "description": "\u00a73.5's codes. Closed on the server (DEC-681 item 1); a client handles an unknown code by status and effect (\u00a73.2).",
+      "enum": [
+        "unauthenticated",
+        "forbidden",
+        "not_found",
+        "invalid",
+        "idempotency_conflict",
+        "stale_base",
+        "classification_changed",
+        "step_up_required",
+        "live_unavailable",
+        "control_stream_frozen",
+        "journal_unavailable",
+        "rate_limited"
+      ]
+    },
+    "Effect": {
+      "enum": [
+        "none",
+        "recorded",
+        "unknown"
+      ]
+    },
+    "Violation": {
+      "type": "object",
+      "required": [
+        "path",
+        "code",
+        "message"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "Problem": {
+      "description": "RFC 9457 problem document (\u00a73.5). event_id is present exactly when effect is recorded or unknown; each code carries the status \u00a73.5's table gives it.",
+      "type": "object",
+      "required": [
+        "type",
+        "status",
+        "code",
+        "title",
+        "effect",
+        "event_id",
+        "retryable",
+        "violations"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            401,
+            403,
+            404,
+            409,
+            422,
+            429,
+            503
+          ]
+        },
+        "code": {
+          "$ref": "#/$defs/ProblemCode"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effect": {
+          "$ref": "#/$defs/Effect"
+        },
+        "event_id": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/EventId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "effect": {
+                "const": "none"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "event_id": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "event_id": {
+                "$ref": "common.schema.json#/$defs/EventId"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "unauthenticated"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "forbidden"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 403
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "not_found"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 404
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "invalid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 422
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "idempotency_conflict"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "stale_base"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "classification_changed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_required"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "live_unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "control_stream_frozen"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "journal_unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "rate_limited"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 429
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Actor": {
+      "description": "Who an event names (\u00a73.3 item 4). A client is never a user; it names the user it acts for.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "id"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "user"
+            },
+            "id": {
+              "$ref": "common.schema.json#/$defs/Id"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "id",
+            "on_behalf_of"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "client"
+            },
+            "id": {
+              "$ref": "common.schema.json#/$defs/Id"
+            },
+            "on_behalf_of": {
+              "$ref": "common.schema.json#/$defs/Id"
+            }
+          }
+        }
+      ]
+    },
+    "StepUpEvidence": {
+      "description": "Journal spec \u00a79.2's evidence, mirroring mandate-identity's StepUpEvidence.",
+      "type": "object",
+      "required": [
+        "assertion_id",
+        "authenticated_at",
+        "method"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "assertion_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "authenticated_at": {
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        },
+        "method": {
+          "$ref": "common.schema.json#/$defs/Id"
+        }
+      }
+    },
+    "StepUpStatus": {
+      "enum": [
+        "bound",
+        "missing",
+        "unbound"
+      ]
+    },
+    "Record": {
+      "description": "The rendered record screen and the build that rendered it (\u00a75, mandate spec \u00a710).",
+      "type": "object",
+      "required": [
+        "artifact",
+        "ui_build"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "common.schema.json#/$defs/ContentRef"
+        },
+        "ui_build": {
+          "$ref": "common.schema.json#/$defs/ContentRef"
+        }
+      }
+    }
+  }
+}

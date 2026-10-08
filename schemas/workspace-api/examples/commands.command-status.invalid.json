@@ -1,0 +1,32 @@
+[
+  {
+    "label": "phase unknown",
+    "set": {
+      "/phase": "unknown"
+    }
+  },
+  {
+    "label": "applied with no steps",
+    "set": {
+      "/steps": []
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "recorded with a step",
+    "set": {
+      "/phase": "recorded"
+    }
+  },
+  {
+    "label": "a step with seq 0",
+    "set": {
+      "/steps/0/seq": 0
+    }
+  }
+]

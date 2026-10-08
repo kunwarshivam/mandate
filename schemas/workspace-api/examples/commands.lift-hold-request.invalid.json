@@ -1,0 +1,14 @@
+[
+  {
+    "label": "a missing step_up member",
+    "remove": [
+      "/step_up"
+    ]
+  },
+  {
+    "label": "step-up with an extra member",
+    "set": {
+      "/step_up/valid": true
+    }
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "label": "phase applied",
+    "set": {
+      "/phase": "applied"
+    }
+  },
+  {
+    "label": "an unknown step-up status",
+    "set": {
+      "/step_up_status": "valid"
+    }
+  },
+  {
+    "label": "no as_of watermark",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "no served_at",
+    "remove": [
+      "/served_at"
+    ]
+  },
+  {
+    "label": "an extra member",
+    "set": {
+      "/approved": true
+    }
+  }
+]

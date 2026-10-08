@@ -1,0 +1,20 @@
+[
+  {
+    "label": "a code verifier member",
+    "set": {
+      "/code_verifier_secret": "x"
+    }
+  },
+  {
+    "label": "an http URL",
+    "set": {
+      "/authorization_url": "http://broker.example/oauth/authorize"
+    }
+  },
+  {
+    "label": "an access token member",
+    "set": {
+      "/access_token": "x"
+    }
+  }
+]

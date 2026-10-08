@@ -1,0 +1,10 @@
+[
+  {
+    "label": "no release, no warning",
+    "set": {
+      "/release": false,
+      "/warning_shown": null,
+      "/step_up": null
+    }
+  }
+]

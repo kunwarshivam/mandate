@@ -1,0 +1,8 @@
+[
+  {
+    "label": "no step-up status",
+    "remove": [
+      "/step_up_status"
+    ]
+  }
+]

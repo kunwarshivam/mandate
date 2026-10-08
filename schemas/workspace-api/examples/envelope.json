@@ -1,0 +1,92 @@
+{
+  "Envelope": [
+    {
+      "api_version": "v1",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "served_at": "2026-10-08T14:30:00.000000000Z",
+      "as_of": [
+        {
+          "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+          "seq": 312,
+          "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "recorded_at": "2026-10-08T14:30:00.000000000Z"
+        }
+      ]
+    },
+    {
+      "api_version": "v1",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "served_at": "2026-10-08T14:30:00.000000000Z",
+      "as_of": [],
+      "extra": "responses add members"
+    }
+  ],
+  "ProblemCode": [
+    "unauthenticated",
+    "step_up_required",
+    "journal_unavailable"
+  ],
+  "Effect": [
+    "none",
+    "recorded",
+    "unknown"
+  ],
+  "Violation": [
+    {
+      "path": "/owner_exit/0/bid",
+      "code": "invalid",
+      "message": "a decimal is a string"
+    }
+  ],
+  "Problem": [
+    {
+      "type": "about:blank",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "about:blank",
+      "status": 503,
+      "code": "journal_unavailable",
+      "title": "Unavailable",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    }
+  ],
+  "Actor": [
+    {
+      "kind": "user",
+      "id": "usr_1"
+    },
+    {
+      "kind": "client",
+      "id": "cli_1",
+      "on_behalf_of": "usr_1"
+    }
+  ],
+  "StepUpEvidence": [
+    {
+      "assertion_id": "asr_01JBH3C0Q0",
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+      "method": "passkey"
+    }
+  ],
+  "StepUpStatus": [
+    "bound",
+    "missing",
+    "unbound"
+  ],
+  "Record": [
+    {
+      "artifact": "sha256:abababababababababababababababababababababababababababababababab",
+      "ui_build": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+  ]
+}

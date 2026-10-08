@@ -1,0 +1,32 @@
+[
+  {
+    "label": "a number for a dollar cap",
+    "set": {
+      "/max_order_usd": 300
+    }
+  },
+  {
+    "label": "max_orders 0",
+    "set": {
+      "/max_orders": 0
+    }
+  },
+  {
+    "label": "max_orders 1001",
+    "set": {
+      "/max_orders": 1001
+    }
+  },
+  {
+    "label": "a timed shape without expiry",
+    "set": {
+      "/expires_at": null
+    }
+  },
+  {
+    "label": "until_close with a cap",
+    "set": {
+      "/shape": "until_close"
+    }
+  }
+]

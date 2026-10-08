@@ -1,0 +1,20 @@
+[
+  {
+    "label": "phase applied",
+    "set": {
+      "/phase": "applied"
+    }
+  },
+  {
+    "label": "an unknown applies",
+    "set": {
+      "/applies": "later"
+    }
+  },
+  {
+    "label": "no as_of watermark",
+    "set": {
+      "/as_of": []
+    }
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "label": "phase approved",
+    "set": {
+      "/phase": "approved"
+    }
+  },
+  {
+    "label": "a lowercase event id",
+    "set": {
+      "/response_id": "01jbh3btz8k2m4n6p8r0s2t4v6"
+    }
+  }
+]

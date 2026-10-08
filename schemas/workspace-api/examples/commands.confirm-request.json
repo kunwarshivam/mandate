@@ -1,0 +1,21 @@
+{
+  "agent_id": "agt_1",
+  "base_version": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+  "confirmed_paths": [
+    "/capital/allocation_usd"
+  ],
+  "warnings_acknowledged": [
+    "W-012"
+  ],
+  "classification_shown": "risk_increasing",
+  "screen_digest": "sha256:abababababababababababababababababababababababababababababababab",
+  "record": {
+    "artifact": "sha256:abababababababababababababababababababababababababababababababab",
+    "ui_build": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+  },
+  "step_up": {
+    "assertion_id": "asr_01JBH3C0Q0",
+    "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+    "method": "passkey"
+  }
+}

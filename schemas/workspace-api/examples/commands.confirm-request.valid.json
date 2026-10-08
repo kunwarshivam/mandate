@@ -1,0 +1,11 @@
+[
+  {
+    "label": "a new mandate with no step-up",
+    "set": {
+      "/agent_id": null,
+      "/base_version": null,
+      "/classification_shown": "neutral",
+      "/step_up": null
+    }
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "label": "until_close, derived caps",
+    "set": {
+      "/shape": "until_close",
+      "/max_order_usd": null,
+      "/max_total_usd": null,
+      "/expires_at": null
+    }
+  }
+]

@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/kill-switch-request.schema.json",
+  "type": "object",
+  "required": [
+    "scope"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "type": "object",
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "agent",
+            "connection",
+            "workspace"
+          ]
+        },
+        "id": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "workspace"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "id": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "id": {
+            "$ref": "../common.schema.json#/$defs/Id"
+          }
+        }
+      }
+    },
+    "environment_shown": {
+      "oneOf": [
+        {
+          "enum": [
+            "paper",
+            "live"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "owner_exit": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "asset_id",
+              "bid",
+              "bid_size",
+              "quoted_at",
+              "floor"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "asset_id": {
+                "$ref": "../common.schema.json#/$defs/AssetId"
+              },
+              "bid": {
+                "$ref": "../common.schema.json#/$defs/Decimal"
+              },
+              "bid_size": {
+                "$ref": "../common.schema.json#/$defs/Decimal"
+              },
+              "quoted_at": {
+                "$ref": "../common.schema.json#/$defs/Timestamp"
+              },
+              "floor": {
+                "$ref": "../common.schema.json#/$defs/Decimal"
+              }
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /kill-switch (\u00a75.4). Only scope is required: a missing optional member never refuses it (API-7). No org scope: the org kill switch is one workspace call per workspace (DEC-436 item 13)."
+}
