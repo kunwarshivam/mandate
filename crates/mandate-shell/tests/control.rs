@@ -155,7 +155,6 @@ fn violations(rules: &[Violation]) -> Option<Refusal> {
 /// parsed, and a context with the registry present (X-7), every envelope path confirmed, and `paper`
 /// for a connection the stream says nothing about (DEC-505 items 1 and 3).
 #[test]
-#[ignore = "pending E19-11"]
 fn the_input_is_the_deployed_confirmed_version() {
     let stream = Stream::deployed();
     let input = stream.read();
@@ -170,7 +169,6 @@ fn the_input_is_the_deployed_confirmed_version() {
 }
 
 #[test]
-#[ignore = "pending E19-11"]
 fn without_a_deployment_of_this_agent_there_is_no_input() {
     assert_eq!(Stream::deployed().refused(), None, "with it");
     let mut stream = Stream::deployed();
@@ -187,7 +185,6 @@ fn without_a_deployment_of_this_agent_there_is_no_input() {
 /// An `AgentStopped` after the latest `AgentDeployed` refuses, another agent's does not, and a
 /// deployment after the stop counts.
 #[test]
-#[ignore = "pending E19-11"]
 fn a_stopped_agent_refuses_until_it_is_deployed_again() {
     let others = Stream::deployed().then("AgentStopped", &stop("agent_other"));
     assert_eq!(others.refused(), None, "another agent's stop");
@@ -201,7 +198,6 @@ fn a_stopped_agent_refuses_until_it_is_deployed_again() {
 /// The latest `AgentDeployed` names the version: a later one naming a document the store lacks
 /// refuses rather than falling back to the earlier version.
 #[test]
-#[ignore = "pending E19-11"]
 fn the_latest_deployment_counts_and_its_document_must_be_stored_intact() {
     let later = format!(
         r#"{{"agent_id":"{AGENT}","mandate_version":"sha256:{}","record_ref":"sha256:{}"}}"#,
@@ -218,7 +214,6 @@ fn the_latest_deployment_counts_and_its_document_must_be_stored_intact() {
 /// The records are read in `seq` order, not slice order: a stop at seq 5 listed before the
 /// deployment at seq 4 still follows it.
 #[test]
-#[ignore = "pending E19-11"]
 fn the_stream_is_read_in_seq_order() {
     let mut reordered = Stream::deployed().then("AgentStopped", &stop(AGENT));
     reordered.records.swap(3, 4);
@@ -227,7 +222,6 @@ fn the_stream_is_read_in_seq_order() {
 
 /// A stored document that re-hashes but is no mandate, and a store that cannot be read, refuse.
 #[test]
-#[ignore = "pending E19-11"]
 fn an_unreadable_document_or_store_refuses() {
     let unreadable = Stream::of(&json(r#"{"name":"not a mandate"}"#), &envelope());
     assert_eq!(unreadable.refused(), Some(Refusal::DocumentUnreadable));
@@ -240,7 +234,6 @@ fn an_unreadable_document_or_store_refuses() {
 /// another version or none (V-020 and V-022), a model registered under another hash or not at all
 /// (V-007), and a connection revoked or established as `live` (V-001) each refuse.
 #[test]
-#[ignore = "pending E19-11"]
 fn every_v_rule_the_stream_decides_refuses() {
     let but_name: Vec<&str> = envelope().into_iter().filter(|p| *p != "name").collect();
     let unconfirmed = Stream::of(&json(MANDATE), &but_name);
@@ -270,7 +263,6 @@ fn every_v_rule_the_stream_decides_refuses() {
 
 /// A `live` mandate is refused before anything else is read about it.
 #[test]
-#[ignore = "pending E19-11"]
 fn a_live_mandate_is_refused() {
     let paper = Stream::deployed();
     assert_eq!(paper.refused(), None, "the paper document");
@@ -283,7 +275,6 @@ fn a_live_mandate_is_refused() {
 /// V-002 is phase 2's (DEC-505 item 3): the version phase 1 confirmed with no equity is refused on
 /// a preflight equity below the allocation, and carries an equity that covers it.
 #[test]
-#[ignore = "pending E19-11"]
 fn v_002_refuses_only_on_the_preflight_equity() {
     let input = Stream::deployed().read().unwrap();
     let usd = |text| Usd::parse(text).unwrap();
