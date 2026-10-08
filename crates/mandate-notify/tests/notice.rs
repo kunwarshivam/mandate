@@ -62,14 +62,15 @@ fn a_failing_random_source_mints_no_notice() {
     );
 }
 
-/// DEC-702 item 2: text reads back only as exactly 32 lowercase hex digits, the form a link and
-/// `NoticeIssued` carry, and the id it gives is the one that was minted.
+/// DEC-702 item 2: an id is written as its source's bits in 32 lowercase hex digits, text reads
+/// back only in that form, and the id it gives is the one that was minted.
 #[test]
 #[ignore = "pending E8-9"]
-fn a_notice_id_parses_only_from_32_lowercase_hex() {
+fn a_notice_id_round_trips_only_through_32_lowercase_hex() {
     let mut random = Recording::seeded(21);
     let minted = answer("mint", NoticeId::mint(&mut random));
     let id = hex(&random.issued[0]);
+    assert_eq!(answer("hex", minted.hex()), id);
     assert_eq!(answer("parse", NoticeId::parse(&id)), minted);
     let upper = id.to_ascii_uppercase();
     for text in [

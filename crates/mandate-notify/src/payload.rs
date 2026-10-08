@@ -31,6 +31,16 @@ impl NoticeId {
         Err(NotifyError::Unimplemented { story: "E8-9" })
     }
 
+    /// The id's 32 lowercase hex digits, as a link, the payload, and the dispatcher's
+    /// `NoticeIssued` and `NoticeAttempted` carry it.
+    ///
+    /// # Errors
+    /// Never once implemented.
+    pub fn hex(&self) -> Result<String, NotifyError> {
+        let _ = self;
+        Err(NotifyError::Unimplemented { story: "E8-9" })
+    }
+
     /// Reads back a notice id from its 32 lowercase hex digits, as a link or the dispatcher's own
     /// `NoticeIssued` carries it (DEC-702 item 2). A ULID, 26 characters of Crockford base32, never
     /// parses.
