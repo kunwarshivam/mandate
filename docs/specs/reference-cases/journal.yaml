@@ -10334,7 +10334,7 @@ approval_answers:
     expect:
       outcome: Valid
 broker_profile:
-  spec: docs/specs/journal.md v0.20 §9 and rule 21b (DEC-531 item 4, DEC-630)
+  spec: docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)
   artifacts:
   - name: alpaca
     ref: sha256:6408fbbc116a3cd591c9a0377079a6cac0104766974b60a93ab7b1f0b8b8315c

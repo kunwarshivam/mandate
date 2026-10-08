@@ -3046,7 +3046,7 @@ def production_artifact_problems(artifact: dict) -> list[str]:
 def production_registration_violations(
     draft: dict, stored: dict[str, dict], skip: frozenset[str] = frozenset()
 ) -> list[Violation]:
-    """Rules 20, 21, 21a and (v0.20) 21b. `skip` seeds the broker-profile section's validator bugs."""
+    """Rules 20, 21, 21a and (v0.19) 21b. `skip` seeds the broker-profile section's validator bugs."""
     out = type_violations(ENVELOPE, draft, "", frozenset())
     if out:
         return out
@@ -3505,7 +3505,7 @@ def run_policy_overlay_mutants(section: dict, agent_section: dict) -> list[str]:
     return escaped
 
 
-# --------------------------------------------------------------------------- broker_profile (v0.20)
+# --------------------------------------------------------------------------- broker_profile (v0.19)
 
 PROFILE_MEMBERS = {"kind", "profile_version", "rows", "idempotency"}
 PROFILE_ROW_ENUMS = {
@@ -3643,7 +3643,7 @@ def profile_shape_problem(obj) -> str | None:
 
 
 def build_broker_profile_section(control_section: dict) -> dict:
-    """Journal spec v0.20 (DEC-531 item 4, DEC-630): a version-3 `ConfigSnapshotRegistered` of a
+    """Journal spec v0.19 (DEC-531 item 4, DEC-630): a version-3 `ConfigSnapshotRegistered` of a
     broker's capability profile, with the profile stored under its hash. Additive, so the
     `production_config_refs` cases and their counts stay as they are."""
     profile = alpaca_profile()
@@ -3680,7 +3680,7 @@ def build_broker_profile_section(control_section: dict) -> dict:
         return {"name": name, "base": "profile_registration", "changes": changes, "expect": {"reason": reason, "path": path}}
 
     return {
-        "spec": "docs/specs/journal.md v0.20 §9 and rule 21b (DEC-531 item 4, DEC-630)",
+        "spec": "docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)",
         "artifacts": [{"name": "alpaca", "ref": ref, "object": profile, "canonical": canon(profile)}],
         "valid_drafts": {"profile_registration": registration},
         "invalid_drafts": [

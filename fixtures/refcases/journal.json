@@ -15889,7 +15889,7 @@
   ]
  },
  "broker_profile": {
-  "spec": "docs/specs/journal.md v0.20 §9 and rule 21b (DEC-531 item 4, DEC-630)",
+  "spec": "docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)",
   "artifacts": [
    {
     "name": "alpaca",
