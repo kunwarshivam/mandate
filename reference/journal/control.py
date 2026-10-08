@@ -1080,18 +1080,21 @@ def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list
     if event_type == "RecordsAccessed":
         accessor = p["accessor"]
         rule("76.accessor", not isinstance(accessor, str) or accessor == draft["actor"]["id"], "payload.accessor")
-        rule("76.actor", kind not in ("agent", "broker"), "actor.kind")
+        refused = tuple(k for k in ("agent", "broker") if f"kinds.76.{k}" not in skip)
+        rule("76.actor", kind not in refused, "actor.kind")
         resources = p["resources"] if isinstance(p["resources"], list) else []
         named = [r.encode() for r in resources if isinstance(r, str)]
         rule("76.resources", all(a < b for a, b in zip(named, named[1:])), "payload.resources")
     if event_type == "ExportCreated":
-        rule("77.actor", kind in ("user", "system"), "actor.kind")
+        widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.77.{k}" in skip)
+        rule("77.actor", kind in ("user", "system", *widened), "actor.kind")
         if p["form"] in ("canonical", *VIEW_FORMS) and (p["view"] is None or isinstance(p["view"], str)):
             rule("77.view", (p["view"] is not None) == (p["form"] in VIEW_FORMS), "payload.view")
     if event_type == "VerificationRun":
         if p["trigger"] in TRIGGERS:
             allowed = ("user", "system") if p["trigger"] == "request" else ("system",)
-            rule("78", kind in allowed, "actor.kind")
+            widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.78.{k}" in skip)
+            rule("78", kind in (*allowed, *widened), "actor.kind")
         for i, r in enumerate(items):
             at = f"payload.ranges[{i}]"
             failure = r.get("failure")

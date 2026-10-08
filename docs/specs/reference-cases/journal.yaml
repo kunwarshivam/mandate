@@ -15486,7 +15486,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id008
+      value: &id010
         kind: agent
         id: agent_a
         version: 0.1.0
@@ -15560,12 +15560,82 @@ records_access:
       outcome: Invalid
       reason: schema
       path: actor.kind
-  - name: export_by_an_agent
+  - name: read_by_a_broker
+    clause: 'rule 76: a broker reads no records'
+    base_draft: records_read
+    changes:
+    - path: actor
+      value: &id008
+        kind: broker
+        id: alpaca
+        version: v2
+        build: null
+    - path: payload.accessor
+      value: alpaca
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: export_by_a_broker
     clause: 'rule 77: a user or a service account exports'
     base_draft: export_canonical
     changes:
     - path: actor
       value: *id008
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: export_by_an_operator
+    clause: 'rule 77: platform staff do not export; a break-glass export fails closed (§9.10)'
+    base_draft: export_canonical
+    changes:
+    - path: actor
+      value: &id009
+        kind: platform_operator
+        id: operator_01
+        version: '1'
+        build: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: scheduled_run_by_a_broker
+    clause: 'rule 78: a scheduled run is the verifier''s own'
+    base_draft: verification_pass
+    changes:
+    - path: actor
+      value: *id008
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: requested_run_by_an_operator
+    clause: 'rule 78: platform staff do not run a verification; it fails closed (§9.10)'
+    base_draft: verification_fail
+    changes:
+    - path: actor
+      value: *id009
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: export_by_an_agent
+    clause: 'rule 77: a user or a service account exports'
+    base_draft: export_canonical
+    changes:
+    - path: actor
+      value: *id010
     - path: artifact_refs
       value: []
     expect:
@@ -15601,7 +15671,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: &id010
+      value: &id012
         kind: user
         id: user_owner_01
         version: '1'
@@ -15617,7 +15687,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id008
+      value: *id010
     - path: artifact_refs
       value: []
     expect:
@@ -15823,7 +15893,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id009
+      value: &id011
         kind: system
         id: control_services
         version: 0.1.0
@@ -15848,6 +15918,18 @@ records_access:
       value: []
     expect:
       outcome: Valid
+  - name: read_by_an_operator
+    clause: 'rule 76 and §7: platform staff''s break-glass reads are journaled where the customer reads them'
+    base_draft: records_read
+    changes:
+    - path: actor
+      value: *id009
+    - path: payload.accessor
+      value: operator_01
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
   - name: read_scheduler_and_notice_streams
     clause: '§9.10 types: every stream type of §2'
     base_draft: records_read
@@ -15868,7 +15950,7 @@ records_access:
       value: []
     expect:
       outcome: Valid
-  - name: notice_resolved_by_a_client_read
+  - name: notice_resolved_with_resources_and_result
     clause: 'rule 76: resources and a stored result (workspace API §3.9)'
     base_draft: records_read
     changes:
@@ -15907,7 +15989,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id009
+      value: *id011
     - path: artifact_refs
       value: []
     expect:
@@ -15917,7 +15999,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id009
+      value: *id011
     - path: artifact_refs
       value: []
     expect:
@@ -15927,7 +16009,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: *id010
+      value: *id012
     - path: payload.trigger
       value: request
     - path: artifact_refs
@@ -15939,7 +16021,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id009
+      value: *id011
     - path: payload.trigger
       value: restore_drill
     - path: payload.ranges

@@ -1900,7 +1900,11 @@ A verification a principal requested for an export names that export's `ExportCr
 77. `ExportCreated`: `actor.kind` is `user` or `system` (`actor.kind`), and `view` is non-null
     exactly when `form` is `json` or `csv` (`payload.view`).
 78. `VerificationRun`: `actor.kind` is `system`, or, for a `request`, `user` or `system`
-    (`actor.kind`).
+    (`actor.kind`). Rules 77 and 78 refuse a `platform_operator`, so a §7 break-glass export or
+    verification by platform staff cannot be journaled and is not served: it fails closed on
+    purpose. Platform staff's break-glass reads are journaled as `RecordsAccessed` (rule 76 admits
+    them); an export or a verification for them is run by the workspace's own user or service
+    account.
 79. `VerificationRun`: each range, in array order, at `payload.ranges[i].<member>`: a non-null
     `failure`'s `seq` is non-null exactly when its check is reported at an event (§11's per-event
     checks 1 to 6, `anchor_head_mismatch` at the anchored `seq`, `intent_action_mismatch`, and
