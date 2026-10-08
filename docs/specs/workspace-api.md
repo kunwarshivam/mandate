@@ -965,7 +965,7 @@ like any other change.
 **Only one's own.** `/me` resolves to the authenticated user; no route sets or removes another
 member's address, and a client, a service account, the host CLI, and a platform operator have none
 (API-6). The identity spec §4.2 row "Add or remove one's own notification address (a push
-subscription; later an email or chat address)" authorizes setting and removing: **S** for both,
+subscription; later an email address)" authorizes setting and removing: **S** for both,
 `own` in the five workspace columns (workspace admin, operator, approver, viewer, auditor), at this
 workspace's scope through a membership that reaches it, and blank everywhere else. The row "List
 one's own notification addresses (opaque references only)", `own` in the same columns without
@@ -1243,7 +1243,10 @@ twice.
    evidence again and without writing the vault (so a retry after a lost `202` succeeds). No body
    is compared then: the journaled members hold no endpoint or keys, so a retry with a different
    body answers the original outcome too. Before the event exists, a vault entry under the derived
-   `address_ref` written for a different request digest is `idempotency_conflict`.
+   `address_ref` written for a different request digest is `idempotency_conflict`. This is a deliberate exception
+   to API-4 and §3.4 (a different body is a 409): once the event exists, the journaled members
+   hold no endpoint or keys, so there is nothing to compare the new body against
+   ([DEC-795](../project/decisions/DEC-795.md)).
 2. Check the allowlist and the step-up evidence, which is judged only by a call that will append.
 3. Ask the vault which of the member's entries hold this endpoint, and keep only the active ones
    (§4.11). An active match that is reachable answers `200` and writes nothing. An active match
