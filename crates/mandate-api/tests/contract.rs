@@ -100,8 +100,9 @@ fn plain_effect(name: &str) -> Effect {
     }
 }
 
-/// The title `envelope.schema.json#/$defs/Problem` pins for each code (API-10, DEC-682 item 28):
-/// generic text that names no content.
+/// The title `envelope.schema.json#/$defs/Problem` pins for each code (API-10, DEC-682 item 28),
+/// and for identity spec §4.5's six codes, which neither spec titles, the one DEC-681 item 14
+/// fixes: generic text that names no content.
 const TITLES: &[(&str, &str)] = &[
     ("unauthenticated", "Sign in required"),
     ("forbidden", "Not allowed"),
@@ -116,6 +117,12 @@ const TITLES: &[(&str, &str)] = &[
     ("journal_unavailable", "Temporarily unavailable"),
     ("rate_limited", "Too many requests"),
     ("outcome_unknown", "Result unknown"),
+    ("own_roles", "Cannot change own roles"),
+    ("owner_role_reserved", "Owner role reserved"),
+    ("last_owner", "Owner must remain"),
+    ("last_admin", "Admin must remain"),
+    ("reduction_only", "Risk reduction only"),
+    ("membership_unavailable", "Membership unavailable"),
 ];
 
 fn title_of(name: &str) -> &'static str {
@@ -134,8 +141,8 @@ fn every_problem_code_has_the_spec_tables_status() {
         .filter(|c| c.planned.is_none())
         .collect();
     assert!(
-        served.len() >= 12,
-        "§3.5 lists at least the twelve codes of v0.1"
+        served.len() >= 18,
+        "§3.5 lists at least v0.1's twelve codes and identity spec §4.5's six"
     );
     let event = ulid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     for SpecCode { name, status, .. } in served {
@@ -186,7 +193,9 @@ fn event_id_is_present_exactly_when_something_may_be_recorded() {
 /// The effects each code may carry, read from the spec: a refusal for authentication, role, scope,
 /// existence, shape, idempotency, base, classification, live, rate, identity, or an unavailable
 /// journal comes before anything is written (§3.5, API-1, API-2, API-13; "`effect: none`" in
-/// `journal_unavailable`'s row). Only §5.6's batch refuses its revocation after its kill switch was
+/// `journal_unavailable`'s row). Identity spec §4.5's refusals (`own_roles`,
+/// `owner_role_reserved`, `last_owner`, `last_admin`, `reduction_only`, `membership_unavailable`)
+/// are the authorization step's, which commits nothing (§4.5, DEC-643), so they carry only `none`. Only §5.6's batch refuses its revocation after its kill switch was
 /// recorded, with `step_up_required` or while frozen with `control_stream_frozen`. Only
 /// `outcome_unknown` reports `unknown`, and it reports nothing else (#788's §3.5 row, DEC-681 item
 /// 11).
@@ -207,8 +216,8 @@ fn each_code_carries_only_the_effects_the_spec_allows_it() {
         .filter(|c| c.planned.is_none())
         .collect();
     assert!(
-        served.len() >= 12,
-        "§3.5 lists at least the twelve codes of v0.1"
+        served.len() >= 18,
+        "§3.5 lists at least v0.1's twelve codes and identity spec §4.5's six"
     );
     for SpecCode { name, .. } in served {
         let code: ProblemCode = decode(format!("\"{name}\"").as_bytes()).expect(&name);
@@ -651,8 +660,8 @@ fn the_safety_enums_of_a_problem_are_closed() {
         })
         .collect();
     assert!(
-        codes.len() >= 12,
-        "§3.5 lists at least the twelve codes of v0.1"
+        codes.len() >= 18,
+        "§3.5 lists at least v0.1's twelve codes and identity spec §4.5's six"
     );
     let cases: Vec<(ProblemCode, &str)> = codes.iter().map(|(c, n)| (*c, n.as_str())).collect();
     closed(&cases);
@@ -677,7 +686,7 @@ fn the_problem_code_enum_is_exactly_the_spec_tables_codes() {
         .filter(|c| c.planned.is_none())
         .map(|c| c.name.clone())
         .collect();
-    assert!(rust.len() >= 12, "the refusal lists the variants: {rust:?}");
+    assert!(rust.len() >= 18, "the refusal lists the variants: {rust:?}");
     let unlisted: Vec<_> = rust.difference(&listed).collect();
     assert!(
         unlisted.is_empty(),

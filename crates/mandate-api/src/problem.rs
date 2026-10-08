@@ -38,9 +38,10 @@ pub enum CurrentBase {
 impl Problem {
     /// The problem for `code`: the status §3.5's table gives it, the type URI
     /// `https://mandate.dev/problems/<code>`, a title fixed by the code that names no content, no
-    /// violations, and `retryable` for `journal_unavailable` and `rate_limited` only, with
-    /// `membership_unavailable` once #766's codes are served (DEC-681 items 9 and 11). The title
-    /// is the one `envelope.schema.json` pins for the code.
+    /// violations, and `retryable` for `journal_unavailable`, `rate_limited`, and
+    /// `membership_unavailable` only (DEC-681 items 9 and 11). The title is the one
+    /// `envelope.schema.json` pins for the code, or for identity spec §4.5's codes the one DEC-681
+    /// item 14 fixes.
     ///
     /// # Errors
     /// [`ProblemError::EventIdMismatch`] for an `event_id` with [`Effect::None`], or none with
@@ -62,7 +63,8 @@ impl Problem {
 }
 
 /// The stable machine codes of §3.5's table. Closed on the server: it can emit no other code
-/// (DEC-681 item 1). An operation's own codes join this enum with the operation's story.
+/// (DEC-681 item 1). An operation's own codes join this enum with the operation's story. The last
+/// six are identity spec §4.5's refusals (DEC-643), each refused before anything is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProblemCode {
@@ -78,6 +80,12 @@ pub enum ProblemCode {
     ControlStreamFrozen,
     JournalUnavailable,
     RateLimited,
+    OwnRoles,
+    OwnerRoleReserved,
+    LastOwner,
+    LastAdmin,
+    ReductionOnly,
+    MembershipUnavailable,
 }
 
 /// What the failed call left in the journal (§3.5), a closed safety enum (§3.2): the web app
