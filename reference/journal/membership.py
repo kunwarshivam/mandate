@@ -107,6 +107,7 @@ def base_drafts() -> dict[str, dict]:
                 "roles": ["approver", "viewer"],
                 "method": "oidc",
                 "activated_at": AT,
+                "independent_approval_required": True,
                 "cool_off_ends_at": A_DAY_LATER,
             },
         ),
@@ -121,6 +122,7 @@ def base_drafts() -> dict[str, dict]:
                 "roles": ["approver", "operator", "workspace_admin"],
                 "method": "passkey",
                 "activated_at": AT,
+                "independent_approval_required": False,
                 "cool_off_ends_at": AT,
             },
         ),
@@ -137,6 +139,7 @@ def base_drafts() -> dict[str, dict]:
                 ],
                 "removed": ["viewer"],
                 "changed_at": AT,
+                "independent_approval_required": True,
                 "step_up": dict(STEP_UP),
             },
         ),
@@ -154,7 +157,9 @@ def base_drafts() -> dict[str, dict]:
                 "member": MEMBER,
                 "by": ADMIN,
                 "step_up": dict(STEP_UP),
+                "roles": ["approver", "viewer"],
                 "reactivated_at": AT,
+                "independent_approval_required": True,
                 "cool_off_ends_at": A_DAY_LATER,
             },
         ),
@@ -212,6 +217,7 @@ MEMBER_CASES = {
         ("roles", "viewer", None),
         ("method", 7, "password"),
         ("activated_at", 1790000000, "2026-10-05T14:00:00Z"),
+        ("independent_approval_required", "true", None),
         ("cool_off_ends_at", 1790086400, "2026-10-06T14:00:00Z"),
     ),
     "role_changed": (
@@ -220,6 +226,7 @@ MEMBER_CASES = {
         ("added", {"role": "operator"}, None),
         ("removed", "viewer", None),
         ("changed_at", 1790000000, "2026-10-05"),
+        ("independent_approval_required", 1, None),
         ("step_up", "passkey", None),
     ),
     "deactivated": (
@@ -231,7 +238,9 @@ MEMBER_CASES = {
         ("member", 7, "user_member_01"),
         ("by", 7, ""),
         ("step_up", "passkey", None),
+        ("roles", "viewer", None),
         ("reactivated_at", 1790000000, "2026-10-05"),
+        ("independent_approval_required", "false", None),
         ("cool_off_ends_at", 1790086400, "2026-10-06"),
     ),
     "removed": (
@@ -241,16 +250,27 @@ MEMBER_CASES = {
     ),
 }
 # Non-nullable members a `null` must not satisfy, each its own case.
-# A `null` writer fails rule 55, a `null` cool-off end rule 61, and a `null` expiry rule 62, at the member's own path with the
-# same reason, so such a draft is refused identically whether or not its type is checked first.
-RULE_TYPED = ("by", "changed_by", "invited_by", "revoked_by", "cool_off_ends_at", "expires_at")
+# A `null` writer fails rule 55, a `null` cool-off end rule 61, a `null` expiry rule 62, and a `null` own
+# instant rule 64, at the member's own path with the same reason, so such a draft is refused identically whether or not its type is checked first.
+RULE_TYPED = (
+    "by",
+    "changed_by",
+    "invited_by",
+    "revoked_by",
+    "cool_off_ends_at",
+    "expires_at",
+    "invited_at",
+    "activated_at",
+    "changed_at",
+    "reactivated_at",
+)
 NULLED = {
     "invited": ("invitation", "roles", "invited_by", "step_up", "expires_at"),
     "invitation_revoked": ("invitation", "revoked_by"),
-    "activated": ("member", "reason", "roles", "method", "activated_at", "cool_off_ends_at"),
-    "role_changed": ("member", "changed_by", "added", "removed", "changed_at"),
+    "activated": ("member", "reason", "roles", "method", "activated_at", "independent_approval_required", "cool_off_ends_at"),
+    "role_changed": ("member", "changed_by", "added", "removed", "changed_at", "independent_approval_required"),
     "deactivated": ("member", "by", "reason"),
-    "reactivated": ("member", "by", "step_up", "reactivated_at", "cool_off_ends_at"),
+    "reactivated": ("member", "by", "step_up", "roles", "reactivated_at", "independent_approval_required", "cool_off_ends_at"),
     "removed": ("member", "by", "reason"),
 }
 
@@ -644,6 +664,90 @@ def invalid_drafts() -> list[dict]:
             "payload.session_ref",
         ),
         invalid(
+            "activated_in_the_past",
+            "rules 61 and 64: the reviewer's probe, a grant dated back to escape its cool-off",
+            "activated",
+            [
+                change("payload.activated_at", "2020-01-01T00:00:00.000000000Z"),
+                change("payload.cool_off_ends_at", "2020-01-02T00:00:00.000000000Z"),
+            ],
+            "schema",
+            "payload.cool_off_ends_at",
+            also=[("schema", "payload.activated_at")],
+        ),
+        invalid(
+            "changed_a_nanosecond_in_the_future",
+            "rule 64",
+            "role_changed",
+            [change("payload.changed_at", "2026-10-05T14:00:00.000000001Z")],
+            "schema",
+            "payload.changed_at",
+        ),
+        invalid(
+            "invited_a_nanosecond_early",
+            "rule 64: a week from a self-chosen instant is still refused",
+            "invited",
+            [
+                change("payload.invited_at", "2026-10-05T13:59:59.999999999Z"),
+                change("payload.expires_at", "2026-10-12T13:59:59.999999999Z"),
+            ],
+            "schema",
+            "payload.invited_at",
+        ),
+        invalid(
+            "reactivated_in_the_past",
+            "rule 64",
+            "reactivated",
+            [change("payload.reactivated_at", "2026-10-04T14:00:00.000000000Z")],
+            "schema",
+            "payload.reactivated_at",
+        ),
+        invalid(
+            "cooling_without_independence",
+            "rule 61: no day is owed when independence is not required",
+            "activated",
+            [change("payload.independent_approval_required", False)],
+            "schema",
+            "payload.cool_off_ends_at",
+        ),
+        invalid(
+            "operator_at_once_under_independence",
+            "rule 61: a day is owed",
+            "role_changed",
+            [
+                change(
+                    "payload.added",
+                    [{"role": "auditor", "cool_off_ends_at": AT}, {"role": "operator", "cool_off_ends_at": AT}],
+                )
+            ],
+            "schema",
+            "payload.added[1].cool_off_ends_at",
+        ),
+        invalid(
+            "approver_reactivated_at_once_under_independence",
+            "rule 61",
+            "reactivated",
+            [change("payload.cool_off_ends_at", AT)],
+            "schema",
+            "payload.cool_off_ends_at",
+        ),
+        invalid(
+            "reactivated_with_no_role",
+            "rule 58",
+            "reactivated",
+            [change("payload.roles", []), change("payload.cool_off_ends_at", AT)],
+            "schema",
+            "payload.roles",
+        ),
+        invalid(
+            "reactivated_roles_unsorted",
+            "rule 54",
+            "reactivated",
+            [change("payload.roles", ["viewer", "approver"])],
+            "non_canonical",
+            "payload.roles",
+        ),
+        invalid(
             "rules_reported_in_order",
             "§9.1 order: rule 55 before rule 57 before rule 61",
             "role_changed",
@@ -663,9 +767,9 @@ def valid_drafts() -> list[dict]:
     return [
         valid(
             "activated_without_a_cool_off",
-            "rule 61: the 24 hours apply only under `independent_approval_required`, which the record does not carry",
+            "rule 61: without independence required, an approver activates at once",
             "activated",
-            [change("payload.cool_off_ends_at", AT)],
+            [change("payload.independent_approval_required", False), change("payload.cool_off_ends_at", AT)],
         ),
         valid(
             "viewer_activated_at_once",
@@ -693,9 +797,13 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "operator_granted_without_a_cool_off",
-            "rule 61",
+            "rule 61: without independence required, an operator grant is effective at once",
             "role_changed",
-            [change("payload.added", [{"role": "operator", "cool_off_ends_at": AT}]), change("payload.removed", [])],
+            [
+                change("payload.added", [{"role": "operator", "cool_off_ends_at": AT}]),
+                change("payload.removed", []),
+                change("payload.independent_approval_required", False),
+            ],
         ),
         valid(
             "left",
@@ -738,9 +846,21 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "reactivated_at_once",
-            "rule 61",
+            "rule 61: without independence required",
             "reactivated",
-            [change("payload.cool_off_ends_at", AT)],
+            [change("payload.independent_approval_required", False), change("payload.cool_off_ends_at", AT)],
+        ),
+        valid(
+            "viewer_reactivated_at_once_under_independence",
+            "rule 61: kept roles that never cool off",
+            "reactivated",
+            [change("payload.roles", ["auditor", "viewer"]), change("payload.cool_off_ends_at", AT)],
+        ),
+        valid(
+            "founding_under_independence",
+            "rule 61: the founding grant never cools off, even where independence is required",
+            "founding",
+            [change("payload.independent_approval_required", True)],
         ),
         valid(
             "paper_step_up_by_cli_confirm",
@@ -785,22 +905,28 @@ def instant(text: str) -> datetime:
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%S.%f000Z")
 
 
-def stated_cool_offs(draft: dict) -> list[tuple[str, str, bool]]:
-    """Identity spec §8.3, read from the record by its own path: each cool-off's start and end, and
-    whether its grant adds operator or approver to a member who is not the founder."""
+def stated_cool_offs(draft: dict) -> list[tuple[str, bool]]:
+    """Identity spec §8.3, read from the record by its own path: each cool-off's end, and whether a
+    day is owed: independence required and operator or approver added to an existing workspace."""
     p = draft["payload"]
     kind = draft["event_type"]
+    independent = p.get("independent_approval_required") is True
     if kind == "MemberActivated":
         founding = p["reason"] == "founding"
-        return [(p["activated_at"], p["cool_off_ends_at"], not founding and bool(set(p["roles"]) & set(COOLING)))]
+        return [(p["cool_off_ends_at"], independent and not founding and bool(set(p["roles"]) & set(COOLING)))]
     if kind == "MemberReactivated":
-        return [(p["reactivated_at"], p["cool_off_ends_at"], True)]
+        return [(p["cool_off_ends_at"], independent and bool(set(p["roles"]) & set(COOLING)))]
     if kind == "MemberRoleChanged":
-        return [(p["changed_at"], a["cool_off_ends_at"], a["role"] in COOLING) for a in p["added"]]
+        return [(a["cool_off_ends_at"], independent and a["role"] in COOLING) for a in p["added"]]
     return []
 
 
-STEP_UP_INSTANT = {"MemberInvited": "invited_at", "MemberRoleChanged": "changed_at", "MemberReactivated": "reactivated_at"}
+OWN_INSTANT = {
+    "MemberInvited": "invited_at",
+    "MemberActivated": "activated_at",
+    "MemberRoleChanged": "changed_at",
+    "MemberReactivated": "reactivated_at",
+}
 
 
 def timing_problems(name: str, draft: dict) -> list[str]:
@@ -810,21 +936,24 @@ def timing_problems(name: str, draft: dict) -> list[str]:
     out = []
     step_up = p.get("step_up")
     if step_up is not None:
-        at = instant(p[STEP_UP_INSTANT[draft["event_type"]]])
+        at = instant(draft["event_time"])
         authenticated = instant(step_up["authenticated_at"])
         if not authenticated <= at <= authenticated + timedelta(minutes=5):
             out.append(found("drafts.timing", f"{name}: step-up at {step_up['authenticated_at']} is not valid then"))
     if draft["event_type"] == "MemberInvited" and instant(p["expires_at"]) != instant(p["invited_at"]) + timedelta(days=7):
         out.append(found("drafts.timing", f"{name}: an invitation that does not last 7 days"))
+    own = OWN_INSTANT.get(draft["event_type"])
+    if own and instant(p[own]) != instant(draft["event_time"]):
+        out.append(found("drafts.timing", f"{name}: {own} is not the envelope's event_time"))
     return out
 
 
 def cool_off_problems(name: str, draft: dict) -> list[str]:
     out = []
-    for start, end, may_cool in stated_cool_offs(draft):
-        allowed = {instant(start)} | ({instant(start) + timedelta(days=1)} if may_cool else set())
-        if instant(end) not in allowed:
-            out.append(found("drafts.cool_off", f"{name}: a cool-off from {start} to {end}"))
+    start = instant(draft["event_time"])
+    for end, owed in stated_cool_offs(draft):
+        if instant(end) != (start + timedelta(days=1) if owed else start):
+            out.append(found("drafts.cool_off", f"{name}: a cool-off ending {end}"))
     return out
 
 
@@ -877,8 +1006,10 @@ VALIDATOR_MUTANTS = (
     "rule.63",
     "boundary.rule_60_after",
     "boundary.rule_60_window",
-    "boundary.rule_61_any_later",
-    "boundary.rule_61_every_role",
+    "rule.64",
+    "boundary.rule_61_ignores_independence",
+    "boundary.rule_61_founding_cools",
+    "boundary.rule_61_either",
     "record.extra",
     "record.missing",
     *sorted({f"loose.payload.{member}" for cases in MEMBER_CASES.values() for member, _, _ in cases}),

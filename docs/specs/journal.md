@@ -14,12 +14,14 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 - **v0.19 ([DEC-437](../project/decisions/DEC-437.md) item 9, [DEC-648](../project/decisions/DEC-648.md)):**
   §9's control-stream table catalogues the identity spec's §12.1 records. §9.8 closes the seven
-  membership records at schema version 1, with rules 54 to 63, and states the fold that identity
+  membership records at schema version 1, with rules 54 to 64, and states the fold that identity
   spec §5.3's `workspace_users` reads. It adds `MemberInvitationRevoked`, which §12.1 lacked for its
   §5.1 `invited` to `revoked` transition, the accepted `invitation` on `MemberActivated`, and the
   cool-off end on `MemberReactivated`; each journals a state change identity spec §5 already defines.
-  `MemberInvited` also carries `invited_at`, and each membership record, until the envelope gains
-  identity spec §12.2's session field, a payload `session_ref`.
+  `MemberInvited` also carries `invited_at`, each grant the effective `independent_approval_required`,
+  `MemberReactivated` the roles it restores, and each membership record, until the envelope gains
+  identity spec §12.2's session field, a payload `session_ref`. A record's own instant is its
+  envelope's `event_time`.
   The credential, session, service-account, host-CLI, and break-glass records stay open until
   their own change; the client records are E10-15's. The vectors gain a generated, additive `membership` section, so they stay
   version 3.
@@ -559,7 +561,8 @@ of either new kind, the corresponding paths are `payload.content_hash` and `payl
 
 The identity records ([identity spec §12.1](identity.md#121-events-journal-9-control-stream),
 DEC-437 item 9) are control-stream records. The membership records close in §9.8. The client
-records `ClientConnected` and `ClientRevoked` are E10-15's, with the `client` actor (§3). The
+records `ClientConnected` and `ClientRevoked` are E10-15's, closed with the `client` actor (§3) in journal
+spec v0.20. The
 credential, session, service-account, host-CLI, and break-glass records are listed with the members
 the identity spec names and close in their own change, as §9.2's other records do; until then
 `append` refuses them as `unknown_event_type`. `ScopeHalted` and `ScopeReenabled` are not catalogued: they
@@ -1580,7 +1583,10 @@ The control-stream records of a workspace membership ([identity spec §5](identi
 §12.1), closed at schema version 1 as §9.7's records are: every listed member is present, `null`
 only where the type is nullable, and any extra member is refused. §9.1's types and report order
 apply, and the rules number on from §9.7's. Instants are §4.7 timestamps, as the identity spec's
-cool-off and expiry are wall-clock times, and step-up evidence is §9.2's `DisclosureAccepted.step_up`
+cool-off and expiry are wall-clock times. A record's own instant (`invited_at`, `activated_at`,
+`changed_at`, `reactivated_at`) is the envelope's `event_time` exactly (rule 64), so a writer cannot
+date a grant into the past to escape its cool-off or a stale step-up; every cool-off end and step-up
+window is computed from `event_time`. Step-up evidence is §9.2's `DisclosureAccepted.step_up`
 type, `null` only on a `MemberRoleChanged` that grants nothing (rule 59). The test vectors' `membership` section holds a base draft
 of each record, an invalid draft for every member type and rule, and valid drafts for the cases a
 rule might be misread to refuse.
@@ -1612,7 +1618,7 @@ organization story, not here.
 | `roles` | `[role]` | The roles it names, granted only once accepted: rules 54 and 58 |
 | `invited_by` | `text` | The inviting admin (opaque): rules 55 and 56 |
 | `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}` | Inviting needs step-up (identity spec §4.2): rule 60 |
-| `invited_at` | `timestamp` | The instant the invitation was issued |
+| `invited_at` | `timestamp` | The instant the invitation was issued: rule 64 |
 | `expires_at` | `timestamp` | The invitation expires unaccepted at this instant: rule 62 |
 | `session_ref` | `text?` | Rule 63 |
 
@@ -1636,7 +1642,8 @@ creates a workspace (identity spec §3.2, ID-13). It enters `cooling_off`, and i
 | `reason` | `invitation_accepted` \| `founding` | Rules 56 and 57 |
 | `roles` | `[role]` | Rules 54, 57, and 58 |
 | `method` | `passkey` \| `oidc` \| `email_link` | How the member signed in (identity spec §6.1) |
-| `activated_at` | `timestamp` | The instant the membership began |
+| `activated_at` | `timestamp` | The instant the membership began: rule 64 |
+| `independent_approval_required` | `boolean` | The workspace's effective `independent_approval_required` at the grant ([mandate spec §4.3](mandate.md#43-policy-hierarchy-dec-51-dec-98)), which decides the cool-off: rule 61 |
 | `cool_off_ends_at` | `timestamp` | The end of the activation's cool-off ([identity spec §8.3](identity.md#83-cool-off-against-sock-puppets)): rule 61 |
 | `session_ref` | `text?` | The invitee's session; `null` for the founding grant: rule 63 |
 
@@ -1648,7 +1655,8 @@ creates a workspace (identity spec §3.2, ID-13). It enters `cooling_off`, and i
 | `changed_by` | `text` | The admin (opaque): rules 55 to 57 |
 | `added` | `[{role: role, cool_off_ends_at: timestamp}]` | Each role granted, and the end of its cool-off: rules 54, 58, and 61 |
 | `removed` | `[role]` | Rules 54 and 58 |
-| `changed_at` | `timestamp` | The instant of the change |
+| `changed_at` | `timestamp` | The instant of the change: rule 64 |
+| `independent_approval_required` | `boolean` | As on `MemberActivated`: rule 61 |
 | `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}?` | A grant needs step-up and a removal does not: rules 59 and 60 |
 | `session_ref` | `text?` | Rule 63 |
 
@@ -1662,14 +1670,16 @@ creates a workspace (identity spec §3.2, ID-13). It enters `cooling_off`, and i
 | `session_ref` | `text?` | Rule 63 |
 
 **`MemberReactivated`**: an admin reactivated a deactivated member, with its kept roles. It enters
-`cooling_off` again.
+`cooling_off` again. It names the roles it restores, so its cool-off is decided by the record alone.
 
 | Member | Type | Meaning |
 |---|---|---|
 | `member` | `ulid` | |
 | `by` | `text` | The admin (opaque): rules 55 to 57 |
 | `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}` | Reactivating needs step-up (identity spec §5.1): rule 60 |
-| `reactivated_at` | `timestamp` | |
+| `roles` | `[role]` | The kept roles it restores, exactly those the member held when deactivated: rules 54 and 58 |
+| `reactivated_at` | `timestamp` | Rule 64 |
+| `independent_approval_required` | `boolean` | As on `MemberActivated`: rule 61 |
 | `cool_off_ends_at` | `timestamp` | Rule 61 |
 | `session_ref` | `text?` | Rule 63 |
 
@@ -1701,41 +1711,49 @@ period (§6.4).
     `left` has `by` equal to `member` (`payload.by`). `MemberActivated`: `invitation` is `null`
     exactly when `reason` is `founding` (`payload.invitation`), and an accepted invitation's
     `member` equals `actor.id`, the invitee who signed in (`payload.member`).
-58. Roles: `MemberInvited.roles` and `MemberActivated.roles` are non-empty (`payload.roles`); the
+58. Roles: `MemberInvited.roles`, `MemberActivated.roles`, and `MemberReactivated.roles` are
+    non-empty (`payload.roles`); the
     founding grant's include `workspace_admin`, since a workspace always has an `active` admin
     (identity spec §5.2; `payload.roles`); a `MemberRoleChanged` adds or removes at least one role
     (`payload.added`), and no role is both added and removed (`payload.removed`).
 59. `MemberRoleChanged.step_up` is non-null exactly when `added` is non-empty (`payload.step_up`).
-60. Step-up evidence is [mandate spec §6.1](mandate.md#61-purposes)'s, valid at the record's own
-    instant (`invited_at`, `changed_at`, `reactivated_at`): its method is `passkey` in a `live`
+60. Step-up evidence is [mandate spec §6.1](mandate.md#61-purposes)'s, valid at the envelope's
+    `event_time`: its method is `passkey` in a `live`
     envelope and `passkey` or `cli_confirm` otherwise ([identity spec §7.3](identity.md#73-rules);
-    `payload.step_up.method`), and 0 ≤ instant − `authenticated_at` ≤ 300 seconds, so evidence
+    `payload.step_up.method`), and 0 ≤ `event_time` − `authenticated_at` ≤ 300 seconds, so evidence
     authenticated after the instant fails closed (`payload.step_up.authenticated_at`). That the
     assertion was never used before is a check across records, the identity crate's (identity spec
     §7.2).
-61. Cool-off ([identity spec §8.3](identity.md#83-cool-off-against-sock-puppets), stated once there):
-    each cool-off end equals its start (`activated_at`, `changed_at`, `reactivated_at`) or its start
-    plus exactly 86 400 seconds; and it equals its start for the founding grant, for a
-    `MemberActivated` whose `roles` hold neither `operator` nor `approver`, and for an added role
-    other than those two (at that `cool_off_ends_at`). Whether the 24 hours apply depends on the
-    effective `independent_approval_required` at the grant, which the record does not carry, so the
-    journal checks only that the end is one of the two the rule allows.
+61. Cool-off ([identity spec §8.3](identity.md#83-cool-off-against-sock-puppets), stated once there),
+    exactly: each cool-off end is the envelope's `event_time` plus 86 400 seconds when the record's
+    `independent_approval_required` is true and the grant adds `operator` or `approver` to an existing
+    workspace, and is `event_time` itself otherwise (at that `cool_off_ends_at`). The grant adds them
+    when a `MemberActivated` with reason `invitation_accepted` or a `MemberReactivated` holds either in
+    its `roles`, or a `MemberRoleChanged` adds that role (each added role decided by itself). The
+    founding grant creates the workspace, so it never cools off.
 62. `MemberInvited.expires_at` is `invited_at` plus exactly 7 days (identity spec §5.2;
     `payload.expires_at`).
 63. `session_ref` is non-null exactly when `actor.kind` is `user` (`payload.session_ref`): a user acts
     through a session, and the system writes without one.
+64. A record's own instant (`invited_at`, `activated_at`, `changed_at`, `reactivated_at`) equals the
+    envelope's `event_time` exactly (at that member).
 
 **The fold** (identity spec §5.1, §5.3, ID-7). These records are the only source of a membership's
-state. Folding the control stream in `seq` order: `MemberInvited` makes an invitation `invited` until
-`expires_at`; `MemberInvitationRevoked` makes it `revoked`; `MemberActivated` and
+state. Folding the control stream in `seq` order: `MemberInvited` makes an invitation `invited`
+before `expires_at` and `expired` from it; `MemberInvitationRevoked` makes it `revoked`; `MemberActivated` and
 `MemberReactivated` make the member `cooling_off` until their `cool_off_ends_at` and `active` from it;
 `MemberRoleChanged` adds and removes roles, each added role effective from its `cool_off_ends_at`;
 `MemberDeactivated` makes the member `deactivated`, keeping its roles for a reactivation; and
-`MemberRemoved` makes it `removed`. A record that does not fit the state it finds (a second
-activation, a role change for a member who is not `active` or `cooling_off`, a reactivation of a
-member who is not `deactivated`, a removal of one who is not `deactivated`, an activation by an
-invitation that is not `invited` at `activated_at`, or with roles other than the invitation's) is
-refused by workspace services before it is committed; a fold that meets one anyway reads the
+`MemberRemoved` makes it `removed`. `removed`, `expired`, and `revoked` are terminal: a removed
+member comes back only through a new invitation, which starts a new membership with no role of the
+old one. A record that does not fit the state it finds is refused: a second activation of a member
+whose membership is not `removed`; an activation by an invitation that is not `invited` at
+`activated_at` (so `activated_at` < `expires_at`, and an invitation activates at most once) or with
+roles other than the invitation's; a role change for a member who is not `active` or `cooling_off`,
+or that removes a role the member does not hold or adds one it does; a reactivation of a member who
+is not `deactivated`, or with roles other than those kept; a deactivation of one who is not
+`active` or `cooling_off`; a removal of one who is not `deactivated`; and a revocation of an
+invitation that is not `invited`. Such a record is refused by workspace services before it is committed; a fold that meets one anyway reads the
 membership as unreadable, and `workspace_users` as 1 (identity spec §5.3). The cross-record checks
 are the identity crate's (E9-7), not `append`'s.
 

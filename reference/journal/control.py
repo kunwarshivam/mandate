@@ -344,7 +344,12 @@ WRITERS = {
 }
 STEP_UP_WINDOW_SECONDS = 300
 INVITATION_DAYS = 7
-STEP_UP_AT = {"MemberInvited": "invited_at", "MemberRoleChanged": "changed_at", "MemberReactivated": "reactivated_at"}
+OWN_INSTANT = {
+    "MemberInvited": "invited_at",
+    "MemberActivated": "activated_at",
+    "MemberRoleChanged": "changed_at",
+    "MemberReactivated": "reactivated_at",
+}
 SYSTEM_REASONS = ("founding", "deprovisioned", "group_removed", "org_deleted")
 SELF_REASONS = ("admin",)
 SCHEMAS[("ctl", "MemberInvited")] = rec(
@@ -366,6 +371,7 @@ SCHEMAS[("ctl", "MemberActivated")] = rec(
     ("roles", list_of(ROLE)),
     ("method", one_of("passkey", "oidc", "email_link")),
     ("activated_at", TS),
+    ("independent_approval_required", BOOL),
     ("cool_off_ends_at", TS),
     ("session_ref", opt(STR)),
 )
@@ -375,6 +381,7 @@ SCHEMAS[("ctl", "MemberRoleChanged")] = rec(
     ("added", list_of(rec(("role", ROLE), ("cool_off_ends_at", TS)))),
     ("removed", list_of(ROLE)),
     ("changed_at", TS),
+    ("independent_approval_required", BOOL),
     ("step_up", opt(STEP_UP)),
     ("session_ref", opt(STR)),
 )
@@ -388,7 +395,9 @@ SCHEMAS[("ctl", "MemberReactivated")] = rec(
     ("member", ULID),
     ("by", STR),
     ("step_up", STEP_UP),
+    ("roles", list_of(ROLE)),
     ("reactivated_at", TS),
+    ("independent_approval_required", BOOL),
     ("cool_off_ends_at", TS),
     ("session_ref", opt(STR)),
 )
@@ -869,7 +878,7 @@ def membership_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
         rule("57.invitation", (p["invitation"] is None) == (reason == "founding"), "payload.invitation")
         if reason == "invitation_accepted":
             rule("57.invitee", p["member"] == actor["id"], "payload.member")
-    if event_type in ("MemberInvited", "MemberActivated"):
+    if event_type in ("MemberInvited", "MemberActivated", "MemberReactivated"):
         rule("58.empty", bool(listed(p["roles"])), "payload.roles")
     if event_type == "MemberActivated" and reason == "founding" and listed(p["roles"]):
         rule("58.founding_admin", "workspace_admin" in listed(p["roles"]), "payload.roles")
@@ -883,14 +892,17 @@ def membership_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
     if isinstance(step_up, dict):
         allowed = ("passkey",) if draft["environment"] == "live" else ("passkey", "cli_confirm")
         rule("60.method", step_up.get("method") in allowed, "payload.step_up.method")
-        at = p[STEP_UP_AT[event_type]]
+        at = draft["event_time"]
         rule("60.window", step_up_fresh(step_up.get("authenticated_at"), at, skip), "payload.step_up.authenticated_at")
-    for start, end, cooling, path in cool_offs(event_type, p):
-        rule(f"61.{event_type}", cool_off_allowed(start, end, cooling, skip), path)
+    for end, cooling, path in cool_offs(event_type, p, skip):
+        rule(f"61.{event_type}", cool_off_exact(draft["event_time"], end, cooling, skip), path)
     if event_type == "MemberInvited":
         days = gap_nanos(p["invited_at"], p["expires_at"])
         rule("62", days == INVITATION_DAYS * 86400 * 10**9, "payload.expires_at")
     rule("63", (p["session_ref"] is not None) == (actor["kind"] == "user"), "payload.session_ref")
+    instant = OWN_INSTANT.get(event_type)
+    if instant:
+        rule("64", p[instant] == draft["event_time"], f"payload.{instant}")
     return out
 
 
@@ -926,33 +938,36 @@ def record_items(value) -> list[dict]:
 END = ".cool_off_ends_at"
 
 
-def cool_offs(event_type: str, p: dict) -> list[tuple[str, str, bool, str]]:
-    """Each cool-off a record states: its start, its end, whether the 24 hours may apply, and its
-    path (rule 61)."""
+def cool_offs(event_type: str, p: dict, skip: frozenset[str]) -> list[tuple[str, bool, str]]:
+    """Each cool-off a record states: its end, whether identity spec §8.3's 24 hours apply to it, and
+    its path (rule 61). They apply exactly when independence is required and the grant adds operator
+    or approver to an existing workspace."""
+    independent = p.get("independent_approval_required") is True or "boundary.rule_61_ignores_independence" in skip
     if event_type == "MemberActivated":
-        cooling = p["reason"] != "founding" and any(r in COOLING_ROLES for r in listed(p["roles"]))
-        return [(p["activated_at"], p["cool_off_ends_at"], cooling, "payload.cool_off_ends_at")]
+        cooling = independent and p["reason"] != "founding" and any(r in COOLING_ROLES for r in listed(p["roles"]))
+        if "boundary.rule_61_founding_cools" in skip and p["reason"] == "founding":
+            cooling = independent and any(r in COOLING_ROLES for r in listed(p["roles"]))
+        return [(p["cool_off_ends_at"], cooling, "payload.cool_off_ends_at")]
     if event_type == "MemberReactivated":
-        return [(p["reactivated_at"], p["cool_off_ends_at"], True, "payload.cool_off_ends_at")]
+        cooling = independent and any(r in COOLING_ROLES for r in listed(p["roles"]))
+        return [(p["cool_off_ends_at"], cooling, "payload.cool_off_ends_at")]
     if event_type == "MemberRoleChanged":
         return [
-            (p["changed_at"], a.get(END[1:]), a.get("role") in COOLING_ROLES, f"payload.added[{i}]{END}")
+            (a.get(END[1:]), independent and a.get("role") in COOLING_ROLES, f"payload.added[{i}]{END}")
             for i, a in enumerate(record_items(p["added"]))
         ]
     return []
 
 
-def cool_off_allowed(start: str, end: str, cooling: bool, skip: frozenset[str]) -> bool:
-    """Rule 61: the end is the start, or, where the 24 hours may apply, exactly a day after it. An
-    instant a seeded `loose` bug let through untyped is never allowed."""
-    if not all(isinstance(v, str) and is_timestamp(v) for v in (start, end)):
+def cool_off_exact(start: str, end, cooling: bool, skip: frozenset[str]) -> bool:
+    """Rule 61: the end is exactly a day after `start` when the 24 hours apply, and `start` itself
+    otherwise."""
+    gap = gap_nanos(start, end)
+    if gap is None:
         return False
-    gap = instant_nanos(end) - instant_nanos(start)
-    if "boundary.rule_61_any_later" in skip:
-        return gap >= 0
-    if "boundary.rule_61_every_role" in skip:
-        cooling = True
-    return gap == 0 or (cooling and gap == COOL_OFF_SECONDS * 10**9)
+    if "boundary.rule_61_either" in skip:
+        return gap in (0, COOL_OFF_SECONDS * 10**9)
+    return gap == (COOL_OFF_SECONDS * 10**9 if cooling else 0)
 
 
 def act_failure(p: dict, skip: frozenset[str]) -> str | None:

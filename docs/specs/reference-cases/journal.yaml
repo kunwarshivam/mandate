@@ -10418,6 +10418,7 @@ membership:
         - viewer
         method: oidc
         activated_at: '2026-10-05T14:00:00.000000000Z'
+        independent_approval_required: true
         cool_off_ends_at: '2026-10-06T14:00:00.000000000Z'
         session_ref: session_activated
       artifact_refs: []
@@ -10449,6 +10450,7 @@ membership:
         - workspace_admin
         method: passkey
         activated_at: '2026-10-05T14:00:00.000000000Z'
+        independent_approval_required: false
         cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
         session_ref: null
       artifact_refs: []
@@ -10481,6 +10483,7 @@ membership:
         removed:
         - viewer
         changed_at: '2026-10-05T14:00:00.000000000Z'
+        independent_approval_required: true
         step_up:
           assertion_id: assert_admin_01
           authenticated_at: '2026-10-05T13:59:30.000000000Z'
@@ -10536,7 +10539,11 @@ membership:
           assertion_id: assert_admin_01
           authenticated_at: '2026-10-05T13:59:30.000000000Z'
           method: passkey
+        roles:
+        - approver
+        - viewer
         reactivated_at: '2026-10-05T14:00:00.000000000Z'
+        independent_approval_required: true
         cool_off_ends_at: '2026-10-06T14:00:00.000000000Z'
         session_ref: session_reactivated
       artifact_refs: []
@@ -10946,6 +10953,16 @@ membership:
       outcome: Invalid
       reason: non_canonical
       path: payload.activated_at
+  - name: activated.independent_approval_required.kind
+    clause: §9.8 types
+    base_draft: activated
+    changes:
+    - path: payload.independent_approval_required
+      value: 'true'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.independent_approval_required
   - name: activated.cool_off_ends_at.kind
     clause: §9.8 types
     base_draft: activated
@@ -11016,6 +11033,16 @@ membership:
       outcome: Invalid
       reason: schema
       path: payload.activated_at
+  - name: activated.independent_approval_required.null
+    clause: §9.8 types
+    base_draft: activated
+    changes:
+    - path: payload.independent_approval_required
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.independent_approval_required
   - name: activated.cool_off_ends_at.null
     clause: §9.8 types
     base_draft: activated
@@ -11127,6 +11154,16 @@ membership:
       outcome: Invalid
       reason: non_canonical
       path: payload.changed_at
+  - name: role_changed.independent_approval_required.kind
+    clause: §9.8 types
+    base_draft: role_changed
+    changes:
+    - path: payload.independent_approval_required
+      value: 1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.independent_approval_required
   - name: role_changed.step_up.kind
     clause: §9.8 types
     base_draft: role_changed
@@ -11187,6 +11224,16 @@ membership:
       outcome: Invalid
       reason: schema
       path: payload.changed_at
+  - name: role_changed.independent_approval_required.null
+    clause: §9.8 types
+    base_draft: role_changed
+    changes:
+    - path: payload.independent_approval_required
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.independent_approval_required
   - name: role_changed.missing
     clause: §9.8 closed
     base_draft: role_changed
@@ -11367,6 +11414,16 @@ membership:
       outcome: Invalid
       reason: schema
       path: payload.step_up
+  - name: reactivated.roles.kind
+    clause: §9.8 types
+    base_draft: reactivated
+    changes:
+    - path: payload.roles
+      value: viewer
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.roles
   - name: reactivated.reactivated_at.kind
     clause: §9.8 types
     base_draft: reactivated
@@ -11387,6 +11444,16 @@ membership:
       outcome: Invalid
       reason: non_canonical
       path: payload.reactivated_at
+  - name: reactivated.independent_approval_required.kind
+    clause: §9.8 types
+    base_draft: reactivated
+    changes:
+    - path: payload.independent_approval_required
+      value: 'false'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.independent_approval_required
   - name: reactivated.cool_off_ends_at.kind
     clause: §9.8 types
     base_draft: reactivated
@@ -11437,6 +11504,16 @@ membership:
       outcome: Invalid
       reason: schema
       path: payload.step_up
+  - name: reactivated.roles.null
+    clause: §9.8 types
+    base_draft: reactivated
+    changes:
+    - path: payload.roles
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.roles
   - name: reactivated.reactivated_at.null
     clause: §9.8 types
     base_draft: reactivated
@@ -11447,6 +11524,16 @@ membership:
       outcome: Invalid
       reason: schema
       path: payload.reactivated_at
+  - name: reactivated.independent_approval_required.null
+    clause: §9.8 types
+    base_draft: reactivated
+    changes:
+    - path: payload.independent_approval_required
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.independent_approval_required
   - name: reactivated.cool_off_ends_at.null
     clause: §9.8 types
     base_draft: reactivated
@@ -12090,6 +12177,111 @@ membership:
       outcome: Invalid
       reason: schema
       path: payload.session_ref
+  - name: activated_in_the_past
+    clause: 'rules 61 and 64: the reviewer''s probe, a grant dated back to escape its cool-off'
+    base_draft: activated
+    changes:
+    - path: payload.activated_at
+      value: '2020-01-01T00:00:00.000000000Z'
+    - path: payload.cool_off_ends_at
+      value: '2020-01-02T00:00:00.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cool_off_ends_at
+      also:
+      - reason: schema
+        path: payload.activated_at
+  - name: changed_a_nanosecond_in_the_future
+    clause: rule 64
+    base_draft: role_changed
+    changes:
+    - path: payload.changed_at
+      value: '2026-10-05T14:00:00.000000001Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.changed_at
+  - name: invited_a_nanosecond_early
+    clause: 'rule 64: a week from a self-chosen instant is still refused'
+    base_draft: invited
+    changes:
+    - path: payload.invited_at
+      value: '2026-10-05T13:59:59.999999999Z'
+    - path: payload.expires_at
+      value: '2026-10-12T13:59:59.999999999Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.invited_at
+  - name: reactivated_in_the_past
+    clause: rule 64
+    base_draft: reactivated
+    changes:
+    - path: payload.reactivated_at
+      value: '2026-10-04T14:00:00.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reactivated_at
+  - name: cooling_without_independence
+    clause: 'rule 61: no day is owed when independence is not required'
+    base_draft: activated
+    changes:
+    - path: payload.independent_approval_required
+      value: false
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cool_off_ends_at
+  - name: operator_at_once_under_independence
+    clause: 'rule 61: a day is owed'
+    base_draft: role_changed
+    changes:
+    - path: payload.added
+      value:
+      - role: auditor
+        cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
+      - role: operator
+        cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.added[1].cool_off_ends_at
+  - name: approver_reactivated_at_once_under_independence
+    clause: rule 61
+    base_draft: reactivated
+    changes:
+    - path: payload.cool_off_ends_at
+      value: '2026-10-05T14:00:00.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cool_off_ends_at
+  - name: reactivated_with_no_role
+    clause: rule 58
+    base_draft: reactivated
+    changes:
+    - path: payload.roles
+      value: []
+    - path: payload.cool_off_ends_at
+      value: '2026-10-05T14:00:00.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.roles
+  - name: reactivated_roles_unsorted
+    clause: rule 54
+    base_draft: reactivated
+    changes:
+    - path: payload.roles
+      value:
+      - viewer
+      - approver
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.roles
   - name: rules_reported_in_order
     clause: '§9.1 order: rule 55 before rule 57 before rule 61'
     base_draft: role_changed
@@ -12111,9 +12303,11 @@ membership:
         path: payload.added[0].cool_off_ends_at
   valid_drafts:
   - name: activated_without_a_cool_off
-    clause: 'rule 61: the 24 hours apply only under `independent_approval_required`, which the record does not carry'
+    clause: 'rule 61: without independence required, an approver activates at once'
     base_draft: activated
     changes:
+    - path: payload.independent_approval_required
+      value: false
     - path: payload.cool_off_ends_at
       value: '2026-10-05T14:00:00.000000000Z'
     expect:
@@ -12157,7 +12351,7 @@ membership:
     expect:
       outcome: Valid
   - name: operator_granted_without_a_cool_off
-    clause: rule 61
+    clause: 'rule 61: without independence required, an operator grant is effective at once'
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -12166,6 +12360,8 @@ membership:
         cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
     - path: payload.removed
       value: []
+    - path: payload.independent_approval_required
+      value: false
     expect:
       outcome: Valid
   - name: left
@@ -12227,11 +12423,33 @@ membership:
     expect:
       outcome: Valid
   - name: reactivated_at_once
-    clause: rule 61
+    clause: 'rule 61: without independence required'
     base_draft: reactivated
     changes:
+    - path: payload.independent_approval_required
+      value: false
     - path: payload.cool_off_ends_at
       value: '2026-10-05T14:00:00.000000000Z'
+    expect:
+      outcome: Valid
+  - name: viewer_reactivated_at_once_under_independence
+    clause: 'rule 61: kept roles that never cool off'
+    base_draft: reactivated
+    changes:
+    - path: payload.roles
+      value:
+      - auditor
+      - viewer
+    - path: payload.cool_off_ends_at
+      value: '2026-10-05T14:00:00.000000000Z'
+    expect:
+      outcome: Valid
+  - name: founding_under_independence
+    clause: 'rule 61: the founding grant never cools off, even where independence is required'
+    base_draft: founding
+    changes:
+    - path: payload.independent_approval_required
+      value: true
     expect:
       outcome: Valid
   - name: paper_step_up_by_cli_confirm
