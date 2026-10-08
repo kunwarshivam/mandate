@@ -1067,12 +1067,18 @@ after U-A1 to U-A5 are recorded.
   dispatcher hung (NT-9); a lost address alerts on the other channels (spec §5.6).
 - **E8-11 (Must, M7; SC)** As an approver, I want email notices (spec §4.4). Provider per DEC-438
   item 21; until the founder decides, the adapter runs against a recorded fixture only.
-  *Accepted when:* NT-1's canary test passes on captured messages; links match `<origin>/n/<ULID>`
-  (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider configuration check.
+  *Accepted when:* NT-1's canary test passes on captured messages; links match
+  `<origin>/n/<notice id>` (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider
+  configuration check; the `xtask` email-footer check of spec §4.4 (DEC-700 item 4) exists, runs in
+  `cargo xtask ci fast`'s lint, and is shown to fail on a planted second mail transport and on a
+  planted mail-sending dependency while `[[EMAIL-FOOTER]]` stands.
 - **E8-12 (Must, M7; SC)** As an approver, I want one chat channel (spec §4.5), Slack or Telegram
   per DEC-438 item 20. *Accepted when:* NT-1's canary test passes; every inbound message, button, or
   callback leaves the control stream unchanged (NT-3); the webhook URL or bot token is read only
-  from the vault and appears in no log (rule 7).
+  from the vault and appears in no log (rule 7). For Telegram (spec §4.5, DEC-700 item 2): a linking
+  code is refused once 10 minutes have passed since it was shown; it is spent by the first message
+  that carries it, even when no address is then recorded; showing a new code revokes the earlier
+  one; and the replies to an unknown, an expired, and a spent code are byte-identical.
 - **E8-13 (Must, M9 and M10; SC)** As an approver, I want to open a notice, sign in, and answer
   inside my workspace (spec §6, G4), with `web_inbox` as a pull channel (DEC-438 item 3). Depends on
   the workspace API and identity specs (DEC-436, DEC-437). *Accepted when:* a captured link with no

@@ -90,12 +90,12 @@ the dispatcher's own predicate (`AGENTS.md`, "Getting it right the first time").
 
 | ID | Invariant | How it is tested |
 |---|---|---|
-| NT-1 | **Payloads are opaque.** Anything that leaves the workspace deployment as a notice carries exactly a notice id (random, never a journal event id) and one text key from a closed set (§4.2), rendered through fixed templates. Never an instrument, side, quantity, price, order value, P&L, score, thesis, rule, deadline, agent name, mandate content, broker account, or personal data, the recipient's name included (`AGENTS.md` rule 6, [DEC-11](../project/04-decision-log.md#decisions), PX-6). The payload type has no field and no constructor that takes free text from domain data (rung 1). A web push also travels in an envelope the relay and the push service read (§4.6): its `urgency` and TTL are fixed per class, never taken from a deadline or any subject's time, so they reveal at most the class; the push endpoint is an address, under NT-2 | Type test: the payload and every channel's rendered message are built only from `Notification`, whose id type has no constructor from an event id; a captured-payload test seeds a workspace whose instruments, agent names, rule ids, prices, and user names are unique canary strings, drives every notice kind through every channel adapter and the relay, and scans every captured byte for every canary (E8-5's acceptance); an envelope test that every relayed request's `urgency` and TTL equal its class's fixed pair (§4.6) whatever the subject's deadline |
+| NT-1 | **Payloads are opaque.** Anything that leaves the workspace deployment as a notice carries exactly a notice id (random, never a journal event id) and one text key from a closed set (§4.2), rendered through fixed templates. Never an instrument, side, quantity, price, order value, P&L, score, thesis, rule, deadline, agent name, mandate content, broker account, or personal data, the recipient's name included (`AGENTS.md` rule 6, [DEC-11](../project/04-decision-log.md#decisions), PX-6). The payload type has no field and no constructor that takes free text from domain data (rung 1). A web push also travels in an envelope the relay and the push service read (§4.6): its `urgency` and TTL are fixed per class, never taken from a deadline or any subject's time, so they reveal at most the class; the push endpoint is an address, under NT-2 | Type test: the payload and every channel's rendered message are built only from `Notification`, whose id type has no constructor from an event id; a captured-payload test seeds a workspace whose instruments, agent names, rule ids, prices, and user names are unique canary strings, drives every notice kind through every channel adapter and the relay, and scans every captured byte for every canary (E8-5's acceptance); an envelope test that every relayed and direct request's `urgency` and TTL equal its class's fixed pair whatever the subject's deadline, against the three pairs written into the test from DEC-700 item 3, not read from §4.6's table or the code's |
 | NT-2 | **Addresses stay minimal and private.** A recipient is journaled and logged only as an opaque user id and a channel. The address is read from the vault at send time, passed to the one provider that needs it, and never journaled, logged, or put in a metric | Log, metric, and journal scans for canary addresses after a full run; a test that the dispatcher's only path to an address is the vault client |
 | NT-3 | **Approval happens only inside the workspace.** A grant, a skip, an acknowledgment, or any owner command reaches the runtime only as a control-stream event that workspace services write after authenticating the user in the workspace deployment ([mandate spec §6.4](mandate.md#64-approvals) "Responses"). No channel adapter, relay, provider webhook, email reply, or chat message can write one | Layering: the notification crates cannot depend on the control-stream writer (`xtask/layers.toml`); a fuzz test feeds every inbound path (replies, chat messages, button callbacks, provider webhooks) and asserts the control stream is unchanged |
 | NT-4 | **Links carry no authority.** A link holds the workspace app's fixed origin and the notice id, nothing else, so it reveals neither an event reference nor a creation time: no session, token, one-time code, or sign-in. Opening it requires sign-in; a grant requires step-up as mandate spec §6.1 and §6.4 require | Template test: every link matches `<origin>/n/<notice id>`; a property test that two notices about one cause get different ids and no id parses as a ULID of any journaled event; an end-to-end test opens a captured link with no session and reaches only the sign-in screen |
 | NT-5 | **Delivery never adds risk** (rule 3). Failure, delay, duplication, or loss of any notice changes no order, intent, limit, or mode. Its only effect on trading state is check 4 (`not_delivered`), which can only refuse a response. An approval nobody could see times out to `skip`. Check 4 is the only effect because only an approval reads delivery, and an approval gates only a risk-adding action: no exit, protective order, risk exit, owner exit, or kill switch is ever gated by an approval (`AGENTS.md` rules 2 and 13). So the claim holds under any later autonomy change that keeps those rules, and one that gated a risk-reducing action on an approval would break rule 13 first | Fault injection: with every push channel failing, hung, or duplicating, a soak run's intents, gate decisions, and modes are identical to a run with perfect delivery, except asks that time out to `skip` |
-| NT-6 | **Nothing suppresses a safety notice.** Retry de-duplication, rate limits, coalescing, quiet hours, unsubscribe, and provider quotas never drop a `safety` notice. Every `safety` cause (§3.4) produces, within 60 seconds of its commit while the dispatcher runs, a send attempt on every configured push channel the recipient has not lost (§5.6) and an entry in the pull channels. A notice that joins a coalescing window (§5.4) meets the bound at the window's end: it joins only if its cause committed after the window's first message was sent, and the window ends 60 seconds after that send | Property test: random storms of safety events across quiet hours, rate limits, and provider 429s; an oracle that derives the causes from the subject streams on its own (one per `OwnerAlertSent`, one per kill-switch command however many streams journal `KillSwitchActivated`) counts the attempts per cause, recipient, and channel and requires every one within the bound |
+| NT-6 | **Nothing suppresses a safety notice.** Retry de-duplication, rate limits, coalescing, quiet hours, unsubscribe, and provider quotas never drop a `safety` notice. Every `safety` cause (§3.4) produces, within 60 seconds of its commit while the dispatcher runs, a send attempt on every configured push channel the recipient has not lost (§5.6) and an entry in the pull channels. A notice coalesced with others (§5.4) meets the bound too: a cause not in a window's first message, including one that commits while that message's send is still in flight, either goes at once in its own message or joins a window that ends within 60 seconds of its own commit | Property test: random storms of safety events across quiet hours, rate limits, and provider 429s; an oracle that derives the causes from the subject streams on its own (one per `OwnerAlertSent`, one per kill-switch command however many streams journal `KillSwitchActivated`) counts the attempts per cause, recipient, and channel and requires every one within the bound; the storms include causes that commit while a first message's send hangs at the provider, which must not be dropped or held past their own 60 seconds |
 | NT-7 | **Quiet hours never delay a safety notice.** Quiet hours apply only to `action` push sends (suppressed, as mandate spec §6.4 says) and `info` push sends (deferred to the window's end). Pull channels are never affected, so a request stays listed and grantable | Property test over random quiet-hour windows, including ones spanning midnight and the DST changes (`mandate_approval::deliver_now`'s DST cases extended per class) |
 | NT-8 | **Every send is journaled, and only after its cause.** The dispatcher sends nothing about an event that is not committed, journals `NoticeIssued` before the first send, and journals every attempt's outcome as `NoticeAttempted` (recipient (opaque), channel, attempt, status, provider message id, time), all on the notice stream, of which it is the only writer (journal spec §2). A crash between a send and its record re-sends the notice (at least once); it never loses one | Crash injection at every step of a send, and a second dispatcher started for the same workspace (the older is `Fenced`, journal spec §5.1, and the newer re-sends); an oracle that reads only the journal finds, for every cause, a terminal outcome per recipient and channel |
 | NT-9 | **The notification path is never in the trade path.** No exit, protective order, risk exit, kill switch, owner exit, or gate decision waits on, is ordered after, or fails because of the dispatcher, a provider, or the relay (rule 13; [OPS-4](../design/infrastructure.md), [OPS-12](../design/infrastructure.md)) | Fault injection: the kill-switch and exit suites pass with the dispatcher hung and the relay unreachable |
@@ -292,11 +292,15 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 - **No greeting by name** (NT-1). The address is the only personal data the provider receives.
 - **Unsubscribe:** `List-Unsubscribe` appears only on `info` mail (the brief). §5.7.
 - **No mail leaves while the footer is a placeholder** (rung 2, DEC-700 item 4). While the email
-  template's footer is `[[EMAIL-FOOTER]]`, the only mail transport that can be constructed is the
-  recorded-fixture transport, which writes each rendered message to a test capture and sends
-  nothing. A check in CI fails if any other mail transport exists while the placeholder stands, so
-  an adapter that reaches a mail server ships only in the same change that replaces the placeholder
-  with the wording DEC-438 item 24 leaves to the founder and counsel.
+  template's footer is `[[EMAIL-FOOTER]]`, the only mail transport is the recorded-fixture
+  transport, which writes each rendered message to a test capture and sends nothing. E8-11 builds
+  the check that holds this, in the same change as the adapter: an `xtask` check, run by
+  `cargo xtask ci fast`'s lint, that fails when the email template in `mandate-notify` still holds
+  `[[EMAIL-FOOTER]]` and the workspace has any implementor of the mail transport trait other than
+  the recorded fixture, or any dependency on a mail-sending crate. The change that replaces the
+  placeholder with the wording DEC-438 item 24 leaves to the founder and counsel removes the check,
+  and it is that change alone that may add a transport reaching a mail server. `AGENTS.md`'s trust
+  ladder lists the check under "Checked" once it exists.
 
 ### 4.5 Chat
 
@@ -333,7 +337,10 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
   class, the same whether the push goes through the relay or straight to the push service:
   `action` `high` and 3 600 s, `safety` `high` and 86 400 s (its retry window), `info` `normal` and
   21 600 s (its retry window). Neither is taken from an approval's deadline or any subject's time,
-  which would tell the relay and the push service when a request expires. The `endpoint` is the
+  which would tell the relay and the push service when a request expires. An `action` TTL shorter
+  than an approval's window is safe: a push the service drops when its TTL ends is only a missed
+  interruption, retries continue per §5.3 until the approval stops being pending, the pull channels
+  list the request throughout, and an ask nobody answers times out to `skip` (NT-5). The `endpoint` is the
   subscription's push endpoint: an address, held and handled under NT-2, and the relay logs only
   its `relay_id`. It stores no ciphertext after the
   attempt, logs opaque ids and counts only, and has no route into any workspace deployment. The size
@@ -417,16 +424,23 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 
 ### 5.4 Coalescing and rate limits
 
-- **Safety notices are coalesced, never dropped.** The first `safety` notice to a recipient on a
-  channel goes at once, and its send opens a 60-second window. A further `safety` notice to the
-  same recipient and channel whose cause committed after that send, and before the window ends,
-  joins the window; the joined notices are combined into one message sent at the window's end,
-  whose notice id is the first joined notice's and whose link opens the alerts center. A cause that
-  committed before the first send (read in the same pass) goes in the first message itself. Every
-  combined notice gets its own outcome record pointing to the combined message's provider id, so
-  the oracle of NT-6 counts it. A joined notice meets NT-6's bound at the window's end, at most 60
-  seconds after the first send and so after its own commit (DEC-700 item 5); no `safety` notice
-  waits more than 60 seconds.
+- **Safety notices are coalesced, never dropped** (DEC-700 item 5). The dispatcher reads causes in
+  passes, and its read watermark, not a send's time, decides which message a cause goes in:
+  - With no window open for a recipient and channel, the `safety` causes read in one pass go at once
+    in one message, the first, and a window opens.
+  - A `safety` cause read in a later pass, including one that committed while the first message's
+    send was still in flight, joins the open window. The window's message is sent when the window
+    ends, which is 60 seconds after the earliest commit among the causes that joined it, and never
+    later than 60 seconds after the window opened. It does not wait on the first message's outcome.
+  - A cause read when its own commit is already 60 seconds old (the dispatcher lagged) goes at once
+    in its own message; the lag alert of §7 fires.
+
+  So every `safety` notice is sent within 60 seconds of its own commit while the dispatcher keeps
+  up, and none is dropped. The combined message's notice id is the first combined notice's and its
+  link opens the alerts center. Every combined notice gets its own outcome record pointing to the
+  combined message's provider id, so the oracle of NT-6 counts it. While the dispatcher keeps up,
+  a recipient gets at most one message per channel per window; after a lag the windows can be
+  shorter, since the bound wins over the message count.
 - **Action notices** are bounded by the ask budget (10 `ApprovalRequested` per agent per risk day,
   mandate spec §6.4), one pending risk-adding approval per agent, and one reminder each.
 - **Info notices** push only the brief, once per recipient per risk day.
