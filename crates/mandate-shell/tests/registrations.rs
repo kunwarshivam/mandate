@@ -1,15 +1,16 @@
-//! The effective configuration registrations (E19-11, DEC-505 item 1, DEC-523; the brief's slice
-//! D3, part b): the latest by `seq` per kind, the asset-id and model-triple narrowings, the fee
-//! date, and the registered instrument snapshot read exactly as DEC-523 pins it. Each object is
-//! written here and registered as journal spec §9.2's `ConfigSnapshotRegistered` names it.
+//! The effective configuration registrations (E19-11, DEC-505 item 1; the brief's slice D3, part
+//! b): the latest by `seq` per kind, the asset-id and model-triple narrowings, the fee date, and
+//! each registered object re-hashed. Each object is written here and registered in journal spec
+//! §9.2's closed `ConfigSnapshotRegistered` payload, among records of other types and kinds.
 
 use std::collections::BTreeMap;
 
 use mandate_canon::{Digest, Value, to_canonical};
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
 use mandate_shell::control::{
-    ConfigRefusal as Refusal, Configuration, ControlRecord, Pinned, SnapshotExchange, configuration,
+    ConfigRefusal as Refusal, Configuration, ControlRecord, Pinned, configuration,
 };
-use mandate_time::{Date, UtcNanos};
+use mandate_time::Date;
 
 const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const AAPL: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
@@ -20,7 +21,12 @@ const CALENDAR: &str =
     r#"{"first":"2026-01-01","holidays":[],"last":"2026-12-31","special_sessions":[]}"#;
 const RULES: &str = r#"{"rules":"reviewed_v1"}"#;
 const MODEL: &str = r#"{"kind":"quant_model_content","model_id":"quant.ma_crossover"}"#;
+const POLICY: &str = r#"{"kind":"policy_set","levels":[],"policy_set_version":1}"#;
+/// §9.2's closed payload with rule 21's nulls: `@K` is the kind and `@H` the content hash.
+const RECORD: &str = r#"{"admits_instruments":null,"content_hash":"@H","kind":"@K","model_id":null,"model_version":null,"params":[]}"#;
 const MODEL_RECORD: &str = r#"{"admits_instruments":false,"content_hash":"@H","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}"#;
+const DEPLOYED: &str = r#"{"agent_id":"agent_spy","mandate_version":"sha256:8888888888888888888888888888888888888888888888888888888888888888","record_ref":"sha256:6666666666666666666666666666666666666666666666666666666666666666"}"#;
+const CONFIRMED: &str = r#"{"confirmed_paths":["/name"],"mandate_version":"sha256:8888888888888888888888888888888888888888888888888888888888888888"}"#;
 const TODAY: &str = "2026-10-07";
 
 fn json(text: &str) -> Value {
@@ -31,7 +37,7 @@ fn digest(object: &str) -> Digest {
     Digest::of(&to_canonical(&json(object)))
 }
 
-/// A control stream of registrations and the store holding each registered object.
+/// A control stream and the store holding each registered object.
 #[derive(Default)]
 struct Stream {
     records: Vec<ControlRecord>,
@@ -39,32 +45,37 @@ struct Stream {
 }
 
 impl Stream {
-    /// One registration of every kind the run uses, `snapshot` and the pinned model's.
+    /// Seq 1 to 5: one registration of each kind the run uses, `snapshot` and the pinned model's;
+    /// then seq 6 to 8, which change nothing: a `policy_set` registration (D4's kind), and an
+    /// `AgentDeployed` and a `MandateConfirmed`.
     fn registered(snapshot: &str) -> Self {
         let stream = Self::default().register("fee_config", FEE);
         let stream = stream.register("trading_calendar", CALENDAR);
         let stream = stream.register("rule_set", RULES);
         let stream = stream.register("instrument_snapshot", snapshot);
-        stream.model(MODEL, MODEL_RECORD)
+        let stream = stream
+            .stored(MODEL, MODEL_RECORD)
+            .register("policy_set", POLICY);
+        stream
+            .then("AgentDeployed", DEPLOYED)
+            .then("MandateConfirmed", CONFIRMED)
     }
 
     fn register(self, kind: &str, object: &str) -> Self {
-        let hash = digest(object);
-        let record = format!(r#"{{"content_hash":"sha256:{hash}","kind":"{kind}"}}"#);
-        self.append(object, &record)
+        self.stored(object, &RECORD.replace("@K", kind))
     }
 
-    /// `content` registered by `record`, a `MODEL_RECORD` with its own triple.
-    fn model(self, content: &str, record: &str) -> Self {
+    /// `content` stored and registered by `record`, with `@H` its content hash.
+    fn stored(mut self, content: &str, record: &str) -> Self {
+        let bytes = to_canonical(&json(content));
+        self.store.insert(digest(content), bytes);
         let record = record.replace("@H", &format!("sha256:{}", digest(content)));
-        self.append(content, &record)
+        self.then("ConfigSnapshotRegistered", &record)
     }
 
-    fn append(mut self, object: &str, payload: &str) -> Self {
-        let bytes = to_canonical(&json(object));
-        self.store.insert(digest(object), bytes);
+    fn then(mut self, event_type: &str, payload: &str) -> Self {
         let seq = u64::try_from(self.records.len()).unwrap() + 1;
-        let (event_type, payload) = ("ConfigSnapshotRegistered".to_owned(), json(payload));
+        let (event_type, payload) = (event_type.to_owned(), json(payload));
         let record = ControlRecord {
             seq,
             event_type,
@@ -85,21 +96,28 @@ impl Stream {
     }
 }
 
+/// An artifact store that cannot be read.
+struct Unavailable;
+impl ArtifactSource for Unavailable {
+    fn read_artifact(&self, _: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+        Err(ArtifactError::Unavailable)
+    }
+}
+
 fn pinned() -> Pinned {
     Pinned {
         asset_id: SPY.to_owned(),
-        symbol: "SPY".to_owned(),
         model_id: "quant.ma_crossover".to_owned(),
         model_version: "1.0.0".to_owned(),
         content_hash: digest(MODEL),
     }
 }
 
-/// Each kind's effective registration names its object and carries the stored bytes; the snapshot
-/// is read into SPY's id, symbol, `arca`, and its classification instant.
+/// Each kind's effective registration names its object and carries the stored bytes; records of
+/// other types and kinds change nothing.
 #[test]
 #[ignore = "pending E19-11"]
-fn every_kind_has_its_registered_object_and_the_snapshot_is_read() {
+fn every_kind_has_its_registered_object() {
     let config = Stream::registered(SNAPSHOT).read(TODAY).unwrap();
     let hashes = [
         (config.fee_config.content_hash, FEE),
@@ -113,23 +131,22 @@ fn every_kind_has_its_registered_object_and_the_snapshot_is_read() {
     }
     let fee_bytes = to_canonical(&json(FEE));
     assert_eq!(config.fee_config.bytes, fee_bytes, "the stored bytes");
-    assert_eq!(config.instrument.instrument_id, SPY);
-    assert_eq!(config.instrument.symbol, "SPY");
-    assert_eq!(config.instrument.exchange, SnapshotExchange::Arca);
-    let classified = UtcNanos::parse_rfc3339("2026-10-05T00:00:00Z").unwrap();
-    assert_eq!(config.instrument.etp_classified_at, classified);
 }
 
-/// The latest registration by `seq` counts; a later fee schedule not yet effective on the trade
-/// date refuses rather than falling back, and counts from its `effective_from` on.
+/// The latest registration by `seq` counts, in whatever order the slice lists them; a later fee
+/// schedule not yet effective on the trade date refuses rather than falling back, and counts from
+/// its `effective_from` on.
 #[test]
 #[ignore = "pending E19-11"]
 fn the_latest_registration_counts_and_a_future_fee_schedule_refuses() {
     let rules = r#"{"rules":"reviewed_v2"}"#;
-    let later = Stream::registered(SNAPSHOT).register("rule_set", rules);
-    let config = later.read(TODAY).unwrap();
-    assert_eq!(config.rule_set.content_hash, digest(rules), "the later one");
-    assert_eq!(config.rule_set.seq, 6, "its seq");
+    let mut later = Stream::registered(SNAPSHOT).register("rule_set", rules);
+    for swapped in [false, true] {
+        let config = later.read(TODAY).unwrap();
+        let latest = (config.rule_set.content_hash, config.rule_set.seq);
+        assert_eq!(latest, (digest(rules), 9), "swapped: {swapped}");
+        later.records.swap(2, 8);
+    }
     let fee = FEE.replace("2026-01-01", "2026-10-09");
     let future = Stream::registered(SNAPSHOT).register("fee_config", &fee);
     assert_eq!(future.refused(), Some(Refusal::FeeNotYetEffective));
@@ -139,8 +156,8 @@ fn the_latest_registration_counts_and_a_future_fee_schedule_refuses() {
 
 /// A snapshot counts only for the pinned asset id and a `model_version` only for the pinned triple
 /// (DEC-505 item 1): later ones for anything else, the pinned hash under another id or version
-/// included, do not displace them; a later one for the pinned asset that fails DEC-523 refuses
-/// rather than falling back; and without one there is none.
+/// included, do not displace them, and without one there is none. Neither does a record of another
+/// type that carries a kind and a hash.
 #[test]
 #[ignore = "pending E19-11"]
 fn only_the_pinned_instrument_and_model_registrations_count() {
@@ -148,29 +165,36 @@ fn only_the_pinned_instrument_and_model_registrations_count() {
     let other_model = r#"{"kind":"quant_model_content","model_id":"quant.other"}"#;
     let renamed = MODEL_RECORD.replace("quant.ma_crossover", "quant.other");
     let bumped = MODEL_RECORD.replace("1.0.0", "1.0.1");
+    let lookalike = RECORD.replace("@K", "rule_set");
+    let lookalike = lookalike.replace("@H", &format!("sha256:{}", digest(FEE)));
     let later = Stream::registered(SNAPSHOT).register("instrument_snapshot", &aapl);
     let later = later
-        .model(other_model, MODEL_RECORD)
-        .model(MODEL, &renamed);
-    let config = later.model(MODEL, &bumped).read(TODAY).unwrap();
-    assert_eq!(config.instrument.instrument_id, SPY, "SPY's earlier one");
-    assert_eq!(config.model_version.content_hash, digest(MODEL));
-    assert_eq!(config.model_version.seq, 5, "the pinned triple's own");
-    let nyse = SNAPSHOT.replace("arca", "nyse");
-    let later_spy = Stream::registered(SNAPSHOT).register("instrument_snapshot", &nyse);
-    let member = "exchange";
-    assert_eq!(later_spy.refused(), Some(Refusal::SnapshotValue { member }));
+        .stored(other_model, MODEL_RECORD)
+        .stored(MODEL, &renamed);
+    let later = later
+        .stored(MODEL, &bumped)
+        .then("MandateConfirmed", &lookalike);
+    let config = later.read(TODAY).unwrap();
+    let snapshot = (
+        config.instrument_snapshot.content_hash,
+        config.instrument_snapshot.seq,
+    );
+    assert_eq!(snapshot, (digest(SNAPSHOT), 4), "SPY's earlier one");
+    let model = (config.model_version.content_hash, config.model_version.seq);
+    assert_eq!(model, (digest(MODEL), 5), "the pinned triple's own");
+    assert_eq!(config.rule_set.seq, 3, "not the lookalike");
     let kind = "instrument_snapshot";
     let only_aapl = Stream::registered(&aapl).refused();
     assert_eq!(only_aapl, Some(Refusal::Unregistered { kind }));
     let mut no_model = Stream::registered(SNAPSHOT);
-    no_model.records.pop();
+    no_model.records.remove(4);
     let kind = "model_version";
     assert_eq!(no_model.refused(), Some(Refusal::Unregistered { kind }));
 }
 
-/// A kind with no registration, an object missing from the store, an object without the member
-/// the reader needs, and one that does not re-hash each refuse.
+/// A kind with no registration, a fee object without `effective_from`, a store that cannot be
+/// read, and for every kind an object missing from the store or one that does not re-hash, each
+/// refuse.
 #[test]
 #[ignore = "pending E19-11"]
 fn a_missing_registration_or_object_refuses() {
@@ -178,48 +202,28 @@ fn a_missing_registration_or_object_refuses() {
     no_rules.records.remove(2);
     let kind = "rule_set";
     assert_eq!(no_rules.refused(), Some(Refusal::Unregistered { kind }));
-    let mut missing = Stream::registered(SNAPSHOT);
-    missing.store.remove(&digest(FEE));
-    let kind = "fee_config";
-    assert_eq!(missing.refused(), Some(Refusal::ObjectMissing { kind }));
     let undated = r#"{"environment":"paper","schedule":"conservative_v1"}"#;
-    let malformed = Stream::registered(SNAPSHOT).register(kind, undated);
+    let malformed = Stream::registered(SNAPSHOT).register("fee_config", undated);
+    let kind = "fee_config";
     assert_eq!(malformed.refused(), Some(Refusal::Malformed { kind }));
-    let mut corrupt = Stream::registered(SNAPSHOT);
-    corrupt.store.get_mut(&digest(CALENDAR)).unwrap().push(b' ');
-    let kind = "trading_calendar";
-    assert_eq!(corrupt.refused(), Some(Refusal::ObjectCorrupt { kind }));
-}
-
-/// DEC-523: exactly eight string members, each in its value set, and the symbol the pinned one;
-/// the asset id another instrument's is no snapshot of this run's (DEC-505 item 1).
-#[test]
-#[ignore = "pending E19-11"]
-fn the_snapshot_is_exactly_what_dec_523_pins() {
-    let source = r#","etp_source":"nasdaq_trader_symbol_directory""#;
-    let extra = r#""cusip":"78462F103","symbol""#;
-    let value = |member| Refusal::SnapshotValue { member };
-    let missing = |member| Refusal::SnapshotMissingMember { member };
-    let wrong = Refusal::SnapshotWrongType { member: "exchange" };
-    let kind = "instrument_snapshot";
-    let rows = [
-        (source, "", missing("etp_source")),
-        (r#""symbol""#, extra, Refusal::SnapshotExtraMember),
-        (r#""arca""#, "1", wrong),
-        ("nasdaq_trader", "issuer_website", value("etp_source")),
-        (r#""arca""#, r#""nyse""#, value("exchange")),
-        ("us_equity", "crypto", value("asset_class")),
-        (r#""plain""#, r#""leveraged""#, value("etp")),
-        ("whole", "fractional", value("increment")),
-        ("05T00:00:00Z", "05", value("etp_classified_at")),
-        (r#""SPY""#, r#""SPYG""#, value("symbol")),
-        (SPY, AAPL, Refusal::Unregistered { kind }),
+    let stream = Stream::registered(SNAPSHOT);
+    let date = Date::parse(TODAY).unwrap();
+    let unavailable = configuration(&stream.records, &Unavailable, &pinned(), date).err();
+    assert_eq!(unavailable, Some(Refusal::StoreUnavailable));
+    let objects = [
+        ("fee_config", FEE),
+        ("trading_calendar", CALENDAR),
+        ("rule_set", RULES),
+        ("instrument_snapshot", SNAPSHOT),
+        ("model_version", MODEL),
     ];
-    for (from, to, refusal) in rows {
-        let snapshot = SNAPSHOT.replace(from, to);
-        assert_ne!(snapshot, SNAPSHOT, "the edit applied for {refusal:?}");
-        let refused = Stream::registered(&snapshot).refused();
-        assert_eq!(refused, Some(refusal), "{snapshot}");
+    for (kind, object) in objects {
+        let mut missing = Stream::registered(SNAPSHOT);
+        missing.store.remove(&digest(object));
+        assert_eq!(missing.refused(), Some(Refusal::ObjectMissing { kind }));
+        let mut corrupt = Stream::registered(SNAPSHOT);
+        corrupt.store.get_mut(&digest(object)).unwrap().push(b' ');
+        assert_eq!(corrupt.refused(), Some(Refusal::ObjectCorrupt { kind }));
     }
 }
 
@@ -227,7 +231,6 @@ fn the_snapshot_is_exactly_what_dec_523_pins() {
 #[test]
 fn every_config_refusal_has_its_own_code() {
     let kind = "rule_set";
-    let member = "exchange";
     let rows = [
         (Refusal::Unimplemented { story: "E19-11" }, "unimplemented"),
         (Refusal::Unregistered { kind }, "unregistered"),
@@ -236,13 +239,6 @@ fn every_config_refusal_has_its_own_code() {
         (Refusal::StoreUnavailable, "store_unavailable"),
         (Refusal::Malformed { kind }, "malformed"),
         (Refusal::FeeNotYetEffective, "fee_not_yet_effective"),
-        (
-            Refusal::SnapshotMissingMember { member },
-            "snapshot_missing_member",
-        ),
-        (Refusal::SnapshotExtraMember, "snapshot_extra_member"),
-        (Refusal::SnapshotWrongType { member }, "snapshot_wrong_type"),
-        (Refusal::SnapshotValue { member }, "snapshot_value"),
     ];
     for (refusal, code) in rows {
         assert_eq!(refusal.code(), code, "{refusal:?}");

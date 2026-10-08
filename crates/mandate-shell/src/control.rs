@@ -15,7 +15,7 @@ use mandate_num::Usd;
 use mandate_spec::context::{AgentId, Membership};
 use mandate_spec::validate::Violation;
 use mandate_spec::{Mandate, ValidationContext};
-use mandate_time::{Date, UtcNanos};
+use mandate_time::Date;
 
 /// One record of the workspace control stream as the run read it: its sequence number, type and
 /// payload (journal spec §9.2). The journal has already verified the chain it came from.
@@ -101,6 +101,21 @@ pub fn confirmed_version(
 }
 
 impl ConfirmedVersion {
+    /// The deployed version's digest.
+    pub fn version(&self) -> Digest {
+        self.version
+    }
+
+    /// The stored document that re-hashes to [`Self::version`].
+    pub fn mandate(&self) -> &Mandate {
+        &self.mandate
+    }
+
+    /// The folded context.
+    pub fn context(&self) -> &ValidationContext {
+        &self.context
+    }
+
     /// Phase 2: V-002 on the account equity the run's GET-only preflight read from the broker,
     /// which the returned context carries.
     pub fn with_equity(self, account_equity_usd: Usd) -> Result<Self, DeploymentRefusal> {
@@ -113,7 +128,6 @@ impl ConfirmedVersion {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pinned {
     pub asset_id: String,
-    pub symbol: String,
     pub model_id: String,
     pub model_version: String,
     pub content_hash: Digest,
@@ -127,22 +141,6 @@ pub struct Registered {
     pub bytes: Vec<u8>,
 }
 
-/// The listing exchanges DEC-523 item 3 admits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SnapshotExchange {
-    Arca,
-    Nasdaq,
-}
-
-/// The registered instrument snapshot as DEC-523 reads it, less the members with one value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InstrumentSnapshot {
-    pub instrument_id: String,
-    pub symbol: String,
-    pub exchange: SnapshotExchange,
-    pub etp_classified_at: UtcNanos,
-}
-
 /// The effective registration of every configuration kind the run uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Configuration {
@@ -150,12 +148,11 @@ pub struct Configuration {
     pub trading_calendar: Registered,
     pub rule_set: Registered,
     pub instrument_snapshot: Registered,
-    pub instrument: InstrumentSnapshot,
     pub model_version: Registered,
 }
 
 /// Why the registered configuration cannot be used. Each is a refusal before any credential is
-/// read; a snapshot refusal names the DEC-523 member, never a value.
+/// read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigRefusal {
     /// The body of every stub in the tests PR (DEC-77).
@@ -173,14 +170,6 @@ pub enum ConfigRefusal {
     Malformed { kind: &'static str },
     #[error("the effective fee schedule is not yet effective on the trade date")]
     FeeNotYetEffective,
-    #[error("the instrument snapshot lacks member {member}")]
-    SnapshotMissingMember { member: &'static str },
-    #[error("the instrument snapshot has a member DEC-523 does not list")]
-    SnapshotExtraMember,
-    #[error("the instrument snapshot's {member} is not a string")]
-    SnapshotWrongType { member: &'static str },
-    #[error("the instrument snapshot's {member} is outside DEC-523's value set")]
-    SnapshotValue { member: &'static str },
 }
 
 impl ConfigRefusal {
@@ -194,10 +183,6 @@ impl ConfigRefusal {
             Self::StoreUnavailable => "store_unavailable",
             Self::Malformed { .. } => "malformed",
             Self::FeeNotYetEffective => "fee_not_yet_effective",
-            Self::SnapshotMissingMember { .. } => "snapshot_missing_member",
-            Self::SnapshotExtraMember => "snapshot_extra_member",
-            Self::SnapshotWrongType { .. } => "snapshot_wrong_type",
-            Self::SnapshotValue { .. } => "snapshot_value",
         }
     }
 }

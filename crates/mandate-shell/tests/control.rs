@@ -159,14 +159,14 @@ fn violations(rules: &[Violation]) -> Option<Refusal> {
 fn the_input_is_the_deployed_confirmed_version() {
     let stream = Stream::deployed();
     let input = stream.read();
-    let version = input.as_ref().map(|i| i.version);
+    let version = input.as_ref().map(|i| i.version());
     assert_eq!(version, Ok(stream.version), "the AgentDeployed version");
     let input = input.unwrap();
-    assert_eq!(input.mandate, Mandate::parse(&json(MANDATE)).unwrap());
-    let registered = input.context.registry.as_ref().map(BTreeMap::len);
+    assert_eq!(*input.mandate(), Mandate::parse(&json(MANDATE)).unwrap());
+    let registered = input.context().registry.as_ref().map(BTreeMap::len);
     assert_eq!(registered, Some(1), "the one model_version registration");
     let paper = Some(mandate_domain::Environment::Paper);
-    assert_eq!(input.context.connection_environment, paper);
+    assert_eq!(input.context().connection_environment, paper);
 }
 
 #[test]
@@ -195,7 +195,7 @@ fn a_stopped_agent_refuses_until_it_is_deployed_again() {
     assert_eq!(stopped.refused(), Some(Refusal::Stopped));
     let deploy = stopped.text(3);
     let again = stopped.then("AgentDeployed", &deploy);
-    assert_eq!(again.read().map(|i| i.version), Ok(again.version));
+    assert_eq!(again.read().map(|i| i.version()), Ok(again.version));
 }
 
 /// The latest `AgentDeployed` names the version: a later one naming a document the store lacks
@@ -290,7 +290,7 @@ fn v_002_refuses_only_on_the_preflight_equity() {
     let short = input.clone().with_equity(usd("999.99")).err();
     assert_eq!(short, violations(&[Violation::V002]), "below 1000");
     let input = input.with_equity(usd("1000")).unwrap();
-    assert_eq!(input.context.account_equity_usd, usd("1000"));
+    assert_eq!(input.context().account_equity_usd, usd("1000"));
 }
 
 /// Each refusal has its own stable code (ADR-0001 ES-09); a live test for the mutation gate.
