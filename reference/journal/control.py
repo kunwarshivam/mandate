@@ -329,6 +329,77 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
     ("band_bp", INT),
 )
 
+# §9.8 (DEC-670): the records the workspace API commits. `MandateConfirmed` gains its agent link at
+# `schema_version` 2 (registered with the §9.5 versions below); the others close at 1.
+DRAFT_ORIGINS = ("description", "goal_answers", "template", "version", "edit", "compile")
+NEW_DRAFT_ORIGINS = DRAFT_ORIGINS[:4]
+CALL_REFUSALS = (
+    "policy_denied",
+    "budget_exhausted",
+    "rate_limited_local",
+    "meter_unavailable",
+    "input_rejected",
+    "model_withdrawn",
+)
+CALL_OUTCOMES = (
+    "ok",
+    *CALL_REFUSALS,
+    "deadline_exceeded",
+    "provider_unavailable",
+    "rate_limited_provider",
+    "credential_invalid",
+    "content_refused",
+    "schema_invalid",
+    "identity_mismatch",
+)
+SENT_NOTHING = ("response_ref", "reported_identity", "provider_request_id", "attempts", "tokens", "cost_usd")
+TOKENS = rec(("input", INT), ("output", INT), ("cached", INT))
+SCHEMAS[("ctl", "MandateDraftSaved")] = rec(
+    ("draft_id", IDENT_T),
+    ("draft", REF),
+    ("origin", one_of(*DRAFT_ORIGINS)),
+    ("base_draft", opt(REF)),
+    ("base_version", opt(REF)),
+)
+SCHEMAS[("ctl", "ModelInvocationRecorded")] = rec(
+    ("call_id", ULID),
+    ("purpose", one_of("compiler")),
+    ("draft_id", IDENT_T),
+    ("draft", REF),
+    ("model", rec(("model_id", STR), ("model_version", STR), ("content_hash", REF))),
+    ("endpoint", STR),
+    ("request_digest", REF),
+    ("sampling", rec(("temperature", DEC), ("seed", opt(INT)))),
+    ("prompt_ref", REF),
+    ("response_ref", opt(REF)),
+    ("reported_identity", opt(STR)),
+    ("provider_request_id", opt(STR)),
+    ("outcome", one_of(*CALL_OUTCOMES)),
+    ("attempts", INT),
+    ("tokens", TOKENS),
+    ("cost_usd", DEC),
+    ("price_table_ref", REF),
+    ("cache_hit", BOOL),
+    ("deadline", TS),
+    ("completed_at", TS),
+)
+SCHEMAS[("ctl", "OwnerRequestSubmitted")] = rec(
+    ("agent_id", IDENT_T),
+    ("instrument_id", T("asset_id")),
+    ("side", one_of("buy", "sell")),
+    ("quantity", opt(DEC)),
+    ("requested_by", one_of("owner", "client")),
+    ("client_id", opt(IDENT_T)),
+)
+CONFIRMED_V2 = rec(
+    ("mandate_version", REF),
+    ("confirmed_paths", list_of(POINTER)),
+    ("record_ref", REF),
+    ("agent_id", opt(IDENT_T)),
+    ("base_version", opt(REF)),
+)
+REQUIRED_REFS["ModelInvocationRecorded"] = ("model_version",)
+
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
 ACCOUNT_STREAM_REF_ALT = "01J8Z2ACCT00000000000000A2"
@@ -412,6 +483,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1,),
+    ("ctl", "MandateConfirmed"): (1, 2),
 }
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "StreamOpened", 1): rec(
@@ -428,6 +500,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
     ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
+    ("ctl", "MandateConfirmed", 2): CONFIRMED_V2,
 }
 
 
@@ -724,6 +797,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         if p["acknowledged"] is not None and action != "unprotected_end":
             rule("44.acknowledged", False, "schema", "payload.acknowledged")
     out += answer_violations(event_type, draft, skip)
+    out += workspace_violations(event_type, draft, skip)
     return out
 
 
@@ -759,6 +833,93 @@ def answer_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
             if failed:
                 rule(f"53.{failed}", False, f"payload.{failed}")
     return out
+
+
+def workspace_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.8's rules 54 to 65, on a well-typed payload, in rule order. A seeded `loose` bug can let a
+    member of the wrong kind through; the rules that read it then stop, as the journal's own reader
+    would refuse it before them."""
+    out: list[Violation] = []
+    try:
+        workspace_rules(event_type, draft, skip, out)
+    except (TypeError, ValueError, ArithmeticError, AttributeError):
+        pass
+    return out
+
+
+def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: list[Violation]) -> None:
+    p = draft["payload"]
+    actor = draft["actor"]
+
+    def rule(name: str, holds: bool, path: str) -> bool:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+            return False
+        return True
+
+    if event_type == "MandateDraftSaved":
+        new = p["origin"] in NEW_DRAFT_ORIGINS
+        (
+            rule("54.base_draft", (p["base_draft"] is None) == new, "payload.base_draft")
+            and rule("54.base_version", (p["base_version"] is not None) == (p["origin"] == "version"), "payload.base_version")
+            and rule("54.compile", p["origin"] != "compile" or draft["causation_id"] is not None, "causation_id")
+        )
+        client = actor["kind"] == "client" and (p["origin"] == "version" or "rule.55.client_origin" in skip)
+        rule("55", actor["kind"] == "user" or client, "actor.kind")
+    if event_type == "ModelInvocationRecorded":
+        bound = draft["config_refs"].get("model_version")
+        if bound is not None:
+            rule("56", p["model"]["content_hash"] == bound, "payload.model.content_hash")
+        ok = p["outcome"] == "ok"
+        if ok:
+            missing = next((m for m in ("response_ref", "reported_identity") if p[m] is None), None)
+            rule("57", missing is None, f"payload.{missing}")
+        if p["outcome"] in CALL_REFUSALS:
+            sent = {
+                "response_ref": p["response_ref"] is not None,
+                "reported_identity": p["reported_identity"] is not None,
+                "provider_request_id": p["provider_request_id"] is not None,
+                "attempts": p["attempts"] != 0,
+                "tokens": any(v != 0 for v in p["tokens"].values()) and "rule.58.tokens" not in skip,
+                "cost_usd": Decimal(p["cost_usd"]) != 0,
+            }
+            first = next((m for m in SENT_NOTHING if sent[m]), None)
+            rule("58", first is None, f"payload.{first}")
+        if p["cache_hit"]:
+            if rule("59.hit", ok, "payload.cache_hit"):
+                spent = {
+                    "attempts": p["attempts"] != 0,
+                    "provider_request_id": p["provider_request_id"] is not None,
+                    "cost_usd": Decimal(p["cost_usd"]) != 0,
+                }
+                first = next((m for m in spent if spent[m]), None)
+                rule("59.free", first is None, f"payload.{first}")
+        elif p["outcome"] not in CALL_REFUSALS:
+            floor = 2 if "boundary.rule_59_attempts" in skip else 1
+            rule("59.attempts", p["attempts"] >= floor, "payload.attempts")
+        rule("60.cost", Decimal(p["cost_usd"]) >= 0, "payload.cost_usd")
+        if ok:
+            late = instant_nanos(p["completed_at"]) > instant_nanos(p["deadline"])
+            if "boundary.rule_60_strict" in skip:
+                late = instant_nanos(p["completed_at"]) >= instant_nanos(p["deadline"])
+            rule("60.late", not late, "payload.completed_at")
+        rule("61", actor["kind"] == "system", "actor.kind")
+    if event_type == "MandateConfirmed" and draft["schema_version"] == 2:
+        (
+            rule("62.paired", (p["base_version"] is None) == (p["agent_id"] is None), "payload.base_version")
+            and rule("62.moved", p["base_version"] != p["mandate_version"], "payload.base_version")
+        )
+        rule("63", actor["kind"] == "user", "actor.kind")
+    if event_type == "OwnerRequestSubmitted":
+        expected = {"user": "owner", "client": "client"}.get(actor["kind"])
+        if rule("64.actor", expected is not None, "actor.kind") and rule(
+            "64.requested_by", p["requested_by"] == expected, "payload.requested_by"
+        ):
+            client_id = actor["id"] if expected == "client" else None
+            rule("64.client_id", p["client_id"] == client_id, "payload.client_id")
+        if p["quantity"] is not None:
+            positive = Decimal(p["quantity"]) >= 0 if "boundary.rule_65_zero" in skip else Decimal(p["quantity"]) > 0
+            rule("65", positive, "payload.quantity")
 
 
 def act_failure(p: dict, skip: frozenset[str]) -> str | None:
