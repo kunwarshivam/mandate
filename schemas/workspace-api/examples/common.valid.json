@@ -2,7 +2,8 @@
   "Decimal": [
     "-0.5",
     "10000000000000000000000000000",
-    "0.1234567890123456789012345678"
+    "0.1234567890123456789012345678",
+    "10000000000000000000000000000"
   ],
   "Timestamp": [
     "1970-01-01T00:00:00.000000000Z",
@@ -48,6 +49,26 @@
       "stale": false,
       "age_seconds": 0,
       "limit_source": "data_profile.max_mark_age_s"
+    }
+  ],
+  "QuotedContent": [
+    {
+      "author": "owner_selected",
+      "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars",
+      "model_id": "a",
+      "model_version": "1.0.0",
+      "produced_at": "2026-09-28T18:04:58.000000000Z",
+      "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA",
+      "artifact": null
+    },
+    {
+      "author": "owner_selected",
+      "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars",
+      "model_id": "quant.momentum",
+      "model_version": "2024-10-22",
+      "produced_at": "2026-09-28T18:04:58.000000000Z",
+      "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA",
+      "artifact": null
     }
   ]
 }
