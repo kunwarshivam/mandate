@@ -18,7 +18,7 @@ import hashlib
 import json
 import re
 
-from common import apply_change, change, delete, digest_strings
+from common import apply_change, change, delete, digest_strings, hash_chain
 from control import (
     AGENT_STREAM,
     SERVICES,
@@ -27,9 +27,11 @@ from control import (
     WORKSPACE,
     check_of,
     draft_for,
+    anchor_self_failure,
     manifest_hash,
     merkle_root,
     reported,
+    trusted_start,
     violations,
 )
 from control import (
@@ -119,8 +121,11 @@ def refs_kept(base: str, changes: list[dict]) -> list[dict]:
     return [*changes, change("artifact_refs", sorted(digest_strings(draft["payload"])))]
 
 
-def invalid(name, clause, base, changes, reason, path, also=()):
-    return control_invalid(name, clause, base, refs_kept(base, changes), reason, path, also)
+def invalid(name, clause, base, changes, reason, path, also=(), refs=None):
+    """A refused draft. `artifact_refs` follows the changed payload's digests unless `refs` names the
+    list to write instead, for the cases about `artifact_refs` itself."""
+    kept = refs_kept(base, changes) if refs is None else [*folded(base, changes), change("artifact_refs", refs)]
+    return control_invalid(name, clause, base, kept, reason, path, also)
 
 
 def valid(name, clause, base, changes):
@@ -200,8 +205,15 @@ def invalid_drafts() -> list[dict]:
     return [
         *member_drafts(),
         invalid("anchor_wrong_stream", "§9.11: an anchor is a control-stream record", "anchor", [change("stream_id", AGENT_STREAM)], "wrong_stream", "event_type"),
-        invalid("token_not_listed", "§3: `artifact_refs` lists the token", "anchor", [], "artifact_refs", "artifact_refs")
-        | {"changes": [change("artifact_refs", [])]},
+        invalid("token_not_listed", "§3: `artifact_refs` lists the token", "anchor", [], "artifact_refs", "artifact_refs", refs=[]),
+        invalid(
+            "anchor_without_its_own_leaf",
+            "rule 81: an anchor names its own control stream's head",
+            "anchor",
+            [change("payload.leaves", leaves[:2]), change("payload.root", merkle_root(leaves[:2]))],
+            "schema",
+            "payload.leaves",
+        ),
         invalid("anchor_of_nothing", "rule 81: at least one leaf", "anchor", [change("payload.leaves", []), change("payload.root", "0" * 64)], "schema", "payload.leaves"),
         invalid(
             "anchor_leaf_of_another_workspace",
@@ -225,7 +237,7 @@ def invalid_drafts() -> list[dict]:
             "anchor_stream_twice",
             "rule 81: one leaf per stream",
             "anchor",
-            [change("payload.leaves", [leaves[0], leaves[0]]), change("payload.root", merkle_root([leaves[0], leaves[0]]))],
+            [change("payload.leaves", [leaves[2], leaves[2]]), change("payload.root", merkle_root([leaves[2], leaves[2]]))],
             "schema",
             f"{L1}.stream_id",
         ),
@@ -302,10 +314,11 @@ def invalid_drafts() -> list[dict]:
 def valid_drafts() -> list[dict]:
     """Cases a rule might be misread to refuse; each must be accepted."""
     leaves = Section.bases["anchor"]["payload"]["leaves"]
-    five = [{"hash": f"{i}" * 64, "seq": i + 1, "stream_id": f"acct:{WORKSPACE}:A{i}"} for i in range(5)]
-    one = [leaves[0]]
+    five = [{"hash": f"{i}" * 64, "seq": i + 1, "stream_id": f"acct:{WORKSPACE}:A{i}"} for i in range(4)]
+    five.append({"hash": "4" * 64, "seq": 5, "stream_id": STREAM})
+    one = [leaves[2]]
     return [
-        valid("anchor_of_one_stream", "rule 82: one leaf is its own root", "anchor", [change("payload.leaves", one), change("payload.root", merkle_root(one))]),
+        valid("anchor_of_one_stream", "rule 82: one leaf, its own stream's, is its own root", "anchor", [change("payload.leaves", one), change("payload.root", merkle_root(one))]),
         valid("anchor_of_five_streams", "rule 82: the split is the largest power of two below the count", "anchor", [change("payload.leaves", five), change("payload.root", merkle_root(five))]),
         valid("anchor_without_its_token", "§9.11: a timestamping outage leaves the token null (§10)", "anchor", [change("payload.token", None)]),
         valid(
@@ -323,6 +336,107 @@ def valid_drafts() -> list[dict]:
     ]
 
 
+# --------------------------------------------------------------------------- §11 and the trusted start
+
+
+def chained(event_type: str, seq: int, payload: dict) -> dict:
+    """A control-stream body at `seq`, before `hash_chain` gives it its `prev_hash`."""
+    body = envelope("anchor", event_type, SERVICES, payload)
+    body["event_id"] = f"01J8Z3C3A00000000000000{seq:03d}"
+    body["seq"] = seq
+    body["recorded_at"] = AT
+    return body
+
+
+def range_case(name: str, clause: str, own: str, expect_failure: bool) -> dict:
+    """A control stream of four events whose fourth is an anchor. `own` says what the anchor's leaf
+    for its own stream holds: the head before it, a wrong `seq`, a wrong `hash`, or no leaf."""
+    head = [
+        chained("StreamOpened", 1, {"stream_type": "control", "workspace_id": WORKSPACE}),
+        chained("SegmentExported", 2, segment(ACCOUNT_STREAM, 1, 3, GENESIS)),
+        chained("SegmentExported", 3, segment(ACCOUNT_STREAM, 4, 9, "5" * 64)),
+    ]
+    first = hash_chain(copy.deepcopy(head), GENESIS)
+    leaf = {"hash": first[2]["hash"], "seq": 3, "stream_id": STREAM}
+    if own == "seq":
+        leaf["seq"] = 2
+    elif own == "hash":
+        leaf["hash"] = first[1]["hash"]
+    leaves = [{"hash": "1" * 64, "seq": 9, "stream_id": ACCOUNT_STREAM}]
+    if own != "missing":
+        leaves.append(leaf)
+    anchor = chained("AnchorComputed", 4, {"leaves": leaves, "root": merkle_root(leaves), "token": TOKEN})
+    entries = hash_chain([*head, anchor], GENESIS)
+    expect = {"seq": 4, "check": "anchor_self_mismatch"} if expect_failure else None
+    chain = [{"body": e["body"], "hash": e["hash"]} for e in entries]
+    return {"name": name, "clause": clause, "chain": chain, "expect": expect}
+
+
+def range_checks() -> list[dict]:
+    return [
+        range_case("anchor_names_the_head_before_it", "§11 anchor_self_mismatch: passes", "head", False),
+        range_case("anchor_names_an_earlier_seq", "§11 anchor_self_mismatch: the seq before the anchor", "seq", True),
+        range_case("anchor_names_another_events_hash", "§11 anchor_self_mismatch: that event's hash", "hash", True),
+        range_case("anchor_leaves_its_own_stream_out", "§11 anchor_self_mismatch: a leaf for its own stream", "missing", True),
+    ]
+
+
+SEGMENT_START = segment(ACCOUNT_STREAM, 4, 9, "5" * 64)
+FOREIGN_SEGMENT = segment(ACCOUNT_STREAM, 20, 30, "9" * 64)
+ANCHOR_IDS = {"stamped": "01J8Z3C4A000000000000000S1", "unstamped": "01J8Z3C4A000000000000000U1"}
+
+
+def start_records() -> list[dict]:
+    """The records a resolver reads: one workspace's control stream, and a record of another
+    workspace's that names this workspace's account stream."""
+
+    def anchor(leaves: list[dict], token) -> dict:
+        return {"leaves": leaves, "root": merkle_root(leaves), "token": token}
+
+    stamped = [
+        {"hash": "1" * 64, "seq": 9, "stream_id": ACCOUNT_STREAM},
+        {"hash": "2" * 64, "seq": 3, "stream_id": STREAM},
+    ]
+    unstamped = [
+        {"hash": "3" * 64, "seq": 12, "stream_id": ACCOUNT_STREAM},
+        {"hash": "4" * 64, "seq": 5, "stream_id": STREAM},
+    ]
+    return [
+        {"event_id": "01J8Z3C4A000000000000000G1", "event_type": "SegmentExported", "stream_id": STREAM, "payload": SEGMENT_START},
+        {"event_id": ANCHOR_IDS["stamped"], "event_type": "AnchorComputed", "stream_id": STREAM, "payload": anchor(stamped, TOKEN)},
+        {"event_id": ANCHOR_IDS["unstamped"], "event_type": "AnchorComputed", "stream_id": STREAM, "payload": anchor(unstamped, None)},
+        {"event_id": "01J8Z3C4A000000000000000F1", "event_type": "SegmentExported", "stream_id": "ctl:ws_01J8Z9", "payload": FOREIGN_SEGMENT},
+    ]
+
+
+def start_case(name, clause, stream, from_seq, request, expect):
+    return {"name": name, "clause": clause, "stream_id": stream, "from_seq": from_seq, "request": request, "expect": expect}
+
+
+def trusted_starts() -> dict:
+    manifest = {"kind": "manifest", "manifest_hash": SEGMENT_START["manifest_hash"]}
+    stamped = {"kind": "anchor", "anchor_event_id": ANCHOR_IDS["stamped"]}
+    unstamped = {"kind": "anchor", "anchor_event_id": ANCHOR_IDS["unstamped"]}
+    genesis = {"kind": "genesis"}
+    acct = ACCOUNT_STREAM
+    return {
+        "records": start_records(),
+        "cases": [
+            start_case("genesis_at_seq_one", "§11: the genesis start", acct, 1, genesis, {"from_seq": 1, "prev_hash": GENESIS}),
+            start_case("genesis_after_seq_one", "§11: genesis is seq 1 only", acct, 2, genesis, None),
+            start_case("segment_at_its_first_seq", "§9.11: a SegmentExported's start", acct, 4, manifest, {"from_seq": 4, "prev_hash": "5" * 64}),
+            start_case("segment_entered_inside", "§9.11: a segment starts at its first_seq", acct, 5, manifest, None),
+            start_case("segment_of_another_stream", "§9.11: the segment's own stream", AGENT_STREAM, 4, manifest, None),
+            start_case("manifest_not_recorded", "§9.11: an absent manifest", acct, 4, {"kind": "manifest", "manifest_hash": "8" * 64}, None),
+            start_case("stamped_anchor_after_its_leaf", "§9.11: a stamped anchor's leaf at n - 1", acct, 10, stamped, {"from_seq": 10, "prev_hash": "1" * 64}),
+            start_case("stamped_anchor_at_its_leaf", "§9.11: the leaf is the event before the start", acct, 9, stamped, None),
+            start_case("unstamped_anchor_is_no_start", "§9.11, DEC-783 item 8: a null token vouches for nothing", acct, 13, unstamped, None),
+            start_case("anchor_without_the_stream", "§9.11: the anchor has no leaf for the stream", AGENT_STREAM, 10, stamped, None),
+            start_case("another_workspaces_segment", "§9.11, DEC-767: only the workspace's own records", acct, 20, {"kind": "manifest", "manifest_hash": FOREIGN_SEGMENT["manifest_hash"]}, None),
+        ],
+    }
+
+
 # --------------------------------------------------------------------------- independent oracles
 
 ORACLE_CHECKS = (
@@ -333,6 +447,11 @@ ORACLE_CHECKS = (
     "drafts.tenant",
     "invalid_drafts",
     "valid_drafts",
+    "ranges.chain",
+    "ranges.reference",
+    "ranges.walk",
+    "starts.reference",
+    "starts.resolve",
 )
 
 
@@ -343,8 +462,9 @@ def found(check: str, message: str) -> str:
 
 
 def root_by_levels(leaves: list[dict]) -> str:
-    """§10's tree built level by level, bottom up: at each level, the largest power-of-two prefix of
-    a node's span pairs off first. It shares no code with rule 82's recursive split."""
+    """§10's tree, built top down by its own split: each span of more than one leaf splits at the
+    largest power of two below its length, found from the length's bit count rather than rule 82's
+    doubling loop, and the halves are hashed recursively. It shares no code with rule 82."""
 
     def leaf_hash(leaf: dict) -> bytes:
         body = json.dumps({k: leaf[k] for k in sorted(leaf)}, separators=(",", ":"), ensure_ascii=False)
@@ -379,6 +499,81 @@ def workspace_of(stream: str) -> str:
     return stream[start:] if end < 0 else stream[start:end]
 
 
+def walk_own_leaf(chain: list[dict]) -> dict | None:
+    """The oracle's own §11 walk: an anchor's leaves must contain exactly the triple of its own
+    stream, the previous entry's `seq` and the previous entry's `hash`."""
+    for before, entry in zip(chain, chain[1:]):
+        body = entry["body"]
+        if body["event_type"] == "AnchorComputed":
+            need = (body["stream_id"], before["body"]["seq"], before["hash"])
+            have = {(leaf["stream_id"], leaf["seq"], leaf["hash"]) for leaf in body["payload"]["leaves"]}
+            if need not in have:
+                return {"seq": body["seq"], "check": "anchor_self_mismatch"}
+    return None
+
+
+def chain_breaks(chain: list[dict]) -> list[int]:
+    """The `seq`s whose body does not re-hash to its `hash` or does not link to the one before."""
+    bad, prev = [], GENESIS
+    for entry in chain:
+        body = entry["body"]
+        text = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        if hashlib.sha256(text.encode()).hexdigest() != entry["hash"] or body["prev_hash"] != prev:
+            bad.append(body["seq"])
+        prev = entry["hash"]
+    return bad
+
+
+def resolve_start(records: list[dict], case: dict) -> dict | None:
+    """The oracle's own resolver, written from §9.11's paragraph: filter by workspace first, then by
+    the kind of start, and only then by the fit."""
+    stream, n, request = case["stream_id"], case["from_seq"], case["request"]
+    mine = [r for r in records if workspace_of(r["stream_id"]) == workspace_of(stream)]
+    if request["kind"] == "genesis":
+        return {"from_seq": 1, "prev_hash": GENESIS} if n == 1 else None
+    if request["kind"] == "manifest":
+        hits = [
+            r["payload"]
+            for r in mine
+            if r["event_type"] == "SegmentExported"
+            and r["payload"]["manifest_hash"] == request["manifest_hash"]
+            and r["payload"]["stream_id"] == stream
+            and r["payload"]["first_seq"] == n
+        ]
+        return {"from_seq": n, "prev_hash": hits[0]["first_prev_hash"]} if hits else None
+    anchors = [
+        r["payload"]
+        for r in mine
+        if r["event_type"] == "AnchorComputed" and r["event_id"] == request["anchor_event_id"] and r["payload"]["token"]
+    ]
+    leaves = [leaf for a in anchors for leaf in a["leaves"] if (leaf["stream_id"], leaf["seq"]) == (stream, n - 1)]
+    return {"from_seq": n, "prev_hash": leaves[0]["hash"]} if leaves else None
+
+
+def entries_of(chain: list[dict]) -> list[dict]:
+    return [{"seq": e["body"]["seq"], "hash": e["hash"], "body": e["body"]} for e in chain]
+
+
+def check_ranges_and_starts(section: dict) -> list[str]:
+    problems = []
+    for case in section["range_checks"]:
+        chain = case["chain"]
+        if chain_breaks(chain):
+            problems.append(found("ranges.chain", f"{case['name']}: entries {chain_breaks(chain)} do not chain"))
+        if anchor_self_failure(entries_of(chain)) != case["expect"]:
+            problems.append(found("ranges.reference", f"{case['name']}: expected {case['expect']}"))
+        if walk_own_leaf(chain) != case["expect"]:
+            problems.append(found("ranges.walk", f"{case['name']}: expected {case['expect']}"))
+    starts = section["trusted_starts"]
+    for case in starts["cases"]:
+        got = trusted_start(starts["records"], case["stream_id"], case["from_seq"], case["request"])
+        if got != case["expect"]:
+            problems.append(found("starts.reference", f"{case['name']}: expected {case['expect']}, got {got}"))
+        if resolve_start(starts["records"], case) != case["expect"]:
+            problems.append(found("starts.resolve", f"{case['name']}: expected {case['expect']}"))
+    return problems
+
+
 def check_section(section: dict, v3: dict) -> list[str]:
     """Every failure, so seeded bugs can be shown caught."""
     problems = []
@@ -411,7 +606,7 @@ def check_section(section: dict, v3: dict) -> list[str]:
         got = violations(draft_for(section, case))
         if got:
             problems.append(found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
-    return problems
+    return problems + check_ranges_and_starts(section)
 
 
 # --------------------------------------------------------------------------- seeded bugs
@@ -421,6 +616,7 @@ VALIDATOR_MUTANTS = (
     "rule.81.workspace",
     "rule.81.seq",
     "rule.81.order",
+    "rule.81.self",
     "rule.82",
     "rule.83",
     "rule.84.workspace",
@@ -482,6 +678,33 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         ("a valid segment's manifest hash is the file's", "segments.manifest", mutated(manifest_of_the_file)),
         ("a valid segment names another workspace's stream", "drafts.tenant", mutated(foreign_segment)),
         (
+            "a range case's chain is altered after it was hashed",
+            "ranges.chain",
+            mutated(lambda s: s["range_checks"][0]["chain"][1]["body"]["payload"].update(last_seq=4)),
+        ),
+        (
+            "a passing range is expected to fail",
+            "ranges.reference",
+            mutated(lambda s: s["range_checks"][0].update(expect={"seq": 4, "check": "anchor_self_mismatch"})),
+        ),
+        (
+            "an anchor naming another event's hash is expected to pass",
+            "ranges.walk",
+            mutated(lambda s: s["range_checks"][2].update(expect=None)),
+        ),
+        (
+            "an unstamped anchor is expected to be a start",
+            "starts.resolve",
+            mutated(lambda s: case(s["trusted_starts"], "cases", "unstamped_anchor_is_no_start").update(
+                expect={"from_seq": 13, "prev_hash": "3" * 64})),
+        ),
+        (
+            "a segment's start is expected at another hash",
+            "starts.reference",
+            mutated(lambda s: case(s["trusted_starts"], "cases", "segment_at_its_first_seq").update(
+                expect={"from_seq": 4, "prev_hash": "6" * 64})),
+        ),
+        (
             "an invalid draft's expectation differs",
             "invalid_drafts",
             mutated(lambda s: case(s, "invalid_drafts", "anchor_root_lies")["expect"].update(path="payload.leaves")),
@@ -492,6 +715,10 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: case(s, "valid_drafts", "anchor_without_its_token")["changes"].append(change("actor", USER))),
         ),
     ]
+
+
+RANGE_MUTANTS = ("self.missing", "self.seq", "self.hash")
+START_MUTANTS = ("start.genesis_seq", "start.first_seq", "start.anchor_seq", "start.null_token", "start.workspace")
 
 
 def run_mutants(section: dict, v3: dict) -> list[str]:
@@ -508,6 +735,18 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
             caught |= bool(got) if want is None else not reported(got, want)
         if not caught:
             escaped.append(f"cold-records validator mutant {mutant}")
+    for mutant in RANGE_MUTANTS:
+        skip = frozenset([mutant])
+        if all(anchor_self_failure(entries_of(c["chain"]), skip) == c["expect"] for c in section["range_checks"]):
+            escaped.append(f"cold-records range mutant {mutant}")
+    starts = section["trusted_starts"]
+    for mutant in START_MUTANTS:
+        skip = frozenset([mutant])
+        if all(
+            trusted_start(starts["records"], c["stream_id"], c["from_seq"], c["request"], skip) == c["expect"]
+            for c in starts["cases"]
+        ):
+            escaped.append(f"cold-records start mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if not any(c == check for _, c, _ in registered):
@@ -529,4 +768,6 @@ def build_section(v3: dict) -> dict:
         "drafts": copy.deepcopy(Section.bases),
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
+        "range_checks": range_checks(),
+        "trusted_starts": trusted_starts(),
     }

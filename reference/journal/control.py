@@ -1198,6 +1198,8 @@ def cold_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[
             if previous is not None and isinstance(stream, str) and isinstance(previous, str):
                 rule("81.order", stream.encode() > previous.encode(), f"{at}.stream_id")
             previous = stream
+        streams = [leaf.get("stream_id") for leaf in items]
+        rule("81.self", not leaves or draft["stream_id"] in streams, "payload.leaves")
         typed = items and all(
             isinstance(leaf.get("hash"), str) and is_integer(leaf.get("seq")) and isinstance(leaf.get("stream_id"), str)
             for leaf in items
@@ -1220,6 +1222,65 @@ def cold_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[
             rule("85", p["manifest_hash"] == manifest_hash(p), "payload.manifest_hash")
         rule("86", kind == "system", "actor.kind")
     return out
+
+
+def anchor_self_failure(entries: list[dict], skip: frozenset[str] = frozenset()) -> dict | None:
+    """§11's `anchor_self_mismatch` over one control stream's entries in `seq` order: each
+    `AnchorComputed` has a leaf for its own stream naming the event just before it, by `seq` and by
+    `hash`. Returns the first failure, `{seq, check}`, or `None`."""
+    for i, entry in enumerate(entries):
+        body = entry["body"]
+        if body["event_type"] != "AnchorComputed" or i == 0:
+            continue
+        before = entries[i - 1]
+        own = [leaf for leaf in body["payload"]["leaves"] if leaf["stream_id"] == body["stream_id"]]
+        if not own:
+            if "self.missing" in skip:
+                continue
+            return {"seq": entry["seq"], "check": "anchor_self_mismatch"}
+        leaf = own[0]
+        seq_ok = leaf["seq"] == before["seq"] or "self.seq" in skip
+        hash_ok = leaf["hash"] == before["hash"] or "self.hash" in skip
+        if not (seq_ok and hash_ok):
+            return {"seq": entry["seq"], "check": "anchor_self_mismatch"}
+    return None
+
+
+def trusted_start(
+    records: list[dict], stream: str, from_seq: int, request: dict, skip: frozenset[str] = frozenset()
+) -> dict | None:
+    """§9.11's "What a verifier reads": the trusted start of a range of `stream` entered at
+    `from_seq`, resolved from `request` among the control-stream `records` of `stream`'s own
+    workspace, or `None` when the request names no usable start."""
+    workspace = stream.split(":")[1]
+    own = [
+        r
+        for r in records
+        if r["stream_id"].split(":")[1] == workspace or "start.workspace" in skip
+    ]
+    if request["kind"] == "genesis":
+        if from_seq == 1 or "start.genesis_seq" in skip:
+            return {"from_seq": from_seq, "prev_hash": GENESIS}
+        return None
+    if request["kind"] == "manifest":
+        for r in own:
+            p = r["payload"]
+            if r["event_type"] != "SegmentExported" or p["manifest_hash"] != request["manifest_hash"]:
+                continue
+            fits = p["stream_id"] == stream and (p["first_seq"] == from_seq or "start.first_seq" in skip)
+            if fits:
+                return {"from_seq": from_seq, "prev_hash": p["first_prev_hash"]}
+        return None
+    for r in own:
+        if r["event_type"] != "AnchorComputed" or r["event_id"] != request["anchor_event_id"]:
+            continue
+        if r["payload"]["token"] is None and "start.null_token" not in skip:
+            return None
+        for leaf in r["payload"]["leaves"]:
+            fits = leaf["seq"] == from_seq - 1 or "start.anchor_seq" in skip
+            if leaf["stream_id"] == stream and fits:
+                return {"from_seq": from_seq, "prev_hash": leaf["hash"]}
+    return None
 
 
 def act_failure(p: dict, skip: frozenset[str]) -> str | None:

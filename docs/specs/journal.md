@@ -1947,7 +1947,7 @@ hash beside them. So a verifier takes a trusted start from either record in the 
 |---|---|---|
 | `leaves` | `[{hash: digest, seq: integer, stream_id: stream_id}]` | Every stream's head at the anchor, one per stream, strictly ascending by `stream_id` bytes. The control stream's leaf is its head **before** this event, which §11's `anchor_self_mismatch` checks: rule 81 |
 | `root` | `digest` | §10's root over `leaves`: rule 82 |
-| `token` | `ref?` | The RFC 3161 timestamp token, stored as an artifact (§10), or `null` while the timestamping authority is unavailable; the outage is retried and journaled as a gap (§10) |
+| `token` | `ref?` | The RFC 3161 timestamp token, stored as an artifact (§10), or `null` while the timestamping authority is unavailable; the outage is retried and journaled as a gap (§10). An anchor whose `token` is `null` is not a trusted start (below) |
 
 **`SegmentExported`**: one segment of §6.2, shipped and locked.
 
@@ -1966,9 +1966,15 @@ checks do (`segment_manifest_mismatch`, `segment_gap`).
 
 **What a verifier reads.** The trusted start of a range of stream `s` entered at `n` is
 `{from_seq: n, prev_hash: first_prev_hash}` of a `SegmentExported` of `s` whose `first_seq` is `n`,
-or `{from_seq: n, prev_hash: hash}` of the leaf for `s` in an `AnchorComputed` whose leaf `seq` is
-`n − 1`. Either is looked up among the workspace's own control-stream records only, so a record that
-is absent and one of another workspace give the same refusal (workspace API §4.8.1, DEC-767).
+or `{from_seq: n, prev_hash: hash}` of the leaf for `s` in an `AnchorComputed` **that has a
+`token`** and whose leaf `seq` is `n − 1`. An anchor whose `token` is `null` is not a trusted start:
+without the timestamp nothing outside the journal vouches for it, and a start the journal vouches
+for alone is what [DEC-115](../project/04-decision-log.md#decisions) item 5 refused. A range is then
+entered from genesis, from a `SegmentExported`, or from a stamped anchor. A later record that
+supplies the missing token (the anchor stamp record, backlog) makes such an anchor a start; this
+version has none. Every start is looked up among the workspace's own control-stream records only,
+so a record that is absent and one of another workspace give the same refusal (workspace API
+§4.8.1, DEC-767). The test vectors' `cold_records.trusted_starts` hold these cases.
 
 **Consistency rules** (reason `schema`; the path is the member named):
 
@@ -1976,7 +1982,9 @@ is absent and one of another workspace give the same refusal (workspace API §4.
     clauses in this order, at `payload.leaves[i].<member>`: its `stream_id`'s `{workspace_id}`
     segment equals the envelope `stream_id`'s (`stream_id`); its `seq` is at least 1 (`seq`); and
     after the first leaf, its `stream_id` sorts after the previous leaf's by bytes (`stream_id`), so
-    no stream has two leaves.
+    no stream has two leaves. Then, when there are leaves, one names the envelope's own control
+    stream (`payload.leaves`): a control stream always holds its `StreamOpened` before any anchor, so an
+    anchor that leaves its own stream out would dodge §11's `anchor_self_mismatch` by omission.
 82. `AnchorComputed`: `root` is §10's root over `leaves`, recomputed at append (`payload.root`):
     leaf = SHA-256(0x00 ‖ canonical(leaf)), node = SHA-256(0x01 ‖ left ‖ right), split at the
     largest power of two below the count. An anchor whose leaves do not produce its root proves
@@ -2027,7 +2035,8 @@ anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_m
 
 - `anchor_self_mismatch` — an `AnchorComputed` has a leaf for its own control stream, and that leaf
   names the event just before it: its `seq` is one less than the `AnchorComputed`'s own, and its
-  `hash` is that event's `hash` (§10), reported at the `AnchorComputed`;
+  `hash` is that event's `hash` (§10), reported at the `AnchorComputed`. The test vectors'
+  `cold_records.range_checks` hold a case for each clause;
 
 and on an agent stream ([§9.1](#91-agent-stream-payload-schemas-dec-177)):
 

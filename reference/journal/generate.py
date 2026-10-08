@@ -3691,7 +3691,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(audit.vector_mutants(audit_section))} vector mutants caught; "
         f"{len(cold_section['drafts'])} cold-record drafts, {len(cold_section['invalid_drafts'])} invalid and "
         f"{len(cold_section['valid_drafts'])} valid; {len(cold.VALIDATOR_MUTANTS)} validator and "
-        f"{len(cold.vector_mutants(cold_section))} vector mutants caught"
+        f"{len(cold.vector_mutants(cold_section))} vector mutants caught, "
+        f"{len(cold_section['range_checks'])} range checks and {len(cold_section['trusted_starts']['cases'])} trusted starts, "
+        f"{len(cold.RANGE_MUTANTS)} range and {len(cold.START_MUTANTS)} start mutants caught"
     )
     return 0
 

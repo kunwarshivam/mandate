@@ -4454,5 +4454,7 @@ From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.
 - Close `SegmentEvicted` (journal spec §6.2, §9): which segment left the hot store, by its
   `SegmentExported` manifest hash, and when. Left out of DEC-783 by the lead's ruling, so a hot-store
   eviction record stays prose until a story needs to read it.
-- Re-stamping an anchor's timestamp token before it expires (§10): `AnchorComputed.token` is the
-  first stamp only; a later stamp needs its own record.
+- The anchor stamp record (§10, DEC-783 item 8): a control-stream record, `AnchorStamped`, that names
+  an `AnchorComputed` as its `causation_id` and carries a timestamp token for its root. It backfills
+  the token of an anchor appended during a timestamping outage, which until then is not a trusted
+  start (§9.11), and re-stamps an anchor before its token expires.
