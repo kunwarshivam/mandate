@@ -131,7 +131,6 @@ fn parse_as_journal_draft(draft: &EventDraft) -> Result<Draft, Invalid> {
 }
 
 #[test]
-#[ignore = "pending E8-3"]
 fn every_answer_record_the_runtime_writes_passes_the_journals_check() {
     let mut seen = BTreeSet::new();
     let mut failed = Vec::new();
@@ -153,7 +152,6 @@ fn every_answer_record_the_runtime_writes_passes_the_journals_check() {
 /// check 7 and on a skip, and exactly the count and independence the request bound on a grant check
 /// 7 judged, whether it admitted, counted or refused it.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_responded_record_carries_its_quorum_only_where_check_7_was_judged() {
     for (name, ran) in runs() {
         let [responded] = records(&ran, "ApprovalResponded")[..] else {
@@ -191,7 +189,6 @@ fn a_responded_record_carries_its_quorum_only_where_check_7_was_judged() {
 /// DEC-533 item 4: an `auto` re-classification passes check 10 with no label, written `null`; an
 /// `ask` writes its own label, the bound one or another trigger's; a `deny` writes no label either.
 #[test]
-#[ignore = "pending E8-3"]
 fn decided_by_now_is_null_unless_the_reclassification_asks() {
     for (name, ran) in runs() {
         for revalidated in records(&ran, "ApprovalRevalidated") {

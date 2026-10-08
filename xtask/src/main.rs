@@ -2288,12 +2288,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
-///
-/// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
-/// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
-/// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
-/// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2306,18 +2301,6 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
-    ),
-    (
-        "crates/mandate-runtime/tests/answer_records.rs",
-        "every_answer_record_the_runtime_writes_passes_the_journals_check",
-    ),
-    (
-        "crates/mandate-runtime/tests/answer_records.rs",
-        "a_responded_record_carries_its_quorum_only_where_check_7_was_judged",
-    ),
-    (
-        "crates/mandate-runtime/tests/answer_records.rs",
-        "decided_by_now_is_null_unless_the_reclassification_asks",
     ),
 ];
 
