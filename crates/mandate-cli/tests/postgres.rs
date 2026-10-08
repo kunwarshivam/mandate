@@ -100,7 +100,6 @@ fn stream() -> StreamId {
 /// The control-stream vectors appended through `ControlJournal` are stored byte for byte with the
 /// vectors' hashes, and read back the same (journal spec §5.1, §11).
 #[test]
-#[ignore = "pending E10-16"]
 fn the_control_stream_vectors_are_stored_byte_for_byte() {
     let Some(t) = opened("v") else { return };
     let (_db, mut pg, _) = t;
@@ -133,7 +132,6 @@ fn the_control_stream_vectors_are_stored_byte_for_byte() {
 /// the store at `--store`, and then commits: the outcomes of `MemoryJournal`'s artifact-aware
 /// append over the same objects (journal spec §11 check 6; DEC-510).
 #[test]
-#[ignore = "pending E10-16"]
 fn a_registration_commits_only_once_its_object_is_in_the_store() {
     let Some(t) = opened("o") else { return };
     let (_db, mut pg, root) = t;
@@ -191,7 +189,6 @@ fn shape(outcome: &AppendOutcome) -> String {
 /// tests' own journal answers them, the journal every M7 command test already runs against
 /// (journal spec §5.1; DEC-257 item 16).
 #[test]
-#[ignore = "pending E10-16"]
 fn ownership_fencing_and_retries_answer_as_the_cli_tests_journal() {
     let Some(t) = opened("r") else { return };
     let (_db, mut pg, _) = t;
