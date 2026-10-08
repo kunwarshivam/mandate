@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.3 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md), and [DEC-832](../project/decisions/DEC-832.md); v0.3 adds one's own memberships and session, one's own notification address, principal scope, who may obtain a step-up challenge, reduction-only sessions' workspaces, and `refresh_failed`, [DEC-816](../project/decisions/DEC-816.md)). Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by the founder in [DEC-820](../project/decisions/DEC-820.md) and applied by DEC-640; items 16 to 21 are Proposed and wait for the founder |
+| **Status** | v0.3 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md), and [DEC-832](../project/decisions/DEC-832.md); v0.3 adds one's own memberships and session, one's own notification address, principal scope, who may obtain a step-up challenge, reduction-only sessions' workspaces, and `refresh_failed`, [DEC-816](../project/decisions/DEC-816.md)). Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by the founder in [DEC-820](../project/decisions/DEC-820.md) and applied by DEC-640; DEC-642 item 10 (a failed membership read never refuses a risk-reducing operation) is accepted by the founder, 2026-10-08; items 16 to 21 are Proposed and wait for the founder |
 | **Implements** | [HLD §4](../HLD.md#4-architecture) (org directory, workspace deployment, deployment modes) and [§8](../HLD.md#8-multi-tenancy-and-security); PRD [FR-1.1 to FR-1.6](../product/04-prd-v1.md#61-identity-and-tenancy); backlog E9 |
 | **Depends on** | [Mandate spec §4.3, V-047, §6.1, §6.4, §6.5](mandate.md#43-policy-hierarchy-dec-51-dec-98); [journal spec §2, §3, §6.4, §7](journal.md#3-event-envelope); [infrastructure design §5, OPS-6](../design/infrastructure.md#5-secrets-and-the-vault); [inference spec INF-9, INF-11](inference.md#2-invariants); [DEC-141](../project/04-decision-log.md#decisions), [DEC-211](../project/04-decision-log.md#decisions), [DEC-411](../project/decisions/DEC-411.md) |
 | **Read by** | The workspace services API spec (`docs/specs/workspace-api.md`, DEC-436), the notifications spec (`docs/specs/notifications.md`, DEC-438), and the threat model (`docs/security/threat-model.md`, DEC-439), all drafted in parallel. They take roles, principals, and step-up from here |
@@ -370,8 +370,8 @@ engage; Kill switch, org scope: engage. "Kill switch, any scope: privileges beyo
 among them. Any other row is refused `reduction_only`. A route-1 session leaves reduction-only
 when a refresh succeeds (it is a full session again) or the provider refuses one (it ends, §6.4).
 
-**A failed membership read** (DEC-642 item 10, on the coordinator's ruling: agent-accepted and
-reversible by the founder. It is a narrow loosening of ID-3's fail-closed rule for the
+**A failed membership read** (DEC-642 item 10, on the coordinator's ruling and accepted by the
+founder on 2026-10-08. It is a narrow loosening of ID-3's fail-closed rule for the
 risk-reducing rows, made for rule 13, not a DEC-176 tightening; it adds no trading risk, and in
 hybrid and on-prem deployments the snapshot it reads can be as wide as the live read, above).
 `membership_unavailable` is never the outcome of a risk-reducing operation
@@ -1156,9 +1156,10 @@ owner and last admin refusals (item 12); organization deletion (item 13); the E9
 
 **Decided by the founder:** item 15, in [DEC-820](../project/decisions/DEC-820.md) item 2: Supabase
 Auth as the managed OIDC issuer, free tier, and workspace services as the WebAuthn relying party
-for step-up and the risk-reduction path.
+for step-up and the risk-reduction path; and DEC-642 item 10, 2026-10-08 (below).
 
-**v0.2's readings (agent, DEC-79, DEC-176)**, each tightening only except DEC-642 item 10 (below),
+**v0.2's readings (agent, DEC-79, DEC-176)**, each tightening only except DEC-642 item 10
+(founder-accepted, below),
 for the code of E9-1, E9-2, and E9-8: how item 15 is applied (asymmetric-only OIDC verification,
 ES256 only for the managed issuer, the RP ID and origin as per-deployment configuration),
 [DEC-640](../project/decisions/DEC-640.md); the matrix's cell
@@ -1168,13 +1169,13 @@ grammar, column scopes, inactive rows, and ID-2 scoped to the rows the matrix na
 [DEC-643](../project/decisions/DEC-643.md); and the sealed `OrgContext` with its per-workspace
 fan-out and the `PrincipalContext` for one's own data, [DEC-832](../project/decisions/DEC-832.md).
 
-**Agent-accepted, reversible by the founder:** DEC-642 item 10, authorizing a risk-reducing
+**Accepted by the founder, 2026-10-08:** DEC-642 item 10, authorizing a risk-reducing
 operation from a session's roles snapshot when the membership read fails (§4.5). It loosens ID-3's
 fail-closed rule for those rows only, for rule 13, and adds no trading risk; in hybrid and on-prem
 deployments the snapshot can be as wide as the live read. It is pinned by
 `a_deactivated_member_is_refused_through_an_outage` and by the audit display of
-`membership_unverified`. The founder may reverse it by a new decision, which restores
-`membership_unavailable` on every row.
+`membership_unverified`. Only a new decision of the founder reverses it, which
+restores `membership_unavailable` on every row.
 
 **v0.3's readings (agent, DEC-79, DEC-176)**, each closing a gap other lanes hit, by the reading
 that adds no risk: the "List one's own workspace memberships" row, the membership index, and
