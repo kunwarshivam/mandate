@@ -59,12 +59,7 @@ pub(crate) fn payload(
         "ApprovalRequested" => approval_requested_rules(view)?,
         "ApprovalResponded" => responded_rules(view)?,
         "ApprovalRevalidated" => revalidated_rules(view)?,
-        "AgentModeChanged" if schema_version == 2 => held_mode_rules(view)?,
-        "AgentModeChanged" => ensure(
-            strictness(view.text("to")) >= strictness(view.text("lifecycle")),
-            InvalidReason::Schema,
-            "payload.to",
-        )?,
+        "AgentModeChanged" => held_mode_rules(view)?,
         "OwnerExitRequested" => owner_exit_rules(view)?,
         "ModelOutputRecorded" => {
             let thesis = view.is_null("thesis_id");
@@ -291,9 +286,10 @@ const OWNER_MODE_REASONS: [&str; 5] = [
     "owner_lift_hold",
 ];
 
-/// Journal spec v0.21 §9.10's rules 78 and 79 on `AgentModeChanged` version 2 (DEC-672): `held`
-/// follows a hold's and a lift's reason, and `to` is at least as strict as the lifecycle and at
-/// least `exits_only` while held, so a resume never clears a hold and a lift never clears a pause.
+/// Rule 11 and journal spec v0.21 §9.10's rules 78 and 79 (DEC-672): `held` follows a hold's and a
+/// lift's reason, and `to` is at least as strict as the lifecycle and at least `exits_only` while
+/// held, so a resume never clears a hold and a lift never clears a pause. A version-1 record has no
+/// `held` and no hold reason, so for it this is rule 11 alone.
 fn held_mode_rules(view: Payload<'_>) -> Result<(), Invalid> {
     let held = view.0.get("held") == Some(&Value::Bool(true));
     let reason = view.text("reason");
