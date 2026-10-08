@@ -95,7 +95,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 
 | ID | Invariant | How it is tested |
 |---|---|---|
-| **API-1** | **Authenticated.** Every call except the liveness probe carries a valid session or token. Without one the API returns 401, reveals no data, and says nothing about whether the resource exists | A route table test: every registered route, called without credentials, returns 401 with the same body |
+| **API-1** | **Authenticated.** Every call except the liveness probe and a CORS preflight (§3.3 item 5) carries a valid session or token. Without one the API returns 401, reveals no data, and says nothing about whether the resource exists | A route table test: every registered route, called without credentials, returns 401 with the same body |
 | **API-2** | **Authorized on the server.** Each operation checks the principal's role in the workspace (§3.7) and, for a client, its scope (§3.8), on the server, before any read or write. The web app's role checks (`web/src/lib/roles.tsx`) are never authority | A matrix test: every route × every role and client scope, with the expected 403 or success from §3.7, computed from the table, not from the handler |
 | **API-3** | **Journal before effect.** Every call that can change what an agent, connection, policy, member, client, or approval may do commits its control-stream event (`Committed` or `AlreadyCommitted`, journal spec §5.1), with the caller's identity in `actor`, before it reports success and before anything acts on it. The API writes no agent or account stream | Fault injection: fail the append at every step; no stream owner ever sees an effect without its control-stream cause, and no response says `recorded` without a committed event |
 | **API-4** | **Idempotent.** Every mutating call carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
@@ -196,6 +196,19 @@ Owned by the [identity spec](identity.md). What the API requires of it:
    so a version an operator proposes through their own client and then confirms is still their own
    (mandate spec §6.4, amended in this change). Events also record the channel (`web`, `cli`,
    `mcp`) and the authentication method.
+5. **Cross-origin requests** (the web app at `https://app.owlhead.ai` calls `https://api.owlhead.ai`
+   with `credentials: include`; DEC-682 item 32):
+   - Only the exact configured app origin is allowed: no wildcard and no reflected `Origin`. Its
+     responses carry `Access-Control-Allow-Origin` with that origin,
+     `Access-Control-Allow-Credentials: true`, and `Vary: Origin`. Any other origin gets no CORS
+     header.
+   - A preflight `OPTIONS` allows the methods `GET`, `POST`, `PUT`, `DELETE`, and `PATCH`, and the
+     headers `Content-Type`, `Idempotency-Key`, `If-Match`, and `X-Mandate-Request`, with
+     `Access-Control-Max-Age: 600`. A preflight is never authenticated and reads no data (API-1's
+     exemption).
+   - Exposed headers: `ETag`, `Location`, `Retry-After`, and the version headers of §3.2.
+   - The session cookie is host-only, `__Host-` prefixed, `Secure`, `HttpOnly`, `SameSite=Strict`,
+     and `Path=/`.
 
 ### 3.4 Idempotency
 
@@ -436,6 +449,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Go live | `POST /agents/{id}/go-live` | — | Always `live_unavailable` until counsel signs off (B5, DEC-98). The route exists so the refusal is tested |
 | Pause, resume | `POST /agents/{id}/pause`, `.../resume` | `OwnerCommandIssued` | Pause: no step-up, API-7. Resume: step-up, judged by the runtime |
 | Hold new openings | `POST /agents/{id}/hold` | `OwnerCommandIssued` with command `hold_openings` (journal change) | DEC-191. Sets `exits_only` and nothing else. Lifting it is the owner's alone, with step-up, as a `lift_hold` command (journal change); it lifts only the hold, never a latched limit (MI-3) |
+| Lift a hold | `POST /agents/{id}/hold/lift` | `OwnerCommandIssued` with command `lift_hold` (journal change) | (planned: E10-12) Users only, never a client; step-up required (`lift_hold`); not an API-7 operation, since it adds risk back (DEC-684 item 1) |
 | Stop | `POST /agents/{id}/stop` | `OwnerCommandIssued` | Step-up; `release` and the warning digest per DEC-290 item 2; the flat-or-release precondition is the runtime's (DEC-136) |
 | Owner exit | `POST /agents/{id}/exits` | `OwnerCommandIssued` (`owner_exit`) | §5.4. Never refused for step-up (mandate spec §6.1) |
 | Acknowledge | `POST /agents/{id}/acknowledgments` | `OwnerAcknowledged` | Names the event acknowledged; step-up; independence judged by the executor |
