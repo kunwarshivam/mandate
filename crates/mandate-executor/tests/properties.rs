@@ -139,6 +139,57 @@ fn units(text: &str) -> Option<i128> {
     Some(if negative { -value } else { value })
 }
 
+/// A draft's `risk_clock` in whole seconds since the epoch. Journal spec §4.7 and its `risk_clock`
+/// row make it a timestamp, `YYYY-MM-DDTHH:MM:SS[.fraction]Z` on a whole second, and "never
+/// integer seconds", so it is parsed here, with the civil-date arithmetic written out rather than
+/// borrowed from `mandate-time`, so that the two agreeing means something.
+fn risk_seconds(draft: &EventDraft) -> Option<i64> {
+    let text = field(draft, "risk_clock")?;
+    let (date, time) = text.strip_suffix('Z')?.split_once('T')?;
+    let mut ymd = date.splitn(3, '-').map(str::parse::<i64>);
+    let (year, month, day) = (ymd.next()?.ok()?, ymd.next()?.ok()?, ymd.next()?.ok()?);
+    let whole = time.split_once('.').map_or(time, |(whole, _)| whole);
+    let mut hms = whole.splitn(3, ':').map(str::parse::<i64>);
+    let (hour, minute, second) = (hms.next()?.ok()?, hms.next()?.ok()?, hms.next()?.ok()?);
+    let shifted = if month <= 2 { year - 1 } else { year };
+    let era = shifted.div_euclid(400);
+    let year_of_era = shifted - era * 400;
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(days * 86_400 + hour * 3_600 + minute * 60 + second)
+}
+
+/// Each `OrderSubmitted` with the `OrderRequestRecorded` its `causation_id` names merged in: from
+/// schema version 2 the intent id, purpose and agent ride that companion, not the submission
+/// (journal spec §9.5, rule 45; DEC-446). A submission whose companion is missing keeps its own
+/// members only, so an oracle that needs the intent sees none rather than a neighbour's.
+fn submissions_with_requests(drafts: &[EventDraft]) -> Vec<Value> {
+    let requests: BTreeMap<&str, &Value> = drafts
+        .iter()
+        .filter(|d| d.event_type == "OrderRequestRecorded")
+        .map(|d| (d.event_id.0.as_str(), &d.payload))
+        .collect();
+    drafts
+        .iter()
+        .filter(|d| d.event_type == "OrderSubmitted")
+        .map(|d| {
+            let mut merged = d.payload.clone();
+            if let (Value::Object(merged), Some(Value::Object(companion))) = (
+                &mut merged,
+                d.causation_id
+                    .as_ref()
+                    .and_then(|cause| requests.get(cause.0.as_str()).copied()),
+            ) {
+                for (key, value) in companion {
+                    merged.entry(key.clone()).or_insert_with(|| value.clone());
+                }
+            }
+            merged
+        })
+        .collect()
+}
+
 impl ShadowBook {
     fn of(drafts: &[EventDraft]) -> Self {
         let mut book = Self::default();
@@ -373,16 +424,24 @@ struct Interval {
 struct ProtectionAccountant {
     intervals: Vec<Interval>,
     covered: BTreeMap<String, i128>,
+    /// The latest `risk_clock` any draft carried, the end an interval still open is measured to.
+    last_clock: i64,
 }
 
 impl ProtectionAccountant {
     /// Builds the interval set from the drafts alone: a `ProtectionChanged` whose action opens an
     /// interval starts one, and one whose action closes it ends it. An interval that never ends
-    /// is exactly what "journaled from start to end" forbids.
+    /// is exactly what "journaled from start to end" forbids. Each is timed on the drafts'
+    /// `risk_clock` timestamps (journal spec §4.7).
     fn of(drafts: &[EventDraft]) -> Self {
         let mut accountant = Self::default();
         let mut alerted_at: BTreeSet<String> = BTreeSet::new();
         for draft in drafts {
+            let at = risk_seconds(draft);
+            if let Some(at) = at {
+                accountant.last_clock = accountant.last_clock.max(at);
+            }
+            let at = at.unwrap_or(accountant.last_clock);
             if draft.event_type == "OwnerAlertSent"
                 && let Some(name) = field(draft, "instrument")
             {
@@ -395,7 +454,6 @@ impl ProtectionAccountant {
             else {
                 continue;
             };
-            let at = i64::try_from(number(draft, "risk_clock").unwrap_or(0)).unwrap_or(i64::MAX);
             match action {
                 "unprotected_start" => accountant.intervals.push(Interval {
                     instrument: name.to_owned(),
@@ -434,15 +492,6 @@ impl ProtectionAccountant {
             .iter()
             .filter(|i| i.ended_at.is_none())
             .count()
-    }
-
-    /// The longest interval that closed, in whole seconds.
-    fn longest_closed(&self) -> i64 {
-        self.intervals
-            .iter()
-            .filter_map(|i| i.ended_at.map(|end| end.saturating_sub(i.started_at)))
-            .max()
-            .unwrap_or(0)
     }
 }
 
@@ -563,6 +612,66 @@ fn scripted_protected_complete() -> impl Strategy<Value = Vec<Step>> {
         let mut script = PREFIX.to_vec();
         script.extend(PROTECTED_LEAD);
         script.push(Step::Fill);
+        script.extend(random);
+        script
+    })
+}
+
+/// The steps that make the executor doubt a submission and then resubmit it: a fresh plain
+/// opening on `AAPL` whose submission times out, so it is `Unknown`, then three absences the broker
+/// reports over more than the fifteen-second window, each after a wait, so §5.7's
+/// `Unknown → Intent` edge fires and the gate re-runs. Without them a random script reaches a
+/// resubmission too rarely for the properties about one to judge any.
+const DOUBTED_LEAD: [Step; 8] = [
+    Step::Intent {
+        which: 3,
+        exiting: false,
+        other: false,
+        protected: false,
+    },
+    Step::Timeout,
+    Step::Absent,
+    Step::Wait,
+    Step::Absent,
+    Step::Wait,
+    Step::Absent,
+    Step::Wait,
+];
+
+/// Every script with the doubted lead after the prefix, for the properties about a resubmission.
+fn scripted_doubted() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(DOUBTED_LEAD);
+        script.extend(random);
+        script
+    })
+}
+
+/// The steps that age an opening past `max_intent_age_s` (120 seconds) before anything lets it go:
+/// a restart, so the startup reconciliation holds every opening (`startup_reconciliation_pending`),
+/// a fresh plain opening on `AAPL`, four thirty-four-second waits, and the snapshot that ends the
+/// hold. The opening must then be abandoned, never submitted.
+const STALE_LEAD: [Step; 7] = [
+    Step::Restart,
+    Step::Intent {
+        which: 3,
+        exiting: false,
+        other: false,
+        protected: false,
+    },
+    Step::Wait,
+    Step::Wait,
+    Step::Wait,
+    Step::Wait,
+    Step::Snapshot,
+];
+
+/// Every script with the stale lead after the prefix, for the property about an intent's age.
+fn scripted_stale() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(STALE_LEAD);
         script.extend(random);
         script
     })
@@ -1133,27 +1242,36 @@ proptest! {
     }
 
     /// E7-2: the id is a function of the intent id alone, so two attempts for one intent carry
-    /// one id and two intents never share one.
+    /// one id and two intents never share one. The intent rides the submission's
+    /// `OrderRequestRecorded` companion (journal spec §9.5, rule 45), and the doubted lead makes
+    /// every script resubmit one intent at a second attempt, which is where an id that depends on
+    /// the attempt would show.
     #[test]
     #[ignore = "pending E7-2"]
-    fn a_client_order_id_is_a_function_of_the_intent_id_alone(script in scripted()) {
+    fn a_client_order_id_is_a_function_of_the_intent_id_alone(script in scripted_doubted()) {
         let run = play(&script);
         let mut by_intent: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for draft in &run.drafts {
-            if draft.event_type != "OrderSubmitted" {
-                continue;
-            }
-            let (Some(intent), Some(id)) =
-                (field(draft, "intent_id"), field(draft, "client_order_id"))
-            else {
+        let mut attempts: BTreeMap<String, usize> = BTreeMap::new();
+        for submission in submissions_with_requests(&run.drafts) {
+            let (Some(intent), Some(id)) = (
+                submission.get("intent_id").and_then(Value::as_str),
+                submission.get("client_order_id").and_then(Value::as_str),
+            ) else {
                 continue;
             };
             by_intent
                 .entry(intent.to_owned())
                 .or_default()
                 .insert(id.to_owned());
+            let count = attempts.entry(intent.to_owned()).or_insert(0);
+            *count = count.saturating_add(1);
         }
-        prop_assume!(!by_intent.is_empty());
+        prop_assert!(
+            attempts.get(&intent_named(3)).is_some_and(|count| *count >= 2),
+            "the doubted lead's opening, confirmed absent, is submitted a second time (§5.7), so \
+             there is a resubmission for this property to judge: {:?}",
+            attempts
+        );
         for (intent, ids) in &by_intent {
             prop_assert_eq!(
                 ids.len(),
@@ -1269,21 +1387,22 @@ proptest! {
     /// Journal §5.2, §5.7: recovery queries, and never resubmits an order it has doubted without
     /// a confirmed absence. An absence is not a state: it is journaled as `OrderStateChanged` to
     /// `unknown` with `lookup: "absent"`, so the oracle counts those, per order, since the order
-    /// last went `unknown` (DEC-133's ruling on absences).
+    /// last went `unknown` (DEC-133's ruling on absences), and measures their span on the
+    /// `risk_clock` timestamps. The doubted lead puts a resubmission in every script.
     #[test]
     #[ignore = "pending E7-3"]
-    fn no_recovery_submits_without_a_confirmed_absence(script in scripted()) {
+    fn no_recovery_submits_without_a_confirmed_absence(script in scripted_doubted()) {
         let run = play(&script);
-        let mut absences: BTreeMap<String, (u32, Option<u64>)> = BTreeMap::new();
+        let mut absences: BTreeMap<String, (u32, Option<i64>)> = BTreeMap::new();
         let mut doubted: BTreeSet<String> = BTreeSet::new();
         let mut resubmissions = 0usize;
-        let window = u64::try_from(config().unknown_absent_window_s).unwrap_or(u64::MAX);
+        let window = config().unknown_absent_window_s;
         let needed = config().unknown_absent_lookups;
         for draft in &run.drafts {
             let Some(id) = field(draft, "client_order_id") else {
                 continue;
             };
-            let at = number(draft, "risk_clock");
+            let at = risk_seconds(draft);
             match draft.event_type.as_str() {
                 "OrderStateChanged" if field(draft, "state") == Some("unknown") => {
                     if field(draft, "lookup") == Some("absent") {
@@ -1321,6 +1440,11 @@ proptest! {
                 _ => {}
             }
         }
+        prop_assert!(
+            resubmissions > 0,
+            "the doubted lead's opening is resubmitted after its confirmed absence, so there is a \
+             resubmission for this property to judge"
+        );
         prop_assert!(
             resubmissions <= ShadowBook::of(&run.drafts).submissions.len(),
             "the count cannot exceed the submissions the journal carries"
@@ -1689,7 +1813,10 @@ proptest! {
         );
     }
 
-    /// §5.4, E7-4: no interval exceeds `max_unprotected_s` without an alert.
+    /// §5.4, E7-4: no interval exceeds `max_unprotected_s` without an alert. An interval is
+    /// measured on the drafts' `risk_clock` timestamps, to its end or, still open, to the run's
+    /// last clock, and an alert counts for it when the draft the notification names is in the
+    /// interval's instrument and inside the interval.
     #[test]
     #[ignore = "pending E7-4"]
     fn no_interval_exceeds_the_limit_without_an_alert(script in scripted_protected()) {
@@ -1699,17 +1826,39 @@ proptest! {
             !accountant.intervals.is_empty(),
             "the protected lead's partly filled bracket journals an unprotected interval (§5.4)"
         );
-        let alerts = run
+        let subjects: BTreeMap<&str, (&str, i64)> = run
+            .drafts
+            .iter()
+            .filter_map(|d| {
+                let name = field(d, "instrument").or(field(d, "instrument_id"))?;
+                Some((d.event_id.0.as_str(), (name, risk_seconds(d)?)))
+            })
+            .collect();
+        let alerts: Vec<(&str, i64)> = run
             .effects
             .iter()
-            .filter(|e| matches!(e, Effect::Notify(_)))
-            .count();
-        let longest = accountant.longest_closed();
-        if longest > config().max_unprotected_s {
+            .filter_map(|e| match e {
+                Effect::Notify(note) => subjects.get(note.subject_event.0.as_str()).copied(),
+                _ => None,
+            })
+            .collect();
+        let bound = config().max_unprotected_s;
+        for interval in &accountant.intervals {
+            let end = interval.ended_at.unwrap_or(accountant.last_clock);
+            let lasted = end.saturating_sub(interval.started_at);
+            if lasted <= bound {
+                continue;
+            }
             prop_assert!(
-                alerts > 0,
-                "an interval of {}s exceeded the 60s bound with no alert (planted bug 14)",
-                longest
+                alerts.iter().any(|(name, at)| *name == interval.instrument
+                    && *at >= interval.started_at
+                    && *at <= end),
+                "an interval in {} of {}s from {} exceeded the {}s bound with no alert (planted \
+                 bug 14)",
+                interval.instrument,
+                lasted,
+                interval.started_at,
+                bound
             );
         }
     }
@@ -2356,7 +2505,9 @@ proptest! {
         }
     }
 
-    /// Journal §2: every risk input this crate appends carries a non-decreasing `risk_clock`.
+    /// Journal §2: every risk input this crate appends carries a non-decreasing `risk_clock`, a
+    /// §4.7 timestamp on a whole second ("never integer seconds"), read as one. A script whose run
+    /// appends no risk input (no fill, so no `FillApplied` or `FeesCharged`) has none to judge.
     #[test]
     #[ignore = "pending E7-2"]
     fn every_risk_input_draft_carries_a_non_decreasing_risk_clock(script in scripted()) {
@@ -2374,15 +2525,19 @@ proptest! {
             "OwnerAcknowledged",
             "UniverseChanged",
         ];
-        let mut last: u64 = 0;
+        let mut last = i64::MIN;
         let mut checked = 0usize;
+        prop_assume!(run.drafts.iter().any(|d| risk_inputs.contains(&d.event_type.as_str())));
         for draft in &run.drafts {
             if !risk_inputs.contains(&draft.event_type.as_str()) {
                 continue;
             }
             checked = checked.saturating_add(1);
-            let at = number(draft, "risk_clock").ok_or_else(|| {
-                TestCaseError::fail(format!("{} carries no risk_clock", draft.event_type))
+            let at = risk_seconds(draft).ok_or_else(|| {
+                TestCaseError::fail(format!(
+                    "{} carries no risk_clock timestamp (journal spec §4.7)",
+                    draft.event_type
+                ))
             })?;
             prop_assert!(
                 at >= last,
@@ -2393,7 +2548,7 @@ proptest! {
             );
             last = at;
         }
-        prop_assert!(checked <= run.drafts.len());
+        prop_assert!(checked > 0, "the run appended a risk input for this property to judge");
     }
 
     /// Journal §2: every copied fact cites its origin.
@@ -2644,43 +2799,63 @@ proptest! {
         }
     }
 
-    /// ES-21, journal §8: no submission carries an intent older than its maximum age.
+    /// ES-21, journal §8, §5.7: no submission carries an opening older than its maximum age,
+    /// measured from the intent's first `IntentReceived` on the `risk_clock` timestamps. Only an
+    /// opening ages out: an exit is never too old, it is held and priced at its release (rule 13,
+    /// DEC-160 (12), the coordinator's ruling D2). The intent and purpose ride the submission's
+    /// `OrderRequestRecorded` companion (journal spec §9.5, rule 45). The stale lead hands over an
+    /// opening the startup reconciliation holds until it is past the age, which is where an age
+    /// check made only on a resubmission would let it go (planted bug 19).
     #[test]
     #[ignore = "pending E7-2"]
-    fn no_submission_carries_an_intent_older_than_its_maximum_age(script in scripted()) {
+    fn no_submission_carries_an_intent_older_than_its_maximum_age(script in scripted_stale()) {
         let run = play(&script);
-        let mut received: BTreeMap<String, u64> = BTreeMap::new();
-        let mut submissions = 0usize;
-        let max = u64::try_from(config().max_intent_age_s).unwrap_or(u64::MAX);
-        for draft in &run.drafts {
-            match draft.event_type.as_str() {
-                "IntentReceived" => {
-                    if let (Some(intent), Some(at)) =
-                        (field(draft, "intent_id"), number(draft, "risk_clock"))
-                    {
-                        received.insert(intent.to_owned(), at);
-                    }
-                }
-                "OrderSubmitted" => {
-                    submissions = submissions.saturating_add(1);
-                    let (Some(intent), Some(at)) =
-                        (field(draft, "intent_id"), number(draft, "risk_clock"))
-                    else {
-                        continue;
-                    };
-                    if let Some(born) = received.get(intent) {
-                        prop_assert!(
-                            at.saturating_sub(*born) <= max,
-                            "{} was submitted {}s after it was received (planted bug 19)",
-                            intent,
-                            at.saturating_sub(*born)
-                        );
-                    }
-                }
-                _ => {}
+        let mut received: BTreeMap<String, i64> = BTreeMap::new();
+        for draft in run.drafts.iter().filter(|d| d.event_type == "IntentReceived") {
+            if let (Some(intent), Some(at)) = (field(draft, "intent_id"), risk_seconds(draft)) {
+                received.entry(intent.to_owned()).or_insert(at);
             }
         }
-        prop_assert_eq!(submissions, ShadowBook::of(&run.drafts).submissions.len());
+        prop_assert!(
+            received.contains_key(&intent_named(3)),
+            "the stale lead's opening is received, so there is an aged intent to judge"
+        );
+        let clocks: BTreeMap<&str, i64> = run
+            .drafts
+            .iter()
+            .filter(|d| d.event_type == "OrderSubmitted")
+            .filter_map(|d| Some((d.event_id.0.as_str(), risk_seconds(d)?)))
+            .collect();
+        let max = config().max_intent_age_s;
+        let mut openings = 0usize;
+        let submitted = run.drafts.iter().filter(|d| d.event_type == "OrderSubmitted");
+        for (draft, merged) in submitted.zip(submissions_with_requests(&run.drafts)) {
+            let text = |name: &str| merged.get(name).and_then(Value::as_str);
+            if !matches!(text("purpose"), Some("open" | "increase")) {
+                continue;
+            }
+            openings = openings.saturating_add(1);
+            let Some(intent) = text("intent_id") else {
+                return Err(TestCaseError::fail(format!(
+                    "{:?} is an opening with no intent on its companion",
+                    text("client_order_id")
+                )));
+            };
+            let (Some(born), Some(at)) =
+                (received.get(intent), clocks.get(draft.event_id.0.as_str()))
+            else {
+                return Err(TestCaseError::fail(format!(
+                    "{intent} was submitted with no IntentReceived or no risk_clock before it"
+                )));
+            };
+            prop_assert!(
+                at.saturating_sub(*born) <= max,
+                "{} was submitted {}s after it was received (planted bug 19)",
+                intent,
+                at.saturating_sub(*born)
+            );
+        }
+        prop_assert!(openings > 0, "the prefix's opening is submitted, so one is judged");
     }
 }
 
