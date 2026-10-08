@@ -19,18 +19,25 @@ export interface SourceEnv {
   NEXT_PUBLIC_WORKSPACE_API_URL?: string;
 }
 
-/**
- * The workspaces the signed-in principal is an active member of, or `null` while no route serves
- * them. The identity service owns the answer (lane L1); the web app never takes a workspace id from
- * its build or its URL alone.
- */
-export type WorkspaceResolver = () => Promise<{ workspace_ids: string[] } | null>;
+/** One active membership, as `GET /v1/me/workspaces` lists it (identity spec, pending: lane L1). */
+export interface Membership {
+  workspace_id: string;
+  label: string;
+  role: string;
+}
 
-/** Which workspace this session reads. `choose`: several memberships and none chosen yet (G1's switcher). */
+/**
+ * The signed-in principal's active memberships, from `GET /v1/me/workspaces`, or `null` while no
+ * route serves them. The identity service owns the answer (lane L1); the web app never takes a
+ * workspace id from its build or its URL alone.
+ */
+export type WorkspaceResolver = () => Promise<Membership[] | null>;
+
+/** Which workspace this session reads. `choose`: several memberships and none chosen yet (G1's switcher, by label). */
 export type WorkspaceResolution =
   | { kind: "fixtures" }
-  | { kind: "workspace"; baseUrl: string; workspaceId: string }
-  | { kind: "choose"; baseUrl: string; workspaceIds: string[] }
+  | { kind: "workspace"; baseUrl: string; workspaceId: string; label: string }
+  | { kind: "choose"; baseUrl: string; workspaces: Array<{ workspace_id: string; label: string }> }
   | { kind: "unconfigured"; reason: string };
 
 /** Common `Freshness` (spec §6.1, API-14): the server's judgment of one value's age, measured to `served_at`. */

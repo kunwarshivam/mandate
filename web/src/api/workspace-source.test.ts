@@ -63,13 +63,13 @@ describe("the data source, chosen at build time (DEC-736)", () => {
 
 describe("which workspace is read: the principal's memberships at run time (identity spec §3.2, §9.2)", () => {
   const api = { kind: "api", baseUrl: "https://ws.example" } as const;
-  const members = (...ids: string[]): WorkspaceResolver => async () => ({ workspace_ids: ids });
+  const members = (...ids: string[]): WorkspaceResolver => async () => ids.map((id, i) => ({ workspace_id: id, label: `Workspace ${i + 1}`, role: "operator" }));
 
   it.skip("pending E11-9: fixtures need no workspace, and the resolver is never asked", async () => {
     let asked = 0;
     const resolver: WorkspaceResolver = async () => {
       asked += 1;
-      return { workspace_ids: ["ws_1"] };
+      return [{ workspace_id: "ws_1", label: "Workspace 1", role: "operator" }];
     };
     expect(await resolveWorkspace({ kind: "fixtures" }, resolver, null)).toEqual({ kind: "fixtures" });
     expect((await resolveWorkspace({ kind: "unconfigured", reason: "no API configured" }, resolver, null)).kind).toBe("unconfigured");
@@ -77,7 +77,7 @@ describe("which workspace is read: the principal's memberships at run time (iden
   });
 
   it.skip("pending E11-9: one membership is the workspace read", async () => {
-    expect(await resolveWorkspace(api, members("ws_1"), null)).toEqual({ kind: "workspace", baseUrl: "https://ws.example", workspaceId: "ws_1" });
+    expect(await resolveWorkspace(api, members("ws_1"), null)).toEqual({ kind: "workspace", baseUrl: "https://ws.example", workspaceId: "ws_1", label: "Workspace 1" });
   });
 
   it.skip("pending E11-9: until the identity service serves memberships, the API source is unconfigured", async () => {
@@ -93,12 +93,23 @@ describe("which workspace is read: the principal's memberships at run time (iden
   });
 
   it.skip("pending E11-9: a chosen workspace is read only when the principal is a member of it", async () => {
-    expect(await resolveWorkspace(api, members("ws_1", "ws_2"), "ws_2")).toEqual({ kind: "workspace", baseUrl: "https://ws.example", workspaceId: "ws_2" });
+    expect(await resolveWorkspace(api, members("ws_1", "ws_2"), "ws_2")).toEqual({ kind: "workspace", baseUrl: "https://ws.example", workspaceId: "ws_2", label: "Workspace 2" });
     expect((await resolveWorkspace(api, members("ws_1"), "ws_other")).kind).toBe("unconfigured");
   });
 
-  it.skip("pending E11-9: several memberships and none chosen asks the owner to choose", async () => {
-    expect(await resolveWorkspace(api, members("ws_1", "ws_2"), null)).toEqual({ kind: "choose", baseUrl: "https://ws.example", workspaceIds: ["ws_1", "ws_2"] });
+  it.skip("pending E11-9: several memberships and none chosen asks the owner to choose, by label", async () => {
+    expect(await resolveWorkspace(api, members("ws_1", "ws_2"), null)).toEqual({
+      kind: "choose",
+      baseUrl: "https://ws.example",
+      workspaces: [
+        { workspace_id: "ws_1", label: "Workspace 1" },
+        { workspace_id: "ws_2", label: "Workspace 2" },
+      ],
+    });
+  });
+
+  it.skip("pending E11-9: the same workspace listed twice is unconfigured, not a choice", async () => {
+    expect((await resolveWorkspace(api, members("ws_1", "ws_1"), null)).kind).toBe("unconfigured");
   });
 
   it.skip("pending E11-9: no membership, or an id that is not a path segment, is unconfigured", async () => {
