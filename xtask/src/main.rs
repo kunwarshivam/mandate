@@ -1504,8 +1504,11 @@ fn command_live_flag(command: &str, runner: Option<&str>, cargo_config: bool) ->
         return LiveFlag::Absent;
     }
     let mut lists = Vec::new();
-    let mut index = 0;
-    while let Some(word) = words.get(index) {
+    let mut resume = 0;
+    for (index, word) in words.iter().enumerate() {
+        if index < resume {
+            continue;
+        }
         let start = if let Some(list) = word.strip_prefix("--features=") {
             Some((list, index))
         } else if let Some(list) = word.strip_prefix("-F").filter(|list| !list.is_empty()) {
@@ -1517,27 +1520,12 @@ fn command_live_flag(command: &str, runner: Option<&str>, cargo_config: bool) ->
         } else {
             None
         };
-        index = index.saturating_add(1);
         let Some((first, at)) = start else {
             continue;
         };
-        let mut list = first.to_owned();
-        let mut end = at;
-        if let Some(quote) = first
-            .chars()
-            .next()
-            .filter(|c| matches!(c, '"' | '\'' | '`'))
-        {
-            while !(list.len() > 1 && list.ends_with(quote)) {
-                end = end.saturating_add(1);
-                let Some(next) = words.get(end) else {
-                    break;
-                };
-                list.push(' ');
-                list.push_str(next);
-            }
-        }
-        index = index.max(end.saturating_add(1));
+        let rest = words.get(at.saturating_add(1)..).unwrap_or_default();
+        let (list, used) = feature_list(first, rest);
+        resume = at.saturating_add(1).saturating_add(used);
         lists.push(list);
     }
     if lists.iter().any(|list| list.contains(['$', '`'])) {
@@ -1567,6 +1555,30 @@ fn command_live_flag(command: &str, runner: Option<&str>, cargo_config: bool) ->
         }
         _ => LiveFlag::Build,
     }
+}
+
+/// A feature list that starts with `first`: a quoted list (`"`, `'` or a backtick) runs to the word
+/// that closes its quote, so it may span words. Returns the list and how many of `rest` it took.
+fn feature_list(first: &str, rest: &[&str]) -> (String, usize) {
+    let Some(quote) = first
+        .chars()
+        .next()
+        .filter(|c| matches!(c, '"' | '\'' | '`'))
+    else {
+        return (first.to_owned(), 0);
+    };
+    if first.len() > 1 && first.ends_with(quote) {
+        return (first.to_owned(), 0);
+    }
+    let mut list = first.to_owned();
+    for (index, next) in rest.iter().enumerate() {
+        list.push(' ');
+        list.push_str(next);
+        if next.ends_with(quote) {
+            return (list, index.saturating_add(1));
+        }
+    }
+    (list, rest.len())
 }
 
 /// Code spans that look like repository paths: no spaces or globs, starting at a known root.
