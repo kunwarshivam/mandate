@@ -724,6 +724,88 @@ fn scripted_doubted() -> impl Strategy<Value = Vec<Step>> {
     })
 }
 
+/// Defect E5b's shape (#668 round 2; backlog E5b), after the prefix: a completed CPHC bracket, a
+/// risk exit whose protection's cancel is confirmed so it is submitted, the protection's cancel
+/// delivered again, and a second risk exit. The ladder steps the first exit before the broker has
+/// acknowledged it, and the second goes beside that cancel. The pinned seed's random steps never
+/// reach it, so it leads every script of the property it pins, which fails on it until E5b's fix.
+const STEP_BESIDE_LEAD: [Step; 9] = [
+    Step::Fill,
+    Step::Intent {
+        which: 1,
+        exiting: false,
+        other: true,
+        protected: true,
+    },
+    Step::Acknowledge,
+    Step::Fill,
+    Step::Fill,
+    Step::Intent {
+        which: 3,
+        exiting: true,
+        other: true,
+        protected: false,
+    },
+    Step::Cancelled,
+    Step::Cancelled,
+    Step::Intent {
+        which: 2,
+        exiting: true,
+        other: true,
+        protected: false,
+    },
+];
+
+fn scripted_beside_a_step() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(STEP_BESIDE_LEAD);
+        script.extend(random);
+        script
+    })
+}
+
+/// Defect E4b's shape (#668 round 2; backlog E4b), after the protected lead: a second CPHC
+/// bracket, a risk exit, a fill, a cancel confirmed and the waits that leave an OCO's
+/// acknowledgment awaited while a later interval starts, which ends the first open interval rather
+/// than the awaited one. It leads every script of the property it pins, which fails on it until
+/// E4b's fix.
+const AWAITED_LEAD: [Step; 8] = [
+    Step::Intent {
+        which: 3,
+        exiting: false,
+        other: true,
+        protected: true,
+    },
+    Step::Intent {
+        which: 2,
+        exiting: true,
+        other: true,
+        protected: false,
+    },
+    Step::Fill,
+    Step::Intent {
+        which: 0,
+        exiting: false,
+        other: false,
+        protected: false,
+    },
+    Step::Cancelled,
+    Step::Wait,
+    Step::Timeout,
+    Step::Acknowledge,
+];
+
+fn scripted_awaited() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(PROTECTED_LEAD);
+        script.extend(AWAITED_LEAD);
+        script.extend(random);
+        script
+    })
+}
+
 /// The steps that age an opening past `max_intent_age_s` (120 seconds) before anything lets it go:
 /// a restart, so the startup reconciliation holds every opening (`startup_reconciliation_pending`),
 /// a fresh plain opening on `AAPL`, four thirty-four-second waits, and the snapshot that ends the
@@ -1904,7 +1986,8 @@ proptest! {
     /// last clock, and an alert counts for it when the draft the notification names is in the
     /// interval's instrument and inside the interval.
     #[test]
-    fn no_interval_exceeds_the_limit_without_an_alert(script in scripted_protected()) {
+    #[ignore = "pending E7-4"]
+    fn no_interval_exceeds_the_limit_without_an_alert(script in scripted_awaited()) {
         let run = play(&script);
         let accountant = ProtectionAccountant::of(&run.drafts);
         prop_assert!(
@@ -1969,7 +2052,10 @@ proptest! {
     /// what §5.4's sequences order after a confirmation; an opening may be accepted while an exit
     /// waits, and the exit then asks its cancel too (DEC-160 (13)), so a buy is not judged here.
     #[test]
-    fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {
+    #[ignore = "pending E7-4"]
+    fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(
+        script in scripted_beside_a_step(),
+    ) {
         let run = play(&script);
         if let (Some(batch), Some(true)) = (run.kill_batches.first(), run.kill_working.first()) {
             prop_assert!(

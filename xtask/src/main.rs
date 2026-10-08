@@ -2304,7 +2304,18 @@ const STUB_MARKERS: [&str; 5] = [
 ///   first, so its mode and record would never be journaled (`AGENTS.md` rule 13: the kill switch
 ///   is always available), or the step confirming the protection's cancel, leaving the position
 ///   unprotected and unsold. The session slice deletes this row with the extended-hours path.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
+///
+/// Two more `properties` rows went back to pending in #668's round 2, failing on executor defects
+/// at random seeds the pinned one missed; each property's scripts now lead with its defect's shape
+/// (`STEP_BESIDE_LEAD`, `AWAITED_LEAD`), so it fails at every seed until the fix lands:
+/// - `no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` (defect E5b): the exit
+///   ladder steps a rung the broker has not yet acknowledged, asking its cancel, and another exit
+///   goes beside that cancel (backlog: "E7-4 (stream K), E5b from #668's round-2 review").
+/// - `no_interval_exceeds_the_limit_without_an_alert` (defect E4b): while a bracket's OCO awaits
+///   its acknowledgment, a new interval's start ends the first open interval rather than the
+///   awaited one, so the bound alerts late (E4b, from #698's review; its backlog row comes with
+///   E4b's tests PR).
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2329,6 +2340,14 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "an_owner_exit_outside_the_session_prices_from_the_confirmed_bid",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_interval_exceeds_the_limit_without_an_alert",
     ),
 ];
 

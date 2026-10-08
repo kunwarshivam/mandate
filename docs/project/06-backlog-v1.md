@@ -3037,6 +3037,23 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   1 + 1 + 2 against a position of 3, so a short of 1 is possible; a whole-position exit gets there
   with no OCO. This is arithmetic: the harness cannot fill 01 behind the newer orders. Trading spec
   §5.4 (Σ protective sells ≤ position) and `AGENTS.md` rule 12.
+- **E7-4 (stream K), E5b from #668's round-2 review: the exit ladder steps a rung the broker has
+  not acknowledged, and another exit goes beside that cancel.** Script, the same on `main`
+  (`properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding`, seed 209):
+  `Intent 0 (AAPL open), Acknowledge, Fill, Intent 1 (CPHC protected open), Acknowledge, Fill, Fill,
+  Intent 3 (CPHC risk exit), Cancelled, Cancelled, Intent 2 (CPHC risk exit)`. At 46 the OCO's
+  cancel is confirmed and exit 03 is submitted; the second `Cancelled` re-delivers the OCO's
+  `canceled` (journaled `ignored`); at 54, 03 still `submitting`, its ladder step asks
+  `Cancel{03}` (`ladder_step`, `attempted: pending_cancel`, `ignored`), a cancel of an order the
+  broker has not acknowledged, and exit 02 is submitted in the same step while that cancel is
+  outstanding. CI's shard-81 script on #668 (`Intent 0, Acknowledge, Fill, Intent 1 (CPHC
+  protected), Acknowledge, Fill, Fill, Intent 2 (CPHC exit), Cancelled, Intent 0, Intent 3 (CPHC
+  exit)`) is the same shape. No short follows from it alone: the gate sizes 02 on the position less
+  every live sell, 03 included (`available`). Trading spec §5.6 (a rung steps by cancel, confirm,
+  resubmit) and §5.7 (an order the broker has not acknowledged is queried, never cancelled blind);
+  `AGENTS.md` rule 13. Decide whether the ladder may step an unacknowledged rung, and whether another
+  exit may go beside a rung's step cancel, then fix tests-first; until then the property is pending
+  under a `BEHAVIOUR_ONLY_TESTS` row. To be fixed before any real-money run.
 - **E7-4 (stream K), from E7-4 slice 7's tests correction: an unconfirmed owner exit pre-market
   cancels protection for a sell that cannot fill before 09:30 (open question for the
   coordinator).** At 2026-09-22 08:00 ET an owner kill switch without confirmation cancels the
