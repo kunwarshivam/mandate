@@ -1249,7 +1249,8 @@ proves each pending test fails on them (DEC-110).
   refusals of cancel, fill and a sell that working sells already hold), and
   `crates/mandate-rh-sim/tests/properties.rs` (over random scripts: a `ref_id` never yields a
   second order; a terminal order never changes and is refused; a fill never exceeds the quantity;
-  every state change is a legal transition; each against the test's own oracle), with fixtures in
+  every state change is a legal transition, and every legal one is accepted; each against the
+  test's own oracle), with fixtures in
   `tests/common/mod.rs`. Pending E7-25.
 - **Run:** `cargo nextest run -p mandate-rh-sim`.
 

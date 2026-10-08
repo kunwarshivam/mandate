@@ -212,9 +212,6 @@ fn run(ops: &[Op]) -> Result<Trace, SimError> {
             Op::Session(session) => sim.apply(Event::Session(*session)),
             Op::EndOfDay => sim.apply(Event::EndOfDay),
         };
-        if let Err(SimError::Unimplemented { story }) = result {
-            return Err(SimError::Unimplemented { story });
-        }
         let after = sim.orders(AGENTIC)?;
         trace.steps.push(Step {
             op: op.clone(),
@@ -285,6 +282,12 @@ proptest! {
                         "{:?} -> {:?} after {:?}", old.state, new.state, step.op),
                     None => prop_assert!(matches!(new.state,
                         State::New | State::Queued | State::Confirmed | State::Unconfirmed | State::Rejected | State::Failed)),
+                }
+            }
+            if let (Op::Advance { to, .. }, Some(old)) = (&step.op, step.target_before()) {
+                let by_fill = matches!(to, State::PartiallyFilled | State::Filled);
+                if legal(old.state, *to) && !by_fill {
+                    prop_assert_eq!(&step.result, &Ok(()), "{:?} -> {:?} is legal", old.state, to);
                 }
             }
             if let (Op::Cancel { .. }, Ok(())) = (&step.op, &step.result) {
