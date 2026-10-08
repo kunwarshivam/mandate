@@ -1082,6 +1082,8 @@ def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list
         rule("76.accessor", not isinstance(accessor, str) or accessor == draft["actor"]["id"], "payload.accessor")
         refused = tuple(k for k in ("agent", "broker") if f"kinds.76.{k}" not in skip)
         rule("76.actor", kind not in refused, "actor.kind")
+        approved = kind != "platform_operator" or draft["causation_id"] is not None
+        rule("76.break_glass", approved, "causation_id")
         resources = p["resources"] if isinstance(p["resources"], list) else []
         named = [r.encode() for r in resources if isinstance(r, str)]
         rule("76.resources", all(a < b for a, b in zip(named, named[1:])), "payload.resources")

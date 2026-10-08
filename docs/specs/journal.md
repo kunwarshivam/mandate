@@ -1893,8 +1893,10 @@ A verification a principal requested for an export names that export's `ExportCr
     so ranges are ordered and never overlap.
 76. `RecordsAccessed`: `accessor` equals the envelope's `actor.id` (`payload.accessor`);
     `actor.kind` is neither `agent` nor `broker` (`actor.kind`), so a `client` actor, in §3's one
-    shape (rules 66 to 68), records its own reads with its own `id` as `accessor`; and each of
-    `resources` sorts after the one before it by bytes (`payload.resources`). Rule 68 already keeps
+    shape (rules 66 to 68), records its own reads with its own `id` as `accessor`; a
+    `platform_operator`'s read has a non-null `causation_id`, the `PlatformOperatorAction` that
+    opened its customer-approved break-glass window (§7) (`causation_id`); and each of `resources`
+    sorts after the one before it by bytes (`payload.resources`). Rule 68 already keeps
     a client to `RecordsAccessed`, so rules 77 and 78 refuse it again only as a second statement of
     workspace API §3.8 (a client never exports or verifies).
 77. `ExportCreated`: `actor.kind` is `user` or `system` (`actor.kind`), and `view` is non-null

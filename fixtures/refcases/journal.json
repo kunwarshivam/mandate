@@ -24207,6 +24207,35 @@
     }
    },
    {
+    "name": "operator_read_without_its_break_glass",
+    "clause": "rule 76: platform staff read only under an approved break-glass action (§7)",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "operator_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.accessor",
+      "value": "operator_01"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
     "name": "export_by_a_broker",
     "clause": "rule 77: a user or a service account exports",
     "base_draft": "export_canonical",
@@ -24803,6 +24832,10 @@
      {
       "path": "payload.accessor",
       "value": "operator_01"
+     },
+     {
+      "path": "causation_id",
+      "value": "01J8Z3R9A000000000000000B1"
      },
      {
       "path": "artifact_refs",
