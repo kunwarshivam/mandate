@@ -38,6 +38,13 @@ pub(crate) enum Ty {
     OpenObject,
     /// A member that is always `null` at its record's version (journal spec §9.7).
     Null,
+    /// Exactly 32 lowercase hexadecimal digits: a random notice id, never an event id (DEC-720).
+    NoticeId,
+    /// A stream id in spec §2's grammar (DEC-720).
+    StreamId,
+    /// 1 to 256 characters from U+0021 to U+007E: a provider's message id, which holds no space
+    /// and so no sentence (DEC-720).
+    Opaque,
 }
 
 pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Invalid> {
@@ -86,6 +93,9 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
             normalize_record(fields, value.as_object().ok_or_else(schema)?, path).map(Value::Object)
         }
         Ty::OpenObject => value.as_object().map(|_| value.clone()).ok_or_else(schema),
+        Ty::NoticeId => checked(is_notice_id(text()?)),
+        Ty::StreamId => checked(crate::StreamId::parse(text()?).is_some()),
+        Ty::Opaque => checked(is_opaque(text()?)),
         Ty::Null => match value {
             Value::Null => Ok(Value::Null),
             _ => Err(schema()),
@@ -146,6 +156,16 @@ fn is_asset_id(s: &str) -> bool {
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         })
     }) && groups.next().is_none()
+}
+
+fn is_notice_id(s: &str) -> bool {
+    s.len() == 32
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn is_opaque(s: &str) -> bool {
+    (1..=256).contains(&s.len()) && s.bytes().all(|b| (0x21..=0x7e).contains(&b))
 }
 
 pub(crate) fn is_ident(s: &str) -> bool {

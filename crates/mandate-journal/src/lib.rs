@@ -26,16 +26,19 @@ mod catalogue;
 mod control;
 mod draft;
 mod merkle;
+mod notice;
 mod schema;
 mod verify;
 
 pub use agent::{AgentStreamCheck, AgentStreamFailure, verify_agent_stream};
 
-/// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, then §9.5's rule 45
-/// on the account stream (DEC-446 item 3). Each draft has already passed `Draft::parse`.
+/// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, §9.5's rule 45 on the
+/// account stream (DEC-446 item 3), then DEC-720's rule N12 on every stream that holds alerts
+/// (DEC-720). Each draft has already passed `Draft::parse`.
 pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     agent::check_batch(drafts)?;
-    control::check_batch(drafts)
+    control::check_batch(drafts)?;
+    notice::check_batch(drafts)
 }
 pub use artifact::{
     ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, check_artifact, get_artifact,
@@ -80,13 +83,12 @@ pub enum StreamType {
     Control,
     Scheduler,
     /// `ntf:{workspace_id}`, whose single writer is the workspace's notification dispatcher
-    /// (journal spec v0.12 §2, DEC-720). [`StreamId::parse`] reads it once E8-9's
-    /// slice S2 is implemented.
+    /// (journal spec v0.12 §2, DEC-720).
     Notice,
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
-/// or `clock:{workspace_id}`, each segment `[A-Za-z0-9_-]+` (journal spec §2).
+/// `clock:{workspace_id}`, or `ntf:{workspace_id}`, each segment `[A-Za-z0-9_-]+` (journal spec §2).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StreamId {
     text: String,
@@ -101,6 +103,7 @@ impl StreamId {
             ["agent", _, _] => StreamType::Agent,
             ["ctl", _] => StreamType::Control,
             ["clock", _] => StreamType::Scheduler,
+            ["ntf", _] => StreamType::Notice,
             _ => return None,
         };
         parts

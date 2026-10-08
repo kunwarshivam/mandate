@@ -7,7 +7,9 @@ use mandate_canon::{Object, Value, parse, to_canonical};
 use mandate_time::UtcNanos;
 
 use crate::schema::{Ty, normalize, normalize_record, parse_digest_ref, payload_schema};
-use crate::{Environment, Invalid, InvalidReason, StreamId, StreamType, agent, catalogue, control};
+use crate::{
+    Environment, Invalid, InvalidReason, StreamId, StreamType, agent, catalogue, control, notice,
+};
 
 static ENVELOPE: &[(&str, Ty)] = &[
     ("envelope_version", Ty::Int),
@@ -101,7 +103,10 @@ impl Draft {
         let causation_id = fields.get("causation_id");
         let closed = agent::governs(&stream_id, event_type);
         let controlled = control::governs(&stream_id, event_type);
-        let payload = if closed {
+        let noticed = notice::governs(&stream_id, event_type);
+        let payload = if noticed {
+            notice::payload(event_type, int("schema_version"), written, causation_id)?
+        } else if closed {
             agent::payload(event_type, int("schema_version"), written, causation_id)?
         } else if controlled {
             control::payload(
@@ -132,7 +137,9 @@ impl Draft {
             return Err(Invalid::new(InvalidReason::PiiRefs, "pii_refs"));
         }
 
-        if closed {
+        if noticed {
+            notice::subject(event_type, &stream_id, &payload)?;
+        } else if closed {
             agent::subject_and_copy(event_type, &stream_id, &payload, causation_id)?;
         } else if controlled {
             control::subject_and_copy(event_type, &stream_id, &payload, causation_id)?;
