@@ -12,12 +12,11 @@
 
 use crate::ConnectError;
 
-/// Alpaca's live trading host. Reachable only through [`LiveTokenRequest`].
-pub const LIVE_HOST: &str = "api.alpaca.markets";
 /// Alpaca's paper trading host.
 pub const PAPER_HOST: &str = "paper-api.alpaca.markets";
-/// The one live-host URL, `POST` only.
-pub const LIVE_TOKEN_URL: &str = "https://api.alpaca.markets/oauth/token";
+/// The one live-host URL, `POST` only. Crate-private, so no adapter can build a live URL of its
+/// own; an adapter gets it from [`LiveTokenRequest::url`].
+pub(crate) const LIVE_TOKEN_URL: &str = "https://api.alpaca.markets/oauth/token";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
@@ -27,8 +26,7 @@ pub enum Method {
     Delete,
 }
 
-/// `POST https://api.alpaca.markets/oauth/token`, and nothing else. Its method and URL are
-/// [`Method::Post`] and [`LIVE_TOKEN_URL`].
+/// `POST https://api.alpaca.markets/oauth/token`, and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LiveTokenRequest {
     only_the_token_endpoint: (),
@@ -47,6 +45,16 @@ impl LiveTokenRequest {
             only_the_token_endpoint: (),
         }
     }
+
+    /// Always [`Method::Post`].
+    pub fn method(self) -> Method {
+        Method::Post
+    }
+
+    /// Always `https://api.alpaca.markets/oauth/token`.
+    pub fn url(self) -> &'static str {
+        LIVE_TOKEN_URL
+    }
 }
 
 /// A trading or account request, always to [`PAPER_HOST`].
@@ -57,8 +65,10 @@ pub struct PaperRequest {
 }
 
 impl PaperRequest {
-    /// A request for `path` on the paper host. `path` is an absolute path (`/v2/...`) with no
-    /// scheme, authority, or `..` segment, so it cannot name another host.
+    /// A request for `path` on the paper host. `path` must start with `/v2/` and contain only
+    /// path characters: no scheme, authority, `//`, `.` or `..` segment, percent escape, query,
+    /// fragment, backslash, or whitespace. So it cannot name another host or another endpoint
+    /// than the one it spells.
     pub fn new(method: Method, path: &str) -> Result<Self, ConnectError> {
         let _ = (method, path);
         Err(ConnectError::Unimplemented { story: "E10-13" })
@@ -78,9 +88,13 @@ pub enum Outbound {
     Paper(PaperRequest),
 }
 
-/// Admits a raw request or refuses it before it leaves the process. To the live host only
-/// `POST /oauth/token` is admitted (exact path, no query, default port); to the paper host any
-/// `/v2/` path; to any other host, or over anything but `https`, nothing.
+/// Admits a raw request or refuses it before it leaves the process. The match is exact, never
+/// normalized: no trimming, case folding, percent decoding, or dot-segment removal.
+///
+/// - To the live host, only `POST https://api.alpaca.markets/oauth/token`, byte for byte.
+/// - To the paper host, `https://paper-api.alpaca.markets` followed by a path
+///   [`PaperRequest::new`] accepts, with the method kept.
+/// - To any other host, or over anything but lowercase `https`, nothing.
 pub fn admit(method: Method, url: &str) -> Result<Outbound, ConnectError> {
     let _ = (method, url);
     Err(ConnectError::Unimplemented { story: "E10-13" })
