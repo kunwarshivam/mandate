@@ -315,6 +315,36 @@ impl ExchangeCalendar {
             .find(|s| s.contains(at))
             .map(SessionSpan::session))
     }
+
+    /// The newest trading day whose regular session has ended at `now`: its end, an early close's
+    /// included, is not after `now`. `None` when no regular session of the validity range has ended
+    /// by `now`, a clock before the range included.
+    ///
+    /// Errors: `outside_calendar` when `now`'s New York date is after the range, because the
+    /// calendar cannot say which later days traded, and answering with the range's last session
+    /// would be a guess ([DEC-517](../../../docs/project/decisions/DEC-517.md)).
+    pub fn last_completed_regular_session(&self, now: UtcNanos) -> Result<Option<Date>, TimeError> {
+        if new_york_date(now)? > self.valid_to {
+            return Err(TimeError::OutsideCalendar);
+        }
+        let mut day = self.valid_from;
+        let last = self.valid_to.min(now.date());
+        let mut completed = None;
+        while day <= last {
+            if self
+                .sessions(day)?
+                .iter()
+                .any(|span| span.session == Session::Regular && span.end <= now)
+            {
+                completed = Some(day);
+            }
+            if day == last {
+                break;
+            }
+            day = day.next()?;
+        }
+        Ok(completed)
+    }
 }
 
 fn span(session: Session, start: UtcNanos, end: UtcNanos) -> SessionSpan {
