@@ -205,6 +205,12 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+[crates.mandate-vault-local]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["secrecy", "thiserror"]
+
 [crates.mandate-alpaca]
 layer = 7
 safety_critical = true

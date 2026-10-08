@@ -366,9 +366,8 @@ resolves the notice to its approval for that user, if the user may see it, and o
 creation time, so an event id in a payload would tell the relay and the provider when the request
 was made. A link grants no authority and holds no token. Mandate spec §6.4's payload sentence is
 amended by the notifications spec's change (#558, DEC-438), whose wording also excludes the event
-timestamp; this spec cites that sentence and does not edit it. As notifications spec §4.2 says,
-`mandate_approval::ApprovalRef::of_requested_event` (`crates/mandate-approval/src/notify.rs`) stays
-the in-workspace reference to the request and stops being what a payload carries.
+timestamp; this spec cites that sentence and does not edit it. What becomes of
+`mandate_approval::ApprovalRef::of_requested_event` is said once, in notifications spec §4.2.
 
 ### 3.10 Rate limits and quotas
 
