@@ -47,6 +47,15 @@ fn no_product_code_reaches_the_rfc_vectors() {
 }
 
 #[test]
+fn an_endpoint_never_prints_its_address() {
+    let endpoint = PushEndpoint {
+        url: ENDPOINT.to_owned(),
+        origin_len: "https://push.example.net".len(),
+    };
+    assert_eq!(format!("{endpoint:?}"), "PushEndpoint(..)", "NT-2");
+}
+
+#[test]
 fn the_closed_tables_are_the_specs() {
     let text = [
         (PushText::ApprovalNeeded, "approval_needed"),

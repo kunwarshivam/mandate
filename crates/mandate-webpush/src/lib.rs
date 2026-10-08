@@ -41,7 +41,7 @@ pub const MAX_BODY_LEN: usize = 512;
 /// The octets every record holds: the plaintext, its delimiter `0x02`, then zeros (DEC-790 item 2).
 pub const PADDED_RECORD_LEN: usize = 128;
 
-/// How far after `now` the VAPID token expires: 12 hours, inside RFC 8292's 24 (DEC-790 item 3).
+/// How far after `now` the VAPID token expires: 12 hours, inside RFC 8292's 24 (DEC-790 item 4).
 pub const VAPID_LIFETIME_S: u64 = 43_200;
 
 /// Why no request could be built. `code()` is stable and carries no input.
@@ -145,9 +145,17 @@ impl NoticeClass {
 }
 
 /// A push endpoint: `https://<host>[:port]/...`, with no user information. An address (NT-2).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PushEndpoint {
     url: String,
+    origin_len: usize,
+}
+
+/// Prints no part of the address (NT-2, DEC-790 item 6).
+impl std::fmt::Debug for PushEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PushEndpoint(..)")
+    }
 }
 
 impl PushEndpoint {
