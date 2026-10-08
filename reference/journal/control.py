@@ -418,7 +418,16 @@ SCHEMAS[("ctl", "ClientConnected")] = rec(
     ("agents", list_of(IDENT_T)),
     ("step_up", STEP_UP),
 )
-SCHEMAS[("ctl", "ClientRevoked")] = rec(("client_id", IDENT_T), ("user", STR))
+REVOCATION_ACTORS = {
+    "owner": ("user",),
+    "admin": ("user",),
+    "member_deactivated": ("system",),
+    "deprovisioned": ("system",),
+    "compromised": ("user", "system"),
+}
+SCHEMAS[("ctl", "ClientRevoked")] = rec(
+    ("client_id", IDENT_T), ("user", STR), ("reason", one_of(*REVOCATION_ACTORS))
+)
 
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
@@ -864,7 +873,7 @@ def workspace_violations(event_type: str, draft: dict, skip: frozenset[str]) -> 
     out: list[Violation] = []
     try:
         workspace_rules(event_type, draft, skip, out)
-    except (TypeError, ValueError, ArithmeticError, AttributeError):
+    except (TypeError, ValueError, ArithmeticError, AttributeError, KeyError):
         pass
     return out
 
@@ -953,7 +962,11 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
         if rule("73.actor", actor["kind"] == "user", "actor.kind"):
             rule("73.user", p["user"] == actor["id"], "payload.user")
     if event_type == "ClientRevoked":
-        rule("74", actor["kind"] in ("user", "system"), "actor.kind")
+        if rule("74", actor["kind"] in REVOCATION_ACTORS[p["reason"]], "actor.kind"):
+            if p["reason"] == "owner":
+                rule("74.owner", p["user"] == actor["id"], "payload.user")
+            if p["reason"] == "admin":
+                rule("74.admin", p["user"] != actor["id"], "payload.user")
 
 
 def act_failure(p: dict, skip: frozenset[str]) -> str | None:

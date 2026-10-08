@@ -20,7 +20,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `OwnerRequestSubmitted`, and `RecordsAccessed`. §9.8's rules 55 and 64 already had client branches,
   which now admit. §9.9 closes `ConnectionRevoked` version 2, with the reason `owner` or
   `compromised` and its step-up (workspace API §5.6), and `ClientConnected` and `ClientRevoked`
-  (identity spec §12.1), with rules 69 to 74. Version 1 of `ConnectionRevoked` stays registered and
+  (identity spec §12.1), with rules 69 to 74; `ClientRevoked` records why with a closed `reason`. Version 1 of `ConnectionRevoked` stays registered and
   unchanged. The vectors gain a generated `client_actor` section and stay version 3.
 - **v0.19 ([DEC-670](../project/decisions/DEC-670.md)):** §9.8 closes four control-stream records
   the [workspace API](workspace-api.md) commits (its §4.1, §4.6, §5.1; DEC-436 item 14), with rules
@@ -1758,6 +1758,7 @@ stays registered and unchanged (§8); the workspace API writes version 2.
 |---|---|---|
 | `client_id` | `id` | |
 | `user` | `text` | The user it acted for (opaque) |
+| `reason` | `owner` \| `admin` \| `member_deactivated` \| `deprovisioned` \| `compromised` | Who ended it and why: the client's own user, a workspace admin (identity spec §4.2), the system on a member's deactivation (identity §5.2) or deprovisioning (§11.1), or a suspected compromise: rule 74 |
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 
@@ -1771,8 +1772,10 @@ stays registered and unchanged (§8); the workspace API writes version 2.
     at the list, `scopes` first).
 73. `ClientConnected`: the actor is a `user` (`actor.kind`), and `user` is its `id`
     (`payload.user`): a user connects their own client (identity spec §4.2).
-74. `ClientRevoked`: the actor is a `user` (the client's user or an admin) or the `system` that
-    deprovisions a user's clients (identity spec §11.1) (`actor.kind`).
+74. `ClientRevoked`: the actor follows the `reason` (`actor.kind`): a `user` for `owner` and
+    `admin`, the `system` for `member_deactivated` and `deprovisioned`, and either for
+    `compromised`. For `owner`, `user` is the actor's `id`; for `admin`, it is not
+    (`payload.user`).
 
 `ConnectionRevoked` version 2 maps to the `ConnectionRevoked` fact as version 1 does (§9.2). The
 client records map to no `JournaledFact`.

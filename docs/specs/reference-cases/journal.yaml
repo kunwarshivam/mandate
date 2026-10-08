@@ -13079,6 +13079,7 @@ client_actor:
       payload:
         client_id: client_01
         user: user_owner_01
+        reason: owner
       artifact_refs: []
       pii_refs: []
   invalid_drafts:
@@ -13418,6 +13419,30 @@ client_actor:
       outcome: Invalid
       reason: non_canonical
       path: payload.user
+  - name: client_revoked.reason.kind
+    clause: §9.9 types
+    base_draft: client_revoked
+    changes:
+    - path: payload.reason
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: client_revoked.reason.form
+    clause: §9.9 types
+    base_draft: client_revoked
+    changes:
+    - path: payload.reason
+      value: expired
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
   - name: client_revoked.client_id.null
     clause: §9.9 types
     base_draft: client_revoked
@@ -13442,6 +13467,18 @@ client_actor:
       outcome: Invalid
       reason: schema
       path: payload.user
+  - name: client_revoked.reason.null
+    clause: §9.9 types
+    base_draft: client_revoked
+    changes:
+    - path: payload.reason
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
   - name: client_revoked.missing
     clause: §9.9 closed
     base_draft: client_revoked
@@ -13862,6 +13899,58 @@ client_actor:
       outcome: Invalid
       reason: schema
       path: actor.kind
+  - name: owner_revocation_by_another_user
+    clause: 'rule 74: `owner` is the client''s own user'
+    base_draft: client_revoked
+    changes:
+    - path: actor.id
+      value: user_admin_01
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.user
+  - name: admin_revocation_by_the_owner
+    clause: 'rule 74: `admin` is another user'
+    base_draft: client_revoked
+    changes:
+    - path: payload.reason
+      value: admin
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.user
+  - name: deprovisioning_by_a_user
+    clause: 'rule 74: deactivation and deprovisioning are the system''s'
+    base_draft: client_revoked
+    changes:
+    - path: payload.reason
+      value: deprovisioned
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: owner_revocation_by_the_system
+    clause: rule 74
+    base_draft: client_revoked
+    changes:
+    - path: actor
+      value:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
   valid_drafts:
   - name: client_request_sized_sell
     clause: 'rule 64: a client''s request, any side and size'
@@ -13927,6 +14016,24 @@ client_actor:
         id: control_services
         version: 0.1.0
         build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    - path: payload.reason
+      value: deprovisioned
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: client_revoked_on_deactivation
+    clause: 'rule 74: identity §5.2 step 2'
+    base_draft: client_revoked
+    changes:
+    - path: actor
+      value:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    - path: payload.reason
+      value: member_deactivated
     - path: artifact_refs
       value: []
     expect:
@@ -13937,6 +14044,24 @@ client_actor:
     changes:
     - path: actor.id
       value: user_admin_01
+    - path: payload.reason
+      value: admin
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: client_revoked_as_compromised_by_the_system
+    clause: 'rule 74: either a user or the system may revoke a compromised client'
+    base_draft: client_revoked
+    changes:
+    - path: actor
+      value:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    - path: payload.reason
+      value: compromised
     - path: artifact_refs
       value: []
     expect:
