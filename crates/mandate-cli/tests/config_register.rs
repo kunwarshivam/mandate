@@ -61,21 +61,23 @@ fn refused(result: Result<impl std::fmt::Debug, ControlError>) -> &'static str {
 #[ignore = "pending E10-16"]
 fn an_instrument_snapshot_of_dec_523_is_stored_registered_and_found_on_a_rerun() {
     for exchange in ["arca", "nasdaq"] {
-        let object = spy_with(|m| {
+        let canonical_input = spy_with(|m| {
             m.insert(
                 Key::new("exchange").unwrap(),
                 Value::Str(exchange.to_owned()),
             );
         });
+        let object = [b"\n ", canonical_input.as_slice(), b" \n"].concat();
         let (mut journal, mut store) = (Journal::default(), Store::new());
         let kind = ConfigKind::InstrumentSnapshot;
         let first = register(&mut journal, &mut store, &owner(), kind, &object, at(NOW)).unwrap();
         let canonical = to_canonical(&parse(&object).unwrap());
         assert_eq!(
-            store.get(&Digest::of(&canonical)),
-            Some(&canonical),
-            "{exchange}"
+            store.values().collect::<Vec<_>>(),
+            [&canonical],
+            "{exchange}: the canonical form, stored under its hash"
         );
+        assert_eq!(store.keys().next(), Some(&Digest::of(&canonical)));
         let (draft, payload) = registered(&journal);
         let shape = (draft.event_type(), draft.schema_version());
         assert_eq!(shape, ("ConfigSnapshotRegistered", 1));
@@ -232,7 +234,8 @@ fn a_model_is_registered_with_the_hosts_content_and_hash_only() {
     assert_eq!(store.get(&content.hash), Some(&content.canonical));
     let object = parse(&content.canonical).unwrap();
     let names: Vec<&str> = object
-        .get("params")
+        .get("params_schema")
+        .and_then(|schema| schema.get("params"))
         .and_then(Value::as_array)
         .unwrap()
         .iter()

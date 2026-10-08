@@ -23,6 +23,7 @@ mandate-journal.workspace = true
 mandate-journal-cold.workspace = true
 mandate-journal-pg.workspace = true
 mandate-marketdata.workspace = true
+mandate-modelhost.workspace = true
 mandate-time.workspace = true
 secrecy.workspace = true
 serde.workspace = true
@@ -30,7 +31,6 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 toml.workspace = true
 
 [dev-dependencies]
-mandate-modelhost.workspace = true
 mandate-num.workspace = true
 proptest.workspace = true
 serde_json.workspace = true

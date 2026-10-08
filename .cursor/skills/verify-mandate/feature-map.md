@@ -1032,6 +1032,17 @@ proves each pending test fails on them (DEC-110).
 - **Run:** `MANDATE_PG_URL=postgres://… cargo nextest run -p mandate-cli --test postgres`, or
   `cargo xtask ci postgres`, which runs `mandate-cli` beside `mandate-journal-pg`.
 
+## The CLI's configuration and model registrations (E10-16, D1)
+
+- **Spec:** `docs/specs/journal.md` §9.2 (`ConfigSnapshotRegistered` versions 1 and 2); the first
+  paper trade brief (D1); DEC-504 item 3, DEC-523, DEC-526.
+- **Code:** `crates/mandate-cli/src/config.rs` (`register`, which stores any kind's object and
+  registers it, holding the instrument snapshot to exactly DEC-523's object; `register_model`,
+  whose content and hash come only from `mandate_modelhost::content`; both paper only), stubbed.
+- **Tests:** `crates/mandate-cli/tests/config_register.rs`, pending E10-16, each committed draft
+  read back through `Draft::parse`.
+- **Run:** `cargo nextest run -p mandate-cli --test config_register`; `cargo xtask ci pending`.
+
 ## Reference-case harness
 
 - **Spec:** ADR-0001 ES-11; DEC-77 (pending and passing cases).
