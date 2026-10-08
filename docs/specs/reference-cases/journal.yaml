@@ -15433,3 +15433,111 @@ hold:
       value: step_up_missing
     expect:
       outcome: Valid
+  range_verification:
+  - name: the_hold_carried_through_a_pause_and_a_resume
+    from_seq: 1
+    events:
+    - &id007
+      schema_version: 2
+      payload:
+        from: normal
+        to: exits_only
+        reason: owner_hold
+        lifecycle: normal
+        held: true
+    - schema_version: 2
+      payload:
+        from: exits_only
+        to: paused
+        reason: owner_pause
+        lifecycle: paused
+        held: true
+    - &id008
+      schema_version: 2
+      payload:
+        from: paused
+        to: exits_only
+        reason: owner_resume
+        lifecycle: normal
+        held: true
+    - schema_version: 2
+      payload:
+        from: exits_only
+        to: normal
+        reason: owner_lift_hold
+        lifecycle: normal
+        held: false
+    expect: []
+  - name: a_restriction_drops_the_hold
+    from_seq: 1
+    events:
+    - *id007
+    - schema_version: 2
+      payload:
+        from: exits_only
+        to: exits_only
+        reason: restriction_changed
+        lifecycle: normal
+        held: false
+    expect:
+    - 1
+  - name: a_kill_switch_drops_the_hold
+    from_seq: 1
+    events:
+    - *id007
+    - schema_version: 2
+      payload:
+        from: exits_only
+        to: stopped
+        reason: kill_switch
+        lifecycle: stopped
+        held: false
+    expect:
+    - 1
+  - name: a_reconciliation_sets_a_hold_nobody_asked_for
+    from_seq: 1
+    events:
+    - schema_version: 2
+      payload:
+        from: normal
+        to: exits_only
+        reason: awaiting_reconciliation
+        lifecycle: normal
+        held: true
+    expect:
+    - 0
+  - name: a_version_1_record_after_a_version_2_one
+    from_seq: 1
+    events:
+    - *id007
+    - schema_version: 1
+      payload:
+        from: exits_only
+        to: paused
+        reason: owner_pause
+        lifecycle: paused
+    expect:
+    - 1
+  - name: version_1_records_before_the_first_hold
+    from_seq: 1
+    events:
+    - schema_version: 1
+      payload:
+        from: normal
+        to: paused
+        reason: owner_pause
+        lifecycle: paused
+    - *id007
+    expect: []
+  - name: a_later_range_trusts_its_first_record
+    from_seq: 40
+    events:
+    - schema_version: 2
+      payload:
+        from: exits_only
+        to: paused
+        reason: owner_pause
+        lifecycle: paused
+        held: true
+    - *id008
+    expect: []
