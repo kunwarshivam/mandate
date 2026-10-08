@@ -153,6 +153,7 @@ subject's stream writes an `OwnerAlertSent` naming it, with the kind, in the sub
 | `integrity_incident` | `IntegrityIncidentRecorded` (journal spec §11) | safety | `attention_needed` | Owners and workspace admins |
 | `credential_added` | `CredentialEnrolled` (identity spec §12.1): a new passkey or device | safety | `account_changed` | The member, on every push channel |
 | `new_device` | `SessionOpened` with the first-seen-device flag (identity spec §6.2, §12.1): a sign-in from a device the member has not used, which a synced passkey makes possible with no enrolment | safety | `account_changed` | The member, on every push channel |
+| `notification_address_changed` | `NotificationAddressChanged`, `added` or `removed` (workspace API spec §4.10, §5.7): a member set or removed one of their own push addresses, with step-up ([DEC-795](../project/decisions/DEC-795.md)) | safety | `account_changed` | The member, on every push channel they hold after the change, once more on the address just removed, and in the pull channels |
 | `recovery_used` | A sign-in by OIDC or a recovery code that starts an enrolment cool-off (identity spec §10.1) | safety | `account_changed` | The member, on every push channel |
 | `role_granted` | `MemberActivated` or `MemberRoleChanged` adding a role (identity spec §8.3) | safety | `account_changed` | Every other workspace admin and org owner, and the member |
 | `member_deactivated` | `MemberDeactivated` or `MemberRemoved` (identity spec §5.2) | safety | `account_changed` | The remaining workspace admins |
@@ -427,6 +428,11 @@ adds the notice stream and these records; E8-9's tests PR closes their payload s
 - `auth_failed` (a revoked Slack webhook, a removed Telegram bot) does the same, and also raises an
   operator alert when the credential is the platform's (the Telegram bot token).
 - An address comes back only when the signed-in user re-verifies it in the workspace.
+- **A member's own change is not a loss.** Adding or removing a push address through the workspace
+  API (workspace API spec §4.10) is journaled as `NotificationAddressChanged` on the control
+  stream and raises a `notification_address_changed` notice, not `channel_lost`. Its one last send
+  to a removed address is the only send to that address after the removal, so a member whose address
+  was removed by someone else learns of it there (DEC-795).
 - An owner whose every push address is `unreachable` still has the pull channels. No trading state
   changes (NT-5); whether a live agent should hold openings in that case is Proposed (DEC-438 item
   25).
