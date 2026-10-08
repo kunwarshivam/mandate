@@ -8,20 +8,26 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use mandate_accounting::AssetClass as TradedClass;
 use mandate_accounting::InstrumentId;
-use mandate_alpaca::{Exchange as BrokerExchange, MinuteBar, MinuteBars};
+use mandate_alpaca::{
+    Asset, AssetSnapshot, Exchange as BrokerExchange, Feed as QuoteFeed, LatestQuote, MinuteBar,
+    MinuteBars, wire,
+};
 use mandate_canon::{DecStr, Digest, Value, to_canonical};
 use mandate_executor::BindingGateConfigRefs;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
-use mandate_num::Qty;
+use mandate_num::{Price, Qty, Usd};
 use mandate_risk::Exchange as GateExchange;
 use mandate_shell::Cause;
 use mandate_shell::control::{
     Configuration, ConfirmedVersion, ControlRecord, Pinned, RunFacts, configuration,
     confirmed_version,
 };
-use mandate_shell::paper::{Artifacts, liquidity_facts};
+use mandate_shell::paper::{
+    Artifacts, BrokerFacts, LiquidityFacts, PaperFacts, liquidity_facts, load_contexts,
+};
 use mandate_spec::context::{AgentId, Membership};
 use mandate_time::{Date, UtcNanos};
 
@@ -158,34 +164,25 @@ impl Stream {
 #[ignore = "pending E7-19"]
 fn the_artifacts_bind_the_registered_instrument_and_objects() {
     let nasdaq = SNAPSHOT.replace("arca", "nasdaq");
-    let exchanges = [
+    for (snapshot, venues) in [
         (
             nasdaq.as_str(),
-            BrokerExchange::Nasdaq,
-            GateExchange::Nasdaq,
+            (BrokerExchange::Nasdaq, GateExchange::Nasdaq),
         ),
-        (SNAPSHOT, BrokerExchange::Arca, GateExchange::Arca),
-    ];
-    for (snapshot, broker, gate) in exchanges {
-        let artifacts = Stream::deployed(snapshot, RULES, FEE).artifacts().unwrap();
-        let identity = artifacts.production_identity();
-        assert_eq!(
-            (identity.broker_exchange, identity.gate_exchange),
-            (broker, gate)
-        );
+        (SNAPSHOT, (BrokerExchange::Arca, GateExchange::Arca)),
+    ] {
+        let identity = Stream::deployed(snapshot, RULES, FEE).artifacts().unwrap();
+        let identity = identity.production_identity();
+        assert_eq!((identity.broker_exchange, identity.gate_exchange), venues);
     }
     let stream = Stream::deployed(SNAPSHOT, RULES, FEE);
     let artifacts = stream.artifacts().unwrap();
     let identity = artifacts.production_identity();
     assert_eq!(identity.asset_id.as_str(), SPY);
     assert_eq!(identity.symbol.as_str(), "SPY");
-    let model = (
-        identity.model_id,
-        identity.model_version,
-        identity.model_hash,
-    );
-    let hash = Digest::of(MODEL.as_bytes());
-    assert_eq!(model, ("quant.ma_crossover", "1.0.0", hash));
+    let model = (identity.model_id, identity.model_version);
+    assert_eq!(model, ("quant.ma_crossover", "1.0.0"));
+    assert_eq!(identity.model_hash, Digest::of(MODEL.as_bytes()));
     let mandate = MANDATE.replace(AAPL, SPY).replace(r#""AAPL""#, r#""SPY""#);
     let refs = BindingGateConfigRefs::complete(
         reference(FEE.as_bytes()),
@@ -210,12 +207,7 @@ fn a_registered_object_the_run_cannot_use_is_refused() {
         Stream::deployed(SNAPSHOT, RULES, &aggressive),
         Stream::deployed(SNAPSHOT, &slow_quotes, FEE),
     ] {
-        let refused = stream.artifacts().err();
-        assert_eq!(
-            refused.as_ref().map(Cause::code),
-            Some("absent"),
-            "{refused:?}"
-        );
+        assert_absent(stream.artifacts());
     }
     let (confirmed, config) = Stream::deployed(SNAPSHOT, RULES, FEE).inputs();
     let mut other_symbol = config.clone();
@@ -225,13 +217,13 @@ fn a_registered_object_the_run_cannot_use_is_refused() {
     let mut other_model = config;
     other_model.model_version.content_hash = Digest::of(b"another model");
     for config in [other_symbol, other_asset, other_model] {
-        let refused = Artifacts::from_registered(&confirmed, &config).err();
-        assert_eq!(
-            refused.as_ref().map(Cause::code),
-            Some("absent"),
-            "{refused:?}"
-        );
+        assert_absent(Artifacts::from_registered(&confirmed, &config));
     }
+}
+
+fn assert_absent(refused: Result<Artifacts, Cause>) {
+    let code = refused.as_ref().err().map(Cause::code);
+    assert_eq!(code, Some("absent"), "{:?}", refused.err());
 }
 
 /// Twenty-five daily SPY bars ending on Friday 2026-09-25, the last session completed at [`NOW`].
@@ -288,19 +280,92 @@ fn the_liquidity_facts_read_the_registered_instrument() {
     let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
     let symbol = artifacts.production_identity().symbol;
     let root = std::env::temp_dir().join(format!("mandate-shell-q1-{}", std::process::id()));
+    let aapl = daily(&root.join("aapl"), "AAPL");
     let daily = daily(&root, "SPY");
-    let facts = liquidity_facts(symbol, &daily, &minute_bars("SPY"), now());
-    let figures = facts.map(|facts| {
-        (
-            facts.prior_close.to_string(),
-            facts.trailing_5m_volume.to_string(),
-        )
-    });
-    assert_eq!(
-        figures.as_ref().map_err(Cause::code),
-        Ok(&("655.2".to_owned(), "500".to_owned()))
+    let wrong_daily = liquidity_facts(symbol, &aapl, &minute_bars("SPY"), now());
+    assert!(wrong_daily.is_err(), "AAPL's bars: {wrong_daily:?}");
+    let facts = liquidity_facts(symbol, &daily, &minute_bars("SPY"), now()).unwrap();
+    let figures = (
+        facts.prior_close.to_string(),
+        facts.trailing_5m_volume.to_string(),
     );
+    assert_eq!(figures, ("655.2".to_owned(), "500".to_owned()));
     let other = liquidity_facts(symbol, &daily, &minute_bars("AAPL"), now());
     assert_eq!(other.err().map(|cause| cause.code()), Some("absent"));
     fs::remove_dir_all(&root).unwrap();
+}
+
+/// The recorded empty, active paper account, a fresh SPY quote and SPY's minute bars, beside the
+/// broker's asset record for `asset_id` and `symbol` listed on `exchange`.
+fn spy_facts(asset_id: &str, symbol: &str, exchange: BrokerExchange) -> PaperFacts {
+    let at = |text| UtcNanos::parse_rfc3339(text).unwrap();
+    let (price, qty) = (
+        |text| Price::parse(text).unwrap(),
+        |text| Qty::parse(text).unwrap(),
+    );
+    let account = include_bytes!("fixtures/tracer/alpaca/account.json");
+    let asset = Asset {
+        asset_id: asset_id.to_owned(),
+        instrument: InstrumentId::new(symbol).unwrap(),
+        class: TradedClass::UsEquity,
+        exchange,
+        active: true,
+        tradable: true,
+        fractionable: true,
+        ipo: false,
+        ptp_no_exception: false,
+        min_order_size: None,
+        min_trade_increment: None,
+        price_increment: None,
+    };
+    let quote = LatestQuote {
+        instrument: InstrumentId::new("SPY").unwrap(),
+        at: at("2026-09-28T16:59:59.5Z"),
+        bid: price("655.1"),
+        bid_size: qty("2"),
+        ask: price("655.2"),
+        ask_size: qty("1"),
+        feed: QuoteFeed::Iex,
+    };
+    let broker = BrokerFacts {
+        account: wire::account(account).unwrap(),
+        positions: Vec::new(),
+        open_orders: Vec::new(),
+        asset: AssetSnapshot {
+            asset,
+            loaded_at: at("2026-09-28T16:59:59Z"),
+        },
+        quote,
+        minute_bars: minute_bars("SPY"),
+    };
+    let liquidity = LiquidityFacts {
+        prior_close: price("655.2"),
+        median_dollar_volume_20d: Usd::parse("45864000000").unwrap(),
+        adv_20d: qty("70000000"),
+        trailing_5m_volume: qty("500"),
+    };
+    PaperFacts { broker, liquidity }
+}
+
+/// The preflight judges the broker's asset record against the instrument the registered artifacts
+/// bind (X-8): SPY's id, listed on arca as its snapshot says, holds; AAPL's id, SPY on nasdaq, or
+/// another symbol is refused at the asset record.
+#[test]
+#[ignore = "pending E7-19"]
+fn the_preflight_judges_the_registered_instruments_asset_record() {
+    let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
+    let agent = mandate_runtime::AgentId("agent_spy".to_owned());
+    let judged = |facts: PaperFacts| load_contexts(&artifacts, &facts, now(), &agent).map(|_| ());
+    let spy = judged(spy_facts(SPY, "SPY", BrokerExchange::Arca));
+    assert!(spy.is_ok(), "{spy:?}");
+    let others = [
+        (AAPL, "SPY", BrokerExchange::Arca),
+        (SPY, "SPY", BrokerExchange::Nasdaq),
+        (SPY, "QQQ", BrokerExchange::Arca),
+    ];
+    for (asset_id, symbol, exchange) in others {
+        let refused = format!("{:?}", judged(spy_facts(asset_id, symbol, exchange)));
+        let at_the_record = refused.contains("Absent") && refused.contains("asset record");
+        assert!(at_the_record, "{asset_id} {symbol} {exchange:?}: {refused}");
+    }
 }

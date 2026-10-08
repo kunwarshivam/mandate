@@ -16,6 +16,7 @@ use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, SYMBOL, absent, usd};
+use crate::control::{Configuration, ConfirmedVersion};
 use crate::error::Cause;
 
 /// The largest quote-age bound the rule-set artifact may name: a minute-old quote is already older
@@ -116,8 +117,8 @@ impl Artifacts {
     /// # Errors
     /// [`Cause::Absent`] for a registered object the run cannot use, as for its file.
     pub fn from_registered(
-        confirmed: &crate::control::ConfirmedVersion,
-        configuration: &crate::control::Configuration,
+        confirmed: &ConfirmedVersion,
+        configuration: &Configuration,
     ) -> Result<Self, Cause> {
         let _ = (confirmed, configuration);
         Err(Cause::Unimplemented { story: "E7-19" })
