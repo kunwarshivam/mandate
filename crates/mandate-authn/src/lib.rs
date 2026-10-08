@@ -16,10 +16,11 @@
 //! caller fetched and handed in, at a time ([`UtcNanos`]) the caller read. No clock, no network,
 //! no randomness: the same inputs always give the same answer (ES-21).
 //!
-//! **Only an allowed algorithm reaches a key.** The header's `alg` must be one of [`Algorithm`]'s
-//! three (ES256, RS256, EdDSA), its `kid` must name a key in the set, and that key must be of the
-//! algorithm's type; `none`, every HMAC algorithm, and anything else are refused before a key is
-//! looked up, so a public key is never used as an HMAC secret.
+//! **Only an allowed algorithm reaches a key.** The header's `alg` must be one of the issuer's
+//! configured algorithms, drawn from ES256, RS256 and EdDSA ([`Algorithm`]), its `kid` must name a
+//! key in the set, and that key must be of the algorithm's type; `none`, every HMAC algorithm, and
+//! anything else are refused before a key is looked up, so a public key is never used as an HMAC
+//! secret.
 //!
 //! **A refusal names the check, never the value** (ID-9). [`Refusal`] and [`SetupError`] carry
 //! static text only: no token, nonce, claim, or key appears in their `Display` or `Debug`.
