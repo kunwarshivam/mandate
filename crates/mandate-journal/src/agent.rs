@@ -257,10 +257,8 @@ pub fn verify_agent_stream(
                     return fail(AgentStreamCheck::ModeEventMismatch);
                 }
             }
-            "AgentModeChanged" => {
-                if !held.carries(row.schema_version, &own) {
-                    return fail(AgentStreamCheck::HeldMismatch);
-                }
+            "AgentModeChanged" if !held.carries(row.schema_version, &own) => {
+                return fail(AgentStreamCheck::HeldMismatch);
             }
             _ => {}
         }
