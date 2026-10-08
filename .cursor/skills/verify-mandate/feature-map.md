@@ -1097,6 +1097,13 @@ proves each pending test fails on them (DEC-110).
   §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
   force; every refusal code, each writing nothing; a failing store committing nothing.
   `cargo nextest run -p mandate-cli --test deploy`.
+- **The commands (D2c, DEC-530 item 1):** `crates/mandate-cli/src/gestures.rs` (`version create`,
+  `version confirm` and `agent deploy` over DEC-527's owner flags and P0's target; without
+  `--code` a gesture prints `code …` and `warnings …` from the read-only `confirmation` or
+  `deployment` and commits nothing), stubbed, and `main`; `crates/mandate-cli/tests/gestures.rs`,
+  pending E10-16 but for the flag test: the shown codes, the refusals without a database, and the
+  binary against Postgres, none naming the DSN.
+  `cargo nextest run -p mandate-cli --test gestures`; `cargo xtask ci postgres` for the binary.
 
 ## Reference-case harness
 

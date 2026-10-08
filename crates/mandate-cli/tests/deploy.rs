@@ -311,7 +311,9 @@ fn a_stopped_agent_deploys_again_and_a_reconfirmed_version_is_the_latest() {
 }
 
 /// Every refusal carries one of DEC-530 item 9's codes, each case its own, and writes nothing: no
-/// append, no stored object, no assertion.
+/// append, no stored object, no assertion. Where two checks both fail, the earlier in item 9's
+/// order refuses: a superseded version before a wrong code, and a wrong code before an active
+/// deployment.
 #[test]
 #[ignore = "pending E10-16"]
 fn every_refusal_has_its_own_code_and_writes_nothing() {
@@ -326,7 +328,7 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
     let other = Deploy(OTHER_AGENT, "v1", None);
     let other_stop = Seed("AgentStopped", OTHER_STOPPED);
     let codes = [deploy_code(OTHER_AGENT, "v1"), deploy_code(AGENT, "v2")];
-    let cases: [(&str, &[Do<'_>], Do<'_>); 19] = [
+    let cases: [(&str, &[Do<'_>], Do<'_>); 21] = [
         ("paper_only", &[v1, c1, As(Environment::Live)], d1),
         ("paper_only", &[v1, c1, As(Environment::Backtest)], d1),
         ("agent_invalid", &[v1, c1], Deploy("agent a", "v1", None)),
@@ -335,6 +337,16 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
         ("document_corrupt", &[v1, c1, Corrupt], d1),
         ("version_unconfirmed", &[v1], d1),
         ("version_superseded", &[v1, c1, v2, c2], d1),
+        (
+            "version_superseded",
+            &[v1, c1, v2, c2],
+            Deploy(AGENT, "v1", Some("00000000")),
+        ),
+        (
+            "code_mismatch",
+            &[v1, c1, d1, v2, c2],
+            Deploy(AGENT, "v2", Some("00000000")),
+        ),
         (
             "code_mismatch",
             &[v1, c1],
