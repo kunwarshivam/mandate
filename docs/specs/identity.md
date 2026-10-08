@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.2 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md)). Items 1 to 14 of DEC-437 are agent readings; items 15 to 21 are Proposed and wait for the founder |
+| **Status** | v0.2 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md)). Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by DEC-820 (PR #762) and applied by DEC-640; items 16 to 21 are Proposed and wait for the founder |
 | **Implements** | [HLD §4](../HLD.md#4-architecture) (org directory, workspace deployment, deployment modes) and [§8](../HLD.md#8-multi-tenancy-and-security); PRD [FR-1.1 to FR-1.6](../product/04-prd-v1.md#61-identity-and-tenancy); backlog E9 |
 | **Depends on** | [Mandate spec §4.3, V-047, §6.1, §6.4, §6.5](mandate.md#43-policy-hierarchy-dec-51-dec-98); [journal spec §2, §3, §6.4, §7](journal.md#3-event-envelope); [infrastructure design §5, OPS-6](../design/infrastructure.md#5-secrets-and-the-vault); [inference spec INF-9, INF-11](inference.md#2-invariants); [DEC-141](../project/04-decision-log.md#decisions), [DEC-211](../project/04-decision-log.md#decisions), [DEC-411](../project/decisions/DEC-411.md) |
 | **Read by** | The workspace services API spec (`docs/specs/workspace-api.md`, DEC-436), the notifications spec (`docs/specs/notifications.md`, DEC-438), and the threat model (`docs/security/threat-model.md`, DEC-439), all drafted in parallel. They take roles, principals, and step-up from here |
@@ -458,15 +458,17 @@ without any outside service (ID-10, and HLD §4's rule that no hosted-only depen
 path). This spec therefore has workspace services act as a WebAuthn relying party in their own
 right, holding the public keys of each member's passkeys, while the sign-in provider stays a
 replaceable OIDC issuer. Which provider that is for managed mode at launch, and whether passkeys
-are enrolled once (with the workspace) or twice, is DEC-437 item 15 (Proposed).
+are enrolled once (with the workspace) or twice, was DEC-437 item 15, decided by DEC-820.
 
-**Interim reading of item 15** ([DEC-640](../project/decisions/DEC-640.md)), until the founder
-decides: the managed sign-in provider (Supabase Auth, DEC-211) is one OIDC issuer, whose tokens
+**Item 15 as applied** ([DEC-640](../project/decisions/DEC-640.md), applying DEC-820): the
+managed sign-in provider (Supabase Auth, DEC-211, free tier) is one OIDC issuer, whose tokens
 workspace services verify against the keys it publishes, selected by `kid` from the configured
-issuer only, with asymmetric algorithms only (RS256, PS256, ES256, EdDSA; never `none`, an `HS*`
-algorithm, or a key the token carries itself). Workspace services are the WebAuthn relying party
-for passkey sign-in, step-up, and §6.4 route 2, so a passkey is enrolled once, with the workspace.
-Nothing is bought; every environment stays `paper`, and a `live` step-up is refused.
+issuer only. Every configured issuer is verified with asymmetric algorithms only (RS256, PS256,
+ES256, EdDSA; never `none`, an `HS*` algorithm, or a key the token carries itself), and an
+issuer's configuration may narrow the list: the managed issuer (`https://<ref>.supabase.co/auth/v1`,
+audience `authenticated`) accepts ES256 only. Workspace services are the WebAuthn relying party
+for passkey sign-in, step-up, and §6.4 route 2, with RP ID `app.owlhead.ai` and the one origin
+`https://app.owlhead.ai`, so a passkey is enrolled once, with the workspace.
 
 ### 6.2 Sessions
 
@@ -855,19 +857,22 @@ cool-off (item 4); action-bound step-up (item 5); the risk-reduction path (item 
 the `client` actor kind with `on_behalf_of` (item 10); revoking a connection needs step-up (item 11); last
 owner and last admin refusals (item 12); organization deletion (item 13); the E9 rows (item 14).
 
+**Decided by the founder:** item 15, in DEC-820 (PR #762): Supabase Auth as the managed OIDC issuer,
+free tier, and workspace services as the WebAuthn relying party.
+
 **v0.2's readings (agent, DEC-79, DEC-176)**, each tightening only, for the code of E9-1, E9-2, and
-E9-8: the interim reading of item 15 (asymmetric-only OIDC verification; workspace services as the
-WebAuthn relying party; no spending), [DEC-640](../project/decisions/DEC-640.md); the matrix's cell
+E9-8: how item 15 is applied (asymmetric-only OIDC verification, ES256 only for the managed issuer,
+the RP ID and origin), [DEC-640](../project/decisions/DEC-640.md); the matrix's cell
 grammar, column scopes, inactive rows, and ID-2 scoped to the rows the matrix names (E9-12 item 2),
 [DEC-641](../project/decisions/DEC-641.md); the `TenantContext` contract,
 [DEC-642](../project/decisions/DEC-642.md); and the authorization step's refusal codes,
 [DEC-643](../project/decisions/DEC-643.md).
 
-**Proposed for the founder** (spending, legal text, a safety rule, or a question already put to the founder):
+**Proposed for the founder**, item 15 now decided (spending, legal text, a safety rule, or a question already put to the founder):
 
 | Item | Decision | Recommendation |
 |---|---|---|
-| 15 | Identity provider for managed mode at launch, and whether the workspace holds its own passkeys | Keep Supabase Auth (DEC-211) as the managed OIDC issuer; have workspace services be the WebAuthn relying party for step-up and the risk-reduction path, so no hosted service sits in a core path. A paid plan at launch is spending |
+| 15 | Identity provider for managed mode at launch, and whether the workspace holds its own passkeys | **Decided by the founder in DEC-820**: Supabase Auth as the managed OIDC issuer, free tier; workspace services as the WebAuthn relying party (applied in DEC-640) |
 | 16 | SAML 2.0 for business SSO in v1 | OIDC only in v1; most enterprise IdPs offer OIDC. SAML later, with a library chosen then |
 | 17 | Deactivating the second user under `independent_approval_required` (DEC-411 item 6's open half) | Never refuse a deactivation (removing access is a security action); keep the agents running as DEC-411 item 6 says; flagging them `policy_nonconforming` stays the founder's product call. This spec proceeds on "never refuse" because refusing would keep a departed person's access, and not refusing adds no trading risk (a latch only holds) |
 | 18 | Platform-assisted organization recovery and its identity-verification text | A 7-day waiting procedure with notice to every member (§10.2), wording reviewed by counsel. None until decided |
