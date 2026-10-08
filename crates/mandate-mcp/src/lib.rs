@@ -28,10 +28,12 @@
 mod budget;
 mod endpoint;
 mod error;
+mod transport;
 
 pub use budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
 pub use endpoint::PinnedEndpoint;
 pub use error::{McpError, ServerText};
+pub use transport::{McpTransport, Monotonic, PROTOCOL_VERSION, SystemMonotonic, TransportConfig};
 
 #[cfg(test)]
 #[allow(
