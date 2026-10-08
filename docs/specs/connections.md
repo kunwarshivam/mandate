@@ -47,7 +47,8 @@ their rules hold. The API routes that start a connection are the workspace API s
   E7-15); §4's capability table is the connector's capability profile (trading spec §5.2,
   [DEC-531](../project/decisions/DEC-531.md)). §6.2 maps `GetOrderByClientId` to the shared
   list-and-match fallback, and §12 records how [DEC-529](../project/decisions/DEC-529.md) reads
-  DEC-441 items 10, 15 to 17 and 20 for the founder's one live order. Customers stay blocked.
+  DEC-441 items 10, 15 to 17 and 20 for the founder's one live order. A pre-trade alert refuses
+  only an opening or an increase (`AGENTS.md` rule 13). Customers stay blocked.
 - **v0.1:** first draft (DEC-441).
 
 ## 1. Scope
@@ -264,7 +265,7 @@ Robinhood's server; nothing outside the connector knows MCP exists.
 
 | `BrokerRequest` (executor) | MCP mapping |
 |---|---|
-| `Submit` | `review_equity_order`, then `place_equity_order`, with `account_number` the founder-typed agentic account and `ref_id` derived deterministically from the journaled intent's idempotency key, never omitted. Any pre-trade alert refuses before the place. An unparsable or unexpected answer to the place is `Unknown`, never rejected and never re-sent |
+| `Submit` | `review_equity_order`, then `place_equity_order`, with `account_number` the founder-typed agentic account and `ref_id` derived deterministically from the journaled intent's idempotency key, never omitted. A pre-trade alert refuses an opening or an increase before the place. For a sell or a protective order the alert is journaled and the order is placed anyway, so the broker accepts or rejects it (`AGENTS.md` rule 13); C1's tests pin that an alert on the protective stop-limit does not refuse it. An unparsable or unexpected answer to the place is `Unknown`, never rejected and never re-sent |
 | `Cancel` | `cancel_equity_order`, by the broker `order_id` from our record |
 | `GetOrderByClientId` | Not offered (U-R2). The shared fallback ([DEC-529](../project/decisions/DEC-529.md) item 4), used only when the account ledger shows the account dedicated to one agent: `get_equity_orders` with the intent's `symbol`, `placed_agent` `agentic`, and `created_at_gte` the intent's `OrderSubmitted` time less a fixed margin, all pages; exactly one record matching side, type, quantity, limit price and time in force (and `ref_id`, if records carry it) is adopted and followed by `order_id`; zero or several leave the order `Unknown` (trading §5.3 rule 9). The connector never re-sends on its own |
 | `ListOpenOrders`, `ListPositions`, `GetAccount` | `get_equity_orders`, `get_equity_positions`, `get_accounts`, `get_portfolio`, filtered to the agentic account (CN-8) |
@@ -348,7 +349,7 @@ which gives each answer's source); "from contract" is not a written answer.
 | U-R3 | Limit, stop-limit, GTC, and extended-hours flags for equities; limit and stop-limit for crypto | Equities **from contract** (limit, stop-limit, gfd, gtc; extended hours limit only); crypto open | Missing types make the mandate's order policy undeployable on Robinhood |
 | U-R4 | OCO or bracket orders, or at least a resting stop-limit | Resting GTC stop-limit **from contract**; OCO and bracket placement **absent** from the tool list | One GTC stop-limit for the whole position (trading §5.4; DEC-529 item 7 for DEC-529's order). With no resting stop at all, no protected equity mandate can deploy on Robinhood |
 | U-R5 | Token lifetime, refresh, and how revocation shows | **Open** | Treated as short-lived: re-check before every session |
-| U-R6 | Account status fields and restriction rejects | **In part:** `review_equity_order`'s pre-trade alerts; status fields and error codes open | Any alert refuses before the place; an unrecognized status is `blocked` (trading §7.3 row 1; principle 3) |
+| U-R6 | Account status fields and restriction rejects | **In part:** `review_equity_order`'s pre-trade alerts; status fields and error codes open | An alert refuses an opening or an increase before the place; a sell or protective order is placed anyway, with the alert journaled (rule 13). An unrecognized status is `blocked` (trading §7.3 row 1; principle 3) |
 | U-R7 | Margin and 1× status | **Open:** no margin field in the contract | Paused and prompted (FR-2.6); DEC-529's order rests on the founder's attestation (DEC-529 item 11) |
 | U-R8 | Fills, fees, dividends, deposits, and withdrawals as an activity feed | **In part:** orders, positions and tax lots; no deposit, withdrawal or dividend feed; fill fields unpublished | Reconciliation (trading §11) cannot run; not deployable for customers. DEC-529's order on a flat, dedicated account compares the order's state and filled quantity and the position |
 | U-R9 | Rate limits | **Open** | §6.5's conservative default |
@@ -523,7 +524,10 @@ each stays in force for every customer connection:
 - **Item 20:** does not apply to the founder's own account (DEC-529 item 8).
 - **CN-3 and ES-23:** the runner's `live` cargo feature adds Robinhood's published MCP host to a
   build the founder makes locally from `main`; the default build has no live host (DEC-529 item 3).
-  The connection the founder records through the CLI is spent by the first order that fills.
+  The connection the founder records through the CLI is spent once an order it placed fills, wholly or partly, or its answer is lost and the order is `Unknown`, until the founder reconciles it (DEC-529 item 1). "Unspent" is checked only
+  when the version is confirmed and deployed and when the runner starts. A spent connection never
+  carries a second opening, but the agent deployed on it keeps `cli_confirm` for owner exits, pause,
+  stop, acknowledgments and grants until its account is flat (rule 13).
 
 ## 13. Open questions
 

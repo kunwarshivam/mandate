@@ -19,7 +19,10 @@
   founder's one live order (DEC-529 item 12); §7.2 adds Robinhood's account type, 1× and regime
   rows (DEC-529 item 11; [DEC-620](../project/decisions/DEC-620.md) items 1 and 2). The stop-limit's
   limit is the mandate's `stop_limit_offset` ([DEC-539](../project/decisions/DEC-539.md)). Founder-reserved under DEC-79 and accepted on 2026-10-08. Every narrowing
-  is for DEC-529's one order; no Alpaca outcome and no reference case changes.
+  is for DEC-529's one order; no Alpaca outcome and no reference case changes. §5.7: on a profile
+  with no query by client order id, `Unknown` never returns to `Intent`, so nothing is resubmitted
+  (DEC-529 item 4). No pre-trade alert or quote cross-check refuses an exit or a protective order
+  (`AGENTS.md` rule 13).
 - **v0.15:** §7.3 gains a row for a connection the connector reports `degraded` or `suspended`
   ([connections spec §9.1](connections.md#91-states)): account state `closing_only`, all agents
   `exits_only`. `AccountRestrictionChanged` carries an enumerated `cause` (`broker_reject`,
@@ -283,7 +286,7 @@ the mandate's per-instrument cap, bounded by the organization ceiling.
 | `sip` | Backtests; **live equity agents (required)**, except DEC-529's one order (row below) | Consolidated quotes and trades; standard staleness and spread limits |
 | `iex` | **Paper trading** | IEX quotes as the reference for collars and risk marks; wider spread limit and longer staleness threshold (configured); an opening order requires a fresh IEX quote |
 | `crypto` | Crypto, paper and live | Alpaca crypto feed |
-| Broker quote, cross-checked | **DEC-529's one founder-run live order only** ([DEC-529](../project/decisions/DEC-529.md) item 12) | Robinhood's own quote (`get_equity_quotes`, re-read by `review_equity_order`) is the reference for the collar and the risk mark. It must agree with the `iex` quote within the collar, or the run refuses and nothing is sent. Daily and minute bars stay Alpaca's `iex` (its minute volume understates, so the participation caps only tighten) |
+| Broker quote, cross-checked | **DEC-529's one founder-run live order only** ([DEC-529](../project/decisions/DEC-529.md) item 12) | Robinhood's own quote (`get_equity_quotes`, re-read by `review_equity_order`) is the reference for the collar and the risk mark. It must agree with the `iex` quote within the collar, or the opening is refused and nothing is sent. The cross-check never refuses an exit or a protective order, which are priced as §5.6 prices them (`AGENTS.md` rule 13). Daily and minute bars stay Alpaca's `iex` (its minute volume understates, so the participation caps only tighten) |
 
 A bar exists only when trades occur: a missing regular-session bar means "no trade", not a data
 gap. `inspect` distinguishes no-trade minutes, session closures, and true gaps.
@@ -379,7 +382,9 @@ for the current session are queued by the broker for the next eligible session.
 | GTC expiry | Not published | — |
 | Pre-trade check | `review_equity_order` | Tool list |
 
-Crypto, extended hours and options are not declared, so no Robinhood mandate may use them. With
+Crypto, extended hours and options are not declared, so no Robinhood mandate may use them. Having
+no extended-hours row is a limit of this profile: every equity exit on it, an owner exit included,
+waits for the regular session, and the owner is told so when the mandate is deployed. With
 §5.1's limit openings, the intersection is limit, whole shares, day, regular session; protection is
 the one stop-limit (DEC-529 item 2).
 
@@ -490,6 +495,9 @@ item 7, resolving DEC-441 item 17 for DEC-529's one order):
   `bracket_partial_fill_timeout`, or ends partly filled, the executor cancels the remainder,
   confirms, and places the stop-limit for the filled quantity, as for a bracket above
   ([DEC-620](../project/decisions/DEC-620.md) item 3).
+- The interval until the stop-limit rests is bounded by `max_unprotected_s`: if it is not resting
+  by then, the executor exits the held quantity as a `risk_exit` through §5.6 and alerts the
+  owner.
 - A mandate with protection off is refused on such a profile.
 - GTC expiry is not published, so no re-place is scheduled from it; the owner checks the resting
   stop in the broker's app while the position is held (disclosed). A stop-limit may not fill on a
@@ -622,7 +630,7 @@ stateDiagram-v2
     Unknown --> Canceled: found, canceled
     Unknown --> Expired: found, expired
     Unknown --> Rejected: confirmed rejected
-    Unknown --> Intent: confirmed absent after N lookups over T seconds
+    Unknown --> Intent: confirmed absent after N lookups over T seconds (only where the profile can query by client order id)
     Accepted --> PartiallyFilled: fill
     PartiallyFilled --> PartiallyFilled: fill
     Accepted --> Filled: fill completes
@@ -678,6 +686,10 @@ PartiallyFilled); fills during either pending state update filled quantity witho
 - Filled quantity is non-decreasing, ≤ order quantity, and equals the sum of unique fills.
 - `Unknown → Intent` re-runs the gate: if allowed and younger than `max_intent_age`, resubmit
   with the **same** `client_order_id`; otherwise `Abandoned`.
+- **On a profile with no query by client order id** (§5.2: Robinhood), absence cannot be shown, so
+  `Unknown → Intent` never fires and nothing is resubmitted. The order leaves `Unknown` only by the
+  list-and-match adoption of [connections spec §6.2](connections.md#62-how-mcp-maps-to-the-connector-interface),
+  or by the owner reconciling it by hand ([DEC-529](../project/decisions/DEC-529.md) item 4).
 - Per-event fill quantity and price are authoritative; cumulative quantity mismatches trigger
   reconciliation.
 - Every transition is journaled before it takes effect in state.
@@ -779,7 +791,7 @@ source.
 | Account type | Alpaca: always margin; `multiplier` 1, 2, or 4. Robinhood: not in the contract (connections spec U-R7); for DEC-529's order, the founder's attestation that the agentic account is a cash account or has margin disabled ([DEC-529](../project/decisions/DEC-529.md) item 11) |
 | Equity, cash, `buying_power`, `non_marginable_buying_power`, `last_equity`, status flags | Broker |
 | Settled and unsettled cash, reservations, accrued fees | Model, reconciled to broker |
-| Day-trading regime | Alpaca: `intraday_margin` (§9.2). Robinhood: `legacy_pdt` (§9.2), since the contract does not show it has moved to the intraday margin standard; any pattern-day-trading alert from `review_equity_order` also refuses (connections spec U-R6; [DEC-620](../project/decisions/DEC-620.md) item 1) |
+| Day-trading regime | Alpaca: `intraday_margin` (§9.2). Robinhood: `legacy_pdt` (§9.2), since the contract does not show it has moved to the intraday margin standard; a pattern-day-trading alert from `review_equity_order` also refuses an opening or an increase, never a sell or a protective order, which is placed with the alert journaled (connections spec U-R6; [DEC-620](../project/decisions/DEC-620.md) item 1) |
 
 **1× requirement.** At connect and daily, the platform verifies `multiplier = 1` (or an enforced
 1× cap); otherwise agents are paused and the owner is prompted. Robinhood shows no margin field,
@@ -794,7 +806,7 @@ of the model and the broker:
 |---|---|
 | Margin account, equities | settled + Σ unsettled − reservations − round(accrued, 2, ceiling) |
 | Margin account, crypto | min(equity model above, broker `non_marginable_buying_power`) |
-| Cash account (generic brokers) | settled − reservations − round(accrued, 2, ceiling) |
+| Cash account (generic brokers; Robinhood's attested agentic account for DEC-529's order, DEC-620 item 2) | settled − reservations − round(accrued, 2, ceiling) |
 
 **Uncleared deposits are excluded** from model buying power (a returned deposit would otherwise
 create a debit). The fee reservation for crypto buys is 0 (the fee is paid in the asset). The gate
