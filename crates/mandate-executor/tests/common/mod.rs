@@ -564,6 +564,8 @@ pub fn broker_account() -> BrokerAccount {
         buying_power: usd("20000"),
         non_marginable_buying_power: usd("20000"),
         accrued_fees: usd("0"),
+        last_equity: usd("20000"),
+        maintenance_margin: usd("0"),
     }
 }
 

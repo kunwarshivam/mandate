@@ -438,6 +438,10 @@ struct Interval {
     /// its legs are held, not cancelled (§5.4). Every other interval opens where protection is
     /// cancelled for an exit or a re-placement.
     bracket: bool,
+    /// The bracket entry its `unprotected_start` names, if any: an `unprotected_end` naming an
+    /// entry ends that entry's interval only, so two partly filled brackets in one instrument keep
+    /// two intervals (DEC-521 item 3).
+    entry: Option<String>,
 }
 
 /// One `ProtectionChanged placed`: the orders it names, in one instrument, and the quantity they
@@ -520,14 +524,15 @@ impl ProtectionAccountant {
                             started_at: at,
                             ended_at: None,
                             bracket: field(draft, "bracket").is_some(),
+                            entry: field(draft, "bracket").map(str::to_owned),
                         }),
                         "unprotected_end" => {
-                            if let Some(open) = accountant
-                                .intervals
-                                .iter_mut()
-                                .rev()
-                                .find(|i| i.instrument == name && i.ended_at.is_none())
-                            {
+                            let entry = field(draft, "bracket");
+                            if let Some(open) = accountant.intervals.iter_mut().rev().find(|i| {
+                                i.instrument == name
+                                    && i.ended_at.is_none()
+                                    && (entry.is_none() || i.entry.as_deref() == entry)
+                            }) {
                                 open.ended_at = Some(at);
                             }
                         }
@@ -1336,12 +1341,15 @@ proptest! {
     /// one id and two intents never share one. The intent rides the submission's
     /// `OrderRequestRecorded` companion (journal spec §9.5, rule 45), and the doubted lead makes
     /// every script resubmit one intent at a second attempt, which is where an id that depends on
-    /// the attempt would show.
+    /// the attempt would show. An exit's ladder rung is a new order under its own id, `-l{n}` for
+    /// rung n ≥ 1, still carrying the exit's intent (trading-domain spec §2.3, §5.6, DEC-160
+    /// (10)), so the id is judged per intent and rung, the rung read from the same companion
+    /// (DEC-521 item 1).
     #[test]
     #[ignore = "pending E7-2"]
     fn a_client_order_id_is_a_function_of_the_intent_id_alone(script in scripted_doubted()) {
         let run = play(&script);
-        let mut by_intent: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut by_intent: BTreeMap<(String, u64), BTreeSet<String>> = BTreeMap::new();
         let mut attempts: BTreeMap<String, usize> = BTreeMap::new();
         for submission in submissions_with_requests(&run.drafts) {
             let (Some(intent), Some(id)) = (
@@ -1350,8 +1358,9 @@ proptest! {
             ) else {
                 continue;
             };
+            let rung = submission.get("rung").and_then(Value::as_int).unwrap_or(0);
             by_intent
-                .entry(intent.to_owned())
+                .entry((intent.to_owned(), rung))
                 .or_default()
                 .insert(id.to_owned());
             let count = attempts.entry(intent.to_owned()).or_insert(0);
@@ -1363,13 +1372,14 @@ proptest! {
              there is a resubmission for this property to judge: {:?}",
             attempts
         );
-        for (intent, ids) in &by_intent {
+        for ((intent, rung), ids) in &by_intent {
             prop_assert_eq!(
                 ids.len(),
                 1,
-                "intent {} produced {:?}, so the id depends on more than the intent \
-                 (planted bug 7)",
+                "intent {} at rung {} produced {:?}, so the id depends on more than the intent \
+                 and its rung (planted bug 7)",
                 intent,
+                rung,
                 ids
             );
         }
@@ -1958,13 +1968,18 @@ proptest! {
     /// resolved by the order's own terminal state on the journal, or, for a protective order, by
     /// the `ProtectionChanged` that records it cancelled — never by the request being accepted.
     /// Two rulings bound the wait. Rule 5's wait ends when the cancel is journaled overdue
-    /// (`cancel_overdue`, DEC-160 (7), (13), (18)). And the OCO for a partly filled entry's filled
-    /// quantity is placed once that entry is terminal, whatever else is pending (DEC-346 item 6),
-    /// so a protective submission does not wait on a plain buy's cancel: a plain buy that fills
-    /// only adds to the position the protection covers, while a bracket entry's fill activates
-    /// sell legs, so its cancel still holds protection back. The sells are what §5.4's sequences
-    /// order after a confirmation; an opening may be accepted while an exit waits, and the exit
-    /// then asks its cancel too (DEC-160 (13)), so a buy is not judged here.
+    /// (`cancel_overdue`, DEC-160 (7), (13), (18)). And an entry that turns terminal partly
+    /// filled, "after that cancel or by any other path", gets its OCO for the filled quantity
+    /// (DEC-346 item 6), so a protective submission does not wait on any buy's cancel, plain or
+    /// bracket (DEC-521 item 2). A plain buy that fills only adds to the position. A bracket
+    /// entry's legs are held until it is completely filled and are sized to its quantity (§5.4),
+    /// so the fill that activates them adds as much to the position as they can sell, and the OCO
+    /// is at most its own entry's fill. That bound needs no live protective order or exit to cover
+    /// the filled shares of a bracket entry whose legs are held; a re-placement sized on the
+    /// position breaks it today, because held legs are counted by no cap (backlog E1), and so does
+    /// E5's overdue cancel. Every other sell still waits on every outstanding cancel: the sells are
+    /// what §5.4's sequences order after a confirmation; an opening may be accepted while an exit
+    /// waits, and the exit then asks its cancel too (DEC-160 (13)), so a buy is not judged here.
     #[test]
     #[ignore = "pending E7-4"]
     fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {
@@ -1981,14 +1996,12 @@ proptest! {
         }
         let mut instrument_of: BTreeMap<String, String> = BTreeMap::new();
         let mut outstanding: BTreeMap<String, String> = BTreeMap::new();
-        let mut plain_buys: BTreeSet<String> = BTreeSet::new();
+        let mut buys: BTreeSet<String> = BTreeSet::new();
         for effect in &run.effects {
             if let Effect::Broker(BrokerRequest::Submit(order)) = effect
                 && order.side == mandate_accounting::Side::Buy
-                && order.bracket.is_none()
-                && order.oco.is_none()
             {
-                plain_buys.insert(order.client_order_id.as_str().to_owned());
+                buys.insert(order.client_order_id.as_str().to_owned());
             }
             match effect {
                 Effect::Journal(draft) if draft.event_type == "OrderSubmitted" => {
@@ -2042,7 +2055,7 @@ proptest! {
                     let blocking: Vec<&String> = outstanding
                         .iter()
                         .filter(|(_, name)| name.as_str() == order.instrument.as_str())
-                        .filter(|(id, _)| !(protective && plain_buys.contains(*id)))
+                        .filter(|(id, _)| !(protective && buys.contains(*id)))
                         .map(|(id, _)| id)
                         .collect();
                     prop_assert!(

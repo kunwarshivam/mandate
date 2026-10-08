@@ -661,6 +661,13 @@ after U-A1 to U-A5 are recorded.
   `model_registry`, DEC-484, which needs an artifact-aware append in `mandate-journal-pg`), and
   slice 5 as the new `mandate-paper` adapter, its bounded wait for a terminal entry, and the
   deletion of E7-7's AAPL assembly.
+  *Follow-up (A1, [DEC-524](decisions/DEC-524.md)):* nothing yet turns a broker-reported
+  maintenance deficit, a negative `BrokerAccount::maintenance_excess`, into trading-domain spec
+  §9.2's `exits_only` for every agent and an owner alert. The gate deliberately denies nothing per
+  order on it (`mandate-risk`'s `a_reported_deficit_is_an_account_state_not_a_denial`), so the
+  account-state path owns it, beside §7.3's restriction table in the executor's reconciliation.
+  With 1× long-only exposure no approved order creates a deficit, so the first trade does not
+  need it.
 - **E7-20 (Must, M7)** As the founder, I want CodeQL to flag a credential written to a log by
   its type rather than its name, so that excluding the name-keyed `rust/cleartext-logging` query
   ([DEC-500](decisions/DEC-500.md)) leaves no gap. *Accepted when:* a query under
@@ -2940,6 +2947,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   are not yet recorded `placed` counts as live protection for any exit sequence in the instrument,
   so the exit waits a step and cancels the legs through §5.4 before it submits, as DEC-485 item 16
   does for the flatten. Until then that property fails on #668's code.
+  The same root cause, held legs counted by no cap, reaches protection sizing too
+  ([DEC-521](decisions/DEC-521.md) item 2, #689's review): `re_place` (reached from `settle` →
+  `replace` after an exit sequence, and from `new_day`'s re-placement before expiry) sizes on
+  `long`, which includes a working bracket's ingested partial fills, while `covered` excludes its
+  held legs. Then a later OCO for another entry, placed while that bracket's cancel is unconfirmed
+  (DEC-346 item 6), oversells once the bracket completes: with B = 10 shares outside two entries, a
+  re-placement over the first entry's f1 = 1 covers 11; the second entry ends with f2 = 1 and its
+  OCO is 1; the first completes (Q1 = 2) and its legs activate, so sells are 11 + 1 + 2 = 14 against
+  a position of 13. The fix counts held legs, sized to their entry, in every cap and sizing,
+  re-placement included, and pins the arithmetic with a hand case.
 - **E7-4 (stream K), E2 from E7-4 slice 7's tests correction ([DEC-506](decisions/DEC-506.md)
   item 8): an opening rests inside an unprotected interval.** Minimal script
   (`properties::no_resting_order_is_submitted_inside_an_unprotected_interval`):
@@ -2953,6 +2970,37 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   tests-first: the gate holds such an opening until protection is placed again, never repricing
   it, with a hold reason a DEC names (§9.1); exits are untouched. Until then that property fails on
   #668's code.
+- **E7-4 (stream K), E4 from E7-4 slice 7's second tests correction
+  ([DEC-521](decisions/DEC-521.md) item 3): a second bracket's end closes the first bracket's
+  unprotected interval, so the bound alerts late.** Minimal script
+  (`properties::no_interval_exceeds_the_limit_without_an_alert`, seed 101):
+  `Intent 0 (AAPL open), Acknowledge, Fill, Intent 1 (CPHC protected open), Acknowledge, Fill,
+  Intent 2 (CPHC protected open), Fill, Fill, Wait, Intent 0, Intent 0, Cancelled, Intent 0`
+  (bracket 01 partly filled at 34; bracket 02 partly filled at 42 and complete at 46, its legs
+  placed; 01's share is still unprotected at 96 with no alert). The fold's `unprotected_end` ends the
+  first open interval in the instrument and ignores the `bracket` it names, so 02's end closes 01's
+  interval and leaves 02's open; `bound` measures from 42, not 34. Trading spec §5.4 ("Bounded
+  unprotected intervals": every interval is journaled from start to end and alerts at
+  `max_unprotected_s`). The acknowledgment path has the same defect: a partly filled second
+  bracket's OCO ends its interval at the broker's acknowledgment (DEC-348 item 2), with an
+  `unprotected_end` that names no bracket, and that arm too ends the first open interval. Fix
+  tests-first, as its own PR: `UnprotectedInterval` carries the bracket entry its start names; an
+  end that names a bracket, and the acknowledgment of the OCO placed for one, close only that
+  bracket's interval. The cases are `hand::a_second_brackets_end_leaves_the_first_brackets_interval_bounded`
+  and `hand::an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_bounded`,
+  which the fix takes live with their `BEHAVIOUR_ONLY_TESTS` rows; the property goes live with #668.
+- **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
+  ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
+  while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on
+  #668's head: `Intent 0 (AAPL open), Acknowledge, Fill, Intent 1 (CPHC protected open),
+  Acknowledge, Fill, Intent 3 (CPHC risk exit), Intent 2 (CPHC protected open), Acknowledge, Fill,
+  Wait, Cancelled, Cancelled`. At 84 both entries' cancels are journaled `cancel_overdue`, and the
+  exit of 1 is submitted, sized on their fills, while both still rest at the broker
+  (DEC-160 (7), (13), (18)). At 88 02's cancel is confirmed and its OCO placed for 1 (room 2 − 1,
+  DEC-346 item 6). If 01's last share then fills, the broker activates its legs for 2: sells of
+  1 + 1 + 2 against a position of 3, so a short of 1 is possible; a whole-position exit gets there
+  with no OCO. This is arithmetic: the harness cannot fill 01 behind the newer orders. Trading spec
+  §5.4 (Σ protective sells ≤ position) and `AGENTS.md` rule 12.
 - **E7-4 (stream K), from E7-4 slice 7's tests correction: an unconfirmed owner exit pre-market
   cancels protection for a sell that cannot fill before 09:30 (open question for the
   coordinator).** At 2026-09-22 08:00 ET an owner kill switch without confirmation cancels the

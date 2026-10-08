@@ -276,6 +276,8 @@ fn account() -> Result<BrokerAccount, String> {
         buying_power: usd("3999997.98")?,
         non_marginable_buying_power: usd("999998.99")?,
         accrued_fees: Usd::ZERO,
+        last_equity: usd("1000000")?,
+        maintenance_margin: Usd::ZERO,
     })
 }
 

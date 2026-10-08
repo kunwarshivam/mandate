@@ -593,6 +593,13 @@ pub struct BrokerAccount {
     pub buying_power: Usd,
     pub non_marginable_buying_power: Usd,
     pub accrued_fees: Usd,
+    /// The broker's equity at the prior session's close (§7.2's `last_equity`): the prior-close
+    /// equity §9.2's `legacy_pdt` regime compares with its threshold. Read from the broker, never
+    /// journaled: `AccountStateObserved` and `AccountSnapshotRecorded` are closed schemas (DEC-524).
+    pub last_equity: Usd,
+    /// The broker's maintenance margin requirement, from which [`BrokerAccount::maintenance_excess`]
+    /// derives the excess §9.2's `intraday_margin` regime checks. Never journaled (DEC-524).
+    pub maintenance_margin: Usd,
 }
 
 /// A reject the broker answered with, from which §7.3's restriction table is read.

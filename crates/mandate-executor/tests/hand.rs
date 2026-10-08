@@ -3167,6 +3167,331 @@ fn a_terminal_partly_filled_entry_is_oco_d_at_once() {
     assert_eq!((oco.take_profit, oco.stop), (price("170"), price("140")));
 }
 
+/// DEC-346 item 6 sizes the OCO for a terminal partly filled entry to that entry's own filled
+/// quantity, capped by what the position leaves after every live protective order and exit. The
+/// cap only lowers it: with another bracket's 6 shares unprotected beside it, the room is 11 and the
+/// OCO is still the 5 that filled, which is what keeps the first bracket's legs, if it completes,
+/// within the position (DEC-521 item 2).
+#[test]
+fn a_terminal_entry_oco_covers_its_own_fill_not_the_room() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    let first = shell
+        .run(
+            handoff(
+                INTENT,
+                common::AGENT,
+                protected_opening(AAPL, "10", "150", "140", Some("170")),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the first bracket is sent");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-1",
+            Some(&first),
+            "6",
+            "150",
+        ))),
+        &ports,
+    );
+    let second = shell
+        .run(
+            handoff(
+                OTHER_INTENT,
+                common::AGENT,
+                protected_opening(AAPL, "10", "150", "140", Some("170")),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("a second bracket is sent beside the first");
+
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-2",
+            Some(&second),
+            AAPL,
+            Side::Buy,
+            "10",
+            "5",
+            "canceled",
+        ))),
+        &ports,
+    );
+
+    let oco = ran
+        .submissions()
+        .first()
+        .copied()
+        .and_then(|o| o.oco.clone())
+        .expect("the second bracket ends partly filled, so its filled quantity is OCO'd (§5.4)");
+    assert_eq!(
+        oco.qty,
+        qty("5"),
+        "the OCO covers the 5 shares the second bracket filled, not the 11 the position leaves \
+         uncovered, 6 of which are the first bracket's, whose legs are held (DEC-346 item 6)"
+    );
+}
+
+/// §5.4's bound is per interval: two partly filled brackets in one instrument keep two intervals,
+/// and the second's legs, once placed, end the second's interval, not the first's. The first
+/// bracket's shares are still unprotected, so the owner is alerted at the first tick
+/// `max_unprotected_s` after its partial fill (backlog: "E7-4 (stream K), E4 from E7-4 slice 7's
+/// second tests correction", DEC-521 item 3).
+#[test]
+#[ignore = "pending E7-4"]
+fn a_second_brackets_end_leaves_the_first_brackets_interval_bounded() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Tick(clock(10)), &ports);
+    let first = shell
+        .run(
+            handoff(
+                INTENT,
+                common::AGENT,
+                protected_opening(AAPL, "10", "150", "140", Some("170")),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the first bracket is sent");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&first),
+            AAPL,
+            Side::Buy,
+            "10",
+            "6",
+            "partially_filled",
+        ))),
+        &ports,
+    );
+    shell.run(Input::Tick(clock(20)), &ports);
+    let second = shell
+        .run(
+            handoff(
+                OTHER_INTENT,
+                common::AGENT,
+                protected_opening(AAPL, "10", "150", "140", Some("170")),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("a second bracket is sent beside the first: it only adds a tranche (§5.4)");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-2",
+            Some(&second),
+            AAPL,
+            Side::Buy,
+            "10",
+            "5",
+            "partially_filled",
+        ))),
+        &ports,
+    );
+    shell.run(Input::Tick(clock(30)), &ports);
+    let completed = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-2",
+            Some(&second),
+            AAPL,
+            Side::Buy,
+            "10",
+            "10",
+            "filled",
+        ))),
+        &ports,
+    );
+    assert!(
+        completed
+            .drafts
+            .iter()
+            .any(|d| d.event_type == "ProtectionChanged"
+                && d.payload.get("action").and_then(|v| v.as_str()) == Some("unprotected_end")
+                && d.payload.get("bracket").and_then(|v| v.as_str()) == Some(second.as_str())),
+        "the second bracket's legs are placed and its own interval ends: {:?}",
+        completed.draft_types()
+    );
+
+    let early = shell.run(Input::Tick(clock(69)), &ports);
+    assert!(
+        !early.notifications.contains(&"unprotected_interval_limit"),
+        "59 seconds after the first partial fill is inside the bound: {:?}",
+        early.notifications
+    );
+    let bound = shell.run(Input::Tick(clock(70)), &ports);
+    assert!(
+        bound.notifications.contains(&"unprotected_interval_limit"),
+        "the first bracket's 6 shares have been unprotected since 10, so at 70 the owner is \
+         alerted; the second bracket's end at 30 must not have closed that interval (§5.4): {:?}",
+        bound.notifications
+    );
+    let after = shell.run(Input::Tick(clock(85)), &ports);
+    assert!(
+        !after.notifications.contains(&"unprotected_interval_limit"),
+        "the first interval is alerted once, and the second ended at 30, so 65 seconds after the \
+         second partial fill nothing alerts again: {:?}",
+        after.notifications
+    );
+}
+
+/// The same bound when the second bracket ends partly filled: its OCO ends the second's interval
+/// only once the broker acknowledges it (DEC-348 item 2), and that acknowledgment, which names no
+/// bracket, must end the interval of the bracket the OCO protects, not the first bracket's
+/// (backlog: "E7-4 (stream K), E4 from E7-4 slice 7's second tests correction", DEC-521 item 3).
+#[test]
+#[ignore = "pending E7-4"]
+fn an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_bounded() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Tick(clock(10)), &ports);
+    let first = shell
+        .run(
+            handoff(
+                INTENT,
+                common::AGENT,
+                protected_opening(AAPL, "10", "150", "140", Some("170")),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the first bracket is sent");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&first),
+            AAPL,
+            Side::Buy,
+            "10",
+            "6",
+            "partially_filled",
+        ))),
+        &ports,
+    );
+    shell.run(Input::Tick(clock(20)), &ports);
+    let second = shell
+        .run(
+            handoff(
+                OTHER_INTENT,
+                common::AGENT,
+                protected_opening(AAPL, "10", "150", "140", Some("170")),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("a second bracket is sent beside the first: it only adds a tranche (§5.4)");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-2",
+            Some(&second),
+            AAPL,
+            Side::Buy,
+            "10",
+            "5",
+            "partially_filled",
+        ))),
+        &ports,
+    );
+    shell.run(Input::Tick(clock(30)), &ports);
+    let oco = shell
+        .run(
+            Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+                "b-2",
+                Some(&second),
+                AAPL,
+                Side::Buy,
+                "10",
+                "5",
+                "canceled",
+            ))),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect(
+            "the second bracket ends partly filled, so its 5 shares get an OCO (DEC-346 item 6)",
+        );
+    shell.run(Input::Tick(clock(35)), &ports);
+    let acknowledged = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-3",
+            Some(&oco),
+            AAPL,
+            Side::Sell,
+            "5",
+            "0",
+            "accepted",
+        ))),
+        &ports,
+    );
+    assert!(
+        acknowledged
+            .drafts
+            .iter()
+            .any(|d| d.event_type == "ProtectionChanged"
+                && d.payload.get("action").and_then(|v| v.as_str()) == Some("unprotected_end")),
+        "the OCO's acknowledgment ends an interval (DEC-348 item 2): {:?}",
+        acknowledged.draft_types()
+    );
+
+    let early = shell.run(Input::Tick(clock(69)), &ports);
+    assert!(
+        !early.notifications.contains(&"unprotected_interval_limit"),
+        "59 seconds after the first partial fill is inside the bound: {:?}",
+        early.notifications
+    );
+    let bound = shell.run(Input::Tick(clock(70)), &ports);
+    assert!(
+        bound.notifications.contains(&"unprotected_interval_limit"),
+        "the first bracket's 6 shares have been unprotected since 10, so at 70 the owner is \
+         alerted; the acknowledgment of the second bracket's OCO at 35 must not have closed that \
+         interval (§5.4): {:?}",
+        bound.notifications
+    );
+    let after = shell.run(Input::Tick(clock(85)), &ports);
+    assert!(
+        !after.notifications.contains(&"unprotected_interval_limit"),
+        "the first interval is alerted once, and the second ended at its acknowledgment, so 65 \
+         seconds after the second partial fill nothing alerts again: {:?}",
+        after.notifications
+    );
+}
+
 #[test]
 fn an_unprotected_interval_at_the_limit_cancels_re_places_and_alerts() {
     let ids = TestIds;
