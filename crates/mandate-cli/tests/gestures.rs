@@ -89,27 +89,33 @@ fn deploy_code(agent: &str, version: &str) -> String {
     ))
 }
 
+/// Appends one event as another control-stream writer would.
+fn seed(journal: &mut Journal, event_type: &str, payload: &str) {
+    let control = stream(CONTROL);
+    let head = journal.head(&control).unwrap().seq;
+    let draft = SEEDED
+        .replace("@I", &format!("{head:025}"))
+        .replace("@P", payload);
+    let draft = draft.replace("ConfigSnapshotRegistered", event_type);
+    let epoch = journal.take_ownership(&control).unwrap();
+    let outcome = journal.append(&control, head, epoch, now().at, &[draft.as_bytes()]);
+    assert!(matches!(outcome, Ok(AppendOutcome::Committed(_))));
+}
+
 /// A workspace whose control stream registers the fixture's model and SPY's snapshot.
 fn registered() -> (Journal, Store) {
     let (mut journal, mut store) = (Journal::default(), Store::new());
     store.put_artifact(SPY.as_bytes()).unwrap();
     let snapshot = SNAPSHOT.replace("@H", &reference(&canonical(SPY)));
-    let control = stream(CONTROL);
-    for (n, payload) in [MODEL, snapshot.as_str()].into_iter().enumerate() {
-        let draft = SEEDED
-            .replace("@I", &format!("{n:025}"))
-            .replace("@P", payload);
-        let epoch = journal.take_ownership(&control).unwrap();
-        let head = journal.head(&control).unwrap().seq;
-        let outcome = journal.append(&control, head, epoch, now().at, &[draft.as_bytes()]);
-        assert!(matches!(outcome, Ok(AppendOutcome::Committed(_))));
-    }
+    seed(&mut journal, "ConfigSnapshotRegistered", MODEL);
+    seed(&mut journal, "ConfigSnapshotRegistered", &snapshot);
     (journal, store)
 }
 
 /// Showing a gesture's code runs its checks but the code's and writes nothing: no append, no
 /// stored object, no assertion. The codes are DEC-530 item 4's, and the warnings mandate spec
-/// §4.2's: W-002, as 1000 x 0.05 at the stop is over 0.02 x 1000 a day.
+/// §4.2's: W-002, as 1000 x 0.05 at the stop is over 0.02 x 1000 a day. A shown deployment checks
+/// the V-rules as its gesture does.
 #[test]
 #[ignore = "pending E10-16"]
 fn a_shown_code_is_the_gestures_and_showing_writes_nothing() {
@@ -163,6 +169,15 @@ fn a_shown_code_is_the_gestures_and_showing_writes_nothing() {
     assert_eq!(shown, Ok(expected), "the deployment's code");
     let after = (journal.attempts.len(), store.clone(), ids.assertions);
     assert_eq!(after, before, "nothing written");
+    seed(
+        &mut journal,
+        "ConnectionRevoked",
+        r#"{"connection_id":"conn_alpaca_paper_01"}"#,
+    );
+    let refused = deployment(&journal, &store, &owner(), (AGENT, &version), now());
+    let reason = refused.map_err(|e| e.to_string());
+    let invalid = matches!(&reason, Err(why) if why.contains("version_invalid"));
+    assert!(invalid, "the V-rules are checked: V-001, {reason:?}");
 }
 
 /// The three commands parse with DEC-527's required owner flags and P0's target, `--code` is
