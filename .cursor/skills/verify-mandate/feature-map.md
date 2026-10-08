@@ -587,13 +587,20 @@ while a reducing purpose passes it.
   `crates/mandate-journal-pg/src/lib.rs`'s
   `a_version_two_configuration_draft_passes_validation_and_is_refused_after_idempotency` (the
   plain-append refusal, which no external oracle covers).
+  J0 (DEC-510): `crates/mandate-journal-pg/tests/pg_config_artifacts.rs`, pending E7-19 against the
+  `PgJournal::append_with_config_artifacts` stub (the Postgres artifact-aware append gives
+  `MemoryJournal`'s outcomes, heads, and rows; refusals write nothing; §5.1's order; a property
+  against an outcome built from each step). Each starts with a database-free property so the
+  pending gate sees the stub without Postgres.
 - **Reference cases:** the `production_config_refs` section of `fixtures/refcases/journal.json`.
 - **Not covered here:** DEC-484 item 4's object shape (`policy_set_version`, level order and
   uniqueness, sorted unique models and params) is not checked at append, because the spec's
   append-time check is only absence and a differing top-level `kind`; the validated production
   input owns it, as the E7-19 backlog row says.
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-journal-pg -p mandate-refcases -E
-  'binary(production_config_refs) | package(mandate-journal) | package(mandate-journal-pg)'`.
+  'binary(production_config_refs) | package(mandate-journal) | package(mandate-journal-pg)'`. J0's
+  Postgres tests: `MANDATE_PG_URL=postgres://… cargo nextest run -p mandate-journal-pg --test
+  pg_config_artifacts --run-ignored all`.
 
 ## Agent-stream payload schemas (E7-9)
 
