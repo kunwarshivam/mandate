@@ -20,10 +20,23 @@
 //! read only by `mandate-num`, never through a float (ES-23); text that is not canonical decimal
 //! text is refused, which is stricter than the contract states.
 //!
-//! Where the contract is silent the simulator takes the reading that adds no risk: a `ref_id` is
-//! deduplicated per account and returns the first order whatever the re-send says; buying power
-//! is a scripted figure that orders and fills do not move; and a sell larger than the position is
-//! refused, because the agentic account cannot sell short.
+//! Where the contract is silent the simulator takes the reading that adds no risk, and says so:
+//!
+//! - a `ref_id` is deduplicated per account, and a re-send returns the first order whatever it
+//!   says, unless [`Event::RefuseChangedResend`] makes a changed re-send an error;
+//! - an order record does not echo its `ref_id` unless [`Event::EchoRefId`] turns that on, so a
+//!   recovery that matches on it cannot pass here and fail against the real broker;
+//! - buying power is a scripted figure that orders and fills do not move;
+//! - a sell is refused when it is larger than the position less every working sell, because the
+//!   agentic account cannot sell short and two working sells must not oversell it;
+//! - `place` refuses on any alert `review` would raise;
+//! - a fill comes only to a `confirmed` or `partially_filled` order;
+//! - the end of the trading day cancels every working `gfd` order, `queued` ones included;
+//! - every other state change follows one lifecycle table: `new` to `queued`, `confirmed`,
+//!   `unconfirmed`, `cancelled`, `rejected` or `failed`; `queued` to the same but `queued`;
+//!   `unconfirmed` to `confirmed`, `cancelled`, `rejected` or `failed`; `confirmed` to
+//!   `cancelled`, `voided` or `failed`; `partially_filled` to `cancelled` or `voided`; and fills
+//!   alone reach `partially_filled` and `filled`.
 //!
 //! [DEC-124]: ../../../docs/project/04-decision-log.md
 //! [DEC-441]: ../../../docs/project/decisions/DEC-441.md
@@ -102,7 +115,9 @@ pub enum Fault {
 
 /// A scripted input: the session moves (a queued order whose market hours admit the new session
 /// is confirmed), a quote or a halt, a fault for the next place that creates an order, or the end
-/// of the trading day, which cancels every working `gfd` order and closes the market.
+/// of the trading day, which cancels every working `gfd` order and closes the market. Two switches,
+/// both off by default, change readings the contract leaves open: whether an order record echoes
+/// its `ref_id`, and whether a re-send of a `ref_id` with a different body is an error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Session(Session),
@@ -110,6 +125,8 @@ pub enum Event {
     Halt(String),
     Script(Fault),
     EndOfDay,
+    EchoRefId(bool),
+    RefuseChangedResend(bool),
 }
 
 /// A customer account. `pattern_day_trader` marks an account a day trade would restrict, so an
@@ -151,7 +168,9 @@ pub struct Execution {
 pub struct Order {
     pub id: String,
     pub account_number: String,
-    pub ref_id: String,
+    /// `None` unless [`Event::EchoRefId`] is on: the contract does not say that `orders[]`
+    /// carries it.
+    pub ref_id: Option<String>,
     pub symbol: String,
     pub side: Side,
     pub order_type: OrderType,
@@ -210,6 +229,8 @@ pub enum SimError {
     ThroughLimit,
     #[error("the order was created, and its answer was lost")]
     AnswerLost,
+    #[error("the ref_id was sent before with a different order")]
+    ChangedResend,
 }
 
 /// The simulated broker: its accounts, orders, positions, and the scripted market.

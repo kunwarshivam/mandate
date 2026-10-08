@@ -58,8 +58,6 @@ fn only_an_agentic_account_reviews_or_places() -> Outcome {
 
 #[test]
 fn each_refusal_names_what_it_refuses() {
-    let stub = SimError::Unimplemented { story: "E7-25" };
-    assert_eq!(stub.to_string(), "E7-25 has not been implemented yet");
     let field = SimError::Unreadable("ref_id").to_string();
     assert!(field.starts_with("`ref_id` is missing"), "{field}");
     let alert = SimError::Alert(mandate_rh_sim::Alert::Halt).to_string();

@@ -39,8 +39,10 @@
 #      its hash from `mandate_modelhost::content()` and no caller supplies a hash; its
 #      `forbidden_internal` list keeps it from ever reaching mandate-alpaca, mandate-shell or
 #      mandate-paper, so the founder's CLI cannot place an order
-#   tool  mandate-refcases, xtask, and mandate-rh-sim, the simulated Robinhood broker (E7-25,
-#         DEC-124): a test fixture no product crate may depend on
+#   10 mandate-rh-sim, the simulated Robinhood broker (E7-25, DEC-124): above every product crate,
+#      so none can take it as a normal dependency and it stays out of every production graph,
+#      while the Robinhood connector's tests (C1) reach it as a dev-dependency
+#   tool  mandate-refcases, xtask
 
 impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
 
@@ -119,7 +121,7 @@ pure = false
 allowed_external = ["libtest-mimic", "serde_json", "toml"]
 
 [crates.mandate-rh-sim]
-layer = "tool"
+layer = 10
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
