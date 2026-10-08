@@ -2,23 +2,14 @@
 //! ([task brief](../../../docs/project/tasks/E4-2-backtest-baseline.md) "The baseline strategy",
 //! DEC-127 items 12 and 13).
 
-use core::cmp::Ordering;
+mod ma_crossover;
+
+pub use ma_crossover::StrategyConfig;
 
 use crate::BacktestError;
 use mandate_accounting::AssetClass;
-use mandate_num::{Bps, NumError, Price, Ratio, Usd};
+use mandate_num::{Bps, Price, Usd};
 use mandate_sim::TimeInForce;
-
-/// The moving-average crossover's parameters. The windows are counted in **periods**, not bars, and
-/// `collar` is how far from the signal period's close a limit is priced before it is put on the tick
-/// (spec §2.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StrategyConfig {
-    pub fast_periods: u32,
-    pub slow_periods: u32,
-    pub collar: Bps,
-    pub target_notional: Usd,
-}
 
 /// Which strategy a run drives.
 ///
@@ -101,45 +92,4 @@ impl Strategy {
             (Self::MovingAverageCrossover(_), AssetClass::UsEquity) => TimeInForce::Day,
         }
     }
-}
-
-impl StrategyConfig {
-    /// `Long` when `fast_sum × slow_periods > slow_sum × fast_periods`, the division-free form of
-    /// `fast_sum ÷ fast_periods > slow_sum ÷ slow_periods`, and `Flat` on equality or below.
-    fn signal(&self, closes: &[Price]) -> Result<Signal, BacktestError> {
-        let (fast, slow) = self.windows()?;
-        if closes.len() < slow {
-            return Ok(Signal::Undecided);
-        }
-        let fast_average = window_sum(closes, fast)?.times_int(self.slow_periods)?;
-        let slow_average = window_sum(closes, slow)?.times_int(self.fast_periods)?;
-        Ok(match fast_average.cmp(&slow_average) {
-            Ordering::Greater => Signal::Long,
-            Ordering::Equal | Ordering::Less => Signal::Flat,
-        })
-    }
-
-    /// The two windows as lengths, or `strategy_windows_crossed` for a fast window at or above the
-    /// slow one, or either zero.
-    fn windows(&self) -> Result<(usize, usize), BacktestError> {
-        let fast_below_slow = matches!(self.fast_periods.cmp(&self.slow_periods), Ordering::Less);
-        if self.fast_periods == 0 || !fast_below_slow {
-            return Err(BacktestError::StrategyWindowsCrossed);
-        }
-        let fast = usize::try_from(self.fast_periods).map_err(|_| NumError::Overflow)?;
-        let slow = usize::try_from(self.slow_periods).map_err(|_| NumError::Overflow)?;
-        Ok((fast, slow))
-    }
-}
-
-/// Σ of the last `periods` closes, exact: a 9-place price is read as the ratio its canonical text
-/// denotes, so the comparison introduces no rounding of its own (DEC-127 item 12).
-fn window_sum(closes: &[Price], periods: usize) -> Result<Ratio, BacktestError> {
-    let window = closes
-        .iter()
-        .rev()
-        .take(periods)
-        .map(|close| Ratio::parse(&close.to_string()))
-        .collect::<Result<Vec<Ratio>, NumError>>()?;
-    Ok(Ratio::sum(&window)?)
 }

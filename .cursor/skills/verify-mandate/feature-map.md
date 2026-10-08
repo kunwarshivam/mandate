@@ -117,7 +117,9 @@ every workspace crate and reference-case suite has an entry and that every path 
   `docs/project/tasks/E4-2-backtest-baseline.md` and DEC-127.
 - **Code:** `mandate-backtest`: `crates/mandate-backtest/src/lib.rs` (the loop's inputs, its per-bar
   order, the run's fills, orders, and observations), `crates/mandate-backtest/src/strategy.rs` (the
-  division-free moving-average crossover and the buy-and-hold benchmark),
+  strategy dispatch and the buy-and-hold benchmark),
+  `crates/mandate-backtest/src/strategy/ma_crossover.rs` (the division-free moving-average
+  crossover, in its own file so DEC-504's content hash can list it; E15-13 M0),
   `crates/mandate-backtest/src/metrics.rs` (every figure of a block),
   `crates/mandate-backtest/src/report.rs` (both blocks, the input digests, the canonical bytes and
   their SHA-256). It drives `mandate-sim`'s fill model and `mandate-accounting`'s fold unchanged; the
