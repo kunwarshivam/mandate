@@ -556,6 +556,14 @@ below). In order, workspace services:
    its open streams in the workspace within 60 s (ID-3). Its sessions keep serving its other
    workspaces, and a session left with no workspace and no org membership that reaches a scope is
    closed (`SessionRevoked` with reason `deactivated`);
+   and when that was the principal's last membership in the deployment that reaches a scope, its
+   notification addresses are removed too, one `NotificationAddressChanged` with `action: removed`
+   per address, in the same transaction, raising no address-change notice (the remaining admins get
+   `member_deactivated`). Like every write of the request path, these carry the authenticated
+   principal as actor: the deactivating admin, or the member who left (§4.5), never `system`, and
+   no step-up evidence, since removing access needs none. While the principal still holds a
+   reaching membership elsewhere, its addresses stay, and the receive column (§4.1) alone stops the
+   ended workspace's notices reaching it;
 3. leave every committed event as it was. A response or command committed before step 1 was
    authorized when committed and is judged by the runtime as usual. One arriving after step 1 is
    refused at the API and never committed;
