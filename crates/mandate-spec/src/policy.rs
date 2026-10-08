@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use core::cmp::Ordering;
 
+use mandate_canon::Value;
 use mandate_domain::{AutonomyDecision, Environment, Purpose};
 
 use crate::document::{Channel, LadderAction, Mandate};
@@ -214,6 +215,28 @@ pub enum PolicyValue {
 pub struct PolicyLevel {
     pub name: LevelName,
     pub values: BTreeMap<PolicyKey, PolicyValue>,
+}
+
+impl PolicyLevel {
+    /// One `schemas/policy.schema.json` document read strictly, as `Mandate::parse` reads the
+    /// mandate schema: an unknown member, a missing one, a value of another type, off its enum, off
+    /// its decimal grammar, out of its integer bounds, or a set repeating an item is a
+    /// [`ParseError`](crate::ParseError) naming the pointer. `profile` is checked and not kept
+    /// (journal spec §9, DEC-484 item 4).
+    pub fn parse(document: &Value) -> Result<Self, SpecError> {
+        let _ = document;
+        Err(SpecError::Unimplemented)
+    }
+}
+
+/// A `policy_set` configuration object (journal spec §9, DEC-484 item 4): exactly `kind:
+/// "policy_set"`, `policy_set_version: 1` and `levels`, each a [`PolicyLevel::parse`] document,
+/// returned outermost first. A level out of the platform, organization, workspace order, or
+/// repeated, is `invalid_input`; a member or a level that breaks the schema is its
+/// [`ParseError`](crate::ParseError), its pointer from the object's root.
+pub fn parse_policy_set(object: &Value) -> Result<Vec<PolicyLevel>, SpecError> {
+    let _ = object;
+    Err(SpecError::Unimplemented)
 }
 
 /// One violation, naming the key, the level that broke it, and the **nearest** ancestor whose value it

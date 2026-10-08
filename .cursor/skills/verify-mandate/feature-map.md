@@ -859,7 +859,8 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   identity the version hash rests on), `crates/mandate-spec/tests/document.rs` (the code and pointer
   each rejection carries), `crates/mandate-spec/tests/validate.rs` (the closed §7 list, the provenance
   rules, the confirmation screen's four figures), `crates/mandate-spec/tests/policy.rs` (the nearest
-  broken ancestor, each key kind, the absence asymmetry),
+  broken ancestor, each key kind, the absence asymmetry), `crates/mandate-spec/tests/policy_document.rs`
+  (a `policy.schema.json` document and a `policy_set` object read strictly, DEC-484 item 4),
   `crates/mandate-spec/tests/risk_day.rs` (the year tiled without gap or overlap),
   `crates/mandate-spec/tests/goal.rs` (each §3.1 "done when" row, and a `profit_stop` left to the risk
   state), `crates/mandate-spec/tests/risk.rs` (the §5 fold: the ladder and its hysteresis boundary,
