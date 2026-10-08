@@ -328,6 +328,19 @@ describe("the desktop", () => {
     expect(task).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("cascades each window it opens from the one in front, so a new window shows the last one rather than covering it; the home page is never cascaded from", async () => {
+    renderLanding();
+    const translate = (name: string) => win(name).style.translate;
+    await press(icon("The record"));
+    expect(translate(RECORD)).toBe("-24px 12px");
+    await press(icon("Questions"));
+    expect(translate(HELP)).toBe("4px 40px");
+    await press(icon("Guestbook"));
+    expect(translate(GUESTBOOK)).toBe("32px 68px");
+    await press(icon("The record"));
+    expect(translate(RECORD)).toBe("-24px 12px");
+  });
+
   it("maximizes a window to fill the desktop, and restores it", async () => {
     renderLanding();
     await press(screen.getByRole("button", { name: "Maximize Owlhead Home Page" }));

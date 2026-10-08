@@ -38,8 +38,9 @@ the owl, the rules and the record.
 - [x] **Approvals countdown.** By the brief: whole minutes, quantized to 15 seconds, in a slot
       that holds the width of "(59 min left)", never seconds, never colour. No change. (R-14)
 - [x] **Breadcrumb ellipsis** on top-level screens: the fold shows only past the top level. (R-8)
-- [ ] **Landing windows.** Open beside the last rather than on top; "Try it." gets a button;
-      Questions shows its scrollbar. (R-30)
+- [x] **Landing windows.** Each window now cascades 28px down and right of the one in front,
+      so a new one shows the last rather than covering it. "Try it." already had its button on
+      the next line, and the windows scroll; the review's capture used overlay scrollbars. (R-30)
 - [ ] **Set-up replies say what they read** and, on a second miss, what shape of answer would
       work; lookback and z-score default with "default" marked. (R-26, R-27)
 
