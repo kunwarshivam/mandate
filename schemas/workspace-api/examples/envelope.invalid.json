@@ -59,6 +59,15 @@
       "event_id": null,
       "retryable": true,
       "violations": []
+    },
+    {
+      "type": "about:blank",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
     }
   ],
   "Actor": [

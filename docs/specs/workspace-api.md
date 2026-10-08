@@ -101,7 +101,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 | **API-4** | **Idempotent.** Every mutating call carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
 | **API-5** | **The envelope changes only by a confirmed version.** No call changes an envelope field of a deployed agent except confirming a mandate version, by a **user** with the role for it. The server computes the classification itself (mandate spec §9.2) and requires step-up when it is risk-increasing; a client's claimed classification is never used (rule 11) | Fuzz random envelope edits through every operation; an oracle that diffs the confirmed documents shows every change came through a `MandateConfirmed` by a user, with step-up whenever its own §9.2 verdict is increasing |
 | **API-6** | **A client is owner input, never the owner.** A client token reaches only the operations of §3.8. `requested_by` is set from the authenticated channel, never from the request body (mandate spec §6.2 step 5a). A client can never confirm a version, answer an approval, create, widen, or pick a delegation, connect or revoke a connection, change a member, policy, or client, export, or use pause, resume, Stop, release, owner exit, acknowledgment, or the kill switch (DEC-141, DEC-185, DEC-191) | The route matrix for the client principal; a test that a client request carrying `requested_by: owner` in its body is journaled as `client` |
-| **API-7** | **Risk reduction is never blocked by the API.** Pause, holding new openings, the kill switch at any scope (including the kill-switch half of a revoke on compromise, §5.6), an owner exit, Skip on an approval, ending a delegation, and away mode (the **API-7 operations**) are refused only for a failed authentication, a role that may not act, or a malformed request. Never for a rate limit, a quota, a stale or missing read model, missing step-up (except where mandate spec §6.1 requires it, below), a runtime, model, market-data, or global-control-plane outage, a pending approval, or a frozen control stream (journal spec §11). A kill switch or owner exit without valid step-up is still recorded and still stops or routes (mandate spec §6.1, DEC-158 option (c)) | A test per operation with every one of those conditions injected; each still commits its event. Resume, Stop, and acknowledgment are not risk reduction and may be refused without step-up, as mandate spec §6.1 says |
+| **API-7** | **Risk reduction is never blocked by the API.** Pause, holding new openings, the kill switch at any scope (including the kill-switch half of a revoke on compromise, §5.6), an owner exit, Skip on an approval, ending a delegation, and away mode (the **API-7 operations**) are refused only for a failed authentication (including the CSRF check of §3.3 item 1), a role that may not act, or a malformed request. Never for a rate limit, a quota, a stale or missing read model, missing step-up (except where mandate spec §6.1 requires it, below), a runtime, model, market-data, or global-control-plane outage, a pending approval, or a frozen control stream (journal spec §11). A kill switch or owner exit without valid step-up is still recorded and still stops or routes (mandate spec §6.1, DEC-158 option (c)) | A test per operation with every one of those conditions injected; each still commits its event. Resume, Stop, and acknowledgment are not risk reduction and may be refused without step-up, as mandate spec §6.1 says |
 | **API-8** | **The kill-switch path needs only the API, its authentication, and Postgres.** Pause and the kill switch read no read model, call no model, runtime, market-data service, global control plane, or telemetry, and run on a reserved worker and database-connection pool that other traffic cannot exhaust (infrastructure §3.6) | A test with the model gateway, read-model tables, runtime, and metrics exporter all unavailable and every ordinary worker busy: the kill switch commits within its bound |
 | **API-9** | **Tenants never see each other.** Every resource lives under one workspace. A principal reaches only workspaces it belongs to. An id from another workspace, or one that does not exist, returns the same 404. No response, error, log line, metric label, or notification carries another workspace's data | Cross-workspace tests at the route, database (row-level security), and artifact layers (OPS-6); a test that the 404 bodies and timings for "foreign" and "absent" match |
 | **API-10** | **Nothing sensitive leaves through the API's side channels.** What the API hands to the relay or a notification provider is an opaque notice id and generic text only; approval links carry only that id; page titles, URLs, and error titles hold no instrument, size, price, thesis, or agent name (rule 6) | Payload capture tests on every notification the API emits; a URL lint over the route table |
@@ -164,9 +164,13 @@ the journal is the only channel (DEC-17).
 Owned by the [identity spec](identity.md). What the API requires of it:
 
 1. **Browser sessions** in a `Secure`, `HttpOnly`, `SameSite=Strict` cookie, with a CSRF defence on
-   every mutating call: the `Origin` header must be the app's own origin, and the call must carry a
-   custom request header a cross-site form cannot set. No bearer token is ever stored in browser
-   storage (brief §5, rule 6 row).
+   every mutating call: the `Origin` header must equal the deployment's configured app origin
+   (`https://app.owlhead.ai` for the demo), and the call must carry the custom request header
+   `X-Mandate-Request: 1`, which a cross-site form cannot set. A mutating call failing either check
+   is refused before any read or write with 403 `forbidden`, `effect: none`, `retryable: false`.
+   The check applies to every route, the API-7 operations included: a call that fails it is not
+   authenticated as the owner, which API-7 allows as a refusal (DEC-682 item 19). No bearer token is
+   ever stored in browser storage (brief §5, rule 6 row).
 2. **CLI, client, and service-account tokens are sender-constrained** (DPoP, RFC 9449; identity
    spec §6.3, §6.5, §6.6): each request carries a proof signed by the key the token was issued to,
    and the API refuses a token presented without a matching proof. A copied token alone is useless.
@@ -190,10 +194,18 @@ Owned by the [identity spec](identity.md). What the API requires of it:
 ### 3.4 Idempotency
 
 Every mutating call carries `Idempotency-Key`: 16 to 64 characters from `[A-Za-z0-9_-]`, chosen by
-the client per user gesture. The API derives the control-stream `event_id` from it (DEC-436 item 4):
-the 128 bits of the ULID are the first 128 bits of SHA-256 over the workspace id, the principal id,
-the operation name, and the key. The ULID's time component carries no meaning (journal spec §3), so
-this is a valid id. Then:
+the client per user gesture. The API derives the control-stream `event_id` from it (DEC-436 item 4,
+DEC-681 item 5), and a client can compute the same id before it sends the call:
+
+- Build the JSON object `{"key", "operation", "principal", "workspace"}`: the key as sent; the
+  operation's name from the route table; the actor's own id (a client's id, never its user's); and
+  the workspace id. For each event of a call that commits several events, add `"position"`, an
+  integer from 0 in batch order.
+- Write it in journal spec §4's canonical form and take its SHA-256.
+- The first 128 bits of that digest, most significant first, are the ULID. It is written as 26
+  Crockford base-32 digits (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`), uppercase.
+
+The ULID's time component carries no meaning (journal spec §3), so this is a valid id. Then:
 
 1. The API looks the id up first. If an event exists and its semantic members (everything but
    server-set times) equal the request's, it returns that event's outcome. If they differ, 409
