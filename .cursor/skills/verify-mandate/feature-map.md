@@ -1051,8 +1051,7 @@ proves each pending test fails on them (DEC-110).
   `Subscription`, `PushEndpoint`, `VapidSubject`, the `SecureRandom` and `VapidSigner` traits, and
   `NoticeClass`'s fixed urgency and TTL) and `crates/mandate-webpush/src/payload.rs` (the closed
   `PushPlaintext` and `PushText`), stubbed but for the closed tables.
-- **Tests:** `crates/mandate-webpush/src/tests.rs`, with the published vectors and their fixtures in
-  `crates/mandate-webpush/tests/vectors/mod.rs` (DEC-794): the RFC 8291 §5 and RFC 8188 §3.1 vectors
+- **Tests:** `crates/mandate-webpush/src/tests.rs`: the RFC 8291 §5 and RFC 8188 §3.1 vectors
   byte-exact, a receiver-side decrypt oracle, an ES256 check of the VAPID token against the
   signer's public key, the size cap, refusals, and properties for the opaque payload and the
   token's expiry, pending E8-14 but for the live closed-tables test.
