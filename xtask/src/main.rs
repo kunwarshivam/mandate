@@ -311,12 +311,13 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
 }
 
 /// The lint job over the repository at `root` (ADR-0001 ES-12): ShellCheck over its
-/// `.github/scripts/` (DEC-329), actionlint over its `.github/workflows/` (DEC-330), then
+/// `.github/scripts/` (DEC-329) and `deploy/` (the demo host's runbook, DEC-822), actionlint over its `.github/workflows/` (DEC-330), then
 /// `workspace_checks`, the checks that need the Cargo and uv workspaces, which `ci lint` passes as
 /// [`workspace_lint`]. The job takes the repository it runs in, so a fixture repository drives it
 /// and neither tool's result can be dropped without a test failing (DEC-331, the DEC-139 pattern).
 fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()> {
     shellcheck_scripts(&root.join(".github/scripts"))?;
+    shellcheck_scripts(&root.join("deploy"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
     workspace_checks()
 }
@@ -448,7 +449,8 @@ struct Finding {
 /// so that this source matches no rule. The palette rows prove the "Web palette ramp references"
 /// exception (the `lapis` token names contain "api"): the ramp row is allowed in the design-source
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
-/// reported too.
+/// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
+/// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -464,6 +466,11 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let palette = "web/src/lib/palette.ts";
     let ramp = "  \"lapis-soft\": \"ultramarine-100\",";
     let palette_key = format!("  \"api-key\": \"{page}\",");
+    let hex = "CC94B39C77AE7342A68B89628A682D308D4E5E73";
+    let bootstrap = "deploy/bootstrap.sh";
+    let fingerprint = format!("CLOUDFLARE_FINGERPRINT={hex}");
+    let not_fingerprint = format!("CLOUDFLARE_KEY={hex}");
+    let cloudflare = Some("cloudflare-api-key");
     vec![
         (fixture("page-1.json"), json.clone(), None),
         (fixture("requests.txt"), query.clone(), None),
@@ -486,6 +493,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (palette.to_owned(), ramp.to_owned(), None),
         ("stray-palette.ts".to_owned(), ramp.to_owned(), generic),
         (palette.to_owned(), palette_key, generic),
+        (bootstrap.to_owned(), fingerprint.clone(), None),
+        ("stray-fingerprint.sh".to_owned(), fingerprint, cloudflare),
+        (bootstrap.to_owned(), not_fingerprint, cloudflare),
     ]
 }
 
@@ -761,6 +771,14 @@ struct CratePolicy {
     /// dependencies, dev-dependencies included, whatever the layers allow (DEC-525).
     #[serde(default)]
     forbidden_internal: Vec<String>,
+    /// When set, the only workspace crates that may depend on this crate, by a dependency of any
+    /// kind: an allowlist, so a crate added later is refused until it is named (DEC-642 item 7).
+    #[serde(default)]
+    allowed_dependents: Option<Vec<String>>,
+    /// Whether every workspace crate that depends on this one must do so as a dev-dependency, as
+    /// test support must (DEC-645).
+    #[serde(default)]
+    dev_only: bool,
     /// The one crate that may declare a `live` cargo feature: the deployment runner (ES-23 as
     /// DEC-529 item 3 narrows it). No crate is marked until the runner's G1a slice marks it.
     #[serde(default)]
@@ -821,6 +839,19 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
             )
         }));
     }
+    for (listed, own) in &policy.crates {
+        let unknown = own
+            .allowed_dependents
+            .iter()
+            .flatten()
+            .filter(|name| !names.contains(name.as_str()) && !policy.planned.contains(name));
+        problems.extend(unknown.map(|name| {
+            format!(
+                "`{listed}` allows `{name}` as a dependent, which is neither a workspace member nor \
+                 in `planned` (DEC-642 item 7)"
+            )
+        }));
+    }
     for pkg in &packages {
         let Some(own) = policy.crates.get(&pkg.name) else {
             problems.push(format!("`{}` has no entry in xtask/layers.toml", pkg.name));
@@ -852,6 +883,22 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
                 let Some(dep_policy) = policy.crates.get(&dep.name) else {
                     continue;
                 };
+                if dep_policy.dev_only && dep.kind.as_deref() != Some("dev") {
+                    problems.push(format!(
+                        "`{}` depends on `{}`, which is dev-only in xtask/layers.toml, other than as \
+                         a dev-dependency (DEC-645)",
+                        pkg.name, dep.name
+                    ));
+                }
+                if let Some(allowed) = &dep_policy.allowed_dependents
+                    && !allowed.contains(&pkg.name)
+                {
+                    problems.push(format!(
+                        "`{}` depends on `{}`, whose allowed_dependents in xtask/layers.toml does \
+                         not name it (DEC-642 item 7)",
+                        pkg.name, dep.name
+                    ));
+                }
                 match (&own_layer, layer_of(dep_policy, &dep.name)?) {
                     (Layer::Product(_), Layer::Tool) => {
                         problems.push(format!(
@@ -3692,6 +3739,8 @@ mod tests {
                     pure: false,
                     allowed_external: Vec::new(),
                     forbidden_internal: banned.unwrap_or_default(),
+                    allowed_dependents: None,
+                    dev_only: false,
                     live_feature: false,
                 };
                 ((*name).to_owned(), policy)
@@ -3811,6 +3860,66 @@ mod tests {
         let planned: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpaca", "mandate-paper"])];
         let problems = layer_problems(&policy(&layers, &planned, &["mandate-paper"]), &members())?;
         assert_eq!(problems, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// A crate with `allowed_dependents` may be depended on, by a normal or a dev-dependency, only
+    /// by the crates it names; one it does not name is a problem, and so is a name that is neither
+    /// a member nor planned (DEC-642 item 7).
+    #[test]
+    fn only_an_allowed_dependent_may_depend_on_a_sealed_crate() -> Result<()> {
+        let layers = [("seal", 0), ("core", 1), ("kit", 11), ("api", 6)];
+        let sealed = |allowed: &[&str]| {
+            let mut p = policy(&layers, &[], &["store"]);
+            if let Some(seal) = p.crates.get_mut("seal") {
+                seal.allowed_dependents = Some(allowed.iter().map(|n| (*n).to_owned()).collect());
+            }
+            p
+        };
+        let meta = |api_kind: Option<&'static str>| {
+            workspace(vec![
+                member("seal", &[]),
+                member("core", &[("seal", None)]),
+                member("kit", &[("seal", None), ("core", None)]),
+                member("api", &[("core", None), ("seal", api_kind)]),
+            ])
+        };
+        for kind in [None, Some("dev")] {
+            let problems = layer_problems(&sealed(&["core", "kit", "store"]), &meta(kind))?;
+            let named = "`api` depends on `seal`, whose allowed_dependents";
+            assert!(
+                problems.iter().any(|p| p.starts_with(named)),
+                "{kind:?}: {problems:?}"
+            );
+            assert_eq!(problems.len(), 1, "{kind:?}: {problems:?}");
+        }
+        let allowed = layer_problems(&sealed(&["core", "kit", "api"]), &meta(None))?;
+        assert_eq!(allowed, Vec::<String>::new());
+        let typo = layer_problems(&sealed(&["core", "kit", "api", "stor"]), &meta(None))?;
+        assert!(
+            typo.iter()
+                .any(|p| p.starts_with("`seal` allows `stor` as a dependent")),
+            "{typo:?}"
+        );
+        Ok(())
+    }
+
+    /// A `dev_only` crate may be depended on only as a dev-dependency (DEC-645).
+    #[test]
+    fn a_dev_only_crate_is_only_a_dev_dependency() -> Result<()> {
+        let layers = [("kit", 11), ("api", 6)];
+        let mut p = policy(&layers, &[], &[]);
+        if let Some(kit) = p.crates.get_mut("kit") {
+            kit.dev_only = true;
+        }
+        for (kind, refused) in [(None, true), (Some("build"), true), (Some("dev"), false)] {
+            let meta = workspace(vec![member("kit", &[]), member("api", &[("kit", kind)])]);
+            let problems = layer_problems(&p, &meta)?;
+            let named = problems
+                .iter()
+                .any(|p| p.starts_with("`api` depends on `kit`, which is dev-only"));
+            assert_eq!(named, refused, "{kind:?}: {problems:?}");
+        }
         Ok(())
     }
 
@@ -7477,12 +7586,16 @@ jq -r "$filter" "$src"
         fixture_workspace(&root)?;
         let scripts = root.join(".github/scripts");
         let workflows = root.join(".github/workflows");
+        let deploy = root.join("deploy");
         fs::create_dir_all(&scripts)?;
         fs::create_dir_all(&workflows)?;
-        fs::write(
-            scripts.join("clean.sh"),
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\"\n",
-        )?;
+        fs::create_dir_all(&deploy)?;
+        for dir in [&scripts, &deploy] {
+            fs::write(
+                dir.join("clean.sh"),
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\"\n",
+            )?;
+        }
         fs::write(
             workflows.join("clean.yml"),
             concat!(
@@ -7511,6 +7624,12 @@ jq -r "$filter" "$src"
             .err();
         fs::remove_file(scripts.join("planted.sh"))?;
 
+        fs::write(deploy.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
+        let deploy_shellcheck = lint(&root, || Ok(()))
+            .map_err(|err| format!("{err:#}"))
+            .err();
+        fs::remove_file(deploy.join("planted.sh"))?;
+
         fs::write(
             workflows.join("planted.yml"),
             concat!(
@@ -7531,6 +7650,12 @@ jq -r "$filter" "$src"
                 .as_deref()
                 .is_some_and(|err| err.contains("SC2086")),
             "a planted SC2086 fails the lint job naming the code, got {shellcheck:?}"
+        );
+        assert!(
+            deploy_shellcheck
+                .as_deref()
+                .is_some_and(|err| err.contains("SC2086")),
+            "a planted SC2086 under deploy/ fails the lint job too, got {deploy_shellcheck:?}"
         );
         assert!(
             actionlint

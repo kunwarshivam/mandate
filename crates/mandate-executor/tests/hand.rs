@@ -3802,7 +3802,6 @@ fn an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_b
 /// fill starts a new interval and ends the awaited one, the second bracket's, never the first's.
 /// The first bracket's 6 shares stay unprotected from 10, so the owner is alerted at 70, once.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3892,7 +3891,6 @@ fn a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets() {
 /// the middle one only. The first (from 10) is then alerted at 70, the middle one never, and the
 /// third (from 25) at 85; nothing alerts at 80, which an awaited interval left open would.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_new_start_ends_the_awaited_middle_interval_only() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

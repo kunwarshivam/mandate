@@ -23,3 +23,8 @@
   `OrgContext` is not a `Tenant`, outside the crate), with their in-crate controls.
 - **Run:** `cargo nextest run -p mandate-identity --run-ignored all` and
   `cargo test -p mandate-identity --doc`.
+- **Seal and test support:** `mandate-identity-seal` (layer 0, safety-critical; the `Seal` token
+  and `LookupSeal`, closed by its `allowed_dependents` list in `xtask/layers.toml`, which
+  `cargo xtask layers` checks, DEC-642 item 7) and `mandate-identity-testkit` (layer 11, so only
+  dev-dependencies reach it, and `dev_only` in `xtask/layers.toml`; `StaticLookup`, `FailingLookup`, `session`, `membership`; DEC-645).
+  The ULID text codecs are pending in `crates/mandate-identity/src/tests/ulid.rs`.

@@ -1400,6 +1400,14 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - every notification carries only an opaque ID and generic text (rule 6);
   - turning a monitor agent into one that trades is a new mandate the owner confirms, never an
     in-place change.
+- **E10-20 (Must, M6, blocker for starting an agent on the L2 host; SC)** As the founder, I want
+  `mandate agent pause` and `mandate agent kill` reachable from the CLI, so that the SSH
+  kill-switch fallback of [DEC-822](decisions/DEC-822.md) item 7 works and the rehearsal in
+  FOUNDER-STEPS step 16 (`deploy/README.md`) can pass. The code exists in
+  `crates/mandate-cli/src/agent.rs` and `control.rs`; `AgentCommand` in `gestures.rs` does not name
+  them. *Accepted when:* `AgentCommand` carries `pause` and `kill`, wired to that code; an agent
+  kill touches only its own scope (rule 13); and a test runs each command through the binary
+  against the journal. No agent starts on the L2 host before this lands.
 
 ### E11 Web app: dashboard and controls
 
@@ -3190,10 +3198,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   awaited set rather than adding to it. #771's review added two tests before the fix: a hand case
   with the awaited interval between two others (`a_new_start_ends_the_awaited_middle_interval_only`)
   and a property lead where the awaited interval is the first open one and another is the latest
-  (`AWAITED_FIRST_LEAD`), so a fix that ends the latest open interval fails both. A fourth minor
-  from that review: the fix's match lets an unbracketed open interval (an exit's or a
-  re-placement's) be ended for any awaited bracket OCO; no script here has reached it yet, so pin
-  it with a case if one does.
+  (`AWAITED_FIRST_LEAD`), so a fix that ends the latest open interval fails both. Done by E4b's
+  fix: that arm ends the open interval of a bracket whose OCO's acknowledgment was awaited (or an
+  unbracketed one), never another bracket's; `no_interval_exceeds_the_limit_without_an_alert` and
+  both hand cases are live again. The three minors stay open, with a fourth from that review: the
+  fix's match lets an unbracketed open interval (an exit's or a re-placement's) be ended for any
+  awaited bracket OCO; no script here has reached it yet, so pin it with a case if one does.
 - **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
   ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
   while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on
@@ -4512,3 +4522,26 @@ From the workspace API contract's drift rule (DEC-683, E10-10):
   journal spec change first.
 - **Run `schemas/workspace-api/`'s checkers in CI** (`check_examples.py`, `check_planned.py`, and
   the mutation sweep) from a `cargo xtask` job; until then reviewers run them.
+
+From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
+
+- **The mutation plan's tests** (#768).
+  - `the_planned_shards_test_the_gates_mutants_and_no_more_per_shard` seeds a diff whose mutants
+    are all in one package. Add a second mutated crate to its fixture, so the plan's sum across
+    packages is pinned as well as its listing.
+  - `ci_sizes_the_mutation_matrix_from_the_plan` pins exact `ci.yml` lines, so rewording one
+    fails the test even when the wiring still holds. It fails safe; parse the jobs' keys instead
+    when it next gets in the way.
+- **The behaviour-only rows** (#770, `xtask/behaviour-only/`).
+  - Pin the exact refusal message for a non-`.toml` file in `a_malformed_or_misnamed_row_is_refused`,
+    as the other refusals' messages are pinned.
+  - Read the rows through `git ls-files` rather than `read_dir`, as `ci pending` reads test files, so
+    an untracked or ignored file in the directory cannot change the gate's verdict.
+  - Say in the README that two tests whose paths differ only by `::` against `__` derive the same
+    file name, so the second row cannot be added until one is renamed.
+- **The feature map's directory** (#773, `.cursor/skills/verify-mandate/features/`).
+  - Check or refuse what else sits in the directory: today the README and any non-`.md` file are
+    skipped without a word.
+  - Refuse two feature files with the same `# ` title, which `--index` would list twice.
+  - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
+    the README is never read as a feature.

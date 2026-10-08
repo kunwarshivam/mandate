@@ -8,5 +8,7 @@
 - **Tests:** `crates/mandate-passkey/tests/api.rs` (refusal codes, the challenge length) and
   `tests/oracle.rs` (the software authenticator in `tests/common/mod.rs` against RFC 4648 and
   RFC 8949 vectors and `ring`'s verifier; its keys are generated in the test, never a real
-  authenticator, identity spec §1.3).
+  authenticator, identity spec §1.3); `tests/enrol.rs` (enrolment: `none` attestation, the
+  client data, the RP ID hash, the flags, the key types) and `tests/structure.rs` (credential ID
+  lengths, the CBOR subset, COSE key parameters). Pending E9-1.
 - **Run:** `cargo nextest run -p mandate-passkey`.
