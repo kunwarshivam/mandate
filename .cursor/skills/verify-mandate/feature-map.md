@@ -1201,9 +1201,7 @@ proves each pending test fails on them (DEC-110).
   a given calendar) and `crates/mandate-modelhost/tests/refusals.rs` (one refusal per failed check
   in the brief's order, each refusal's stable code, FT-4 over random identity changes, and the
   signal against an `i128` oracle with determinism), with fixtures in `tests/common/mod.rs`.
-  Pending until M2.
-- **Run:** `cargo nextest run -p mandate-modelhost`; the pending tests with
-  `cargo nextest run -p mandate-modelhost --run-ignored only`.
+- **Run:** `cargo nextest run -p mandate-modelhost`.
 
 ## Research-agent spike (E17-0)
 
