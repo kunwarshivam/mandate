@@ -8,8 +8,7 @@
 
 use std::path::Path;
 
-use mandate_canon::Digest;
-use mandate_canon::{Key, Object, Value, parse, to_canonical};
+use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
 use mandate_journal::{Draft, StoredEvent, TrustedStart, check_batch, verify_agent_stream};
 
 fn section(name: &str) -> Value {
@@ -82,8 +81,18 @@ fn unrefused(name: &str) -> (Vec<String>, usize) {
     }
     let valid = list(&section, "valid_drafts");
     for case in valid {
-        if let Err(e) = Draft::parse(&draft(&section, case)) {
-            failed.push(format!("valid {}: {e:?}", text(case, "name")));
+        let bytes = draft(&section, case);
+        let written = parse(&bytes).unwrap();
+        let parsed = Draft::parse(&bytes).map(|d| (d.event_type().to_owned(), d.schema_version()));
+        let want = (
+            text(&written, "event_type").to_owned(),
+            written
+                .get("schema_version")
+                .and_then(Value::as_int)
+                .unwrap_or_default(),
+        );
+        if parsed.as_ref() != Ok(&want) {
+            failed.push(format!("valid {}: {parsed:?}", text(case, "name")));
         }
     }
     (failed, valid.len())
@@ -183,11 +192,28 @@ fn a_compromised_revocation_follows_its_connections_kill_switch_in_its_batch() {
             .collect()
     };
     let mut failed = Vec::new();
-    for case in list(&section, "valid_batches") {
-        if let Err(e) = check_batch(&batch(case)) {
+    let valid = list(&section, "valid_batches");
+    for case in valid {
+        let drafts = batch(case);
+        if let Err(e) = check_batch(&drafts) {
             failed.push(format!("valid {}: {e:?}", text(case, "name")));
         }
+        let unrelated = section
+            .get("drafts")
+            .and_then(|d| d.get("client_connected"))
+            .map(to_canonical)
+            .and_then(|bytes| Draft::parse(&bytes).ok())
+            .unwrap();
+        let mut apart = drafts.clone();
+        apart.insert(1, unrelated);
+        if let Err(e) = check_batch(&apart) {
+            failed.push(format!(
+                "valid {} with an unrelated draft between: {e:?}",
+                text(case, "name")
+            ));
+        }
     }
+    assert!(!valid.is_empty(), "at least one valid batch");
     let invalid = list(&section, "invalid_batches");
     for case in invalid {
         let expect = case.get("expect").unwrap();
@@ -234,44 +260,70 @@ fn every_invalid_hold_draft_is_refused_with_its_reason_at_its_path() {
     assert_rules_cited(&clauses, 75..=80);
 }
 
-/// §11's `held_mismatch` (§9.10, DEC-672): over each of the `hold` section's ranges of
-/// `AgentModeChanged` records, the first record whose `held` drops or sets a hold without a hold's
-/// or a lift's reason, or a version-1 record after a version-2 one, fails at its `seq`; a range with
-/// none passes.
+/// One stored agent-stream row at `seq` of an `event_type` with `payload`.
+fn stored(seq: u64, event_type: &str, version: u64, payload: &Value) -> StoredEvent {
+    let body = format!(
+        r#"{{"event_type":"{event_type}","schema_version":{version},"payload":{}}}"#,
+        String::from_utf8(to_canonical(payload)).unwrap()
+    );
+    StoredEvent {
+        stream_id: "agent:ws_01J8Z2:agent_a".to_owned(),
+        seq,
+        event_id: format!("01J8Z6R0A{seq:017}"),
+        event_type: event_type.to_owned(),
+        schema_version: version,
+        environment: "paper".to_owned(),
+        recorded_at: "2026-10-08T16:00:00.000000000Z".to_owned(),
+        prev_hash: Digest::of(b""),
+        hash: Digest::of(b""),
+        body: body.into_bytes(),
+    }
+}
+
+/// §11's `held_mismatch` (§9.10, DEC-672) over each of the `hold` section's ranges. A case's
+/// `anchor`, the stored chain before a later range, is given to the verifier as the version-2 hold
+/// or lift that set it, one `seq` before the range, so the check anchors on the chain rather than
+/// on the range's first record; a case with no anchor has none before its start and fails closed.
+/// The first failing record is reported at its `seq`, and only it: a case lists every violation
+/// the reference finds, and the verifier stops at the first.
 #[test]
 fn the_owners_hold_is_carried_through_every_range() {
     let section = section("hold");
+    let cases = list(&section, "range_verification");
     let mut failed = Vec::new();
-    for case in list(&section, "range_verification") {
+    for case in cases {
         let from = case.get("from_seq").and_then(Value::as_int).unwrap();
-        let rows: Vec<StoredEvent> = list(case, "events")
-            .iter()
-            .zip(from..)
-            .map(|(event, seq)| {
-                let version = event.get("schema_version").and_then(Value::as_int).unwrap();
-                let body = format!(
-                    r#"{{"event_type":"AgentModeChanged","schema_version":{version},"payload":{}}}"#,
-                    String::from_utf8(to_canonical(event.get("payload").unwrap())).unwrap()
-                );
-                StoredEvent {
-                    stream_id: "agent:ws_01J8Z2:agent_a".to_owned(),
-                    seq,
-                    event_id: format!("01J8Z6R0A{seq:017}"),
-                    event_type: "AgentModeChanged".to_owned(),
-                    schema_version: version,
-                    environment: "paper".to_owned(),
-                    recorded_at: "2026-10-08T16:00:00.000000000Z".to_owned(),
-                    prev_hash: Digest::of(b""),
-                    hash: Digest::of(b""),
-                    body: body.into_bytes(),
-                }
-            })
-            .collect();
+        let mut rows = Vec::new();
+        let mut first = from;
+        if let Some(anchor) = case.get("anchor").and_then(Value::as_object) {
+            let held = anchor.get("held") == Some(&Value::Bool(true));
+            let reason = if held {
+                "owner_hold"
+            } else {
+                "owner_lift_hold"
+            };
+            let payload = parse(
+                format!(
+                    r#"{{"from":"normal","held":{held},"lifecycle":"normal","reason":"{reason}","to":"{}"}}"#,
+                    if held { "exits_only" } else { "normal" }
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+            first = from - 1;
+            rows.push(stored(first, "AgentModeChanged", 2, &payload));
+        }
+        for (event, seq) in list(case, "events").iter().zip(from..) {
+            let version = event.get("schema_version").and_then(Value::as_int).unwrap();
+            let payload = event.get("payload").unwrap();
+            rows.push(stored(seq, text(event, "event_type"), version, payload));
+        }
         let start = TrustedStart {
-            from_seq: from,
+            from_seq: first,
             prev_hash: Digest::of(b""),
         };
-        let want = list(case, "expect")
+        let expect = list(case, "expect");
+        let want = expect
             .first()
             .and_then(Value::as_int)
             .map(|i| (from + i, "held_mismatch"));
@@ -280,10 +332,19 @@ fn the_owners_hold_is_carried_through_every_range() {
             .map(|f| (f.seq, f.check.code()));
         if got != want {
             failed.push(format!(
-                "{}: expected {want:?}, got {got:?}",
+                "{}: expected the first of {expect:?} from seq {from}, got {got:?}",
                 text(case, "name")
             ));
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert!(
+        cases.len() >= 17,
+        "{} range cases; never fewer",
+        cases.len()
+    );
+    assert!(
+        cases.iter().any(|c| list(c, "expect").len() >= 2),
+        "a case with two violations shows only the first is reported"
+    );
 }

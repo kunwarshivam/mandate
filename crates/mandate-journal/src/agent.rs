@@ -268,8 +268,11 @@ pub fn verify_agent_stream(
 }
 
 /// The owner's hold as a range of `AgentModeChanged` records has carried it so far (§11's
-/// `held_mismatch`): unknown before a range that starts after seq 1 reaches its first version-2
-/// record, and `false` before any on a full chain.
+/// `held_mismatch`): `false` before any on a full chain, and unknown before a later range reaches
+/// its first version-2 record. The check anchors on the stored chain, never on the range: a
+/// version-2 copy read while the hold is unknown fails closed, since only a hold or a lift sets it
+/// without an anchor. A caller that holds the chain before the range passes its anchoring record
+/// as the range's first row.
 struct Held {
     last: Option<bool>,
     versioned: bool,
@@ -294,7 +297,7 @@ impl Held {
         let reason = Payload(payload).text("reason");
         let kept = reason == "owner_hold"
             || reason == "owner_lift_hold"
-            || self.last.is_none_or(|last| last == now);
+            || self.last.is_some_and(|last| last == now);
         self.last = Some(now);
         kept
     }

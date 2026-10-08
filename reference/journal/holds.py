@@ -45,6 +45,8 @@ IDS = {
     "refused": "01J8Z6H4A000000000000000H5",
 }
 SECOND_LIFT = "01J8Z6H1B000000000000000H6"
+AGENT_ACTOR = {"kind": "agent", "id": AGENT, "version": "0.1.0", "build": "sha256:" + "c" * 64}
+BROKER = {"kind": "broker", "id": "broker_01", "version": "1", "build": None}
 CLIENT = {"kind": "client", "id": "client_01", "version": "1", "build": None, "on_behalf_of": OWNER}
 SUBMITTED_AT = 1791475200
 STEP_UP = {"assertion_id": "assert_owner_09", "authenticated_at": 1791475190, "method": "cli_confirm"}
@@ -249,6 +251,44 @@ def invalid_drafts() -> list[dict]:
             "schema",
             "payload.command",
         ),
+        *(
+            invalid(
+                f"lift_by_{name}",
+                "rule 75: only a user lifts a hold",
+                "lift",
+                [change("actor", dict(actor))],
+                "schema",
+                "actor.kind",
+            )
+            for name, actor in (("the_system", SERVICES), ("an_agent", AGENT_ACTOR), ("a_broker", BROKER))
+        ),
+        *(
+            invalid(
+                f"hold_by_{name}",
+                "rule 75: a hold is a user's or a client's",
+                "hold",
+                [change("actor", dict(actor))],
+                "schema",
+                "actor.kind",
+            )
+            for name, actor in (("an_agent", AGENT_ACTOR), ("a_broker", BROKER))
+        ),
+        invalid(
+            "client_hold_with_a_build",
+            "rule 67: a client is external, so it has no build digest",
+            "hold",
+            [change("actor", dict(CLIENT) | {"build": "sha256:" + "d" * 64})],
+            "schema",
+            "actor.build",
+        ),
+        invalid(
+            "version_1_mode_change_with_a_hold",
+            "§9.10: version 1's reasons stay closed; a hold is version 2's",
+            "held",
+            [change("schema_version", 1), delete("payload.held")],
+            "non_canonical",
+            "payload.reason",
+        ),
         invalid(
             "hold_by_the_system",
             "rule 75: a hold is a person's command",
@@ -362,6 +402,18 @@ def kill_switch(actor: dict) -> list[dict]:
 def valid_drafts() -> list[dict]:
     return [
         valid(
+            "version_1_mode_change_unchanged",
+            "§9.10: version 1 stays registered",
+            "held",
+            [
+                change("schema_version", 1),
+                delete("payload.held"),
+                change("payload.reason", "owner_pause"),
+                change("payload.to", "paused"),
+                change("payload.lifecycle", "paused"),
+            ],
+        ),
+        valid(
             "kill_switch_stays_open",
             "§9.10: other commands are not closed here, and a kill switch is always recorded",
             "hold",
@@ -435,26 +487,47 @@ def valid_drafts() -> list[dict]:
 HOLD_REASONS = ("owner_hold", "owner_lift_hold")
 
 
-def held_mismatches(events: list[dict], from_seq: int, skip: frozenset[str] = frozenset()) -> list[int]:
-    """§11's `held_mismatch` over one agent-stream range of `AgentModeChanged` records, each
-    `{schema_version, payload}` in `seq` order from `from_seq`: the index of every record that
-    breaks it. A version-2 record whose reason is not a hold's or a lift's carries the `held` of the
-    last version-2 record before it, or `false` when the range starts the stream and there is none;
-    a range that starts later checks nothing before its first version-2 record. A version-1 record
-    after a version-2 one is refused: it would drop the hold on replay."""
+def held_mismatches(
+    events: list[dict], from_seq: int, anchor: dict | None, skip: frozenset[str] = frozenset()
+) -> list[int]:
+    """§11's `held_mismatch` over one agent-stream range in `seq` order from `from_seq`: the index
+    of every record that breaks it. Only `AgentModeChanged` records are read; any other event in
+    between leaves the hold as it was.
+
+    The check anchors on the stored chain before the range, never on the range's own first
+    record: `anchor` is `{held, v2_before}`, the `held` of the nearest version-2 `AgentModeChanged`
+    before the range and whether any exists, or `None` when the verifier cannot see before the
+    range. A range from seq 1 is anchored on nothing: no hold, no version-2 record. Then:
+
+    - a version-2 record whose reason is not a hold's or a lift's carries the last `held`; with no
+      anchor and no earlier version-2 record in the range it fails closed;
+    - a version-2 hold or lift sets `held` and needs no anchor;
+    - a version-1 record after any version-2 one, before the range or in it, fails."""
+    if from_seq == 1 and "held.anchor_ignored" not in skip:
+        anchor = {"held": False, "v2_before": False}
+    last = None if anchor is None or not anchor["v2_before"] else anchor["held"]
+    if anchor is not None and not anchor["v2_before"]:
+        last = False
+    versioned = bool(anchor and anchor["v2_before"])
+    if "held.trust_first" in skip and from_seq != 1:
+        last, versioned = None, False
     out = []
-    last: bool | None = False if from_seq == 1 else None
-    seen_v2 = False
     for i, event in enumerate(events):
+        if event["event_type"] != "AgentModeChanged":
+            if "held.reset_on_other" in skip:
+                last = None
+            continue
         if event["schema_version"] == 1:
-            if seen_v2 and "held.v1_after_v2" not in skip:
+            if versioned and "held.v1_after_v2" not in skip:
                 out.append(i)
             continue
-        seen_v2 = True
+        versioned = True
         p = event["payload"]
-        carried = p["reason"] in HOLD_REASONS or "held.carry" in skip
-        if not carried and last is not None and p["held"] != last:
-            out.append(i)
+        owner = p["reason"] in HOLD_REASONS or "held.carry" in skip
+        if not owner:
+            unanchored = last is None and "held.unanchored_passes" not in skip
+            if unanchored or (last is not None and p["held"] != last):
+                out.append(i)
         last = p["held"]
         if "held.forget" in skip:
             last = None
@@ -465,7 +538,12 @@ def range_event(version: int, from_: str, to: str, reason: str, lifecycle: str, 
     payload = {"from": from_, "to": to, "reason": reason, "lifecycle": lifecycle}
     if version == 2:
         payload["held"] = held
-    return {"schema_version": version, "payload": payload}
+    return {"event_type": "AgentModeChanged", "schema_version": version, "payload": payload}
+
+
+def other_event(event_type: str) -> dict:
+    """An agent-stream event that is not a mode change; `held` carries across it."""
+    return {"event_type": event_type, "schema_version": 1, "payload": {}}
 
 
 def range_cases() -> list[dict]:
@@ -473,54 +551,77 @@ def range_cases() -> list[dict]:
     pause = range_event(2, "exits_only", "paused", "owner_pause", "paused", True)
     resume = range_event(2, "paused", "exits_only", "owner_resume", "normal", True)
     lift = range_event(2, "exits_only", "normal", "owner_lift_hold", "normal", False)
+    dropped = range_event(2, "exits_only", "exits_only", "restriction_changed", "normal", False)
+    kept = range_event(2, "exits_only", "exits_only", "restriction_changed", "normal", True)
+    v1_pause = range_event(1, "normal", "paused", "owner_pause", "paused")
+    held_before = {"held": True, "v2_before": True}
+    clear_before = {"held": False, "v2_before": True}
+
+    def case(name, events, expect, from_seq=1, anchor=None):
+        return {"name": name, "from_seq": from_seq, "anchor": anchor, "events": events, "expect": expect}
+
     return [
-        {"name": "the_hold_carried_through_a_pause_and_a_resume", "from_seq": 1, "events": [hold, pause, resume, lift], "expect": []},
-        {
-            "name": "a_restriction_drops_the_hold",
-            "from_seq": 1,
-            "events": [hold, range_event(2, "exits_only", "exits_only", "restriction_changed", "normal", False)],
-            "expect": [1],
-        },
-        {
-            "name": "a_kill_switch_drops_the_hold",
-            "from_seq": 1,
-            "events": [hold, range_event(2, "exits_only", "stopped", "kill_switch", "stopped", False)],
-            "expect": [1],
-        },
-        {
-            "name": "a_reconciliation_sets_a_hold_nobody_asked_for",
-            "from_seq": 1,
-            "events": [range_event(2, "normal", "exits_only", "awaiting_reconciliation", "normal", True)],
-            "expect": [0],
-        },
-        {
-            "name": "a_version_1_record_after_a_version_2_one",
-            "from_seq": 1,
-            "events": [hold, range_event(1, "exits_only", "paused", "owner_pause", "paused")],
-            "expect": [1],
-        },
-        {
-            "name": "version_1_records_before_the_first_hold",
-            "from_seq": 1,
-            "events": [range_event(1, "normal", "paused", "owner_pause", "paused"), hold],
-            "expect": [],
-        },
-        {
-            "name": "a_later_range_trusts_its_first_record",
-            "from_seq": 40,
-            "events": [range_event(2, "exits_only", "paused", "owner_pause", "paused", True), resume],
-            "expect": [],
-        },
+        case(
+            "the_hold_carried_through_a_pause_a_resume_and_other_events",
+            [hold, other_event("KillSwitchActivated"), pause, other_event("IntentProposed"), resume, lift],
+            [],
+        ),
+        case("a_restriction_drops_the_hold", [hold, other_event("IntentProposed"), dropped], [2]),
+        case(
+            "a_kill_switch_drops_the_hold",
+            [hold, range_event(2, "exits_only", "stopped", "kill_switch", "stopped", False)],
+            [1],
+        ),
+        case(
+            "a_reconciliation_sets_a_hold_nobody_asked_for",
+            [range_event(2, "normal", "exits_only", "awaiting_reconciliation", "normal", True)],
+            [0],
+        ),
+        case("a_version_1_record_after_a_version_2_one", [hold, v1_pause], [1]),
+        case("version_1_records_before_the_first_hold", [v1_pause, hold], []),
+        case(
+            "a_full_chain_opens_with_a_copy_that_holds_nothing",
+            [range_event(2, "normal", "exits_only", "restriction_changed", "normal", False)],
+            [],
+        ),
+        case(
+            "two_violations_and_only_the_first_reported",
+            [hold, dropped, range_event(2, "exits_only", "exits_only", "restriction_changed", "normal", True)],
+            [1, 2],
+        ),
+        case("a_later_range_launders_a_dropped_hold", [dropped], [0], 40, held_before),
+        case("a_later_range_starts_with_version_1_after_a_version_2", [v1_pause], [0], 40, clear_before),
+        case(
+            "a_later_range_whose_predecessor_was_not_held",
+            [range_event(2, "normal", "normal", "restriction_changed", "normal", False)],
+            [],
+            40,
+            clear_before,
+        ),
+        case("a_later_range_carries_its_anchor", [kept, resume], [], 40, held_before),
+        case("an_unanchored_range_opens_with_a_hold", [hold, kept], [], 40),
+        case("an_unanchored_range_anchors_on_its_own_hold_then_drops_it", [hold, dropped], [1], 40),
+        case("an_unanchored_range_opens_with_version_1", [v1_pause, hold], [], 40),
+        case("an_unanchored_range_opens_with_a_copy_and_fails_closed", [kept], [0], 40),
+        case("an_unanchored_range_with_version_1_after_its_hold", [hold, v1_pause], [1], 40),
     ]
 
 
-RANGE_MUTANTS = ("held.v1_after_v2", "held.carry", "held.forget")
+RANGE_MUTANTS = (
+    "held.v1_after_v2",
+    "held.carry",
+    "held.forget",
+    "held.anchor_ignored",
+    "held.trust_first",
+    "held.reset_on_other",
+    "held.unanchored_passes",
+)
 
 
 def range_problems(section: dict, skip: frozenset[str] = frozenset()) -> list[str]:
     problems = []
     for case in section["range_verification"]:
-        got = held_mismatches(case["events"], case["from_seq"], skip)
+        got = held_mismatches(case["events"], case["from_seq"], case["anchor"], skip)
         if got != case["expect"]:
             problems.append(found("range", f"{case['name']}: expected {case['expect']}, got {got}"))
     return problems
@@ -541,7 +642,9 @@ def found(check: str, message: str) -> str:
 def floor_problems(name: str, draft: dict) -> list[str]:
     """Mandate spec §5.9 and §6.1: the effective mode is the strictest of what holds it. The owner's
     lifecycle holds its own mode, and the hold holds `exits_only`."""
-    p = draft["payload"]
+    p = dict(draft["payload"])
+    if draft["schema_version"] == 1:
+        p.setdefault("held", False)
     if not isinstance(p.get("held"), bool) or p.get("lifecycle") not in RANK or p.get("to") not in RANK:
         return [found("drafts.floor", f"{name}: no `held`, lifecycle, or mode to judge")]
     held_by = [p["lifecycle"]] + (["exits_only"] if p["held"] else [])
@@ -665,7 +768,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         (
             "a valid copy loses its `held`",
             "drafts.floor",
-            mutated(lambda s: s["drafts"]["held"]["payload"].pop("held")),
+            mutated(lambda s: s["drafts"]["held"]["payload"].update(held=None)),
         ),
         (
             "an invalid draft's expectation differs",

@@ -1874,8 +1874,8 @@ stream only (rule 26). A lift whose step-up does not count is refused like a res
 version-2 copy (a restriction, a reconciliation, a kill switch, a pause, a resume, a Stop) carries
 the last one's, and once a stream holds a version-2 `AgentModeChanged` every later one is version
 2. `append` sees one record and cannot check either, so §11's per-range check `held_mismatch` does,
-and `mandate journal verify` reports it; a stray `held: false` would otherwise drop the hold on
-replay.
+anchored on the stored chain before the range (or failing closed without it), and `mandate journal
+verify` reports it; a stray `held: false` would otherwise drop the hold on replay.
 
 **Lifecycle.** A hold is copied whatever the mode: on a paused or stopped agent the copy records
 `held` with `to` unchanged, so command status reaches `applied`. A second hold, or a lift with no
@@ -1924,11 +1924,15 @@ anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_m
   `AgentModeChanged` on this stream with reason `kill_switch`, reported at the
   `KillSwitchActivated`;
 - `held_mismatch` — the owner's hold is carried, never dropped (§9.10, [DEC-672](../project/decisions/DEC-672.md)).
-  An `AgentModeChanged` version 2 whose reason is not `owner_hold` or `owner_lift_hold` has the
-  `held` of the last version-2 `AgentModeChanged` before it, or `false` when the range starts at
-  seq 1 and there is none; and no version-1 `AgentModeChanged` follows a version-2 one. Reported
-  at the record that breaks it. A range that starts later checks nothing before its first
-  version-2 record.
+  Only `AgentModeChanged` records are read; any other event between them leaves the hold as it
+  was. A version-2 one whose reason is not `owner_hold` or `owner_lift_hold` has the `held` of the
+  last version-2 `AgentModeChanged` before it, and no version-1 `AgentModeChanged` follows a
+  version-2 one. **The check anchors on the stored chain, not on the range:** "before it" includes
+  the records before the range's trusted start, so a range can never adopt a dropped hold as its
+  first record. The range only limits what is reported. A full chain is anchored on nothing (no
+  hold, no version-2 record). A verifier that cannot read the chain before a later range fails
+  closed: the range's first version-2 record, unless it is a hold or a lift, is reported as having
+  no anchor. Reported at the first record that breaks it.
 
 A reference to an event before the range's trusted start is not checked by that range; the weekly
 full-chain run checks every one, and there a `mode_event` that names no earlier event fails. The
