@@ -211,21 +211,25 @@ reaches that connection's broker hosts.
    the platform's client secret, read through a single-use grant valid only while its connection
    is `connecting` (infrastructure §5.2). The token goes to the vault and the code is deleted.
 
-   The executor then runs checks 1 to 3 and 5 to 7 of §8.1 against the grant and the account,
-   using only reads, through the paper-host request type that `mandate-connections` will provide
+   The executor then runs checks 1 (scope), 2 (environment), 3 (account), and 7 (contract) of
+   §8.1 against the grant and the account, using only reads, through the paper-host request type that `mandate-connections` will provide
    (to be built, E10-13). It stores the broker's account id in the personal-data vault (§3.1,
-   journal §6.4).
+   journal §6.4). Checks 5 (1× buying power) and 6 (account status) are read from the
+   `AccountStateObserved` the executor appends from the same account read (journal §9.2), and
+   never refuse a connect: a failed check 5 means
+   connected with agents not deployable, and check 6 shows the status (§8.1).
 
    While `connecting`, the executor does **nothing else**:
    - no order, cancel, or other write to the broker;
    - no reconciliation;
    - no write to the connection record;
    - no lease beyond its own vault entry and the client-secret grant;
-   - no append other than `StreamOpened` and the check results below.
+   - no append other than `StreamOpened`, `AccountStateObserved`, and `ConnectionChecked`.
 5. **Record the results.** The executor appends `ConnectionChecked` (journal spec change E7-17,
-   PR #786) on that account stream. It carries every check's result, pass or refusal, and the
-   personal-data reference of the account id, never the id or the token (CN-10). The API then
-   acts on it as the connection manager:
+   PR #786) on that account stream. It carries the result of checks 1, 2, 3, and 7, pass or
+   refusal, and `account_pii_ref`, the personal-data reference of the account id (null if the
+   account could not be read), never the id or the token (CN-10). The member and the fingerprint
+   step below are pending in #786. The API then acts on it as the connection manager:
    - It reads the results from the journal.
    - It asks the vault to compute the account fingerprint from that reference, receiving only the
      result (§3.1), and writes the fingerprint to the pending connection record.
@@ -237,7 +241,7 @@ reaches that connection's broker hosts.
      stream, with `causation_id` set to the passing `ConnectionChecked`. That cross-stream
      causation is permitted by E7-17 (#786). The executor leaves `connecting` only when it reads
      that event from the control stream; from then on it runs as the account's executor.
-   - **if any check refuses**, the API appends `ConnectionRefused` on the control stream (E7-17).
+   - **if check 1, 2, 3, 7, or 4 refuses**, the API appends `ConnectionRefused` on the control stream (E7-17).
      Its causation is the failed `ConnectionChecked` when the executor's check failed. The
      teardown in step 6 runs at once.
 
@@ -245,7 +249,8 @@ reaches that connection's broker hosts.
 6. **Teardown, the only exit from `connecting` other than step 5.** The connection manager tears a
    pending connection down when any check refuses, or when no passing results arrive within the
    code's lifetime plus one minute (Proposed: 11 minutes). Teardown:
-   - deletes the vault entry (code or token) and the personal-data entry;
+   - deletes the vault entry (code or token) and the personal-data entry of the account id, both
+     under the pending connection's paths (infrastructure §3.1);
    - revokes the client-secret grant and stops the executor;
    - journals `ConnectionRefused` (refusal or timeout) on the control stream, without the token
      (CN-10).
@@ -461,10 +466,11 @@ Kraken now.
 
 ### 8.1 At connect, at every executor start, and daily
 
-Each check's result is journaled without the credential (CN-10; infrastructure §5.3). Checks 1 to 3
-and 5 to 7 run in the connection's account executor, never in the API process, which holds no
+Each check's result is journaled without the credential (CN-10; infrastructure §5.3). Checks 1, 2,
+3, and 7 run in the connection's account executor, never in the API process, which holds no
 credential and reaches no broker (workspace API spec §1.4; DEC-690 item 1). The executor appends
-their results on its account stream as `ConnectionChecked` (E7-17). Check 4 runs in the connection
+their results on its account stream as `ConnectionChecked` (E7-17). Checks 5 and 6 are read from
+`AccountStateObserved` and never refuse a connect. Check 4 runs in the connection
 manager, the only component that sees every connection's fingerprint. At connect, the API reads the
 results from the journal and only then appends `ConnectionEstablished` or tears the pending
 connection down (§5.2).
