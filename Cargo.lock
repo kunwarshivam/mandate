@@ -1608,6 +1608,7 @@ dependencies = [
  "mandate-journal-pg",
  "mandate-liquidity",
  "mandate-marketdata",
+ "mandate-modelhost",
  "mandate-num",
  "mandate-risk",
  "mandate-runtime",

@@ -35,7 +35,7 @@ const MANDATE: &str = include_str!("fixtures/tracer/mandate.json");
 const FEE: &str = include_str!("fixtures/tracer/config/fee-config.json");
 const CALENDAR: &str = include_str!("fixtures/tracer/config/trading-calendar.json");
 const RULES: &str = include_str!("fixtures/tracer/config/rule-set.json");
-const MODEL: &str = include_str!("fixtures/tracer/config/model-artifact.json");
+const E7_7_MODEL: &[u8] = include_bytes!("fixtures/tracer/config/model-artifact.json");
 const AAPL: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const SNAPSHOT: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-09-21T00:00:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}"#;
@@ -48,6 +48,20 @@ fn json(text: &str) -> Value {
 
 fn reference(bytes: &[u8]) -> String {
     format!("sha256:{}", Digest::of(bytes))
+}
+
+/// The content object `mandate model register` stores for the pinned model (DEC-504 item 1), as
+/// production registers it.
+fn model() -> String {
+    let content = mandate_modelhost::content("quant.ma_crossover", "1.0.0").unwrap();
+    String::from_utf8(content.canonical).unwrap()
+}
+
+/// The E7-7 paper mandate re-pinned to SPY and to `content`'s hash.
+fn spy_mandate(content: &str) -> String {
+    let pinned = Digest::of(content.as_bytes()).to_hex();
+    let mandate = MANDATE.replace(AAPL, SPY).replace(r#""AAPL""#, r#""SPY""#);
+    mandate.replace(&Digest::of(E7_7_MODEL).to_hex(), &pinned)
 }
 
 fn now() -> UtcNanos {
@@ -64,7 +78,13 @@ struct Stream {
 
 impl Stream {
     fn deployed(snapshot: &str, rules: &str, fee: &str) -> Self {
-        let mandate = MANDATE.replace(AAPL, SPY).replace(r#""AAPL""#, r#""SPY""#);
+        Self::with_model(snapshot, rules, fee, &model())
+    }
+
+    /// The deployment with `content` registered as the pinned model `quant.ma_crossover` 1.0.0, and
+    /// the mandate re-pinned to its hash.
+    fn with_model(snapshot: &str, rules: &str, fee: &str, content: &str) -> Self {
+        let mandate = spy_mandate(content);
         let document = to_canonical(&json(&mandate));
         let version = reference(&document);
         let paths: Vec<String> = ENVELOPE.split(' ').map(|p| format!("/{p}")).collect();
@@ -77,7 +97,7 @@ impl Stream {
         stream.store.insert(Digest::of(&document), document);
         let model = format!(
             r#"{{"admits_instruments":false,"content_hash":"{}","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}}"#,
-            stream.put(MODEL)
+            stream.put(content)
         );
         let created = format!(
             r#"{{"mandate_version":"{version}","provenance":[{}],"record_ref":"sha256:{}"}}"#,
@@ -180,10 +200,10 @@ fn the_artifacts_bind_the_registered_instrument_and_objects() {
     let identity = artifacts.production_identity();
     assert_eq!(identity.asset_id.as_str(), SPY);
     assert_eq!(identity.symbol.as_str(), "SPY");
-    let model = (identity.model_id, identity.model_version);
-    assert_eq!(model, ("quant.ma_crossover", "1.0.0"));
-    assert_eq!(identity.model_hash, Digest::of(MODEL.as_bytes()));
-    let mandate = MANDATE.replace(AAPL, SPY).replace(r#""AAPL""#, r#""SPY""#);
+    let triple = (identity.model_id, identity.model_version);
+    assert_eq!(triple, ("quant.ma_crossover", "1.0.0"));
+    assert_eq!(identity.model_hash, Digest::of(model().as_bytes()));
+    let mandate = spy_mandate(&model());
     let refs = BindingGateConfigRefs::complete(
         reference(FEE.as_bytes()),
         reference(CALENDAR.as_bytes()),
@@ -196,7 +216,8 @@ fn the_artifacts_bind_the_registered_instrument_and_objects() {
 
 /// A registered object is judged as its file is: a fee schedule or a rule set the run cannot use
 /// is refused, never replaced by a reviewed default. A configuration whose instrument or model is
-/// not the confirmed mandate's is refused too.
+/// not the confirmed mandate's is refused too, and so is registered content whose own
+/// `model_version` or `model_id` is not the pin's although its hash is the pinned one (DEC-504).
 #[test]
 #[ignore = "pending E7-19"]
 fn a_registered_object_the_run_cannot_use_is_refused() {
@@ -208,6 +229,13 @@ fn a_registered_object_the_run_cannot_use_is_refused() {
         Stream::deployed(SNAPSHOT, &slow_quotes, FEE),
     ] {
         assert_absent(stream.artifacts());
+    }
+    let pinned = r#""model_version":"1.0.0""#;
+    let renamed = model().replace(pinned, r#""model_version":"1.0.1""#);
+    let other_id = model().replace("quant.ma_crossover", "quant.other");
+    for content in [renamed, other_id] {
+        assert_ne!(content, model(), "the edit applied");
+        assert_absent(Stream::with_model(SNAPSHOT, RULES, FEE, &content).artifacts());
     }
     let (confirmed, config) = Stream::deployed(SNAPSHOT, RULES, FEE).inputs();
     let mut other_symbol = config.clone();
