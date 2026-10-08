@@ -59,6 +59,7 @@ pub(crate) fn payload(
         "ApprovalRequested" => approval_requested_rules(view)?,
         "ApprovalResponded" => responded_rules(view)?,
         "ApprovalRevalidated" => revalidated_rules(view)?,
+        "AgentModeChanged" if schema_version == 2 => held_mode_rules(view)?,
         "AgentModeChanged" => ensure(
             strictness(view.text("to")) >= strictness(view.text("lifecycle")),
             InvalidReason::Schema,
@@ -282,7 +283,38 @@ fn first_differing_action(mine: &Value, theirs: &Value) -> Option<&'static str> 
         .find(|member| mine.get(member) != theirs.get(member))
 }
 
-const OWNER_MODE_REASONS: [&str; 3] = ["owner_pause", "owner_resume", "owner_stop"];
+const OWNER_MODE_REASONS: [&str; 5] = [
+    "owner_pause",
+    "owner_resume",
+    "owner_stop",
+    "owner_hold",
+    "owner_lift_hold",
+];
+
+/// Journal spec v0.21 §9.10's rules 78 and 79 on `AgentModeChanged` version 2 (DEC-672): `held`
+/// follows a hold's and a lift's reason, and `to` is at least as strict as the lifecycle and at
+/// least `exits_only` while held, so a resume never clears a hold and a lift never clears a pause.
+fn held_mode_rules(view: Payload<'_>) -> Result<(), Invalid> {
+    let held = view.0.get("held") == Some(&Value::Bool(true));
+    let reason = view.text("reason");
+    if reason == "owner_hold" || reason == "owner_lift_hold" {
+        ensure(
+            held == (reason == "owner_hold"),
+            InvalidReason::Schema,
+            "payload.held",
+        )?;
+    }
+    let floor = if held {
+        strictness(view.text("lifecycle")).max(strictness("exits_only"))
+    } else {
+        strictness(view.text("lifecycle"))
+    };
+    ensure(
+        strictness(view.text("to")) >= floor,
+        InvalidReason::Schema,
+        "payload.to",
+    )
+}
 const RISK_ADDING: [&str; 2] = ["open", "increase"];
 const MODES: [&str; 4] = ["normal", "exits_only", "paused", "stopped"];
 const CLIPS: [&str; 6] = [
@@ -572,6 +604,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         return match event_type {
             "ModelOutputRecorded" => Some(&MODEL_OUTPUT_RECORDED),
             "DecisionMade" => Some(&DECISION_MADE),
+            "AgentModeChanged" => Some(&AGENT_MODE_CHANGED_V2),
             _ => None,
         };
     }
@@ -965,6 +998,27 @@ static AGENT_MODE_CHANGED: Ty = Ty::Record(&[
         ]),
     ),
     ("lifecycle", Ty::OneOf(&["normal", "paused", "stopped"])),
+]);
+
+/// §9.10's version 2: version 1's members with the hold's two reasons, then `held`.
+static AGENT_MODE_CHANGED_V2: Ty = Ty::Record(&[
+    ("from", MODE),
+    ("to", MODE),
+    (
+        "reason",
+        Ty::OneOf(&[
+            "restriction_changed",
+            "awaiting_reconciliation",
+            "owner_pause",
+            "owner_resume",
+            "owner_stop",
+            "kill_switch",
+            "owner_hold",
+            "owner_lift_hold",
+        ]),
+    ),
+    ("lifecycle", Ty::OneOf(&["normal", "paused", "stopped"])),
+    ("held", Ty::Bool),
 ]);
 
 static KILL_SWITCH_ACTIVATED: Ty = Ty::Record(&[

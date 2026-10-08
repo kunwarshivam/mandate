@@ -1339,7 +1339,6 @@ fn the_approval_answers_are_catalogued_and_closed_on_their_streams() {
 /// control stream too: a payload with no `command` is refused at that member, since §9.10 reads it
 /// for every command.
 #[test]
-#[ignore = "pending E10-15"]
 fn the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream() {
     for (event_type, refs) in CLOSED_BY_E10_15 {
         for kind in [ACCT, AGENT, CTL, CLOCK] {

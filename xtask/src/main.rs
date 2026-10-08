@@ -2325,14 +2325,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
 /// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
 /// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
-///
-/// The 8 `mandate-journal` rows are E10-15's (DEC-670 to DEC-672, journal spec v0.19 to v0.21):
-/// they check `Draft::parse` and `check_batch`, the journal's existing checks, so there is no stub
-/// for them to stop at. Today the journal answers `unknown_event_type` or `unknown_schema` for the
-/// new records, refuses the `client` actor kind, and has no rule 54 to 80, which is what they fail
-/// on (DEC-137, as J2's tests did). E10-15's implementation deletes the rows with their `#[ignore]`
-/// lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 21] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2381,38 +2374,6 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 21] = [
     (
         "crates/mandate-runtime/tests/answer_records.rs",
         "decided_by_now_is_null_unless_the_reclassification_asks",
-    ),
-    (
-        "crates/mandate-journal/tests/catalogue.rs",
-        "the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream",
-    ),
-    (
-        "crates/mandate-journal/tests/workspace_records.rs",
-        "every_workspace_api_base_and_valid_draft_parses",
-    ),
-    (
-        "crates/mandate-journal/tests/workspace_records.rs",
-        "every_invalid_workspace_api_draft_is_refused_with_its_reason_at_its_path",
-    ),
-    (
-        "crates/mandate-journal/tests/workspace_records.rs",
-        "every_client_actor_base_and_valid_draft_parses",
-    ),
-    (
-        "crates/mandate-journal/tests/workspace_records.rs",
-        "every_invalid_client_actor_draft_is_refused_with_its_reason_at_its_path",
-    ),
-    (
-        "crates/mandate-journal/tests/workspace_records.rs",
-        "a_compromised_revocation_follows_its_connections_kill_switch_in_its_batch",
-    ),
-    (
-        "crates/mandate-journal/tests/workspace_records.rs",
-        "every_hold_base_and_valid_draft_parses",
-    ),
-    (
-        "crates/mandate-journal/tests/workspace_records.rs",
-        "every_invalid_hold_draft_is_refused_with_its_reason_at_its_path",
     ),
 ];
 

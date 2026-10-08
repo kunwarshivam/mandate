@@ -124,7 +124,6 @@ fn assert_rules_cited(clauses: &[String], rules: std::ops::RangeInclusive<u32>) 
 }
 
 #[test]
-#[ignore = "pending E10-15"]
 fn every_workspace_api_base_and_valid_draft_parses() {
     let (failed, valid) = unrefused("workspace_api");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -132,7 +131,6 @@ fn every_workspace_api_base_and_valid_draft_parses() {
 }
 
 #[test]
-#[ignore = "pending E10-15"]
 fn every_invalid_workspace_api_draft_is_refused_with_its_reason_at_its_path() {
     let (failed, clauses) = refused("workspace_api");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -145,7 +143,6 @@ fn every_invalid_workspace_api_draft_is_refused_with_its_reason_at_its_path() {
 }
 
 #[test]
-#[ignore = "pending E10-15"]
 fn every_client_actor_base_and_valid_draft_parses() {
     let (failed, valid) = unrefused("client_actor");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -153,7 +150,6 @@ fn every_client_actor_base_and_valid_draft_parses() {
 }
 
 #[test]
-#[ignore = "pending E10-15"]
 fn every_invalid_client_actor_draft_is_refused_with_its_reason_at_its_path() {
     let (failed, clauses) = refused("client_actor");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -168,7 +164,6 @@ fn every_invalid_client_actor_draft_is_refused_with_its_reason_at_its_path() {
 /// Rule 69's batch clause: a compromised revocation names, earlier in its batch, the kill switch at
 /// its connection's scope. Each valid batch commits, and each invalid one fails at its draft.
 #[test]
-#[ignore = "pending E10-15"]
 fn a_compromised_revocation_follows_its_connections_kill_switch_in_its_batch() {
     let section = section("client_actor");
     let batch = |case: &Value| -> Vec<Draft> {
@@ -220,7 +215,6 @@ fn a_compromised_revocation_follows_its_connections_kill_switch_in_its_batch() {
 }
 
 #[test]
-#[ignore = "pending E10-15"]
 fn every_hold_base_and_valid_draft_parses() {
     let (failed, valid) = unrefused("hold");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -228,7 +222,6 @@ fn every_hold_base_and_valid_draft_parses() {
 }
 
 #[test]
-#[ignore = "pending E10-15"]
 fn every_invalid_hold_draft_is_refused_with_its_reason_at_its_path() {
     let (failed, clauses) = refused("hold");
     assert!(failed.is_empty(), "{}", failed.join("\n"));

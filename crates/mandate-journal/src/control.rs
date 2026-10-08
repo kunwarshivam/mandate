@@ -83,7 +83,9 @@ const COMPANION: &str = "OrderRequestRecorded";
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     match stream.stream_type() {
-        StreamType::Control => CONTROL.contains(&event_type),
+        StreamType::Control => {
+            CONTROL.contains(&event_type) || crate::workspace::CONTROL.contains(&event_type)
+        }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
             event_type == REFUSAL
@@ -101,13 +103,32 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
 pub(crate) fn payload(
     event_type: &str,
     schema_version: u64,
+    stream: &StreamId,
     payload: &Value,
-    config_refs: Option<&Value>,
-    actor: Option<&Value>,
+    envelope: Envelope<'_>,
 ) -> Result<Value, Invalid> {
-    let schema = schema(event_type, schema_version)
+    let Envelope {
+        config_refs,
+        actor,
+        causation_id,
+    } = envelope;
+    if event_type == "OwnerCommandIssued"
+        && let Some(open) = crate::workspace::open_command(payload, actor)
+    {
+        return open;
+    }
+    let schema = crate::workspace::schema(event_type, schema_version, stream.stream_type())
+        .or_else(|| schema(event_type, schema_version))
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
     let payload = crate::schema::normalize(schema, payload, "payload")?;
+    crate::workspace::rules(
+        event_type,
+        schema_version,
+        &payload,
+        config_refs,
+        actor,
+        causation_id,
+    )?;
     let p = Payload(&payload);
     match event_type {
         "MandateVersionCreated" => {
@@ -260,6 +281,15 @@ pub(crate) fn payload(
     Ok(payload)
 }
 
+/// The envelope members [`payload`]'s rules read: `config_refs` (rules 22, 38, 56), the actor
+/// (rules 46, 55, 61, 63, 64, 70, and 73 to 76), and `causation_id` (rules 54 and 69).
+#[derive(Clone, Copy)]
+pub(crate) struct Envelope<'a> {
+    pub(crate) config_refs: Option<&'a Value>,
+    pub(crate) actor: Option<&'a Value>,
+    pub(crate) causation_id: Option<&'a Value>,
+}
+
 /// Subject rules 25, 26 and 28 (`stream_mismatch`), then copy rule 27, on a payload that passed
 /// [`payload`]: reported after `artifact_refs` and `pii_refs` (§9.1's order, which §9.2 keeps).
 pub(crate) fn subject_and_copy(
@@ -282,7 +312,7 @@ pub(crate) fn subject_and_copy(
     }
     let allowed: &[&str] = match stream.stream_type() {
         StreamType::Account => &["acknowledge"],
-        StreamType::Agent => &["resume", "stop"],
+        StreamType::Agent => &["resume", "stop", "lift_hold"],
         StreamType::Control | StreamType::Scheduler => &[],
     };
     ensure(

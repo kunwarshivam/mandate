@@ -81,7 +81,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "RelatedAccountsCoordination"
         | "AgentModeApplied" => entry(ACCOUNT, NONE),
 
-        "ModelInvocationRecorded" => entry(AGENT, &[MOD]),
+        "ModelInvocationRecorded" => entry(&[Agent, Control], &[MOD]),
         "ThesisProposed" | "ThesisRevised" => entry(AGENT, &[MAN, MOD]),
         "ModelOutputRecorded"
         | "DecisionMade"
@@ -119,7 +119,12 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "KeyRevoked"
         | "RecordsAccessed"
         | "ExportCreated"
-        | "PersonalDataErased" => entry(CONTROL, NONE),
+        | "PersonalDataErased"
+        | "MandateDraftSaved"
+        | "OwnerRequestSubmitted"
+        | "ClientConnected"
+        | "ClientRevoked"
+        | "OwnerCommandIssued" => entry(CONTROL, NONE),
 
         "ClockOffsetRecorded" | "ClockToleranceExceeded" => entry(&[Scheduler], NONE),
         _ => return None,
