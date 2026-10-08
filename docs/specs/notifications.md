@@ -306,13 +306,17 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 - **Encryption.** The workspace deployment encrypts the payload to the subscribing browser with Web
   Push message encryption (RFC 8291) and signs with its own application server key (RFC 8292). The
   browser's push service and the relay see only ciphertext, of a payload that is opaque anyway.
-- **Only the browsers' push services** (DEC-792, [#833](https://github.com/kunwarshivam/mandate/pull/833)). A subscription's
-  endpoint is accepted, stored, and sent to only if it is `https` on port 443, with no user
-  information and no IP literal, and its host is on the deployment's push-service allowlist: each
-  entry is an exact host or `*.` and a domain, whose subdomains are all allowed. The default list
-  is `fcm.googleapis.com`, `updates.push.services.mozilla.com`, `*.push.apple.com`, and
-  `*.notify.windows.com`. A send follows no redirect: a `3xx` answer is a permanent failure,
-  `address_rejected`.
+- **Only the browsers' push services** (DEC-792, [#833](https://github.com/kunwarshivam/mandate/pull/833)).
+  A subscription's endpoint is accepted, stored, and sent to only if it parses as `https`, port 443
+  (none written, or `:443`), with no user information, and a host that is a lowercase ASCII name:
+  an IP literal, a trailing dot, a non-ASCII or `xn--` (IDN) label, or a percent-encoded character
+  is refused, never normalized into a match. The host must then match the deployment's allowlist,
+  whose entries are an exact host or `*.` and a domain; `*.domain` matches a proper subdomain at any
+  depth and never the domain itself. The default list is `fcm.googleapis.com`,
+  `updates.push.services.mozilla.com`, `*.push.apple.com`, and `*.notify.windows.com`. A send follows
+  no redirect: a `3xx` answer is a permanent failure, `address_rejected`. One parser
+  (`mandate_webpush::PushEndpoint`) serves the workspace API, the dispatcher, and the relay, with one
+  shared table test; the web client checks the same table before it hands a subscription over.
 - **Direct or relayed.** A managed workspace deployment sends to the push service directly. A hybrid
   deployment whose egress allows only the global control plane sends through the relay over its
   existing outbound mutual-TLS link ([HLD §4](../HLD.md#workspace-deployment)).
@@ -356,11 +360,14 @@ The dispatcher **tails the journal**, which is its outbox:
    `NoticeIssued` before any send.
 3. For each recipient and push channel it reads the address from the vault and sends through the
    channel's adapter (§5.2), then journals the outcome as `NoticeAttempted`.
-   **It reads an address only when that address's last `NotificationAddressChanged` is `added`**
-   (workspace API spec §5.7), and only while its host is on the allowlist (§4.6). The single
-   exception is the one last send of a `notification_address_changed` notice to the very address
-   its `removed` event names: opaque like every notice, retried within the safety window (NT-6),
-   and never repeated for a later notice.
+   **It reads an address only while it is active**, that is, while its last
+   `NotificationAddressChanged` is `added` (workspace API spec §4.10), and only while its host is on
+   the allowlist (§4.6). The single exception is the one last send of a
+   `notification_address_changed` notice to the very address its `removed` event names: opaque like
+   every notice, subject to the allowlist, retried within the safety window (NT-6), and never
+   repeated for a later notice. If the vault entry is already gone, that attempt is a terminal
+   `failed` that marks nothing and raises no `channel_lost`; once the entry is swept, no exception
+   remains.
 4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
    issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
    while the approval is still pending.
@@ -442,7 +449,9 @@ adds the notice stream and these records; E8-9's tests PR closes their payload s
 - An address comes back only when the signed-in user re-verifies it in the workspace.
 - **An allowlist change.** An address whose host leaves the allowlist is no longer sent to: its next
   attempt is journaled `failed` with `address_rejected`, which marks it `unreachable` and raises
-  `channel_lost` to the member's other channels, as for any rejected address.
+  `channel_lost` to the member's other channels, as for any rejected address. It stays unreachable
+  until the member sets it again, still counts toward their limit, and shows its status in the
+  workspace (workspace API spec §4.10).
 - **A member's own change is not a loss.** Adding or removing a push address through the workspace
   API (workspace API spec §4.10) is journaled as `NotificationAddressChanged` on the control
   stream and raises a `notification_address_changed` notice, not `channel_lost`. Its one last send
