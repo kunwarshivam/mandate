@@ -19,6 +19,7 @@ mandate-journal-pg = { path = "crates/mandate-journal-pg", version = "0.0.0" }
 mandate-liquidity = { path = "crates/mandate-liquidity", version = "0.0.0" }
 mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
 mandate-mcp = { path = "crates/mandate-mcp", version = "0.0.0" }
+mandate-vault-local = { path = "crates/mandate-vault-local", version = "0.0.0" }
 mandate-modelhost = { path = "crates/mandate-modelhost", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-passkey = { path = "crates/mandate-passkey", version = "0.0.0" }

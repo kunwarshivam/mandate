@@ -29,6 +29,9 @@ Why this test fails on behaviour rather than at its story's stub, and what delet
 
 The file is named `<crate>__<suite>__<test>.toml`, with `::` in the test path written `__`:
 `crates/mandate-executor/tests/hand.rs`'s `outlier_close` would be
-`mandate-executor__hand__outlier_close.toml`. `cargo xtask ci pending` refuses a file whose name
+`mandate-executor__hand__outlier_close.toml`. A row may also name xtask's own unit tests:
+`file = "xtask/src/main.rs"`, with a test in its `tests` module, named as crate `xtask` and suite
+`main`, so `tests::name` is `xtask__main__tests__name.toml`. No other file outside
+`crates/<crate>/` may be named. `cargo xtask ci pending` refuses a file whose name
 does not match its contents, a file with any other field or a missing or empty one, a duplicate
 row, and anything here other than this README and `.toml` rows.
