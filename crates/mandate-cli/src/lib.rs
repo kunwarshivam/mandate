@@ -24,6 +24,7 @@ use clap::{Parser, Subcommand};
 pub mod agent;
 pub mod approvals;
 pub mod artifact;
+pub mod config;
 pub mod control;
 pub mod download;
 pub mod inspect;

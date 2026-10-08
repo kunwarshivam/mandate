@@ -30,6 +30,7 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 toml.workspace = true
 
 [dev-dependencies]
+mandate-modelhost.workspace = true
 mandate-num.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
