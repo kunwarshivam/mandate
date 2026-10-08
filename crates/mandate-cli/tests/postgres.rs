@@ -305,7 +305,6 @@ fn bad_stream_property() {
 /// user, password or host), and nothing is created beside the existing file, which is left as it
 /// was (DEC-522 item 3; `AGENTS.md` rule 7).
 #[test]
-#[ignore = "pending E10-16"]
 fn no_refusal_names_the_dsn_or_creates_a_file() {
     let sentinels = [
         "v0-user-sentinel",
@@ -360,7 +359,6 @@ fn seeded(name: &str) -> Option<(TestDb, String, PathBuf)> {
 /// The export is the vectors' segment, line for line from their canonical bodies and hashes
 /// (journal spec §6.2), and `journal verify` passes it with the store (X-11).
 #[test]
-#[ignore = "pending E10-16"]
 fn a_stream_exports_as_its_vectors_segment_and_verifies() {
     let Some((_db, dsn, root)) = seeded("x") else {
         return;
@@ -402,7 +400,6 @@ fn a_stream_exports_as_its_vectors_segment_and_verifies() {
 /// An existing file is refused and left as it was, and a stream with no event is refused and
 /// writes nothing: a segment never replaces evidence, and an empty one verifies nothing.
 #[test]
-#[ignore = "pending E10-16"]
 fn an_existing_file_and_an_empty_stream_are_refused() {
     let Some((_db, dsn, root)) = seeded("r") else {
         return;
@@ -424,7 +421,6 @@ fn an_existing_file_and_an_empty_stream_are_refused() {
 /// The binary dispatches `journal export` from `main` and does not panic on the journal's own
 /// runtime (DEC-522), and the file it writes passes `journal verify`.
 #[test]
-#[ignore = "pending E10-16"]
 fn the_binary_exports_a_stream_that_the_binary_verifies() {
     let Some((_db, dsn, root)) = seeded("b") else {
         return;

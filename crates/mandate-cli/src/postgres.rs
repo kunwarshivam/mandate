@@ -43,15 +43,7 @@ impl PgControlJournal {
     /// [`ControlError::Journal`] for a DSN that does not parse or a store that cannot be opened. No
     /// message names the DSN.
     pub fn open(args: &JournalArgs) -> Result<Self, ControlError> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|_| ControlError::Journal("no runtime for the journal".to_owned()))?;
-        let journal = {
-            let _entered = runtime.enter();
-            PgJournal::from_dsn(args.journal.expose_secret())
-        }
-        .map_err(|_| ControlError::Journal("the journal DSN does not parse".to_owned()))?;
+        let (runtime, journal) = connect(&args.journal)?;
         let store = FsArtifactStore::open(&args.store)
             .map_err(|e| ControlError::Journal(format!("the artifact store: {}", e.code())))?;
         Ok(Self {
@@ -102,6 +94,34 @@ impl ControlJournal for PgControlJournal {
     fn wait(&mut self, delay: Duration) {
         std::thread::sleep(delay);
     }
+}
+
+/// Every event of `stream` in the journal at `dsn`, in `seq` order, each re-checked on read
+/// (journal spec §11 checks 1 to 5), on a runtime of its own (DEC-522).
+///
+/// # Errors
+/// As [`PgControlJournal::open`] for the DSN, and the journal's error by its code for the read.
+pub fn read_stream(
+    dsn: &SecretString,
+    stream: &StreamId,
+) -> Result<Vec<StoredEvent>, ControlError> {
+    let (runtime, journal) = connect(dsn)?;
+    let rows = runtime.block_on(journal.rows(stream));
+    rows.map_err(|e| journal_error(e.code()))
+}
+
+/// A current-thread runtime and the journal at `dsn` on it, not yet connected.
+fn connect(dsn: &SecretString) -> Result<(Runtime, PgJournal), ControlError> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| ControlError::Journal("no runtime for the journal".to_owned()))?;
+    let journal = {
+        let _entered = runtime.enter();
+        PgJournal::from_dsn(dsn.expose_secret())
+    }
+    .map_err(|_| ControlError::Journal("the journal DSN does not parse".to_owned()))?;
+    Ok((runtime, journal))
 }
 
 /// A journal call that returned no answer, by its stable code (ADR-0001 ES-09), never the DSN: a

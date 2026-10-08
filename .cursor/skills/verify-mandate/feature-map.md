@@ -1017,10 +1017,12 @@ proves each pending test fails on them (DEC-110).
   database-free DSN property; the options parse and hide the DSN), and the in-module
   `waiting_sleeps_for_the_whole_delay`.
 - **`journal export` (V0, DEC-522):** `crates/mandate-cli/src/journal/export.rs` (one stream to
-  the §6.2 segment `journal verify` reads), stubbed pending E10-16; its tests are the three
-  `export` tests in `crates/mandate-cli/tests/postgres.rs` (the vectors' segment, line for line,
-  verified with its store; an existing file and an empty stream refused; the binary exporting and
-  verifying), each starting with a database-free bad-stream refusal.
+  the §6.2 segment `journal verify` reads, written whole to `<out>.tmp` and published by a hard
+  link that never replaces a file), and `main`, synchronous so the journal's runtime is the only
+  one; its tests are the four export tests in `crates/mandate-cli/tests/postgres.rs` (the vectors'
+  segment, line for line, verified with its store; an existing file and an empty stream refused;
+  the binary exporting and verifying; no refusal naming the DSN or creating a file), each running
+  without a database until it reaches the journal.
 - **Run:** `MANDATE_PG_URL=postgres://… cargo nextest run -p mandate-cli --test postgres`, or
   `cargo xtask ci postgres`, which runs `mandate-cli` beside `mandate-journal-pg`.
 

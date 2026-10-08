@@ -133,6 +133,10 @@ pub enum Refusal {
     ExportStreams,
     /// The export's `stream_id` is not one of journal spec §2.
     ExportStreamId,
+    /// `journal export` was given a file that exists; an export never replaces one (DEC-522).
+    ExportExists,
+    /// `journal export` was asked for a stream with no event, whose segment would verify nothing.
+    ExportEmpty,
     /// A path the cold command was given, or a file inside its export, could not be read: the
     /// export is not a directory, or an I/O failure (DEC-490 item 4).
     Unreadable,
@@ -151,6 +155,8 @@ impl Refusal {
             Self::AnchorStream => "anchor_covers_another_stream",
             Self::ExportStreams => "export_mixes_streams",
             Self::ExportStreamId => "export_stream_id_invalid",
+            Self::ExportExists => "export_file_exists",
+            Self::ExportEmpty => "export_stream_empty",
             Self::Unreadable => "path_unreadable",
             Self::ColdExportIncomplete => "cold_export_incomplete",
         }
