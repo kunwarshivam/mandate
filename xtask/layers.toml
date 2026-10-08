@@ -72,6 +72,16 @@ safety_critical = true
 pure = true
 allowed_external = ["sha2", "thiserror"]
 
+# Web push for opaque notices (E8-14, notifications spec §4.6): RFC 8291 encryption and RFC 8292
+# VAPID over a closed payload. It depends on no workspace crate, and may never reach the journal,
+# the control stream's writers, or the order path, so no push can approve or act (NT-3).
+[crates.mandate-webpush]
+layer = 0
+safety_critical = true
+pure = true
+allowed_external = ["aes-gcm", "base64ct", "hkdf", "p256", "sha2", "thiserror"]
+forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-mcp", "mandate-cli"]
+
 [crates.mandate-domain]
 layer = 1
 safety_critical = true

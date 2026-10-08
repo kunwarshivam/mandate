@@ -6,6 +6,7 @@ extend-exclude = ["reference/", "fixtures/", "Cargo.lock", "python/uv.lock", "we
 extend-ignore-re = [
     "[0-9a-f]{16,}",                # hashes
     "\\\\x[0-9A-Fa-f]{2}",          # escaped bytes in test vectors
+    "B[A-Za-z0-9_-]{86}",           # base64url uncompressed P-256 keys in RFC test vectors
 ]
 
 [default.extend-words]
