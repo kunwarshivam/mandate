@@ -321,8 +321,9 @@ crates.
   registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`),
   and the policy set and model registry that govern the run, DEC-534 (tests in
   `crates/mandate-shell/tests/governance.rs`);
-  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed E7-7 AAPL artifacts and
-  binds the bytes it checked, reads the GET-only broker preflight (including the trailing window's
+  `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed artifacts and binds the
+  bytes it checked (`Artifacts::from_registered` takes them from the confirmed version and the
+  registered objects instead of files, Q1; tests in `crates/mandate-shell/tests/registered.rs`), reads the GET-only broker preflight (including the trailing window's
   IEX minute bars, DEC-471) and the liquidity facts into one `PaperFacts` snapshot, refuses any
   missing, stale, or ambiguous fact or a non-clean account, and assembles the trusted run and
   executor contexts from that snapshot alone (DEC-470); `src/adapters.rs` the production adapters:
@@ -1037,8 +1038,10 @@ proves each pending test fails on them (DEC-110).
   in-memory journal in `crates/mandate-cli/tests/common/mod.rs`.
 - **The `approvals` commands (K1a, DEC-533):** `crates/mandate-cli/src/inbox.rs` (`list`, `show`,
   `approve` and `skip` over P0's journal as D1b's paper owner; the renderers `list_lines`,
-  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`), stubbed, and `main`;
-  `crates/mandate-cli/tests/inbox.rs`, pending E8-3 but for the live flags test.
+  `show_lines`, `granted_lines`, `skipped_line`; `assertion_id`) and `main`, with the answer's
+  `content_hash` in `artifact_refs` (`control.rs`, DEC-533 item 6);
+  `crates/mandate-cli/tests/inbox.rs`, and `crates/mandate-cli/tests/grant.rs`, the binary over
+  Postgres (`MANDATE_PG_URL`), playing the runtime that records the grant.
 - **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime -p mandate-cli`;
   `cargo xtask ci pending`.
 
@@ -1102,7 +1105,7 @@ proves each pending test fails on them (DEC-110).
 - **`agent deploy` (D2b, DEC-530 item 9):** `crates/mandate-cli/src/deploy.rs` (`deploy`, which
   takes the stream's latest confirmed version and a code bound to the agent and the version, and
   commits `AgentDeployed` with `config_refs.mandate_version`; one active deployment per agent),
-  stubbed; `crates/mandate-cli/tests/deploy.rs`, pending E10-16, over a control stream seeded in
+  on `version.rs`'s checks; `crates/mandate-cli/tests/deploy.rs`, over a control stream seeded in
   §9.2's shapes: the exact payload, record and envelope; the fold reading the agent's version in
   force; every refusal code, each writing nothing; a failing store committing nothing.
   `cargo nextest run -p mandate-cli --test deploy`.
@@ -1296,6 +1299,19 @@ proves each pending test fails on them (DEC-110).
   clock-independence check), with fixtures in `tests/common/mod.rs`.
 - **Run:** `cargo nextest run -p mandate-modelhost`.
 
+## Passkey relying party (E9-1)
+
+- **Spec:** identity spec §6.1, §6.3, §7.2 step 4; DEC-660 (dependencies, algorithms, and the
+  strict readings).
+- **Code:** `mandate-passkey`, `crates/mandate-passkey/` (layer 2, pure, safety-critical):
+  `src/lib.rs` (`enrol`, `verify`, `RelyingParty`, `Challenge`, `Credential`, `PublicKey`,
+  `Refusal`).
+- **Tests:** `crates/mandate-passkey/tests/api.rs` (refusal codes, the challenge length) and
+  `tests/oracle.rs` (the software authenticator in `tests/common/mod.rs` against RFC 4648 and
+  RFC 8949 vectors and `ring`'s verifier; its keys are generated in the test, never a real
+  authenticator, identity spec §1.3).
+- **Run:** `cargo nextest run -p mandate-passkey`.
+
 ## Simulated Robinhood broker (E7-25)
 
 - **Spec:** the Robinhood tool contract (E7-15: "The equity order tools", "Order states") and
@@ -1305,8 +1321,13 @@ proves each pending test fails on them (DEC-110).
   a dev-dependency only; safety-critical, pure):
   `src/lib.rs` (`Sim`, its scripted `Event`s and `Fault`s, the order and request types,
   `SimError`).
-- **Tests:** `crates/mandate-rh-sim/tests/rules.rs` (only an agentic account reviews or places;
-  account numbers are unique), with fixtures in `tests/common/mod.rs`. Pending E7-25.
+- **Tests:** `crates/mandate-rh-sim/tests/rules.rs` (quantity forms, sessions and text against
+  the contract; only an agentic account reviews or places; each pre-trade alert refuses) and
+  `crates/mandate-rh-sim/tests/lifecycle.rs` (fills and positions, `ref_id` after a lost answer
+  and its echo and changed-resend switches, `gfd` and `gtc`, sessions, scripted answers, and the
+  refusals of cancel, fill and a sell that working sells already hold, a working sell holding
+  only its unfilled remainder), with fixtures
+  in `tests/common/mod.rs`. Pending E7-25.
 - **Run:** `cargo nextest run -p mandate-rh-sim`.
 
 ## Research-agent spike (E17-0)
