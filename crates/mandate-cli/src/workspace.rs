@@ -6,8 +6,10 @@ use std::io::Write;
 
 use clap::{Args, Subcommand};
 
-use crate::control::{ControlError, Now, Submitted};
-use crate::postgres::JournalArgs;
+use mandate_journal::Environment;
+
+use crate::control::{ControlError, Now, Owner, Submitted, control_stream, open_control_stream};
+use crate::postgres::{JournalArgs, PgControlJournal, read_stream};
 
 #[derive(Debug, Subcommand)]
 pub enum WorkspaceCommand {
@@ -34,6 +36,23 @@ pub struct OpenArgs {
 /// before anything is appended, or the journal's error; no message names the DSN, and a refusal
 /// prints nothing.
 pub fn open(args: &OpenArgs, now: Now, report: &mut impl Write) -> anyhow::Result<Submitted> {
-    let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: "E10-16" }.into())
+    let owner = Owner {
+        workspace: args.workspace.clone(),
+        user: String::new(),
+        environment: Environment::Paper,
+    };
+    let refused = |reason| ControlError::Refused { reason };
+    let stream = control_stream(&owner).map_err(|_| refused("owner_workspace_invalid"))?;
+    if !read_stream(&args.target.journal, &stream)?.is_empty() {
+        return Err(refused("workspace_already_open").into());
+    }
+    let mut journal = PgControlJournal::open(&args.target)?;
+    let submitted = open_control_stream(&mut journal, &owner, now)?;
+    let Submitted { event_id, seq } = &submitted;
+    writeln!(
+        report,
+        "opened {} as event {event_id} at seq {seq}",
+        stream.as_str()
+    )?;
+    Ok(submitted)
 }
