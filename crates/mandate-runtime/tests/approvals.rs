@@ -684,18 +684,20 @@ fn drift_beyond_the_band_either_way_or_no_mark_skips() {
     skipped_on_revalidation(&ran, &asked, &grant.event_id, "drift");
 }
 
-/// The `quorum` member of the step's one `ApprovalResponded`, as written: `None` when the record
-/// carries no such key.
+/// The quorum check 7 applied, or `None` when the record carries none: `quorum` absent, or `null`
+/// as journal spec v0.17 §9.7 writes it (DEC-533 item 3, whose presence `answer_records.rs` pins).
 fn quorum_recorded(ran: &Ran) -> Option<&Value> {
-    only(ran, "ApprovalResponded").payload.get("quorum")
+    only(ran, "ApprovalResponded")
+        .payload
+        .get("quorum")
+        .filter(|recorded| !matches!(recorded, Value::Null))
 }
 
 /// Journal spec §9, mandate spec §6.4 check 7, DEC-488: an admitted grant's `ApprovalResponded`
 /// records exactly the approver count and independence check 7 applied, `{required, independent}`
 /// as the request bound them with no overlay folded; a skip (checks 1 to 5 only) and a grant
 /// refused at any check before 7 (`not_an_approver`, `content_mismatch`, `step_up_missing`, `late`,
-/// and `not_pending` after the act) record no `quorum` member at all, because check 7 applied
-/// nothing to them.
+/// and `not_pending` after the act) record no quorum, because check 7 applied nothing to them.
 #[test]
 fn an_admitted_grant_records_the_quorum_check_7_applied_and_no_other_response_does() {
     let (ids, gate, plan, view) = (
