@@ -2928,6 +2928,33 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   tests-first: the gate holds such an opening until protection is placed again, never repricing
   it, with a hold reason a DEC names (§9.1); exits are untouched. Until then that property fails on
   #668's code.
+- **E7-4 (stream K), E4 from E7-4 slice 7's second tests correction
+  ([DEC-521](decisions/DEC-521.md) item 3): a second bracket's end closes the first bracket's
+  unprotected interval, so the bound alerts late.** Minimal script
+  (`properties::no_interval_exceeds_the_limit_without_an_alert`, seed 101):
+  `Intent 0 (AAPL open), Acknowledge, Fill, Intent 1 (CPHC protected open), Acknowledge, Fill,
+  Intent 2 (CPHC protected open), Fill, Fill, Wait, Intent 0, Intent 0, Cancelled, Intent 0`
+  (bracket 01 partly filled at 34; bracket 02 partly filled at 42 and complete at 46, its legs
+  placed; 01's share is still unprotected at 96 with no alert). The fold's `unprotected_end` ends the
+  first open interval in the instrument and ignores the `bracket` it names, so 02's end closes 01's
+  interval and leaves 02's open; `bound` measures from 42, not 34. Trading spec §5.4 ("Bounded
+  unprotected intervals": every interval is journaled from start to end and alerts at
+  `max_unprotected_s`). Fix tests-first, as its own PR: `UnprotectedInterval` carries the bracket
+  entry its start names, and an end that names a bracket closes only that bracket's interval. The
+  case is `hand::a_second_brackets_end_leaves_the_first_brackets_interval_bounded`, which the fix
+  takes live with its `BEHAVIOUR_ONLY_TESTS` row; the property goes live with #668.
+- **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
+  ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
+  while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on
+  #668's head: `Intent 0 (AAPL open), Acknowledge, Fill, Intent 1 (CPHC protected open),
+  Acknowledge, Fill, Intent 3 (CPHC risk exit), Intent 2 (CPHC protected open), Acknowledge, Fill,
+  Wait, Cancelled, Cancelled`. At 84 both entries' cancels are journaled `cancel_overdue`, and the
+  exit of 1 is submitted, sized on their fills, while both still rest at the broker
+  (DEC-160 (7), (13), (18)). At 88 02's cancel is confirmed and its OCO placed for 1 (room 2 − 1,
+  DEC-346 item 6). If 01's last share then fills, the broker activates its legs for 2: sells of
+  1 + 1 + 2 against a position of 3, so a short of 1 is possible; a whole-position exit gets there
+  with no OCO. This is arithmetic: the harness cannot fill 01 behind the newer orders. Trading spec
+  §5.4 (Σ protective sells ≤ position) and `AGENTS.md` rule 12.
 - **E7-4 (stream K), from E7-4 slice 7's tests correction: an unconfirmed owner exit pre-market
   cancels protection for a sell that cannot fill before 09:30 (open question for the
   coordinator).** At 2026-09-22 08:00 ET an owner kill switch without confirmation cancels the
