@@ -1006,8 +1006,8 @@ proves each pending test fails on them (DEC-110).
   (`docs/project/tasks/first-paper-trade.md`, P0 and X-12); DEC-510, DEC-520.
 - **Code:** `crates/mandate-cli/src/postgres.rs` (`JournalArgs`, the `--journal` and `--store`
   options D1, D2 and V0 flatten; `PgControlJournal`, `mandate-journal-pg` behind `ControlJournal`,
-  appending through J0's artifact-aware append with the `mandate-artifacts-fs` store), stubbed
-  pending E10-16.
+  appending through J0's artifact-aware append with the `mandate-artifacts-fs` store; the DSN a
+  `SecretString` exposed only to `PgJournal::from_dsn`).
 - **Tests:** `crates/mandate-cli/tests/postgres.rs` (the control-stream vectors byte for byte, a
   registration refused until its object is in the store, as `MemoryJournal` answers, and
   ownership, fencing and retries as the CLI tests' journal answers; each starts with a
