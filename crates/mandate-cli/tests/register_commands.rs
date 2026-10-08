@@ -22,11 +22,13 @@ use clap::error::ErrorKind;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, parse, to_canonical};
 use mandate_cli::config::ConfigKind;
-use mandate_cli::control::{ControlJournal, Now, Owner};
+use mandate_cli::control::{ControlJournal, Now, Owner, Submitted};
 use mandate_cli::postgres::{JournalArgs, PgControlJournal, read_stream};
 use mandate_cli::register::{ConfigCommand, ModelArgs, OwnerArgs, RegisterArgs, run, run_model};
 use mandate_cli::{Cli, Command};
-use mandate_journal::{AppendOutcome, ArtifactRef, ArtifactSource, Environment, StreamId};
+use mandate_journal::{
+    AppendOutcome, ArtifactRef, ArtifactSource, Environment, StoredEvent, StreamId,
+};
 use mandate_journal_pg::APP_ROLE;
 use mandate_time::UtcNanos;
 use support::{TestDb, URL_VAR};
@@ -35,10 +37,11 @@ const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at
 /// `ctl:ws1`'s opening in paper, as the journal vectors' control stream opens (journal spec §2): the
 /// stream these commands append to is opened before them, by a writer that is not the CLI.
 const OPENING: &str = r#"{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Y0A0A000000000000000S1","event_time":"2026-09-20T13:00:00.000000000Z","event_type":"StreamOpened","payload":{"stream_type":"control","workspace_id":"ws1"},"pii_refs":[],"schema_version":1,"stream_id":"ctl:ws1"}"#;
-const SENTINELS: [&str; 3] = [
+const SENTINELS: [&str; 4] = [
     "d1b-user-sentinel",
     "d1b-password-sentinel",
     "d1b-host-sentinel.invalid",
+    "d1b-db-sentinel",
 ];
 
 fn now() -> Now {
@@ -72,13 +75,20 @@ fn snapshot_args(owner: OwnerArgs, file: &Path, journal: &str, store: &Path) -> 
     }
 }
 
-/// The message a command refused with, checked to carry `code` and no part of the DSN.
-fn refused_with<T: std::fmt::Debug>(result: anyhow::Result<T>, code: &str) {
-    let why = result.map(|t| format!("not refused: {t:?}"));
+/// Runs `command`, which must refuse with a message carrying `code` and no part of the DSN, and
+/// print nothing (DEC-527 items 4 and 5).
+fn refuses(code: &str, command: impl FnOnce(&mut Vec<u8>) -> anyhow::Result<Submitted>) {
+    let mut out = Vec::new();
+    let why = command(&mut out).map(|t| format!("not refused: {t:?}"));
     let why = why.unwrap_or_else(|e| format!("{e:#}"));
     assert!(why.contains(code), "{code}: {why}");
     let named: Vec<&str> = SENTINELS.into_iter().filter(|s| why.contains(s)).collect();
     assert!(named.is_empty(), "{code} names {named:?}: {why}");
+    assert!(
+        out.is_empty(),
+        "{code}: printed {}",
+        String::from_utf8_lossy(&out)
+    );
 }
 
 #[test]
@@ -104,6 +114,18 @@ fn the_owner_is_two_required_flags_and_always_paper() {
     };
     let parsed = (args.kind, args.owner.owner());
     assert_eq!(parsed, (ConfigKind::InstrumentSnapshot, Ok(paper)));
+    let longest = "u".repeat(64);
+    for (workspace, user) in [
+        ("ws1", &*longest),
+        ("ws1", "a_b-9"),
+        ("WS_1-a", "u1"),
+        ("w", "u1"),
+    ] {
+        let owner = owner_args(workspace, user)
+            .owner()
+            .map(|o| (o.workspace, o.user));
+        assert_eq!(owner, Ok((workspace.into(), user.into())), "accepted");
+    }
     for flag in ["--workspace", "--user"] {
         let at = full.iter().position(|a| *a == flag).unwrap();
         let without: Vec<&str> = [&full[..at], &full[at + 2..]].concat();
@@ -122,13 +144,41 @@ fn the_owner_is_two_required_flags_and_always_paper() {
     assert_eq!(kind, Some(ErrorKind::MissingRequiredArgument), "model");
 }
 
+/// `--kind` takes §9.2's names.
+#[test]
+fn the_kinds_take_their_journal_names() {
+    let kinds = [
+        ("fee_config", ConfigKind::FeeConfig),
+        ("trading_calendar", ConfigKind::TradingCalendar),
+        ("instrument_snapshot", ConfigKind::InstrumentSnapshot),
+        ("rule_set", ConfigKind::RuleSet),
+        ("policy_set", ConfigKind::PolicySet),
+        ("model_registry", ConfigKind::ModelRegistry),
+    ];
+    for (name, kind) in kinds {
+        let line = format!(
+            "mandate config register --kind {name} f --workspace w --user u \
+                            --journal j --store s"
+        );
+        let parsed = Cli::try_parse_from(line.split_whitespace()).map(|cli| cli.command);
+        let Ok(Command::Config(ConfigCommand::Register(args))) = parsed else {
+            panic!("{name}: {parsed:?}")
+        };
+        assert_eq!(args.kind, kind, "{name}");
+    }
+}
+
 /// With no database: a bad owner id is refused before the file is read, the journal opened, or the
 /// store created; a missing file before the journal is opened; and a snapshot outside DEC-523
-/// without a connection. No refusal names any part of the DSN (`AGENTS.md` rule 7).
-fn refusals_without_a_database() {
-    let [user, password, host] = SENTINELS;
-    let dsn = format!("postgres://{user}:{password}@{host}:1/j");
-    let (dir, store) = (scratch("refusals"), scratch("refusals-store"));
+/// without a connection; and a journal that cannot be reached is an error. No refusal names any
+/// part of the DSN (`AGENTS.md` rule 7) or prints anything. `tag` keeps each caller's files apart.
+fn refusals_without_a_database(tag: &str) {
+    let [user, password, host, db] = SENTINELS;
+    let dsn = format!("postgres://{user}:{password}@{host}:1/{db}");
+    let (dir, store) = (
+        scratch(&format!("{tag}-files")),
+        scratch(&format!("{tag}-store")),
+    );
     std::fs::create_dir_all(&dir).unwrap();
     let missing = dir.join("missing.json");
     let cases = [
@@ -140,37 +190,47 @@ fn refusals_without_a_database() {
         ("ws1", "Founder Name", "owner_user_invalid"),
         ("ws1", "User1", "owner_user_invalid"),
         ("ws1", &"u".repeat(65), "owner_user_invalid"),
+        ("ws1", "usér", "owner_user_invalid"),
+        ("ws1", "u.1", "owner_user_invalid"),
+        ("ws1", "u1\n", "owner_user_invalid"),
+        ("wé", "u1", "owner_workspace_invalid"),
+        ("ws\n", "u1", "owner_workspace_invalid"),
     ];
     for (workspace, user, code) in cases {
         let owner = owner_args(workspace, user);
         let snapshot = snapshot_args(owner.clone(), &missing, &dsn, &store);
-        refused_with(run(&snapshot, now(), &mut Vec::new()), code);
+        refuses(code, |out| run(&snapshot, now(), out));
         let model = ModelArgs {
             model_id: "quant.ma_crossover".into(),
             model_version: "1.0.0".into(),
             owner,
             target: snapshot.target.clone(),
         };
-        refused_with(run_model(&model, now(), &mut Vec::new()), code);
+        refuses(code, |out| run_model(&model, now(), out));
         assert!(!store.exists(), "{code}: the store is not created");
     }
     let owner = owner_args("ws1", "u1");
     let args = snapshot_args(owner.clone(), &missing, &dsn, &store);
-    refused_with(run(&args, now(), &mut Vec::new()), "config_file_unreadable");
+    refuses("config_file_unreadable", |out| run(&args, now(), out));
     assert!(!store.exists(), "a missing file: the store is not created");
     let nyse = dir.join("nyse.json");
     std::fs::write(&nyse, SPY.replace("arca", "nyse")).unwrap();
-    let args = snapshot_args(owner, &nyse, &dsn, &store);
-    refused_with(
-        run(&args, now(), &mut Vec::new()),
-        "instrument_snapshot_invalid",
-    );
+    let args = snapshot_args(owner.clone(), &nyse, &dsn, &store);
+    refuses("instrument_snapshot_invalid", |out| run(&args, now(), out));
+    let spy = dir.join("spy.json");
+    std::fs::write(&spy, SPY).unwrap();
+    let unreachable = format!("postgres://{user}:{password}@127.0.0.1:1/{db}");
+    let args = snapshot_args(owner, &spy, &unreachable, &store);
+    refuses("unavailable", |out| run(&args, now(), out));
+    for made in [dir, store] {
+        std::fs::remove_dir_all(made).ok();
+    }
 }
 
 #[test]
 #[ignore = "pending E10-16"]
 fn a_bad_owner_a_missing_file_or_a_bad_snapshot_is_refused_without_a_database() {
-    refusals_without_a_database();
+    refusals_without_a_database("refusals");
 }
 
 /// A DSN acting as the application role in `db`'s schema.
@@ -181,19 +241,54 @@ fn dsn(db: &TestDb) -> String {
     format!("{url}{joiner}options={options}")
 }
 
-/// The binary registers SPY's snapshot and the model on `ctl:ws1` in Postgres, as `u1` in paper,
-/// with both objects in the store; a re-run of `model register` prints the event it found.
+/// The password in `MANDATE_PG_URL`, if it names one.
+fn url_password() -> Option<String> {
+    let url = std::env::var(URL_VAR).ok()?;
+    let (credentials, _) = url.split_once("://")?.1.split_once('@')?;
+    credentials
+        .split_once(':')
+        .map(|(_, password)| password.to_owned())
+}
+
+/// What a command printed: one line, whose words include `row`'s event id and `seq`, and which
+/// shows no part of the DSN and none of the object's content (DEC-527 item 5).
+fn printed(stdout: &str, row: &StoredEvent) {
+    let lines: Vec<&str> = stdout.lines().collect();
+    let [line] = lines.as_slice() else {
+        panic!("one line: {stdout:?}")
+    };
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let seq = row.seq.to_string();
+    assert!(
+        words.contains(&row.event_id.as_str()) && words.contains(&seq.as_str()),
+        "{line}"
+    );
+    let rest = line.replace(&row.event_id, "");
+    let hidden = ["postgres://", "us_equity", "etp", "SPY"].map(str::to_owned);
+    for shown in hidden.into_iter().chain(url_password()) {
+        assert!(!rest.contains(&shown), "{line} shows {shown}");
+    }
+}
+
+/// The binary registers SPY's snapshot, a rule set and the model on `ctl:ws1` in Postgres, as `u1`
+/// in paper, with each object in the store; a re-run of `model register` prints the event it
+/// found.
 #[test]
 #[ignore = "pending E10-16"]
 fn the_binary_registers_the_snapshot_and_the_model_in_postgres() {
-    refusals_without_a_database();
+    refusals_without_a_database("binary");
     let Some(db) = TestDb::new() else {
         return;
     };
     let (dsn, root) = (dsn(&db), scratch("binary"));
     std::fs::create_dir_all(&root).unwrap();
-    let (file, store) = (root.join("spy.json"), root.join("store"));
+    let (file, rules, store) = (
+        root.join("spy.json"),
+        root.join("rules.json"),
+        root.join("store"),
+    );
     std::fs::write(&file, SPY).unwrap();
+    std::fs::write(&rules, br#"{"x":1}"#).unwrap();
     let ctl = StreamId::parse("ctl:ws1").unwrap();
     let target = JournalArgs {
         journal: dsn.as_str().into(),
@@ -215,25 +310,34 @@ fn the_binary_registers_the_snapshot_and_the_model_in_postgres() {
             .output()
             .unwrap();
         let stderr = String::from_utf8_lossy(&run.stderr);
-        assert!(run.status.success(), "{argv:?}: {stderr}");
-        String::from_utf8_lossy(&run.stdout).into_owned()
+        assert!(
+            run.status.success() && stderr.is_empty(),
+            "{argv:?}: {stderr}"
+        );
+        String::from_utf8(run.stdout).unwrap()
     };
-    let kind = ["config", "register", "--kind", "instrument_snapshot"];
-    let snapshot = mandate(&[&kind[..], &[file.to_str().unwrap()]].concat());
+    let config = |kind: &str, file: &Path| {
+        mandate(&["config", "register", "--kind", kind, file.to_str().unwrap()])
+    };
+    let snapshot = config("instrument_snapshot", &file);
+    let rule_set = config("rule_set", &rules);
     let model = ["model", "register", "quant.ma_crossover", "1.0.0"];
     let (first, again) = (mandate(&model), mandate(&model));
     let rows = read_stream(&target.journal, &ctl).unwrap();
-    let [_, registered, model_row] = rows.as_slice() else {
-        panic!("the opening and two registrations; the re-run found the model's: {rows:?}")
+    let [_, registered, rule_row, model_row] = rows.as_slice() else {
+        panic!("the opening and three registrations; the re-run found the model's: {rows:?}")
     };
-    assert!(snapshot.contains(&registered.event_id), "{snapshot}");
-    let id = &model_row.event_id;
-    assert!(first.contains(id) && again.contains(id), "{first}{again}");
+    printed(&snapshot, registered);
+    printed(&rule_set, rule_row);
+    printed(&first, model_row);
+    printed(&again, model_row);
     let content = mandate_modelhost::content("quant.ma_crossover", "1.0.0").unwrap();
     let spy = to_canonical(&parse(SPY.as_bytes()).unwrap());
     let files = FsArtifactStore::open(&store).unwrap();
+    let rule = br#"{"x":1}"#.to_vec();
     for (row, kind, object) in [
         (registered, "instrument_snapshot", &spy),
+        (rule_row, "rule_set", &rule),
         (model_row, "model_version", &content.canonical),
     ] {
         let body = parse(&row.body).unwrap();
@@ -248,4 +352,5 @@ fn the_binary_registers_the_snapshot_and_the_model_in_postgres() {
         let stored = files.read_artifact(&ArtifactRef::of(object));
         assert_eq!(stored.as_ref(), Ok(object), "{kind}");
     }
+    std::fs::remove_dir_all(root).ok();
 }
