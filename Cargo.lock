@@ -1639,6 +1639,8 @@ name = "mandate-dispatcher"
 version = "0.0.0"
 dependencies = [
  "base64ct",
+ "mandate-canon",
+ "mandate-journal",
  "mandate-notify",
  "mandate-push-relay",
  "mandate-time",
