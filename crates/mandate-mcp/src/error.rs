@@ -84,6 +84,12 @@ pub enum McpError {
     ClientSecretIssued,
     #[error("the registration does not keep the one loopback redirect sent")]
     RedirectChanged,
+    #[error("the operating system's random generator failed; no login was begun")]
+    RandomUnavailable,
+    #[error("the callback's state is not the login's")]
+    StateMismatch,
+    #[error("the authorization server refused the login")]
+    AuthorizationDenied,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -120,6 +126,9 @@ impl McpError {
             Self::RegistrationUnavailable => "registration_unavailable",
             Self::ClientSecretIssued => "client_secret_issued",
             Self::RedirectChanged => "redirect_changed",
+            Self::RandomUnavailable => "random_unavailable",
+            Self::StateMismatch => "state_mismatch",
+            Self::AuthorizationDenied => "authorization_denied",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }

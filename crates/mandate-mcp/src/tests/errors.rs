@@ -45,6 +45,9 @@ fn every_error_has_its_stable_code() {
         ),
         (McpError::ClientSecretIssued, "client_secret_issued"),
         (McpError::RedirectChanged, "redirect_changed"),
+        (McpError::RandomUnavailable, "random_unavailable"),
+        (McpError::StateMismatch, "state_mismatch"),
+        (McpError::AuthorizationDenied, "authorization_denied"),
         (McpError::Unimplemented { story: "E7-16" }, "unimplemented"),
     ];
     for (error, code) in cases {
