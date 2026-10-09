@@ -2,16 +2,42 @@
 
 | | |
 |---|---|
-| **Status** | v0.28 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.29 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `connections` section of §9.8, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13, and `cold_records` section of §9.14; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `connections` section of §9.8, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, and `cold_records` section of §9.14; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.29 ([DEC-774](../project/decisions/DEC-774.md)):** two readings that only tighten
+  (DEC-176), one of the text alone, and a carve-out that keeps the freeze off risk reduction.
+  - **§9.13's codes.** `VerificationRun`'s `failure.check` listed every §11 code except
+    `held_mismatch` (v0.23), `connection_lifecycle_mismatch`, and `connection_cause_mismatch`
+    (v0.20), so a run could not record those failures: the reference validator refused them as
+    `non_canonical`. The list gains all three, and rule 111 classes each as reported at an event,
+    since §11 reports each at the record that breaks it.
+  - **An operator read's cause.** Rule 108 requires a `platform_operator`'s `RecordsAccessed` to
+    name a `causation_id`, but `append` cannot see what it names. §11 gains the control stream's
+    check `break_glass_cause_mismatch`, reported at the read: the cause must be an earlier
+    `PlatformOperatorAction` on the same control stream. That record stays open (DEC-261 item 9,
+    Proposed), and `append` refuses it as `unknown_schema`, so until item 9 is decided every
+    operator read that `append` admits fails this check. §9.13's list and rule 111 admit the code.
+  - **§11's headings.** §11's per-range checks are now labelled by where each is reported: for the
+    range as a whole (`anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`,
+    `segment_gap`) or at an event (`anchor_head_mismatch` and every check §11 lists by stream), as
+    rule 111 and the reference validator already read them. Rule 111's behaviour does not change.
+  - **The freeze never holds risk reduction.** §11's control-stream freeze, which an operator read
+    can now reach, says what the account- and agent-stream case already says of the kill switch:
+    risk exits, protective orders, owner exits, and the kill switch at any scope still work
+    (`AGENTS.md` rule 13), citing workspace API API-7, which already keeps its risk-reducing
+    operations recorded while the control stream is frozen. Nothing else the freeze covers changes.
+  - **Vectors.** The `records_access` section gains a valid run failing on each of the four codes
+    with its `seq`, an invalid run naming none for each, and `range_checks`, control-stream chains
+    the reference verifier and an oracle of its own judge, the first of them failing the operator
+    read `read_by_an_operator` (still valid at `append`). The vectors stay version 3.
 - **v0.28 ([DEC-720](../project/decisions/DEC-720.md), [DEC-795](../project/decisions/DEC-795.md) items 5 to 7):**
   §9.15 closes the records of v0.12's notice stream at schema version 1, with rules 119 to 130:
   the subject stream owner's `OwnerAlertSent` and the dispatcher's notice-stream `StreamOpened`,
@@ -2611,7 +2637,7 @@ A `checked_range` is a `range` whose `to_hash` is `digest?` (the head the run ve
 
 | Member | Type | Meaning |
 |---|---|---|
-| `failure` | `{check, seq: integer?}?` | The first failure §11 reports for the range, or `null`. `check` is one of §11's codes: `non_canonical`, `column_mismatch`, `seq_gap`, `rehash_mismatch`, `prev_hash_mismatch`, `artifact_missing`, `artifact_mismatch`, `anchor_head_mismatch`, `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`, `segment_gap`, `anchor_self_mismatch`, `intent_action_mismatch`, `mode_event_mismatch`; `seq` is where it was reported, for a per-event check the position walked (the previous `seq` plus 1, or `from_seq` first), whatever the body there says: rule 111 |
+| `failure` | `{check, seq: integer?}?` | The first failure §11 reports for the range, or `null`. `check` is one of §11's codes: `non_canonical`, `column_mismatch`, `seq_gap`, `rehash_mismatch`, `prev_hash_mismatch`, `artifact_missing`, `artifact_mismatch`, `anchor_head_mismatch`, `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`, `segment_gap`, `anchor_self_mismatch`, `break_glass_cause_mismatch`, `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`, `connection_lifecycle_mismatch`, `connection_cause_mismatch`; `seq` is where it was reported, for a per-event check the position walked (the previous `seq` plus 1, or `from_seq` first), whatever the body there says: rule 111 |
 
 A verification a principal requested for an export names that export's `ExportCreated` as its
 `causation_id`. A failed run does not repair anything and does not replace §11's incident path:
@@ -2632,7 +2658,9 @@ A verification a principal requested for an export names that export's `ExportCr
     shape (rules 81 to 83), records its own reads with its own `id` as `accessor`; a
     `platform_operator`'s read has a non-null `causation_id`, the `PlatformOperatorAction` that
     opened its customer-approved break-glass window (§7) (`causation_id`); and each of `resources`
-    sorts after the one before it by bytes (`payload.resources`). Rule 83 already keeps
+    sorts after the one before it by bytes (`payload.resources`). `append` cannot see what that
+    `causation_id` names, so §11's `break_glass_cause_mismatch` checks it; until DEC-261 item 9
+    closes `PlatformOperatorAction`, every operator read this rule admits fails that check. Rule 83 already keeps
     a client off `ExportCreated` and `VerificationRun`, so rules 109 and 110 refuse it again only as a
     second statement of workspace API §3.8 (a client never exports or verifies).
 109. `ExportCreated`: `actor.kind` is `user` or `system` (`actor.kind`), and `view` is non-null
@@ -2646,7 +2674,8 @@ A verification a principal requested for an export names that export's `ExportCr
 111. `VerificationRun`: each range, in array order, at `payload.ranges[i].<member>`: a non-null
     `failure`'s `seq` is non-null exactly when its check is reported at an event (§11's per-event
     checks 1 to 6, `anchor_head_mismatch` at the anchored `seq`, `anchor_self_mismatch`,
-    `intent_action_mismatch`, and `mode_event_mismatch`) and null for `anchor_root_mismatch`, `tsa_token_invalid`,
+    `break_glass_cause_mismatch`, `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`,
+    `connection_lifecycle_mismatch`, and `connection_cause_mismatch`) and null for `anchor_root_mismatch`, `tsa_token_invalid`,
     `segment_manifest_mismatch`, and `segment_gap` (`failure.seq`); a non-null `seq` lies from
     `from_seq` to `to_seq` (`failure.seq`); and `to_hash` is non-null when `failure` is null
     (`to_hash`).
@@ -2886,16 +2915,35 @@ line order for exports), reading `seq` from the body.
 5. `prev_hash_mismatch` — `prev_hash` equals the previous event's `hash` (or the trusted start).
 6. `artifact_missing`, `artifact_mismatch` — every referenced artifact exists and re-hashes.
 
-**Per-range checks:** `anchor_head_mismatch` (the event at each anchored `seq` exists with the
-anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`,
-`segment_gap`, on the control stream ([§9.14](#914-anchor-and-segment-records-dec-783)):
+**Per-range checks** read more than the one event they judge. Each is reported in one of two ways,
+which `VerificationRun`'s `failure.seq` records ([§9.13](#913-records-access-export-and-verification-records-dec-780)
+rule 111):
+
+- **for the range**, with no `seq`: `anchor_root_mismatch`, `tsa_token_invalid`,
+  `segment_manifest_mismatch`, and `segment_gap`;
+- **at an event**, with that event's `seq`: `anchor_head_mismatch` (the event at each anchored
+  `seq` exists with the anchored hash, reported at that `seq`) and every check listed below.
+
+On the control stream ([§9.14](#914-anchor-and-segment-records-dec-783), [§9.13](#913-records-access-export-and-verification-records-dec-780)):
 
 - `anchor_self_mismatch` — an `AnchorComputed` has a leaf for its own control stream, and that leaf
   names the event just before it: its `seq` is one less than the `AnchorComputed`'s own, and its
   `hash` is that event's `hash` (§10), reported at the `AnchorComputed`. The test vectors'
   `cold_records.range_checks` hold a case for each clause;
+- `break_glass_cause_mismatch` — a `RecordsAccessed` whose actor is a `platform_operator` names, as
+  its `causation_id`, an earlier `PlatformOperatorAction` on this control stream, so of the same
+  workspace: the customer-approved break-glass action that opened its window (§7). Rule 108 checks
+  at `append` only that the `causation_id` is non-null, since `append` cannot see earlier batches.
+  A cause that names a later event or an event of another type fails, and so does one that names no
+  event in a range that starts at seq 1, the full-chain run among them (below); each is reported at
+  the `RecordsAccessed`. **Until DEC-261 item 9 closes `PlatformOperatorAction`,
+  `append` refuses that record (`unknown_schema`), so no control stream holds one, and every
+  operator read that `append` admits fails this check** wherever it is judged, always in the
+  weekly full-chain run. It fails closed on purpose, as rules 109 and 110 do for an operator's
+  export or verification. The test vectors' `records_access.range_checks` hold a case for each
+  clause, the first of them the read `records_access`'s valid draft `read_by_an_operator`.
 
-and on an agent stream ([§9.1](#91-agent-stream-payload-schemas-dec-177)):
+On an agent stream ([§9.1](#91-agent-stream-payload-schemas-dec-177)):
 
 - `intent_action_mismatch` — an `IntentProposed` whose `causation_id` names a `DecisionMade` has
   that decision's action members (rule 10), and one whose `causation_id` names an
@@ -2939,14 +2987,18 @@ holds the other stream):
   each.
 
 A reference to an event before the range's trusted start is not checked by that range; the weekly
-full-chain run checks every one, and there a `mode_event` that names no earlier event fails. The
-test vectors' `agent_stream.range_verification` holds a case for each.
+full-chain run checks every one, and there a `mode_event`, or an operator read's `causation_id`,
+that names no earlier event fails. The test vectors' `agent_stream.range_verification` holds a case
+for each for `mode_event`, and `records_access.range_checks` for the operator read's cause.
 
 **Schedule:** the tail of every stream at startup and before each segment export; the full chain
 weekly; results journaled as `VerificationRun`.
 
 **On failure:** SEV-1. Account- or agent-stream failures pause the affected agents (the kill switch
-still works); control-stream failures freeze mandate and deployment changes. Affected segments are
+still works); control-stream failures freeze mandate and deployment changes, and the freeze never
+holds risk reduction: risk exits, protective orders, owner exits, and the kill switch at any scope
+still work (`AGENTS.md` rule 13), and the workspace API still records its risk-reducing operations
+([workspace API spec](workspace-api.md#2-invariants) API-7). Affected segments are
 put on legal hold. **Nothing is repaired in place:** a new writer epoch continues from an
 `IntegrityIncidentRecorded` event that references the last good hash and anchor. The customer (for
 advisers, their chief compliance officer) is notified within the configured deadline, and the

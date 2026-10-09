@@ -627,8 +627,8 @@ RANGE = rec(
     ("prev_hash", DIGEST_HEX),
     ("to_hash", DIGEST_HEX),
 )
-# §11's codes: those reported at an event (checks 1 to 6, the anchored head, and the agent stream's
-# two range checks reported at their event), then those reported for the range as a whole.
+# §11's codes: those reported at an event (checks 1 to 6, the anchored head, and every range check
+# reported at the event that breaks it), then those reported for the range as a whole.
 EVENT_CHECKS = (
     "non_canonical",
     "column_mismatch",
@@ -639,8 +639,12 @@ EVENT_CHECKS = (
     "artifact_mismatch",
     "anchor_head_mismatch",
     "anchor_self_mismatch",
+    "break_glass_cause_mismatch",
     "intent_action_mismatch",
     "mode_event_mismatch",
+    "held_mismatch",
+    "connection_lifecycle_mismatch",
+    "connection_cause_mismatch",
 )
 RANGE_CHECKS = ("anchor_root_mismatch", "tsa_token_invalid", "segment_manifest_mismatch", "segment_gap")
 CHECKED_RANGE = rec(
@@ -1557,7 +1561,8 @@ def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list
             if isinstance(failure, dict):
                 seq, check = failure.get("seq"), failure.get("check")
                 if check in EVENT_CHECKS or check in RANGE_CHECKS:
-                    rule("111.seq", (seq is not None) == (check in EVENT_CHECKS), f"{at}.failure.seq")
+                    at_event = check in EVENT_CHECKS and f"classify.{check}" not in skip
+                    rule("111.seq", (seq is not None) == at_event, f"{at}.failure.seq")
                 bounds = (r.get("from_seq"), seq, r.get("to_seq"))
                 if all(is_integer(b) for b in bounds):
                     rule("111.inside", bounds[0] <= bounds[1] <= bounds[2], f"{at}.failure.seq")
@@ -1675,6 +1680,34 @@ def anchor_self_failure(entries: list[dict], skip: frozenset[str] = frozenset())
         hash_ok = leaf["hash"] == before["hash"] or "self.hash" in skip
         if not (seq_ok and hash_ok):
             return {"seq": entry["seq"], "check": "anchor_self_mismatch"}
+    return None
+
+
+def break_glass_failure(entries: list[dict], skip: frozenset[str] = frozenset()) -> dict | None:
+    """§11's `break_glass_cause_mismatch` over one control-stream range's entries in `seq` order: a
+    `platform_operator`'s `RecordsAccessed` cites, by `causation_id`, an earlier
+    `PlatformOperatorAction` on this stream. A cause named by no entry is judged only when the range
+    starts at seq 1, since it may lie before a later trusted start. Returns the first failure,
+    `{seq, check}`, or `None`."""
+    if not entries:
+        return None
+    from_seq = entries[0]["seq"]
+    position = {entry["body"]["event_id"]: entry for entry in entries}
+    for entry in entries:
+        body = entry["body"]
+        operator = body["actor"]["kind"] == "platform_operator" or "cause.actor" in skip
+        if body["event_type"] != "RecordsAccessed" or not operator:
+            continue
+        named = position.get(body["causation_id"])
+        if named is None:
+            judged = from_seq == 1 or "cause.tail" in skip
+            if judged and "cause.unresolved" not in skip:
+                return {"seq": entry["seq"], "check": "break_glass_cause_mismatch"}
+            continue
+        typed = named["body"]["event_type"] == "PlatformOperatorAction" or "cause.type" in skip
+        earlier = named["seq"] < entry["seq"] or "cause.earlier" in skip
+        if not (typed and earlier):
+            return {"seq": entry["seq"], "check": "break_glass_cause_mismatch"}
     return None
 
 
