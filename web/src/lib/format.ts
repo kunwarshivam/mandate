@@ -77,6 +77,35 @@ export function dateLabel(iso: string): string {
   return `${months[m - 1]} ${d}, ${y}`;
 }
 
+/** The zone the record's days are counted in: Eastern time, the market's, which every "ET" label names. */
+export const RECORD_ZONE = "America/New_York";
+
+const ZONED = new Map<string, Intl.DateTimeFormat>();
+
+function inZone(iso: string, zone: string): { day: string; time: string } {
+  let format = ZONED.get(zone);
+  if (!format) {
+    format = new Intl.DateTimeFormat("en-US", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+    ZONED.set(zone, format);
+  }
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) throw new Error(`not an ISO timestamp: ${iso}`);
+  const part = Object.fromEntries(format.formatToParts(ms).map((p) => [p.type, p.value]));
+  return { day: `${part.year}-${part.month}-${part.day}`, time: `${part.hour}:${part.minute}:${part.second}` };
+}
+
+/**
+ * A time on the record, placed in its day: the clock alone, "14:01:12", when it falls on the same
+ * day as `now` in `zone`, and "Sep 26, 2026, 15:12" from any other day, so a time from another day
+ * never reads as a time today (C-23). The timeline and every restriction's "since" use it. `now`
+ * and `zone` are inputs, so it reads neither the clock nor the viewer's zone setting.
+ */
+export function datedClock(at: string, now: string, zone: string): string {
+  const when = inZone(at, zone);
+  if (when.day === inZone(now, zone).day) return when.time;
+  return `${dateLabel(when.day)}, ${when.time.slice(0, 5)}`;
+}
+
 export function zoneLabel(iso: string): string {
   return iso.endsWith("-04:00") || iso.endsWith("-05:00") ? "ET" : "UTC";
 }
