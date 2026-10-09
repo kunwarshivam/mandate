@@ -418,6 +418,11 @@ fn decision_rules(p: Payload<'_>) -> Result<(), Invalid> {
         schema,
         "payload.decided_by",
     )?;
+    ensure(
+        decided_by != "policy_overlay" || autonomy != "auto",
+        schema,
+        "payload.decided_by",
+    )?;
 
     let discretionary = p.text("purpose") == "discretionary_exit";
     ensure(
@@ -555,6 +560,7 @@ fn is_label(label: &str) -> bool {
         "default",
         "admission_ceiling",
         "client_ceiling",
+        "policy_overlay",
     ]
     .contains(&label)
         || ["rule:", DELEGATION]
