@@ -1648,7 +1648,10 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   derivation the spec requires is the workspace API's `POST /verifications` (§4.8.1,
   [DEC-767](decisions/DEC-767.md)), done first. This adds ergonomics, not trust: an offline control
   export proves no more than its own chain until [DEC-265](04-decision-log.md#decisions) item 1
-  lets an anchor's token be verified.
+  lets an anchor's token be verified. The API path's library half (the `VerificationRun` producer
+  and run logic in `mandate-audit`) goes first; its route waits for `mandate-api-server`, which the
+  first route's story creates ([DEC-680](decisions/DEC-680.md) item 1, claim
+  [#750](https://github.com/kunwarshivam/mandate/issues/750)).
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
