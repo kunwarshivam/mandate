@@ -471,7 +471,6 @@ fn a_working_entry_is_cancelled_at_the_bound_through_the_executor() {
 /// seconds in, the last read the wake after the cancel, and nothing else sent. The door keeps its
 /// stages, so the journal is the free function's test's to read.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_production_door_watches_as_the_function_does() {
     let run = watched_through(LATE, true, Door::Cycle);
     assert_eq!(run.outcome.as_ref().unwrap().submitted.len(), 1);
