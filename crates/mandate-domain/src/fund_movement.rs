@@ -36,27 +36,53 @@ pub const FUND_MOVEMENT_TOKENS: [&str; 15] = [
 ];
 
 /// The name's parts in order, each lower-cased; empty for a name with no ASCII letter or digit.
-///
-/// A stub until E7-12's implementation PR: it has no error to carry, so its body is `todo!()`, the
-/// other stub form DEC-137 names.
-#[expect(
-    clippy::todo,
-    reason = "an infallible function has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
 pub fn name_tokens(name: &str) -> Vec<String> {
-    let _ = name;
-    todo!()
+    let mut parts = Vec::new();
+    let mut part = String::new();
+    let mut previous: Option<char> = None;
+    let mut chars = name.chars().peekable();
+    while let Some(c) = chars.next() {
+        if !c.is_ascii_alphanumeric() {
+            push_part(&mut parts, &mut part);
+            previous = None;
+            continue;
+        }
+        if starts_part(previous, c, chars.peek().copied()) {
+            push_part(&mut parts, &mut part);
+        }
+        part.push(c.to_ascii_lowercase());
+        previous = Some(c);
+    }
+    push_part(&mut parts, &mut part);
+    parts
+}
+
+/// Moves the part being built onto the parts, unless it is empty: a run of separators, or one at
+/// either end of the name, makes no part.
+fn push_part(parts: &mut Vec<String>, part: &mut String) {
+    if !part.is_empty() {
+        parts.push(std::mem::take(part));
+    }
+}
+
+/// Whether the ASCII letter or digit `c` opens a new part when `previous` is the ASCII letter or
+/// digit before it in the same run (`None` at the run's start) and `next` the character after it:
+/// a capital after a lowercase letter or a digit, or a capital after a capital when a lowercase
+/// letter follows it.
+fn starts_part(previous: Option<char>, c: char, next: Option<char>) -> bool {
+    c.is_ascii_uppercase()
+        && match previous {
+            Some(p) if p.is_ascii_lowercase() || p.is_ascii_digit() => true,
+            Some(_) => next.is_some_and(|n| n.is_ascii_lowercase()),
+            None => false,
+        }
 }
 
 /// Whether any of the name's parts is in [`FUND_MOVEMENT_TOKENS`], or the name holds a character
 /// outside ASCII.
-///
-/// A stub until E7-12's implementation PR, like [`name_tokens`].
-#[expect(
-    clippy::todo,
-    reason = "an infallible function has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
 pub fn is_fund_movement_name(name: &str) -> bool {
-    let _ = name;
-    todo!()
+    !name.is_ascii()
+        || name_tokens(name)
+            .iter()
+            .any(|part| FUND_MOVEMENT_TOKENS.binary_search(&part.as_str()).is_ok())
 }
