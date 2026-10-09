@@ -811,7 +811,8 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "removal_only",
-            "rules 100 and 101: removing a role needs no step-up",
+            "rules 100 and 101: removing a role needs no step-up; the same record offboards a deactivated "
+            "member (DEC-654 item 7), whose state only the fold sees",
             "role_changed",
             [change("payload.added", []), change("payload.step_up", None)],
         ),

@@ -37935,7 +37935,7 @@
    },
    {
     "name": "removal_only",
-    "clause": "rules 100 and 101: removing a role needs no step-up",
+    "clause": "rules 100 and 101: removing a role needs no step-up; the same record offboards a deactivated member (DEC-654 item 7), whose state only the fold sees",
     "base_draft": "role_changed",
     "changes": [
      {
