@@ -248,7 +248,6 @@ fn stays_unknown_and_blocks(
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn a_lost_answer_lists_by_instrument_origin_and_creation_time() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -269,7 +268,6 @@ fn a_lost_answer_lists_by_instrument_origin_and_creation_time() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn no_matching_record_leaves_the_order_unknown_and_its_instrument_blocked() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -281,7 +279,6 @@ fn no_matching_record_leaves_the_order_unknown_and_its_instrument_blocked() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn an_account_another_agent_trades_on_is_never_listed() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -321,7 +318,6 @@ fn a_profile_that_queries_by_client_order_id_never_lists() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn exactly_one_matching_record_is_adopted() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -343,7 +339,6 @@ fn exactly_one_matching_record_is_adopted() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn two_matching_records_leave_the_order_unknown_and_its_instrument_blocked() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -355,7 +350,6 @@ fn two_matching_records_leave_the_order_unknown_and_its_instrument_blocked() {
 /// DEC-863: the broker still lists our cancelled order `STALE`, which carries no client order id
 /// and every matched member of the lost one. It cannot be told apart, so nothing is adopted.
 #[test]
-#[ignore = "pending E7-23"]
 fn a_stale_lookalike_of_a_journaled_order_is_never_adopted() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -376,7 +370,6 @@ fn a_stale_lookalike_of_a_journaled_order_is_never_adopted() {
 /// any order, the order is adopted exactly when one record is exact; the oracle counts what it
 /// generated, never the matcher's verdict.
 #[test]
-#[ignore = "pending E7-23"]
 fn over_generated_listings_exactly_one_exact_record_is_adopted() {
     let fixture = Fixture::new();
     let ports = fixture.ports();

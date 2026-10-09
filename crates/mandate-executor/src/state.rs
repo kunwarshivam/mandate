@@ -168,6 +168,9 @@ pub(crate) struct PendingRequest {
 pub(crate) struct OrderDetail {
     pub(crate) request: Option<SubmitOrder>,
     pub(crate) submitted_seq: Option<Seq>,
+    /// The risk clock of the `OrderSubmitted` this attempt was journaled with, from which an
+    /// `Unknown` order's listing starts (DEC-862 item 2).
+    pub(crate) submitted_at: Option<RiskClock>,
     pub(crate) unknown_since: Option<RiskClock>,
     pub(crate) last_absence: Option<RiskClock>,
     /// An exit waited on the order past rule 5's bound, or the broker refused its cancel, and the
