@@ -5,6 +5,8 @@
   leaves open).
 - **Code:** `crates/mandate-audit/src/trace.rs`: `TraceRead` over `MemoryRead` and the response
   types. Stubs until the E12-1 implementation lands.
-- **Tests:** `crates/mandate-audit/tests/trace.rs`, pending E12-1: cycles and self-links, and
-  forged links into another workspace.
+- **Tests:** `crates/mandate-audit/tests/trace.rs`, pending E12-1: an independent breadth-first
+  walk over random link graphs of two workspaces, cycles and self-links, forged links into another
+  workspace, the depth, event and hop bounds at and one past each, model text only quoted, and
+  `intent_id` lookups on the named streams.
 - **Run:** `cargo nextest run -p mandate-audit --run-ignored only -E 'binary(trace)'`.
