@@ -7951,6 +7951,20 @@ jq -r "$filter" "$src"
     /// refused on its own line beside the command that expands it. A quoted list holding
     /// `--features=live` is refused with it. A line is refused once, however many of its words
     /// hold the token. The pins that need no `cargo` word are listed apart from those with one.
+    ///
+    /// Where a word is read as a command (the coordinator's sixth-round rulings under DEC-176,
+    /// so that main's own files stay allowed). An executing command is `bash`, `sh`, `zsh`,
+    /// `dash`, `eval`, `ssh`, `su`, `sudo`, `env`, `xargs`, `nohup`, `timeout`, `nice`, or
+    /// `docker` or `podman` with `run` or `exec`. A quoted word is re-read as a nested command
+    /// only when an executing command takes it or it follows `-c` (`ssh h "cargo build $F"`), so
+    /// `echo "$a $b"` and an awk program are not. `x=( … )` is one word. A here-doc's lines are
+    /// read as commands only when an executing command takes it, so `cat <<EOF` holding `$F` is
+    /// allowed. The lines inside a single-quoted string that spans lines are not read as
+    /// commands when the quote opens in an argument of a command that does not execute it; a
+    /// multi-line `bash -c '…'` is still read. A word holding `${{ … }}` in command position is
+    /// possibly cargo inside a `run:` value only (`run: ${{ inputs.cmd }} build $F`), and not
+    /// in a job name, an `env:` value, a `with:` input or a cache key. The live-token backstop
+    /// still reads every word of these lines.
     #[test]
     #[ignore = "pending E7-26"]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
@@ -8228,6 +8242,24 @@ jq -r "$filter" "$src"
                 ".github/workflows/ci.yml",
                 "steps:\n  - name: liveness\n    run: ./probe.sh --liveness\n",
             ),
+            (".github/scripts/build.sh", "set -e\necho \"$a $b\"\n"),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nshards=(\"$A\" \"$A/tmp\")\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncat <<EOF\ncargo build $F\nEOF\n",
+            ),
+            (".github/scripts/build.sh", "set -e\njq -n '\n$a $b\n'\n"),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      key: x-${{ runner.os }}\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      key: x-${{ runner.os }}-${{ steps.v.outputs.version }}\n",
+            ),
         ];
         for (path, text) in allowed_in_a_script {
             let files = [ci_file(path, text)];
@@ -8264,6 +8296,37 @@ jq -r "$filter" "$src"
             let problems = live_feature_problems(&policy, &meta(), &files)?;
             assert_eq!(problems.len(), 1, "{text}: {problems:?}");
             assert!(problems[0].contains(path), "names the file: {problems:?}");
+        }
+        let refused_through_an_executing_command = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\nssh h \"cargo build $F\"\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nsudo sh -c \"cargo build $F\"\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nbash -c '\ncargo build $F\n'\n",
+                ":3",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: ${{ inputs.cmd }} build $F\n",
+                ":2",
+            ),
+        ];
+        for (path, text, line) in refused_through_an_executing_command {
+            let files = [ci_file(path, text)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].contains(&format!("{path}{line}")),
+                "names the file and line: {problems:?}"
+            );
         }
         let refused_on_two_lines = [
             (
