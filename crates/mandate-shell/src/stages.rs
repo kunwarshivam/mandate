@@ -268,10 +268,11 @@ pub trait Executor {
     /// Starts one process-local fold from an empty state while retaining its trusted context.
     fn reset(&mut self) -> Result<(), Cause>;
     /// Hands the executor the connector's capability profile, which its protection reads, after
-    /// the fold at every start (DEC-838 item 5). Not yet called: E7-23 B2a wires it.
+    /// the fold at every start (DEC-838 item 5). A stub until E7-23 B2a, which overrides it or
+    /// makes it required; the tracer does not call it yet.
     fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
         let _ = profile;
-        Ok(())
+        Err(Cause::Unimplemented { story: "E7-23" })
     }
     fn step(
         &mut self,

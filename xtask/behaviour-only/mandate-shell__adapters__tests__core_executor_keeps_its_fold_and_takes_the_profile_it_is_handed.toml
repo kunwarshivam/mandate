@@ -1,8 +1,0 @@
-file = "crates/mandate-shell/src/adapters.rs"
-test = "tests::core_executor_keeps_its_fold_and_takes_the_profile_it_is_handed"
-reason = """
-E7-23 B2a's (DEC-838 item 5). `CoreExecutor` takes `Executor::use_profile`'s default, which keeps no
-profile, and `ExecutorState::with_profile` is a stub that keeps none, so the state equals its fold
-and the test fails on that equality, not at a stub. The implementation PR deletes this file with
-the #[ignore] line.
-"""
