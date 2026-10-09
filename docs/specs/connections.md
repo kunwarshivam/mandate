@@ -42,6 +42,11 @@ their rules hold. The API routes that start a connection are the workspace API s
 
 ## 0. Change history
 
+- **v0.2, amended by [DEC-699](../project/decisions/DEC-699.md)** ([DEC-694](../project/decisions/DEC-694.md)
+  item 4): §5.2 step 1's pending record is journaled as `ConnectionRequested` (journal spec §9.8,
+  rule 131), the event the connect's step-up commits with (identity spec §7.2 step 5); step 6's
+  API restart re-reads the open requests; and §9.1 no longer says a refused connect keeps no
+  record beyond the refusal, since its request is kept too. Each only tightens (DEC-176).
 - **v0.2, amended by [DEC-687](../project/decisions/DEC-687.md):** §8.2 states how the health
   signals count (per signal class) and how several causes are tracked; §9.1's halt paragraph no
   longer lists a reconnect as lifting the restriction (DEC-800 item 5, journal §9.8 rule 68), and
@@ -213,7 +218,9 @@ DEC-690 item 4; DEC-441 item 21). A live Alpaca OAuth connection needs a new dec
 
 1. **Start.** A workspace admin presents step-up (identity spec #556, ID-4) and starts the connect.
    The connection manager creates the pending connection record (`connecting`, §9.1) with its
-   `connection_id`, `account_ref`, and vault path. It also creates a single-use `state` bound to the
+   `connection_id`, `account_ref`, and vault path, and journals it on the control stream as
+   `ConnectionRequested` (journal spec §9.8, rule 131), without the vault path, in the transaction
+   that marks the step-up challenge used (identity spec §7.2 step 5). It also creates a single-use `state` bound to the
    user, workspace, intended environment, and a PKCE verifier, with a short expiry (Proposed
    default: 10 minutes). The server records that it issued that `state`, for that workspace, with
    `env=paper`. Before the redirect, the owner is shown the token's possible breadth (the residual
@@ -348,7 +355,9 @@ DEC-690 item 4; DEC-441 item 21). A live Alpaca OAuth connection needs a new dec
    again (E7-17).
 
    **Restarts.**
-   - *API restart:* the connection manager re-reads every `connecting` record. It appends
+   - *API restart:* the connection manager re-reads every `connecting` record: the
+     `ConnectionRequested` records that no establishment or refusal has closed (journal spec §9.8,
+     rule 131). It appends
      `ConnectionEstablished` for one whose results all passed and whose check 4 still passes, and
      tears down every other one that is past its deadline.
    - *Token-exchange process restart:* it never re-runs an exchange. A code it has read is spent,
@@ -654,7 +663,7 @@ protective order, a cancel, or the kill switch.
 
 | State | Entered when | Openings | Exits, protection, kill switch | Ends when | Who ends it |
 |---|---|---|---|---|---|
-| `connecting` | Step-up and connect started | No agent yet; the token-exchange process may only exchange the code, and the executor may only run checks and append their results (§5.2 step 4) | — | `ConnectionEstablished` (`active`), or the teardown of §5.2 step 6 on a refusal, a timeout, or a restart past the deadline (refused, no record kept beyond the refusal event) | System |
+| `connecting` | Step-up and connect started (`ConnectionRequested`, journal §9.8 rule 131) | No agent yet; the token-exchange process may only exchange the code, and the executor may only run checks and append their results (§5.2 step 4) | — | `ConnectionEstablished` (`active`), or the teardown of §5.2 step 6 on a refusal, a timeout, or a restart past the deadline (refused: the journal keeps the `ConnectionRequested`, the refusal event, and the orphan account stream, and nothing else) | System |
 | `active` | All §8.1 checks pass | As the gate allows | Yes | Any transition below | — |
 | `degraded` | Network errors, low headroom, or contract drift | **Halted**: account state `closing_only`, agents `exits_only` | Yes, while the broker accepts | Good probes, or for drift a released connector version (not yet decided: until it is, drift clears only as [DEC-687](../project/decisions/DEC-687.md) item 3 says), **then** the owner's acknowledgment (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
 | `suspended` | Credential invalid: expired, revoked at the broker, refresh failed, or a later permission check failed | **Halted**: account state `closing_only`, agents `exits_only` | Attempted while any call succeeds; otherwise protection rests at the broker | Re-authorization only (DEC-800 item 5, accepted by the founder in DEC-824 item 6): the owner replaces the credential, a `reauthorize` check after the suspension passes every §8.1 check, the control services accept it for the same account as `ConnectionCredentialRotated`, and the executor clears the cause on that rotation (journal §9.8 rule 68); the owner then acknowledges (trading §7.3, cause `connection_unavailable`). A revoke and reconnect of the same account (§3) does not by itself leave `suspended`: the reconnected connection is still `suspended`, and the owner still re-authorizes | Owner, with step-up |
@@ -683,7 +692,7 @@ transient. A restriction that lifts with no acknowledgment would be a separate s
 
 | Step | What happens | Invariants |
 |---|---|---|
-| **Connect** | Step-up; pending record (`connecting`); OAuth or key entry; code or key to vault (API); for OAuth, the code exchanged by the token-exchange process; executor started in `connecting`, which may only run checks and append their results (§5.2 step 4); check 4 and `ConnectionEstablished`, whose causation cites the passing results (API); only then does the executor act on the account, starting with the first reconciliation. A refusal, a timeout, or a restart follows §5.2 step 6 | CN-1, CN-2, CN-3, CN-5, CN-10 |
+| **Connect** | Step-up; pending record (`connecting`), journaled as `ConnectionRequested`; OAuth or key entry; code or key to vault (API); for OAuth, the code exchanged by the token-exchange process; executor started in `connecting`, which may only run checks and append their results (§5.2 step 4); check 4 and `ConnectionEstablished`, whose causation cites the passing results (API); only then does the executor act on the account, starting with the first reconciliation. A refusal, a timeout, or a restart follows §5.2 step 6 | CN-1, CN-2, CN-3, CN-5, CN-10 |
 | **Verify permissions** | §8.1 at every executor start and daily | CN-2, CN-3 |
 | **Healthy** | `active`; health probe; daily 1× and permission checks | — |
 | **Degraded** | `closing_only`, so agents are `exits_only`; exits continue. The owner is alerted after a configured period (Proposed: 5 minutes) for network errors and low headroom, and **at once** for contract drift, which is not transient | CN-6, rule 13 |
