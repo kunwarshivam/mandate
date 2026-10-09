@@ -64,6 +64,13 @@ the owl, the rules and the record.
       read, never a value; each model setting's question names its range, so nobody guesses.
       Defaulting a setting would amend DEC-472 and brief A3 ("each setting empty"), so it waits
       for a DEC. (R-26, R-27)
+- [x] **Stop takes a press with the command palette open (C-21).** It did not: Kumo's palette
+      dialog is modal, so it hid the frame from assistive technology and laid its scrim over
+      Stop, and a press on Stop only closed the palette. The palette is now Kumo's panel in a
+      dialog that keeps Tab inside but is not modal, mounted in the frame's sheet layer under the
+      dock and the tab bar, like the More sheet. `e2e/stop-visible.spec.ts` pins it at 390 and
+      1280px, opened with ⌘K and with its button, and the palette's "Stop…" from the keyboard.
+      (#1038)
 
 ## C. The cutting pass (one PR, no new rules)
 

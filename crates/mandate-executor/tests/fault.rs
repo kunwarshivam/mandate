@@ -207,7 +207,7 @@ fn assert_recovered(shell: &Shell, ports: &Ports<'_>, truth: &Truth, point: Cras
             continue;
         }
         let (Some(name), Some(action)) = (
-            stored.payload.get("instrument").and_then(Value::as_str),
+            common::protected_instrument(&stored.payload),
             stored.payload.get("action").and_then(Value::as_str),
         ) else {
             continue;

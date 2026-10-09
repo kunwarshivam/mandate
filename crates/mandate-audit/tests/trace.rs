@@ -12,7 +12,7 @@ use common::{Fixture, T, WS_A, WS_B, actor, event_id, permitted, tenant, text};
 use mandate_audit::{
     AuditError, Author, Hop, HopStatus, MemoryRead, Quoted, QuotedContent, Trace, TraceRead,
 };
-use mandate_canon::Digest;
+use mandate_canon::{Digest, parse, to_canonical};
 use mandate_identity::WorkspaceId;
 use mandate_journal::StreamId;
 use proptest::prelude::*;
@@ -915,5 +915,390 @@ fn an_intent_naming_another_type_is_a_node_that_counts_and_is_not_followed() {
     assert_eq!(
         (trace.nodes.len(), last, trace.truncated),
         (256, (named.as_str(), 2), true)
+    );
+}
+
+fn digest(n: char) -> String {
+    format!("sha256:{}", n.to_string().repeat(64))
+}
+
+/// An `ApprovalRequested` payload whose content cites `outputs`, with its `content_hash`.
+fn requested(outputs: &[&str]) -> String {
+    let cited: Vec<String> = outputs
+        .iter()
+        .map(|id| format!(r#"{{"event_id":"{id}","artifact":null,"label":"platform-authored"}}"#))
+        .collect();
+    let content = format!(
+        r#"{{"action":{{"instrument":"inst","asset_class":"us_equity","side":"buy","qty":"1",
+        "limit":"10","order_usd":"10","purpose":"open"}},"trigger":{{"mandate_version":"{m}",
+        "decided_by":"default"}},"evidence":{{"combined_score":{{"label":"combined model score, not
+        a probability of profit","value":"1"}},"outputs":[{}]}},"risk_impact":[],
+        "reference_mark":null,"deadline":"{T}","default":"If you do nothing, this action is
+        skipped","choices":["approve","skip"],"approvers":{{"required":1,"independent":false}}}}"#,
+        cited.join(","),
+        m = digest('4'),
+    )
+    .replace("\n        ", " ");
+    let hash = Digest::of(&to_canonical(&parse(content.as_bytes()).unwrap()));
+    format!(
+        r#"{{"instrument":"inst","asset_class":"us_equity","side":"buy","qty":"1","limit":"10",
+        "purpose":"open","mandate_version":"{}","decided_by":"default","combined_score":"1",
+        "reference_mark":null,"approvers_required":1,"independent_required":false,
+        "deadline":1789999200,"timeout_s":60,"on_timeout":"skip","content":{content},
+        "content_hash":"sha256:{hash}"}}"#,
+        digest('4')
+    )
+}
+
+fn decided(outputs: &[&str]) -> String {
+    format!(
+        r#"{{"instrument_id":"inst","side":"buy","type":"limit","tif":"day","qty":"1",
+        "limit_price":"10","purpose":"open","exit_origin":null,"exit_conviction":"1",
+        "buy_conviction":"1","combined_score":"1","outputs_used":[{}],"model_weights":[],
+        "clips_applied":[],"dry_run":"allow","reason_code":null,"autonomy":"ask",
+        "ask_suppressed":null,"decided_by":"default","delegation_id":null,
+        "requested_by":"agent","client_id":null}}"#,
+        outputs
+            .iter()
+            .map(|o| quote(Some(o)))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn revalidated(approval: &str) -> String {
+    format!(
+        r#"{{"approval":"{approval}","result":"skip","reason":"expired","mandate_version_bound":
+        "{m}","mandate_version_now":"{m}","mode":"normal","instrument_restricted":false,
+        "decided_by_bound":"default","decided_by_now":null,"dry_run":"allow",
+        "dry_run_reason":null,"m_req":null,"m_now":null,"band_bp":100}}"#,
+        m = digest('4')
+    )
+}
+
+fn responded(approval: &str) -> String {
+    format!(
+        r#"{{"approval":"{approval}","verdict":"skipped","responder":"u","role":"approver",
+        "result":"admitted","reason":null,"effective_at":0,"step_up":null,"quorum":null,
+        "separation_of_duties":null,"delegation":null}}"#
+    )
+}
+
+/// A thesis record: `TH1` proposed, or `revision` 1 of it, `TH2`, with an autopsy.
+fn thesis(revision: u8) -> String {
+    let (id, before, autopsy) = match revision {
+        0 => ("TH1", "null".to_owned(), "null".to_owned()),
+        _ => ("TH2", quote(Some("TH1")), quote(Some(&digest('9')))),
+    };
+    format!(
+        r#"{{"model_id":"llm.research_agent","model_version":"1.0.0","content_hash":"{}",
+        "thesis_id":"{id}","lineage_id":"L1","revision":{revision},"predecessor_thesis_id":
+        {before},"autopsy_ref":{autopsy},"instrument_id":"00000000-0000-0000-0000-000000000000","asset_class":"us_equity",
+        "direction":"long","as_of":"{T}","expires_at":"{T}","horizon_s":0,"conviction":"1",
+        "confidence":"1","evidence_ref":null,"evidence_sources":["s1"],"corroboration":
+        "market_data","invalidation":"if x","allowlist_version":1,"prompt_ref":"{}",
+        "response_ref":"{}","admitted":true,"reason":null}}"#,
+        digest('6'),
+        digest('7'),
+        digest('8')
+    )
+}
+
+/// The compiler's `ModelInvocationRecorded` (journal spec rules 71 to 76), its model nested.
+fn invoked(call: &str) -> String {
+    format!(
+        r#"{{"call_id":"{call}","purpose":"compiler","draft_id":"d1","draft":"{r}","model":{{
+        "model_id":"llm.compiler","model_version":"2.0.0","content_hash":"{}"}},"endpoint":"e",
+        "request_digest":"{r}","sampling":{{"temperature":"0","seed":null}},"prompt_ref":"{}",
+        "response_ref":"{}","reported_identity":"m","provider_request_id":null,"outcome":"ok",
+        "attempts":1,"tokens":{{"input":1,"output":1,"cached":0}},"cost_usd":"0",
+        "price_table_ref":"{r}","cache_hit":false,"deadline":"{T}","completed_at":"{T}"}}"#,
+        digest('6'),
+        digest('a'),
+        digest('b'),
+        r = digest('4')
+    )
+}
+
+/// An output citing `evidence` whose `thesis_id` is `thesis`.
+fn grounded(evidence: &[String], thesis: &str) -> String {
+    let named = format!(r#""thesis_id":"{thesis}","lineage_id":"L1""#);
+    output(evidence, None, None).replace(r#""thesis_id":null,"lineage_id":null"#, &named)
+}
+
+/// Outputs `o1` and `o2` on `AG1` and `o3` on `AG2`, a decision on `AG1` using them and an absent
+/// id, an approval request it caused citing `o2`, `o1`, `o3`, and a bare request on each agent.
+struct Approvals {
+    g: Graph,
+    outputs: [String; 4],
+    decision: String,
+    request: String,
+    bare: [String; 2],
+}
+
+fn approvals() -> Approvals {
+    let mut g = Graph::new();
+    let (ag1, ag2) = (agent(WS_A, "AG1"), agent(WS_A, "AG2"));
+    let [o1, o2, o3, decision, request, bare, far] =
+        [1, 2, 3, 4, 5, 6, 7].map(|n| event_id(830_000 + n));
+    g.add(&ag1, &o1, None, &[]);
+    g.add(&ag1, &o2, None, &[]);
+    g.add(&ag2, &o3, None, &[]);
+    let used = [&o1, &o2, &o3].map(String::as_str);
+    let absent = event_id(999_999);
+    g.put(
+        &ag1,
+        &decision,
+        ("DecisionMade", 1),
+        None,
+        &decided(&[used[0], used[1], used[2], &absent]),
+    );
+    g.put(
+        &ag1,
+        &request,
+        ("ApprovalRequested", 1),
+        Some(&decision),
+        &requested(&[used[1], used[0], used[2]]),
+    );
+    g.put(&ag1, &bare, ("ApprovalRequested", 1), None, &requested(&[]));
+    g.put(&ag2, &far, ("ApprovalRequested", 1), None, &requested(&[]));
+    Approvals {
+        g,
+        outputs: [o1, o2, o3, absent],
+        decision,
+        request,
+        bare: [bare, far],
+    }
+}
+
+impl Approvals {
+    /// The decision's hops: `o1` and `o2` with `status`, then `o3` and the absent id lost.
+    fn used(&self, status: &HopStatus) -> Vec<Hop> {
+        let (link, [o1, o2, ..]) = ("payload.outputs_used[]", &self.outputs);
+        let lost = hop(&self.decision, link, None, HopStatus::NotRecorded);
+        let to = |id: &str| hop(&self.decision, link, Some(id), status.clone());
+        vec![to(o1), to(o2), lost.clone(), lost]
+    }
+}
+
+/// §4.8.1's `DecisionMade` row, DEC-772 items 4 and 5: each entry of `outputs_used`, in its order,
+/// is the output of that id on the decision's own agent stream; one on another agent's stream reads
+/// as an absent one, `not_recorded`.
+#[test]
+#[ignore = "pending E12-1"]
+fn a_decision_links_each_output_it_used_on_its_agent_stream() {
+    let a = approvals();
+    let trace = traced(&a.g, WS_A, &a.decision, &[]);
+    assert_eq!(trace.hops, a.used(&HopStatus::Shown));
+    let [o1, o2, ..] = &a.outputs;
+    let want = [(a.decision.as_str(), 0), (o1, 1), (o2, 1)];
+    assert_eq!(depths(&trace), want);
+}
+
+/// §4.8.1's `ApprovalRequested` row: each `content.evidence.outputs[].event_id`, in the content's
+/// order, is the output of that id on the request's agent stream, after the request's
+/// `causation_id`, here its decision; the decision's own links then return into the trace.
+#[test]
+#[ignore = "pending E12-1"]
+fn an_approval_request_links_each_output_its_content_cites() {
+    let a = approvals();
+    let trace = traced(&a.g, WS_A, &a.request, &[]);
+    let [o1, o2, ..] = &a.outputs;
+    let cited = "payload.content.evidence.outputs[].event_id";
+    let mut expected = vec![
+        hop(
+            &a.request,
+            "causation_id",
+            Some(&a.decision),
+            HopStatus::Shown,
+        ),
+        hop(&a.request, cited, Some(o2), HopStatus::Shown),
+        hop(&a.request, cited, Some(o1), HopStatus::Shown),
+        hop(&a.request, cited, None, HopStatus::NotRecorded),
+    ];
+    expected.extend(a.used(&HopStatus::AlreadyShown));
+    assert_eq!(trace.hops, expected);
+}
+
+/// §4.8.1's `ApprovalRevalidated` and `ApprovalResponded` rows: `payload.approval` is the
+/// `ApprovalRequested` of that id on the revalidation's agent stream (another agent's reads
+/// `not_recorded`), and a response's `causation_id` names an `ApprovalResponseSubmitted`, so one
+/// naming an output is `unexpected_type` (journal spec rule 50).
+#[test]
+#[ignore = "pending E12-1"]
+fn approval_links_name_the_request_on_the_agent_stream_and_the_typed_submission() {
+    let mut a = approvals();
+    let ag1 = agent(WS_A, "AG1");
+    let [check, stray, answer] = [1, 2, 3].map(|n| event_id(831_000 + n));
+    let [bare, far] = &a.bare;
+    let revalidation = ("ApprovalRevalidated", 1);
+    a.g.put(&ag1, &check, revalidation, None, &revalidated(bare));
+    a.g.put(&ag1, &stray, revalidation, None, &revalidated(far));
+    let [o1, ..] = &a.outputs;
+    a.g.put(
+        &ag1,
+        &answer,
+        ("ApprovalResponded", 1),
+        Some(o1),
+        &responded(bare),
+    );
+    let approval = "payload.approval";
+    let trace = traced(&a.g, WS_A, &check, &[]);
+    assert_eq!(
+        trace.hops,
+        [hop(&check, approval, Some(bare), HopStatus::Shown)]
+    );
+    let trace = traced(&a.g, WS_A, &stray, &[]);
+    assert_eq!(
+        trace.hops,
+        [hop(&stray, approval, None, HopStatus::NotRecorded)]
+    );
+    let trace = traced(&a.g, WS_A, &answer, &[]);
+    let found = HopStatus::UnexpectedType {
+        event_type: "ModelOutputRecorded".to_owned(),
+    };
+    assert_eq!(trace.hops, [hop(&answer, "causation_id", Some(o1), found)]);
+}
+
+/// Theses `TH1` and its revision `TH2` on `AG1`, `TH3` on `AG2`, and the compiler's invocation.
+struct Theses {
+    g: Graph,
+    records: [String; 3],
+    invocation: String,
+}
+
+fn theses() -> Theses {
+    let mut g = Graph::new();
+    let [proposed, revised, elsewhere, invocation] = [1, 2, 3, 4].map(|n| event_id(840_000 + n));
+    let (ag1, ag2) = (agent(WS_A, "AG1"), agent(WS_A, "AG2"));
+    g.put(&ag1, &proposed, ("ThesisProposed", 1), None, &thesis(0));
+    g.put(&ag1, &revised, ("ThesisRevised", 1), None, &thesis(1));
+    let other = thesis(0).replace(r#""thesis_id":"TH1""#, r#""thesis_id":"TH3""#);
+    g.put(&ag2, &elsewhere, ("ThesisProposed", 1), None, &other);
+    let call = event_id(840_009);
+    g.put(
+        &format!("ctl:{}", text(WS_A)),
+        &invocation,
+        ("ModelInvocationRecorded", 1),
+        None,
+        &invoked(&call),
+    );
+    Theses {
+        g,
+        records: [proposed, revised, elsewhere],
+        invocation,
+    }
+}
+
+/// §4.8.1's `ModelOutputRecorded` row and DEC-772 item 5: an output's `thesis_id` is the
+/// `ThesisProposed` or `ThesisRevised` with that `thesis_id` on the output's agent stream, one
+/// target: a thesis recorded only on another agent's stream is one `not_recorded`.
+#[test]
+#[ignore = "pending E12-1"]
+fn an_output_links_its_thesis_on_its_agent_stream() {
+    let mut t = theses();
+    let ag1 = agent(WS_A, "AG1");
+    let [proposed, revised, _] = &t.records;
+    let ids = [1, 2, 3].map(|n| event_id(841_000 + n));
+    let link = "payload.thesis_id";
+    for ((id, named), to) in
+        ids.iter()
+            .zip(["TH1", "TH2", "TH3"])
+            .zip([Some(proposed), Some(revised), None])
+    {
+        let event = draft(id, &ag1, "ModelOutputRecorded", None, &grounded(&[], named));
+        t.g.fx.append_draft(&ag1, id.clone(), &event);
+        let trace = traced(&t.g, WS_A, id, &[]);
+        let status = if to.is_some() {
+            HopStatus::Shown
+        } else {
+            HopStatus::NotRecorded
+        };
+        assert_eq!(trace.hops, [hop(id, link, to.map(String::as_str), status)]);
+    }
+}
+
+/// AU-4, API-18, §4.8.1 "Model output", DEC-772 item 7: a thesis record's `invalidation`,
+/// `evidence_sources` (as canonical JSON), prompt, response, and autopsy artifacts, a `null`
+/// autopsy giving none, and the compiler invocation's prompt and response artifacts, with its
+/// nested model's id and version, are quoted, `platform_authored` (DEC-773), in that order.
+#[test]
+#[ignore = "pending E12-1"]
+fn thesis_and_invocation_text_is_only_quoted() {
+    let mut t = theses();
+    let ag1 = agent(WS_A, "AG1");
+    let start = event_id(842_001);
+    let payload = grounded(from_ref(&t.invocation), "TH2");
+    let event = draft(&start, &ag1, "ModelOutputRecorded", None, &payload);
+    t.g.fx.append_draft(&ag1, start.clone(), &event);
+    let trace = traced(&t.g, WS_A, &start, &[]);
+    let [_, revised, _] = &t.records;
+    let item =
+        |of: &str, model: (&str, &str), member: &str, text: &str, artifact: Option<String>| {
+            Quoted {
+                path: format!("/payload/{member}"),
+                quoted: QuotedContent {
+                    author: Author::PlatformAuthored,
+                    text: text.to_owned(),
+                    model_id: model.0.to_owned(),
+                    model_version: model.1.to_owned(),
+                    produced_at: T.to_owned(),
+                    event_id: of.to_owned(),
+                    artifact,
+                },
+            }
+        };
+    let compiler = |member, n| {
+        item(
+            &t.invocation,
+            ("llm.compiler", "2.0.0"),
+            member,
+            "",
+            Some(digest(n)),
+        )
+    };
+    let research = ("llm.research_agent", "1.0.0");
+    let thesis = |member, text: &str, artifact| item(revised, research, member, text, artifact);
+    let want: [(&str, Vec<Quoted>); 3] = [
+        (&start, vec![]),
+        (
+            &t.invocation,
+            vec![compiler("prompt_ref", 'a'), compiler("response_ref", 'b')],
+        ),
+        (
+            revised,
+            vec![
+                thesis("invalidation", "if x", None),
+                thesis("evidence_sources", r#"["s1"]"#, None),
+                thesis("prompt_ref", "", Some(digest('7'))),
+                thesis("response_ref", "", Some(digest('8'))),
+                thesis("autopsy_ref", "", Some(digest('9'))),
+            ],
+        ),
+    ];
+    let got: Vec<(&str, Vec<Quoted>)> = trace
+        .nodes
+        .iter()
+        .map(|n| (n.event.event_id.as_str(), n.quoted.clone()))
+        .collect();
+    assert_eq!(got, want);
+    let [proposed, ..] = &t.records;
+    let event = draft(
+        &event_id(842_002),
+        &ag1,
+        "ModelOutputRecorded",
+        None,
+        &grounded(&[], "TH1"),
+    );
+    t.g.fx.append_draft(&ag1, event_id(842_002), &event);
+    let trace = traced(&t.g, WS_A, &event_id(842_002), &[]);
+    let paths: Vec<&str> = trace.nodes[1]
+        .quoted
+        .iter()
+        .map(|q| q.path.as_str())
+        .collect();
+    assert_eq!(
+        (trace.nodes[1].event.event_id.as_str(), paths.len()),
+        (proposed.as_str(), 4)
     );
 }

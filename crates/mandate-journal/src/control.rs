@@ -82,6 +82,9 @@ const COMPANION: &str = "OrderRequestRecorded";
 
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
+    if crate::notices::governs(stream, event_type) {
+        return true;
+    }
     match stream.stream_type() {
         StreamType::Control => {
             CONTROL.contains(&event_type)
@@ -127,6 +130,7 @@ pub(crate) fn payload(
     let schema = crate::workspace::schema(event_type, schema_version, stream_type)
         .or_else(|| crate::connections::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::records::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::notices::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
             _ => schema(event_type, schema_version),
@@ -143,6 +147,7 @@ pub(crate) fn payload(
         causation_id,
     )?;
     crate::records::rules(event_type, &payload, stream, actor, causation_id)?;
+    crate::notices::rules(event_type, &payload, causation_id)?;
     let p = Payload(&payload);
     match event_type {
         "MandateVersionCreated" => {
@@ -314,6 +319,9 @@ pub(crate) fn subject_and_copy(
     payload: &Value,
     causation_id: Option<&Value>,
 ) -> Result<(), Invalid> {
+    if crate::notices::governs(stream, event_type) {
+        return crate::notices::subject(event_type, stream, payload);
+    }
     let p = Payload(payload);
     if event_type == "StreamOpened" {
         let opened = format!("ctl:{}", p.text("workspace_id"));

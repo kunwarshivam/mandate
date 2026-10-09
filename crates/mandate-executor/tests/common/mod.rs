@@ -717,6 +717,31 @@ pub fn discretionary_exit(name: &str, quantity: &str, limit: &str) -> mandate_ex
     }
 }
 
+/// A `ProtectionChanged`'s instrument: §9.5's `instrument_id` or legacy `instrument` (DEC-446).
+pub fn protected_instrument(payload: &Value) -> Option<&str> {
+    payload
+        .get("instrument_id")
+        .or_else(|| payload.get("instrument"))
+        .and_then(Value::as_str)
+}
+
+/// The client order ids a member names: §9.5's list or legacy joined text (DEC-446 item 7).
+pub fn named_orders(payload: &Value, member: &str) -> Vec<String> {
+    match payload.get(member) {
+        Some(Value::Array(ids)) => ids
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        Some(Value::Str(joined)) => joined
+            .split([' ', ','])
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Whether a request is one of the broker's two account-wide endpoints, read off the variant
 /// rather than off anything the crate reports about itself.
 pub fn is_account_wide(request: &BrokerRequest) -> bool {
@@ -1126,8 +1151,9 @@ impl Shell {
             .map(|event| &event.payload)
             .find(|payload| {
                 matches!(payload.get("action"), Some(Value::Str(action)) if action == "placed")
-                    && matches!(payload.get("orders"), Some(Value::Str(orders))
-                        if orders.split([',', ' ']).any(|named| named == id))
+                    && named_orders(payload, "orders")
+                        .iter()
+                        .any(|named| named == id)
             })
     }
 
