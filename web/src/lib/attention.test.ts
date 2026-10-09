@@ -225,12 +225,105 @@ describe("a loud Stop has its reason in Needs you", () => {
     expect(needsYouLines(ws).map((l) => l.text)).toEqual(["Agent 2: checking with the broker", "Agent 2: an order's state is unknown"]);
   });
 
-  it("no such line while every order is in any other state", () => {
-    for (const state of Object.keys(IN_FLIGHT) as OrderState[]) {
-      if (state === "Unknown") continue;
+  it("no such line while every order is in a state the broker has confirmed", () => {
+    for (const state of CONFIRMED) {
       const ws = buildWorkspace("normal");
       agentIn(ws, AGENT_IDS.btc).orders[0].state = state;
+      expect(stopAttention(ws), state).toEqual([]);
       expect(needsYouLines(ws), state).toEqual([]);
     }
+  });
+});
+
+/** The states `IN_FLIGHT` marks, read off the record itself, so a state added to it later is swept too. */
+const IN_FLIGHT_STATES = (Object.keys(IN_FLIGHT) as OrderState[]).filter((s) => IN_FLIGHT[s]);
+const CONFIRMED = (Object.keys(IN_FLIGHT) as OrderState[]).filter((s) => !IN_FLIGHT[s]);
+
+/**
+ * Every order the broker has not confirmed turns Stop loud, so every one of them has its line in
+ * Needs you, not only an unknown one (the C-25 follow-up). The sweep runs over `IN_FLIGHT` itself, so
+ * a state added to it later needs its line before this passes. The wording is the table below,
+ * written by hand, never read through `needsYouLines`.
+ */
+describe("a loud Stop says why for every order in flight", () => {
+  const WORDING: Partial<Record<OrderState, string>> = {
+    Intent: "an order is being sent",
+    Submitting: "an order is being sent",
+    PendingCancel: "an order is being cancelled",
+    PendingReplace: "an order is being replaced",
+    Unknown: "an order's state is unknown",
+  };
+
+  it("sweeps the five states the broker has not confirmed today, and no other", () => {
+    expect([...IN_FLIGHT_STATES].sort()).toEqual(["Intent", "PendingCancel", "PendingReplace", "Submitting", "Unknown"]);
+  });
+
+  for (const state of IN_FLIGHT_STATES) {
+    it(`${state}: Stop is loud and Needs you has one line for the agent, opening the order's record`, () => {
+      for (const agent of buildWorkspace("normal").agents) {
+        for (let i = 0; i < agent.orders.length; i++) {
+          const ws = buildWorkspace("normal");
+          const order = agentIn(ws, agent.agent_id).orders[i];
+          order.state = state;
+          const at = `${agent.label} order ${i} ${state}`;
+          expect(stopAttention(ws), at).toEqual(["1 order the broker has not confirmed"]);
+          const lines = needsYouLines(ws);
+          expect(lines, at).toHaveLength(1);
+          const [line] = lines;
+          expect(line.href, at).toBe(orderHref(agent.agent_id, order.client_order_id));
+          expect(line.text.startsWith(`${agent.label}: `), at).toBe(true);
+          const condition = line.text.slice(`${agent.label}: `.length);
+          for (const detail of [order.instrument.symbol, order.side, order.qty, order.limit_price, order.stop_price]) {
+            if (detail) expect(condition, `${at}: carries ${detail}`).not.toContain(detail);
+          }
+          expect(condition, at).toBe(WORDING[state] ?? condition);
+        }
+      }
+    });
+  }
+
+  it("each state's words, in the agent's own condition form", () => {
+    for (const state of IN_FLIGHT_STATES) {
+      const ws = buildWorkspace("normal");
+      agentIn(ws, AGENT_IDS.swing).orders[0].state = state;
+      expect(WORDING[state], `${state} has no wording in this test`).toBeDefined();
+      expect(needsYouLines(ws).map((l) => l.text), state).toEqual([`Agent 2: ${WORDING[state]}`]);
+    }
+  });
+
+  it("several in flight in one agent, of any mix of states: one line, opening the agent's orders", () => {
+    for (const first of IN_FLIGHT_STATES) {
+      for (const second of IN_FLIGHT_STATES) {
+        const ws = buildWorkspace("normal");
+        const btc = agentIn(ws, AGENT_IDS.btc);
+        expect(btc.orders.length).toBeGreaterThan(1);
+        btc.orders[0].state = first;
+        btc.orders[1].state = second;
+        const text = first === "Unknown" && second === "Unknown" ? "Agent 1: 2 orders' states are unknown" : "Agent 1: 2 orders are in flight";
+        expect(stopAttention(ws), `${first} ${second}`).toEqual(["2 orders the broker has not confirmed"]);
+        expect(needsYouLines(ws).map(({ text, href }) => ({ text, href })), `${first} ${second}`).toEqual([{ text, href: agentHref(AGENT_IDS.btc, "orders") }]);
+      }
+    }
+  });
+
+  it("an order in flight beside confirmed ones still reads as the single order it is", () => {
+    for (const state of IN_FLIGHT_STATES) {
+      for (const other of CONFIRMED) {
+        const ws = buildWorkspace("normal");
+        const btc = agentIn(ws, AGENT_IDS.btc);
+        btc.orders[0].state = other;
+        btc.orders[1].state = state;
+        expect(needsYouLines(ws).map(({ text, href }) => ({ text, href })), `${state} beside ${other}`).toEqual([
+          { text: `Agent 1: ${WORDING[state]}`, href: orderHref(AGENT_IDS.btc, btc.orders[1].client_order_id) },
+        ]);
+      }
+    }
+  });
+
+  it("one line per agent: two agents each with an order in flight get a line each, in the agents' order", () => {
+    const ws = buildWorkspace("normal");
+    agentIn(ws, AGENT_IDS.btc).orders[0].state = "PendingCancel";
+    agentIn(ws, AGENT_IDS.swing).orders[0].state = "Submitting";
+    expect(needsYouLines(ws).map((l) => l.text)).toEqual(["Agent 1: an order is being cancelled", "Agent 2: an order is being sent"]);
   });
 });

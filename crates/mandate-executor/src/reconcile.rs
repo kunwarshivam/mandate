@@ -11,6 +11,7 @@ use crate::batch::Batch;
 use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
+use crate::listing::query_unknown;
 use crate::orders::{
     EXTERNAL, StateEvidence, account_fields, account_restriction, every_agent_alerted, fill,
     record_state_change, status_mapping,
@@ -19,8 +20,8 @@ use crate::payload::{int, text};
 use crate::ports::Ports;
 use crate::state::{Adoption, EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
-    Adopted, BrokerAccount, BrokerRequest, BrokerSnapshot, Difference, EventId, Mode, OrderState,
-    ReconcileReason, Reconciliation, ReconciliationVerdict, StatusMapping, Unexplained,
+    Adopted, BrokerAccount, BrokerSnapshot, Difference, EventId, Mode, OrderState, ReconcileReason,
+    Reconciliation, ReconciliationVerdict, StatusMapping, Unexplained,
 };
 
 /// The order of the steps is part of the algorithm: **orders, then fills, then positions, then
@@ -164,7 +165,7 @@ fn orders(
         if adopted != ours {
             adopt(batch, &id, ours, adopted, differences)?;
             if adopted == OrderState::Unknown {
-                batch.broker(BrokerRequest::GetOrderByClientId(id));
+                query_unknown(batch, id)?;
             }
         }
     }
