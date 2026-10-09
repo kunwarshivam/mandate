@@ -1,0 +1,20 @@
+[
+  {"name": "get_accounts", "description": "Lists the customer's accounts.",
+   "inputSchema": {"type": "object", "properties": {}}},
+  {"name": "get_portfolio", "description": "The account's portfolio.",
+   "inputSchema": {"type": "object", "properties": {"account_number": {"type": "string"}}, "required": ["account_number"]}},
+  {"name": "get_equity_positions", "description": "The account's equity positions.",
+   "inputSchema": {"type": "object", "properties": {"account_number": {"type": "string"}}, "required": ["account_number"]}},
+  {"name": "get_equity_quotes", "description": "Quotes for equity symbols.",
+   "inputSchema": {"type": "object", "properties": {"symbols": {"type": "array", "items": {"type": "string"}}}, "required": ["symbols"]}},
+  {"name": "get_equity_tradability", "description": "Whether the account may trade a symbol.",
+   "inputSchema": {"type": "object", "properties": {"account_number": {"type": "string"}, "symbol": {"type": "string"}}, "required": ["account_number", "symbol"]}},
+  {"name": "get_equity_orders", "description": "The account's equity orders, newest first.",
+   "inputSchema": {"type": "object", "properties": {"account_number": {"type": "string"}, "order_id": {"type": "string"}, "symbol": {"type": "string"}, "state": {"type": "string", "enum": ["new", "queued", "confirmed", "unconfirmed", "partially_filled", "filled", "cancelled", "rejected", "failed", "voided"]}, "created_at_gte": {"type": "string"}, "placed_agent": {"type": "string", "enum": ["user", "agentic", "recurring", "drip"]}, "cursor": {"type": "string"}}, "required": ["account_number"]}},
+  {"name": "review_equity_order", "description": "Simulates an equity order without placing it; returns the quote and pre-trade alerts.",
+   "inputSchema": {"type": "object", "properties": {"account_number": {"type": "string"}, "symbol": {"type": "string"}, "side": {"type": "string", "enum": ["buy", "sell"]}, "type": {"type": "string", "enum": ["market", "limit", "stop_market", "stop_limit"]}, "quantity": {"type": "string"}, "dollar_amount": {"type": "string"}, "limit_price": {"type": "string"}, "stop_price": {"type": "string"}, "time_in_force": {"type": "string", "enum": ["gfd", "gtc"]}, "market_hours": {"type": "string", "enum": ["regular_hours", "extended_hours", "all_day_hours"]}}, "required": ["account_number", "symbol", "side", "type"]}},
+  {"name": "place_equity_order", "description": "Places an equity order on an account with agentic_allowed.",
+   "inputSchema": {"type": "object", "properties": {"account_number": {"type": "string"}, "symbol": {"type": "string"}, "side": {"type": "string", "enum": ["buy", "sell"]}, "type": {"type": "string", "enum": ["market", "limit", "stop_market", "stop_limit"]}, "quantity": {"type": "string"}, "dollar_amount": {"type": "string"}, "limit_price": {"type": "string"}, "stop_price": {"type": "string"}, "time_in_force": {"type": "string", "enum": ["gfd", "gtc"]}, "market_hours": {"type": "string", "enum": ["regular_hours", "extended_hours", "all_day_hours"]}, "ref_id": {"type": "string"}}, "required": ["account_number", "symbol", "side", "type"]}},
+  {"name": "cancel_equity_order", "description": "Cancels an equity order; refused once it is filled or cancelled.",
+   "inputSchema": {"type": "object", "properties": {"account_number": {"type": "string"}, "order_id": {"type": "string"}}, "required": ["account_number", "order_id"]}}
+]

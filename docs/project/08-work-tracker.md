@@ -26,7 +26,7 @@ Open PRs and claim issues on GitHub are the live record of who holds what.
 | M6 Alpaca connector (paper) and recovery | In progress. The executor, protective exits slices 1 to 7, and the paper path through D3, D4a, Q1, A1, D1 to D2b, P0, V0, M0 to M2b and R0 are merged. The live path's SP1, L0, K1a, B1 (tests and implementation) and the M1, S1 and X1 tests are merged | **First paper trade** ([brief](tasks/first-paper-trade.md)), in order: J3, D2c and D4b implementations, then D4c, D4d, Q2, H3, E1a, E1b, E3; then E2, the founder's run. **First live trade** ([brief](tasks/first-live-trade.md), DEC-529, target 2026-10-23): the implementations of M1, S1 and X1; then M2, O1a, S2, B2a, B3, K1b, then B2b and the C and G rows; rows E7-23 to E7-26 are in the backlog |
 | M7 Escalation v0 | In progress: `mandate-approval` (E8-1 to E8-3), the runtime's approval path, owner commands, the MC-E lifecycle driver | The CLI's `clap` wiring of the inbox and owner commands; email and one chat channel; MC-E01, E06, E17 to E24, E29 |
 | M9 Web app (started early, DEC-200) | On fixtures: the shell, Home, agents, approvals, Messages and the copilot, the set-up chat, sign-in, the landing page; the design plan's first five decisions (DEC-511 to DEC-515) on #669 | `web/design/plan.md`, every unticked item, in its order; then the connection to a deployment; after the first paper trade, the founder's Home (signed-in, D1), holdings, search and watchlist stories (E11-10, E11-11; [DEC-528](decisions/DEC-528.md), which also places E10-19 and E19-12 later and defers adoption) |
-| M8 and M9's demo lanes (DEC-820, demo about 2026-10-26) | In progress in five lanes (below): identity spec v0.3, the authn, identity and passkey crates' tests and the passkey implementation; the workspace API contract and schemas; journal spec to v0.21; notifications spec v0.2 and its crates' tests; the web client foundation; the audit read contracts | L1 E9-1 sessions, E9-2 I1 implementation, E9-4 step-up, E9-7; L2 the journal spec queue (after v0.21), E10-13, E10-10 implementation, E10-7; L3 the E8-9 and E8-14 implementations; L4 the E11-9 slices; L5 E12-6, waiting on E9-2's `authorize` (identity ID-8) |
+| M8 and M9's demo lanes (DEC-820, demo about 2026-10-26) | In progress in five lanes (below): identity spec v0.3, the authn, identity and passkey crates' tests and the passkey implementation; the workspace API contract and schemas; journal spec to v0.21; notifications spec v0.2 and its crates' tests; the web client foundation; the audit read contracts | L1 E9-1 sessions, E9-2 I1 implementation, E9-4 step-up, E9-7; L2 the journal spec queue (after v0.21), E10-13, E10-10 implementation, E10-7, E7-17 (fold tests and DEC-687 merged, the tests' correction in review, then the fold implementation, then the state-machine slice); L3 the E8-9 and E8-14 implementations; L4 the E11-9 slices; L5 E12-6, waiting on E9-2's `authorize` (identity ID-8) |
 | M8, M10 to M13 | Planned; the design layer drafted (DEC-431 to DEC-443) | ADR-0003's code stories (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5) |
 
 **Reference cases.** Journal 46 of 46. Trading domain 13 of 26 cases plus four variants; the rest
@@ -64,11 +64,18 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   DEC-104 item 5; DEC-129 items 25 to 27; DEC-250; DEC-265 item 1; DEC-266 item 4; DEC-285
   item 6; DEC-476 item 7 (which model reads the owner's words at `/agents/new`, through which
   route, its spend cap and data terms); DEC-480 (acting from a message).
+- **DEC-773** (causal trace authorship): (a) should an owner-selected signal model's output read
+  `owner_selected`? (b) What does the label say? Meanwhile every quoted item is `platform_authored`.
 - **Decided, record still to land:** DEC-360 (option (c)), DEC-410 item 3, DEC-422 (#514 open).
 - **Design calls the plan parks for you:** the landing wordmark (DEC-467 chose the block letters;
   the plan prefers one era of type); the short set-up summary (counsel, DEC-477 question 23);
   the phone chart's axis (a canvas option against the no-script-media-query rule).
 - **Robinhood:** whether a paper or test path exists for agentic accounts.
+- **Contract drift's "released connector version"** (connections spec §8.2 and §9.1): what a
+  released version is, who confirms its new pin, and how it clears a drifted connection. Until
+  then drift does not clear on that account's stream in this slice: a new connection on the same
+  account is a reconnect that continues the stream (journal §9.8 rule 66, DEC-800 item 6).
+  Openings stay halted, exits open ([DEC-687](decisions/DEC-687.md) item 3).
 - **Decided 2026-10-09:** DEC-833 (route 2 serves both key kinds) and DEC-834 item 2 (route 2's
   limits never refuse a valid key).
 - **GitHub Support:** purge the closed PRs' `refs/pull/*/head` refs from before the 2026-10-03

@@ -1,13 +1,31 @@
 //! A scripted HTTP/1.1 server on a loopback port: one canned answer per connection, in order,
 //! and a record of every request it read. No test reaches the network.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::{McpTransport, PinnedEndpoint, SystemMonotonic, TransportConfig};
+use crate::{McpTransport, Monotonic, PinnedEndpoint, SystemMonotonic, TransportConfig};
+
+/// A monotonic clock a test moves by hand: nanoseconds since its origin, shared by its clones.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StepClock(Arc<AtomicU64>);
+
+impl StepClock {
+    pub fn set(&self, at: Duration) {
+        self.0
+            .store(u64::try_from(at.as_nanos()).unwrap(), Ordering::SeqCst);
+    }
+}
+
+impl Monotonic for StepClock {
+    fn elapsed(&self) -> Duration {
+        Duration::from_nanos(self.0.load(Ordering::SeqCst))
+    }
+}
 
 pub(crate) struct Answer {
     pub status: u16,
@@ -63,11 +81,18 @@ impl Loopback {
         let endpoint = PinnedEndpoint::new("127.0.0.1", &self.url).unwrap();
         McpTransport::new(endpoint, config, Box::new(SystemMonotonic::start())).unwrap()
     }
+
+    pub fn transport_with_clock(&self, config: TransportConfig, clock: &StepClock) -> McpTransport {
+        let endpoint = PinnedEndpoint::new("127.0.0.1", &self.url).unwrap();
+        McpTransport::new(endpoint, config, Box::new(clock.clone())).unwrap()
+    }
 }
 
+/// `@BASE@` in an answer's headers or body becomes the server's own `http://127.0.0.1:<port>`.
 pub(crate) async fn serve(answers: Vec<Answer>) -> Loopback {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+    let base = format!("http://{}", listener.local_addr().unwrap());
     let seen = Arc::new(Mutex::new(Vec::new()));
     let record = Arc::clone(&seen);
     tokio::spawn(async move {
@@ -81,13 +106,13 @@ pub(crate) async fn serve(answers: Vec<Answer>) -> Loopback {
                     answer.body
                 )
             } else {
-                answer.body
+                answer.body.replace("@BASE@", &base)
             };
             record.lock().unwrap().push(request);
             tokio::time::sleep(answer.delay).await;
             let mut head = format!("HTTP/1.1 {} X\r\nconnection: close\r\n", answer.status);
             for (name, value) in &answer.headers {
-                head.push_str(&format!("{name}: {value}\r\n"));
+                head.push_str(&format!("{name}: {}\r\n", value.replace("@BASE@", &base)));
             }
             head.push_str(&format!("content-length: {}\r\n\r\n", body.len()));
             let _ = stream.write_all((head + &body).as_bytes()).await;

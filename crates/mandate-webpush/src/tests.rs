@@ -377,7 +377,6 @@ fn the_default_list_is_the_decisions() {
 /// The shared table (DEC-792 item 3, spec §4.6): the browsers' own push services on the default
 /// list, and every syntax DEC-792 item 1 refuses rather than normalizes.
 #[test]
-#[ignore = "pending E8-14"]
 fn the_shared_endpoint_table_holds_on_the_default_list() -> Result<(), WebPushError> {
     let list = PushAllowlist::parse(&SPEC_DEFAULT_LIST)?;
     let table = [
@@ -442,7 +441,6 @@ fn the_shared_endpoint_table_holds_on_the_default_list() -> Result<(), WebPushEr
 /// RFC 8292 §2: `aud` is the push resource's origin, whose ASCII serialization (RFC 6454 §6.2)
 /// omits the default port, so a written `:443` never reaches the token; the address keeps it.
 #[test]
-#[ignore = "pending E8-14"]
 fn the_vapid_audience_omits_a_written_default_port() -> Result<(), WebPushError> {
     let url = "https://fcm.googleapis.com:443/fcm/send/x";
     let endpoint =
@@ -463,7 +461,6 @@ fn the_vapid_audience_omits_a_written_default_port() -> Result<(), WebPushError>
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn a_wildcard_entry_matches_proper_subdomains_at_any_depth_and_never_the_domain()
 -> Result<(), WebPushError> {
     let list = PushAllowlist::parse(&["*.example.net"])?;
@@ -482,7 +479,6 @@ fn a_wildcard_entry_matches_proper_subdomains_at_any_depth_and_never_the_domain(
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn an_exact_entry_matches_only_its_own_host() -> Result<(), WebPushError> {
     let list = PushAllowlist::parse(&["push.example.net"])?;
     let table = [
@@ -504,7 +500,6 @@ fn an_exact_entry_matches_only_its_own_host() -> Result<(), WebPushError> {
 
 /// A customer-run deployment may shorten the list (DEC-792 item 2); what it dropped is refused.
 #[test]
-#[ignore = "pending E8-14"]
 fn a_shortened_list_refuses_the_hosts_it_dropped() -> Result<(), WebPushError> {
     let list = PushAllowlist::parse(&["fcm.googleapis.com"])?;
     let table = [
@@ -525,7 +520,6 @@ fn a_shortened_list_refuses_the_hosts_it_dropped() -> Result<(), WebPushError> {
 /// An entry is one exact host or `*.` and a domain (DEC-792 item 2); one no accepted endpoint
 /// could match is a configuration error, refused rather than kept.
 #[test]
-#[ignore = "pending E8-14"]
 fn a_malformed_allowlist_entry_is_refused() {
     let accepted = [
         "fcm.googleapis.com",
@@ -578,6 +572,119 @@ fn a_malformed_allowlist_entry_is_refused() {
             "{entry:?} after a good one"
         );
     }
+}
+
+/// The entries DEC-722 keeps: the default list, a host or a wildcard's domain of two labels, and a
+/// hyphen inside a label (`a--b` is not an `xn--` label).
+const STILL_ACCEPTED_ENTRIES: [&str; 9] = [
+    "fcm.googleapis.com",
+    "updates.push.services.mozilla.com",
+    "*.push.apple.com",
+    "*.notify.windows.com",
+    "a.b",
+    "*.a.b",
+    "a--b.com",
+    "*.a--b.com",
+    "push-1.example.net",
+];
+
+/// Every entry DEC-722 keeps is accepted, so a parser that refuses everything fails here; then each
+/// of `refused` is refused alone and after a good one.
+fn check_refused_entries(refused: &[&str], rule: &str) {
+    assert!(refused.len() >= 4, "a table with rows to check");
+    for entry in STILL_ACCEPTED_ENTRIES {
+        assert_eq!(
+            PushAllowlist::parse(&[entry]).map(|_| ()),
+            Ok(()),
+            "{entry} stays accepted"
+        );
+    }
+    for entry in refused {
+        let one = PushAllowlist::parse(&[entry]).map(|_| ());
+        assert_eq!(one, Err(WebPushError::InvalidEndpoint), "{entry:?}, {rule}");
+        let among = PushAllowlist::parse(&["fcm.googleapis.com", entry]).map(|_| ());
+        assert_eq!(
+            among,
+            Err(WebPushError::InvalidEndpoint),
+            "{entry:?} after a good one, {rule}"
+        );
+    }
+}
+
+/// DEC-722 keeps two-label entries and inner hyphens, and they match as DEC-792 item 2 says.
+#[test]
+fn the_entries_dec_722_keeps_are_accepted_and_match() -> Result<(), WebPushError> {
+    for entry in STILL_ACCEPTED_ENTRIES {
+        assert_eq!(
+            PushAllowlist::parse(&[entry]).map(|_| ()),
+            Ok(()),
+            "{entry}"
+        );
+    }
+    let list = PushAllowlist::parse(&["a.b", "*.x.y", "*.a--b.com"])?;
+    let table = [
+        ("https://a.b/p", Ok("https://a.b/p")),
+        ("https://c.x.y/p", Ok("https://c.x.y/p")),
+        ("https://c-d.a--b.com/p", Ok("https://c-d.a--b.com/p")),
+        ("https://x.y/p", REFUSED),
+        ("https://c.a.b/p", REFUSED),
+        ("https://a--b.com/p", REFUSED),
+    ];
+    check_endpoints(&list, &table)
+}
+
+/// DEC-722 item 1: an exact entry names two labels or more, and so does a wildcard's domain, so one
+/// typo cannot open the sender to every host under a top-level domain.
+#[test]
+fn an_allowlist_entry_names_at_least_two_labels() {
+    let refused = ["com", "a", "localhost", "*.com", "*.a", "*.net"];
+    check_refused_entries(&refused, "DEC-722 item 1");
+}
+
+/// DEC-722 item 2 (RFC 1123): no label of an entry starts or ends with a hyphen, in any position.
+#[test]
+fn no_label_of_an_allowlist_entry_starts_or_ends_with_a_hyphen() {
+    let refused = [
+        "-a.com",
+        "a-.com",
+        "*.-a.com",
+        "*.a-.com",
+        "-.example.net",
+        "push.-example.net",
+        "push.example-.net",
+        "push.example.-net",
+        "push.example.net-",
+        "*.push.apple-.com",
+        "-a-b.com",
+        "a-b-.com",
+    ];
+    check_refused_entries(&refused, "DEC-722 item 2");
+}
+
+/// DEC-722 item 2: an endpoint whose host has a label with an edge hyphen is refused although a
+/// wildcard entry would match it; a hyphen inside a label is still accepted.
+#[test]
+fn no_label_of_an_endpoint_host_starts_or_ends_with_a_hyphen() -> Result<(), WebPushError> {
+    let list = PushAllowlist::parse(&SPEC_DEFAULT_LIST)?;
+    let table = [
+        (
+            "https://a--b.push.apple.com/x",
+            Ok("https://a--b.push.apple.com/x"),
+        ),
+        (
+            "https://wns2-bl2p.notify.windows.com/w",
+            Ok("https://wns2-bl2p.notify.windows.com/w"),
+        ),
+        ("https://-a.push.apple.com/x", REFUSED),
+        ("https://a-.push.apple.com/x", REFUSED),
+        ("https://-.push.apple.com/x", REFUSED),
+        ("https://a.-b.push.apple.com/x", REFUSED),
+        ("https://a.b-.push.apple.com/x", REFUSED),
+        ("https://-a.push.apple.com:443/x", REFUSED),
+        ("https://-wns2.notify.windows.com/w", REFUSED),
+        ("https://wns2-.notify.windows.com/w", REFUSED),
+    ];
+    check_endpoints(&list, &table)
 }
 
 proptest! {
