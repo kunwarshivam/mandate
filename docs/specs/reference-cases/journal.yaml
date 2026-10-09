@@ -15835,6 +15835,97 @@ connection_requests:
         value: 01J8Z2ACCT00000000000000B7
     expect:
       outcome: Valid
+  - name: revoked_then_torn_down_on_a_retry
+    clause: 'rules 67 and 131: a retry after a revocation is torn down'
+    records:
+    - *id060
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S91A0000000000000000
+      - path: event_type
+        value: ConnectionRequested
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+          account_ref: 01J8Z2ACCT00000000000000B7
+          broker: alpaca
+          environment: paper
+          user: user_owner_01
+          step_up:
+            assertion_id: assert_owner_09
+            authenticated_at: '2026-09-22T12:59:50.000000000Z'
+            method: cli_confirm
+    - base_draft: refused_scope
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.connection_id
+        value: conn_alpaca_paper
+      - *id061
+      - *id062
+    expect:
+      outcome: Valid
+  - name: version_1_after_the_first_request
+    clause: 'rule 131: from the first request on, a connect is version 2'
+    records:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S90A0000000000000000
+      - path: event_type
+        value: ConnectionRequested
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper_2
+          account_ref: 01J8Z2ACCT00000000000000B7
+          broker: alpaca
+          environment: paper
+          user: user_owner_01
+          step_up:
+            assertion_id: assert_owner_09
+            authenticated_at: '2026-09-22T12:59:50.000000000Z'
+            method: cli_confirm
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload.account_ref
+        delete: true
+      - path: payload.user
+        delete: true
+      - path: payload.step_up
+        delete: true
+      - path: payload.margin_attestation
+        delete: true
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 1
+      rule: '131'
   - name: established_after_its_request_was_revoked
     clause: 'rule 131: nothing is established from a revoked request'
     records:

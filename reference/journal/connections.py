@@ -1066,7 +1066,7 @@ def new_fold() -> dict:
     return {
         "first": {}, "latest": {}, "scopes": {}, "holder_of": {},
         "owner": None, "binding": None, "current": "active", "cleared": False,
-        "last_check": {}, "rotations": {}, "suspended_at": -1, "open": {}, "requested": set(), "withdrawn": set(),
+        "last_check": {}, "rotations": {}, "suspended_at": -1, "open": {}, "requested": set(), "withdrawn": set(), "plain": set(),
     }
 
 
@@ -1113,6 +1113,8 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset(), full
                     return i, "66"
                 if prior is None and d["schema_version"] == 2 and unclosed(f, p, kind, skip, full_chain):
                     return i, "131"
+                if prior is None and d["schema_version"] == 1 and f["requested"] and "stream.131.version_1" not in skip:
+                    return i, "131"
                 first.setdefault(cid, p)
                 if p.get("account_ref") is not None:
                     holder_of.setdefault(p["account_ref"], cid)
@@ -1120,8 +1122,10 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset(), full
                 scopes[cid] = p["scopes"]
             elif kind == "ConnectionRevoked":
                 latest[cid] = kind
-                if "stream.131.revoke" not in skip and f["open"].pop(cid, None) is not None:
-                    f["withdrawn"].add(cid)
+                closed = "stream.131.revoke" not in skip and f["open"].pop(cid, None) is not None
+                (f["withdrawn"].add if closed else f["withdrawn"].discard)(cid)
+                if not closed:
+                    f["plain"].add(cid)
             elif kind == "ConnectionCredentialRotated":
                 if latest.get(cid) != "ConnectionEstablished" and "stream.67.rotated" not in skip:
                     return i, "67"
@@ -1130,10 +1134,10 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset(), full
                 scopes[cid] = p["scopes"]
             elif kind == "ConnectionRefused":
                 was = latest.get(cid)
-                withdrawn = cid in f["withdrawn"] and "stream.67.pending_revoke" not in skip
+                old = "stream.67.pending_revoke" in skip
                 fits = {
-                    "connect": was is None or withdrawn,
-                    "reconnect": was == "ConnectionRevoked" and not withdrawn,
+                    "connect": was is None if old else cid not in first and cid not in f["plain"],
+                    "reconnect": was == "ConnectionRevoked" and (old or cid not in f["withdrawn"]),
                     "reauthorize": was == "ConnectionEstablished",
                 }
                 if not fits[p["occasion"]] and f"stream.67.{p['occasion']}" not in skip:
@@ -1154,7 +1158,8 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset(), full
                     return i, "131"
                 f["open"][cid] = p
                 f["requested"].add(ref)
-                f["withdrawn"].discard(cid)
+                if "stream.67.discard" in skip and latest.get(cid) == "ConnectionRevoked":
+                    f["plain"].add(cid)
             continue
         f["owner"] = cid if f["owner"] is None else f["owner"]
         if cid != f["owner"] and "stream.68.one_connection" not in skip:
@@ -1628,6 +1633,8 @@ REQUEST_STREAM_MUTANTS = (
     "stream.131.revoke",
     "stream.131.range",
     "stream.67.pending_revoke",
+    "stream.67.discard",
+    "stream.131.version_1",
     *(f"stream.131.{m}" for m in CLOSING["ConnectionEstablished"]),
 )
 
@@ -1702,6 +1709,12 @@ def request_sequences() -> list[dict]:
                  [requested(90, OTHER_CONNECTION, b), established(1)], (1, "131")),
         sequence("revoked_while_connecting", "rule 131: a revocation closes the open request and is never refused",
                  [REQUESTED, revoked(1), requested(91, CONNECTION, b), established(2, change("payload.account_ref", b))]),
+        sequence("revoked_then_torn_down_on_a_retry", "rules 67 and 131: a retry after a revocation is torn down",
+                 [REQUESTED, revoked(1), requested(91, CONNECTION, b), refused(2, "connect", CONNECTION, *torn_down)]),
+        sequence("version_1_after_the_first_request", "rule 131: from the first request on, a connect is version 2",
+                 [requested(90, OTHER_CONNECTION, b), established(1, change("schema_version", 1), change("causation_id", None),
+                  *(delete(f"payload.{m}") for m in ("account_ref", "user", "step_up", "margin_attestation")))],
+                 (1, "131")),
         sequence("established_after_its_request_was_revoked", "rule 131: nothing is established from a revoked request",
                  [REQUESTED, revoked(1), established(2)], (2, "131")),
         sequence("teardown_after_its_request_was_revoked", "rules 67 and 131: the teardown journals nothing after a revocation",

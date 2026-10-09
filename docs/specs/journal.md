@@ -32,7 +32,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
     starts empty and would not see a request before its trusted start.
   - **Revoke while `connecting`.** A `ConnectionRevoked` is never refused for it, and closes the
     open request. Nothing is established or refused from that request afterwards: rule 131
-    reports either. Rule 67 reads such an id as never established, so the teardown's
+    reports either, and a version-1 connect after the stream's first request breaks it too.
+    Rule 67 reads such an id as never established, so the teardown's
     `ConnectionRefused` is judged by rule 131 alone, and a `reconnect` of it breaks rule 67.
     Connections spec §9.1 gains the revoke exit from `connecting`.
   - **No earlier outcome changes.** Every rule-131 clause, and rule 67's reading of a revocation
@@ -42,8 +43,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
     "nothing else is kept of a refused connect" now name the request too, as connections spec §9.1
     does.
   - **Vectors.** A new generated `connection_requests` section holds the record's drafts (23
-    invalid, 1 valid) and 26 rule-131 sequences, one of them a range (`scope: range`), with 14
-    validator, 15 stream, and 6 vector mutants, as `generate.py` prints. It is a section of its own
+    invalid, 1 valid) and 28 rule-131 sequences, one of them a range (`scope: range`), with 14
+    validator, 17 stream, and 6 vector mutants, as `generate.py` prints. It is a section of its own
     because the E7-17 fold (`crates/mandate-journal/src/connection_fold.rs`) does not check rule
     131 yet: its code change follows this one (ES-22) and reads it. The vectors stay version 3.
 - **v0.31 ([DEC-659](../project/decisions/DEC-659.md)):** §9.12 gains **Order**, which states a
@@ -2168,8 +2169,8 @@ own stream:
     `reauthorize`, names a connection established and not since revoked; a `ConnectionRefused` with
     `reconnect` names one whose latest record is `ConnectionRevoked`, unless that revocation closed
     its request (rule 131); one with `connect` names an id with no earlier `ConnectionEstablished`
-    or `ConnectionRevoked`, except a revocation that closed its request (rule 131 then judges the
-    refusal). For `reconnect` and `reauthorize`, `broker` and `environment` equal the
+    and no earlier `ConnectionRevoked` other than revocations that each closed a request of it
+    (rule 131 then judges the refusal, so a retry after such a revocation is torn down normally). For `reconnect` and `reauthorize`, `broker` and `environment` equal the
     establishment's. A rotation's `scopes` are a subset of the connection's latest scopes, its
     establishment's or the latest rotation's: a replaced credential never widens a grant.
 68. Account stream: every connection record on it names the same `connection_id` (CN-5: one
@@ -2213,6 +2214,9 @@ arrives in §9.10 (v0.22, DEC-671), and these rules count a revocation of either
        `environment`, `user`, and `step_up`, and, for the establishment, its `account_ref`. A
        request is closed once. A reconnect, a credential replacement, and a version-1 establishment
        close none.
+     - **Version 1.** From the stream's first request on, a version-1 `ConnectionEstablished` of
+       an id with no earlier establishment breaks this rule: version 1 exists only in the paper
+       fixtures, and no connect skips its request by writing it.
      - **Revocation.** A `ConnectionRevoked` of an id with an open request closes it, and is never
        refused. A later establishment or `ConnectionRefused` (occasion `connect`) of that id that
        has no request of its own breaks this rule.
