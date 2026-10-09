@@ -212,10 +212,10 @@ fn a_duplicate_key_copy_beside_the_start_segment_refuses_it() {
     );
     let resolve =
         |rows: &[StoredEvent]| resolve_start_from_rows(rows, stream, from_seq, request(req));
-    assert!(
-        matches!(resolve(&rows), Ok(ResolvedStart::Manifest(_))),
-        "the good row alone starts"
-    );
+    match resolve(&rows) {
+        Ok(ResolvedStart::Manifest(_)) => {}
+        other => panic!("the good row alone starts, got {other:?}"),
+    }
     let hash = Digest::of(&body);
     rows.push(StoredEvent { hash, body, ..good });
     assert_eq!(
