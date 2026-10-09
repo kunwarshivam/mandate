@@ -534,6 +534,19 @@ function agent(ws: Workspace, id: string): Agent {
   return found;
 }
 
+/**
+ * Adds entries to a newest-first list (`ws.decisions`, `ws.timeline[agent]`) where their times
+ * place them, since the timelines render these lists as given. An entry goes after any already
+ * there at the same instant, so entries passed together keep the order they are passed in.
+ */
+function insertNewestFirst<T extends { at: string }>(list: T[], ...entries: T[]): void {
+  for (const entry of entries) {
+    const at = Date.parse(entry.at);
+    const index = list.findIndex((existing) => Date.parse(existing.at) < at);
+    list.splice(index === -1 ? list.length : index, 0, entry);
+  }
+}
+
 function supersede(ws: Workspace, approvalId: string, at: string, text: string, reason: CancelReason) {
   const approval = ws.approvals.find((a) => a.approval_id === approvalId);
   if (!approval) return;
@@ -589,7 +602,7 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
         { code: "stale_mark", since: t("14:03:11"), symbol: "XYZ" },
         { code: "stale_mark", since: t("14:03:11"), symbol: "QRS" },
       ];
-      ws.decisions.unshift(underVersionInForce(ws.agents, {
+      insertNewestFirst(ws.decisions, underVersionInForce(ws.agents, {
         event_id: "01JB2NTQSC0J4DZCKCEXEGJ6ZB",
         at: t("14:04:40"),
         agent_id: AGENT_IDS.swing,
@@ -628,7 +641,7 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
         if (d.agent_id === AGENT_IDS.btc && d.client_order_id && canceled.some((o) => o.client_order_id === d.client_order_id)) d.action = { ...d.action, limit_price: DRAWDOWN_RESTING_LIMIT };
       }
       for (const e of ws.timeline[AGENT_IDS.btc]) e.text = e.text.replace("$55,900.00", "$51,700.00");
-      ws.decisions.unshift(underVersionInForce(ws.agents, {
+      insertNewestFirst(ws.decisions, underVersionInForce(ws.agents, {
         event_id: "01JBEZT39S3D19T33BSWM75ANC",
         at: t("14:04:30"),
         agent_id: AGENT_IDS.btc,
@@ -637,7 +650,8 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
         action: { side: "buy", qty: "0.01", symbol: "BTC/USD", limit_price: "51700", purpose: "increase" },
       }));
       b.versions = [...b.versions, BTC_RAISE_REJECTED];
-      ws.timeline[AGENT_IDS.btc].unshift(
+      insertNewestFirst(
+        ws.timeline[AGENT_IDS.btc],
         { event_id: "01JBF6P2M8XKQ4D7N9R3T5W1YC", at: t("14:03:34"), kind: "version", text: "Mandate version rejected: an allocation increase is refused while a limit is latched." },
         { event_id: "01JBBX2KRQNWA605H5PT7DRPKV", at: t("14:01:12"), kind: "mode", text: "Mode changed from trading to selling only: drawdown reached 6% of the high-water mark." },
         { event_id: "01JB53YCQWCMQY1TFS2R2X43GC", at: t("14:01:12"), kind: "order", text: "Buy 0.01 BTC/USD canceled on entering selling only." },
@@ -650,7 +664,7 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
       s.startup = "reconciling";
       s.restrictions = [{ code: "startup_reconciliation", since: t("14:04:40") }];
       supersede(ws, APPROVAL_IDS.swingXyz, t("14:04:40"), "Canceled: the agent restarted and is checking with the broker.", "mode_tightened");
-      ws.timeline[AGENT_IDS.swing].unshift({
+      insertNewestFirst(ws.timeline[AGENT_IDS.swing], {
         event_id: "01JB4NQHN2GMHK041E6YXRGVZ8",
         at: t("14:04:40"),
         kind: "reconciliation",
@@ -673,7 +687,7 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
         submitted_at: t("14:04:51"),
         time_in_force: "day",
       });
-      ws.decisions.unshift(underVersionInForce(ws.agents, {
+      insertNewestFirst(ws.decisions, underVersionInForce(ws.agents, {
         event_id: "01JB64G5D6TZWBE8TXF7JJHHQG",
         at: t("14:05:02"),
         agent_id: AGENT_IDS.swing,
@@ -681,7 +695,7 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
         reason_code: "unknown_order_in_flight",
         action: { side: "sell", qty: "5", symbol: "QRS", limit_price: "97.6", purpose: "discretionary_exit" },
       }));
-      ws.timeline[AGENT_IDS.swing].unshift({
+      insertNewestFirst(ws.timeline[AGENT_IDS.swing], {
         event_id: "01JBM9S346Q3D25VT4F5V37E3T",
         at: t("14:04:57"),
         kind: "order",
