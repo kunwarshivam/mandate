@@ -109,13 +109,22 @@ async fn any_change_to_a_name_or_a_schema_changes_the_hash() {
 #[tokio::test]
 #[ignore = "pending E7-16"]
 async fn a_matching_pin_leaves_openings_open() {
-    let (server, client) = connected(&base(), Some(base_hash()), vec![reply(OK)]).await;
+    let again = vec![listing(&base()), reply(OK)];
+    let (server, mut client) = connected(&base(), Some(base_hash()), again).await;
     assert!(!client.openings_halted().unwrap());
+    let clean = client.check_contract().await;
+    assert!(clean.is_ok(), "{clean:?}");
+    assert!(
+        !client.openings_halted().unwrap(),
+        "a clean check halts nothing"
+    );
     let placed = client
         .call_tool(CallClass::Ordinary, "place_equity_order", &json!({}))
         .await;
     assert!(placed.is_ok(), "{placed:?}");
-    assert_eq!(sent_names(&server), ["place_equity_order"]);
+    assert_eq!(server.seen().len(), 5);
+    assert_eq!(sent(&server, 3)["method"], "tools/list");
+    assert_eq!(sent(&server, 4)["params"]["name"], "place_equity_order");
 }
 
 #[tokio::test]
@@ -329,10 +338,20 @@ async fn a_missing_tool_found_by_a_health_check_halts_openings() {
     assert!(client.openings_halted().unwrap());
 }
 
+/// DEC-839 item 3: the tokens, and the three places a name is split.
 #[tokio::test]
 #[ignore = "pending E7-16"]
 async fn fund_movement_names_are_matched_as_whole_words() {
-    for name in ["initiate_deposit", "fundAccount", "get-funding"] {
+    for name in [
+        "initiate_deposit",
+        "fundAccount",
+        "get-funding",
+        "ACHDebit",
+        "getACHStatus",
+        "v2Transfer",
+        "w\u{456}re",
+        "send\u{200b}_feedback",
+    ] {
         let mut tools = base();
         tools.push(json!({"name": name, "inputSchema": {"type": "object"}}));
         let (_server, client) = session(vec![listing(&tools)], None, roomy()).await;
@@ -341,11 +360,13 @@ async fn fund_movement_names_are_matched_as_whole_words() {
             "{name}: {client:?}"
         );
     }
-    let mut tools = base();
-    tools.push(json!({"name": "get_fundamentals", "inputSchema": {"type": "object"}}));
-    let (_server, client) = session(vec![listing(&tools)], None, roomy()).await;
-    assert!(
-        client.is_ok(),
-        "a whole-word match, not a substring: {client:?}"
-    );
+    for name in ["get_fundamentals", "URLParser"] {
+        let mut tools = base();
+        tools.push(json!({"name": name, "inputSchema": {"type": "object"}}));
+        let (_server, client) = session(vec![listing(&tools)], None, roomy()).await;
+        assert!(
+            client.is_ok(),
+            "{name}: whole words, not substrings: {client:?}"
+        );
+    }
 }
