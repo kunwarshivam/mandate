@@ -761,6 +761,28 @@ fn membership_lookups_read_only_the_pages_snapshot() {
     assert_eq!(served(&j), (fresh, j.heads()));
 }
 
+/// DEC-777 item 6 and DEC-764 item 2: each membership lookup scans its streams whole, not the
+/// page's window. At `limit` 4 the first page stops after ACCT1's `GateDecided`, which it serves
+/// though its `IntentReceived` lies past that page's end; the second page serves the fill, though
+/// the order records that make it the agent's lie before its cursor, consumed on the first page.
+#[test]
+fn membership_lookups_reach_past_the_pages_window() {
+    let mut j = Journal::new();
+    let s1 = stream(Some("ACCT1"));
+    let intent = event_id(900_007);
+    let placed = order(&mut j, &s1, 2, ME, "O7");
+    let gate = j.one(&s1, 3, ("GateDecided", 1, None, &gated(&intent)));
+    let linked = j.one(&s1, 4, ("IntentReceived", 1, None, &received(&intent, ME)));
+    let fill = j.one(&s1, 5, ("FillApplied", 1, None, &filled("O7")));
+    let first = j.page(&query(&[], 4));
+    let opened = j.opened(&stream(None));
+    let want = [vec![opened], placed, vec![gate]].concat();
+    assert_eq!((ids(&first), first.more), (want, true));
+    let second = j.page(&query(&first.next, 4));
+    let rest = (ids(&second), second.next, second.more);
+    assert_eq!(rest, (vec![linked, fill], j.heads(), false));
+}
+
 /// A version-1 `OrderSubmitted` of `order`: §9's members without `risk_clock`. It names no intent
 /// and no agent, so only the `client_order_id` rule could make it, or a fill of it, the agent's.
 fn submitted_v1(order: &str) -> String {

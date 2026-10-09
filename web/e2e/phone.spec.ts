@@ -435,7 +435,7 @@ test("desktop agent keeps its tabs, its mandate card and the full overview, with
   await expect(page.locator("[data-slot=level-legend]")).toBeVisible();
   await expect(page.getByRole("button", { name: "Levels" })).toBeHidden();
   await expect(page.locator("[data-slot=headroom]")).toBeHidden();
-  await expect(page.locator("[data-slot=page-header] [data-slot=mode-badge]")).toBeHidden();
+  await expect(page.locator("[data-slot=mandate-card] [data-slot=mode-badge]")).toHaveCount(0);
 });
 
 test("Home says all clear once the one request is answered", async ({ page }) => {

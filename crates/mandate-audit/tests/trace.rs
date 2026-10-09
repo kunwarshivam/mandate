@@ -709,6 +709,27 @@ fn a_fill_links_each_earlier_submission_of_its_order_on_its_account() {
     );
 }
 
+/// DEC-775 item 1: a version-1 `OrderSubmitted` with a recorded `causation_id` still gives its
+/// one `payload.intent_id` `not_recorded` hop, after that `causation_id`'s hop; §4.8.1's "the walk
+/// ends here unless a `causation_id` is recorded" means no node follows, not that no hop is shown.
+#[test]
+fn a_version_one_submission_with_a_cause_still_shows_its_unrecorded_intent() {
+    let mut g = Graph::new();
+    let acct1 = account("ACCT1");
+    let [first, retry] = [1, 2].map(|n| event_id(805_000 + n));
+    let v1 = ("OrderSubmitted", 1);
+    g.put(&acct1, &first, v1, None, &submitted("c1", 1, 1));
+    g.put(&acct1, &retry, v1, Some(&first), &submitted("c1", 2, 1));
+    let trace = traced(&g, WS_A, &retry, &[]);
+    let expected = [
+        hop(&retry, "causation_id", Some(&first), HopStatus::Shown),
+        hop(&retry, INTENT, None, HopStatus::NotRecorded),
+        hop(&first, INTENT, None, HopStatus::NotRecorded),
+    ];
+    assert_eq!(trace.hops, expected);
+    assert_eq!(depths(&trace), [(retry.as_str(), 0), (first.as_str(), 1)]);
+}
+
 /// Every intent record, the intent's `IntentProposed` (on `AG1`, its `causation_id` absent), and
 /// a `GateDecided` of it on `ACCT2`, where no `IntentReceived` is.
 struct Intents {
@@ -1208,6 +1229,35 @@ fn an_output_links_its_thesis_on_its_agent_stream() {
         };
         assert_eq!(trace.hops, [hop(id, link, to.map(String::as_str), status)]);
     }
+}
+
+/// DEC-775 item 4: `thesis_id` names one target, the `ThesisProposed` or `ThesisRevised` records of
+/// it on the output's agent stream, taken across both types in `seq` order, so a `ThesisRevised`
+/// recorded first leads; a `thesis_id` neither type records is one `not_recorded`, not one per type.
+#[test]
+fn an_outputs_thesis_matches_both_types_in_seq_order_as_one_target() {
+    let mut t = theses();
+    let ag1 = agent(WS_A, "AG1");
+    let [revised, proposed, start, lost] = [1, 2, 3, 4].map(|n| event_id(843_000 + n));
+    let named = |payload: String, from: &str| payload.replace(from, r#""thesis_id":"TH9""#);
+    let revision = named(thesis(1), r#""thesis_id":"TH2""#);
+    t.g.put(&ag1, &revised, ("ThesisRevised", 1), None, &revision);
+    let proposal = named(thesis(0), r#""thesis_id":"TH1""#);
+    t.g.put(&ag1, &proposed, ("ThesisProposed", 1), None, &proposal);
+    let link = "payload.thesis_id";
+    for (id, thesis_id) in [(&start, "TH9"), (&lost, "TH8")] {
+        let payload = grounded(&[], thesis_id);
+        let event = draft(id, &ag1, "ModelOutputRecorded", None, &payload);
+        t.g.fx.append_draft(&ag1, id.clone(), &event);
+    }
+    let trace = traced(&t.g, WS_A, &start, &[]);
+    let expected = [
+        hop(&start, link, Some(&revised), HopStatus::Shown),
+        hop(&start, link, Some(&proposed), HopStatus::Shown),
+    ];
+    assert_eq!(trace.hops, expected);
+    let trace = traced(&t.g, WS_A, &lost, &[]);
+    assert_eq!(trace.hops, [hop(&lost, link, None, HopStatus::NotRecorded)]);
 }
 
 /// AU-4, API-18, §4.8.1 "Model output", DEC-772 item 7: a thesis record's `invalidation`,

@@ -30,6 +30,13 @@
   or `ws` added to any of its objects is `unknown_member` at that member, or at the internally
   tagged object holding it; no request schema names such a member; a kill switch's workspace scope
   naming any workspace is refused, `null` accepted.
+- **Lenient decoder:** `crates/mandate-api/src/lenient.rs`, `decode_lenient` for the six API-7
+  bodies (DEC-682 item 27, DEC-689 item 2, DEC-886), stubbed with `Refused::Unimplemented`.
+  `crates/mandate-api/tests/lenient.rs`, pending E10-10: every case of
+  `schemas/workspace-api/examples/lenient/api7.json`, its `dropped` exactly and its kept value
+  against the body with those pointers removed; a body that is not a JSON object read as `{}` with
+  `[""]` for pause and hold and refused for the other four; and API-4's comparison over the members
+  kept.
 - **Schemas:** `crates/mandate-api/tests/schemas.rs`: live enum and member drift against
   `schemas/workspace-api/` (DEC-683), each member `null`-able and optional exactly as its schema
   says, a kill switch scope's `null` id exactly for `workspace`, and no `serde(flatten)`; pending,

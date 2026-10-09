@@ -1,5 +1,7 @@
 //! A connection's stream rules (journal spec v0.32 §9.8 rules 66 to 68 and 131) and §11's two
 //! connection checks, `connection_lifecycle_mismatch` and `connection_cause_mismatch` (E7-17, DEC-800 item 9).
+//! A range's lifecycle run starts from its connection anchor, or fails closed without one (journal
+//! spec v0.35, DEC-885).
 //! `append` folds no stream, so these rules are not `append`'s: the connection manager and the
 //! executor check them against their own fold before appending, and verification runs them here
 //! over the stored rows.
@@ -93,13 +95,16 @@ pub enum ConnectionCheck {
     /// A version-2 establishment's or a rotation's check is not the passing check of its occasion
     /// on the bound stream for the same connection, or a copy differs from its original.
     CauseMismatch,
+    /// A range with no connection anchor reached a record rule 66, 67, 68, or 131 judges, so it
+    /// fails closed there: cause `unanchored`, not a rule (journal spec v0.35 §11, DEC-885 item 5).
+    Unanchored,
 }
 
 impl ConnectionCheck {
     /// The check's code as §11 writes it.
     pub fn code(self) -> &'static str {
         match self {
-            Self::LifecycleMismatch(_) => "connection_lifecycle_mismatch",
+            Self::LifecycleMismatch(_) | Self::Unanchored => "connection_lifecycle_mismatch",
             Self::CauseMismatch => "connection_cause_mismatch",
         }
     }
@@ -121,35 +126,17 @@ pub enum ConnectionVerifyError {
 /// §11's `connection_lifecycle_mismatch` over the full chain: the first row that breaks rule 66,
 /// 67, 68, or 131.
 pub fn verify_connection_lifecycle(rows: &[StoredEvent]) -> Result<(), ConnectionVerifyError> {
-    lifecycle(rows, Run::FullChain)
+    lifecycle(rows)
 }
 
-/// §11's `connection_lifecycle_mismatch` on a range whose fold starts empty at its trusted start:
-/// rules 66, 67, 68, and 131, except rule 131's requirement that a connect's establishment or
-/// refusal has an open request, which only the full-chain run checks, since the request may sit
-/// before the range (journal spec v0.32 §9.8 rule 131, §11). `rows` are given as
-/// [`verify_connection_lifecycle`] takes them, from the range's first event of each stream.
-pub fn verify_connection_lifecycle_range(
-    rows: &[StoredEvent],
-) -> Result<(), ConnectionVerifyError> {
-    lifecycle(rows, Run::Range)
-}
-
-/// Which §11 run judges the rows: rule 131's existence requirement is the full chain's only.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Run {
-    FullChain,
-    Range,
-}
-
-fn lifecycle(rows: &[StoredEvent], run: Run) -> Result<(), ConnectionVerifyError> {
+fn lifecycle(rows: &[StoredEvent]) -> Result<(), ConnectionVerifyError> {
     let rows = connection_rows(rows);
     let mut controls: BTreeMap<&str, ControlFold<'_>> = BTreeMap::new();
     let mut accounts: BTreeMap<&str, AccountFold<'_>> = BTreeMap::new();
     for row in &rows {
         let stream = row.stored.stream_id.as_str();
         let refused = match row.stream {
-            StreamType::Control => controls.entry(stream).or_default().admit(row, run).err(),
+            StreamType::Control => controls.entry(stream).or_default().admit(row).err(),
             _ => {
                 let admitted = accounts.entry(stream).or_default().admits(row);
                 (!admitted).then_some(ConnectionStreamRule::AccountStream)
@@ -163,6 +150,82 @@ fn lifecycle(rows: &[StoredEvent], run: Run) -> Result<(), ConnectionVerifyError
         }
     }
     Ok(())
+}
+
+/// Where a range's run of rules 66, 67, 68, and 131 starts (journal spec v0.35 §11, DEC-885).
+#[derive(Debug, Clone)]
+pub enum ConnectionStart {
+    /// The rows start at each stream's `seq` 1: the full chain, anchored on nothing.
+    Genesis,
+    /// The rows continue the stored chain whose fold [`ConnectionAnchor::fold`] gave.
+    Anchored(ConnectionAnchor),
+    /// The caller cannot read the chain before the range, or that chain breaks a rule: the run
+    /// fails closed at the first record a rule judges.
+    Unanchored,
+}
+
+/// The connection anchor (DEC-885 item 1): the state the full-chain fold of rules 66, 67, 68, and
+/// 131 holds after each stream's records `1` to `from_seq − 1`, derived only by folding the stored
+/// chain, never from a read model.
+#[derive(Debug, Clone)]
+pub struct ConnectionAnchor(());
+
+impl ConnectionAnchor {
+    /// The anchor after `prefix`, the stored rows of the range's streams from `seq` 1 up to its
+    /// trusted start, in commit order; `None` when the prefix breaks rule 66, 67, 68, or 131, since
+    /// a broken chain anchors nothing (DEC-885 item 2, I5).
+    pub fn fold(prefix: &[StoredEvent]) -> Option<ConnectionAnchor> {
+        let _ = prefix;
+        Err(ConnectionCheckError::Unimplemented { story: "E7-17" }).ok()
+    }
+}
+
+/// Why a located connection check did not pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectionCheckError {
+    /// The first row that fails, by its stream and `seq`.
+    Failed(LocatedConnectionFailure),
+    /// The check is a DEC-77 stub until `story` lands.
+    Unimplemented { story: &'static str },
+}
+
+/// The first row that fails a connection check, by its stream and `seq`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocatedConnectionFailure {
+    pub stream_id: String,
+    pub seq: u64,
+    pub check: ConnectionCheck,
+}
+
+impl LocatedConnectionFailure {
+    /// The check's code as §11 writes it.
+    pub fn code(&self) -> &'static str {
+        self.check.code()
+    }
+}
+
+/// §11's `connection_lifecycle_mismatch` from `start` over `rows`, given as
+/// [`verify_connection_lifecycle`] takes them. From [`ConnectionStart::Genesis`] it is the full
+/// chain; anchored, it judges every row as the full chain would, rule 131's closing existence
+/// included; unanchored, it fails closed with [`ConnectionCheck::Unanchored`] at the first
+/// `ConnectionRequested`, `ConnectionEstablished`, `ConnectionCredentialRotated`, or
+/// `ConnectionRefused` on a control stream or connection record on an account stream, and a
+/// `ConnectionRevoked` never fails (DEC-885 items 3 and 4).
+pub fn verify_connection_lifecycle_from(
+    start: ConnectionStart,
+    rows: &[StoredEvent],
+) -> Result<(), ConnectionCheckError> {
+    let _ = (start, rows);
+    Err(ConnectionCheckError::Unimplemented { story: "E7-17" })
+}
+
+/// [`verify_connection_causes`] over the full chain, reporting the failing row by its stream and
+/// `seq`; the cause check has no range run (DEC-885 item 6).
+pub fn verify_connection_causes_from_genesis(
+    rows: &[StoredEvent],
+) -> Result<(), ConnectionCheckError> {
+    let _ = rows;
+    Err(ConnectionCheckError::Unimplemented { story: "E7-17" })
 }
 
 /// §11's `connection_cause_mismatch`: the first version-2 `ConnectionEstablished` or
@@ -332,7 +395,7 @@ struct ControlFold<'a> {
 }
 
 impl<'a> ControlFold<'a> {
-    fn admit(&mut self, row: &'a Row<'_>, run: Run) -> Result<(), ConnectionStreamRule> {
+    fn admit(&mut self, row: &'a Row<'_>) -> Result<(), ConnectionStreamRule> {
         let p = row.payload();
         let id = text(p, "connection_id");
         let first = self.first.get(id).copied();
@@ -361,7 +424,7 @@ impl<'a> ControlFold<'a> {
                 }
                 let unrequested = match row.stored.schema_version {
                     _ if first.is_some() => false,
-                    2 => self.unclosed(id, p, &ESTABLISHMENT_REPEATS, run),
+                    2 => self.unclosed(id, p, &ESTABLISHMENT_REPEATS),
                     _ => self.bound(),
                 };
                 if unrequested {
@@ -416,7 +479,7 @@ impl<'a> ControlFold<'a> {
                 if !fits || !same("broker") || !same("environment") {
                     return Err(ConnectionStreamRule::Rotated);
                 }
-                if occasion == "connect" && self.unclosed(id, p, &REFUSAL_REPEATS, run) {
+                if occasion == "connect" && self.unclosed(id, p, &REFUSAL_REPEATS) {
                     return Err(ConnectionStreamRule::Requested);
                 }
             }
@@ -431,13 +494,13 @@ impl<'a> ControlFold<'a> {
 
     /// Rule 131's closing clause on a connect's establishment or refusal `p` of `id`: whether it
     /// fails to close the id's open request once, repeating its `members`. With no open request it
-    /// fails only on a bound stream in the full-chain run.
-    fn unclosed(&mut self, id: &str, p: &Value, members: &[&str], run: Run) -> bool {
+    /// fails on a bound stream.
+    fn unclosed(&mut self, id: &str, p: &Value, members: &[&str]) -> bool {
         match self.open.remove(id) {
             Some(request) => members
                 .iter()
                 .any(|member| p.get(member) != request.get(member)),
-            None => self.bound() && run == Run::FullChain,
+            None => self.bound(),
         }
     }
 }
