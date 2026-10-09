@@ -2,7 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_accounting::Side;
+use mandate_accounting::{InstrumentId, Side};
+use mandate_canon::Value as Canon;
 use mandate_domain::{
     AssetClass, CapabilityProfile, MarketSession, OrderType as CellType, ProfileError,
     ProtectionForm, QuantityForm,
@@ -66,20 +67,98 @@ impl<T: Tools> RobinhoodConnector<T> {
 
     /// The connector after a restart: [`Self::new`] with its `ClientOrderId` → `order_id` map
     /// rebuilt from the account stream's `records`, in journal order (journal spec §9.16,
-    /// DEC-860 item 7, DEC-870). A key maps to the one distinct `broker_order_id` its version-2
-    /// `OrderStateChanged` records carry, with the instrument and side of its `OrderSubmitted`,
-    /// or of the order it `replaces`. A key with no id, or with two different ids, maps to
-    /// nothing, so its cancel is `NotSent` (`no_order_id`) with nothing called. Every key the
-    /// stream submitted is never placed again: a `Submit` of it is `Unknown` (DEC-860 item 4).
+    /// DEC-860 item 7, DEC-870, DEC-872). A key maps to the one distinct `broker_order_id` its
+    /// version-2 `OrderStateChanged` records carry, when no other key carries that id, with the
+    /// instrument and side of its own readable `OrderSubmitted`, or else of the order it
+    /// `replaces`. A key with no id, two different ids, an id another key carries, or no readable
+    /// instrument and side (two of its `OrderSubmitted` that disagree included) maps to nothing,
+    /// so its cancel is `NotSent` (`no_order_id`) with nothing called. Every key the stream names
+    /// (an `OrderSubmitted` or `OrderStateChanged` key, or a `replaces` or `replaced_by` target)
+    /// is never placed again: a `Submit` of it is `Unknown` (DEC-860 item 4, DEC-872).
     pub fn restore(
         tools: T,
         account_number: String,
         records: &[FoldedEvent],
     ) -> Result<Self, crate::RobinhoodError> {
-        let _ = tools;
-        let _ = account_number;
-        let _ = records;
-        Err(crate::RobinhoodError::Unimplemented { story: "E7-6" })
+        let mut connector = Self::new(tools, account_number);
+        let mut submitted: BTreeMap<ClientOrderId, Option<(InstrumentId, Side)>> = BTreeMap::new();
+        let mut ids: BTreeMap<ClientOrderId, BTreeSet<String>> = BTreeMap::new();
+        let mut named: BTreeSet<ClientOrderId> = BTreeSet::new();
+        for record in records {
+            let text = |member: &str| record.payload.get(member).and_then(Canon::as_str);
+            let Some(key) = text("client_order_id").and_then(|k| ClientOrderId::parse(k).ok())
+            else {
+                continue;
+            };
+            let link = |member: &str| text(member).and_then(|k| ClientOrderId::parse(k).ok());
+            match record.event_type.as_str() {
+                "OrderSubmitted" => {
+                    named.insert(key.clone());
+                    let side = match text("side") {
+                        Some("buy") => Some(Side::Buy),
+                        Some("sell") => Some(Side::Sell),
+                        _ => None,
+                    };
+                    let instrument = text("instrument_id").and_then(|i| InstrumentId::new(i).ok());
+                    let read = instrument.zip(side);
+                    let own = submitted.entry(key).or_insert_with(|| read.clone());
+                    if *own != read {
+                        *own = None;
+                    }
+                }
+                "OrderStateChanged" => {
+                    named.insert(key.clone());
+                    named.extend(link("replaced_by"));
+                    let old = link("replaces");
+                    named.extend(old.clone());
+                    if let Some(origin) = old.and_then(|old| submitted.get(&old).cloned()) {
+                        submitted.entry(key.clone()).or_insert(origin);
+                    }
+                    let known = ids.entry(key).or_default();
+                    if let Some(id) = text("broker_order_id") {
+                        known.insert(id.to_owned());
+                    }
+                }
+                _ => {}
+            }
+        }
+        connector.in_doubt = named;
+        let (mut seen, mut shared) = (BTreeSet::new(), BTreeSet::new());
+        for id in ids.values().flatten() {
+            if !seen.insert(id) {
+                shared.insert(id.clone());
+            }
+        }
+        for (key, known) in ids {
+            let mut only = known.iter();
+            let (Some(id), None) = (only.next(), only.next()) else {
+                continue;
+            };
+            if shared.contains(id) {
+                continue;
+            }
+            let Some(Some((instrument, side))) = submitted.get(&key) else {
+                continue;
+            };
+            let order = BrokerOrder {
+                broker_order_id: id.clone(),
+                client_order_id: Some(key.as_str().to_owned()),
+                instrument: instrument.clone(),
+                side: *side,
+                qty: Qty::ZERO,
+                filled_qty: Qty::ZERO,
+                limit_price: None,
+                stop_price: None,
+                status: String::new(),
+                reject_code: None,
+                replaced_by_broker_order_id: None,
+                legs: Vec::new(),
+                created_on: None,
+            };
+            connector.in_doubt.remove(&key);
+            connector.placed.insert(key, order);
+        }
+        Ok(connector)
     }
 
     /// Review, then place with the [`crate::ref_id`]. An opening or an increase draws on the
@@ -89,7 +168,7 @@ impl<T: Tools> RobinhoodConnector<T> {
     async fn submit(&mut self, order: &SubmitOrder) -> Result<BrokerOutcome, ConnectorError> {
         let mut arguments = self.arguments(order).ok_or(NOT_OFFERED)?;
         let key = &order.client_order_id;
-        if self.in_doubt.contains(key) {
+        if self.in_doubt.contains(key) || self.placed.contains_key(key) {
             return Err(IN_DOUBT);
         }
         let opening = order.purpose.adds_risk();

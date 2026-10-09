@@ -52,6 +52,18 @@ const ACCOUNT_RECORDS: [&str; 5] = [
     ROTATED,
 ];
 
+/// The control-stream records the range rules judge (rules 66, 67, and 131): the set an unanchored
+/// range fails closed at there (journal spec v0.35 §11, DEC-885 item 4). A `ConnectionRevoked` on a
+/// control stream is never judged (DEC-885 I6).
+pub const JUDGED_ON_CONTROL: &[&str] = &[REQUESTED, ESTABLISHED, ROTATED, REFUSED];
+
+/// The connection records on an account stream, every one of which rule 68 judges and an
+/// unanchored range fails closed at (journal spec v0.37 §11, DEC-888): the records the executor's
+/// fold reads, since a type it skips is judged by nothing. Until E7-17's code PR the fold reads no
+/// `ConnectionRevoked` there, so neither does this list; the pending test
+/// `the_exported_judged_lists_are_the_specs` pins the spec's set.
+pub const JUDGED_ON_ACCOUNT: &[&str] = &ACCOUNT_RECORDS;
+
 /// The occasions an account stream's checks may have before its first binding (rule 68).
 const UNBOUND_OCCASIONS: [&str; 3] = ["connect", "reconnect", "reauthorize"];
 
@@ -271,7 +283,10 @@ pub fn verify_connection_lifecycle_from(
         ConnectionStart::Anchored(ConnectionAnchor(mut folds)) => folds.run(&rows),
         ConnectionStart::Unanchored => rows
             .iter()
-            .find(|row| row.stream != StreamType::Control || row.stored.event_type != REVOKED)
+            .find(|row| {
+                row.stream != StreamType::Control
+                    || JUDGED_ON_CONTROL.contains(&row.stored.event_type.as_str())
+            })
             .map(|row| row.failing(ConnectionCheck::Unanchored)),
     };
     failing.map_or(Ok(()), |failing| Err(failing.located()))

@@ -19,6 +19,7 @@ import calendar
 import copy
 import functools
 import hashlib
+import json
 import re
 from decimal import Decimal
 from pathlib import Path
@@ -656,6 +657,9 @@ EVENT_CHECKS = (
     "connection_cause_mismatch",
 )
 RANGE_CHECKS = ("anchor_root_mismatch", "tsa_token_invalid", "segment_manifest_mismatch", "segment_gap")
+# v0.38 (DEC-894, pending): version 2's list gains the range-level `segment_rows_mismatch`; version 1's
+# closed list is not edited (§8).
+V2_RANGE_CHECKS = (*RANGE_CHECKS, "segment_rows_mismatch")
 CHECKED_RANGE = rec(
     *RANGE.fields[:4],
     ("to_hash", opt(DIGEST_HEX)),
@@ -693,7 +697,7 @@ CHECKED_RANGE_V2 = rec(
     *CHECKED_RANGE.fields[:5],
     ("start", rec(("kind", one_of(*START_KINDS)), ("manifest_hash", opt(DIGEST_HEX)), ("anchor_event_id", opt(ULID)))),
     ("checked", INT),
-    CHECKED_RANGE.fields[5],
+    ("failure", opt(rec(("check", one_of(*EVENT_CHECKS, *V2_RANGE_CHECKS)), ("seq", opt(INT))))),
     ("incomplete", opt(rec(("check", one_of(*INCOMPLETE_CHECKS)), ("cause", one_of(*INCOMPLETE_CAUSES))))),
 )
 VERIFICATION_RUN_V2 = rec(
@@ -1610,7 +1614,7 @@ def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list
             failure = r.get("failure")
             if isinstance(failure, dict):
                 seq, check = failure.get("seq"), failure.get("check")
-                if check in EVENT_CHECKS or check in RANGE_CHECKS:
+                if check in EVENT_CHECKS or check in V2_RANGE_CHECKS:
                     at_event = check in EVENT_CHECKS and f"classify.{check}" not in skip
                     rule("111.seq", (seq is not None) == at_event, f"{at}.failure.seq")
                 bounds = (r.get("from_seq"), seq, r.get("to_seq"))
@@ -1833,6 +1837,78 @@ def trusted_start(
             if leaf["stream_id"] == stream and fits:
                 return {"from_seq": from_seq, "prev_hash": leaf["hash"]}
     return None
+
+
+ROW_COLUMNS = ("stream_id", "seq", "event_id", "event_type", "schema_version", "environment", "recorded_at", "prev_hash")
+
+
+def unique_keys(pairs: list[tuple]) -> dict:
+    if len({k for k, _ in pairs}) != len(pairs):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
+def start_row_failure(row: dict, skip: frozenset[str] = frozenset()) -> str | None:
+    """DEC-787 item 3: the start record's own row against §11 checks 1, 2, and 4, then rule 117
+    for a `SegmentExported`. Returns the first failure's code, or `None`."""
+    try:
+        body = json.loads(row["body"], object_pairs_hook=unique_keys)
+        canonical = canon(body) == row["body"]
+    except (ValueError, TypeError):
+        body, canonical = None, False
+    if not canonical and "row.non_canonical" not in skip:
+        return "non_canonical"
+    body = body if isinstance(body, dict) else {}
+    for column in ROW_COLUMNS:
+        lost = column == "stream_id" and "row.column_workspace" in skip
+        if row[column] != body.get(column) and not lost and "row.column_mismatch" not in skip:
+            return "column_mismatch"
+    if sha256_hex(row["body"].encode()) != row["hash"] and "row.rehash_mismatch" not in skip:
+        return "rehash_mismatch"
+    p = body.get("payload") or {}
+    if row["event_type"] == "SegmentExported" and p.get("manifest_hash") != manifest_hash(p) and "row.rule_117" not in skip:
+        return "rule_117"
+    return None
+
+
+def start_from_rows(
+    rows: list[dict], stream: str, from_seq: int, request: dict, cold: dict, skip: frozenset[str] = frozenset()
+) -> dict:
+    """DEC-787 items 3 and 5 over stored rows (DEC-893, DEC-894): §9.14's lookup reads the rows'
+    columns and bodies' `payload`, as `trusted_start` does; the record found is checked, and a
+    manifest start holds only when the cold manifest's bytes (`cold`: `{state: read, bytes}`,
+    `absent`, or `unreadable`) hash to its `manifest_hash`. Returns `{outcome: start, from_seq,
+    prev_hash}`, `{outcome: refused, cause}`, or `{outcome: cold_unreadable}`."""
+    refused = {"outcome": "refused", "cause": "no_start"}
+    if request["kind"] == "genesis":
+        got = trusted_start([], stream, from_seq, request, skip)
+        return {"outcome": "start", **got} if got else refused
+
+    def fits(row: dict) -> dict | None:
+        try:
+            record = {**{k: row[k] for k in ("event_id", "event_type", "stream_id")}, "payload": json.loads(row["body"])["payload"]}
+        except (ValueError, KeyError, TypeError):
+            return None
+        return trusted_start([record], stream, from_seq, request, skip) if row["stream_id"].startswith("ctl:") or "row.non_ctl_stream" in skip else None
+
+    hits = [(row, got) for row in rows if (got := fits(row))]
+    if not hits:
+        return refused
+    if len(hits) > 1 and "row.first_match" not in skip:
+        return {"outcome": "refused", "cause": "ambiguous_start"}
+    row, got = hits[0]
+    unchecked = row["event_type"] == "AnchorComputed" and "row.anchor_unchecked" in skip
+    failure = None if unchecked else start_row_failure(row, skip)
+    if failure:
+        return {"outcome": "refused", "cause": failure}
+    if request["kind"] == "manifest" and "cold.confirm" not in skip:
+        absent_read = cold["state"] == "absent" and "cold.absent_ok" in skip
+        if cold["state"] != "read" and not absent_read:
+            return {"outcome": "cold_unreadable"}
+        digest_ok = absent_read or sha256_hex(cold["bytes"].encode()) == request["manifest_hash"]
+        if not digest_ok and "cold.digest" not in skip:
+            return {"outcome": "refused", "cause": "cold_manifest_mismatch"}
+    return {"outcome": "start", **got}
 
 
 def act_failure(p: dict, skip: frozenset[str]) -> str | None:

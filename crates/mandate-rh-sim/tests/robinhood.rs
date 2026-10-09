@@ -898,7 +898,6 @@ fn journaled(orders: &[(&ClientOrderId, Option<&str>)]) -> Vec<FoldedEvent> {
 /// restored from the account stream cancels the journaled one at the broker by its id, and the
 /// one journaled with no id stays live, with nothing called for it (CN-7).
 #[test]
-#[ignore = "pending E7-6"]
 fn a_cancel_after_a_restart_finds_its_order_id_from_the_journal() {
     let server = server();
     let (found, lost) = (key("01JRESTART"), key("01JNOID"));

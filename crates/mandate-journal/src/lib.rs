@@ -56,8 +56,9 @@ pub use artifact::{
 pub use connection_fold::{
     ConnectionAnchor, ConnectionAnchorError, ConnectionCheck, ConnectionCheckError,
     ConnectionFailure, ConnectionStart, ConnectionStreamRule, ConnectionVerifyError,
-    LocatedConnectionFailure, verify_connection_causes, verify_connection_causes_from_genesis,
-    verify_connection_lifecycle, verify_connection_lifecycle_from,
+    JUDGED_ON_ACCOUNT, JUDGED_ON_CONTROL, LocatedConnectionFailure, verify_connection_causes,
+    verify_connection_causes_from_genesis, verify_connection_lifecycle,
+    verify_connection_lifecycle_from,
 };
 pub use control_verify::{
     ControlStreamCheck, ControlStreamFailure, ControlVerifyError, verify_anchor_self,
@@ -65,10 +66,13 @@ pub use control_verify::{
 };
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
-pub use start::{StartRequest, TrustedStartError, resolve_trusted_start};
+pub use start::{
+    AnchorRecord, AnchorRecordError, StartRequest, TrustedStartError, anchor_record,
+    resolve_trusted_start,
+};
 pub use verify::{
-    EventCheck, EventFailure, PrefixError, RangeCheck, TrustedStart, Verified, VerifiedPrefix,
-    verify_anchor, verify_events,
+    EventCheck, EventFailure, PrefixError, RangeCheck, RangeWalk, RangeWalkError, TrustedStart,
+    Verified, VerifiedPrefix, verify_anchor, verify_events, walk_range,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

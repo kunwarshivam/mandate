@@ -2,10 +2,12 @@
 //! trusted start of a range, resolved from the workspace's own control-stream records, never from
 //! the request ([workspace API spec](../../../docs/specs/workspace-api.md) §4.8.1). The reference
 //! is `reference/journal/control.py`'s `trusted_start`; the vectors are `cold_records.trusted_starts`.
+//! It also reads an `AnchorComputed` row as the anchor a verifier checks ([`anchor_record`], §10,
+//! §11).
 
 use mandate_canon::{Digest, Value, parse};
 
-use crate::{StoredEvent, StreamId, StreamType, TrustedStart};
+use crate::{Anchor, AnchorLeaf, ArtifactRef, StoredEvent, StreamId, StreamType, TrustedStart};
 
 /// Workspace API §4.8.1's `trusted_start`: it names the record to read, never the `prev_hash`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +82,65 @@ pub fn resolve_trusted_start(
             prev_hash,
         })
         .ok_or(refused)
+}
+
+/// An `AnchorComputed` as a verifier reads it (§9.14): its leaves and root exactly as recorded,
+/// neither sorted nor recomputed, so §11's anchor checks judge what the record holds, and its
+/// timestamp token, `None` when the record's `token` is `null`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnchorRecord {
+    pub anchor: Anchor,
+    pub token: Option<ArtifactRef>,
+}
+
+/// Why a row gave no [`AnchorRecord`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnchorRecordError {
+    /// The row is not an `AnchorComputed` at schema version 1.
+    NotAnAnchor,
+    /// Its body does not parse, or a member of its payload is missing or not of §9.14's type.
+    Malformed,
+    /// Never returned now that E12-3 built the reader; kept, as `TrustedStartError` keeps its
+    /// own, so a caller's match stays the same across the crate's stubs (DEC-77).
+    Unimplemented { story: &'static str },
+}
+
+/// The anchor an `AnchorComputed` row records (§9.14, §10).
+pub fn anchor_record(row: &StoredEvent) -> Result<AnchorRecord, AnchorRecordError> {
+    if row.event_type != "AnchorComputed" || row.schema_version != 1 {
+        return Err(AnchorRecordError::NotAnAnchor);
+    }
+    let malformed = AnchorRecordError::Malformed;
+    let body = parse(&row.body).map_err(|_| malformed)?;
+    let payload = body.get("payload").ok_or(malformed)?;
+    let leaves = payload
+        .get("leaves")
+        .and_then(Value::as_array)
+        .ok_or(malformed)?
+        .iter()
+        .map(|leaf| {
+            Some(AnchorLeaf {
+                stream_id: leaf.get("stream_id")?.as_str()?.to_owned(),
+                seq: leaf.get("seq")?.as_int()?,
+                hash: digest_at(leaf, "hash")?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or(malformed)?;
+    let root = digest_at(payload, "root").ok_or(malformed)?;
+    let token = match payload.get("token").ok_or(malformed)? {
+        Value::Null => None,
+        token => Some(
+            token
+                .as_str()
+                .and_then(ArtifactRef::parse)
+                .ok_or(malformed)?,
+        ),
+    };
+    Ok(AnchorRecord {
+        anchor: Anchor { leaves, root },
+        token,
+    })
 }
 
 fn workspace_of(stream_id: &str) -> Option<&str> {
