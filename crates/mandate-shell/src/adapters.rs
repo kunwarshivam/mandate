@@ -2162,13 +2162,14 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
         gate: Box::new(RiskGate { context: run }),
         journal: Box::new(
             StoreJournal::from_dsn(sources.journal, sources.recorded_at)
-                .with_artifacts(sources.artifacts),
+                .with_artifacts(sources.artifacts.clone()),
         ),
         sink: Box::new(ExecutorSink {
             agent: sources.agent,
         }),
         executor: Box::new(executor),
         connector: sources.transport,
+        artifacts: sources.artifacts,
     }
 }
 
