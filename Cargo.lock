@@ -2048,6 +2048,7 @@ dependencies = [
  "aes-gcm",
  "base64ct",
  "hkdf",
+ "mandate-notify",
  "p256",
  "proptest",
  "sha2 0.11.0",

@@ -4,7 +4,7 @@
   §4.6 (web push and the relay's 512-byte cap), NT-1 and NT-3; DEC-438 items 1 and 13, DEC-700
   item 3 (the envelope per class), DEC-790, DEC-792 (the push-service allowlist). RFC 8291,
   RFC 8188, RFC 8292.
-- **Code:** `mandate-webpush` (layer 0, pure, no workspace dependency):
+- **Code:** `mandate-webpush` (layer 2, pure, over `mandate-notify` alone, DEC-713):
   `crates/mandate-webpush/src/lib.rs` (`build_request`, `encrypt`, `vapid_authorization`,
   `Subscription`, `PushEndpoint`, `PushAllowlist` and `DEFAULT_PUSH_ALLOWLIST`, `VapidSubject`, the
   `SecureRandom` and `VapidSigner` traits, and `NoticeClass`'s fixed urgency and TTL) and `crates/mandate-webpush/src/payload.rs` (the closed

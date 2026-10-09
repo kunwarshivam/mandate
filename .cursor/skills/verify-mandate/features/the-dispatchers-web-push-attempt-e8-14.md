@@ -8,7 +8,7 @@
   mailbox, is a permanent `provider_error`), DEC-790 item 4 (`exp` 12 hours after the attempt),
   DEC-729 (a push service's status, which the relay returns unchanged under DEC-724 item 6, mapped
   to §5.2's outcome).
-- **Code:** `mandate-dispatcher` (layer 3, safety-critical, over `mandate-notify`,
+- **Code:** `mandate-dispatcher` (layer 4, safety-critical, over `mandate-notify`,
   `mandate-webpush` and `mandate-push-relay`): `crates/mandate-dispatcher/src/lib.rs` (`prepare`,
   `Attempt`, `Route`, `Prepared`, `Relayed`, `relay_refusal`, `push_status`, the closed
   `DispatchError`). A
@@ -19,7 +19,7 @@
   schedule; a relayed send with a person's subject builds no header and is refused
   `provider_error`; the relay's `address_rejected` marks the address, its `unreachable` is a
   retried timeout, and every other refusal is a permanent `provider_error` that marks nothing; and a canary subject reaches no outcome or error.
-  Four tests are pending on the `push_status` stub (DEC-77): each status's row, that over every
+  Four tests pin `push_status` (DEC-729): each status's row, that over every
   `u16` only a `3xx`, `404` or `410` marks the address and none is `auth_failed`, that every
   other status but a `2xx`, `400`, `401`, `403` and `413` is retried inside the `safety` window,
   and that a `2xx` with an empty message id is refused `NoMessageId`.

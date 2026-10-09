@@ -12,7 +12,8 @@
   checked and a `ManifestStart` confirmed against the cold manifest, DEC-893, DEC-894, pending), `walk_range` in `verify.rs` (a range walked
   position by position with its count, AU-8; E12-3),
   `crates/mandate-journal/src/connection_fold.rs` (§11's connection checks; a range's lifecycle
-  run from its connection anchor or failing closed without one, DEC-885; E7-17).
+  run from its connection anchor or failing closed without one, DEC-885; and an account-stream
+  `ConnectionRevoked` refused under rule 68, DEC-888; E7-17).
 - **Tests:** `crates/mandate-journal/tests/verify.rs`, `crates/mandate-journal/tests/properties.rs`
   (any tampering detected; rewrites caught only by the anchor; independent Merkle construction),
   `crates/mandate-journal/tests/control_verify.rs` (the two control-stream range checks against
@@ -30,7 +31,6 @@
 - **Reference cases:** `journal::tamper::*`, `journal::merkle`, `journal::export_line_seq_1`, and
   the `cold_records.range_checks`, `cold_records.trusted_starts`, and
   `records_access.range_checks`, `verification_runs`, `connections`, `connection_requests`,
-  `connection_ranges`, `connection_revocations` (DEC-888; read by E7-17's pending tests until
-  its code PR), and `segment_rows` (journal spec v0.38's `segment_rows_mismatch`, DEC-894; no Rust test
+  `connection_ranges`, `connection_revocations` (DEC-888), and `segment_rows` (journal spec v0.38's `segment_rows_mismatch`, DEC-894; no Rust test
   reads it until E12-3's tests PR) vectors of `fixtures/refcases/journal.json`.
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-refcases`.

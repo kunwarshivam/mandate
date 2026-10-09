@@ -40,8 +40,13 @@
   nested member), dropped and listed when not hard and refused when hard, against a hard-member
   list typed from §5; a `workspace`, `workspace_id` or `ws` member at the root, in a record, or in
   the hard `scope`, dropped and listed and never moving the stop (#1155); duplicates; DEC-886's
-  items 2, 4 and 9; a non-object root refused `malformed` or `type` at `""`; and DEC-887's bid
-  members sent only as `null` or left out.
+  items 2, 4 and 9; a non-object root refused `malformed` or `type` at `""`; DEC-887's bid
+  members sent only as `null` or left out; and DEC-900's guards, a duplicate `kind` or `id` in the
+  scope refused beside any unknown member, and a duplicate inside an unknown member outside the
+  scope read as before. Pending, with an `xtask/behaviour-only` row (DEC-900): an unknown scope
+  member holding a duplicate, a wrong type, or a `kind`, `id` or workspace of its own dropped
+  whole at `/scope/<name>`, for each scope kind, the kept body and target equal to the body's
+  without it.
 - **Schemas:** `crates/mandate-api/tests/schemas.rs`: live enum and member drift against
   `schemas/workspace-api/` (DEC-683), each member `null`-able and optional exactly as its schema
   says, a kill switch scope's `null` id exactly for `workspace`, and no `serde(flatten)`; pending,
