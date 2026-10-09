@@ -42,6 +42,8 @@ pub enum ConnectError {
     InvalidPiiRef,
     #[error("the connection record's {member} breaks connections spec §3 to §6")]
     InvalidRecord { member: &'static str },
+    #[error("a permission check refused the credential")]
+    CheckRefused,
     #[error("no connection record has this id")]
     UnknownConnection,
     #[error("a connection does not move from {from:?} to {to:?} (connections spec §9.1)")]
@@ -75,6 +77,7 @@ impl ConnectError {
             Self::InvalidAccountRef => "invalid_account_ref",
             Self::InvalidPiiRef => "invalid_pii_ref",
             Self::InvalidRecord { .. } => "invalid_record",
+            Self::CheckRefused => "check_refused",
             Self::UnknownConnection => "unknown_connection",
             Self::InvalidTransition { .. } => "invalid_transition",
             Self::Unimplemented { .. } => "unimplemented",
