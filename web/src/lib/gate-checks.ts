@@ -1,7 +1,8 @@
-import type { GateDecision, Mandate, ReasonCode } from "@/fixtures/types";
+import type { Agent, GateDecision, Mandate, ReasonCode } from "@/fixtures/types";
 import { dec, mul } from "./decimal";
 import { usd } from "./format";
 import { gateRule } from "./gate-reasons";
+import { mandateAt } from "./mandate-history";
 
 export type CheckResult = "passed" | "failed" | "waiting" | "not_run";
 
@@ -9,7 +10,7 @@ export interface GateCheck {
   key: string;
   label: string;
   result: CheckResult;
-  /** The rule the check enforces, in owner words, with the mandate's own values. */
+  /** The rule the check enforces, in owner words, with the values of the mandate version the gate decided under. */
   rule: string;
 }
 
@@ -17,7 +18,7 @@ interface CheckSpec {
   key: string;
   label: string;
   codes: ReasonCode[];
-  rule: (m: Mandate, d: GateDecision) => string;
+  rule: (m: Mandate | null, d: GateDecision) => string;
 }
 
 /** The gate's checks in the order it runs them; the first that fails ends the run. */
@@ -43,8 +44,12 @@ const CHECKS: CheckSpec[] = [
   { key: "autonomy", label: "Your autonomy rules", codes: ["owner_confirmation_required"], rule: () => "Your rules decide whether it goes without asking, asks you, or is not allowed." },
 ];
 
-/** Each check the gate ran for a decision, with its result. Checks after a failure did not run. */
-export function gateChecks(decision: GateDecision, mandate: Mandate): GateCheck[] {
+/**
+ * Each check the gate ran for a decision, with its result. Checks after a failure did not run. Limits
+ * read as the mandate version the gate decided under, without a figure when it cannot be rebuilt.
+ */
+export function gateChecks(decision: GateDecision, agent: Agent): GateCheck[] {
+  const mandate = mandateAt(agent, decision.mandate_version);
   const failing = decision.reason_code ? CHECKS.findIndex((c) => c.codes.includes(decision.reason_code as ReasonCode)) : -1;
   return CHECKS.map((c, i) => {
     const result: CheckResult = failing < 0 || i < failing ? "passed" : i === failing ? (decision.verdict === "defer" ? "waiting" : "failed") : "not_run";

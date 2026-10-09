@@ -1,12 +1,18 @@
-import type { GateDecision, Mandate, Purpose, ReasonCode } from "@/fixtures/types";
+import type { Agent, GateDecision, Mandate, Purpose, ReasonCode } from "@/fixtures/types";
 import { percent, price, quantity, seconds, usd } from "./format";
+import { mandateAt } from "./mandate-history";
+
+/** Where a limit's figure would go when the mandate a decision was made under cannot be rebuilt. */
+const DECIDED_UNDER = "the mandate version the gate decided under";
 
 /**
  * Gate reason codes (trading-domain.yaml) as the rule they enforce, in plain language. A denial is
- * shown as a rule, never as an error to retry (brief §5, rule 10).
+ * shown as a rule, never as an error to retry (brief §5, rule 10). With no `mandate` (the version a
+ * decision was made under cannot be rebuilt), a limit is named without a figure: none is shown
+ * rather than another version's.
  */
-export function gateRule(code: ReasonCode, mandate: Mandate): string {
-  const risk = mandate.risk;
+export function gateRule(code: ReasonCode, mandate: Mandate | null): string {
+  const risk = mandate?.risk ?? null;
   switch (code) {
     case "account_restricted":
       return "The broker has restricted the account to closing orders.";
@@ -21,11 +27,15 @@ export function gateRule(code: ReasonCode, mandate: Mandate): string {
     case "not_in_universe":
       return "The instrument is not in this agent's universe.";
     case "concentration_limit":
-      return `A position is at most ${usd(risk.max_position_usd)} or ${percent(risk.max_position_fraction, 0)} of equity, whichever is lower.`;
+      return risk
+        ? `A position is at most ${usd(risk.max_position_usd)} or ${percent(risk.max_position_fraction, 0)} of equity, whichever is lower.`
+        : `A position is held to the position limit of ${DECIDED_UNDER}.`;
     case "max_order_size":
-      return `Orders are at most ${usd(risk.max_order_usd)}.`;
+      return risk ? `Orders are at most ${usd(risk.max_order_usd)}.` : `Orders are held to the order limit of ${DECIDED_UNDER}.`;
     case "reentry_cooldown":
-      return `No re-entry within ${seconds(risk.reentry_cooldown_s)} of an exit in the same instrument.`;
+      return risk
+        ? `No re-entry within ${seconds(risk.reentry_cooldown_s)} of an exit in the same instrument.`
+        : `No re-entry after an exit in the same instrument within the cooldown of ${DECIDED_UNDER}.`;
     case "session_not_allowed":
       return "This mandate does not trade in the current session.";
     case "extended_hours_opening_not_allowed":
@@ -41,7 +51,7 @@ export function gateRule(code: ReasonCode, mandate: Mandate): string {
     case "price_outside_collar":
       return "The limit price is too far from the current price.";
     case "max_orders_per_day":
-      return `At most ${risk.max_orders_per_day} orders a day.`;
+      return risk ? `At most ${risk.max_orders_per_day} orders a day.` : `Orders a day are held to the daily limit of ${DECIDED_UNDER}.`;
     case "close_window":
       return "No opening orders in the last 10 minutes of the regular session.";
     case "discretionary_exit_regular_session_only":
@@ -49,7 +59,9 @@ export function gateRule(code: ReasonCode, mandate: Mandate): string {
     case "owner_confirmation_required":
       return "This needs your confirmation first.";
     case "gross_exposure_limit":
-      return `Total holdings are at most ${usd(risk.max_gross_exposure_usd)} or equity, whichever is lower.`;
+      return risk
+        ? `Total holdings are at most ${usd(risk.max_gross_exposure_usd)} or equity, whichever is lower.`
+        : `Total holdings are held to the lower of equity and the holdings limit of ${DECIDED_UNDER}.`;
     case "insufficient_buying_power":
       return "Not enough buying power on the account.";
     default: {
@@ -57,6 +69,21 @@ export function gateRule(code: ReasonCode, mandate: Mandate): string {
       throw new Error(`unhandled reason code ${String(unhandled)}`);
     }
   }
+}
+
+/**
+ * The rule a recorded decision was held to, as the mandate version it was decided under states it
+ * (`mandate_version`), never the agent's current version, and with no figure when that version
+ * cannot be rebuilt. `null` for a decision no rule held.
+ */
+export function decidedRule(decision: GateDecision, agent: Agent): string | null {
+  return decision.reason_code ? gateRule(decision.reason_code, mandateAt(agent, decision.mandate_version)) : null;
+}
+
+/** A recorded decision's verdict and the rule that held it, as one sentence. */
+export function verdictLine(decision: GateDecision, agent: Agent): string {
+  const rule = decidedRule(decision, agent);
+  return `${verdictLabel(decision)}${rule ? `: ${rule}` : "."}`;
 }
 
 const EXIT_PURPOSES: ReadonlySet<Purpose> = new Set(["discretionary_exit", "owner_exit", "risk_exit", "protective"]);

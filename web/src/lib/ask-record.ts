@@ -1,7 +1,7 @@
 import type { Agent, Iso, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { CHANGE_EXAMPLE, asksForChange, namesLimit, readChange } from "./change-request";
-import { gateRule, verdictLabel } from "./gate-reasons";
+import { verdictLine } from "./gate-reasons";
 import { RECORD_ZONE, clock, datedClock, price, quantity, usd } from "./format";
 import { MODE_LABEL, MODE_MEANING } from "./labels";
 import { agentLimits, headroomLine, headroomRows } from "./limits";
@@ -202,7 +202,7 @@ function denied(ctx: AskContext, agents: Agent[]): Reply {
   const agent = findAgent(ctx.ws, d.agent_id);
   if (!agent) return answer(["Not recorded."]);
   return answer(
-    [`At ${clock(d.at)}, ${agent.label}: ${d.action.side} ${quantity(d.action.qty)} ${d.action.symbol}. ${verdictLabel(d)}${d.reason_code ? `: ${gateRule(d.reason_code, agent.mandate)}` : "."}`],
+    [`At ${clock(d.at)}, ${agent.label}: ${d.action.side} ${quantity(d.action.qty)} ${d.action.symbol}. ${verdictLine(d, agent)}`],
     [{ href: decisionHref(agent.agent_id, d.event_id), label: "Gate decision" }],
   );
 }
