@@ -13704,7 +13704,6 @@ jq -r "$filter" "$src"
     /// A command word built by a backtick substitution cannot be read, whether the substitution
     /// is the whole word or a piece of it (#1169 round 4 review, bypass 3; DEC-873 item 1).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_backtick_command_word_cannot_be_read() -> Result<()> {
         let flows = [yaml_lines(&[
             "on: push",
@@ -13731,7 +13730,6 @@ jq -r "$filter" "$src"
     /// (`CARGO_PROFILE_DEV_DEBUG_ASSERTIONS`, `CARGO_TERM_COLORS`) or holds one after a prefix
     /// (`XCARGO_TERM_COLOR`), in job `env`, step `env` or inline, cannot be read (DEC-873 item 5).
     #[test]
-    #[ignore = "pending E7-28"]
     fn an_allowed_cargo_name_is_read_only_exactly() -> Result<()> {
         let flows = [yaml_lines(&[
             "on: push",
@@ -13778,7 +13776,6 @@ jq -r "$filter" "$src"
     /// A listed repository script whose comment alone names `cargo` or `.cargo` cannot be read,
     /// and the problem names the script: a comment is one edit from code (DEC-873 item 2).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_repository_script_comment_naming_cargo_cannot_be_read() -> Result<()> {
         let flows: Vec<CiFile> = clean_scripts()
             .into_iter()
