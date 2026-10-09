@@ -2,7 +2,7 @@
 
 - **Spec:** [identity spec](../../../../docs/specs/identity.md) §6.4 route 2; DEC-833, DEC-834,
   DEC-653.
-- **Code:** `mandate-authn`, `crates/mandate-authn/src/reduction.rs` (layer 1, pure): `ReductionGate`
+- **Code:** `mandate-authn`, `crates/mandate-authn/src/reduction.rs` (layer 2, pure): `ReductionGate`
   (outstanding challenges and recent failures per address and per device, pruned as time advances)
   and the one refusal `Unauthenticated`, implemented (slice A3).
 - **Tests:** `crates/mandate-authn/tests/reduction.rs` (a verified assertion never refused for a
