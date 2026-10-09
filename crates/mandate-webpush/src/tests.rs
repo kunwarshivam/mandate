@@ -574,6 +574,122 @@ fn a_malformed_allowlist_entry_is_refused() {
     }
 }
 
+/// The entries DEC-722 keeps: the default list, a host or a wildcard's domain of two labels, and a
+/// hyphen inside a label (`a--b` is not an `xn--` label).
+const STILL_ACCEPTED_ENTRIES: [&str; 9] = [
+    "fcm.googleapis.com",
+    "updates.push.services.mozilla.com",
+    "*.push.apple.com",
+    "*.notify.windows.com",
+    "a.b",
+    "*.a.b",
+    "a--b.com",
+    "*.a--b.com",
+    "push-1.example.net",
+];
+
+/// Every entry DEC-722 keeps is accepted, so a parser that refuses everything fails here; then each
+/// of `refused` is refused alone and after a good one.
+fn check_refused_entries(refused: &[&str], rule: &str) {
+    assert!(refused.len() >= 4, "a table with rows to check");
+    for entry in STILL_ACCEPTED_ENTRIES {
+        assert_eq!(
+            PushAllowlist::parse(&[entry]).map(|_| ()),
+            Ok(()),
+            "{entry} stays accepted"
+        );
+    }
+    for entry in refused {
+        let one = PushAllowlist::parse(&[entry]).map(|_| ());
+        assert_eq!(one, Err(WebPushError::InvalidEndpoint), "{entry:?}, {rule}");
+        let among = PushAllowlist::parse(&["fcm.googleapis.com", entry]).map(|_| ());
+        assert_eq!(
+            among,
+            Err(WebPushError::InvalidEndpoint),
+            "{entry:?} after a good one, {rule}"
+        );
+    }
+}
+
+/// DEC-722 keeps two-label entries and inner hyphens, and they match as DEC-792 item 2 says.
+#[test]
+fn the_entries_dec_722_keeps_are_accepted_and_match() -> Result<(), WebPushError> {
+    for entry in STILL_ACCEPTED_ENTRIES {
+        assert_eq!(
+            PushAllowlist::parse(&[entry]).map(|_| ()),
+            Ok(()),
+            "{entry}"
+        );
+    }
+    let list = PushAllowlist::parse(&["a.b", "*.x.y", "*.a--b.com"])?;
+    let table = [
+        ("https://a.b/p", Ok("https://a.b/p")),
+        ("https://c.x.y/p", Ok("https://c.x.y/p")),
+        ("https://c-d.a--b.com/p", Ok("https://c-d.a--b.com/p")),
+        ("https://x.y/p", REFUSED),
+        ("https://c.a.b/p", REFUSED),
+        ("https://a--b.com/p", REFUSED),
+    ];
+    check_endpoints(&list, &table)
+}
+
+/// DEC-722 item 1: an exact entry names two labels or more, and so does a wildcard's domain, so one
+/// typo cannot open the sender to every host under a top-level domain.
+#[test]
+#[ignore = "pending E8-14"]
+fn an_allowlist_entry_names_at_least_two_labels() {
+    let refused = ["com", "a", "localhost", "*.com", "*.a", "*.net"];
+    check_refused_entries(&refused, "DEC-722 item 1");
+}
+
+/// DEC-722 item 2 (RFC 1123): no label of an entry starts or ends with a hyphen, in any position.
+#[test]
+#[ignore = "pending E8-14"]
+fn no_label_of_an_allowlist_entry_starts_or_ends_with_a_hyphen() {
+    let refused = [
+        "-a.com",
+        "a-.com",
+        "*.-a.com",
+        "*.a-.com",
+        "-.example.net",
+        "push.-example.net",
+        "push.example-.net",
+        "push.example.-net",
+        "push.example.net-",
+        "*.push.apple-.com",
+        "-a-b.com",
+        "a-b-.com",
+    ];
+    check_refused_entries(&refused, "DEC-722 item 2");
+}
+
+/// DEC-722 item 2: an endpoint whose host has a label with an edge hyphen is refused although a
+/// wildcard entry would match it; a hyphen inside a label is still accepted.
+#[test]
+#[ignore = "pending E8-14"]
+fn no_label_of_an_endpoint_host_starts_or_ends_with_a_hyphen() -> Result<(), WebPushError> {
+    let list = PushAllowlist::parse(&SPEC_DEFAULT_LIST)?;
+    let table = [
+        (
+            "https://a--b.push.apple.com/x",
+            Ok("https://a--b.push.apple.com/x"),
+        ),
+        (
+            "https://wns2-bl2p.notify.windows.com/w",
+            Ok("https://wns2-bl2p.notify.windows.com/w"),
+        ),
+        ("https://-a.push.apple.com/x", REFUSED),
+        ("https://a-.push.apple.com/x", REFUSED),
+        ("https://-.push.apple.com/x", REFUSED),
+        ("https://a.-b.push.apple.com/x", REFUSED),
+        ("https://a.b-.push.apple.com/x", REFUSED),
+        ("https://-a.push.apple.com:443/x", REFUSED),
+        ("https://-wns2.notify.windows.com/w", REFUSED),
+        ("https://wns2-.notify.windows.com/w", REFUSED),
+    ];
+    check_endpoints(&list, &table)
+}
+
 proptest! {
     /// NT-1: whatever the notice id and text key, the plaintext is exactly the closed payload, so
     /// every body is the same length and opens to the payload's own bytes.
