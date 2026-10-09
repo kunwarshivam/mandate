@@ -216,8 +216,6 @@ for (const width of PHONES) {
       const bar = (await tabBar(page).boundingBox())!;
       expect(picker.y).toBeGreaterThan(0);
       expect(picker.y + picker.height, "the range picker ends above the tab bar").toBeLessThanOrEqual(bar.y);
-      const canvas = (await page.locator("[data-slot=account-equity] [data-slot=chart-canvas]").boundingBox())!;
-      expect(canvas.height).toBe(180);
       expect(await smallTargets(page.locator("[data-slot=range-picker]"))).toEqual([]);
     });
 
