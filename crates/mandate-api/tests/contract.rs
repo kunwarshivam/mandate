@@ -335,7 +335,6 @@ fn is_pointer(path: &str) -> bool {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn decode_refuses_every_malformed_body_with_one_located_violation() {
     let good = decode::<Fixture>(br#"{"bid": "1.5", "effect": "recorded"}"#);
     assert!(good.is_ok(), "{good:?}");
@@ -394,7 +393,6 @@ fn decode_refuses_every_malformed_body_with_one_located_violation() {
 /// A refusal on a later line of a pretty-printed body is located there (DEC-681 item 10): the
 /// unknown member `x` on the third line is `/x`.
 #[test]
-#[ignore = "pending E10-10"]
 fn decode_locates_a_refusal_on_a_later_line_of_the_body() {
     let body = b"{\n  \"bid\": \"1.5\",\n  \"x\": 1,\n  \"effect\": \"none\"\n}\n";
     assert_eq!(
@@ -406,7 +404,6 @@ fn decode_locates_a_refusal_on_a_later_line_of_the_body() {
 /// A refusal inside an array is located by the item's index (RFC 6901, DEC-681 item 10): an
 /// unknown member of a command status's second step is `/steps/1/extra`, after an earlier array.
 #[test]
-#[ignore = "pending E10-10"]
 fn decode_locates_a_refusal_inside_an_array_by_its_index() {
     let example =
         include_str!("../../../schemas/workspace-api/examples/commands.command-status.json");
@@ -421,7 +418,6 @@ fn decode_locates_a_refusal_inside_an_array_by_its_index() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn idempotency_keys_are_16_to_64_url_safe_characters() {
     for good in [
         "a".repeat(16),
@@ -500,7 +496,6 @@ fn derived(
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn event_ids_derive_from_workspace_principal_operation_key_and_position() {
     let long = "A".repeat(64);
     let fixed = [
@@ -583,7 +578,6 @@ fn closed<T: Serialize + DeserializeOwned + Validate + PartialEq + Debug + Copy>
 /// Each scalar takes its canonical text and refuses a JSON number, a non-canonical spelling, and
 /// anything else of the wrong shape (§3.1; DEC-681 items 2 and 3).
 #[test]
-#[ignore = "pending E10-10"]
 fn scalars_are_canonical_strings_and_never_numbers() {
     let quoted = |text: &str| format!("\"{text}\"");
     let finest = format!("0.{}1", "0".repeat(27));
@@ -689,7 +683,6 @@ fn round_trips<T: Serialize + DeserializeOwned + Validate + Debug>(texts: &[&str
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_safety_enums_of_a_problem_are_closed() {
     closed(&[
         (Effect::None, "none"),
@@ -769,7 +762,6 @@ fn every_stub_reports_its_story() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_last_batch_position_and_only_route_names_derive_an_id() {
     let text = "0123456789abcdef";
     let last = Some(u32::MAX);
