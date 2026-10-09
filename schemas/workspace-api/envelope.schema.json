@@ -62,12 +62,6 @@
         "busy"
       ],
       "x-planned": {
-        "outcome_unknown": "E10-10",
-        "step_up_missing": "E10-10",
-        "step_up_stale": "E10-10",
-        "step_up_reused": "E10-10",
-        "step_up_method": "E10-10",
-        "step_up_mismatch": "E10-10",
         "address_limit": "E8-14",
         "busy": "E8-14"
       }
