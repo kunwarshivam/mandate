@@ -1,7 +1,7 @@
 //! The guard every outbound Alpaca request passes (DEC-821 items 2 and 4).
 //!
 //! The only request to the live host that can exist is a [`LiveTokenRequest`]: it has no fields
-//! to vary and one crate-private constructor, which the code exchange (D2c) uses (and later the
+//! to vary and one crate-private constructor, which [`crate::exchange`] uses (and later the
 //! refresh), in the token-exchange process only, never the executor. Every other request is a
 //! [`PaperRequest`], which can address only the paper host. An HTTP adapter sends an
 //! [`Outbound`], never a raw URL, and an adapter that receives a raw request first passes it
