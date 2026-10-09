@@ -14,14 +14,26 @@
 # chain of path dependencies of any kind (normal, dev, build), whatever its layer allows; each name
 # is a workspace member or in `planned`. No crate may have a path dependency outside the workspace,
 # whose dependencies the check could not see (DEC-525).
+# `allowed_dependents`, when set, is an allowlist: only the workspace crates it names may depend on
+# the crate, by a dependency of any kind; each name is a workspace member or in `planned` (DEC-642
+# item 7). `dev_only = true` lets other crates depend on the crate only as a dev-dependency
+# (DEC-645).
 #
 # Planned crates and layers, created only when a story needs them:
-#   0  mandate-num, mandate-time, mandate-canon
-#   1  mandate-domain, mandate-approval, mandate-liquidity (pure cores over layer-0 values;
-#      mandate-approval compares values and never reaches a limit under DEC-155 item 1)
-#   2  mandate-journal, mandate-accounting
+#   0  mandate-num, mandate-time, mandate-canon, mandate-identity-seal (DEC-642 item 7: its
+#      allowed_dependents list is the only thing that may build an identity session or membership)
+#   1  mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
+#      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
+#      mandate-authn (E9-1, DEC-650): token verification and sessions as pure functions, with the
+#      issuer's keys and the clock handed in, so it never fetches a key or reads a clock, and
+#      mandate-notify, the closed notice (E8-9, DEC-710): below the journal, so it can never reach
+#      the control-stream writer (notifications spec NT-3)
+#   2  mandate-journal, mandate-accounting, and mandate-passkey, the WebAuthn relying party
+#      (E9-1, DEC-660), which verifies and never signs
 #   3  mandate-spec
-#   4  mandate-risk
+#   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
+#      mandate-spec; it holds L5's audit wire types, and mandate-audit sits above it and converts
+#      into them; its server sits higher (DEC-680)
 #   5  mandate-builder
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
 #      mandate-runtime, mandate-mcp
@@ -42,12 +54,20 @@
 #   10 mandate-rh-sim, the simulated Robinhood broker (E7-25, DEC-124): above every product crate,
 #      so none can take it as a normal dependency and it stays out of every production graph,
 #      while the Robinhood connector's tests (C1) reach it as a dev-dependency
+#   11 mandate-identity-testkit (DEC-645): above every product crate, so only dev-dependencies
+#      reach it, as mandate-rh-sim
 #   tool  mandate-refcases, xtask
 
 impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
-planned = ["mandate-paper"]
+planned = [
+    "mandate-paper",
+    "mandate-identity-system",
+    "mandate-tenant",
+    "mandate-identity-seal",
+    "mandate-identity-testkit",
+]
 
 [crates.xtask]
 layer = "tool"
@@ -72,6 +92,16 @@ safety_critical = true
 pure = true
 allowed_external = ["sha2", "thiserror"]
 
+# Web push for opaque notices (E8-14, notifications spec §4.6): RFC 8291 encryption and RFC 8292
+# VAPID over a closed payload. It depends on no workspace crate, and may never reach the journal,
+# the control stream's writers, or the order path, so no push can approve or act (NT-3).
+[crates.mandate-webpush]
+layer = 0
+safety_critical = true
+pure = true
+allowed_external = ["aes-gcm", "base64ct", "hkdf", "p256", "sha2", "thiserror"]
+forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-mcp", "mandate-cli"]
+
 [crates.mandate-domain]
 layer = 1
 safety_critical = true
@@ -83,6 +113,43 @@ layer = 1
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+[crates.mandate-authn]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
+
+[crates.mandate-identity]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+[crates.mandate-notify]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+[crates.mandate-identity-seal]
+layer = 0
+safety_critical = true
+pure = true
+allowed_external = []
+allowed_dependents = ["mandate-identity", "mandate-identity-testkit"]
+
+[crates.mandate-identity-testkit]
+layer = 11
+safety_critical = false
+pure = true
+dev_only = true
+
+[crates.mandate-passkey]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
 
 [crates.mandate-liquidity]
 layer = 1
@@ -113,6 +180,15 @@ layer = 3
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+[crates.mandate-api]
+layer = 4
+safety_critical = true
+pure = true
+allowed_external = ["serde", "serde_json", "sha2", "thiserror"]
+# The identity system crate holds sessions and credentials; the contract never reaches it
+# (DEC-642 item 6).
+forbidden_internal = ["mandate-identity-system"]
 
 [crates.mandate-refcases]
 layer = "tool"
@@ -163,6 +239,12 @@ safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "serde", "serde_json", "thiserror"]
 
+[crates.mandate-connections]
+layer = 6
+safety_critical = true
+pure = true
+allowed_external = ["secrecy", "thiserror"]
+
 [crates.mandate-journal-pg]
 layer = 6
 safety_critical = true
@@ -189,6 +271,12 @@ layer = 6
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+[crates.mandate-vault-local]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["secrecy", "thiserror"]
 
 [crates.mandate-alpaca]
 layer = 7

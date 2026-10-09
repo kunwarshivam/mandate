@@ -1,4 +1,4 @@
-"""Generates docs/specs/reference-cases/mandate.yaml for mandate spec v0.6."""
+"""Generates docs/specs/reference-cases/mandate.yaml for mandate spec v0.7."""
 import copy, json
 from collections import Counter
 import yaml
@@ -6,7 +6,7 @@ from ref import *  # noqa: F401,F403
 from ref import D, ROOT
 from bases import *  # noqa: F401,F403
 
-doc = {"version": 4, "spec": "docs/specs/mandate.md (v0.6)",
+doc = {"version": 4, "spec": "docs/specs/mandate.md (v0.7)",
        "schemas": ["schemas/mandate.schema.json", "schemas/policy.schema.json"],
        "harness_defaults": {"mark_max_age_s": 120, "hard_trigger_multiple": "1.25", "stagger_window_s": 900},
        "bases": {n: {"mandate": m, "canonical_sha256": version(m)} for n, m in BASES.items()},
@@ -66,6 +66,10 @@ S = [
     ("MC-S30", "max_revisions_per_lineage above 10", "research_equity", [rep("/behavior/research/max_revisions_per_lineage", 11)], False),
     ("MC-S31", "Research interval below 300 s", "research_equity", [rep("/behavior/research/interval_s", 60)], False),
 ]
+def to_v2(offset):
+    """Schema version 2 (DEC-539): `crypto_stop_limit_offset` becomes `stop_limit_offset`."""
+    return [rep("/mandate_schema_version", 2), {"op": "remove", "path": "/protection/crypto_stop_limit_offset"},
+            {"op": "add", "path": "/protection/stop_limit_offset", "value": offset}]
 for cid, title, base, patch, ok in S:
     m = apply_patch(MB[base], patch)
     assert V.is_valid(m) == ok, (cid, [e.message for e in V.iter_errors(m)])
@@ -231,12 +235,15 @@ SEM += [
      "btc_accumulator", FEWER_ORDERS,
      dict(LONE_UNDER_POLICY, previous_version=OVER_SCHEMA, current_mandate_version=version(OVER_SCHEMA))),
 ]
+STOP_LIMIT_EQUITIES = {"stop_limit_asset_classes": ["crypto", "us_equity"]}
+ALPACA_PROFILE = {"stop_limit_asset_classes": ["crypto"]}
+PROFILE_ABSENT = {"stop_limit_asset_classes": None}
 for cid, title, base, patch, ctx in SEM:
     m = apply_patch(MB[base], patch)
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
     errs, warns = semantic(m, dict(CTX, **ctx))
     cases.append({"id": cid, "kind": "semantic", "title": title, "base": base, "patch": patch, "context": ctx,
-                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
 
 # =========================================================== C. policy
 POL = [
@@ -749,6 +756,7 @@ derived("research_equity_no_agent", "research_equity",
 derived("research_equity_two_classes", "research_equity",
         [rep("/universe/asset_classes", ["crypto", "us_equity"]), rep("/protection/crypto_stop_limit_offset", "0.005")],
         "adds crypto to the allowed asset classes")
+derived("btc_accumulator_v2", "btc_accumulator", to_v2("0.005"), "schema version 2 (DEC-539)")
 derived("btc_accumulator_with_deny", "btc_accumulator",
         [{"op": "add", "path": "/autonomy/rules/2", "value": {"id": "deny_big_low", "when": {"field": "order_usd", "op": "gt", "value": "800"}, "then": "deny"}}],
         "adds rule deny_big_low at index 2")
@@ -826,6 +834,52 @@ for cid, title, base, patch in CH:
     if got != "invalid":
         e["step_up_required"] = got == "risk_increasing"
     cases.append({"id": cid, "kind": "change", "title": title, "base": base, "patch": patch, "expect": e})
+
+# =========================================================== K2. one stop-limit offset (DEC-539)
+# Family K is its own until the code reads schema version 2: families S, V and C are counted and must all pass.
+K = [
+    ("MC-K01", "schema", "Version 2 names the offset stop_limit_offset", "btc_accumulator", to_v2("0.005"), {}),
+    ("MC-K02", "schema", "Version 2 with version 1's field name", "btc_accumulator", [rep("/mandate_schema_version", 2)], {}),
+    ("MC-K03", "schema", "Version 1 with version 2's field name", "btc_accumulator", to_v2("0.005")[1:], {}),
+    ("MC-K04", "semantic", "Version 2: crypto with protection but no stop-limit offset", "btc_accumulator", to_v2(None), {}),
+    ("MC-K05", "semantic", "Equities on a profile that protects them with a stop-limit need the offset",
+     "two_stock_swing", to_v2(None), STOP_LIMIT_EQUITIES),
+    ("MC-K06", "semantic", "With the offset set, it passes and the worst case adds it", "two_stock_swing", to_v2("0.01"),
+     STOP_LIMIT_EQUITIES),
+    ("MC-K07", "semantic", "An equity mandate on a profile with OCO and bracket passes without an offset", "two_stock_swing",
+     to_v2(None), ALPACA_PROFILE),
+    ("MC-K08", "semantic", "Version 1's crypto_stop_limit_offset is read as the offset, so it passes", "two_stock_swing",
+     [rep("/protection/crypto_stop_limit_offset", "0.01")], STOP_LIMIT_EQUITIES),
+    ("MC-K09", "change", "Raise the stop-limit offset", "btc_accumulator_v2", [rep("/protection/stop_limit_offset", "0.01")], {}),
+    ("MC-K10", "change", "Move to version 2 with a smaller offset (version 1 reads as version 2)", "btc_accumulator",
+     to_v2("0.004"), {}),
+    ("MC-K11", "change", "Move to version 2 with the same offset", "btc_accumulator", to_v2("0.005"), {}),
+    ("MC-K12", "semantic", "Profile absent: an equity mandate without an offset fails V-008 (fails closed)",
+     "two_stock_swing", to_v2(None), PROFILE_ABSENT),
+    ("MC-K13", "semantic", "Profile absent: an equity mandate with the offset passes, but the worst case adds it and W-002 fires",
+     "two_stock_swing", to_v2("0.09"), PROFILE_ABSENT),
+    ("MC-K14", "semantic", "On the Alpaca profile the same equity mandate passes, its offset out of the worst case, with no W-002",
+     "two_stock_swing", to_v2("0.09"), ALPACA_PROFILE),
+    ("MC-K15", "semantic", "A version-1 document after a version-2 previous version is refused (V-031)",
+     "two_stock_swing", [], {"previous_version": apply_patch(MB["two_stock_swing"], to_v2(None))}),
+]
+for cid, kind, title, base, patch, ctx in K:
+    old = MB[base]
+    m = apply_patch(old, patch)
+    if kind == "schema":
+        cases.append({"id": cid, "kind": kind, "title": title, "base": base, "patch": patch,
+                      "expect": {"schema_valid": V.is_valid(m)}})
+        continue
+    assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
+    if kind == "semantic":
+        errs, warns = semantic(m, dict(CTX, **ctx))
+        cases.append({"id": cid, "kind": kind, "title": title, "base": base, "patch": patch, "context": ctx,
+                      "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
+    else:
+        got, paths = classify(old, m)
+        cases.append({"id": cid, "kind": kind, "title": title, "base": base, "patch": patch,
+                      "expect": {"classification": got, "changed_paths": paths, "old_version": version(old),
+                                 "new_version": version(m), "step_up_required": got == "risk_increasing"}})
 
 # =========================================================== L. research agent: admission, lineage, expiry
 TH_NOW = "2026-09-22T14:00:00.000000000Z"
@@ -975,7 +1029,7 @@ for cid, title, patch, ctx in SEM_D:
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
     errs, warns = semantic(m, dict(CTX, **ctx))
     cases.append({"id": cid, "kind": "semantic", "title": title, "base": "btc_accumulator", "patch": patch, "context": ctx,
-                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
 RECONFIRM = [{"op": "add", "path": "/autonomy/delegations", "value": [REVIEW_DELEGATION]}, rep("/autonomy/review_by", "2027-03-01")]
 for cid, title, extra in [
     ("MC-D11", "Re-confirming moves the review date and carries the delegation over", []),
@@ -987,7 +1041,7 @@ for cid, title, extra in [
     ctx = {"previous_version": with_review_delegation}
     errs, warns = semantic(m, dict(CTX, **ctx))
     cases.append({"id": cid, "kind": "semantic", "title": title, "base": "btc_accumulator_reviewed", "patch": patch, "context": ctx,
-                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
 CH_D = [
     ("MC-D13", "Set a review date where there was none", "btc_accumulator", [{"op": "add", "path": "/autonomy/review_by", "value": REVIEW_BY}]),
     ("MC-D14", "Move the review date earlier", "btc_accumulator_reviewed", [rep("/autonomy/review_by", "2026-11-01")]),
@@ -1272,7 +1326,7 @@ for cid, title, base, patch, ctx in SEM_W:
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
     errs, warns = semantic(m, dict(CTX, **ctx))
     cases.append({"id": cid, "kind": "semantic", "title": title, "base": base, "patch": patch, "context": ctx,
-                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
 with_tw_delegation = apply_patch(MB[TWB], [{"op": "add", "path": "/autonomy/delegations", "value": [TW_DELEGATION]}])
 for cid, title, patch in [
     ("MC-W17", "Removing a tripwire is risk-increasing, so a delegation carried with it is refused (V-042)",
@@ -1286,7 +1340,7 @@ for cid, title, patch in [
     ctx = {"previous_version": with_tw_delegation}
     errs, warns = semantic(m, dict(CTX, **ctx))
     cases.append({"id": cid, "kind": "semantic", "title": title, "base": TWB, "patch": patch, "context": ctx,
-                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m, dict(CTX, **ctx))}})
 SCH_W = [
     ("MC-W01", "A tripwire with an unknown metric", tws(tw_with(TW_DAY, metric="unrealized_loss_usd"))),
     ("MC-W02", "A tripwire whose action is paused (rule 13)", tws(tw_with(TW_STREAK, action="paused"))),
@@ -1482,7 +1536,7 @@ assert all(c["id"].startswith("MC-W") for c in cases[W0:])
 cases[W0:] = sorted(cases[W0:], key=lambda c: c["id"])
 
 # =========================================================== output
-HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
+HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.7)
 #
 # Generated by a reference implementation that is fuzzed against invariants MI-1 to MI-32
 # (spec 1.1); every expected value is computed, not typed.
@@ -1498,6 +1552,9 @@ HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 # - semantic: `context` overrides `validation_context_defaults`. `provenance` maps a JSON Pointer to
 #   {source, confirmed}; absent paths are {user_entered, confirmed: true}. Expect the sorted V- and
 #   W-codes and the worst-case figures shown on the confirmation screen (spec 4.2).
+#   `stop_limit_asset_classes` is the asset classes the connection's profile protects with a
+#   stop-limit (spec 4, DEC-539); null means no profile was supplied, and then every allowed asset
+#   class counts as protected by one (V-008 and W-002 fail closed).
 # - policy: `policies` are listed outermost first; each violation reports the key, the violating
 #   level and value, and the nearest ancestor whose value it breaks (spec 4.3).
 # - risk_state: one agent, one instrument, zero fees. `goal_complete` steps apply the mandate's

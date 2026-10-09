@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/stop-request.schema.json",
+  "type": "object",
+  "required": [
+    "release",
+    "warning_shown",
+    "record",
+    "step_up"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "release": {
+      "type": "boolean"
+    },
+    "warning_shown": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /agents/{agent_id}/stop (\u00a74.2): release and warning_shown as DEC-290 item 2 journals them; the warning digest exactly when release is true.",
+  "if": {
+    "properties": {
+      "release": {
+        "const": true
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "warning_shown": {
+        "$ref": "../common.schema.json#/$defs/ContentRef"
+      }
+    }
+  },
+  "else": {
+    "properties": {
+      "warning_shown": {
+        "type": "null"
+      }
+    }
+  }
+}

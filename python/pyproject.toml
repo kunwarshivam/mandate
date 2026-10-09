@@ -27,5 +27,5 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 known-first-party = ["mandate_tools", "research_spike"]
 
 [tool.pytest.ini_options]
-testpaths = ["mandate_tools/tests", "research_spike/tests"]
+testpaths = ["mandate_tools/tests", "research_spike/tests", "../deploy/tests"]
 addopts = "--strict-markers"

@@ -10,4 +10,8 @@ description = "The vocabulary the mandate rules, the risk gate, the order builde
 workspace = true
 
 [dependencies]
+mandate-canon.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

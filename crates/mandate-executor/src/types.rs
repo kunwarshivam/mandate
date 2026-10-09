@@ -380,8 +380,9 @@ pub struct UnprotectedInterval {
     /// round-4 review, m2).
     pub uncovered: bool,
     /// The bracket entry whose partial fill opened it, when one did. Only an `unprotected_end`
-    /// naming that entry, or the acknowledgment of the OCO placed for it, ends this interval, so a
-    /// second bracket in the instrument never closes it (§5.4; DEC-521 item 3, backlog E4).
+    /// naming that entry, the acknowledgment of the OCO placed for it, or a new interval's start
+    /// while that OCO's acknowledgment is awaited ends this interval, so a second bracket in the
+    /// instrument never closes it (§5.4; DEC-521 item 3, backlog E4 and E4b).
     pub bracket: Option<ClientOrderId>,
 }
 

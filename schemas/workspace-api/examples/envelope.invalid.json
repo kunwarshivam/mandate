@@ -1,0 +1,2055 @@
+{
+  "Envelope": [
+    {
+      "api_version": "v2",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "served_at": "2026-10-08T14:30:00.000000000Z",
+      "as_of": []
+    },
+    {
+      "api_version": "v1",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "as_of": []
+    },
+    {
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "served_at": "2026-10-08T14:30:00.000000000Z",
+      "as_of": [
+        {
+          "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+          "seq": 312,
+          "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "recorded_at": "2026-10-08T14:30:00.000000000Z"
+        }
+      ]
+    },
+    {
+      "api_version": "v1",
+      "served_at": "2026-10-08T14:30:00.000000000Z",
+      "as_of": [
+        {
+          "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+          "seq": 312,
+          "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "recorded_at": "2026-10-08T14:30:00.000000000Z"
+        }
+      ]
+    },
+    {
+      "api_version": "v1",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "as_of": [
+        {
+          "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+          "seq": 312,
+          "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "recorded_at": "2026-10-08T14:30:00.000000000Z"
+        }
+      ]
+    },
+    {
+      "api_version": "v1",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "served_at": "2026-10-08T14:30:00.000000000Z"
+    },
+    {
+      "api_version": "v2",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "served_at": "2026-10-08T14:30:00.000000000Z",
+      "as_of": [
+        {
+          "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+          "seq": 312,
+          "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "recorded_at": "2026-10-08T14:30:00.000000000Z"
+        }
+      ]
+    },
+    {
+      "api_version": "v1",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "served_at": "2026-10-08T14:30:00.000000000Z",
+      "as_of": [
+        {
+          "stream_id": "bad"
+        }
+      ]
+    }
+  ],
+  "ProblemCode": [
+    "unimplemented",
+    "Invalid",
+    "mutant_value"
+  ],
+  "Effect": [
+    "maybe",
+    "mutant_value"
+  ],
+  "Problem": [
+    {
+      "type": "about:blank",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid",
+      "effect": "none",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "about:blank",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Stale",
+      "effect": "recorded",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "about:blank",
+      "status": 500,
+      "code": "invalid",
+      "title": "Invalid",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "about:blank",
+      "status": 409,
+      "code": "rate_limited",
+      "title": "Slow down",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "about:blank",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "x",
+      "status": 503,
+      "code": "outcome_unknown",
+      "title": "t",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "x",
+      "status": 503,
+      "code": "outcome_unknown",
+      "title": "t",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid AAPL order",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 503,
+      "code": "journal_unavailable",
+      "title": "Temporarily unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 503,
+      "code": "journal_unavailable",
+      "title": "Temporarily unavailable",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 429,
+      "code": "rate_limited",
+      "title": "Too many requests",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [],
+      "current_base": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 401,
+      "code": "step_up_required",
+      "title": "Confirmation required",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/unauthenticated",
+      "status": 599,
+      "code": "unauthenticated",
+      "title": "Sign in required",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/unauthenticated",
+      "status": 401,
+      "code": "unauthenticated",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/unauthenticated",
+      "status": 401,
+      "code": "unauthenticated",
+      "title": "Sign in required",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "unauthenticated",
+      "title": "Sign in required",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/unauthenticated",
+      "status": 401,
+      "code": "unauthenticated",
+      "title": "Sign in required",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/unauthenticated",
+      "status": 401,
+      "code": "unauthenticated",
+      "title": "Sign in required",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/forbidden",
+      "status": 599,
+      "code": "forbidden",
+      "title": "Not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/forbidden",
+      "status": 403,
+      "code": "forbidden",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/forbidden",
+      "status": 403,
+      "code": "forbidden",
+      "title": "Not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 403,
+      "code": "forbidden",
+      "title": "Not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/forbidden",
+      "status": 403,
+      "code": "forbidden",
+      "title": "Not allowed",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/forbidden",
+      "status": 403,
+      "code": "forbidden",
+      "title": "Not allowed",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/not_found",
+      "status": 599,
+      "code": "not_found",
+      "title": "Not found",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/not_found",
+      "status": 404,
+      "code": "not_found",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/not_found",
+      "status": 404,
+      "code": "not_found",
+      "title": "Not found",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 404,
+      "code": "not_found",
+      "title": "Not found",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/not_found",
+      "status": 404,
+      "code": "not_found",
+      "title": "Not found",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/not_found",
+      "status": 404,
+      "code": "not_found",
+      "title": "Not found",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 599,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/idempotency_conflict",
+      "status": 599,
+      "code": "idempotency_conflict",
+      "title": "Key already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/idempotency_conflict",
+      "status": 409,
+      "code": "idempotency_conflict",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/idempotency_conflict",
+      "status": 409,
+      "code": "idempotency_conflict",
+      "title": "Key already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 409,
+      "code": "idempotency_conflict",
+      "title": "Key already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/idempotency_conflict",
+      "status": 409,
+      "code": "idempotency_conflict",
+      "title": "Key already used",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/idempotency_conflict",
+      "status": 409,
+      "code": "idempotency_conflict",
+      "title": "Key already used",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/stale_base",
+      "status": 599,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [],
+      "current_base": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    {
+      "type": "https://mandate.dev/problems/stale_base",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [],
+      "current_base": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    {
+      "type": "https://mandate.dev/problems/stale_base",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": [],
+      "current_base": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [],
+      "current_base": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    {
+      "type": "https://mandate.dev/problems/stale_base",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": [],
+      "current_base": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    {
+      "type": "https://mandate.dev/problems/stale_base",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": [],
+      "current_base": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    {
+      "type": "https://mandate.dev/problems/classification_changed",
+      "status": 599,
+      "code": "classification_changed",
+      "title": "Classification changed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/classification_changed",
+      "status": 409,
+      "code": "classification_changed",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/classification_changed",
+      "status": 409,
+      "code": "classification_changed",
+      "title": "Classification changed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 409,
+      "code": "classification_changed",
+      "title": "Classification changed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/classification_changed",
+      "status": 409,
+      "code": "classification_changed",
+      "title": "Classification changed",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/classification_changed",
+      "status": 409,
+      "code": "classification_changed",
+      "title": "Classification changed",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_required",
+      "status": 599,
+      "code": "step_up_required",
+      "title": "Confirmation required",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_required",
+      "status": 401,
+      "code": "step_up_required",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_required",
+      "status": 401,
+      "code": "step_up_required",
+      "title": "Confirmation required",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_required",
+      "title": "Confirmation required",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_required",
+      "status": 401,
+      "code": "step_up_required",
+      "title": "Confirmation required",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/live_unavailable",
+      "status": 599,
+      "code": "live_unavailable",
+      "title": "Live trading unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/live_unavailable",
+      "status": 409,
+      "code": "live_unavailable",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/live_unavailable",
+      "status": 409,
+      "code": "live_unavailable",
+      "title": "Live trading unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 409,
+      "code": "live_unavailable",
+      "title": "Live trading unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/live_unavailable",
+      "status": 409,
+      "code": "live_unavailable",
+      "title": "Live trading unavailable",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/live_unavailable",
+      "status": 409,
+      "code": "live_unavailable",
+      "title": "Live trading unavailable",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/control_stream_frozen",
+      "status": 599,
+      "code": "control_stream_frozen",
+      "title": "Changes are frozen",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/control_stream_frozen",
+      "status": 503,
+      "code": "control_stream_frozen",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/control_stream_frozen",
+      "status": 503,
+      "code": "control_stream_frozen",
+      "title": "Changes are frozen",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 503,
+      "code": "control_stream_frozen",
+      "title": "Changes are frozen",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/control_stream_frozen",
+      "status": 503,
+      "code": "control_stream_frozen",
+      "title": "Changes are frozen",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/journal_unavailable",
+      "status": 599,
+      "code": "journal_unavailable",
+      "title": "Temporarily unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/journal_unavailable",
+      "status": 503,
+      "code": "journal_unavailable",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/journal_unavailable",
+      "status": 503,
+      "code": "journal_unavailable",
+      "title": "Temporarily unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 503,
+      "code": "journal_unavailable",
+      "title": "Temporarily unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/journal_unavailable",
+      "status": 503,
+      "code": "journal_unavailable",
+      "title": "Temporarily unavailable",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/journal_unavailable",
+      "status": 503,
+      "code": "journal_unavailable",
+      "title": "Temporarily unavailable",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/rate_limited",
+      "status": 599,
+      "code": "rate_limited",
+      "title": "Too many requests",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/rate_limited",
+      "status": 429,
+      "code": "rate_limited",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/rate_limited",
+      "status": 429,
+      "code": "rate_limited",
+      "title": "Too many requests",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 429,
+      "code": "rate_limited",
+      "title": "Too many requests",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/rate_limited",
+      "status": 429,
+      "code": "rate_limited",
+      "title": "Too many requests",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/rate_limited",
+      "status": 429,
+      "code": "rate_limited",
+      "title": "Too many requests",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/outcome_unknown",
+      "status": 599,
+      "code": "outcome_unknown",
+      "title": "Result unknown",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/outcome_unknown",
+      "status": 503,
+      "code": "outcome_unknown",
+      "title": "Other title",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/outcome_unknown",
+      "status": 503,
+      "code": "outcome_unknown",
+      "title": "Result unknown",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 503,
+      "code": "outcome_unknown",
+      "title": "Result unknown",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/outcome_unknown",
+      "status": 503,
+      "code": "outcome_unknown",
+      "title": "Result unknown",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/outcome_unknown",
+      "status": 503,
+      "code": "outcome_unknown",
+      "title": "Result unknown",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [],
+      "extra": 1
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_required",
+      "status": 401,
+      "code": "step_up_required",
+      "title": "Confirmation required",
+      "effect": "recorded",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/stale_base",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/membership_unavailable",
+      "status": 503,
+      "code": "membership_unavailable",
+      "title": "Membership unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/membership_unavailable",
+      "status": 403,
+      "code": "membership_unavailable",
+      "title": "Membership unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/membership_unavailable",
+      "status": 503,
+      "code": "membership_unavailable",
+      "title": "Membership unavailable",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/last_owner",
+      "status": 403,
+      "code": "last_owner",
+      "title": "Owner must remain",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/reduction_only",
+      "status": 403,
+      "code": "reduction_only",
+      "title": "Risk reduction only",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/own_roles",
+      "status": 409,
+      "code": "own_roles",
+      "title": "Cannot change own roles",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/owner_role_reserved",
+      "status": 403,
+      "code": "owner_role_reserved",
+      "title": "Owner role reserved",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/last_admin",
+      "status": 409,
+      "code": "last_admin",
+      "title": "Last admin",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_missing",
+      "status": 403,
+      "code": "step_up_missing",
+      "title": "Confirmation not valid",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_missing",
+      "status": 401,
+      "code": "step_up_missing",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_missing",
+      "status": 401,
+      "code": "step_up_missing",
+      "title": "Confirmation not valid",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_missing",
+      "title": "Confirmation not valid",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_missing",
+      "status": 401,
+      "code": "step_up_missing",
+      "title": "Confirmation not valid",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_stale",
+      "status": 403,
+      "code": "step_up_stale",
+      "title": "Confirmation expired",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_stale",
+      "status": 401,
+      "code": "step_up_stale",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_stale",
+      "status": 401,
+      "code": "step_up_stale",
+      "title": "Confirmation expired",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_stale",
+      "title": "Confirmation expired",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_stale",
+      "status": 401,
+      "code": "step_up_stale",
+      "title": "Confirmation expired",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_reused",
+      "status": 403,
+      "code": "step_up_reused",
+      "title": "Confirmation already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_reused",
+      "status": 401,
+      "code": "step_up_reused",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_reused",
+      "status": 401,
+      "code": "step_up_reused",
+      "title": "Confirmation already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_reused",
+      "title": "Confirmation already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_reused",
+      "status": 401,
+      "code": "step_up_reused",
+      "title": "Confirmation already used",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_method",
+      "status": 403,
+      "code": "step_up_method",
+      "title": "Confirmation method not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_method",
+      "status": 401,
+      "code": "step_up_method",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_method",
+      "status": 401,
+      "code": "step_up_method",
+      "title": "Confirmation method not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_method",
+      "title": "Confirmation method not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_method",
+      "status": 401,
+      "code": "step_up_method",
+      "title": "Confirmation method not allowed",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_mismatch",
+      "status": 403,
+      "code": "step_up_mismatch",
+      "title": "Confirmation does not match",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_mismatch",
+      "status": 401,
+      "code": "step_up_mismatch",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_mismatch",
+      "status": 401,
+      "code": "step_up_mismatch",
+      "title": "Confirmation does not match",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 401,
+      "code": "step_up_mismatch",
+      "title": "Confirmation does not match",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_mismatch",
+      "status": 401,
+      "code": "step_up_mismatch",
+      "title": "Confirmation does not match",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    }
+  ],
+  "Actor": [
+    {
+      "kind": "client",
+      "id": "cli_1"
+    },
+    {
+      "kind": "user",
+      "id": "usr_1",
+      "on_behalf_of": "usr_2"
+    },
+    {
+      "kind": "agent",
+      "id": "agt_1"
+    },
+    {
+      "id": "usr_1"
+    },
+    {
+      "kind": "user"
+    },
+    {
+      "kind": "user",
+      "id": "usr_1",
+      "extra": 1
+    },
+    {
+      "id": "cli_1",
+      "on_behalf_of": "usr_1"
+    },
+    {
+      "kind": "client",
+      "on_behalf_of": "usr_1"
+    },
+    {
+      "kind": "client",
+      "id": "cli_1",
+      "on_behalf_of": "usr_1",
+      "extra": 1
+    }
+  ],
+  "StepUpEvidence": [
+    {
+      "assertion_id": "a",
+      "authenticated_at": "2026-10-08T14:30:00Z",
+      "method": "passkey"
+    },
+    {
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+      "method": "passkey"
+    },
+    {
+      "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "method": "passkey"
+    },
+    {
+      "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z"
+    },
+    {
+      "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+      "method": "passkey",
+      "extra": 1
+    },
+    {
+      "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+      "method": "sms"
+    },
+    {
+      "assertion_id": "asr_1",
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+      "method": "passkey"
+    },
+    {
+      "assertion_id": "01jbh3btz8k2m4n6p8r0s2t4v6",
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+      "method": "passkey"
+    },
+    {
+      "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+      "method": "mutant_value"
+    }
+  ],
+  "StepUpStatus": [
+    "valid",
+    "mutant_value"
+  ],
+  "Record": [
+    {
+      "artifact": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    {
+      "ui_build": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    {
+      "artifact": "sha256:abababababababababababababababababababababababababababababababab",
+      "ui_build": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "extra": 1
+    }
+  ],
+  "Violation": [
+    {
+      "path": "/x",
+      "code": "invalid",
+      "message": "untagged"
+    },
+    {
+      "kind": "rule",
+      "path": "/x",
+      "code": "invalid",
+      "message": "not a V-code"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": 5000,
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "a number value"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "platform",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "platform has no ancestor"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "mandate",
+      "ancestor_value": "2500",
+      "message": "a mandate is no ancestor"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "message": "no ancestor value"
+    },
+    {
+      "kind": "schema",
+      "path": "risk",
+      "code": "type",
+      "message": "not a pointer"
+    },
+    {
+      "kind": "rule",
+      "path": "/x",
+      "code": "V-022\n",
+      "message": "trailing newline"
+    },
+    {
+      "kind": "schema",
+      "path": "/x",
+      "code": "type\n",
+      "message": "trailing newline"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd\n",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "trailing newline"
+    },
+    {
+      "kind": "schema",
+      "path": "/x\n",
+      "code": "type",
+      "message": "trailing newline"
+    },
+    {
+      "kind": "schema",
+      "code": "non_canonical",
+      "message": "A decimal is a canonical string."
+    },
+    {
+      "kind": "schema",
+      "path": "/owner_exit/0/bid",
+      "message": "A decimal is a canonical string."
+    },
+    {
+      "kind": "schema",
+      "path": "/owner_exit/0/bid",
+      "code": "non_canonical"
+    },
+    {
+      "kind": "schema",
+      "path": "/owner_exit/0/bid",
+      "code": "non_canonical",
+      "message": "A decimal is a canonical string.",
+      "extra": 1
+    },
+    {
+      "kind": "rule",
+      "code": "V-022",
+      "message": "A delegation needs a confirmed grant."
+    },
+    {
+      "kind": "rule",
+      "path": "/autonomy/delegations/0",
+      "message": "A delegation needs a confirmed grant."
+    },
+    {
+      "kind": "rule",
+      "path": "/autonomy/delegations/0",
+      "code": "V-022"
+    },
+    {
+      "kind": "rule",
+      "path": "/autonomy/delegations/0",
+      "code": "V-022",
+      "message": "A delegation needs a confirmed grant.",
+      "extra": 1
+    },
+    {
+      "kind": "policy",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500"
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy.",
+      "extra": 1
+    },
+    {
+      "kind": "policy",
+      "key": "auto_allowed",
+      "level": "workspace",
+      "value": true,
+      "ancestor_level": "platform",
+      "ancestor_value": false,
+      "message": "Not allowed above."
+    },
+    {
+      "kind": "policy",
+      "path": "/autonomy",
+      "level": "workspace",
+      "value": true,
+      "ancestor_level": "platform",
+      "ancestor_value": false,
+      "message": "Not allowed above."
+    },
+    {
+      "kind": "policy",
+      "path": "/autonomy",
+      "key": "auto_allowed",
+      "value": true,
+      "ancestor_level": "platform",
+      "ancestor_value": false,
+      "message": "Not allowed above."
+    },
+    {
+      "kind": "policy",
+      "path": "/autonomy",
+      "key": "auto_allowed",
+      "level": "workspace",
+      "ancestor_level": "platform",
+      "ancestor_value": false,
+      "message": "Not allowed above."
+    },
+    {
+      "kind": "policy",
+      "path": "/autonomy",
+      "key": "auto_allowed",
+      "level": "workspace",
+      "value": true,
+      "ancestor_value": false,
+      "message": "Not allowed above."
+    },
+    {
+      "kind": "policy",
+      "path": "/autonomy",
+      "key": "auto_allowed",
+      "level": "workspace",
+      "value": true,
+      "ancestor_level": "platform",
+      "message": "Not allowed above."
+    },
+    {
+      "kind": "policy",
+      "path": "/autonomy",
+      "key": "auto_allowed",
+      "level": "workspace",
+      "value": true,
+      "ancestor_level": "platform",
+      "ancestor_value": false
+    },
+    {
+      "kind": "policy",
+      "path": "/autonomy",
+      "key": "auto_allowed",
+      "level": "workspace",
+      "value": true,
+      "ancestor_level": "platform",
+      "ancestor_value": false,
+      "message": "Not allowed above.",
+      "extra": 1
+    },
+    {
+      "kind": "policy",
+      "key": "asset_classes",
+      "level": "mandate",
+      "value": [
+        "crypto",
+        "us_equity"
+      ],
+      "ancestor_level": "organization",
+      "ancestor_value": [
+        "us_equity"
+      ],
+      "message": "Not a subset of the organization's."
+    },
+    {
+      "kind": "policy",
+      "path": "/universe/asset_classes",
+      "level": "mandate",
+      "value": [
+        "crypto",
+        "us_equity"
+      ],
+      "ancestor_level": "organization",
+      "ancestor_value": [
+        "us_equity"
+      ],
+      "message": "Not a subset of the organization's."
+    },
+    {
+      "kind": "policy",
+      "path": "/universe/asset_classes",
+      "key": "asset_classes",
+      "value": [
+        "crypto",
+        "us_equity"
+      ],
+      "ancestor_level": "organization",
+      "ancestor_value": [
+        "us_equity"
+      ],
+      "message": "Not a subset of the organization's."
+    },
+    {
+      "kind": "policy",
+      "path": "/universe/asset_classes",
+      "key": "asset_classes",
+      "level": "mandate",
+      "ancestor_level": "organization",
+      "ancestor_value": [
+        "us_equity"
+      ],
+      "message": "Not a subset of the organization's."
+    },
+    {
+      "kind": "policy",
+      "path": "/universe/asset_classes",
+      "key": "asset_classes",
+      "level": "mandate",
+      "value": [
+        "crypto",
+        "us_equity"
+      ],
+      "ancestor_value": [
+        "us_equity"
+      ],
+      "message": "Not a subset of the organization's."
+    },
+    {
+      "kind": "policy",
+      "path": "/universe/asset_classes",
+      "key": "asset_classes",
+      "level": "mandate",
+      "value": [
+        "crypto",
+        "us_equity"
+      ],
+      "ancestor_level": "organization",
+      "message": "Not a subset of the organization's."
+    },
+    {
+      "kind": "policy",
+      "path": "/universe/asset_classes",
+      "key": "asset_classes",
+      "level": "mandate",
+      "value": [
+        "crypto",
+        "us_equity"
+      ],
+      "ancestor_level": "organization",
+      "ancestor_value": [
+        "us_equity"
+      ]
+    },
+    {
+      "kind": "policy",
+      "path": "/universe/asset_classes",
+      "key": "asset_classes",
+      "level": "mandate",
+      "value": [
+        "crypto",
+        "us_equity"
+      ],
+      "ancestor_level": "organization",
+      "ancestor_value": [
+        "us_equity"
+      ],
+      "message": "Not a subset of the organization's.",
+      "extra": 1
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": [
+        "a",
+        "a"
+      ],
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "mutant",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "mutant",
+      "path": "/owner_exit/0/bid",
+      "code": "non_canonical",
+      "message": "A decimal is a canonical string."
+    },
+    {
+      "kind": "schema",
+      "path": "/owner_exit/0/bid",
+      "code": "Not_A_Code",
+      "message": "A decimal is a canonical string."
+    },
+    {
+      "kind": "rule",
+      "path": "no-slash",
+      "code": "V-022",
+      "message": "A delegation needs a confirmed grant."
+    },
+    {
+      "path": "/owner_exit/0/bid",
+      "code": "non_canonical",
+      "message": "A decimal is a canonical string."
+    },
+    {
+      "path": "/autonomy/delegations/0",
+      "code": "V-022",
+      "message": "A delegation needs a confirmed grant."
+    },
+    {
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "no-slash",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mutant_value",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "mutant_value",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    }
+  ],
+  "PolicyLevel": [
+    "global",
+    "mutant_value"
+  ],
+  "PolicyValue": [
+    1.5,
+    {
+      "min": 1
+    },
+    [
+      "b",
+      "b"
+    ],
+    [
+      "Bad Value"
+    ]
+  ]
+}

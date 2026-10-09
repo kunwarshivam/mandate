@@ -235,11 +235,12 @@ existing ones. So:
 
 - **The caller appends the call record.** The gateway returns the record; the agent's runtime
   appends `ModelInvocationRecorded` to its agent stream.
-- **The compiler's record has no stream yet** (DEC-432 item 19). The journal spec and
-  `mandate-journal`'s catalogue allow `ModelInvocationRecorded` on the agent stream only, and the
-  compiler has no agent. Which stream holds its record is §13 question 1, decided by the journal
-  spec change of E15-8. Until that change names a stream, the compiler makes no call through the
-  gateway, because INF-10 could not hold for it.
+- **The compiler's record is on the control stream** (DEC-432 item 19, answered by
+  [DEC-670](../project/decisions/DEC-670.md)). The compiler has no agent, so the workspace services
+  that call the gateway for it append its `ModelInvocationRecorded` to the workspace's control
+  stream, closed there with this section's members ([journal spec §9.9](journal.md#99-workspace-api-records-dec-670)).
+  Until `mandate-journal` registers that record, the compiler makes no call through the gateway,
+  because INF-10 could not hold for it.
 - A call with `outcome: ok` is followed by its output event (`ModelOutputRecorded` or
   `ThesisProposed`), which carries the content hash the call used.
 - A call with any other outcome writes `ModelInvocationRecorded` and no output event. The model
@@ -616,10 +617,9 @@ the date only; it does not suggest a replacement.
 
 ## 13. Open questions
 
-1. The compiler has no agent. Which stream holds its call record: the workspace's control stream,
-   or a stream of its own? The journal spec allows `ModelInvocationRecorded` on the agent stream
-   only, so either answer is a journal spec change, made in E15-8 with the meter stream's shape.
-   Until then the compiler makes no gateway call (§3.6).
+1. **Answered** ([DEC-670](../project/decisions/DEC-670.md), journal spec v0.21 §9.9): the
+   compiler's call record is on the workspace's control stream (§3.6). The meter stream's shape
+   stays E15-8's.
 2. The policy key that lists allowed endpoints and regions does not exist in `policy.schema.json`.
    Its shape (a set of providers, endpoints, or localities; child ⊆ parent) is part of E15-10.
 3. Whether a per-model cost cap becomes an envelope field for fast and LLM signal models, or the
