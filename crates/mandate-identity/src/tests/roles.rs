@@ -331,14 +331,15 @@ fn only_an_org_owner_changes_the_owner_role() {
     ]);
 }
 
-/// DEC-654 item 7: an entry naming a principal with no membership reaching the scope (none there,
-/// one only in another scope, or one `deactivated`, `invited`, or `removed`, §5.1) is `forbidden`:
-/// the roles and members rows reach the scope's members only, so the change is not granted. It is
-/// judged with item 3, after the rows and before `own_roles`, `owner_role_reserved`, and §5.2; a
+/// DEC-654 item 7: a grant to a principal whose membership does not reach the scope (none there,
+/// one only in another scope, or one `invited`, `deactivated`, or `removed`, §5.1), and a removal
+/// from or a deactivation of one with no membership in the scope at all, are `forbidden`, judged
+/// with item 3, before `own_roles`, `owner_role_reserved`, and §5.2. A removal from or a
+/// deactivation of an `invited` or `deactivated` member is judged like any other entry; a
 /// `cooling_off` member is reached and passes.
 #[test]
 #[ignore = "pending E9-2"]
-fn a_change_naming_a_principal_not_reaching_the_scope_is_forbidden() {
+fn a_grant_to_a_non_member_or_a_change_naming_no_member_is_forbidden() {
     let s = store(&[
         m(INVITEE, WS, Invited, &[Viewer]),
         m(GONE, WS, Removed, &[]),
@@ -354,7 +355,33 @@ fn a_change_naming_a_principal_not_reaching_the_scope_is_forbidden() {
         (&s, WA1, WS, ch(&[(ELSEWHERE, Op)], &[], &[]), forbidden),
         (&s, WA1, WS, ch(&[(WA2, Op)], &[], &[]), forbidden),
         (&s, WA1, WS, ch(&[(INVITEE, Op)], &[], &[]), forbidden),
-        (&s, WA1, WS, ch(&[], &[], &[GONE]), forbidden),
+        (&s, WA1, WS, ch(&[(GONE, Viewer)], &[], &[]), forbidden),
+        (&s, WA1, WS, ch(&[], &[(ELSEWHERE, Wa)], &[]), forbidden),
+        (&s, OO1, ORG, ch(&[], &[], &[VIEW]), forbidden),
+        (&s, WA1, WS, ch(&[], &[(WA2, Wa)], &[]), NOT_REQUIRED),
+        (&s, WA1, WS, ch(&[], &[], &[WA2]), NOT_REQUIRED),
+        (
+            &s,
+            WA1,
+            WS,
+            ch(&[], &[(INVITEE, Viewer)], &[]),
+            NOT_REQUIRED,
+        ),
+        (&s, WA1, WS, ch(&[], &[], &[INVITEE]), NOT_REQUIRED),
+        (
+            &s,
+            OA,
+            ORG,
+            ch(&[], &[], &[OO2]),
+            Err(Refusal::OwnerRoleReserved),
+        ),
+        (
+            &s,
+            WA1,
+            WS,
+            ch(&[], &[], &[WA2, WA1]),
+            Err(Refusal::LastAdmin),
+        ),
         (
             &s,
             OO1,
@@ -369,7 +396,7 @@ fn a_change_naming_a_principal_not_reaching_the_scope_is_forbidden() {
             ch(&[(VIEW, BillingAdmin)], &[], &[]),
             forbidden,
         ),
-        (&s, OO1, ORG, ch(&[], &[], &[OO2]), forbidden),
+        (&s, OO1, ORG, ch(&[], &[], &[OO2]), REQUIRED),
         (
             &s,
             WA1,
