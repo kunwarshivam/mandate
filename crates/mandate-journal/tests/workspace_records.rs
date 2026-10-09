@@ -78,7 +78,6 @@ const SECTIONS: [(&str, usize, usize, RangeInclusive<u32>); 3] = [
 /// Every base and valid draft parses as its own type and version, and every invalid draft is
 /// refused with its reason at its path, with never fewer cases and each rule cited.
 #[test]
-#[ignore = "pending E10-15"]
 fn every_e10_15_draft_parses_or_is_refused_as_its_case_says() {
     let mut failed = Vec::new();
     for (name, valid, invalid, rules) in SECTIONS {
@@ -135,7 +134,6 @@ fn every_e10_15_draft_parses_or_is_refused_as_its_case_says() {
 /// switch: among them an owner's `ConnectionRevoked` version 2, a version 1, and a compromised
 /// `ClientRevoked`, which the clause leaves alone.
 #[test]
-#[ignore = "pending E10-15"]
 fn a_compromised_revocation_follows_its_connections_kill_switch_in_its_batch() {
     let section = section("client_actor");
     let base = |member: &Value| match member.get("kill_switch") {
@@ -226,7 +224,6 @@ fn at_version(draft: &Value, version: u64) -> Vec<u8> {
 /// (§5.1: each draft parsed, then the batch), that batch fails at the kill switch, draft 0, where
 /// the version-1 batch passes.
 #[test]
-#[ignore = "pending E10-15"]
 fn an_open_owner_command_is_registered_at_version_1_only() {
     let client = section("client_actor");
     let hold = section("hold");
@@ -316,7 +313,6 @@ fn stored(seq: u64, event_type: &str, version: u64, payload: &Value) -> StoredEv
 /// its caller derives (item 1); a full chain from seq 1 is anchored on nothing, so answers the same
 /// told `Unknown`. Only the first failing record is reported, at its `seq`.
 #[test]
-#[ignore = "pending E10-15"]
 fn the_owners_hold_is_carried_through_every_range() {
     let section = section("hold");
     let cases = list(&section, "range_verification");
