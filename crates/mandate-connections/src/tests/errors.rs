@@ -9,6 +9,7 @@ fn every_error_has_its_stable_code() {
         (ConnectError::StateUnknown, "state_unknown"),
         (ConnectError::StateExpired, "state_expired"),
         (ConnectError::StateUserMismatch, "state_user_mismatch"),
+        (ConnectError::StateReused, "state_reused"),
         (ConnectError::RequestRefused, "request_refused"),
         (ConnectError::ScopeMismatch, "scope_mismatch"),
         (ConnectError::TokenType, "token_type"),
