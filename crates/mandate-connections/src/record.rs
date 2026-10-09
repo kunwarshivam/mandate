@@ -7,7 +7,7 @@
 //! detects a second connection to an account already connected; it is never journaled, never
 //! returned ([`ConnectionView`], [`EstablishedMembers`]), and never printed.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::ConnectError;
@@ -413,6 +413,8 @@ pub enum Admission {
 pub struct Registry {
     pub(crate) records: Vec<ConnectionRecord>,
     fingerprint_key_rotating: bool,
+    /// The state each revoked connection was revoked from, which its reconnect resumes.
+    revoked_from: BTreeMap<ConnectionId, ConnectionState>,
 }
 
 impl Registry {
@@ -445,6 +447,7 @@ impl Registry {
         Ok(Self {
             records,
             fingerprint_key_rotating,
+            revoked_from: BTreeMap::new(),
         })
     }
 
@@ -519,7 +522,14 @@ impl Registry {
             if !holder.same_venue(record.broker, record.environment) {
                 return Err(ConnectError::ReconnectMismatch);
             }
-            *holder = record;
+            let resumed = self
+                .revoked_from
+                .remove(&holder.connection_id)
+                .unwrap_or(ConnectionState::Suspended);
+            *holder = ConnectionRecord {
+                state: resumed,
+                ..record
+            };
             return Ok(());
         }
         if self.record(&record.connection_id).is_some() {
@@ -558,6 +568,10 @@ impl Registry {
                 from: record.state,
                 to: state,
             });
+        }
+        if state == ConnectionState::Revoked {
+            self.revoked_from
+                .insert(record.connection_id.clone(), record.state);
         }
         record.state = state;
         Ok(())

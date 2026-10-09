@@ -704,7 +704,6 @@ fn a_revoked_account_reconnects_on_its_own_connection() {
 /// since a reconnect is only the connection's condition and the owner must still acknowledge.
 /// Each line is (the state the connection was revoked from, the state after the reconnect).
 #[test]
-#[ignore = "pending E7-11"]
 fn a_reconnect_keeps_the_state_its_connection_was_revoked_from() {
     for (revoked_from, reconnected) in [
         (Active, Active),
