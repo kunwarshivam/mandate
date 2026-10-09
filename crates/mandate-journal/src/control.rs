@@ -146,7 +146,14 @@ pub(crate) fn payload(
         actor,
         causation_id,
     )?;
-    crate::records::rules(event_type, &payload, stream, actor, causation_id)?;
+    crate::records::rules(
+        event_type,
+        schema_version,
+        &payload,
+        stream,
+        actor,
+        causation_id,
+    )?;
     crate::notices::rules(event_type, &payload, causation_id)?;
     let p = Payload(&payload);
     match event_type {

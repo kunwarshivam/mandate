@@ -306,7 +306,6 @@ fn only_a_system_actor_writes_an_anchor_or_a_segment() {
 /// unedited and no version 3; rules 107, 110 and 111 judging version 2; every clause of rule 132;
 /// rule 133's precedence; and rule 83's refusal of a client.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_verification_run_version_2_draft_parses_or_is_refused_as_its_case_says() {
     every_case_of(
         (VERIFICATION_RUNS, "VerificationRun", 2),
@@ -376,7 +375,6 @@ const CAUSES: [&str; 2] = ["token_unverifiable", "anchor_unstamped"];
 /// other result refused at `payload.result`. So an incomplete check alone never fails a run, a
 /// failure always outranks one, and rule 112's pass-or-fail never judges version 2.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_version_2_result_is_fail_over_incomplete_over_pass_for_every_mix_of_ranges() {
     let section = section(VERIFICATION_RUNS);
     let streams = [
@@ -430,7 +428,6 @@ fn a_version_2_result_is_fail_over_incomplete_over_pass_for_every_mix_of_ranges(
 /// never `pass` (`incomplete`). The expected answer is recomputed here clause by clause, the run's
 /// result always rule 133's.
 #[test]
-#[ignore = "pending E12-3"]
 fn rule_132_places_each_start_and_bounds_checked_for_every_range() {
     let section = section(VERIFICATION_RUNS);
     let mut failed = Vec::new();

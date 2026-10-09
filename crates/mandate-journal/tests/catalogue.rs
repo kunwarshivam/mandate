@@ -1481,7 +1481,6 @@ fn the_anchor_and_segment_records_are_catalogued_and_closed_on_the_control_strea
 /// `VerificationRun` version 2 (journal spec v0.36 §9.13, DEC-788, DEC-789) is closed on the
 /// control stream as version 1 is: an unlisted member is refused `schema`, never `unknown_schema`.
 #[test]
-#[ignore = "pending E12-3"]
 fn verification_run_version_2_is_closed_on_the_control_stream() {
     let version_2 = edit(&draft(VERIFICATION, CTL, &[]), "schema_version", Some("2"));
     let e = Draft::parse(&version_2).unwrap_err();
