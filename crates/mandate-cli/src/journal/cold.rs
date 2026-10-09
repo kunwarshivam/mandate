@@ -28,8 +28,8 @@ use mandate_journal_cold::{
 };
 
 use crate::journal::{
-    Refusal, Span, StreamFailure, open_source, parse_anchor, refuse, shown, stream_checks,
-    trusted_start,
+    CAUSE_NOT_RUN, Refusal, Span, StreamFailure, cause_not_run, open_source, parse_anchor, refuse,
+    shown, stream_checks, trusted_start,
 };
 
 #[derive(Debug, Args)]
@@ -159,14 +159,16 @@ pub fn verify(args: &VerifyColdArgs, report: &mut impl Write) -> anyhow::Result<
         .map(|path| parse_anchor(path, &readable(path)?))
         .transpose()?;
     let token = args.token.as_deref().map(readable).transpose()?;
+    let mut not_run = false;
     let outcome = check(
+        &mut not_run,
         start,
         &segments,
         artifacts.as_ref(),
         anchor.as_ref(),
         token.as_deref(),
     )?;
-    let lines = [
+    let mut lines = vec![
         format!("export: {}", args.export.display()),
         format!("segments: {}", segments.len()),
         format!(
@@ -176,8 +178,9 @@ pub fn verify(args: &VerifyColdArgs, report: &mut impl Write) -> anyhow::Result<
         format!("artifact store: {}", shown(args.store.as_deref())),
         format!("anchor: {}", shown(args.anchor.as_deref())),
         format!("token: {}", shown(args.token.as_deref())),
-        format!("result: {outcome}"),
     ];
+    lines.extend(not_run.then(|| CAUSE_NOT_RUN.to_owned()));
+    lines.push(format!("result: {outcome}"));
     writeln!(report, "{}", lines.join("\n")).context("writing the report")?;
     Ok(outcome)
 }
@@ -287,8 +290,11 @@ fn unreadable(path: &Path, error: &std::io::Error) -> anyhow::Error {
 
 /// Runs the checks in DEC-490 item 5's order: the cold walk over the segments from the trusted
 /// start, the export's one stream, the range checks of its type (DEC-782 item 1), the anchor's
-/// head and root over the rows the walk verified, then the token, which never verifies.
+/// head and root over the rows the walk verified, then the token, which never verifies. Sets
+/// `not_run` when the run reaches the stream checks on an export [`cause_not_run`] names, for
+/// DEC-890's report line.
 fn check(
+    not_run: &mut bool,
     start: TrustedStart,
     segments: &[Segment],
     artifacts: &dyn ArtifactSource,
@@ -321,6 +327,7 @@ fn check(
                 ),
             )
         })?;
+    *not_run = cause_not_run(&stream, &rows);
     if let Some(failure) = stream_checks(&stream, &rows, start)? {
         return Ok(ColdOutcome::Stream(failure));
     }

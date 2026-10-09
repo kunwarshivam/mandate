@@ -23,7 +23,7 @@
   `crates/mandate-cli/tests/journal_verify_agent_ranges.rs` (E12-3 W2, DEC-782: the agent stream's
   `intent_action_mismatch`, `mode_event_mismatch` and `held_mismatch` through both commands with no
   hold anchor, so a tail range fails closed, from the `agent_stream` and `hold` range vectors).
-  Both stream types' checks are wired.
+  The control, agent and account streams' checks are wired (DEC-782, DEC-890).
   `crates/mandate-cli/tests/journal_verify_connection_ranges.rs` (E12-3 W3, DEC-782 item 5,
   DEC-885, DEC-890: `connection_lifecycle_mismatch` on a control or account stream through both
   commands, a range from `seq` 1 judged as that stream's full chain and a tail range failing closed
@@ -31,7 +31,7 @@
   token; no single-stream export runs `connection_cause_mismatch`, and the report says so in
   DEC-890's `not run:` line just before `result:`, which no agent stream, connection-free export,
   or run stopped at checks 1 to 6 prints; from the `connections`, `connection_requests` and
-  `connection_ranges` sequences; pending until W3's implementation lands).
+  `connection_ranges` sequences).
   Planted bugs per test: the task brief.
 - **Reference cases:** `journal::tamper::*` and `journal::export_line_seq_1` in
   `fixtures/refcases/journal.json`, read directly rather than through `mandate-refcases`.

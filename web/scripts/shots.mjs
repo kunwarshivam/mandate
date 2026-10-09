@@ -1,7 +1,9 @@
 // Every listed screen on the fixture scenarios, at phone and desktop widths in both themes, as
 // PNG files under .shots/, with a contact sheet (index.html) that puts the golden path first
 // (DEC-516 item 3). Review from pictures: a PR that changes a screen attaches these, before and
-// after; the weekly critique reads the same sheet.
+// after; the weekly critique reads the same sheet. The dev server's scenario panel is hidden before
+// each capture, and each stress scenario is captured on Home and on the agent it affects (critique
+// C-27, C-28).
 //
 // Usage: a server on http://127.0.0.1:4317 (`npm run dev`, which answers `?scenario=`; a
 // production `npm start` ignores it and shows `normal` only), then `npm run shots`.
@@ -10,7 +12,9 @@
 
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { SWITCHER_MARKER } from "./no-scenarios.mjs";
 
 const BASE = process.env.SHOTS_BASE ?? "http://127.0.0.1:4317";
 const args = process.argv.slice(2);
@@ -23,6 +27,7 @@ const ONLY = arg("only", "all");
 const WIDTHS = arg("width", null) ? [Number(arg("width"))] : [1440, 390];
 
 const AGENT = "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC";
+const SWING = "agt_01JB3K9P2H6SD4F8G1E3W7XYZB";
 const APPROVAL = "apr_01JBM9S346Q3D25VT4F5V37E3S";
 
 /** The golden path, in the order an owner meets it: the ten minutes that must be perfect. */
@@ -54,8 +59,35 @@ const SCREENS = [
   ["palette", "/", "normal", "palette"],
 ];
 
-/** Home and the agent under each stress scenario, desktop and light only. */
-const SCENARIOS = ["stale", "drawdown", "paused", "unreachable", "empty", "reconciliation", "unknown-order"];
+/**
+ * Each stress scenario and the agent it affects, captured on Home and on that agent, desktop and
+ * light only (critique C-28). `null` marks a scenario whose workspace has no agents, captured on
+ * Home alone. `src/lib/shots.test.ts` checks each agent against the fixtures (`buildWorkspace`).
+ */
+export const SCENARIO_AGENT = {
+  stale: SWING,
+  drawdown: AGENT,
+  paused: SWING,
+  unreachable: null,
+  empty: null,
+  loading: null,
+  reconciliation: SWING,
+  "unknown-order": SWING,
+};
+
+/** The fixture scenarios with no stress capture of their own, and why. */
+export const NOT_CAPTURED = {
+  normal: "every listed screen is captured on it",
+  approvals: "the golden path captures it, on Home and the request",
+  "result-unknown": "it shows only after Approve or Skip, which no capture presses",
+};
+
+/**
+ * Hides the dev server's scenario panel (Scenario, Role, Colour-blind friendly) before a capture,
+ * by the `data-slot` its root carries. The panel is `next dev` only, so the app is unchanged
+ * (critique C-27).
+ */
+export const HIDE_PANEL_CSS = `[data-slot="${SWITCHER_MARKER}"] { display: none !important; }`;
 
 /**
  * Waits until every chart on screen shows its line. The canvas is drawn on the client only, after
@@ -94,6 +126,7 @@ async function chartsDrawn(page, file) {
 
 async function shoot(page, { path: url, overlay }, file) {
   await page.goto(`${BASE}${url}`, { waitUntil: "networkidle", timeout: 60_000 });
+  await page.addStyleTag({ content: HIDE_PANEL_CSS });
   await chartsDrawn(page, path.basename(file));
   await page.waitForTimeout(900);
   if (overlay === "stop") {
@@ -121,9 +154,9 @@ async function main() {
   for (const [name, url, scenario, overlay] of GOLDEN) for (const width of WIDTHS) for (const theme of ["light", "dark"]) plan.push({ group: "Golden path", name, path: url, scenario, overlay, width, theme });
   if (ONLY !== "golden") {
     for (const [name, url, scenario = "normal", overlay] of SCREENS) for (const width of WIDTHS) for (const theme of ["light", "dark"]) plan.push({ group: "Every screen", name, path: url, scenario, overlay, width, theme });
-    for (const scenario of SCENARIOS) {
+    for (const [scenario, agent] of Object.entries(SCENARIO_AGENT)) {
       plan.push({ group: "Scenarios", name: `home-${scenario}`, path: `/?scenario=${scenario}`, scenario, width: 1440, theme: "light" });
-      plan.push({ group: "Scenarios", name: `agent-${scenario}`, path: `/agents/${AGENT}?scenario=${scenario}`, scenario, width: 1440, theme: "light" });
+      if (agent) plan.push({ group: "Scenarios", name: `agent-${scenario}`, path: `/agents/${agent}?scenario=${scenario}`, scenario, width: 1440, theme: "light" });
     }
   }
   for (const item of plan) {
@@ -161,7 +194,9 @@ img{display:block;width:100%;height:auto}figcaption{padding:6px 10px;color:#5b62
 ${groups.map(section).join("")}`;
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
