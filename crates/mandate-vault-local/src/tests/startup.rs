@@ -182,7 +182,6 @@ fn under_a_regular_file(layout: &Layout, name: &str) -> PathBuf {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_api_refuses_a_token_key_it_cannot_stat() {
     let layout = Layout::new();
     let path = under_a_regular_file(&layout, TOKEN_KEY_CREDENTIAL);
@@ -190,7 +189,6 @@ fn the_api_refuses_a_token_key_it_cannot_stat() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_api_starts_only_when_the_token_key_is_absent() {
     let layout = Layout::new();
     let path = layout.credentials.join(TOKEN_KEY_CREDENTIAL);
@@ -209,7 +207,6 @@ fn the_api_starts_only_when_the_token_key_is_absent() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_key_whose_stat_fails_is_an_io_error() {
     let layout = Layout::new();
     let path = under_a_regular_file(&layout, "k");
@@ -219,7 +216,6 @@ fn a_key_whose_stat_fails_is_an_io_error() {
 /// `/proc/self/mem` stats as a regular file and opens for its own process, but reading at offset
 /// zero fails with `EIO`: a read error that is not a short read.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_key_that_cannot_be_read_is_an_io_error() {
     let path = Path::new("/proc/self/mem");
     assert!(fs::symlink_metadata(path).unwrap().file_type().is_file());

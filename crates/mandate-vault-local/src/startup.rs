@@ -4,7 +4,7 @@
 
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{ErrorKind, Read};
+use std::io::{self, ErrorKind, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
@@ -175,8 +175,8 @@ fn check_directory(path: &Path, want: &Expected) -> Result<(), VaultError> {
 
 /// The API process must not be given the token key in any form, a symlink included. It runs
 /// after the pending key loaded from the same directory, so only a missing entry starts the API;
-/// any other failure to stat it refuses.
-fn refuse_token_key(path: &Path) -> Result<(), VaultError> {
+/// any other failure to stat it refuses (AGENTS.md rule 3).
+pub(crate) fn refuse_token_key(path: &Path) -> Result<(), VaultError> {
     match fs::symlink_metadata(path).map_err(|e| e.kind()) {
         Err(ErrorKind::NotFound) => Ok(()),
         Ok(_) => Err(VaultError::TokenKeyInApiCredentials),
@@ -185,57 +185,38 @@ fn refuse_token_key(path: &Path) -> Result<(), VaultError> {
 }
 
 /// Reads one key straight into its secret box, so no unzeroized copy is left behind. The
-/// credential must be a regular file (not a symlink) of exactly [`KEY_LEN`] bytes.
-fn load_key(path: &Path) -> Result<SecretBox<[u8; KEY_LEN]>, VaultError> {
-    let meta = fs::symlink_metadata(path).map_err(|e| match e.kind() {
-        ErrorKind::NotFound => VaultError::KeyMissing,
-        _ => VaultError::Io,
-    })?;
+/// credential must be a regular file (not a symlink) of exactly [`KEY_LEN`] bytes: a missing one
+/// is [`VaultError::KeyMissing`], a wrong type or length [`VaultError::KeyMalformed`], and any
+/// other failure to stat, open, or read it [`VaultError::Io`].
+pub(crate) fn load_key(path: &Path) -> Result<SecretBox<[u8; KEY_LEN]>, VaultError> {
+    let meta = fs::symlink_metadata(path)
+        .map_err(|e| key_failure(&e, ErrorKind::NotFound, VaultError::KeyMissing))?;
     if !meta.file_type().is_file() {
         return Err(VaultError::KeyMalformed);
     }
-    let mut file = File::open(path).map_err(|_| VaultError::Io)?;
+    let mut file = File::open(path)
+        .map_err(|e| key_failure(&e, ErrorKind::NotFound, VaultError::KeyMissing))?;
     let mut key = SecretBox::new(Box::new([0_u8; KEY_LEN]));
     file.read_exact(key.expose_secret_mut())
-        .map_err(|e| match e.kind() {
-            ErrorKind::UnexpectedEof => VaultError::KeyMalformed,
-            _ => VaultError::Io,
-        })?;
+        .map_err(|e| key_failure(&e, ErrorKind::UnexpectedEof, VaultError::KeyMalformed))?;
     let mut beyond = [0_u8; 1];
-    match file.read(&mut beyond) {
-        Ok(0) => Ok(key),
-        Ok(_) => Err(VaultError::KeyMalformed),
-        Err(_) => Err(VaultError::Io),
+    let extra = file
+        .read(&mut beyond)
+        .map_err(|e| key_failure(&e, ErrorKind::UnexpectedEof, VaultError::KeyMalformed))?;
+    if extra == 0 {
+        Ok(key)
+    } else {
+        Err(VaultError::KeyMalformed)
     }
 }
 
-/// The API process must not be given the token key in any form, a symlink included. Only a
-/// missing entry starts the API; any other failure to stat it refuses with [`VaultError::Io`]
-/// (AGENTS.md rule 3).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "check calls it once E10-13 lands; until then only its tests do"
-    )
-)]
-pub(crate) fn refuse_token_key(path: &Path) -> Result<(), VaultError> {
-    let _ = path;
-    Err(VaultError::Unimplemented { story: "E10-13" })
-}
-
-/// Reads one key straight into its secret box. The credential must be a regular file (not a
-/// symlink) of exactly [`KEY_LEN`] bytes: a missing one is [`VaultError::KeyMissing`], a wrong
-/// type or length [`VaultError::KeyMalformed`], and any other failure to stat, open, or read it
-/// [`VaultError::Io`].
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "check calls it once E10-13 lands; until then only its tests do"
-    )
-)]
-pub(crate) fn load_key(path: &Path) -> Result<SecretBox<[u8; KEY_LEN]>, VaultError> {
-    let _ = path;
-    Err(VaultError::Unimplemented { story: "E10-13" })
+/// Every key read maps its I/O failures here, so the stat, open, and both reads share one
+/// mapping: only `own`, the one failure that is the key's own fault, becomes `fault`, and any
+/// other failure refuses as [`VaultError::Io`] (AGENTS.md rule 3).
+fn key_failure(error: &io::Error, own: ErrorKind, fault: VaultError) -> VaultError {
+    if error.kind() == own {
+        fault
+    } else {
+        VaultError::Io
+    }
 }
