@@ -659,6 +659,42 @@ pub enum BrokerOutcome {
         client_order_id: String,
     },
     AccountWideAccepted,
+    /// The answer to [`BrokerRequest::ListOrders`]: every record the broker listed for it, all
+    /// pages, unfiltered beyond the listing. It names the order the listing was asked for.
+    Listed {
+        client_order_id: String,
+        orders: Vec<ListedOrder>,
+    },
+}
+
+/// One record of a [`BrokerOutcome::Listed`] answer: the order as the broker describes it, with
+/// the two members [`BrokerOrder`] lacks and DEC-529 item 4 matches on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedOrder {
+    pub order: BrokerOrder,
+    pub order_type: OrderType,
+    pub tif: TimeInForce,
+}
+
+/// Who placed an order, as a broker that tags it records it. Only `Agentic` exists: the
+/// fallback lists only orders an agent placed (DEC-529 item 4's `placed_agent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderOrigin {
+    Agentic,
+}
+
+/// The shared fallback for an `Unknown` order on a profile with no query by client order id
+/// ([DEC-529](../../../docs/project/decisions/DEC-529.md) item 4, connections spec §6.2,
+/// [DEC-862](../../../docs/project/decisions/DEC-862.md)): list the account's orders in the
+/// order's instrument, placed by an agent, created at or after `created_since`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderListing {
+    /// The `Unknown` order this listing is for; the answer names it back.
+    pub client_order_id: ClientOrderId,
+    pub instrument: InstrumentId,
+    pub origin: OrderOrigin,
+    /// The order's `OrderSubmitted` risk clock less DEC-862 item 2's margin.
+    pub created_since: RiskClock,
 }
 
 /// Why a request produced no usable answer. An `Err` from the connector is **not** a rejection: it
@@ -778,6 +814,9 @@ pub enum BrokerRequest {
         replaced: ClientOrderId,
     },
     GetOrderByClientId(ClientOrderId),
+    /// The fallback in place of [`Self::GetOrderByClientId`] where the profile cannot query by
+    /// client order id (DEC-529 item 4). Never sent on any other profile.
+    ListOrders(OrderListing),
     ListOpenOrders,
     ListPositions,
     GetAccount,

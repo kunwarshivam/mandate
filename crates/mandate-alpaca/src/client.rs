@@ -190,6 +190,7 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
                 self.account_wide(HttpRequest::close_position(scope, instrument))
                     .await
             }
+            BrokerRequest::ListOrders(_) => Err(ClientError::Unimplemented { story: "E7-23" }),
         }
     }
 

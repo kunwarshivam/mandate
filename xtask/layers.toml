@@ -35,7 +35,10 @@
 #      (E9-1, DEC-660), which verifies and never signs, and mandate-authn (E9-1, DEC-650, DEC-652):
 #      token verification and sessions as pure functions, with the issuer's keys and the clock
 #      handed in, so it never fetches a key or reads a clock; above mandate-identity, whose sealed
-#      session it builds
+#      session it builds; and mandate-identity-system (E9-8, DEC-642 items 5 to 8, DEC-668): the
+#      background processes' SystemContext, above mandate-identity, whose permissions and witness it
+#      uses; its allowed_dependents list names only the bootstrap crates of the agent runtime, the
+#      executor and the scheduler, and is empty until E9-8 creates them
 #   3  mandate-spec, mandate-audit (read-only audit reads over the journal, scoped to one
 #      workspace; E12-6)
 #   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
@@ -69,7 +72,6 @@ impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
 planned = [
-    "mandate-identity-system",
     "mandate-identity-seal",
     "mandate-identity-testkit",
 ]
@@ -157,6 +159,13 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 allowed_dependents = ["mandate-identity", "mandate-identity-system"]
+
+[crates.mandate-identity-system]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = []
+allowed_dependents = []
 
 [crates.mandate-identity-testkit]
 layer = 11

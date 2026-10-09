@@ -1,5 +1,7 @@
 file = "crates/mandate-executor/src/protection.rs"
 test = "remainder_pins::a_short_rungs_record_is_closed"
 reason = """
-E7-19 E1b-P (DEC-859): a data reshaping with no new function; it fails on main's legacy draft, not a stub.
+E7-19 E1b-P (DEC-859): a data reshaping with no new function, so it reaches no stub and fails on
+main's legacy draft until E1b-P's implementation PR deletes this file with the test's `#[ignore]`
+line.
 """

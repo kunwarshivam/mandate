@@ -571,6 +571,7 @@ impl<'s> Session<'s> {
                     | BrokerRequest::Cancel { .. }
                     | BrokerRequest::AcknowledgeReplace { .. }
                     | BrokerRequest::GetOrderByClientId(_)
+                    | BrokerRequest::ListOrders(_)
                     | BrokerRequest::CancelAll(_)
                     | BrokerRequest::ClosePosition(_, _) => {
                         self.perform_executor(vec![mandate_executor::Effect::Broker(request)])?;
