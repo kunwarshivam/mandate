@@ -47,7 +47,10 @@
     "reduction_only",
     "membership_unavailable",
     "address_limit",
-    "busy"
+    "busy",
+    "fold_unavailable",
+    "positions_held",
+    "agents_not_stopped"
   ],
   "Effect": [
     "none",
@@ -514,6 +517,36 @@
       "effect": "none",
       "event_id": null,
       "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/fold_unavailable",
+      "status": 503,
+      "code": "fold_unavailable",
+      "title": "Account state unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/positions_held",
+      "status": 409,
+      "code": "positions_held",
+      "title": "Positions still held",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/agents_not_stopped",
+      "status": 409,
+      "code": "agents_not_stopped",
+      "title": "Agents not stopped",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
       "violations": []
     }
   ],
