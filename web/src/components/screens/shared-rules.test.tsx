@@ -138,6 +138,11 @@ describe("the Approvals rail gives one paragraph per set of shared rules (C-12)"
     expect(rail[0].text).toContain(BOTH);
   });
 
+  it("never merges agents whose rules differ only in what one of them decides", () => {
+    const rail = paragraphs(withAutonomy({ "Agent 3": mapRule("routine", (r) => ({ ...r, then: "deny" })) }));
+    expect(rail.map((p) => p.agents)).toEqual([["Agent 1", "Agent 2"], ["Agent 3"]]);
+  });
+
   it("gives a single agent its own paragraph", () => {
     const rail = paragraphs((ws) => ({ ...ws, agents: ws.agents.filter((a) => a.label === "Agent 3") }));
     expect(rail).toHaveLength(1);

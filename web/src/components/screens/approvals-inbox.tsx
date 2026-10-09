@@ -79,11 +79,13 @@ export function askSentence(agent: Agent): string {
  * Everything that decides when an agent asks, without the rules' ids: every rule in order, since the
  * first that matches decides (mandate spec §6.2), what no rule covers, and what a timeout does. Two
  * agents share their rules only when this is equal, so the same ids with another threshold,
- * comparison or order never read as one set (critique C-12).
+ * comparison or order never read as one set (critique C-12). Each rule's whole condition is keyed,
+ * not only a leaf's field, comparison and value, so a compound condition (the schema's `all`, `any`
+ * and `not`) or any later condition field can only split sets, never merge them.
  */
 function askKey(agent: Agent): string {
   const { rules, default: otherwise, approval } = agent.mandate.autonomy;
-  return JSON.stringify([rules.map((r) => [r.when.field, r.when.op, r.when.value, r.then]), otherwise, approval.on_timeout]);
+  return JSON.stringify([rules.map((r) => [r.when, r.then]), otherwise, approval.on_timeout]);
 }
 
 /** How long a request waits for a set of agents: once when they all wait the same, else each wait against its agents. */
