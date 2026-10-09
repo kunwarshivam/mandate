@@ -34739,5 +34739,3549 @@
     ]
    }
   ]
+ },
+ "membership": {
+  "spec": "docs/specs/journal.md v0.25 §9.12 (DEC-437 item 9, DEC-648)",
+  "drafts": {
+   "invited": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4M1A000000000000000M1",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "MemberInvited",
+    "schema_version": 1,
+    "event_time": "2026-10-05T14:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "01J8Z4M0AD0000000000000AD1",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "invitation": "01J8Z4M0C00000000000000N01",
+     "roles": [
+      "approver",
+      "viewer"
+     ],
+     "invited_by": "01J8Z4M0AD0000000000000AD1",
+     "step_up": {
+      "assertion_id": "assert_admin_01",
+      "authenticated_at": "2026-10-05T13:59:30.000000000Z",
+      "method": "passkey"
+     },
+     "invited_at": "2026-10-05T14:00:00.000000000Z",
+     "expires_at": "2026-10-12T14:00:00.000000000Z",
+     "session_ref": "session_invited"
+    },
+    "artifact_refs": [],
+    "pii_refs": [
+     "pii_invitee_address_01"
+    ]
+   },
+   "invitation_revoked": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4M1B000000000000000M2",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "MemberInvitationRevoked",
+    "schema_version": 1,
+    "event_time": "2026-10-05T14:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "01J8Z4M0AD0000000000000AD1",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "invitation": "01J8Z4M0C00000000000000N01",
+     "revoked_by": "01J8Z4M0AD0000000000000AD1",
+     "session_ref": "session_invitation_revoked"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "activated": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4M1C000000000000000M3",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "MemberActivated",
+    "schema_version": 1,
+    "event_time": "2026-10-05T14:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "01J8Z4M0BE0000000000000ME1",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "member": "01J8Z4M0BE0000000000000ME1",
+     "invitation": "01J8Z4M0C00000000000000N01",
+     "reason": "invitation_accepted",
+     "roles": [
+      "approver",
+      "viewer"
+     ],
+     "method": "oidc",
+     "activated_at": "2026-10-05T14:00:00.000000000Z",
+     "independent_approval_required": true,
+     "cool_off_ends_at": "2026-10-06T14:00:00.000000000Z",
+     "session_ref": "session_activated"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "founding": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4M1D000000000000000M4",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "MemberActivated",
+    "schema_version": 1,
+    "event_time": "2026-10-05T14:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "member": "01J8Z4M0AD0000000000000AD1",
+     "invitation": null,
+     "reason": "founding",
+     "roles": [
+      "approver",
+      "operator",
+      "workspace_admin"
+     ],
+     "method": "passkey",
+     "activated_at": "2026-10-05T14:00:00.000000000Z",
+     "independent_approval_required": false,
+     "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z",
+     "session_ref": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "role_changed": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4M1E000000000000000M5",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "MemberRoleChanged",
+    "schema_version": 1,
+    "event_time": "2026-10-05T14:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "01J8Z4M0AD0000000000000AD1",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "member": "01J8Z4M0BE0000000000000ME1",
+     "changed_by": "01J8Z4M0AD0000000000000AD1",
+     "added": [
+      {
+       "role": "auditor",
+       "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z"
+      },
+      {
+       "role": "operator",
+       "cool_off_ends_at": "2026-10-06T14:00:00.000000000Z"
+      }
+     ],
+     "removed": [
+      "viewer"
+     ],
+     "changed_at": "2026-10-05T14:00:00.000000000Z",
+     "independent_approval_required": true,
+     "step_up": {
+      "assertion_id": "assert_admin_01",
+      "authenticated_at": "2026-10-05T13:59:30.000000000Z",
+      "method": "passkey"
+     },
+     "session_ref": "session_role_changed"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "deactivated": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4M1F000000000000000M6",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "MemberDeactivated",
+    "schema_version": 1,
+    "event_time": "2026-10-05T14:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "01J8Z4M0AD0000000000000AD1",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "member": "01J8Z4M0BE0000000000000ME1",
+     "by": "01J8Z4M0AD0000000000000AD1",
+     "reason": "admin",
+     "session_ref": "session_deactivated"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "reactivated": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4M1G000000000000000M7",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "MemberReactivated",
+    "schema_version": 1,
+    "event_time": "2026-10-05T14:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "01J8Z4M0AD0000000000000AD1",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "member": "01J8Z4M0BE0000000000000ME1",
+     "by": "01J8Z4M0AD0000000000000AD1",
+     "step_up": {
+      "assertion_id": "assert_admin_01",
+      "authenticated_at": "2026-10-05T13:59:30.000000000Z",
+      "method": "passkey"
+     },
+     "roles": [
+      "approver",
+      "viewer"
+     ],
+     "reactivated_at": "2026-10-05T14:00:00.000000000Z",
+     "independent_approval_required": true,
+     "cool_off_ends_at": "2026-10-06T14:00:00.000000000Z",
+     "session_ref": "session_reactivated"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "removed": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4M1H000000000000000M8",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "MemberRemoved",
+    "schema_version": 1,
+    "event_time": "2026-10-05T14:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "01J8Z4M0AD0000000000000AD1",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "member": "01J8Z4M0BE0000000000000ME1",
+     "by": "01J8Z4M0AD0000000000000AD1",
+     "reason": "admin",
+     "session_ref": "session_removed"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "invited.invitation.kind",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "invited.invitation.form",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "value": "not-a-ulid"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "invited.roles.kind",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": "viewer"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "invited.invited_by.kind",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invited_by",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invited_by"
+    }
+   },
+   {
+    "name": "invited.invited_by.form",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invited_by",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.invited_by"
+    }
+   },
+   {
+    "name": "invited.step_up.kind",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": "passkey"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "invited.invited_at.kind",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invited_at",
+      "value": 1790000000
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invited_at"
+    }
+   },
+   {
+    "name": "invited.invited_at.form",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invited_at",
+      "value": "2026-10-05"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.invited_at"
+    }
+   },
+   {
+    "name": "invited.expires_at.kind",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.expires_at",
+      "value": 1791000000
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.expires_at"
+    }
+   },
+   {
+    "name": "invited.expires_at.form",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.expires_at",
+      "value": "2026-10-12"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.expires_at"
+    }
+   },
+   {
+    "name": "invited.session_ref.kind",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.session_ref",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.session_ref"
+    }
+   },
+   {
+    "name": "invited.session_ref.form",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.session_ref",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.session_ref"
+    }
+   },
+   {
+    "name": "invited.invitation.null",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "invited.roles.null",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "invited.invited_by.null",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invited_by",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invited_by"
+    }
+   },
+   {
+    "name": "invited.step_up.null",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "invited.expires_at.null",
+    "clause": "§9.12 types",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.expires_at",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.expires_at"
+    }
+   },
+   {
+    "name": "invited.missing",
+    "clause": "§9.12 closed",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "invited.extra",
+    "clause": "§9.12 closed",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "invitation_revoked.invitation.kind",
+    "clause": "§9.12 types",
+    "base_draft": "invitation_revoked",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "invitation_revoked.invitation.form",
+    "clause": "§9.12 types",
+    "base_draft": "invitation_revoked",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "value": "not-a-ulid"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "invitation_revoked.revoked_by.kind",
+    "clause": "§9.12 types",
+    "base_draft": "invitation_revoked",
+    "changes": [
+     {
+      "path": "payload.revoked_by",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.revoked_by"
+    }
+   },
+   {
+    "name": "invitation_revoked.revoked_by.form",
+    "clause": "§9.12 types",
+    "base_draft": "invitation_revoked",
+    "changes": [
+     {
+      "path": "payload.revoked_by",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.revoked_by"
+    }
+   },
+   {
+    "name": "invitation_revoked.invitation.null",
+    "clause": "§9.12 types",
+    "base_draft": "invitation_revoked",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "invitation_revoked.revoked_by.null",
+    "clause": "§9.12 types",
+    "base_draft": "invitation_revoked",
+    "changes": [
+     {
+      "path": "payload.revoked_by",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.revoked_by"
+    }
+   },
+   {
+    "name": "invitation_revoked.missing",
+    "clause": "§9.12 closed",
+    "base_draft": "invitation_revoked",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "invitation_revoked.extra",
+    "clause": "§9.12 closed",
+    "base_draft": "invitation_revoked",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "activated.member.kind",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "activated.member.form",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "user_member_01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "activated.invitation.kind",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "activated.invitation.form",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "value": "not-a-ulid"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "activated.reason.kind",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "activated.reason.form",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "accepted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "activated.roles.kind",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": "viewer"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "activated.method.kind",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.method",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.method"
+    }
+   },
+   {
+    "name": "activated.method.form",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.method",
+      "value": "password"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.method"
+    }
+   },
+   {
+    "name": "activated.activated_at.kind",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.activated_at",
+      "value": 1790000000
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.activated_at"
+    }
+   },
+   {
+    "name": "activated.activated_at.form",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.activated_at",
+      "value": "2026-10-05T14:00:00Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.activated_at"
+    }
+   },
+   {
+    "name": "activated.independent_approval_required.kind",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.independent_approval_required",
+      "value": "true"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.independent_approval_required"
+    }
+   },
+   {
+    "name": "activated.cool_off_ends_at.kind",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": 1790086400
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "activated.cool_off_ends_at.form",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-06T14:00:00Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "activated.member.null",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "activated.reason.null",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "activated.roles.null",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "activated.method.null",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.method",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.method"
+    }
+   },
+   {
+    "name": "activated.activated_at.null",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.activated_at",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.activated_at"
+    }
+   },
+   {
+    "name": "activated.independent_approval_required.null",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.independent_approval_required",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.independent_approval_required"
+    }
+   },
+   {
+    "name": "activated.cool_off_ends_at.null",
+    "clause": "§9.12 types",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "activated.missing",
+    "clause": "§9.12 closed",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "activated.extra",
+    "clause": "§9.12 closed",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "role_changed.member.kind",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "role_changed.member.form",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "user_member_01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "role_changed.changed_by.kind",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.changed_by",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.changed_by"
+    }
+   },
+   {
+    "name": "role_changed.changed_by.form",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.changed_by",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.changed_by"
+    }
+   },
+   {
+    "name": "role_changed.added.kind",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": {
+       "role": "operator"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.added"
+    }
+   },
+   {
+    "name": "role_changed.removed.kind",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.removed",
+      "value": "viewer"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.removed"
+    }
+   },
+   {
+    "name": "role_changed.changed_at.kind",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.changed_at",
+      "value": 1790000000
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.changed_at"
+    }
+   },
+   {
+    "name": "role_changed.changed_at.form",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.changed_at",
+      "value": "2026-10-05"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.changed_at"
+    }
+   },
+   {
+    "name": "role_changed.independent_approval_required.kind",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.independent_approval_required",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.independent_approval_required"
+    }
+   },
+   {
+    "name": "role_changed.step_up.kind",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": "passkey"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "role_changed.member.null",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "role_changed.changed_by.null",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.changed_by",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.changed_by"
+    }
+   },
+   {
+    "name": "role_changed.added.null",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.added"
+    }
+   },
+   {
+    "name": "role_changed.removed.null",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.removed",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.removed"
+    }
+   },
+   {
+    "name": "role_changed.changed_at.null",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.changed_at",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.changed_at"
+    }
+   },
+   {
+    "name": "role_changed.independent_approval_required.null",
+    "clause": "§9.12 types",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.independent_approval_required",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.independent_approval_required"
+    }
+   },
+   {
+    "name": "role_changed.missing",
+    "clause": "§9.12 closed",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.member",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "role_changed.extra",
+    "clause": "§9.12 closed",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "deactivated.member.kind",
+    "clause": "§9.12 types",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "deactivated.member.form",
+    "clause": "§9.12 types",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "user_member_01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "deactivated.by.kind",
+    "clause": "§9.12 types",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.by",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "deactivated.by.form",
+    "clause": "§9.12 types",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.by",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "deactivated.reason.kind",
+    "clause": "§9.12 types",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "deactivated.reason.form",
+    "clause": "§9.12 types",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "fired"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "deactivated.member.null",
+    "clause": "§9.12 types",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "deactivated.by.null",
+    "clause": "§9.12 types",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.by",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "deactivated.reason.null",
+    "clause": "§9.12 types",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "deactivated.missing",
+    "clause": "§9.12 closed",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "deactivated.extra",
+    "clause": "§9.12 closed",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "reactivated.member.kind",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "reactivated.member.form",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "user_member_01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "reactivated.by.kind",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.by",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "reactivated.by.form",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.by",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "reactivated.step_up.kind",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": "passkey"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "reactivated.roles.kind",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": "viewer"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "reactivated.reactivated_at.kind",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.reactivated_at",
+      "value": 1790000000
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reactivated_at"
+    }
+   },
+   {
+    "name": "reactivated.reactivated_at.form",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.reactivated_at",
+      "value": "2026-10-05"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reactivated_at"
+    }
+   },
+   {
+    "name": "reactivated.independent_approval_required.kind",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.independent_approval_required",
+      "value": "false"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.independent_approval_required"
+    }
+   },
+   {
+    "name": "reactivated.cool_off_ends_at.kind",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": 1790086400
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "reactivated.cool_off_ends_at.form",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-06"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "reactivated.member.null",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "reactivated.by.null",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.by",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "reactivated.step_up.null",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "reactivated.roles.null",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "reactivated.reactivated_at.null",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.reactivated_at",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reactivated_at"
+    }
+   },
+   {
+    "name": "reactivated.independent_approval_required.null",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.independent_approval_required",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.independent_approval_required"
+    }
+   },
+   {
+    "name": "reactivated.cool_off_ends_at.null",
+    "clause": "§9.12 types",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "reactivated.missing",
+    "clause": "§9.12 closed",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "reactivated.extra",
+    "clause": "§9.12 closed",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "removed.member.kind",
+    "clause": "§9.12 types",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "removed.member.form",
+    "clause": "§9.12 types",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "user_member_01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "removed.by.kind",
+    "clause": "§9.12 types",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.by",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "removed.by.form",
+    "clause": "§9.12 types",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.by",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "removed.reason.kind",
+    "clause": "§9.12 types",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "removed.reason.form",
+    "clause": "§9.12 types",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "erased"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "removed.member.null",
+    "clause": "§9.12 types",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "removed.by.null",
+    "clause": "§9.12 types",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.by",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "removed.reason.null",
+    "clause": "§9.12 types",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "removed.missing",
+    "clause": "§9.12 closed",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.member",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "removed.extra",
+    "clause": "§9.12 closed",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "invited_role_unknown",
+    "clause": "§9.12: `role` is a workspace role; an org role is not",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": [
+       "org_owner"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.roles[0]"
+    }
+   },
+   {
+    "name": "added_role_missing_its_end",
+    "clause": "§9.12: each added role is closed",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": [
+       {
+        "role": "auditor"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.added[0].cool_off_ends_at"
+    }
+   },
+   {
+    "name": "step_up_time_as_seconds",
+    "clause": "§9.12: step-up evidence is §9.2's, with a timestamp",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.step_up.authenticated_at",
+      "value": 1790000000
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up.authenticated_at"
+    }
+   },
+   {
+    "name": "invited_on_an_agent_stream",
+    "clause": "§9: a control-stream record",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "invited_roles_unsorted",
+    "clause": "rule 96",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": [
+       "viewer",
+       "approver"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "activated_roles_repeated",
+    "clause": "rule 96: a repeat is refused as a swap is",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": [
+       "approver",
+       "approver"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "removed_unsorted",
+    "clause": "rule 96",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.removed",
+      "value": [
+       "viewer",
+       "approver"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.removed"
+    }
+   },
+   {
+    "name": "added_unsorted",
+    "clause": "rule 96",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": [
+       {
+        "role": "operator",
+        "cool_off_ends_at": "2026-10-06T14:00:00.000000000Z"
+       },
+       {
+        "role": "auditor",
+        "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.added"
+    }
+   },
+   {
+    "name": "invited_by_another",
+    "clause": "rule 97: the writer is the inviter",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invited_by",
+      "value": "01J8Z4M0BE0000000000000ME1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invited_by"
+    }
+   },
+   {
+    "name": "revoked_by_another",
+    "clause": "rule 97",
+    "base_draft": "invitation_revoked",
+    "changes": [
+     {
+      "path": "payload.revoked_by",
+      "value": "01J8Z4M0BE0000000000000ME1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.revoked_by"
+    }
+   },
+   {
+    "name": "removed_by_another",
+    "clause": "rule 97",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.by",
+      "value": "01J8Z4M0AD0000000000000AD2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "invited_by_the_system",
+    "clause": "rule 98: an admin invites",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.invited_by",
+      "value": "control_services"
+     },
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "founding_by_a_user",
+    "clause": "rule 98: the system issues the founding grant (ID-13)",
+    "base_draft": "founding",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "01J8Z4M0AD0000000000000AD1",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.session_ref",
+      "value": "session_founder"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "accepted_by_the_system",
+    "clause": "rule 98: the invitee accepts",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "01J8Z4M0BE0000000000000ME1",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "deprovisioned_by_a_user",
+    "clause": "rule 98: the directory sync deprovisions",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "deprovisioned"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "org_deleted_by_a_user",
+    "clause": "rule 98",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "org_deleted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "role_changed_by_a_platform_operator",
+    "clause": "rule 98: platform staff never change a membership (ID-12)",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "01J8Z4M0AD0000000000000AD1",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "group_removed_by_a_user",
+    "clause": "rule 98: the identity provider's group removal is the system's",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "group_removed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "deactivated_by_a_client",
+    "clause": "rule 98: a client never changes a membership (ID-11)",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_b_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "01J8Z4M0AD0000000000000AD1"
+      }
+     },
+     {
+      "path": "payload.by",
+      "value": "client_b_01"
+     },
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "role_changed_by_an_agent",
+    "clause": "rule 98: only a user or the system writes a membership record",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     },
+     {
+      "path": "payload.changed_by",
+      "value": "agent_a"
+     },
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "own_roles_changed",
+    "clause": "rule 99: no admin changes their own roles (ID-13)",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "01J8Z4M0AD0000000000000AD1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.changed_by"
+    }
+   },
+   {
+    "name": "own_reactivation",
+    "clause": "rule 99",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "01J8Z4M0AD0000000000000AD1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "own_deactivation_as_admin",
+    "clause": "rule 99: leaving is `left`",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "01J8Z4M0AD0000000000000AD1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "own_removal",
+    "clause": "rule 99",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "01J8Z4M0AD0000000000000AD1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "left_by_another",
+    "clause": "rule 99: only the member leaves",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "left"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.by"
+    }
+   },
+   {
+    "name": "accepted_without_its_invitation",
+    "clause": "rule 99",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "founding_with_an_invitation",
+    "clause": "rule 99",
+    "base_draft": "founding",
+    "changes": [
+     {
+      "path": "payload.invitation",
+      "value": "01J8Z4M0C00000000000000N01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invitation"
+    }
+   },
+   {
+    "name": "accepted_for_another",
+    "clause": "rule 99: the invitee who signed in is the member",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "01J8Z4M0AD0000000000000AD1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.member"
+    }
+   },
+   {
+    "name": "invited_to_no_role",
+    "clause": "rule 100",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "activated_with_no_role",
+    "clause": "rule 100",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": []
+     },
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-05T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "founding_without_an_admin",
+    "clause": "rule 100: a workspace always has an admin",
+    "base_draft": "founding",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": [
+       "approver",
+       "operator"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "role_change_changing_nothing",
+    "clause": "rule 100",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": []
+     },
+     {
+      "path": "payload.removed",
+      "value": []
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.added"
+    }
+   },
+   {
+    "name": "role_added_and_removed",
+    "clause": "rule 100",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.removed",
+      "value": [
+       "auditor"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.removed"
+    }
+   },
+   {
+    "name": "grant_without_step_up",
+    "clause": "rule 101: a grant needs step-up",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "removal_with_step_up",
+    "clause": "rule 101: a removal carries none",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "live_step_up_by_cli_confirm",
+    "clause": "rule 102: `live` takes a passkey only",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "environment",
+      "value": "live"
+     },
+     {
+      "path": "payload.step_up.method",
+      "value": "cli_confirm"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up.method"
+    }
+   },
+   {
+    "name": "paper_step_up_by_password",
+    "clause": "rule 102",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.step_up.method",
+      "value": "password"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up.method"
+    }
+   },
+   {
+    "name": "cool_off_of_an_hour",
+    "clause": "rule 103: zero or exactly 24 hours",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-05T15:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "cool_off_a_nanosecond_short",
+    "clause": "rule 103",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-06T13:59:59.999999999Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "cool_off_a_nanosecond_long",
+    "clause": "rule 103: exactly 24 hours, not at least",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-06T14:00:00.000000001Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "cool_off_before_its_start",
+    "clause": "rule 103",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-04T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "founding_cooling_off",
+    "clause": "rule 103: the founding grant never has one",
+    "base_draft": "founding",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-06T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "viewer_cooling_off",
+    "clause": "rule 103: only operator and approver may cool off",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": [
+       "auditor",
+       "viewer"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "added_auditor_cooling_off",
+    "clause": "rule 103, at the added role's own end",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": [
+       {
+        "role": "auditor",
+        "cool_off_ends_at": "2026-10-06T14:00:00.000000000Z"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.added[0].cool_off_ends_at"
+    }
+   },
+   {
+    "name": "step_up_after_the_instant",
+    "clause": "rule 102: evidence authenticated after the grant fails closed (mandate spec §6.1)",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.step_up.authenticated_at",
+      "value": "2026-10-05T14:00:00.000000001Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up.authenticated_at"
+    }
+   },
+   {
+    "name": "step_up_a_nanosecond_stale",
+    "clause": "rule 102: 300 seconds and no more",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.step_up.authenticated_at",
+      "value": "2026-10-05T13:54:59.999999999Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up.authenticated_at"
+    }
+   },
+   {
+    "name": "invitation_of_six_days",
+    "clause": "rule 104: 7 days exactly",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.expires_at",
+      "value": "2026-10-11T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.expires_at"
+    }
+   },
+   {
+    "name": "invitation_a_nanosecond_past_seven_days",
+    "clause": "rule 104: 7 days exactly, not at least",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.expires_at",
+      "value": "2026-10-12T14:00:00.000000001Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.expires_at"
+    }
+   },
+   {
+    "name": "user_without_a_session",
+    "clause": "rule 105: a user acts through a session",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.session_ref"
+    }
+   },
+   {
+    "name": "system_with_a_session",
+    "clause": "rule 105: the system writes without one",
+    "base_draft": "founding",
+    "changes": [
+     {
+      "path": "payload.session_ref",
+      "value": "session_founding"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.session_ref"
+    }
+   },
+   {
+    "name": "activated_in_the_past",
+    "clause": "rules 103 and 106: the reviewer's probe, a grant dated back to escape its cool-off",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.activated_at",
+      "value": "2020-01-01T00:00:00.000000000Z"
+     },
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2020-01-02T00:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.activated_at"
+      }
+     ]
+    }
+   },
+   {
+    "name": "changed_a_nanosecond_in_the_future",
+    "clause": "rule 106",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.changed_at",
+      "value": "2026-10-05T14:00:00.000000001Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.changed_at"
+    }
+   },
+   {
+    "name": "invited_a_nanosecond_early",
+    "clause": "rule 106: a week from a self-chosen instant is still refused",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.invited_at",
+      "value": "2026-10-05T13:59:59.999999999Z"
+     },
+     {
+      "path": "payload.expires_at",
+      "value": "2026-10-12T13:59:59.999999999Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.invited_at"
+    }
+   },
+   {
+    "name": "reactivated_in_the_past",
+    "clause": "rule 106",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.reactivated_at",
+      "value": "2026-10-04T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reactivated_at"
+    }
+   },
+   {
+    "name": "cooling_without_independence",
+    "clause": "rule 103: no day is owed when independence is not required",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.independent_approval_required",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "operator_at_once_under_independence",
+    "clause": "rule 103: a day is owed",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": [
+       {
+        "role": "auditor",
+        "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z"
+       },
+       {
+        "role": "operator",
+        "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.added[1].cool_off_ends_at"
+    }
+   },
+   {
+    "name": "approver_reactivated_at_once_under_independence",
+    "clause": "rule 103",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-05T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
+    "name": "reactivated_with_no_role",
+    "clause": "rule 100",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": []
+     },
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-05T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "reactivated_roles_unsorted",
+    "clause": "rule 96",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": [
+       "viewer",
+       "approver"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.roles"
+    }
+   },
+   {
+    "name": "rules_reported_in_order",
+    "clause": "§9.1 order: rule 97 before rule 99 before rule 103",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.changed_by",
+      "value": "01J8Z4M0BE0000000000000ME1"
+     },
+     {
+      "path": "payload.added",
+      "value": [
+       {
+        "role": "operator",
+        "cool_off_ends_at": "2026-10-05T15:00:00.000000000Z"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.changed_by",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.changed_by"
+      },
+      {
+       "reason": "schema",
+       "path": "payload.added[0].cool_off_ends_at"
+      }
+     ]
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "activated_without_a_cool_off",
+    "clause": "rule 103: without independence required, an approver activates at once",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.independent_approval_required",
+      "value": false
+     },
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-05T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "viewer_activated_at_once",
+    "clause": "rule 103: a role that never cools off",
+    "base_draft": "activated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": [
+       "auditor",
+       "viewer"
+      ]
+     },
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-05T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "founding_owner_bundle_in_live",
+    "clause": "rules 98 to 100 and 103: the retail owner bundle (identity spec §4.3)",
+    "base_draft": "founding",
+    "changes": [
+     {
+      "path": "environment",
+      "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removal_only",
+    "clause": "rules 100 and 101: removing a role needs no step-up; the same record offboards a deactivated member (DEC-654 item 7), whose state only the fold sees",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": []
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "grant_only",
+    "clause": "rule 100: nothing removed",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.removed",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "operator_granted_without_a_cool_off",
+    "clause": "rule 103: without independence required, an operator grant is effective at once",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": [
+       {
+        "role": "operator",
+        "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z"
+       }
+      ]
+     },
+     {
+      "path": "payload.removed",
+      "value": []
+     },
+     {
+      "path": "payload.independent_approval_required",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "admin_granted_at_once_under_independence",
+    "clause": "rule 103: `workspace_admin` never cools off, even where independence is required",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": [
+       {
+        "role": "workspace_admin",
+        "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z"
+       }
+      ]
+     },
+     {
+      "path": "payload.removed",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "left",
+    "clause": "rules 98 and 99: a member leaves by themselves",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "01J8Z4M0BE0000000000000ME1",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.by",
+      "value": "01J8Z4M0BE0000000000000ME1"
+     },
+     {
+      "path": "payload.reason",
+      "value": "left"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "deprovisioned_by_the_directory",
+    "clause": "rule 98",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.by",
+      "value": "control_services"
+     },
+     {
+      "path": "payload.reason",
+      "value": "deprovisioned"
+     },
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "group_removed",
+    "clause": "rule 98",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.by",
+      "value": "control_services"
+     },
+     {
+      "path": "payload.reason",
+      "value": "group_removed"
+     },
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_by_org_deletion",
+    "clause": "rule 98",
+    "base_draft": "removed",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.by",
+      "value": "control_services"
+     },
+     {
+      "path": "payload.reason",
+      "value": "org_deleted"
+     },
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "reactivated_at_once",
+    "clause": "rule 103: without independence required",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.independent_approval_required",
+      "value": false
+     },
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-05T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "viewer_reactivated_at_once_under_independence",
+    "clause": "rule 103: kept roles that never cool off",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": [
+       "auditor",
+       "viewer"
+      ]
+     },
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-05T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "founding_under_independence",
+    "clause": "rule 103: the founding grant never cools off, even where independence is required",
+    "base_draft": "founding",
+    "changes": [
+     {
+      "path": "payload.independent_approval_required",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "paper_step_up_by_cli_confirm",
+    "clause": "rule 102: `cli_confirm` in paper (DEC-155)",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.step_up.method",
+      "value": "cli_confirm"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "step_up_at_the_window_edge",
+    "clause": "rule 102: exactly 300 seconds is still valid",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.step_up.authenticated_at",
+      "value": "2026-10-05T13:55:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "step_up_at_the_instant",
+    "clause": "rule 102: zero seconds is valid",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.step_up.authenticated_at",
+      "value": "2026-10-05T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "invited_to_every_role",
+    "clause": "rule 96",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.roles",
+      "value": [
+       "approver",
+       "auditor",
+       "operator",
+       "viewer",
+       "workspace_admin"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
  }
 }
