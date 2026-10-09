@@ -835,6 +835,7 @@ mod state_change_tests {
     use mandate_num::Qty;
 
     use super::{StateEvidence, state_change_fields};
+    use crate::batch::schema_version;
     use crate::error::ExecutorError;
     use crate::ids::ClientOrderId;
     use crate::payload::{object, text};
@@ -848,12 +849,13 @@ mod state_change_tests {
         let body = format!(
             r#"{{"envelope_version":1,"environment":"paper",
             "event_id":"01J8Z3M4000000000000000001","stream_id":"acct:ws_1:ACCT1",
-            "event_type":"OrderStateChanged","schema_version":1,
+            "event_type":"OrderStateChanged","schema_version":{},
             "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
             "causation_id":null,"correlation_id":null,
             "actor":{{"kind":"system","id":"executor","version":"0.1.0",
             "build":"sha256:{}"}},"config_refs":{{}},"payload":{},
             "artifact_refs":[],"pii_refs":[]}}"#,
+            schema_version("OrderStateChanged"),
             "3".repeat(64),
             String::from_utf8_lossy(&to_canonical(&payload))
         );

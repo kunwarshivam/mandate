@@ -1,0 +1,8 @@
+file = "crates/mandate-journal/tests/order_id.rs"
+test = "version_2_carries_the_brokers_order_id_or_null"
+reason = """
+E7-6 (journal spec v0.34, DEC-869): `Draft::parse` is already implemented, and refuses
+`OrderStateChanged` at version 2 as `unknown_schema` until it is registered, so this test fails
+on that answer rather than at a stub. The code PR that registers version 2 deletes this file with
+the test's `#[ignore]` line.
+"""
