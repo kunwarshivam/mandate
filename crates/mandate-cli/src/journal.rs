@@ -19,8 +19,9 @@ use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
 use mandate_journal::{
     Anchor, AnchorLeaf, ArtifactError, ArtifactRef, ArtifactSource, ControlVerifyError, EventCheck,
-    EventFailure, RangeCheck, StoredEvent, StreamId, StreamType, TrustedStart, verify_anchor,
-    verify_anchor_self, verify_break_glass_causes, verify_events,
+    EventFailure, HeldAnchor, RangeCheck, StoredEvent, StreamId, StreamType, TrustedStart,
+    verify_agent_stream_anchored, verify_anchor, verify_anchor_self, verify_break_glass_causes,
+    verify_events,
 };
 
 pub mod cold;
@@ -97,16 +98,38 @@ pub struct StreamFailure {
 
 /// §11's range checks of `stream`'s type over `rows`, entered at `start`: the failure at the lowest
 /// `seq`, ties going to §11's listing order (DEC-782 items 1 and 2). Other types run none. The CLI
-/// cannot read the chain before the range, so the checks get no hold anchor (DEC-782 item 4). A
-/// check the library has not built is an error, never a pass (DEC-77).
+/// cannot read the chain before the range, so the agent checks get no hold anchor and a tail range
+/// fails closed at its first version-2 copy (DEC-782 item 4). A check the library has not built is
+/// an error, never a pass (DEC-77).
 pub(crate) fn stream_checks(
     stream: &StreamId,
     rows: &[StoredEvent],
     start: TrustedStart,
 ) -> anyhow::Result<Option<StreamFailure>> {
-    if stream.stream_type() != StreamType::Control {
-        return Ok(None);
+    match stream.stream_type() {
+        StreamType::Control => control_checks(rows, start),
+        StreamType::Agent => Ok(agent_checks(rows, start)),
+        _ => Ok(None),
     }
+}
+
+/// The agent stream's `intent_action_mismatch`, `mode_event_mismatch` and `held_mismatch`, which
+/// the library reports at the lowest `seq` in §11's order, with no hold anchor (DEC-782 item 4).
+fn agent_checks(rows: &[StoredEvent], start: TrustedStart) -> Option<StreamFailure> {
+    verify_agent_stream_anchored(rows, start, HeldAnchor::Unknown)
+        .err()
+        .map(|failure| StreamFailure {
+            seq: failure.seq,
+            code: failure.check.code(),
+        })
+}
+
+/// The control stream's `anchor_self_mismatch` and `break_glass_cause_mismatch`: the failure at
+/// the lowest `seq`, a tie going to `anchor_self_mismatch`, which §11 lists first.
+fn control_checks(
+    rows: &[StoredEvent],
+    start: TrustedStart,
+) -> anyhow::Result<Option<StreamFailure>> {
     let mut failures = Vec::new();
     for answer in [
         verify_anchor_self(rows),

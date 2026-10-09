@@ -5,8 +5,9 @@
   `export_line` in `crates/mandate-journal/src/lib.rs`,
   `crates/mandate-journal/src/control_verify.rs` (§11's control-stream range checks
   `anchor_self_mismatch` and `break_glass_cause_mismatch`, run after `verify_events`; E12-3),
-  `crates/mandate-journal/src/start.rs` (§9.14's trusted start of a range, resolved from a
-  `SegmentExported` or a stamped `AnchorComputed`; E12-3, pending),
+  `crates/mandate-journal/src/start.rs` (§9.14's trusted start of a range, resolved from
+  genesis, a `SegmentExported`, or a stamped `AnchorComputed` on the workspace's own control
+  stream only, and a malformed `stream_id` refused, DEC-784; E12-3),
   `crates/mandate-journal/src/connection_fold.rs` (§11's connection checks; a range's lifecycle
   run from its connection anchor or failing closed without one, DEC-885; E7-17, pending).
 - **Tests:** `crates/mandate-journal/tests/verify.rs`, `crates/mandate-journal/tests/properties.rs`
