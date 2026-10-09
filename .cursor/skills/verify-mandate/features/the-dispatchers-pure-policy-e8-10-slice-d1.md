@@ -11,8 +11,10 @@
 - **Tests:** `crates/mandate-notify/tests/quiet_hours.rs`: quiet hours by class in both DST states
   and across both 2026 changes, the skipped and repeated hour, `safety` reading no offset, the tie
   between two offsets from one instant, and a property against a minute walk over random offset
-  tables. `crates/mandate-notify/tests/delivery.rs`: coalescing by hand table, and NT-6's
-  property, which tallies every cause from the reads (exactly one message each, none before its
-  pass, `safety` within its commit plus 60 s or at its pass); the retry schedule, its windows and
-  its stops, and a monotonicity property; one notice per user kill switch.
+  tables. `crates/mandate-notify/tests/delivery.rs`: coalescing by two hand tables (stale causes
+  and windows nothing joins included), and NT-6's property, which tallies every cause from the
+  reads (exactly one message each, none before its pass, `safety` within its commit plus 60 s or
+  at its pass); the retry schedule, its windows, and its stops by the provider's verdict (a
+  `permanent` result before an ended window), and a monotonicity property; one notice per user
+  kill switch.
 - **Run:** `cargo nextest run -p mandate-notify`; `cargo xtask ci pending`.

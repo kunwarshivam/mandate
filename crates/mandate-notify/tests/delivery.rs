@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use common::answer;
 use mandate_notify::{
-    Alert, Class, Message, NotifyError, Pass, Read, Reason, Retry, coalesce, next_attempt,
+    Alert, Class, Message, NotifyError, Outcome, Pass, Read, Reason, Retry, coalesce, next_attempt,
     notice_keys,
 };
 use mandate_time::UtcNanos;
@@ -68,6 +68,28 @@ fn safety_causes_coalesce_per_window_and_none_waits_past_its_bound() {
     ));
 }
 
+/// DEC-725 item 5: a stale cause in the first pass, with no window ever open, goes alone and opens
+/// none; a window nothing joins sends nothing at its end, its openers having gone at its opening;
+/// a stale cause read with fresh ones goes alone, beside a window (T + 70) or an opening (T + 200).
+#[test]
+#[ignore = "pending E8-10"]
+fn stale_causes_and_empty_windows_are_never_held() {
+    #[rustfmt::skip]
+    let passes = [
+        pass(T, vec![read(1, Safety, T - 60)]),
+        pass(T + 5, vec![read(2, Safety, T + 5)]),
+        pass(T + 65, vec![read(3, Safety, T + 65)]),
+        pass(T + 70, vec![read(4, Safety, T + 5), read(5, Safety, T + 68)]),
+        pass(T + 200, vec![read(6, Safety, T + 199), read(7, Safety, T + 100), read(8, Safety, T + 200)]),
+    ];
+    #[rustfmt::skip]
+    let expected = [
+        message(T, &[1]), message(T + 5, &[2]), message(T + 65, &[3]), message(T + 70, &[4]),
+        message(T + 125, &[5]), message(T + 200, &[6, 8]), message(T + 200, &[7]),
+    ];
+    assert_eq!(answer("coalesce", coalesce(&passes)), expected);
+}
+
 proptest! {
     /// NT-6 by a tally of the reads, never the fold's own state: every cause is in exactly one
     /// message, none before its pass, a `safety` one by its commit plus 60 s or at its pass if
@@ -108,23 +130,26 @@ proptest! {
     }
 }
 
-const RETRYABLE: [Reason; 3] = [Reason::Timeout, Reason::RateLimited, Reason::ProviderError];
-
 /// §5.3, DEC-438 item 9, DEC-725 item 6: the gap after attempt n.
 fn gap(n: u32) -> i64 {
     [15, 60, 300].get(n as usize - 1).copied().unwrap_or(900)
 }
 
-fn retry(class: Class, first: i64, last: i64, attempts: u32, reason: Reason) -> Retry {
+fn again(reason: Reason) -> Outcome {
+    Outcome::Retryable { reason }
+}
+
+fn retry(class: Class, first: i64, last: i64, attempts: u32, outcome: Outcome) -> Retry {
     let at = |s| UtcNanos::from_parts(s, 0).unwrap();
     answer(
         "next_attempt",
-        next_attempt(class, at(first), at(last), attempts, reason),
+        next_attempt(class, at(first), at(last), attempts, &outcome),
     )
 }
 
-/// §5.3, DEC-725 item 6: 15 s, 60 s, 5 min, then 15 min; a window has room for an attempt due at
-/// its end and none after; a reason that is not retryable stops at once.
+/// §5.2, §5.3, DEC-725 item 6: 15 s, 60 s, 5 min, then 15 min; a window has room for an attempt
+/// due at its end and none after; the verdict, never the reason, decides, so `retryable` retries
+/// whatever its reason (`too_large` included) and `permanent` stops even past the window's end.
 #[test]
 #[ignore = "pending E8-10"]
 fn retries_follow_the_schedule_until_the_window_ends() {
@@ -136,47 +161,59 @@ fn retries_follow_the_schedule_until_the_window_ends() {
         (4, T + 375, T + 1_275),
         (9, T + 9_000, T + 9_900),
     ] {
-        assert_eq!(
-            retry(Safety, T, last, n, Reason::Timeout),
-            at(due),
-            "after attempt {n}"
-        );
+        let got = retry(Safety, T, last, n, again(Reason::Timeout));
+        assert_eq!(got, at(due), "after attempt {n}");
     }
     for (class, window) in [(Safety, 86_400), (Info, 21_600)] {
+        let rate_limited = || again(Reason::RateLimited);
         assert_eq!(
-            retry(class, T, T + window - 900, 50, Reason::RateLimited),
+            retry(class, T, T + window - 900, 50, rate_limited()),
             at(T + window)
         );
-        assert_eq!(
-            retry(class, T, T + window - 899, 50, Reason::RateLimited),
-            Retry::RetryWindowEnded
-        );
+        let ended = retry(class, T, T + window - 899, 50, rate_limited());
+        assert_eq!(ended, Retry::RetryWindowEnded);
+        let stop = Outcome::Permanent {
+            reason: Reason::TooLarge,
+        };
+        let late = retry(class, T, T + window - 899, 50, stop);
+        assert_eq!(late, Retry::Failed(Reason::TooLarge), "{class:?}");
     }
-    assert_eq!(
-        retry(Action, T, T + 864_000, 1_000, Reason::ProviderError),
-        at(T + 864_900)
-    );
-    for reason in Reason::ALL.into_iter().filter(|r| !RETRYABLE.contains(r)) {
+    let action = retry(Action, T, T + 864_000, 1_000, again(Reason::ProviderError));
+    assert_eq!(action, at(T + 864_900));
+    for reason in Reason::ALL {
         for class in [Action, Safety, Info] {
             assert_eq!(
-                retry(class, T, T, 1, reason),
+                retry(class, T, T, 1, again(reason)),
+                at(T + 15),
+                "{reason:?}"
+            );
+            let stop = Outcome::Permanent { reason };
+            assert_eq!(
+                retry(class, T, T, 1, stop),
                 Retry::Failed(reason),
                 "{reason:?}"
             );
         }
     }
-    let none = next_attempt(Safety, UtcNanos::EPOCH, UtcNanos::EPOCH, 0, Reason::Timeout);
-    assert!(matches!(none, Err(NotifyError::Unrepresentable { .. })));
+    let (epoch, timeout) = (UtcNanos::EPOCH, again(Reason::Timeout));
+    let accepted = Outcome::Accepted {
+        provider_message_id: "fixture-1".to_owned(),
+    };
+    for (attempts, outcome) in [(0, &timeout), (1, &accepted)] {
+        let refused = next_attempt(Safety, epoch, epoch, attempts, outcome);
+        assert!(matches!(refused, Err(NotifyError::Unrepresentable { .. })));
+    }
 }
 
 proptest! {
-    /// §5.3: the next attempt is after the latest by the schedule's gap, which never shrinks, and
-    /// only a class with a window ever runs out of one.
+    /// §5.3: a `retryable` result of any reason is next due its schedule's gap after the latest,
+    /// only a class with a window ever runs out of one, and a later attempt number never brings the
+    /// next attempt earlier, nor ends a window the earlier number left open.
     #[test]
     #[ignore = "pending E8-10"]
     fn retries_are_monotonic(
         class in prop::sample::select(vec![Action, Safety, Info]),
-        reason in prop::sample::select(RETRYABLE.to_vec()),
+        reason in prop::sample::select(Reason::ALL.to_vec()),
         attempts in 1u32..2_000,
         since in 0i64..200_000,
     ) {
@@ -186,8 +223,19 @@ proptest! {
             Some(w) if due > T + w => Retry::RetryWindowEnded,
             _ => Retry::At(UtcNanos::from_parts(due, 0).unwrap()),
         };
-        prop_assert_eq!(retry(class, T, last, attempts, reason), expected);
-        prop_assert!(gap(attempts + 1) >= gap(attempts));
+        let got = retry(class, T, last, attempts, again(reason));
+        prop_assert_eq!(got, expected);
+        if attempts > 1 {
+            let fewer = retry(class, T, last, attempts - 1, again(reason));
+            match (fewer, got) {
+                (Retry::At(before), Retry::At(after)) => prop_assert!(after >= before),
+                (Retry::RetryWindowEnded, Retry::At(_)) => prop_assert!(false, "window reopened"),
+                _ => {}
+            }
+        }
+        if let Retry::At(after) = got {
+            prop_assert!(after.secs() > last, "due {} is not after {}", after.secs(), last);
+        }
     }
 }
 

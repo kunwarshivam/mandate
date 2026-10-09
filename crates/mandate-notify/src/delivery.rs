@@ -4,7 +4,7 @@
 
 use mandate_time::UtcNanos;
 
-use crate::{Class, NotifyError, Reason};
+use crate::{Class, NotifyError, Outcome, Reason};
 
 /// One cause as the dispatcher's pass reads it, for one recipient and push channel.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,8 +31,9 @@ pub struct Message<C> {
 }
 
 /// §5.4's fold for one recipient and push channel: every message the passes produce, by `send_at`,
-/// a window's message before a same-instant pass's own (DEC-725 item 5). A `safety` cause is
-/// never dropped; an `action` or `info` cause goes alone at its pass.
+/// a window's message before a same-instant pass's own, and one pass's own in the read order of
+/// their first causes (DEC-725 item 5). A `safety` cause is never dropped; an `action` or `info`
+/// cause, or a stale `safety` one, goes alone at its pass.
 ///
 /// # Errors
 /// [`NotifyError::Unrepresentable`] for a pass whose `at` is before the previous pass's.
@@ -45,26 +46,29 @@ pub fn coalesce<C: Clone>(passes: &[Pass<C>]) -> Result<Vec<Message<C>>, NotifyE
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Retry {
     At(UtcNanos),
-    /// A reason that is not retryable: journaled `failed` with it, and that channel stops.
+    /// A `permanent` result: journaled `failed` with its reason, and that channel stops.
     Failed(Reason),
     /// The class's window has no room for the next attempt: journaled `abandoned`.
     RetryWindowEnded,
 }
 
 /// The next attempt after `attempts` attempts, the first at `first` and the latest at `last`, the
-/// latest failing with `reason` (§5.3, DEC-725 item 6). An `action` notice has no window; its
-/// `not_pending` stop is the caller's, from the approval.
+/// latest answered `outcome` (§5.2, §5.3, DEC-725 item 6). The provider's verdict decides, not
+/// its reason, and a `permanent` one stops before the window is read; a timeout with no answer is
+/// the caller's `retryable { timeout }`. An `action` notice has no window; its `not_pending` stop
+/// is the caller's, from the approval.
 ///
 /// # Errors
-/// [`NotifyError::Unrepresentable`] for zero attempts or an instant out of range.
+/// [`NotifyError::Unrepresentable`] for zero attempts, an `accepted` outcome, or an instant out of
+/// range.
 pub fn next_attempt(
     class: Class,
     first: UtcNanos,
     last: UtcNanos,
     attempts: u32,
-    reason: Reason,
+    outcome: &Outcome,
 ) -> Result<Retry, NotifyError> {
-    let _ = (class, first, last, attempts, reason);
+    let _ = (class, first, last, attempts, outcome);
     Err(NotifyError::Unimplemented { story: "E8-10" })
 }
 
