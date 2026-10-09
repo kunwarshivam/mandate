@@ -10923,6 +10923,24 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// A YAML merge key with a block mapping under it, `<<:` and no alias or flow mapping,
+    /// carries a `working-directory` into its step, so the line cannot be read, even when the
+    /// build names a package (#1169 round 3 review; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_block_merge_key_cannot_be_read() -> Result<()> {
+        let flows = [ci_file(
+            ".github/workflows/ci.yml",
+            "on: push\njobs:\n  merge-block:\n    steps:\n      - <<:\n          \
+             working-directory: crates/rh-host\n        run: cargo test -p a-lib\n  lib-tests:\n    \
+             steps:\n      - run: cargo test -p a-lib\n",
+        )];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["merge-block"]);
+        names(&problems, &["merge-block"], &["lib-tests"]);
+        Ok(())
+    }
+
     /// A `run:` written so the reader does not find its cargo invocation (a quoted value, an
     /// anchored or tagged value, a quoted `run` key, a flow step) cannot be read (#1169 round 2
     /// review, major; DEC-176 tightening).
