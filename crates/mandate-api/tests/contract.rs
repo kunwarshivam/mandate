@@ -142,7 +142,6 @@ fn title_of(name: &str) -> &'static str {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn every_problem_code_has_the_spec_tables_status() {
     let served: Vec<SpecCode> = spec_codes()
         .into_iter()
@@ -177,7 +176,6 @@ fn every_problem_code_has_the_spec_tables_status() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn event_id_is_present_exactly_when_something_may_be_recorded() {
     let event = ulid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     let invalid = Problem::of(
@@ -216,7 +214,6 @@ fn may_carry(name: &str, effect: Effect) -> bool {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn each_code_carries_only_the_effects_the_spec_allows_it() {
     let event = ulid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     let served: Vec<SpecCode> = spec_codes()
@@ -246,7 +243,6 @@ fn each_code_carries_only_the_effects_the_spec_allows_it() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_problem_serializes_every_member_and_refuses_one_it_does_not_name() {
     let problem = Problem::of(ProblemCode::Invalid, Effect::None, None, None).expect("invalid");
     let written: Value = serde_json::from_slice(&encode(&problem).expect("encodes")).expect("json");
@@ -794,7 +790,6 @@ fn the_last_batch_position_and_only_route_names_derive_an_id() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_stale_base_problem_names_the_current_base_and_no_other_code_does() {
     let stale = Problem::of(ProblemCode::StaleBase, Effect::None, None, Some(base()));
     let stale = stale.expect("stale_base with its base");
@@ -835,7 +830,6 @@ fn a_stale_base_problem_names_the_current_base_and_no_other_code_does() {
 /// `outcome_unknown` (#788's §3.5 row, planned under E10-10): an append whose outcome could not be
 /// confirmed, 503, `effect: unknown` with the derived `event_id`, never retryable, and nothing else.
 #[test]
-#[ignore = "pending E10-10"]
 fn outcome_unknown_reports_unknown_with_its_event_and_nothing_else() {
     let code: ProblemCode = decode(b"\"outcome_unknown\"").expect("outcome_unknown is served");
     let event = ulid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
@@ -955,7 +949,6 @@ fn a_policy_violation_serializes_its_levels_and_values() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_policy_violation_carries_a_number_as_its_decimal_string() {
     let body = br#"{"kind": "policy", "path": "/limits/max_drawdown", "key": "max_drawdown", "level": "workspace", "value": "0.25", "ancestor_level": "organization", "ancestor_value": "0.2", "message": "Looser than the organization allows"}"#;
     let finding = decode::<Violation>(body).expect("a policy finding");
