@@ -1,4 +1,4 @@
-import { type Page, expect, test } from "@playwright/test";
+import { type JSHandle, type Page, expect, test } from "@playwright/test";
 import { AGENT_IDS } from "../src/fixtures/workspace";
 import { agentHref } from "../src/lib/screens";
 
@@ -11,6 +11,9 @@ import { agentHref } from "../src/lib/screens";
  */
 
 const bar = (page: Page) => page.locator("[data-slot=command-bar]");
+
+/** The command palette, by its role and its accessible name. */
+const commandPalette = (page: Page) => page.getByRole("dialog", { name: "Command palette", exact: true });
 
 const ROUTES = ["/", agentHref(AGENT_IDS.swing, "positions"), "/audit/trace"];
 
@@ -83,7 +86,7 @@ test("a press opens the command palette, and ⌘K does the same", async ({ page 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/");
   await page.waitForLoadState("networkidle");
-  const palette = page.getByRole("dialog");
+  const palette = commandPalette(page);
   await expect(async () => {
     await bar(page).click();
     await expect(palette).toBeVisible({ timeout: 1000 });
@@ -105,11 +108,121 @@ for (const width of [390, 768, 1023]) {
     expect((await page.locator("header").boundingBox())!.height).toBe(65);
     await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }).click();
     await page.getByRole("dialog", { name: "More" }).getByRole("button", { name: /^Search/ }).click();
-    const palette = page.getByRole("dialog").filter({ has: page.getByRole("combobox", { name: "Command" }) });
+    const palette = commandPalette(page);
     await expect(palette).toBeVisible();
     await expect(palette.getByRole("combobox", { name: "Command" })).toBeFocused();
   });
 }
+
+/** The frame's Stop: at the end of the dock from 1024 px (DEC-207), of the tab bar below it. */
+const frameStop = (page: Page, width: number) =>
+  page.getByRole("navigation", { name: width < 1024 ? "Main" : "Primary" }).getByRole("button", { name: "Stop", exact: true });
+
+/** Whether the focused element is the one a handle holds. */
+async function focusIs(page: Page, element: JSHandle) {
+  return page.evaluate((el) => document.activeElement === el, element);
+}
+
+/**
+ * The palette is not modal (C-21), so it keeps focus itself: Tab and Shift+Tab wrap inside it, and
+ * when Escape closes it, focus goes back to the element that had it before it opened. The palette's
+ * tab order is walked here with the keyboard, not computed from the component's own rule.
+ */
+test.describe("the palette keeps focus inside and gives it back (C-21)", () => {
+  for (const width of [390, 1280]) {
+    test(`${width} px: Tab from the last element wraps to the first, and Shift+Tab from the first to the last`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      await page.waitForLoadState("networkidle");
+      await page.keyboard.press("ControlOrMeta+k");
+      const palette = commandPalette(page);
+      const first = palette.getByRole("combobox", { name: "Command" });
+      await expect(first, "the palette opens on its first element").toBeFocused();
+      let last: JSHandle = (await first.elementHandle())!;
+      let wrapped = false;
+      for (let step = 0; step < 50 && !wrapped; step++) {
+        await page.keyboard.press("Tab");
+        await expect(palette.locator(":focus"), `Tab ${step + 1} keeps focus in the palette`).toHaveCount(1);
+        wrapped = await first.evaluate((el) => el === document.activeElement);
+        if (!wrapped) last = await page.evaluateHandle(() => document.activeElement!);
+      }
+      expect(wrapped, "Tab from the last element comes back to the first").toBe(true);
+      await page.keyboard.press("Shift+Tab");
+      await expect(palette.locator(":focus"), "Shift+Tab from the first keeps focus in the palette").toHaveCount(1);
+      expect(await focusIs(page, last), "Shift+Tab from the first goes to the last").toBe(true);
+      await page.keyboard.press("Tab");
+      await expect(first, "Tab from the last goes to the first").toBeFocused();
+    });
+
+    test(`${width} px, ⌘K: Escape closes the palette and focus goes back to where it was`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      await page.waitForLoadState("networkidle");
+      const stop = frameStop(page, width);
+      await stop.focus();
+      await expect(stop).toBeFocused();
+      await page.keyboard.press("ControlOrMeta+k");
+      const palette = commandPalette(page);
+      await expect(palette.getByRole("combobox", { name: "Command" })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(palette, "Escape closes the palette").toBeHidden();
+      await expect(stop, "focus goes back to where it was before ⌘K").toBeFocused();
+    });
+  }
+
+  for (const how of ["Enter", "a press"]) {
+    test(`1280 px, the bar opened with ${how}: Escape closes the palette and focus goes back to the bar`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto("/");
+      await page.waitForLoadState("networkidle");
+      const palette = commandPalette(page);
+      if (how === "Enter") {
+        await bar(page).focus();
+        await page.keyboard.press("Enter");
+      } else {
+        await bar(page).click();
+      }
+      await expect(palette.getByRole("combobox", { name: "Command" })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(palette, "Escape closes the palette").toBeHidden();
+      await expect(bar(page), "focus goes back to the bar that opened the palette").toBeFocused();
+    });
+  }
+
+  test("390 px, Search in the More sheet: Escape closes the palette and focus goes back to More", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    const more = page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" });
+    await more.click();
+    await page.getByRole("dialog", { name: "More" }).getByRole("button", { name: /^Search/ }).click();
+    const palette = commandPalette(page);
+    await expect(palette.getByRole("combobox", { name: "Command" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(palette, "Escape closes the palette").toBeHidden();
+    await expect(more, "Search went with its sheet, so focus goes back to More, which opened the sheet").toBeFocused();
+  });
+
+  for (const width of [390, 1280]) {
+    test(`${width} px, the palette's Stop…: the Stop sheet keeps focus, and the palette does not take it back`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      await page.waitForLoadState("networkidle");
+      await frameStop(page, width).focus();
+      await page.keyboard.press("ControlOrMeta+k");
+      const palette = commandPalette(page);
+      await expect(palette.getByRole("combobox", { name: "Command" })).toBeFocused();
+      await page.keyboard.type("Stop");
+      await expect(page.getByRole("option", { name: /^Stop…/ })).toBeVisible();
+      await page.keyboard.press("Enter");
+      const sheet = page.getByRole("dialog", { name: /^Stop/ });
+      await expect(sheet).toBeVisible();
+      await expect(palette).toHaveCount(0);
+      await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+      expect(await sheet.evaluate((el) => el.contains(document.activeElement)), "focus stays in the Stop sheet once the palette has gone").toBe(true);
+    });
+  }
+});
 
 const TRAILS: Array<[string, string, string[]]> = [
   ["/", "Home", []],
