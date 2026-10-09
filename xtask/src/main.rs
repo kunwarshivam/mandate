@@ -8009,9 +8009,11 @@ jq -r "$filter" "$src"
     /// flags in any word, and `-F` only in a command whose command word is `cargo` or may be
     /// cargo (it holds `$`, a backtick or `${{`, or is a whole-array expansion), or in a re-read
     /// word holding the token `cargo`, so `awk -F:` and `gh api -F owner="$o"` are no feature
-    /// flags. Outside the one compile-only form, `--all-features` is refused, and so is a value
-    /// that is not a complete literal of `[a-z0-9_,-]` without the token `live`, which any value
-    /// holding `$`, a backtick or `${{` is not. `Makefile`, `*.mk`, `justfile`,
+    /// flags. A YAML `with:` value has no command word, so it may be cargo: `-F` and a short-flag
+    /// cluster holding `F` (`-qF…`) are feature flags there, while `run:` values and scripts keep
+    /// the rule above. Outside the one compile-only form, `--all-features` is refused, and so is
+    /// a value that is not a complete literal of `[a-z0-9_,-]` without the token `live`, which
+    /// any value holding `$`, a backtick or `${{` is not. `Makefile`, `*.mk`, `justfile`,
     /// `Dockerfile*` and `docker-compose*.yml` are read anywhere in the repository. Out of reach:
     /// Rust sources (`xtask/`, `build.rs`), which code review and the layers check cover, and
     /// scripts that exist only at run time.
@@ -8389,6 +8391,14 @@ jq -r "$filter" "$src"
             (
                 ".github/workflows/ci.yml",
                 "steps:\n  - uses: an/action@v1\n    with:\n      args: --features ${{ matrix.a }}${{ matrix.b }}\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: build -F ${{ matrix.a }}${{ matrix.b }}\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: -qF${{ matrix.a }}${{ matrix.b }}\n",
             ),
         ];
         for (path, text) in refused_inputs_with_no_cargo_word {
