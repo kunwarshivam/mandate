@@ -37,6 +37,18 @@ pub enum IssueError {
     Unimplemented,
 }
 
+/// Why a challenge record has no canonical form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CanonicalError {
+    /// An identifier has no ULID text.
+    #[error(transparent)]
+    Ulid(#[from] UlidTextError),
+    /// The stubs of E9-4's tests PR return this, so every pending test fails on them (DEC-77,
+    /// DEC-137); the implementation PR replaces the stubs and removes the variant.
+    #[error("step-up is not implemented yet")]
+    Unimplemented,
+}
+
 /// What workspace services issue for one step-up (§7.2 step 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChallengeRecord {
@@ -63,16 +75,16 @@ impl ChallengeRecord {
 
     /// The record's canonical form (journal spec §4): an object of seven text members, the
     /// digest as `sha256:` and its lowercase hex, the instants in the journal's timestamp form.
-    pub fn canonical(&self) -> Result<Vec<u8>, UlidTextError> {
+    pub fn canonical(&self) -> Result<Vec<u8>, CanonicalError> {
         let _ = self;
-        Err(UlidTextError::Unimplemented { story: "E9-4" })
+        Err(CanonicalError::Unimplemented)
     }
 
     /// The WebAuthn challenge: SHA-256 of [`ChallengeRecord::canonical`] (§7.2 step 2), so the
     /// authenticator signs the action itself.
-    pub fn webauthn_challenge(&self) -> Result<Challenge, UlidTextError> {
+    pub fn webauthn_challenge(&self) -> Result<Challenge, CanonicalError> {
         let _ = self;
-        Err(UlidTextError::Unimplemented { story: "E9-4" })
+        Err(CanonicalError::Unimplemented)
     }
 }
 
