@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 
+use mandate_api::envelope::Actor;
 use mandate_api::idempotency::{Derivation, IdempotencyKey, KeyError, event_id};
 use mandate_api::problem::{
     AncestorLevel, CurrentBase, Effect, PolicyLevel, PolicyValue, Problem, ProblemCode,
@@ -517,6 +518,136 @@ fn a_custom_refusal_on_an_objects_last_member_is_located_at_the_member() {
         .collect();
     let mut wrong = mislocated::<Fixture>(&fixture);
     wrong.extend(mislocated::<Nest>(&nested));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A list of decimals beside a closed enum, so a refusal can be met on an array's item.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Quotes {
+    bids: Vec<Decimal>,
+    effect: Effect,
+}
+
+impl Validate for Quotes {
+    fn validate(&self) -> Result<(), Refused> {
+        Ok(())
+    }
+}
+
+/// A custom refusal on an array's item is located at that item by its index (RFC 6901, DEC-681
+/// item 10): the first, a middle, and the last item, with the array the first or last member, and
+/// never the parent or a sibling item. A wrong JSON type on the first item is the control.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_custom_refusal_on_an_array_item_is_located_at_that_item() {
+    let cases: [(&[u8], &str, &str); 6] = [
+        (
+            br#"{"effect": "none", "bids": ["1", "1.50"]}"#,
+            "/bids/1",
+            "non_canonical",
+        ),
+        (
+            br#"{"bids": ["1", "1.50"], "effect": "none"}"#,
+            "/bids/1",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "bids": ["1.50", "1"]}"#,
+            "/bids/0",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "bids": ["1", "1.50", "1"]}"#,
+            "/bids/1",
+            "non_canonical",
+        ),
+        (
+            b"{\n  \"effect\": \"none\",\n  \"bids\": [\n    \"1\",\n    \"1.50\"\n  ]\n}\n",
+            "/bids/1",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "bids": [1, "1"]}"#,
+            "/bids/0",
+            "type",
+        ),
+    ];
+    let wrong = mislocated::<Quotes>(&cases);
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// An [`Actor`], internally tagged on `kind`, beside a closed enum.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Acted {
+    who: Actor,
+    effect: Effect,
+}
+
+impl Validate for Acted {
+    fn validate(&self) -> Result<(), Refused> {
+        Ok(())
+    }
+}
+
+/// serde reads an internally tagged object whole before it decodes its members, so it cannot name
+/// the member inside it that it refuses: the refusal is located at the tagged object itself
+/// (DEC-681 item 10), whether that object is its parent's last member or not, and never at the
+/// parent or at a sibling inside it. Every code that serde reports after reading the object is
+/// covered: `type`, `unknown_member`, `non_canonical`, and `missing`. The tagged object as a first
+/// member, and an unknown `kind`, which serde names, are the controls.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_refusal_inside_a_tagged_object_is_located_at_that_object() {
+    let cases: [(&[u8], &str, &str); 9] = [
+        (
+            br#"{"effect": "none", "who": {"kind": "user", "id": 5}}"#,
+            "/who",
+            "type",
+        ),
+        (
+            br#"{"effect": "none", "who": {"kind": "user", "id": "a", "x": 1}}"#,
+            "/who",
+            "unknown_member",
+        ),
+        (
+            br#"{"effect": "none", "who": {"kind": "user", "id": "a b"}}"#,
+            "/who",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "who": {"id": "a b", "kind": "user"}}"#,
+            "/who",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "who": {"kind": "client", "id": "a"}}"#,
+            "/who",
+            "missing",
+        ),
+        (
+            br#"{"who": {"kind": "user", "id": 5}, "effect": "none"}"#,
+            "/who",
+            "type",
+        ),
+        (
+            br#"{"who": {"id": "a b", "kind": "user"}, "effect": "none"}"#,
+            "/who",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "who": {"id": "a", "kind": "bogus"}}"#,
+            "/who/kind",
+            "enum",
+        ),
+        (
+            br#"{"effect": "none", "who": {"id": "a"}}"#,
+            "/who",
+            "missing",
+        ),
+    ];
+    let wrong = mislocated::<Acted>(&cases);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
