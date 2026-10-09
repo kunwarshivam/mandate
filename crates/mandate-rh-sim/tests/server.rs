@@ -1,16 +1,19 @@
-//! The loopback MCP server over the core (E7-25, S2 tests part 1): loopback only, the session,
-//! and the pinned contract (LT-1, LT-8). Oracles: the contract file, `mandate-mcp`'s allowlist and
-//! revision, and a hash computed outside Rust.
+//! The loopback MCP server over the core (E7-25, S2 tests parts 1 and 2): loopback only, the
+//! session, the pinned contract, tool calls driving the core, unlisted tools, and the extra-tool
+//! and injection variants (LT-1, LT-8, CN-9). Oracles: the contract file, `mandate-mcp`'s
+//! allowlist and revision, a hash computed outside Rust, imperatives written here, the core
+//! driven directly, and the contract's own state and alert names.
 
 mod common;
 
 use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr};
 
-use common::sim;
 use common::wire::Wire;
-use mandate_mcp::ALLOWLIST;
-use mandate_rh_sim::{CONTRACT, INJECTION, ServerError, SimServer, Variant};
+use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, limit, price, qty, ref_id, sim};
+use mandate_mcp::{ALLOWLIST, PROTOCOL_VERSION};
+use mandate_rh_sim::{CONTRACT, Event, Fault, Garble, INJECTION, Order, OrderRequest, OrderType};
+use mandate_rh_sim::{ServerError, Side, SimError, SimServer, State, TimeInForce, Variant};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -38,6 +41,166 @@ fn hash(tools: &[Value]) -> String {
 
 fn names(tools: &[Value]) -> BTreeSet<&str> {
     tools.iter().map(|t| t["name"].as_str().unwrap()).collect()
+}
+
+/// What makes text an instruction to a model, written here rather than read from the server, so
+/// text other than the [`INJECTION`] literal is caught too. Each matches whole words only.
+const IMPERATIVES: [&str; 16] = [
+    "ignore",
+    "ignores",
+    "ignored",
+    "instruction",
+    "instructions",
+    "assistant",
+    "system",
+    "you must",
+    "do not",
+    "always",
+    "call",
+    "calls",
+    "calling",
+    "transfer",
+    "transfers",
+    "transferring",
+];
+
+fn instructs(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    IMPERATIVES.iter().any(|phrase| {
+        let phrase: Vec<&str> = phrase.split(' ').collect();
+        words
+            .windows(phrase.len())
+            .any(|run| run == phrase.as_slice())
+    })
+}
+
+#[test]
+fn the_imperatives_match_whole_words_only() {
+    assert!(instructs("Please CALL transfer_funds") && instructs("you  must, now"));
+    let inflected = [
+        "Ignores prior instructions",
+        "it calls",
+        "transfers the cash",
+    ];
+    assert!(
+        inflected.iter().all(|text| instructs(text)),
+        "inflected forms count"
+    );
+    for text in [
+        "recall the systematic ignorer",
+        "transferable",
+        "do nothing",
+        "a caller",
+    ] {
+        assert!(!instructs(text), "{text}");
+    }
+}
+
+fn served(variant: Variant) -> Result<(SimServer, Wire), ServerError> {
+    let server = SimServer::start(sim().unwrap(), variant)?;
+    let wire = Wire::connect(&server.url()?);
+    Ok((server, wire))
+}
+
+/// The request as `place_equity_order`'s arguments, under the contract's parameter names.
+fn arguments(r: &OrderRequest) -> Value {
+    let mut args = json!({"account_number": r.account_number, "symbol": r.symbol,
+        "side": r.side, "type": r.order_type});
+    let optional = [
+        ("quantity", &r.quantity),
+        ("dollar_amount", &r.dollar_amount),
+        ("limit_price", &r.limit_price),
+        ("stop_price", &r.stop_price),
+        ("time_in_force", &r.time_in_force),
+        ("market_hours", &r.market_hours),
+        ("ref_id", &r.ref_id),
+    ];
+    for (name, value) in optional {
+        if let Some(value) = value {
+            args[name] = json!(value);
+        }
+    }
+    args
+}
+
+/// The contract's `state` values, written out here.
+fn state_text(state: State) -> &'static str {
+    match state {
+        State::New => "new",
+        State::Queued => "queued",
+        State::Confirmed => "confirmed",
+        State::Unconfirmed => "unconfirmed",
+        State::PartiallyFilled => "partially_filled",
+        State::Filled => "filled",
+        State::Cancelled => "cancelled",
+        State::Rejected => "rejected",
+        State::Failed => "failed",
+        State::Voided => "voided",
+    }
+}
+
+/// An order record as `get_equity_orders` must show it, built here from the core's order: every
+/// field list-and-match reads (connections spec §6.2), under the contract's parameter names, with
+/// numbers as decimal text (LT-12).
+fn row(o: &Order) -> Value {
+    let side = match o.side {
+        Side::Buy => "buy",
+        Side::Sell => "sell",
+    };
+    let kind = match o.order_type {
+        OrderType::Market => "market",
+        OrderType::Limit => "limit",
+        OrderType::StopMarket => "stop_market",
+        OrderType::StopLimit => "stop_limit",
+    };
+    let tif = match o.time_in_force {
+        TimeInForce::Gfd => "gfd",
+        TimeInForce::Gtc => "gtc",
+    };
+    json!({"id": o.id, "symbol": o.symbol, "side": side, "type": kind, "time_in_force": tif,
+        "quantity": o.quantity.to_string(), "limit_price": o.limit_price.map(|p| p.to_string()),
+        "state": state_text(o.state)})
+}
+
+/// The account's records over MCP, each checked against [`row`] of the core's order.
+fn listed(wire: &mut Wire, held: &[Order]) -> Vec<Value> {
+    let answer = wire.call("get_equity_orders", json!({"account_number": AGENTIC}));
+    let rows = answer["structuredContent"]["orders"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(rows.len(), held.len(), "{answer}");
+    for (served, order) in rows.iter().zip(held) {
+        for (key, value) in row(order).as_object().unwrap() {
+            assert_eq!(&served[key], value, "{key} of {served}");
+        }
+    }
+    rows
+}
+
+const STATES: [State; 10] = [
+    State::New,
+    State::Queued,
+    State::Confirmed,
+    State::Unconfirmed,
+    State::PartiallyFilled,
+    State::Filled,
+    State::Cancelled,
+    State::Rejected,
+    State::Failed,
+    State::Voided,
+];
+
+fn refused(result: &Value) -> bool {
+    result["isError"] == json!(true)
+}
+
+fn orders(server: &SimServer, account: &str) -> Result<Vec<Order>, ServerError> {
+    server.drive(|s| s.orders(account).unwrap())
 }
 
 #[test]
@@ -72,7 +235,18 @@ fn the_handshake_answers_the_transports_revision_and_a_session_later_requests_ne
     wire.session = Some(format!("{session}x"));
     let stale = wire.request("tools/list", json!({}));
     assert_eq!(stale.status, 404, "a session it never gave: {}", stale.body);
+    let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}});
+    wire.session = None;
+    assert_eq!(
+        wire.post(&note).status,
+        400,
+        "a notification needs the session too"
+    );
     wire.session = Some(other);
+    wire.protocol = "2025-03-26".to_owned();
+    let revision = wire.request("tools/list", json!({}));
+    assert_eq!(revision.status, 400, "another revision: {}", revision.body);
+    wire.protocol = PROTOCOL_VERSION.to_owned();
     assert_eq!(wire.request("tools/list", json!({})).status, 200);
     Ok(())
 }
@@ -103,7 +277,8 @@ fn the_honest_listing_is_the_pinned_contract_and_carries_no_instruction_text() -
             None,
             "the contract publishes none"
         );
-        assert!(tool["description"].is_string(), "{}", tool["name"]);
+        let description = tool["description"].as_str().unwrap();
+        assert!(!instructs(description), "{}: {description}", tool["name"]);
     }
     let text = Value::Array(tools).to_string();
     assert!(
@@ -115,5 +290,350 @@ fn the_honest_listing_is_the_pinned_contract_and_carries_no_instruction_text() -
         Vec::<String>::new(),
         "a listing is not a call"
     );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn the_extra_tool_variant_lists_one_more_tool_keeps_the_hash_and_reaches_nothing() -> Outcome {
+    for extra in ["place_option_order", "transfer_funds"] {
+        let (server, mut wire) = served(Variant::ExtraTool(extra.to_owned()))?;
+        let tools = wire.list();
+        let mut expected = BTreeSet::from(ALLOWLIST);
+        expected.insert(extra);
+        assert_eq!(names(&tools), expected, "{extra}");
+        assert_eq!(
+            hash(&tools),
+            PINNED,
+            "{extra}: not allowlisted, so not hashed"
+        );
+        let answer = wire.call(extra, arguments(&limit("buy", "1", "501", 1)));
+        assert!(refused(&answer), "{extra}: {answer}");
+        assert_eq!(server.calls()?, [extra], "every call is recorded");
+        assert_eq!(orders(&server, AGENTIC)?, [], "{extra} reaches no order");
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn the_injection_variant_carries_instruction_text_in_every_description_and_result() -> Outcome {
+    assert!(
+        instructs(INJECTION),
+        "the imperatives catch the variant's own text"
+    );
+    let (server, mut wire) = served(Variant::Injection)?;
+    let tools = wire.list();
+    assert_eq!(
+        (names(&tools), hash(&tools)),
+        (BTreeSet::from(ALLOWLIST), PINNED.to_owned())
+    );
+    for tool in &tools {
+        let description = tool["description"].as_str().unwrap();
+        assert!(description.contains(INJECTION), "{}", tool["name"]);
+    }
+    let request = limit("buy", "1", "501", 1);
+    let placed = wire.call("place_equity_order", arguments(&request));
+    let listed = wire.call("get_equity_orders", json!({"account_number": AGENTIC}));
+    let refusal = wire.call(
+        "place_equity_order",
+        arguments(&limit("sell", "9", "499", 2)),
+    );
+    for result in [&placed, &listed, &refusal] {
+        assert!(result.to_string().contains(INJECTION), "{result}");
+    }
+    assert!(!refused(&placed) && refused(&refusal), "{placed} {refusal}");
+    let mut direct = sim().unwrap();
+    direct.place(&request).unwrap();
+    assert_eq!(
+        orders(&server, AGENTIC)?,
+        direct.orders(AGENTIC).unwrap(),
+        "text moves nothing"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn an_unlisted_tool_or_an_unknown_method_is_a_protocol_error_that_reaches_nothing() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    let args = json!({"name": "get_equity_tax_lots", "arguments": {"account_number": AGENTIC}});
+    let unlisted = wire.request("tools/call", args).message();
+    assert_eq!(
+        (&unlisted["error"]["code"], unlisted.get("result")),
+        (&json!(-32602), None)
+    );
+    let unknown = wire.request("resources/list", json!({})).message();
+    assert_eq!(
+        (&unknown["error"]["code"], unknown.get("result")),
+        (&json!(-32601), None)
+    );
+    assert_eq!(server.calls()?, ["get_equity_tax_lots"]);
+    assert_eq!(orders(&server, AGENTIC)?, []);
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_place_drives_the_core_as_the_core_driven_alone_would() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    let mut direct = sim().unwrap();
+    let text = |value: &str| Some(value.to_owned());
+    let requests = [
+        limit("buy", "2", "501", 1),
+        limit("buy", "3", "490", 1),
+        limit("sell", "5", "499", 2),
+        OrderRequest {
+            account_number: NOT_AGENTIC.to_owned(),
+            ..limit("buy", "1", "501", 3)
+        },
+        limit("buy", "0.5", "501", 4),
+        OrderRequest {
+            order_type: "market".to_owned(),
+            quantity: None,
+            limit_price: None,
+            dollar_amount: text("250"),
+            ..limit("buy", "1", "1", 5)
+        },
+        OrderRequest {
+            order_type: "stop_limit".to_owned(),
+            stop_price: text("505"),
+            time_in_force: text("gtc"),
+            ..limit("buy", "1", "506", 6)
+        },
+        OrderRequest {
+            market_hours: text("extended_hours"),
+            ..limit("buy", "1", "502", 7)
+        },
+        OrderRequest {
+            ref_id: None,
+            ..limit("buy", "1", "498", 8)
+        },
+        OrderRequest {
+            account_number: DAY_TRADER.to_owned(),
+            ..limit("buy", "1", "500", 9)
+        },
+    ];
+    let (mut placed, mut refusals) = (0, 0);
+    for request in &requests {
+        let answer = wire.call("place_equity_order", arguments(request));
+        match direct.place(request) {
+            Ok(order) => {
+                placed += 1;
+                assert!(!refused(&answer), "{request:?}: {answer}");
+                assert_eq!(answer["structuredContent"]["id"], json!(order.id));
+                assert_eq!(
+                    answer["structuredContent"]["state"],
+                    state_text(order.state)
+                );
+            }
+            Err(_) => {
+                refusals += 1;
+                assert!(refused(&answer), "{request:?}: {answer}");
+            }
+        }
+    }
+    assert_eq!(
+        (placed, refusals),
+        (7, 3),
+        "the script covers both outcomes"
+    );
+    for account in [AGENTIC, DAY_TRADER] {
+        let served = orders(&server, account)?;
+        assert!(!served.is_empty(), "{account} places an order");
+        assert_eq!(served, direct.orders(account).unwrap(), "{account}");
+    }
+    assert_eq!(
+        orders(&server, NOT_AGENTIC)?,
+        [],
+        "a refused account holds nothing"
+    );
+    assert_eq!(server.calls()?, vec!["place_equity_order"; requests.len()]);
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn review_reads_and_cancel_drive_the_core_and_review_places_nothing() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    let buy = |q: &str, at: &str, n| arguments(&limit("buy", q, at, n));
+    let id = |answer: Value| {
+        answer["structuredContent"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let review = wire.call("review_equity_order", buy("100", "501", 1));
+    let alerts = &review["structuredContent"]["alerts"];
+    assert_eq!(alerts, &json!(["buying_power"]), "{review}");
+    assert_eq!(orders(&server, AGENTIC)?, [], "review places nothing");
+    let filled = id(wire.call("place_equity_order", buy("1", "501", 2)));
+    server.drive(|s| s.fill(&filled, qty("1"), price("500")).unwrap())?;
+    let cancel = |id: &str| json!({"account_number": AGENTIC, "order_id": id});
+    let late = wire.call("cancel_equity_order", cancel(&filled));
+    assert!(refused(&late), "a filled order: {late}");
+    let working = id(wire.call("place_equity_order", buy("1", "499", 3)));
+    let cancelled = wire.call("cancel_equity_order", cancel(&working));
+    assert!(!refused(&cancelled), "{cancelled}");
+    let newest = orders(&server, AGENTIC)?;
+    assert_eq!((newest.len(), newest[0].state), (2, State::Cancelled));
+    let listed = wire.call("get_equity_orders", json!({"account_number": AGENTIC}));
+    let rows = listed["structuredContent"]["orders"].as_array().unwrap();
+    let seen: Vec<(&Value, &Value)> = rows.iter().map(|o| (&o["id"], &o["state"])).collect();
+    let (working, filled) = (json!(working), json!(filled));
+    let expected = [(&working, &json!("cancelled")), (&filled, &json!("filled"))];
+    assert_eq!(seen, expected, "newest first, with the contract's states");
+    assert!(
+        !instructs(&listed.to_string()),
+        "honest results instruct nothing"
+    );
+    let calls = [
+        "review_equity_order",
+        "place_equity_order",
+        "cancel_equity_order",
+    ];
+    let then = [
+        "place_equity_order",
+        "cancel_equity_order",
+        "get_equity_orders",
+    ];
+    assert_eq!(server.calls()?, [calls, then].concat());
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_lost_answer_leaves_one_order_the_client_finds_only_by_its_fields() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    let mut direct = sim().unwrap();
+    let lose = Event::Script(Fault::LoseAnswer);
+    server.drive(|s| s.apply(lose.clone()).unwrap())?;
+    direct.apply(lose).unwrap();
+    let request = limit("buy", "2", "501", 1);
+    let answer = wire.call_raw("place_equity_order", arguments(&request));
+    assert!(answer.is_none(), "no byte of an answer arrives");
+    assert_eq!(direct.place(&request), Err(SimError::AnswerLost));
+    let held = direct.orders(AGENTIC).unwrap();
+    assert_eq!(orders(&server, AGENTIC)?, held, "the core acted");
+    let rows = listed(&mut wire, &held);
+    assert_eq!(
+        rows[0].get("ref_id"),
+        None,
+        "records do not echo ref_id unless scripted"
+    );
+    let resent = wire.call(
+        "place_equity_order",
+        arguments(&limit("buy", "3", "490", 1)),
+    );
+    assert_eq!(
+        resent["structuredContent"]["id"],
+        json!(held[0].id),
+        "dedup by ref_id"
+    );
+    assert_eq!(
+        orders(&server, AGENTIC)?,
+        held,
+        "a re-send makes no second order"
+    );
+    server.drive(|s| s.apply(Event::EchoRefId(true)).unwrap())?;
+    let echoed = listed(&mut wire, &held);
+    assert_eq!(echoed[0]["ref_id"], json!(ref_id(1)));
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn two_lost_answers_for_one_body_leave_records_nothing_tells_apart() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    for n in [1, 2] {
+        server.drive(|s| s.apply(Event::Script(Fault::LoseAnswer)).unwrap())?;
+        let answer = wire.call_raw(
+            "place_equity_order",
+            arguments(&limit("buy", "1", "501", n)),
+        );
+        assert!(answer.is_none(), "{n}");
+    }
+    let held = orders(&server, AGENTIC)?;
+    let mut rows = listed(&mut wire, &held);
+    assert_ne!(rows[0]["id"], rows[1]["id"], "two orders");
+    for row in &mut rows {
+        assert_eq!(row.get("ref_id"), None);
+        row.as_object_mut().unwrap().remove("id");
+    }
+    assert_eq!(
+        rows[0], rows[1],
+        "every field list-and-match reads is the same"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_garbled_answer_follows_an_order_the_core_placed_and_only_that_answer_is_bent() -> Outcome {
+    let states: Vec<&str> = STATES.iter().map(|s| state_text(*s)).collect();
+    let all = [
+        Garble::UnknownState,
+        Garble::MissingId,
+        Garble::NumberQuantity,
+        Garble::NotJson,
+    ];
+    for garble in all {
+        let (server, mut wire) = served(Variant::Honest)?;
+        server.garble_next(garble)?;
+        let request = limit("buy", "1", "501", 1);
+        let reply = wire
+            .call_raw("place_equity_order", arguments(&request))
+            .unwrap();
+        assert_eq!(reply.status, 200, "{garble:?}");
+        assert_eq!(reply.header("content-type"), Some("application/json"));
+        let mut direct = sim().unwrap();
+        direct.place(&request).unwrap();
+        let held = direct.orders(AGENTIC).unwrap();
+        let bent = match garble {
+            Garble::UnknownState => "state",
+            Garble::MissingId => "id",
+            Garble::NumberQuantity => "quantity",
+            Garble::NotJson => {
+                assert!(serde_json::from_str::<Value>(&reply.body).is_err());
+                ""
+            }
+        };
+        if garble != Garble::NotJson {
+            let result = reply.result();
+            assert!(
+                !refused(&result),
+                "{garble:?}: bent, never a refusal: {result}"
+            );
+            let content = &result["structuredContent"];
+            let expected = row(&held[0]);
+            for (key, value) in expected.as_object().unwrap() {
+                if key != bent {
+                    assert_eq!(&content[key], value, "{garble:?}: {key} of {content}");
+                }
+            }
+            match garble {
+                Garble::UnknownState => {
+                    let state = content["state"].as_str().unwrap();
+                    assert!(!states.contains(&state), "{state}");
+                }
+                Garble::MissingId => assert_eq!(content.get("id"), None),
+                _ => {
+                    assert!(content["quantity"].is_number(), "{content}");
+                    let quantity = content["quantity"].to_string();
+                    assert_eq!(
+                        quantity,
+                        held[0].quantity.to_string(),
+                        "the core's quantity"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            orders(&server, AGENTIC)?,
+            held,
+            "{garble:?}: the core acted"
+        );
+        listed(&mut wire, &held);
+    }
     Ok(())
 }

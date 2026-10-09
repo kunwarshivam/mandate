@@ -37,6 +37,8 @@ import connections
 import clients
 import control
 import holds
+import membership
+import membership_fold
 import research
 import risk_state
 import workspace
@@ -3823,6 +3825,8 @@ def render(
     workspace_section: dict,
     client_section: dict,
     hold_section: dict,
+    membership_section: dict,
+    fold_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3840,6 +3844,8 @@ def render(
             "workspace_api": workspace_section,
             "client_actor": client_section,
             "hold": hold_section,
+            "membership": membership_section,
+            "membership_fold": fold_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3888,6 +3894,8 @@ def main(argv: list[str] | None = None) -> int:
     workspace_section = workspace.build_section()
     client_section = clients.build_section()
     hold_section = holds.build_section()
+    membership_section = membership.build_section()
+    fold_section = membership_fold.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3915,6 +3923,10 @@ def main(argv: list[str] | None = None) -> int:
     problems += clients.run_mutants(client_section)
     problems += holds.check_section(hold_section)
     problems += holds.run_mutants(hold_section)
+    problems += membership.check_section(membership_section)
+    problems += membership.run_mutants(membership_section)
+    problems += membership_fold.check_section(fold_section)
+    problems += membership_fold.run_mutants(fold_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3935,6 +3947,8 @@ def main(argv: list[str] | None = None) -> int:
         workspace_section,
         client_section,
         hold_section,
+        membership_section,
+        fold_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -3951,6 +3965,8 @@ def main(argv: list[str] | None = None) -> int:
         or workspace.check_section(reread["workspace_api"])
         or clients.check_section(reread["client_actor"])
         or holds.check_section(reread["hold"])
+        or membership.check_section(reread["membership"])
+        or membership_fold.check_section(reread["membership_fold"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4010,7 +4026,12 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(clients.vector_mutants(client_section))} vector mutants caught; "
         f"{len(hold_section['drafts'])} hold drafts, {len(hold_section['invalid_drafts'])} invalid and "
         f"{len(hold_section['valid_drafts'])} valid; {len(holds.VALIDATOR_MUTANTS)} validator and "
-        f"{len(holds.vector_mutants(hold_section))} vector mutants caught"
+        f"{len(holds.vector_mutants(hold_section))} vector mutants caught; "
+        f"{len(membership_section['drafts'])} membership drafts, {len(membership_section['invalid_drafts'])} invalid and "
+        f"{len(membership_section['valid_drafts'])} valid; {len(membership.VALIDATOR_MUTANTS)} validator and "
+        f"{len(membership.vector_mutants(membership_section))} vector mutants caught; "
+        f"{len(fold_section['histories'])} membership histories; {len(membership_fold.FOLD_MUTANTS)} fold and "
+        f"{len(membership_fold.vector_mutants(fold_section))} vector mutants caught"
     )
     return 0
 

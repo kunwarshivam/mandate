@@ -9,7 +9,7 @@ import { AGENT_IDS } from "../src/fixtures/workspace";
  */
 
 const CASES = [
-  { width: 768, button: "More", items: ["Alpaca paper", "Paper workspace", "Alerts", "Profile", "Notifications"], role: "dialog" as const },
+  { width: 768, button: "More", items: ["Alpaca paper", "Paper workspace", "Alerts", "All settings"], role: "dialog" as const },
   { width: 1024, button: "Alerts and account", items: ["Alerts", "You, owner", "Profile", "Notifications"] },
   { width: 1280, button: "Your account", items: ["You, owner", "Profile", "Notifications"] },
   { width: 1024, button: "Workspace: Paper workspace", items: ["Workspaces (fixture)", "Paper workspace", "Second workspace"] },

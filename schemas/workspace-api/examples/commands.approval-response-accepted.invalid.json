@@ -26,6 +26,12 @@
     }
   },
   {
+    "label": "a null dropped list",
+    "set": {
+      "/dropped": null
+    }
+  },
+  {
     "label": "the whole body dropped: a Skip body that is not JSON is refused, never read as {}",
     "set": {
       "/dropped": [

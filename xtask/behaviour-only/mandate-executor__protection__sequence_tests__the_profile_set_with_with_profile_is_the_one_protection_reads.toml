@@ -1,7 +1,0 @@
-file = "crates/mandate-executor/src/protection.rs"
-test = "sequence_tests::the_profile_set_with_with_profile_is_the_one_protection_reads"
-reason = """
-E7-23 B2a's (DEC-838 item 5). with_profile is a stub that keeps no profile and today's re_place
-reads none, so crypto's stop-limit is still placed and the test fails on that placement, not at a
-stub. The implementation PR deletes this file with the #[ignore] line.
-"""
