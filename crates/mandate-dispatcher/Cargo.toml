@@ -1,0 +1,20 @@
+[package]
+name = "mandate-dispatcher"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The notification dispatcher: turns committed causes into sends through the channel adapters (backlog E8-10; web push and the relay, E8-14)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-notify.workspace = true
+mandate-push-relay.workspace = true
+mandate-webpush.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+base64ct.workspace = true
+mandate-time.workspace = true

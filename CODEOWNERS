@@ -63,4 +63,5 @@
 /crates/mandate-paper/      @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam
 /crates/mandate-push-relay/ @kunwarshivam
+/crates/mandate-dispatcher/ @kunwarshivam
 /crates/mandate-audit/      @kunwarshivam
