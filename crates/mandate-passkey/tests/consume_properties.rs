@@ -100,7 +100,11 @@ proptest! {
         }
         let result = case.run();
         match chosen.iter().min() {
-            None => prop_assert!(result.is_ok(), "no failure injected: {result:?}"),
+            None => prop_assert_eq!(
+                result.map(|consumed| consumed.evidence().authenticated_at),
+                Ok(stepup::at(stepup::ISSUED)),
+                "no failure injected: the evidence is stamped with the challenge's issue time",
+            ),
             Some(first) => prop_assert_eq!(result, Err(expected(*first)), "{:?}", chosen),
         }
     }
