@@ -1576,6 +1576,21 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - the Robinhood connector still calls no watchlist or scan tool
     ([connections spec §6.2](../specs/connections.md#62-how-mcp-maps-to-the-connector-interface)
     rule 2).
+- **E11-12 (Must; SC, after E11-9 and E9-5)** As an owner in a workspace whose policy has
+  `independent_approval_required`, I want a risk-increasing mandate version I propose in the web
+  Edit form or a thread to go to a second user for approval, so that a change such as loosening
+  `capital.max_loss_from_allocation`, the only path that lifts a latched lifetime floor, is never
+  confirmed by my passkey alone ([mandate spec](../specs/mandate.md) V-047, §4.3, §5.7, MI-3;
+  [DEC-444](decisions/DEC-444.md)). Until it lands, the web app refuses such a version under the
+  policy, and a neutral one where fewer than two people can approve, and reads an absent or unknown
+  policy value as required (the interim refusal, claim #746).
+  *Accepted when:*
+  - the request names the version, its hash and its §9.2 classification, and the approver is a
+    user other than the requester, with step-up;
+  - a one-user workspace is refused as V-047 says, a risk-reducing version aside (DEC-444);
+  - the version applies only after the second user's approval, and V-047 is checked again at
+    application;
+  - the interim refusal and its tests are replaced, not kept beside the flow.
 
 ### E12 Audit explorer
 

@@ -519,12 +519,46 @@ export interface Proposal extends Diff {
   refusals: Refusal[];
 }
 
-/** Everything that stops a version from applying now, from validation and §5.1. */
+/** The rule id a refusal for independent approval carries, kept in the record, never in the sentence (C-6). */
+export const INDEPENDENT_APPROVAL_RULE = "V-047";
+
+/** §4.3's effective policy. Only a stated `false` turns it off: absent or not known counts as required (rule 3). */
+export function independentApprovalRequired(ws: Workspace): boolean {
+  return ws.independent_approval_required !== false;
+}
+
+/**
+ * §4.3 and V-047: under `independent_approval_required` a version that is not risk-reducing needs a
+ * user other than the requester, and nothing here can ask one yet, so it is refused rather than
+ * confirmed with a passkey alone. With fewer than two people who can approve, V-047 refuses a
+ * neutral version too and lets only a risk-reducing one through (DEC-444). The approver count is a
+ * lower bound on the workspace's users; with two or more, a neutral version needs no second user.
+ */
+function independentApproval(ws: Workspace, classification: ChangeClass | null): Refusal | null {
+  if (!independentApprovalRequired(ws) || classification === null || classification === "risk_reducing") return null;
+  if (ws.approver_users < 2) {
+    return {
+      rule: INDEPENDENT_APPROVAL_RULE,
+      text: "This workspace needs a second person to approve any change that doesn't lower risk, and no second person can approve in it, so only a change that lowers risk can be confirmed.",
+    };
+  }
+  if (classification === "risk_increasing") {
+    return {
+      rule: INDEPENDENT_APPROVAL_RULE,
+      text: "This workspace needs a second person to approve a change that raises risk, and that approval can't be asked for here yet, so a passkey alone can't confirm it.",
+    };
+  }
+  return null;
+}
+
+/** Everything that stops a version from applying now, from validation, §4.3's independent approval and §5.1. */
 function refusalsFor(ws: Workspace, agent: Agent, d: Diff): Refusal[] {
   if (agent.mode === "stopped") return [{ rule: "stopped", text: `${agent.label} is stopped, and a stopped agent's mandate does not change.` }];
   if (d.changes.length === 0) return [];
   const room = add(unallocatedUsd(ws), dec(agent.mandate.capital.allocation_usd));
   const out = validate(d.mandate, { roomUsd: room, approverUsers: ws.approver_users });
+  const independence = independentApproval(ws, d.classification);
+  if (independence) out.push(independence);
   const scaled = allocationChange(agent, d.mandate);
   if (scaled && !scaled.ok) out.push({ rule: "§5.1", text: scaled.reason });
   return out;
