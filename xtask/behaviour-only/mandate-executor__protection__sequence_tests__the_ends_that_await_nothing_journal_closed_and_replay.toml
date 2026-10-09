@@ -1,7 +1,0 @@
-file = "crates/mandate-executor/src/protection.rs"
-test = "sequence_tests::the_ends_that_await_nothing_journal_closed_and_replay"
-reason = """
-E7-19 E1b-P writers (DEC-859 item 1): the writers exist and only their records change, so it
-reaches no stub; it fails where main's legacy record is refused at `append` (DEC-446) until the
-writers slice's implementation PR deletes this file with the test's `#[ignore]` line.
-"""
