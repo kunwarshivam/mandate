@@ -6,21 +6,20 @@ import { Inbox } from "pixelarticons/react/Inbox.js";
 import { SquareAlert } from "pixelarticons/react/SquareAlert.js";
 import { AccountEquityChart } from "@/components/charts/equity-chart";
 import { ModeBadge } from "@/components/domain/mode";
-import { BrandOwl } from "@/components/brand/brand-owl";
 import { AgentOwl } from "@/components/domain/owl";
 import type { Agent, Approval, GateDecision, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
-import { needsYouLines } from "@/lib/attention";
+import { needsYouLines, nothingNeedsYou } from "@/lib/attention";
 import { clock, price, quantity, zoneLabel } from "@/lib/format";
 import { verdictBadge } from "@/lib/gate-reasons";
 import { headroomLine } from "@/lib/limits";
-import { approvalAt, useRuntime } from "@/lib/mock-runtime";
+import { openRequests, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import { AgentCard, PaperPnlNote } from "./agent-card";
 import { AssetsSection } from "./assets-section";
 import { DecisionTimeline, tally } from "./decision-timeline";
-import { EmptyBoard, NEEDS_CARD, NEEDS_ITEM, NEEDS_STRIP, PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
+import { AllClear, EmptyBoard, NEEDS_CARD, NEEDS_ITEM, NEEDS_STRIP, PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
 import { SideRail } from "./side-rail";
 
 /** Home's rail shows the latest decisions beside the money; the audit has them all. */
@@ -71,11 +70,8 @@ function NeedsYou({ ws, open }: { ws: Workspace; open: Approval[] }) {
           </span>
         ) : null}
       </h2>
-      {count === 0 ? (
-        <p data-slot="all-clear" className="pixel-face flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
-          <BrandOwl className="size-8" />
-          All clear. Nothing needs you.
-        </p>
+      {nothingNeedsYou(ws, open) ? (
+        <AllClear />
       ) : (
         <ul className={NEEDS_STRIP}>
           {open.map((a) => (
@@ -180,10 +176,7 @@ function RecentDecisions({ ws, open, count, id, className }: { ws: Workspace; op
 function Dashboard() {
   const { ws, now } = useRuntime();
   if (ws.agents.length === 0) return <EmptyBoard />;
-  const open = ws.approvals
-    .map((a) => approvalAt(a, now))
-    .filter((a) => a.status === "delivered")
-    .sort((a, b) => Date.parse(a.deadline) - Date.parse(b.deadline));
+  const open = openRequests(ws, now);
   const marketStale = ws.health.market_data.state !== "ok";
 
   return (

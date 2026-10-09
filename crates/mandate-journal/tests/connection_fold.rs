@@ -410,6 +410,80 @@ fn only_a_record_that_enters_suspended_moves_the_suspension_a_rotation_must_foll
     );
 }
 
+/// The records before a second suspension: a binding, a first suspension that a `reauthorize`
+/// check (record 3) and its rotation (record 4) clear, the owner's acknowledgment back to `active`,
+/// and a second entry into `suspended` at record 7.
+fn suspended_twice() -> Vec<(&'static str, String)> {
+    vec![
+        check("connect"),
+        ("established_copy", String::new()),
+        (
+            "state_degraded",
+            moved("active", "suspended", "authorization_failed"),
+        ),
+        check("reauthorize"),
+        ("rotated_copy", String::new()),
+        (
+            "state_degraded",
+            moved("suspended", "suspended", "condition_cleared") + &set("causation_id", &id(4)),
+        ),
+        (
+            "state_degraded",
+            moved("suspended", "active", "acknowledged"),
+        ),
+        (
+            "state_degraded",
+            moved("active", "suspended", "credential_expired"),
+        ),
+    ]
+}
+
+/// Rule 68 (journal spec v0.35 §9.8): a `condition_cleared` out of `suspended` names a rotation
+/// whose `reauthorize` check came after the `ConnectionStateChanged` that last entered `suspended`,
+/// the *latest* entry, not any earlier one. After a second entry into `suspended`, neither the
+/// first suspension's rotation nor a new rotation resting on the first suspension's check clears
+/// it: each is refused at the clearing record. A check after the second entry, and its rotation,
+/// clear it. Every vector enters `suspended` at most once, so none tells the two suspensions apart;
+/// the expected answers are §9.8's text, written by hand.
+#[test]
+fn a_clearing_rotation_follows_the_latest_entry_into_suspended() {
+    let clearing = |cause: usize| {
+        (
+            "state_degraded",
+            moved("suspended", "suspended", "condition_cleared") + &set("causation_id", &id(cause)),
+        )
+    };
+    let judged = |more: Vec<(&'static str, String)>| {
+        let mut records = suspended_twice();
+        records.extend(more);
+        written(&records, verify_connection_lifecycle)
+    };
+    assert_eq!(judged(Vec::new()), Ok(()), "the prefix itself is valid");
+    assert_eq!(
+        judged(vec![clearing(4)]),
+        refused(8, ConnectionStreamRule::AccountStream),
+        "the first suspension's rotation does not clear the second"
+    );
+    assert_eq!(
+        judged(vec![("rotated_copy", String::new()), clearing(8)]),
+        refused(9, ConnectionStreamRule::AccountStream),
+        "a rotation after the second entry rests on the first suspension's check"
+    );
+    assert_eq!(
+        judged(vec![
+            check("reauthorize"),
+            ("rotated_copy", String::new()),
+            clearing(9),
+            (
+                "state_degraded",
+                moved("suspended", "active", "acknowledged")
+            ),
+        ]),
+        Ok(()),
+        "a check after the latest entry into suspended, and its rotation, clear it"
+    );
+}
+
 /// Rule 66: "A version-1 first establishment has no `account_ref`, so it is never
 /// re-established", not even by another version 1 whose absent `account_ref` matches it.
 /// §9.8's text refuses it, and so does `reference/journal/connections.py` since v0.30 (DEC-696).
