@@ -7,6 +7,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use anyhow::{Context, Result, bail};
@@ -594,7 +595,7 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
 /// Scans [`gitleaks_plants`], written to a temporary directory, with the repository's
 /// `.gitleaks.toml`: exactly the expected findings must be reported.
 fn gitleaks_exceptions() -> Result<()> {
-    let dir = env::temp_dir().join(format!("mandate-gitleaks-{}", std::process::id()));
+    let dir = unique_temp_path("mandate-gitleaks", "");
     let report_path = dir.with_extension("json");
     let mut expected = BTreeMap::new();
     for (path, line, rule) in gitleaks_plants() {
@@ -1191,7 +1192,7 @@ fn refcases(write: bool) -> Result<()> {
             "../fixtures/refcases",
         ]);
     }
-    let tmp = env::temp_dir().join(format!("mandate-refcases-{}", std::process::id()));
+    let tmp = unique_temp_path("mandate-refcases", "");
     fs::create_dir_all(&tmp)?;
     let tmp_str = tmp.to_str().context("non-UTF-8 temp path")?;
     uv_tools(&[
@@ -3413,6 +3414,23 @@ impl Drop for GateDiff {
     }
 }
 
+/// How many temporary paths this process has named, so two in one process never share one.
+static TEMP_PATHS: AtomicU64 = AtomicU64::new(0);
+
+/// A path in the temporary directory, `<stem>-<pid>-<n><suffix>`, unique on the machine while this
+/// process lives. The process id alone is shared by every test thread of `cargo test`, which runs
+/// one process where nextest runs one per test: one [`GateDiff`] dropping its file removed the file
+/// another was about to time, and one [`TestOrder`] overwrote another's (#824).
+fn unique_temp_path(stem: &str, suffix: &str) -> PathBuf {
+    let n = TEMP_PATHS.fetch_add(1, Ordering::Relaxed);
+    env::temp_dir().join(format!("{stem}-{}-{n}{suffix}", std::process::id()))
+}
+
+/// A temporary path for one [`GateDiff`], no other's (#768's follow-up, #824).
+fn gate_diff_path() -> PathBuf {
+    unique_temp_path("mandate-mutants", ".diff")
+}
+
 /// The diff [`mutants`] and [`mutants_plan`] both judge, or `None`, saying why, when there is no
 /// base or no safety-critical crate's source changed. One function, so the plan that sizes CI's
 /// matrix and the gate each shard runs cannot select different source (DEC-538).
@@ -3443,7 +3461,7 @@ fn gate_diff(root: &Path, base: Option<&str>) -> Result<Option<GateDiff>> {
         "git",
         &args.iter().map(String::as_str).collect::<Vec<_>>(),
     )?;
-    let file = env::temp_dir().join(format!("mandate-mutants-{}.diff", std::process::id()));
+    let file = gate_diff_path();
     fs::write(&file, text)?;
     Ok(Some(GateDiff {
         crates,
@@ -3761,8 +3779,7 @@ impl TestOrder {
         if packages.is_empty() {
             return Ok(None);
         }
-        let file =
-            env::temp_dir().join(format!("mandate-mutants-order-{}.toml", std::process::id()));
+        let file = unique_temp_path("mandate-mutants-order", ".toml");
         fs::write(&file, test_order_config(packages))?;
         Ok(Some(Self(file)))
     }
@@ -4435,11 +4452,48 @@ fn has_pending_tests(root: &Path, dir: &str) -> Result<bool> {
 /// name the story's stub, or a test that can never pass on correct code would pass the gate
 /// (DEC-137). With no pending test there is nothing to run.
 fn pending() -> Result<()> {
-    report(pending_problems(Path::new("."))?, "pending")
+    report(
+        pending_problems(Path::new("."), BuildDir::Callers)?,
+        "pending",
+    )
 }
 
-/// Runs every test the working tree marks pending and names each one that passes or does not run.
-fn pending_problems(root: &Path) -> Result<Vec<String>> {
+/// Where a `cargo` child that builds puts what it builds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BuildDir {
+    /// Wherever the caller's environment says, [`CARGO_TARGET_DIR`] included: the gate run on the
+    /// repository itself, which reuses the caller's builds. CI exports no such variable, so there
+    /// it is the repository's own `target/`.
+    Callers,
+    /// The `target/` of the repository the child runs in, with the caller's [`CARGO_TARGET_DIR`]
+    /// out of its environment: a fixture repository. Every pending-gate fixture names its crate
+    /// `fx`, so under one shared target directory concurrent fixtures overwrote each other's test
+    /// binaries and a fixture's pending test was reported as not run.
+    OwnTree,
+}
+
+/// The `cargo nextest run` child of [`pending_problems`] in `root`, building where `build` says,
+/// with the caller's `PROPTEST_*` variables replaced by [`PENDING_PROPTEST_ENV`].
+fn pending_nextest(root: &Path, args: &[&str], build: BuildDir) -> Command {
+    let mut nextest = Command::new("cargo");
+    nextest.current_dir(root).args(args);
+    if build == BuildDir::OwnTree {
+        nextest.env_remove(CARGO_TARGET_DIR);
+    }
+    for (var, _) in env::vars_os() {
+        if var.to_string_lossy().starts_with("PROPTEST_") {
+            nextest.env_remove(var);
+        }
+    }
+    nextest
+        .env("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1")
+        .envs(PENDING_PROPTEST_ENV);
+    nextest
+}
+
+/// Runs every test the working tree marks pending and names each one that passes or does not run,
+/// building where `build` says.
+fn pending_problems(root: &Path, build: BuildDir) -> Result<Vec<String>> {
     let mut args = vec![
         "ls-files",
         "--cached",
@@ -4517,16 +4571,7 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         .collect::<Vec<_>>()
         .join(" ");
     eprintln!("    $ {pinned} cargo {}", args.join(" "));
-    let mut nextest = Command::new("cargo");
-    nextest.current_dir(root).args(args);
-    for (var, _) in env::vars_os() {
-        if var.to_string_lossy().starts_with("PROPTEST_") {
-            nextest.env_remove(var);
-        }
-    }
-    let out = nextest
-        .env("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1")
-        .envs(PENDING_PROPTEST_ENV)
+    let out = pending_nextest(root, &args, build)
         .stderr(Stdio::inherit())
         .output()
         .context("starting `cargo nextest` (is it installed? see AGENTS.md)")?;
@@ -5605,22 +5650,23 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency,
-        FAST_JOB, FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS,
+        BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir, CARGO_TARGET_DIR, CiFile, CratePolicy,
+        Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS,
         MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard,
         MutatedCrate, PR_JOBS, Package, PendingTest, PendingTestRun, REFCASES, SCHEMA_CHECKERS,
         SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome,
         UnmutatedSource, actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows,
         check_schedule, ci, ci_files, classify, contains_dec_id, contains_word, external_oracles,
         failure_cause, feature_files, feature_map_problems, files_by_extension, first_panic_line,
-        forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
-        is_stub_function, layer_problems, lint, listed_mutant_counts, live_feature_problems,
-        live_test_counts, metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo,
-        mutants_outcome, mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in,
-        pending_problems, pending_tests, plain_comment_lines, preflight_args, proptest_seeds_in,
-        repo_root, schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses,
-        simulator_oracles, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
-        test_binary, test_order_config, test_outcomes, unjudged_mutants, verdicts,
+        forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
+        is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
+        live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
+        mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
+        mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
+        plain_comment_lines, preflight_args, proptest_seeds_in, repo_root, schema_mutants,
+        shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, verdicts,
         workspace_closure, workspace_packages,
     };
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
@@ -6436,6 +6482,78 @@ mod tests {
             TestOrder::write(&[])?.is_none(),
             "a slice with no mutant has nothing to order"
         );
+        Ok(())
+    }
+
+    /// Two test orders written in one process get two files, and dropping one leaves the other:
+    /// under plain `cargo test` every test thread shares the process id, so a name made of the id
+    /// alone let one shard's order overwrite or remove another's.
+    #[test]
+    fn two_test_orders_in_one_process_never_share_a_file() -> Result<()> {
+        let first = TestOrder::write(&["mandate-shell".to_owned()])?
+            .context("a slice with a mutant writes its order")?;
+        let second = TestOrder::write(&["mandate-executor".to_owned()])?
+            .context("a slice with a mutant writes its order")?;
+        assert_ne!(first.0, second.0, "each order has its own file");
+        drop(first);
+        assert_eq!(
+            fs::read_to_string(&second.0)?,
+            test_order_config(&["mandate-executor".to_owned()]),
+            "and dropping one order leaves the other's file, with its own packages"
+        );
+        assert_ne!(
+            unique_temp_path("mandate-xtask-names", ".toml"),
+            unique_temp_path("mandate-xtask-names", ".toml"),
+            "no two temporary paths this process names are the same"
+        );
+        Ok(())
+    }
+
+    /// A fixture's pending gate builds in the fixture's own `target/`, never in a
+    /// `CARGO_TARGET_DIR` the caller exported: every pending fixture's crate is `fx`, and under one
+    /// shared directory concurrent fixtures overwrote each other's test binaries ("`fails_by_todo`
+    /// … did not run"). The gate on the repository itself keeps the caller's directory.
+    #[test]
+    fn only_a_fixtures_pending_gate_drops_the_callers_target_dir() {
+        let args = ["nextest", "run"];
+        let fixture = pending_nextest(Path::new("."), &args, BuildDir::OwnTree);
+        let envs: BTreeMap<&OsStr, Option<&OsStr>> = fixture.get_envs().collect();
+        assert_eq!(
+            envs.get(OsStr::new(CARGO_TARGET_DIR)),
+            Some(&None),
+            "a fixture's run removes the caller's CARGO_TARGET_DIR"
+        );
+        let real = pending_nextest(Path::new("."), &args, BuildDir::Callers);
+        let envs: BTreeMap<&OsStr, Option<&OsStr>> = real.get_envs().collect();
+        assert_eq!(
+            envs.get(OsStr::new(CARGO_TARGET_DIR)),
+            None,
+            "the repository's own run leaves the caller's build directory as it is"
+        );
+        assert_eq!(
+            envs.get(OsStr::new("NEXTEST_EXPERIMENTAL_LIBTEST_JSON")),
+            Some(&Some(OsStr::new("1"))),
+            "and both still ask nextest for libtest JSON"
+        );
+    }
+
+    /// Two gate diffs in one process get two files, and dropping one leaves the other: under plain
+    /// `cargo test` every test thread shares the process id, and one gate's drop removed the diff
+    /// another was about to time ("timing the diff this run reads: No such file or directory").
+    #[test]
+    fn two_gate_diffs_in_one_process_never_share_a_file() -> Result<()> {
+        let fx = Fixture::gated("gate-diff-names")?;
+        let base = fs::read_to_string(fx.0.join("base"))?;
+        let base = base.trim();
+        let first = gate_diff(&fx.0, Some(base))?.context("the fixture's diff changes source")?;
+        let second = gate_diff(&fx.0, Some(base))?.context("the fixture's diff changes source")?;
+        assert_ne!(first.file, second.file, "each diff has its own file");
+        drop(first);
+        assert!(
+            second.file.exists(),
+            "and dropping one gate's diff leaves the other's in place"
+        );
+        assert_ne!(gate_diff_path(), gate_diff_path());
         Ok(())
     }
 
@@ -7305,7 +7423,7 @@ mod tests {
         );
         fx.write("crates/fx/tests/stubs.rs", away)?;
         fx.commit()?;
-        let problems = pending_problems(&fx.0)?;
+        let problems = pending_problems(&fx.0, BuildDir::OwnTree)?;
         assert!(
             problems.len() == 1
                 && problems
@@ -7324,7 +7442,7 @@ mod tests {
         )?;
         fx.commit()?;
         assert_eq!(
-            pending_problems(&fx.0)?,
+            pending_problems(&fx.0, BuildDir::OwnTree)?,
             Vec::<String>::new(),
             "with its row, it is excused"
         );
@@ -7334,7 +7452,7 @@ mod tests {
             &away.replace("fails_on_behaviour", "renamed"),
         )?;
         fx.commit()?;
-        let problems = pending_problems(&fx.0)?;
+        let problems = pending_problems(&fx.0, BuildDir::OwnTree)?;
         assert!(
             problems.iter().any(|p| p.contains(
                 "xtask/behaviour-only/fx__stubs__fails_on_behaviour.toml names \
@@ -7603,9 +7721,14 @@ mod tests {
         main_tip: String,
     }
 
+    /// Removes the fixture's directory, or the single file a test held in a [`Fixture`] for this.
     impl Drop for Fixture {
         fn drop(&mut self) {
-            fs::remove_dir_all(&self.0).ok();
+            if self.0.is_dir() {
+                fs::remove_dir_all(&self.0).ok();
+            } else {
+                fs::remove_file(&self.0).ok();
+            }
         }
     }
 
@@ -8245,7 +8368,7 @@ mod tests {
         )?;
         fx.commit()?;
         for round in 1..=3 {
-            let problems = pending_problems(&fx.0)?;
+            let problems = pending_problems(&fx.0, BuildDir::OwnTree)?;
             assert!(
                 problems.len() == 1
                     && problems.iter().all(|p| p.starts_with(
@@ -8374,7 +8497,7 @@ mod tests {
         fx.write("crates/fx/tests/stubs.rs", live)?;
         fx.commit()?;
         assert_eq!(
-            pending_problems(&fx.0)?,
+            pending_problems(&fx.0, BuildDir::OwnTree)?,
             Vec::<String>::new(),
             "with no pending test there is nothing to run"
         );
@@ -8390,7 +8513,7 @@ mod tests {
         fx.write("crates/fx/tests/stubs.rs", &format!("{live}{failing}"))?;
         fx.commit()?;
         assert_eq!(
-            pending_problems(&fx.0)?,
+            pending_problems(&fx.0, BuildDir::OwnTree)?,
             Vec::<String>::new(),
             "pending tests that fail on the stubs pass the gate"
         );
@@ -8404,7 +8527,7 @@ mod tests {
             &format!("{live}{failing}{away}"),
         )?;
         fx.commit()?;
-        let problems = pending_problems(&fx.0)?;
+        let problems = pending_problems(&fx.0, BuildDir::OwnTree)?;
         let problem = problems.first().map(String::as_str).unwrap_or_default();
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(
@@ -8440,7 +8563,7 @@ mod tests {
             "fn unit_passes() { assert!(super::lookup().is_err()); }\n}\n",
         );
         fx.write("crates/fx/src/lib.rs", &format!("{STUBS}{unit}"))?;
-        let mut problems: Vec<String> = pending_problems(&fx.0)?
+        let mut problems: Vec<String> = pending_problems(&fx.0, BuildDir::OwnTree)?
             .iter()
             .map(|p| p.split([',', ';']).next().unwrap_or_default().to_owned())
             .collect();
@@ -8817,8 +8940,8 @@ mod tests {
         let fx = Fixture::gated("mutants-plan")?;
         let base = fs::read_to_string(fx.0.join("base"))?;
         let base = base.trim();
-        let diff =
-            env::temp_dir().join(format!("mandate-xtask-plan-oracle-{}", std::process::id()));
+        let diff = unique_temp_path("mandate-xtask-plan-oracle", ".diff");
+        let _remove_diff = Fixture(diff.clone());
         fs::write(&diff, fx.git(&["diff", &format!("{base}...HEAD")])? + "\n")?;
 
         let plan = mutants_plan(&fx.0, Some(base))?;
@@ -11071,6 +11194,240 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// [`resolved_live_problems`] over [`live_only_outside_defaults`] and `flows`, every build
+    /// resolving as [`unreached_host`].
+    fn host_problems(flows: &[CiFile]) -> Result<Vec<String>> {
+        resolved_live_problems(
+            &live_policy(),
+            &live_only_outside_defaults(),
+            flows,
+            &unreached_host,
+        )
+    }
+
+    /// Asserts that each of `jobs` (never empty) has a problem naming it, in backticks, that says
+    /// it cannot be read (DEC-868 item 3).
+    fn unreadable(problems: &[String], jobs: &[&str]) {
+        assert!(!jobs.is_empty(), "a check names something");
+        for job in jobs {
+            let named = problems
+                .iter()
+                .any(|p| p.contains(&format!("`{job}`")) && p.contains("cannot be read"));
+            assert!(named, "`{job}` cannot be read: {problems:?}");
+        }
+    }
+
+    /// The control: a plain block-style workflow whose jobs build `-p a-lib`, with an empty flow
+    /// mapping and flat flow sequences of scalars, which hide no key, is not flagged (#1169 round
+    /// 2 review; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_plain_block_style_workflow_is_not_flagged() -> Result<()> {
+        let flows = [ci_file(
+            ".github/workflows/ci.yml",
+            "on: push\npermissions: {}\njobs:\n  setup:\n    runs-on: ubuntu-24.04\n    steps:\n      \
+             - run: echo ready\n  lib-tests:\n    runs-on: ubuntu-24.04\n    permissions: {}\n    \
+             needs: [setup]\n    strategy:\n      matrix:\n        shard: [\"0/2\", \"1/2\"]\n    \
+             steps:\n      - uses: actions/checkout@v4 # a comment naming cargo\n      - name: Test \
+             the library\n        run: cargo test -p a-lib\n      - run: |\n          # cargo test \
+             in a comment\n          cargo test -p a-lib\n          cargo clippy -p a-lib\n",
+        )];
+        assert_eq!(host_problems(&flows)?, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// A cargo invocation of a workflow job that names no `-p`/`--package` selects every
+    /// workspace member, whatever directory it runs in, so it holds a live-only member nothing
+    /// depends on (#1169 round 2 review, major; DEC-176 tightening). `cargo install`, with
+    /// `--path` in either spelling, selects every member too; a `-p` build of another crate
+    /// does not.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_build_naming_no_package_selects_every_member() -> Result<()> {
+        let flows = [workflow(&[
+            ("bare", "cargo test"),
+            ("release", "cargo build --release"),
+            ("install", "cargo install --path crates/rh-host"),
+            (
+                "glued-install",
+                "cargo install --locked --path=crates/rh-host",
+            ),
+            ("lib-tests", "cargo test -p a-lib"),
+        ])];
+        names(
+            &host_problems(&flows)?,
+            &["rh-host", "bare", "release", "install", "glued-install"],
+            &["lib-tests"],
+        );
+        Ok(())
+    }
+
+    /// `env -C <dir>`, `env --chdir`, and `cargo -C <dir>` (with `-Z unstable-options` or a
+    /// `+toolchain`) change the directory cargo reads, so the build cannot be read, and with no
+    /// `-p` it holds the live-only member too (#1169 round 2 review, major; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_directory_change_by_env_or_cargo_cannot_be_read() -> Result<()> {
+        let jobs = [
+            ("env-c", "env -C crates/rh-host cargo test"),
+            ("env-chdir", "env --chdir=crates/rh-host cargo test"),
+            (
+                "env-chdir-spaced",
+                "env --chdir crates/rh-host cargo test -p a-lib",
+            ),
+            ("cargo-c", "cargo -C crates/rh-host test"),
+            (
+                "cargo-c-unstable",
+                "cargo -Z unstable-options -C crates/rh-host test",
+            ),
+            (
+                "cargo-c-nightly",
+                "cargo +nightly -Z unstable-options -C crates/rh-host test -p a-lib",
+            ),
+        ];
+        let mut all = jobs.to_vec();
+        all.push(("lib-tests", "cargo test -p a-lib"));
+        let problems = host_problems(&[workflow(&all)])?;
+        unreadable(&problems, &jobs.map(|(job, _)| job));
+        names(&problems, &["rh-host", "env-c", "cargo-c"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A shell string that holds `cargo` (`bash -c`, `sh -c`, a shell by its path, `env -S`,
+    /// `env --split-string`) hides the invocation from the reader, so it cannot be read (#1169
+    /// round 2 review, major; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_shell_string_holding_cargo_cannot_be_read() -> Result<()> {
+        let jobs = [
+            ("bash-c", "bash -c 'cargo test'"),
+            ("sh-c", "sh -c \"cargo test -p rh-host\""),
+            ("bin-bash-c", "/bin/bash -c 'cargo build'"),
+            ("env-s", "env -S 'cargo test'"),
+            ("env-split", "env --split-string='cargo test'"),
+        ];
+        let mut all = jobs.to_vec();
+        all.push(("lib-tests", "cargo test -p a-lib"));
+        let problems = host_problems(&[workflow(&all)])?;
+        unreadable(&problems, &jobs.map(|(job, _)| job));
+        names(&problems, &["bash-c"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A `working-directory` in a YAML shape the line reader cannot follow (a quoted key, a flow
+    /// step, flow `defaults`, an explicit tag) cannot be read, and a build it moves that names no
+    /// package holds the live-only member (#1169 round 2 review, major; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_working_directory_in_an_unread_yaml_shape_cannot_be_read() -> Result<()> {
+        let flows = [ci_file(
+            ".github/workflows/ci.yml",
+            "on: push\njobs:\n  quoted-key:\n    steps:\n      - \"working-directory\": \
+             crates/rh-host\n        run: cargo test\n  single-quoted-key:\n    defaults:\n      \
+             run:\n        'working-directory': crates/rh-host\n    steps:\n      - run: cargo \
+             test\n  flow-step:\n    steps:\n      - {working-directory: crates/rh-host, run: \
+             cargo test}\n  flow-defaults:\n    defaults: {run: {working-directory: \
+             crates/rh-host}}\n    steps:\n      - run: cargo test\n  tagged-dir:\n    steps:\n      \
+             - working-directory: !!str crates/rh-host\n        run: cargo test -p a-lib\n  \
+             lib-tests:\n    steps:\n      - run: cargo test -p a-lib\n",
+        )];
+        let problems = host_problems(&flows)?;
+        let jobs = [
+            "quoted-key",
+            "single-quoted-key",
+            "flow-step",
+            "flow-defaults",
+            "tagged-dir",
+        ];
+        unreadable(&problems, &jobs);
+        names(&problems, &["rh-host"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A YAML anchor, alias or merge key carries a `working-directory` or a `run:` into a job the
+    /// line reader does not see it in (`defaults: *d`, a step's `<<: *s`, `run: *c`), so each
+    /// cannot be read, and so is each anchor, one holding no `cargo` (`setup`) as much as one that
+    /// does (#1169 round 2 review, major; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_yaml_anchor_alias_or_merge_cannot_be_read() -> Result<()> {
+        let flows = [
+            ci_file(
+                ".github/workflows/ci.yml",
+                "on: push\njobs:\n  setup:\n    defaults: &d\n      run:\n        \
+                 working-directory: crates/rh-host\n    steps:\n      - &s\n        \
+                 working-directory: crates/rh-host\n        run: echo setup\n  anchored-run:\n    \
+                 steps:\n      - run: &c cargo test\n  alias-defaults:\n    defaults: *d\n    steps:\n      - run: cargo test\n  \
+                 merge-step:\n    steps:\n      - <<: *s\n        run: cargo test\n  alias-run:\n    \
+                 steps:\n      - run: *c\n",
+            ),
+            ci_file(
+                ".github/workflows/lib.yml",
+                "on: push\njobs:\n  lib-tests:\n    steps:\n      - run: cargo test -p a-lib\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &[
+                "setup",
+                "anchored-run",
+                "alias-defaults",
+                "merge-step",
+                "alias-run",
+            ],
+        );
+        names(&problems, &["rh-host"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A YAML merge key with a block mapping under it, `<<:` and no alias or flow mapping,
+    /// carries a `working-directory` into its step, so the line cannot be read, even when the
+    /// build names a package (#1169 round 3 review; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_block_merge_key_cannot_be_read() -> Result<()> {
+        let flows = [ci_file(
+            ".github/workflows/ci.yml",
+            "on: push\njobs:\n  merge-block:\n    steps:\n      - <<:\n          \
+             working-directory: crates/rh-host\n        run: cargo test -p a-lib\n  lib-tests:\n    \
+             steps:\n      - run: cargo test -p a-lib\n",
+        )];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["merge-block"]);
+        names(&problems, &["merge-block"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A `run:` written so the reader does not find its cargo invocation (a quoted value, an
+    /// anchored or tagged value, a quoted `run` key, a flow step) cannot be read (#1169 round 2
+    /// review, major; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_run_value_hiding_cargo_cannot_be_read() -> Result<()> {
+        let flows = [ci_file(
+            ".github/workflows/ci.yml",
+            "on: push\njobs:\n  quoted-run:\n    steps:\n      - run: \"cargo test\"\n  \
+             single-quoted-run:\n    steps:\n      - run: 'cargo test'\n  anchored-run:\n    \
+             steps:\n      - run: &c cargo test\n  tagged-run:\n    steps:\n      - run: !!str \
+             cargo test\n  quoted-run-key:\n    steps:\n      - \"run\": cargo test\n  flow-run:\n    \
+             steps:\n      - {run: cargo test}\n  lib-tests:\n    steps:\n      - run: cargo test \
+             -p a-lib\n",
+        )];
+        let problems = host_problems(&flows)?;
+        let jobs = [
+            "quoted-run",
+            "single-quoted-run",
+            "anchored-run",
+            "tagged-run",
+            "quoted-run-key",
+            "flow-run",
+        ];
+        unreadable(&problems, &jobs);
+        names(&problems, &["quoted-run"], &["lib-tests"]);
+        Ok(())
+    }
+
     /// A resolve that fails, or an invocation word the shell expands, is a problem naming the job
     /// rather than an abort, and so is a default build that cannot be resolved (DEC-868 item 3).
     #[test]
@@ -11095,7 +11452,8 @@ jq -r "$filter" "$src"
     }
 
     /// The repository as it stands: cargo's resolve of the default build holds every workspace
-    /// member, the check asks it for `ci.yml`'s `cargo xtask ci fast`, and nothing resolves `live`.
+    /// member, the check asks it for `ci.yml`'s `cargo xtask ci lint` (one of the jobs DEC-871 split
+    /// `ci fast` into), and nothing resolves `live`.
     #[test]
     #[ignore = "pending E7-28"]
     fn the_repository_resolves_no_live_build() -> Result<()> {
@@ -11114,7 +11472,7 @@ jq -r "$filter" "$src"
             cargo_resolve(&root, w)
         })?;
         assert_eq!(problems, Vec::<String>::new());
-        assert!(asked.into_inner().contains(&words("xtask ci fast")));
+        assert!(asked.into_inner().contains(&words("xtask ci lint")));
         Ok(())
     }
 

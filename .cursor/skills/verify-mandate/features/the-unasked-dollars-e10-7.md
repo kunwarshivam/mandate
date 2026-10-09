@@ -10,7 +10,10 @@ until the implementation PR replaces the stub.
   `DelegationUsage`, `EffectivePolicy`).
 - **Tests:** `crates/mandate-spec/tests/unasked.rs`: a table whose figures `reference/mandate/ref.py`'s
   `unasked_usd` produced (unknown inputs, the known zeros, each condition's order bound, delegation
-  slices, the count, and rounding up to the cent).
+  slices, the count, and rounding up to the cent); a property that no simulated risk day runs more
+  unasked than the figure, with its own decision walk and accumulators and with marks, cancels, and
+  exits freeing headroom within the day; and a property that a greedy day reaches the figure in
+  fuzz.py's family of `lte` bounds.
 - **Reference model:** `reference/mandate/ref.py` (`unasked_usd`, `order_usd_bound`),
   `reference/mandate/fuzz.py` (`fuzz_unasked`), `reference/mandate/mutants.py` (`UNASKED_MUTANTS`).
 - **Reference cases:** none; DEC-695 item 9 adds no reference case or fixture.
