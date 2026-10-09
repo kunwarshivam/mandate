@@ -242,7 +242,7 @@ fn fund_movement_is_judged_by_whole_tokens() {
         ("an MCP tool", &robinhood_tool, Outcome::Passed),
     ];
     for (kind, grant, other_word) in kinds {
-        for name in FUND_MOVEMENT_NAMES {
+        for name in FUND_MOVEMENT_NAMES.iter().chain(&FUND_MOVEMENT_TOKENS) {
             assert_eq!(
                 outcome(&run(&grant(name)).unwrap(), Check::Scope),
                 Some(Outcome::Failed(Reason::FundMovement)),
@@ -276,6 +276,25 @@ const FUND_MOVEMENT_NAMES: [&str; 15] = [
     "HTTPSend",
     "v2Transfer",
     "w\u{456}re",
+];
+
+/// Every token of DEC-839 item 3's set, as #888 amends it, as a bare name.
+const FUND_MOVEMENT_TOKENS: [&str; 15] = [
+    "transfer",
+    "transfers",
+    "withdraw",
+    "withdrawal",
+    "withdrawals",
+    "wire",
+    "ach",
+    "send",
+    "payout",
+    "disburse",
+    "deposit",
+    "deposits",
+    "fund",
+    "funds",
+    "funding",
 ];
 
 /// Names that contain a fund word only inside another word: as a scope each is still not
