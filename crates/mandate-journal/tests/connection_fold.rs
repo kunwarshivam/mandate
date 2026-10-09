@@ -872,7 +872,6 @@ fn judged(row: &StoredEvent) -> bool {
 /// answer is the vector's, located by the range row's stream and `seq`, with its code. A `before`
 /// that breaks a rule anchors nothing.
 #[test]
-#[ignore = "pending E7-17"]
 fn every_range_vector_is_judged_from_its_anchor_as_its_vector_says() {
     let mut judged_cases = 0;
     for name in ["connection_ranges", "connection_requests"] {
@@ -936,7 +935,6 @@ fn every_range_vector_is_judged_from_its_anchor_as_its_vector_says() {
 /// the same row; a range from `seq` 1, anchored on nothing or from genesis, is the full chain; and
 /// rows before `k` that break a rule anchor nothing.
 #[test]
-#[ignore = "pending E7-17"]
 fn an_anchored_range_agrees_with_the_full_chain_on_every_split() {
     let chains = full_chains();
     assert!(
@@ -972,7 +970,6 @@ fn an_anchored_range_agrees_with_the_full_chain_on_every_split() {
 /// `k` fail closed at the first one [`judged`] names, with no rule, and pass when it names none, so
 /// a range of revocations passes, anchored or not.
 #[test]
-#[ignore = "pending E7-17"]
 fn an_unanchored_range_fails_closed_at_its_first_judged_record() {
     let mut revocations_passed = 0;
     for chain in full_chains() {
@@ -998,7 +995,6 @@ fn an_unanchored_range_fails_closed_at_its_first_judged_record() {
 /// §11's `connection_cause_mismatch` located: over the 9 `chains`, the full-chain cause check
 /// reports the row [`verify_connection_causes`] reports, by its stream and `seq`.
 #[test]
-#[ignore = "pending E7-17"]
 fn the_located_cause_check_reports_the_full_chain_row() {
     let section = section();
     let cases = list(&section, "chains");

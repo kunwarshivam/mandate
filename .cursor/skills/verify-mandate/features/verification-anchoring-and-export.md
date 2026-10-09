@@ -9,7 +9,7 @@
   genesis, a `SegmentExported`, or a stamped `AnchorComputed` on the workspace's own control
   stream only, and a malformed `stream_id` refused, DEC-784; E12-3),
   `crates/mandate-journal/src/connection_fold.rs` (§11's connection checks; a range's lifecycle
-  run from its connection anchor or failing closed without one, DEC-885; E7-17, pending).
+  run from its connection anchor or failing closed without one, DEC-885; E7-17).
 - **Tests:** `crates/mandate-journal/tests/verify.rs`, `crates/mandate-journal/tests/properties.rs`
   (any tampering detected; rewrites caught only by the anchor; independent Merkle construction),
   `crates/mandate-journal/tests/control_verify.rs` (the two control-stream range checks against
