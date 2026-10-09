@@ -13622,7 +13622,7 @@ mod bracket_tests {
     /// awaiting it are journaled before it is sent (rule 5). Each names the entry and the day.
     #[test]
     #[ignore = "pending E7-19"]
-    fn a_bracket_entrys_placements_are_closed() -> Result<(), ExecutorError> {
+    fn the_bracket_entry_placements_are_closed() -> Result<(), ExecutorError> {
         with_ports(|ports| {
             let entry = text(&entry_id());
             let prices = [
