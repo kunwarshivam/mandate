@@ -4,6 +4,7 @@
 mod answers;
 mod bounds;
 mod budget;
+mod contract;
 mod endpoint;
 mod errors;
 mod server;

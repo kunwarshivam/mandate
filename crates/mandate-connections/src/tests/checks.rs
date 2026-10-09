@@ -206,11 +206,13 @@ fn nothing_that_can_move_funds_out_is_accepted() {
     );
 }
 
-/// Fund movement is judged by whole tokens (DEC-676, amending DEC-839 item 3): a name is split at
-/// every character that is not a letter or digit, at each lower-to-upper case change, and before the
-/// last capital of a run of capitals that a lowercase letter follows (`ACHDebit` is `ach`, `debit`);
-/// lowercased; and refused when a token is one of DEC-839's and DEC-676's. A word that only contains
-/// one, such as `fundamentals`, is another word.
+/// Fund movement is judged by whole tokens (DEC-839 item 3 as #888 amends it, shared by check 1
+/// under DEC-676 item 1): a name is split at every character that is not a letter or digit, at
+/// each lower-to-upper and digit-to-upper change, and before the last capital of a run of capitals
+/// that a lowercase letter follows (`ACHDebit` is `ach`, `debit`); lowercased; and refused when a
+/// token is in DEC-839's set. A name with any character that is not ASCII is refused whatever its
+/// tokens, so a homoglyph cannot spell a fund word past the rule. A word that only contains one,
+/// such as `fundamentals`, is another word.
 #[test]
 #[ignore = "pending E7-12"]
 fn fund_movement_is_judged_by_whole_tokens() {
@@ -227,6 +229,9 @@ fn fund_movement_is_judged_by_whole_tokens() {
         "add_funds",
         "ACHDebit",
         "getACHStatus",
+        "HTTPSend",
+        "v2Transfer",
+        "w\u{456}re",
     ] {
         let mut input = robinhood();
         input.granted = Granted::Tools(set(&["get_accounts", "place_equity_order", tool]));
@@ -255,7 +260,7 @@ fn fund_movement_is_judged_by_whole_tokens() {
 }
 
 /// A pin is made at the first connect only; at every later occasion a missing pin fails closed as
-/// drift (DEC-676 item 3, AGENTS.md rule 3), never as a pass.
+/// drift (DEC-676 item 2, AGENTS.md rule 3), never as a pass.
 #[test]
 #[ignore = "pending E7-12"]
 fn a_later_contract_check_without_a_pin_fails_closed() {
@@ -284,7 +289,7 @@ fn a_later_contract_check_without_a_pin_fails_closed() {
 }
 
 /// What the broker reported must be the kind the credential is: an API key's permissions, OAuth
-/// scopes, or MCP tools. Any other pairing fails closed as `scope_mismatch` (DEC-676 item 4).
+/// scopes, or MCP tools. Any other pairing fails closed as `scope_mismatch` (DEC-676 item 3).
 #[test]
 #[ignore = "pending E7-12"]
 fn a_grant_of_another_kind_than_the_credential_is_refused() {

@@ -1610,7 +1610,9 @@ dependencies = [
 name = "mandate-connections"
 version = "0.0.0"
 dependencies = [
+ "mandate-time",
  "proptest",
+ "secrecy",
  "thiserror",
 ]
 
@@ -1781,6 +1783,8 @@ version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
  "mandate-canon",
+ "mandate-identity",
+ "mandate-time",
  "proptest",
  "ring",
  "serde",

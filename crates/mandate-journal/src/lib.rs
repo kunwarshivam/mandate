@@ -30,7 +30,10 @@ mod merkle;
 mod schema;
 mod verify;
 
-pub use agent::{AgentStreamCheck, AgentStreamFailure, verify_agent_stream};
+pub use agent::{
+    AgentStreamCheck, AgentStreamFailure, HeldAnchor, verify_agent_stream,
+    verify_agent_stream_anchored,
+};
 
 /// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, then §9.5's rule 45
 /// on the account stream (DEC-446 item 3). Each draft has already passed `Draft::parse`.

@@ -32,8 +32,8 @@
 //! reach the journal or the control-stream writer (NT-3 at rung 1). It is pure: the random source
 //! is passed in, and the dispatcher (E8-10) supplies the operating system's.
 //!
-//! Every entry point returns a `Result` whose [`NotifyError::Unimplemented`] is the tests PR's stub
-//! (DEC-77).
+//! Every entry point returns a `Result`, so a later slice's stub reports
+//! [`NotifyError::Unimplemented`] (DEC-77).
 
 mod kind;
 mod payload;

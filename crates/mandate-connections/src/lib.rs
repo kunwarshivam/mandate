@@ -15,6 +15,9 @@
 //! **Which process may call what** (connections spec §5.2, DEC-690 item 1, DEC-691, DEC-821
 //! items 2 and 4):
 //!
+//! - [`start`] belongs to the **API process**. It creates the single-use `state` and the
+//!   authorization URL, and redeems the `state` at the callback. It names no token type, and
+//!   the API process reaches no broker.
 //! - [`grant::check_scope`] checks the granted scopes in the token-exchange process, on the token
 //!   response and before the vault write. That process is not the executor: it holds no order
 //!   client and no token lease.
@@ -27,14 +30,15 @@
 //!   [`hosts::PaperRequest`], which can address only the paper host; the executor sends only
 //!   those, and its egress contains no live host (DEC-821 item 4).
 //!
-//! The `state` and authorization URL (API process), and the code exchange and its vault write
-//! (`exchange`, the token-exchange process, never the executor), follow in the next D2 slices.
+//! The code exchange and its vault write (`exchange`, the token-exchange process, never the
+//! executor) follow in D2c.
 
 pub mod checks;
 pub mod error;
 pub mod grant;
 pub mod hosts;
 pub mod record;
+pub mod start;
 
 pub use error::ConnectError;
 

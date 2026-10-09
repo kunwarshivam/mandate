@@ -1,6 +1,6 @@
 # MCP transport for broker connectors (E7-16)
 
-- **Spec:** `docs/specs/connections.md` §6.2 rules 1 and 4, §6.5 (the reserved exit budget), CN-9;
+- **Spec:** `docs/specs/connections.md` §6.2 rules 1 to 4 (M2: `client.rs`, DEC-839), §6.5 (the reserved exit budget), CN-9;
   DEC-441 item 8; slice M1 of the first-live-trade brief (#706).
 - **Code:** `mandate-mcp`: `crates/mandate-mcp/src/endpoint.rs` (`PinnedEndpoint`: `https` on the
   pinned host only, plain `http` only to a loopback literal in the crate's own test build),
@@ -17,5 +17,6 @@
   time), `crates/mandate-mcp/src/tests/server.rs` (the scripted loopback server),
   `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/bounds.rs` (sessions,
   redirects, timeouts, the exit budget, and a canary in server text),
-  `crates/mandate-mcp/src/tests/errors.rs`.
+  `crates/mandate-mcp/src/tests/errors.rs`, and `crates/mandate-mcp/src/tests/contract.rs` (M2: the
+  allowlist, fund-movement refusal, and metadata canary; its part 2 adds the pinned hash and drift).
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
