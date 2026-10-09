@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/oauth-start-response.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "authorization_url",
+    "expires_at"
+  ],
+  "properties": {
+    "authorization_url": {
+      "type": "string",
+      "pattern": "^https://[^\\s]+$"
+    },
+    "expires_at": {
+      "$ref": "../common.schema.json#/$defs/Timestamp"
+    }
+  },
+  "description": "POST /connections/oauth/start (\u00a74.5, DEC-821): no secret-shaped member (API-11). Reads no stream, so as_of may be empty.",
+  "propertyNames": {
+    "not": {
+      "pattern": "([tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[pP][aA][sS][sS][pP][hH][rR][aA][sS][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[aA][pP][iI]_[kK][eE][yY]|[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]|[aA][cC][cC][oO][uU][nN][tT]_[nN][uU][mM][bB][eE][rR]|[fF][iI][nN][gG][eE][rR][pP][rR][iI][nN][tT]|[vV][aA][uU][lL][tT])"
+    }
+  },
+  "unevaluatedProperties": false
+}

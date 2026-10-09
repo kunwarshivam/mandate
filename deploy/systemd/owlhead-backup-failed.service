@@ -1,0 +1,9 @@
+# Runs when owlhead-backup.service fails: one error-priority line in the system journal, which
+# `journalctl -p err -u owlhead-backup-failed` shows. Until notifications exist, check it weekly.
+[Unit]
+Description=Report a failed Owlhead backup
+
+[Service]
+Type=oneshot
+IPAddressDeny=any
+ExecStart=/usr/bin/systemd-cat -t owlhead-backup -p err /bin/echo "owlhead backup FAILED; see: journalctl -u owlhead-backup.service"

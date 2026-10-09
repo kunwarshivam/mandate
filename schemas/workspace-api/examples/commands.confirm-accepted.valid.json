@@ -1,0 +1,38 @@
+[
+  {
+    "label": "auto: /phase = \"recorded\"",
+    "set": {
+      "/phase": "recorded"
+    }
+  },
+  {
+    "label": "auto: /classification = \"risk_increasing\"",
+    "set": {
+      "/classification": "risk_increasing"
+    }
+  },
+  {
+    "label": "auto: /classification = \"risk_reducing\"",
+    "set": {
+      "/classification": "risk_reducing"
+    }
+  },
+  {
+    "label": "auto: /classification = \"neutral\"",
+    "set": {
+      "/classification": "neutral"
+    }
+  },
+  {
+    "label": "auto: /applies = \"now\"",
+    "set": {
+      "/applies": "now"
+    }
+  },
+  {
+    "label": "auto: /applies = \"next_safe_point\"",
+    "set": {
+      "/applies": "next_safe_point"
+    }
+  }
+]

@@ -17,7 +17,7 @@ if it lacks something you need twice, add a subcommand (the `correction` playboo
 | Command | Proves |
 |---|---|
 | `cargo xtask check` | Every per-PR job, as CI runs them. Required before proposing any change |
-| `cargo xtask ci lint` | shellcheck over `.github/scripts/`, actionlint over `.github/workflows/`, fmt, clippy `-D warnings`, crate layering, debt markers and plain comments, the feature map, typos, ruff |
+| `cargo xtask ci lint` | shellcheck over `.github/scripts/`, actionlint over `.github/workflows/`, fmt, clippy `-D warnings`, crate layering, the `live` feature (`cargo xtask live-feature`: only the crate `xtask/layers.toml` marks `live_feature` may declare one, and CI compiles it at most once, in `cargo check -p <runner>`; DEC-529), debt markers and plain comments, the feature map, typos, ruff |
 | `cargo xtask ci test` | nextest, doctests, pytest; reference cases marked `passing` in `status.toml` |
 | `cargo xtask ci pending` | Every test in the workspace marked `#[ignore = "pending <story>"]` fails on the change's code |
 | `cargo xtask ci mutants` | cargo-mutants on the changed source of every crate `xtask/layers.toml` marks `safety_critical = true`, the `tool`-layer `mandate-refcases` harness included (DEC-253): every mutant caught. A mutant is judged only by the tests the run executes. Those are the mutated packages' own plus, whenever a mutated package is one `mandate-refcases` is built on, the whole reference harness, so an oracle that lives outside the crate it covers still judges it (DEC-497). The reach comes from cargo's dependency graph, so a new suite is an oracle the moment it exists |
@@ -35,11 +35,13 @@ The toolchain comes from `.cursor/install.sh` (idempotent, pinned, checksum-veri
 
 ## The feature map
 
-[`feature-map.md`](feature-map.md) lists each feature with its spec anchor, code, tests, reference
-cases, and the command that exercises it. Read it to find what covers the code you are about to
-change. When you add a crate, a reference-case suite, or a feature, add its entry in the same
-change: `cargo xtask ci lint` fails when a crate or suite is missing or a listed path does not
-exist.
+[`features/`](features/README.md) holds one file a feature, each with its spec anchor, code,
+tests, reference cases, and the command that exercises it. `cargo xtask feature-map --index` lists
+them by title; read the ones that cover the code you are about to change. When you add a crate, a
+reference-case suite, or a feature, add or edit its feature's file in the same change, and only
+that file: a new feature is a new file `features/<slug>.md` opening with its `# ` title, and there
+is no list to update. `cargo xtask ci lint` fails when a crate or suite is named in no feature, a
+listed path does not exist, or a feature file has no title.
 
 ## Evidence rules
 

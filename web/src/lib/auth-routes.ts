@@ -23,6 +23,7 @@ const PUBLIC_FILES = new Set([
   "/og-image.png",
   "/site.webmanifest",
   "/robots.txt",
+  "/push-sw.js",
 ]);
 
 export function isPublicPath(pathname: string): boolean {
