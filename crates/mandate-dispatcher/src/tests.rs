@@ -3,7 +3,7 @@
 //! the adapter: the 12-hour lifetime as 43 200 s (DEC-790 item 4), the safety retry schedule from
 //! spec §5.3, and the reasons that mark an address from spec §5.2.
 
-use super::{Attempt, DispatchError, Prepared, Route, prepare, relay_refusal};
+use super::{Attempt, DispatchError, Prepared, Route, prepare, push_status, relay_refusal};
 use base64ct::{Base64UrlUnpadded, Encoding};
 use mandate_notify::canary::{CANARIES, scan};
 use mandate_notify::{Class, Outcome, Reason, Retry, next_attempt};
@@ -450,5 +450,150 @@ fn a_relayed_send_refuses_the_subject_before_the_endpoint() -> Checked {
         assert_eq!(error, endpoint_error, "{subject}");
     }
     assert_eq!(signer.signed.get(), 0, "nothing was signed");
+    Ok(())
+}
+
+/// The id a test's caller journals for an accepted push.
+const MESSAGE_ID: &str = "push-1";
+
+/// `retryable { reason }`.
+const fn retry(reason: Reason) -> Outcome {
+    Outcome::Retryable { reason }
+}
+
+/// `permanent { reason }`.
+const fn stop(reason: Reason) -> Outcome {
+    Outcome::Permanent { reason }
+}
+
+/// `accepted { MESSAGE_ID }`.
+fn accepted() -> Outcome {
+    Outcome::Accepted {
+        provider_message_id: MESSAGE_ID.to_owned(),
+    }
+}
+
+/// Every status [`push_status`] names, and the codes at each class boundary, each with the outcome
+/// written here from its source: spec §4.6 (a `3xx`), §5.3 (a `429`), RFC 8030 (`201`, `404`,
+/// `410`, `413`), and DEC-729 for the rest. The `401` and `403` rows are DEC-729 item 4's interim,
+/// Proposed for the founder, who may change them; such a change is a tests-correction PR.
+fn push_rows() -> Vec<(u16, Outcome)> {
+    let unknown = retry(Reason::ProviderError);
+    let mut rows: Vec<(u16, Outcome)> =
+        [0, 100, 199].map(|status| (status, unknown.clone())).into();
+    rows.extend([200, 201, 202, 204, 299].map(|status| (status, accepted())));
+    for status in [300, 301, 302, 304, 307, 308, 399, 404, 410] {
+        rows.push((status, stop(Reason::AddressRejected)));
+    }
+    for status in [400, 401, 403] {
+        rows.push((status, stop(Reason::ProviderError)));
+    }
+    rows.push((413, stop(Reason::TooLarge)));
+    rows.push((429, retry(Reason::RateLimited)));
+    for status in [
+        402, 405, 406, 408, 409, 411, 412, 414, 415, 422, 428, 430, 451, 499,
+    ] {
+        rows.push((status, unknown.clone()));
+    }
+    for status in [500, 501, 502, 503, 504, 599, 600, 999, u16::MAX] {
+        rows.push((status, unknown.clone()));
+    }
+    rows
+}
+
+/// DEC-724 item 6, DEC-729, spec §4.6, §5.2, §5.3: each push service status, returned by the relay
+/// unchanged or received by a direct send, maps to the outcome its row writes.
+///
+/// The founder may change the `401` and `403` rows under DEC-729 item 4, now Proposed; until then
+/// they are its interim, `permanent { provider_error }`.
+#[test]
+#[ignore = "pending E8-14"]
+fn each_push_status_maps_to_its_section_5_2_outcome() -> Checked {
+    for (status, outcome) in push_rows() {
+        assert_eq!(push_status(status, MESSAGE_ID)?, outcome, "status {status}");
+    }
+    Ok(())
+}
+
+/// Spec §4.6, §5.2, §5.6, DEC-728, DEC-729: over every `u16`, only a redirect, `404` or `410`
+/// marks the address; nothing is ever `auth_failed`, so no deployment-side VAPID fault marks an
+/// address; and exactly the `2xx` statuses are accepted, carrying the caller's id unchanged.
+///
+/// That no status is `auth_failed` is DEC-729 item 4's interim for `401` and `403`, which the
+/// founder may change; a change there corrects this assertion in a tests-correction PR.
+#[test]
+#[ignore = "pending E8-14"]
+fn only_a_redirect_or_a_gone_subscription_marks_the_address() -> Checked {
+    for status in 0..=u16::MAX {
+        let outcome = push_status(status, MESSAGE_ID)?;
+        let gone = (300..=399).contains(&status) || status == 404 || status == 410;
+        let marks = matches!(outcome, Outcome::Permanent { reason } if MARKS.contains(&reason));
+        assert_eq!(marks, gone, "status {status}");
+        let auth_failed = matches!(
+            outcome,
+            Outcome::Permanent {
+                reason: Reason::AuthFailed
+            }
+        );
+        assert!(
+            !auth_failed,
+            "status {status}: no status is auth_failed under DEC-729 item 4's interim, which the founder may change"
+        );
+        assert_eq!(
+            outcome == accepted(),
+            (200..=299).contains(&status),
+            "status {status}"
+        );
+    }
+    Ok(())
+}
+
+/// Spec §5.3, DEC-729: over every `u16`, each status outside the `2xx` and the named permanent ones
+/// (any `3xx`, `400`, `401`, `403`, `404`, `410`, `413`) is retryable, so a `safety` notice's next
+/// attempt is 15 s later, inside its 24-hour window; each named one stops that channel.
+#[test]
+#[ignore = "pending E8-14"]
+fn an_unexpected_status_is_retried_inside_the_safety_window() -> Checked {
+    let at = UtcNanos::from_parts(1_791_000_000, 0)?;
+    let retry_at = Retry::At(UtcNanos::from_parts(1_791_000_015, 0)?);
+    let named = [400, 401, 403, 404, 410, 413];
+    for status in 0..=u16::MAX {
+        let outcome = push_status(status, MESSAGE_ID)?;
+        if (200..=299).contains(&status) {
+            continue;
+        }
+        let permanent = (300..=399).contains(&status) || named.contains(&status);
+        let after = next_attempt(Class::Safety, at, at, 1, &outcome)?;
+        match outcome {
+            Outcome::Permanent { reason } if permanent => {
+                assert_eq!(after, Retry::Failed(reason), "status {status}");
+            }
+            Outcome::Retryable { .. } if !permanent => {
+                assert_eq!(after, retry_at, "status {status}");
+            }
+            other => return Err(format!("status {status} gave {other:?}").into()),
+        }
+    }
+    Ok(())
+}
+
+/// DEC-729 item 1: the journal refuses `delivered` without an id, so a `2xx` with an empty id is
+/// the closed `NoMessageId`, never an `accepted` with no id; any other status maps as it would with
+/// an id, so an empty id never loses a `404`'s mark or a `5xx`'s retry.
+#[test]
+#[ignore = "pending E8-14"]
+fn an_accepted_push_with_no_message_id_is_refused() -> Checked {
+    for status in [200, 201, 202, 204, 299] {
+        match push_status(status, "") {
+            Err(DispatchError::NoMessageId) => {}
+            Err(other) => return Err(other.into()),
+            Ok(outcome) => return Err(format!("status {status} gave {outcome:?}").into()),
+        }
+    }
+    for (status, outcome) in push_rows() {
+        if !(200..=299).contains(&status) {
+            assert_eq!(push_status(status, "")?, outcome, "status {status}");
+        }
+    }
     Ok(())
 }
