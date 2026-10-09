@@ -213,7 +213,6 @@ fn walked(g: &Graph, workspace: WorkspaceId, start: &str) -> Trace {
 /// AU-3 and AU-1: random graphs over both workspaces, every link naming one of the outputs, a
 /// `StreamOpened` of any of the three segments, or an absent id, self-links and cycles included.
 #[test]
-#[ignore = "pending E12-1"]
 fn every_trace_is_the_independent_breadth_first_walk() {
     let target = 0..40_usize;
     let node = (0..4_usize, proptest::option::of(target.clone()));
@@ -259,7 +258,6 @@ fn every_trace_is_the_independent_breadth_first_walk() {
 
 /// DEC-762 item 3: a self-link, a two-cycle and a three-cycle each end at `already_shown`.
 #[test]
-#[ignore = "pending E12-1"]
 fn cycles_and_self_links_end_at_already_shown() {
     let mut g = Graph::new();
     let stream = agent(WS_A, "AG1");
@@ -295,7 +293,6 @@ fn cycles_and_self_links_end_at_already_shown() {
 /// AU-1: links forged to name another workspace's events, the prefixed segment's, and absent ids
 /// all read `not_recorded` with no `to`; a start outside the workspace is the one `NotFound`.
 #[test]
-#[ignore = "pending E12-1"]
 fn forged_links_read_as_absent_ones_and_a_foreign_start_is_not_found() {
     let mut g = Graph::new();
     let (mine, theirs) = (event_id(710_001), event_id(710_002));
@@ -319,7 +316,6 @@ fn forged_links_read_as_absent_ones_and_a_foreign_start_is_not_found() {
 /// DEC-762 item 2: 16 hops deep is shown whole; one more is `beyond_bound` and truncates, an absent
 /// target too. A link from depth 16 to a shown event is still `already_shown` (DEC-772 item 2).
 #[test]
-#[ignore = "pending E12-1"]
 fn the_depth_bound_is_sixteen_hops() {
     let mut g = Graph::new();
     let stream = agent(WS_A, "AG2");
@@ -347,7 +343,6 @@ fn the_depth_bound_is_sixteen_hops() {
 /// DEC-762 item 2: 256 events, the start included, are shown whole; a 257th is `beyond_bound`,
 /// one of an unexpected type too (DEC-772 item 2).
 #[test]
-#[ignore = "pending E12-1"]
 fn the_node_bound_is_256_events() {
     let mut g = Graph::new();
     let stream = agent(WS_A, "AG1");
@@ -387,7 +382,6 @@ fn the_node_bound_is_256_events() {
 /// DEC-762 item 2, DEC-772 item 3: 1,024 hops are recorded whole; at a 1,025th the walk stops and
 /// the trace is truncated.
 #[test]
-#[ignore = "pending E12-1"]
 fn the_hop_bound_is_1024_hops() {
     let mut g = Graph::new();
     let stream = agent(WS_A, "AG2");
@@ -403,7 +397,6 @@ fn the_hop_bound_is_1024_hops() {
 /// AU-4, API-18, DEC-772 item 7, DEC-773: an output's injected text and thesis artifact are served only as
 /// quoted, attributed items, in §4.8.1's order, and an event id written in that text is not a link.
 #[test]
-#[ignore = "pending E12-1"]
 fn model_text_is_only_quoted_and_never_followed() {
     let mut g = Graph::new();
     let stream = agent(WS_A, "AG1");
@@ -444,7 +437,6 @@ fn model_text_is_only_quoted_and_never_followed() {
 /// stream, is `not_recorded`, as is "every `GateDecided`" with none; an `IntentProposed` whose
 /// `causation_id` names an output is `unexpected_type`, shown, not followed.
 #[test]
-#[ignore = "pending E12-1"]
 fn intent_links_are_scoped_to_the_named_streams_and_typed() {
     let mut g = Graph::new();
     let account = format!("acct:{}:ACCT1", text(WS_A));
