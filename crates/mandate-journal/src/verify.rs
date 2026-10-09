@@ -88,54 +88,10 @@ pub fn verify_events(
     let mut expected_seq = start.from_seq;
     let mut prev_hash = start.prev_hash;
     for row in rows {
-        let fail = |check| EventFailure {
+        check_row(row, expected_seq, prev_hash, artifacts).map_err(|check| EventFailure {
             seq: row.seq,
             check,
-        };
-        let body = match parse(&row.body) {
-            Ok(body) if to_canonical(&body) == row.body => body,
-            _ => return Err(fail(EventCheck::NonCanonical)),
-        };
-        if !columns_match(row, &body) {
-            return Err(fail(EventCheck::ColumnMismatch));
-        }
-        if row.seq != expected_seq {
-            return Err(fail(EventCheck::SeqGap));
-        }
-        if Digest::of(&row.body) != row.hash {
-            return Err(fail(EventCheck::RehashMismatch));
-        }
-        if row.prev_hash != prev_hash {
-            return Err(fail(EventCheck::PrevHashMismatch));
-        }
-        let artifact_refs = body
-            .get("artifact_refs")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten();
-        let config_refs = body
-            .get("config_refs")
-            .and_then(Value::as_object)
-            .into_iter()
-            .flat_map(|refs| refs.values());
-        for reference in artifact_refs.chain(config_refs) {
-            let read = reference
-                .as_str()
-                .and_then(ArtifactRef::parse)
-                .map(|r| (r, artifacts.read_artifact(&r)));
-            match read {
-                None | Some((_, Err(ArtifactError::Missing | ArtifactError::Unavailable))) => {
-                    return Err(fail(EventCheck::ArtifactMissing));
-                }
-                Some((_, Err(ArtifactError::Corrupt))) => {
-                    return Err(fail(EventCheck::ArtifactMismatch));
-                }
-                Some((r, Ok(bytes))) if Digest::of(&bytes) != r.digest() => {
-                    return Err(fail(EventCheck::ArtifactMismatch));
-                }
-                Some((_, Ok(_))) => {}
-            }
-        }
+        })?;
         prev_hash = row.hash;
         expected_seq = expected_seq.saturating_add(1);
     }
@@ -185,6 +141,58 @@ impl<'a> VerifiedPrefix<'a> {
     }
 }
 
+/// §11's per-event checks 1 to 6 on `row`, expected at `expected_seq` after `prev_hash`.
+fn check_row(
+    row: &StoredEvent,
+    expected_seq: u64,
+    prev_hash: Digest,
+    artifacts: &dyn ArtifactSource,
+) -> Result<(), EventCheck> {
+    let body = match parse(&row.body) {
+        Ok(body) if to_canonical(&body) == row.body => body,
+        _ => return Err(EventCheck::NonCanonical),
+    };
+    if !columns_match(row, &body) {
+        return Err(EventCheck::ColumnMismatch);
+    }
+    if row.seq != expected_seq {
+        return Err(EventCheck::SeqGap);
+    }
+    if Digest::of(&row.body) != row.hash {
+        return Err(EventCheck::RehashMismatch);
+    }
+    if row.prev_hash != prev_hash {
+        return Err(EventCheck::PrevHashMismatch);
+    }
+    let artifact_refs = body
+        .get("artifact_refs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
+    let config_refs = body
+        .get("config_refs")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|refs| refs.values());
+    for reference in artifact_refs.chain(config_refs) {
+        let read = reference
+            .as_str()
+            .and_then(ArtifactRef::parse)
+            .map(|r| (r, artifacts.read_artifact(&r)));
+        match read {
+            None | Some((_, Err(ArtifactError::Missing | ArtifactError::Unavailable))) => {
+                return Err(EventCheck::ArtifactMissing);
+            }
+            Some((_, Err(ArtifactError::Corrupt))) => return Err(EventCheck::ArtifactMismatch),
+            Some((r, Ok(bytes))) if Digest::of(&bytes) != r.digest() => {
+                return Err(EventCheck::ArtifactMismatch);
+            }
+            Some((_, Ok(_))) => {}
+        }
+    }
+    Ok(())
+}
+
 /// One range walked position by position (§11's per-event checks; §9.13 rules 111 and 132;
 /// workspace API §4.8.1 "Coverage", AU-8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,7 +209,8 @@ pub struct RangeWalk {
 pub enum RangeWalkError {
     /// `from_seq` is 0 or `to_seq` is below it, so the bounds name no range (rule 107).
     NotARange,
-    /// The walk is not built yet (DEC-77).
+    /// Never returned now that E12-3 built the walk; kept, as `TrustedStartError` keeps its own,
+    /// so a caller's match stays the same across the crate's stubs (DEC-77).
     Unimplemented { story: &'static str },
 }
 
@@ -216,8 +225,42 @@ pub fn walk_range(
     to_seq: u64,
     artifacts: &dyn ArtifactSource,
 ) -> Result<RangeWalk, RangeWalkError> {
-    let _ = (rows, start, to_seq, artifacts);
-    Err(RangeWalkError::Unimplemented { story: "E12-3" })
+    if start.from_seq == 0 || to_seq < start.from_seq {
+        return Err(RangeWalkError::NotARange);
+    }
+    let mut prev_hash = start.prev_hash;
+    let mut rows = rows.iter();
+    let mut checked: u64 = 0;
+    for position in start.from_seq..=to_seq {
+        let fail = |check| RangeWalk {
+            checked,
+            outcome: Err(EventFailure {
+                seq: position,
+                check,
+            }),
+        };
+        let Some(row) = rows.next() else {
+            return Ok(fail(EventCheck::SeqGap));
+        };
+        if let Err(check) = check_row(row, position, prev_hash, artifacts) {
+            return Ok(fail(check));
+        }
+        prev_hash = row.hash;
+        checked = checked.saturating_add(1);
+    }
+    if rows.next().is_some() {
+        return Ok(RangeWalk {
+            checked,
+            outcome: Err(EventFailure {
+                seq: to_seq,
+                check: EventCheck::SeqGap,
+            }),
+        });
+    }
+    Ok(RangeWalk {
+        checked,
+        outcome: Ok(prev_hash),
+    })
 }
 
 /// The stored columns equal the body's fields (spec §11 check 2).

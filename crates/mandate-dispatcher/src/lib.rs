@@ -19,13 +19,14 @@
 //! built for that attempt with that attempt's time, so its `exp`, a fixed 12 hours on (DEC-790
 //! item 4), never lapses inside the 24-hour `safety` retry window, and no header outlives its
 //! attempt. A relayed send checks the configured subject with [`VapidSubject::check_relayed`]
-//! before it builds any header. [`relay_refusal`] gives each relay refusal its §5.2 outcome.
+//! before it builds any header. [`relay_refusal`] gives each relay refusal its §5.2 outcome, and
+//! [`push_status`] each push service's status (DEC-729).
 //!
 //! Nothing here keeps, journals, or logs a header: [`PushRequest`] and [`Relayed`] have no
 //! `Debug`, and an [`Outcome`] or a [`DispatchError`] holds no input (NT-2).
 //!
-//! Every entry point returns a `Result`, so a stub would report
-//! [`DispatchError::Unimplemented`] (DEC-77); none does now.
+//! Every entry point returns a `Result`, so a stub reports [`DispatchError::Unimplemented`]
+//! (DEC-77); [`push_status`] does until its tests are live.
 
 use mandate_notify::{Outcome, Reason};
 use mandate_push_relay::{RelayError, RelayRequest};
@@ -38,12 +39,16 @@ use mandate_webpush::{
 /// and none carries an input.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DispatchError {
-    /// The body of a stub in a tests PR (DEC-77); nothing here returns it now.
+    /// The body of a stub in a tests PR (DEC-77).
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
     /// The push request could not be built; the web-push error's closed code says why.
     #[error("the push request could not be built: {0}")]
     WebPush(#[from] WebPushError),
+    /// A push service accepted a send, but the caller gave no id to journal it under: the journal
+    /// refuses `delivered` without one, so no `accepted` is formed (DEC-729 item 1).
+    #[error("an accepted push needs a message id")]
+    NoMessageId,
 }
 
 /// How a deployment reaches the push service (spec §4.6, HLD §4).
@@ -174,6 +179,33 @@ pub fn relay_refusal(refusal: RelayError) -> Result<Outcome, DispatchError> {
             reason: Reason::ProviderError,
         },
     })
+}
+
+/// The outcome a push service's HTTP status is journaled as, on either route: the relay returns
+/// the status unchanged (DEC-724 item 6), and this is where it is read (spec §4.6, §5.2, §5.3,
+/// DEC-729).
+///
+/// - Any `2xx` is `accepted`, carrying `message_id`, the id the caller journals as
+///   `provider_message_id`, unchanged. An empty `message_id` with a `2xx` is
+///   [`DispatchError::NoMessageId`], never an `accepted` with no id; with any other status the id
+///   is not read.
+/// - Any `3xx` is `permanent { address_rejected }`: no redirect is followed (§4.6).
+/// - `404` and `410`, a subscription that is gone (RFC 8030 §7.3, RFC 9110 §15.5.11), are
+///   `permanent { address_rejected }`.
+/// - `400`, a fault of the deployment's own request, is `permanent { provider_error }` (DEC-728's
+///   reading). `401` and `403`, about its VAPID header, are too, never `auth_failed`, so they mark
+///   no address: the interim of DEC-729 item 4, which is Proposed for the founder.
+/// - `413` is `permanent { too_large }`.
+/// - `429` is `retryable { rate_limited }` (§5.3) and any `5xx` is `retryable { provider_error }`.
+/// - Every other status, one outside `100..=599` included, is `retryable { provider_error }`: an
+///   unknown answer is retried inside the class's window and marks no address.
+///
+/// # Errors
+/// [`DispatchError::NoMessageId`] for a `2xx` with an empty `message_id`. The stub reports
+/// [`DispatchError::Unimplemented`] (DEC-77).
+pub fn push_status(status: u16, message_id: &str) -> Result<Outcome, DispatchError> {
+    let _ = (status, message_id);
+    Err(DispatchError::Unimplemented { story: "E8-14" })
 }
 
 #[cfg(test)]
