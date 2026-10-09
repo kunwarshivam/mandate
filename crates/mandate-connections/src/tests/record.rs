@@ -30,6 +30,20 @@ const MOVES: [(ConnectionState, ConnectionState); 8] = [
     (Suspended, Revoked),
 ];
 const SHA: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+/// Exactly `sha256:` and 64 lowercase hex digits, every digit among them.
+const EVERY_HEX_DIGIT: &str =
+    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+/// Digests a prefix-only or length-only check would take: each breaks `sha256:` plus exactly 64
+/// lowercase hex digits in one way.
+const MALFORMED_DIGESTS: [&str; 7] = [
+    "sha512:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaag",
+    "sha256:",
+];
 
 fn id(text: &str) -> ConnectionId {
     ConnectionId(text.to_owned())
@@ -164,6 +178,7 @@ fn identifiers_are_validated() {
         "01J8Z2ACCT00000000000000AU",
         "8ZZZZZZZZZZZZZZZZZZZZZZZZZ",
         " 1J8Z2ACCT00000000000000A1",
+        "01J8Z2ACCT00000000000000A\n",
     ] {
         assert_eq!(
             AccountRef::new(bad),
@@ -276,12 +291,13 @@ fn a_record_is_viewed_as_built() {
     );
 }
 
+/// Live: what a record shows is fixed by its types, not by [`ConnectionRecord::new`]'s checks, so
+/// it is judged on a record built as stored (a pass-through `new` would pass it pending).
 #[test]
-#[ignore = "pending E7-11"]
 fn a_record_shows_references_only() {
     let mut new = alpaca("conn_a", 1);
     new.fingerprint = AccountFingerprint::from_vault_hash(CANARY);
-    let made = record(new);
+    let made = stored(new, Active);
     assert_eq!(made.view().state, Active);
     assert_eq!(made.established_members().account_ref, account_ref(1));
     let printed = format!("{made:?}");
@@ -313,7 +329,19 @@ fn a_record_keeps_the_connections_rules() {
         Err(ConnectError::EnvironmentRefused),
         "DEC-441 item 3"
     );
-    let cases: [(&str, Change, NewRecord, &str); 13] = [
+    let alpaca_live_oauth = with(
+        &|n| {
+            n.environment = Environment::Live;
+            n.auth_kind = AuthKind::Oauth;
+        },
+        alpaca("conn_o", 1),
+    );
+    assert_eq!(
+        alpaca_live_oauth,
+        Err(ConnectError::EnvironmentRefused),
+        "DEC-821 item 7: paper connections only"
+    );
+    let cases: [(&str, Change, NewRecord, &str); 15] = [
         ("no scopes", &|n| n.scopes.clear(), alpaca("a", 1), "scopes"),
         (
             "an empty scope",
@@ -335,6 +363,22 @@ fn a_record_keeps_the_connections_rules() {
             "a control scope",
             &|n| {
                 n.scopes.insert("read\n".into());
+            },
+            alpaca("a", 1),
+            "scopes",
+        ),
+        (
+            "a non-ASCII scope",
+            &|n| {
+                n.scopes.insert("tradé".into());
+            },
+            alpaca("a", 1),
+            "scopes",
+        ),
+        (
+            "a DEL scope",
+            &|n| {
+                n.scopes.insert("read\u{7f}".into());
             },
             alpaca("a", 1),
             "scopes",
@@ -400,9 +444,33 @@ fn a_record_keeps_the_connections_rules() {
     for (name, change, base, member) in cases {
         assert_eq!(with(change, base), invalid(member), "{name}");
     }
-    let accepted: [(Change, NewRecord); 4] = [
+    for digest in MALFORMED_DIGESTS {
+        let mut hashed = robinhood("r", 2);
+        hashed.contract_hash = Some(digest.to_owned());
+        assert_eq!(
+            ConnectionRecord::new(hashed).map(|_| ()),
+            invalid("contract_hash"),
+            "contract_hash {digest:?}"
+        );
+        let mut termed = robinhood("r", 2);
+        termed.terms_version = Some(digest.to_owned());
+        assert_eq!(
+            ConnectionRecord::new(termed).map(|_| ()),
+            invalid("terms_version"),
+            "terms_version {digest:?}"
+        );
+    }
+    let accepted: [(Change, NewRecord); 6] = [
         (&|_| {}, robinhood("r", 2)),
         (&|n| n.terms_version = Some(SHA.into()), robinhood("r", 2)),
+        (
+            &|n| n.contract_hash = Some(EVERY_HEX_DIGIT.into()),
+            robinhood("r", 2),
+        ),
+        (
+            &|n| n.terms_version = Some(EVERY_HEX_DIGIT.into()),
+            robinhood("r", 2),
+        ),
         (&|n| n.auth_kind = AuthKind::Oauth, alpaca("o", 3)),
         (
             &|n| {
@@ -420,28 +488,62 @@ fn a_record_keeps_the_connections_rules() {
 #[test]
 #[ignore = "pending E7-11"]
 fn a_registry_starts_from_records_that_keep_cn_5() {
-    let two = |a: NewRecord, b: NewRecord| {
-        Registry::new(vec![stored(a, Active), stored(b, Revoked)], false)
+    let active = || stored(alpaca("conn_a", 1), Active);
+    let both_orders = |revoked: NewRecord| {
+        let revoked = stored(revoked, Revoked);
+        [
+            (
+                id("conn_a"),
+                Registry::new(vec![active(), revoked.clone()], false).err(),
+            ),
+            (
+                revoked.connection_id.clone(),
+                Registry::new(vec![revoked, active()], false).err(),
+            ),
+        ]
     };
-    two(alpaca("conn_a", 1), alpaca("conn_b", 2)).unwrap();
-    assert_eq!(
-        two(alpaca("conn_a", 1), alpaca("conn_a", 2)).err(),
-        Some(ConnectError::InvalidConnectionId)
-    );
+    for (_, got) in both_orders(alpaca("conn_b", 2)) {
+        assert_eq!(got, None);
+    }
+    for (_, got) in both_orders(alpaca("conn_a", 2)) {
+        assert_eq!(got, Some(ConnectError::InvalidConnectionId));
+    }
     let mut same_account = alpaca("conn_b", 2);
     same_account.fingerprint = fingerprint(1);
-    assert_eq!(
-        two(alpaca("conn_a", 1), same_account).err(),
-        Some(ConnectError::AlreadyConnected {
-            existing: id("conn_a")
-        })
-    );
+    for (first, got) in both_orders(same_account) {
+        assert_eq!(
+            got,
+            Some(ConnectError::AlreadyConnected { existing: first }),
+            "the first record of the two is named"
+        );
+    }
     let mut same_stream = alpaca("conn_b", 2);
     same_stream.account_ref = account_ref(1);
-    assert_eq!(
-        two(alpaca("conn_a", 1), same_stream).err(),
-        Some(ConnectError::InvalidAccountRef)
-    );
+    for (_, got) in both_orders(same_stream) {
+        assert_eq!(got, Some(ConnectError::InvalidAccountRef));
+    }
+}
+
+/// Another account, under a new id, cannot take an account stream a record holds, live or
+/// revoked (CN-5).
+#[test]
+#[ignore = "pending E7-11"]
+fn an_account_ref_is_held_by_one_record() {
+    for state in [Active, Revoked] {
+        let mut registry = empty();
+        registry.insert(record(alpaca("conn_a", 1))).unwrap();
+        if state == Revoked {
+            registry.set_state(&id("conn_a"), Revoked).unwrap();
+        }
+        let mut stream_taken = alpaca("conn_b", 2);
+        stream_taken.account_ref = account_ref(1);
+        assert_eq!(
+            registry.insert(record(stream_taken)),
+            Err(ConnectError::InvalidAccountRef),
+            "{state:?}"
+        );
+        assert_eq!(registry.view(&id("conn_b")), Ok(None), "{state:?}");
+    }
 }
 
 #[test]
@@ -633,11 +735,26 @@ fn a_reconnect_keeps_its_broker_and_environment() {
     assert_eq!(
         registry.insert(record(kraken)),
         Err(ConnectError::ReconnectMismatch),
-        "insert re-checks it"
+        "insert re-checks the broker"
     );
     assert_eq!(
         registry.view(&id("conn_a")).unwrap().map(|v| v.state),
         Some(Revoked)
+    );
+    let mut kraken_demo = alpaca("conn_k", 5);
+    kraken_demo.broker = Broker::KrakenDerivativesUs;
+    registry.insert(record(kraken_demo.clone())).unwrap();
+    registry.set_state(&id("conn_k"), Revoked).unwrap();
+    let mut kraken_live = kraken_demo;
+    kraken_live.environment = Environment::Live;
+    assert_eq!(
+        registry.insert(record(kraken_live)),
+        Err(ConnectError::ReconnectMismatch),
+        "insert re-checks the environment"
+    );
+    assert_eq!(
+        registry.view(&id("conn_k")).unwrap().map(|v| v.environment),
+        Some(Environment::Paper)
     );
 }
 
@@ -669,7 +786,7 @@ fn every_connect_waits_while_the_fingerprint_key_rotates() {
         registry.set_state(&id("conn_a"), Revoked).unwrap();
         registry
     };
-    let rotating = Registry::new(revoked.records.clone(), true).unwrap();
+    let mut rotating = Registry::new(revoked.records.clone(), true).unwrap();
     for n in [1, 2] {
         assert_eq!(
             rotating.admit(&candidate(n)),
@@ -677,6 +794,17 @@ fn every_connect_waits_while_the_fingerprint_key_rotates() {
             "account {n}"
         );
     }
+    for (new, what) in [
+        (alpaca("conn_a", 1), "a reconnect"),
+        (alpaca("conn_b", 2), "a new account"),
+    ] {
+        assert_eq!(
+            rotating.insert(record(new)),
+            Err(ConnectError::FingerprintRotating),
+            "insert re-checks the rotation: {what}"
+        );
+    }
+    assert_eq!(rotating.records, revoked.records, "nothing was added");
 }
 
 /// One step of a deployment's life.
@@ -688,6 +816,8 @@ enum Step {
     Move(u8, ConnectionState),
     /// A record for account `n` under another connection's id, or with another broker.
     Mismatched(u8),
+    /// A new account, under a new id and fingerprint, with account `n`'s `account_ref`.
+    StolenRef(u8),
 }
 
 fn step() -> impl Strategy<Value = Step> {
@@ -695,6 +825,7 @@ fn step() -> impl Strategy<Value = Step> {
         (0u8..4, any::<bool>()).prop_map(|(n, kraken)| Step::Connect(n, kraken)),
         (0u8..4, prop::sample::select(STATES.to_vec())).prop_map(|(n, s)| Step::Move(n, s)),
         (0u8..4).prop_map(Step::Mismatched),
+        (0u8..4).prop_map(Step::StolenRef),
     ]
 }
 
@@ -795,6 +926,17 @@ fn one_account_one_connection_for_life() {
                         prop_assert_eq!(
                             registry.insert(record(stranger)),
                             Err(ConnectError::InvalidConnectionId)
+                        );
+                    }
+                    Step::StolenRef(n) => {
+                        let Some((_, reference, _)) = bound.get(&n) else {
+                            continue;
+                        };
+                        let mut thief = alpaca("conn_thief", n.wrapping_add(200));
+                        thief.account_ref = reference.clone();
+                        prop_assert_eq!(
+                            registry.insert(record(thief)),
+                            Err(ConnectError::InvalidAccountRef)
                         );
                     }
                 }
