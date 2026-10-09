@@ -1,7 +1,7 @@
 //! E10-15 (DEC-670 to DEC-673; journal spec v0.23 §3, §9.9 to §9.11, §11): the workspace API
 //! records, the `client` actor, and the hold, against the vectors' `workspace_api`,
 //! `client_actor` and `hold` sections. Until E10-15's implementation the journal refuses these
-//! records as uncatalogued or unregistered, and the range test stops at its stub.
+//! records as not catalogued or not registered, and the range test stops at its stub.
 
 use std::ops::RangeInclusive;
 use std::path::Path;
