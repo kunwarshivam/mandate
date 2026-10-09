@@ -27272,6 +27272,32 @@ records_access:
       value: []
     expect:
       outcome: Valid
+  - name: failure_at_an_anchor_of_its_own_control_stream
+    clause: 'rule 111: `anchor_self_mismatch` (§11, DEC-783) is reported at the `AnchorComputed`'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: rehash_mismatch
+          seq: 17
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: anchor_self_mismatch
+          seq: 9
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
   - name: failure_at_the_last_event
     clause: rule 111
     base_draft: verification_fail
@@ -27296,3 +27322,1690 @@ records_access:
       value: []
     expect:
       outcome: Valid
+cold_records:
+  spec: docs/specs/journal.md v0.27 §9.14 (DEC-783)
+  drafts:
+    anchor:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3C1A000000000000000C1
+      stream_id: ctl:ws_01J8Z2
+      event_type: AnchorComputed
+      schema_version: 1
+      event_time: '2026-09-21T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        leaves:
+        - hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
+          seq: 5
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+          seq: 12
+          stream_id: agent:ws_01J8Z2:agent_a
+        - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+          seq: 7
+          stream_id: ctl:ws_01J8Z2
+        root: 3709e7de749808a46884a6043f6ba8a6185f27ca00f5132a434f86d2746fb6a5
+        token: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      artifact_refs:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      pii_refs: []
+    segment:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3C2A000000000000000C2
+      stream_id: ctl:ws_01J8Z2
+      event_type: SegmentExported
+      schema_version: 1
+      event_time: '2026-09-21T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        first_seq: 4
+        last_seq: 9
+        first_prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+        last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+        file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: anchor.leaves.kind
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value: all
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves
+  - name: anchor.root.kind
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.root
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.root
+  - name: anchor.root.form
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.root
+      value: sha256:3333333333333333333333333333333333333333333333333333333333333333
+    - path: artifact_refs
+      value:
+      - sha256:3333333333333333333333333333333333333333333333333333333333333333
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.root
+  - name: anchor.token.kind
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.token
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.token
+  - name: anchor.token.form
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.token
+      value: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.token
+  - name: anchor.leaves[0].hash.kind
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: 7
+        seq: 5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[0].hash
+  - name: anchor.leaves[0].hash.form
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: '222222222222222222222222222222222222222222222222222222222222222'
+        seq: 5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.leaves[0].hash
+  - name: anchor.leaves[0].seq.kind
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
+        seq: '5'
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[0].seq
+  - name: anchor.leaves[0].stream_id.kind
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
+        seq: 5
+        stream_id: 7
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[0].stream_id
+  - name: anchor.leaves[0].stream_id.form
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
+        seq: 5
+        stream_id: acct:only_one_segment
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.leaves[0].stream_id
+  - name: segment.stream_id.kind
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.stream_id
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.stream_id
+  - name: segment.stream_id.form
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.stream_id
+      value: ctl:ws_01J8Z2:extra
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.stream_id
+  - name: segment.first_seq.kind
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.first_seq
+      value: '4'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.first_seq
+  - name: segment.last_seq.kind
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.last_seq
+      value: '9'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_seq
+  - name: segment.first_prev_hash.kind
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.first_prev_hash
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.first_prev_hash
+  - name: segment.first_prev_hash.form
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.first_prev_hash
+      value: '5555555555555555555555555555555555555555555555555555555555555555
+
+        '
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.first_prev_hash
+  - name: segment.last_hash.kind
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.last_hash
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_hash
+  - name: segment.last_hash.form
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.last_hash
+      value: '66666666666666666666666666666666666666666666666666666666666666666'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.last_hash
+  - name: segment.file_sha256.kind
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.file_sha256
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.file_sha256
+  - name: segment.file_sha256.form
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.file_sha256
+      value: 777777777777777777777777777777777777777777777777777777777777777G
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.file_sha256
+  - name: segment.manifest_hash.kind
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.manifest_hash
+      value: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.manifest_hash
+  - name: segment.manifest_hash.form
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.manifest_hash
+      value: sha256:8888888888888888888888888888888888888888888888888888888888888888
+    - path: artifact_refs
+      value:
+      - sha256:8888888888888888888888888888888888888888888888888888888888888888
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.manifest_hash
+  - name: anchor.leaves.null
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves
+  - name: anchor.root.null
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.root
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.root
+  - name: anchor.leaves[0].hash.null
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: null
+        seq: 5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[0].hash
+  - name: anchor.leaves[0].seq.null
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
+        seq: null
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[0].seq
+  - name: anchor.leaves[0].stream_id.null
+    clause: §9.14 types
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
+        seq: 5
+        stream_id: null
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[0].stream_id
+  - name: segment.stream_id.null
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.stream_id
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.stream_id
+  - name: segment.first_seq.null
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.first_seq
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.first_seq
+  - name: segment.last_seq.null
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.last_seq
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_seq
+  - name: segment.first_prev_hash.null
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.first_prev_hash
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.first_prev_hash
+  - name: segment.last_hash.null
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.last_hash
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_hash
+  - name: segment.file_sha256.null
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.file_sha256
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.file_sha256
+  - name: segment.manifest_hash.null
+    clause: §9.14 types
+    base_draft: segment
+    changes:
+    - path: payload.manifest_hash
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.manifest_hash
+  - name: anchor.missing
+    clause: §9.14 closed
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      delete: true
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves
+  - name: anchor.extra
+    clause: §9.14 closed
+    base_draft: anchor
+    changes:
+    - path: payload.instrument
+      value: x
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: segment.missing
+    clause: §9.14 closed
+    base_draft: segment
+    changes:
+    - path: payload.stream_id
+      delete: true
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.stream_id
+  - name: segment.extra
+    clause: §9.14 closed
+    base_draft: segment
+    changes:
+    - path: payload.instrument
+      value: x
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: leaf_missing_member
+    clause: §9.14 closed
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - seq: 5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[0].hash
+  - name: leaf_extra_member
+    clause: §9.14 closed
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
+        seq: 5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        price: '1'
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[0].price
+  - name: anchor_wrong_stream
+    clause: '§9.14: an anchor is a control-stream record'
+    base_draft: anchor
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: token_not_listed
+    clause: '§3: `artifact_refs` lists the token'
+    base_draft: anchor
+    changes:
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: artifact_refs
+      path: artifact_refs
+  - name: anchor_without_its_own_leaf
+    clause: 'rule 113: an anchor names its own control stream''s head'
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - &id066
+        hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
+        seq: 5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      - &id065
+        hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+    - path: payload.root
+      value: b7606d563377aa5c9305f53b529c7898b247768ba0ff3b16e7cd092e1d7faf56
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves
+  - name: anchor_of_nothing
+    clause: 'rule 113: at least one leaf'
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value: []
+    - path: payload.root
+      value: '0000000000000000000000000000000000000000000000000000000000000000'
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves
+  - name: anchor_leaf_of_another_workspace
+    clause: 'rule 113: tenant isolation'
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
+        seq: 5
+        stream_id: acct:ws_01J8Z9:01J8Z9ACCT00000000000000A1
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[0].stream_id
+      also:
+      - reason: schema
+        path: payload.root
+  - name: anchor_leaf_at_seq_zero
+    clause: 'rule 113: seq starts at 1'
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
+        seq: 0
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[0].seq
+      also:
+      - reason: schema
+        path: payload.root
+  - name: anchor_leaves_unsorted
+    clause: 'rule 113: leaves sort by stream'
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - *id065
+      - *id066
+      - &id067
+        hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: payload.root
+      value: f48a41d2665571115d5c9c7d3803f3ef675c6f4d90e505af0da6c4628b21dade
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[1].stream_id
+  - name: anchor_stream_twice
+    clause: 'rule 113: one leaf per stream'
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - *id067
+      - *id067
+    - path: payload.root
+      value: 00cad8073293949638b66e7c221e4075f6817ae6d3e8ffc6361ea65dd0467d04
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.leaves[1].stream_id
+  - name: anchor_root_lies
+    clause: 'rule 114: the root is recomputed'
+    base_draft: anchor
+    changes:
+    - path: payload.root
+      value: '3333333333333333333333333333333333333333333333333333333333333333'
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.root
+  - name: anchor_root_of_other_leaves
+    clause: 'rule 114: a root over the leaves before a change proves nothing'
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        seq: 5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      - hash: '8888888888888888888888888888888888888888888888888888888888888888'
+        seq: 12
+        stream_id: agent:ws_01J8Z2:agent_a
+      - hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        seq: 7
+        stream_id: ctl:ws_01J8Z2
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.root
+  - name: anchor_by_a_user
+    clause: rule 115
+    base_draft: anchor
+    changes:
+    - path: actor
+      value: *id064
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: segment_of_another_workspace
+    clause: 'rule 116: tenant isolation'
+    base_draft: segment
+    changes:
+    - path: payload.stream_id
+      value: acct:ws_01J8Z9:01J8Z9ACCT00000000000000A1
+    - path: payload.manifest_hash
+      value: ca201b89e3bb5ba3827aa037d898fc01f132c01d71d93c1986f8bed4f75e4ef9
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.stream_id
+  - name: segment_from_seq_zero
+    clause: 'rule 116: seq starts at 1'
+    base_draft: segment
+    changes:
+    - path: payload.first_seq
+      value: 0
+    - path: payload.manifest_hash
+      value: 3a7b21fa6dd85b386bdc6248dde602f471d31a484045b448558d046d5b35ff3c
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.first_seq
+  - name: segment_reversed
+    clause: 'rule 116: `last_seq` is at least `first_seq`'
+    base_draft: segment
+    changes:
+    - path: payload.last_seq
+      value: 3
+    - path: payload.manifest_hash
+      value: b7d3f36f15f39fe61bd390835714d429ed4b519b883f271f3d96a72009951eb0
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_seq
+  - name: segment_from_one_not_genesis
+    clause: 'rule 116: seq 1 follows 64 zeros'
+    base_draft: segment
+    changes:
+    - path: payload.first_seq
+      value: 1
+    - path: payload.manifest_hash
+      value: d7fde50e0ef301bd69caa05ec1d2d6d9a53b3f7f008df86af49f637eb6405666
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.first_prev_hash
+  - name: segment_genesis_not_from_one
+    clause: 'rule 116: only seq 1 follows 64 zeros'
+    base_draft: segment
+    changes:
+    - path: payload.first_prev_hash
+      value: '0000000000000000000000000000000000000000000000000000000000000000'
+    - path: payload.manifest_hash
+      value: 06010e000557d7c75ef84c95350d023f0f4fc08c34723058176f5010cf8aadd3
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.first_prev_hash
+  - name: segment_manifest_hash_of_another_manifest
+    clause: 'rule 117: the record and its manifest agree'
+    base_draft: segment
+    changes:
+    - path: payload.last_hash
+      value: '9999999999999999999999999999999999999999999999999999999999999999'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.manifest_hash
+  - name: segment_manifest_hash_of_the_file
+    clause: 'rule 117: the manifest''s hash, not the file''s (DEC-263 item 3)'
+    base_draft: segment
+    changes:
+    - path: payload.manifest_hash
+      value: '7777777777777777777777777777777777777777777777777777777777777777'
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.manifest_hash
+  - name: segment_by_a_user
+    clause: rule 118
+    base_draft: segment
+    changes:
+    - path: actor
+      value: *id064
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  valid_drafts:
+  - name: anchor_of_one_stream
+    clause: 'rule 114: one leaf, its own stream''s, is its own root'
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - *id067
+    - path: payload.root
+      value: 0003c9675ac0c43101293f562cebe3019c5f7a808d0a819c6b7e5ab95c2fe125
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Valid
+  - name: anchor_of_five_streams
+    clause: 'rule 114: the split is the largest power of two below the count'
+    base_draft: anchor
+    changes:
+    - path: payload.leaves
+      value:
+      - hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        seq: 1
+        stream_id: acct:ws_01J8Z2:A0
+      - hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        seq: 2
+        stream_id: acct:ws_01J8Z2:A1
+      - hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        seq: 3
+        stream_id: acct:ws_01J8Z2:A2
+      - hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        seq: 4
+        stream_id: acct:ws_01J8Z2:A3
+      - hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        seq: 5
+        stream_id: ctl:ws_01J8Z2
+    - path: payload.root
+      value: 1560011bb843cd1b721c0eb6c805c38465b1146679c17fad8c183e05d2fa1d5c
+    - path: artifact_refs
+      value:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: Valid
+  - name: anchor_without_its_token
+    clause: '§9.14: a timestamping outage leaves the token null (§10)'
+    base_draft: anchor
+    changes:
+    - path: payload.token
+      value: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: segment_from_genesis
+    clause: 'rule 116: a first segment follows 64 zeros'
+    base_draft: segment
+    changes:
+    - path: payload
+      value:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        first_seq: 1
+        last_seq: 9
+        first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+        file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+        manifest_hash: c26989c3044971a71d21d402b9e8f544c697d12cb01edb5ba9a40cadb1d499d0
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: segment_of_one_event
+    clause: 'rule 116: `first_seq` may equal `last_seq`'
+    base_draft: segment
+    changes:
+    - path: payload
+      value:
+        stream_id: ctl:ws_01J8Z2
+        first_seq: 4
+        last_seq: 4
+        first_prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+        last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+        file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+        manifest_hash: ea55d13096860710bd8978c30903add994db37792a79f3ae74253b945fd59ef3
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  range_checks:
+  - name: anchor_names_the_head_before_it
+    clause: '§11 anchor_self_mismatch: passes'
+    chain:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000001
+        stream_id: ctl:ws_01J8Z2
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_type: control
+          workspace_id: ws_01J8Z2
+        artifact_refs: []
+        pii_refs: []
+        seq: 1
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: e117a7a0527f9e725ba6ad66847a6d3d0d7f99d652f5133227db4d26295bb9c2
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000002
+        stream_id: ctl:ws_01J8Z2
+        event_type: SegmentExported
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          first_seq: 1
+          last_seq: 3
+          first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+          file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+          manifest_hash: 43de04ae2020c830f98522c6201bf4a736a2ddc579809d1ed0adff2e999fde90
+        artifact_refs: []
+        pii_refs: []
+        seq: 2
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: e117a7a0527f9e725ba6ad66847a6d3d0d7f99d652f5133227db4d26295bb9c2
+      hash: 6a777dd4d7a806422e6fd6a7e170c5fba57743841e50d1d1bc11dc469b7d2da5
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000003
+        stream_id: ctl:ws_01J8Z2
+        event_type: SegmentExported
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          first_seq: 4
+          last_seq: 9
+          first_prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+          last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+          file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+          manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+        artifact_refs: []
+        pii_refs: []
+        seq: 3
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: 6a777dd4d7a806422e6fd6a7e170c5fba57743841e50d1d1bc11dc469b7d2da5
+      hash: a1faf179f36fa098976204f186fba12023e44973811de1cca10f3cfcfade0d25
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000004
+        stream_id: ctl:ws_01J8Z2
+        event_type: AnchorComputed
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          leaves:
+          - hash: '1111111111111111111111111111111111111111111111111111111111111111'
+            seq: 9
+            stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          - hash: a1faf179f36fa098976204f186fba12023e44973811de1cca10f3cfcfade0d25
+            seq: 3
+            stream_id: ctl:ws_01J8Z2
+          root: 0d9bf0f31ff2dbdec39a7f354ef425057bf141923cc5aca70f8784e5b1ff4d44
+          token: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        artifact_refs:
+        - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        pii_refs: []
+        seq: 4
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: a1faf179f36fa098976204f186fba12023e44973811de1cca10f3cfcfade0d25
+      hash: 8a5c897e4dfacebe9cdb07cbeb9b1f14f6cb0d326a1d194bd82ee809d4ccaddb
+    expect: null
+  - name: anchor_names_an_earlier_seq
+    clause: '§11 anchor_self_mismatch: the seq before the anchor'
+    chain:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000001
+        stream_id: ctl:ws_01J8Z2
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_type: control
+          workspace_id: ws_01J8Z2
+        artifact_refs: []
+        pii_refs: []
+        seq: 1
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: e117a7a0527f9e725ba6ad66847a6d3d0d7f99d652f5133227db4d26295bb9c2
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000002
+        stream_id: ctl:ws_01J8Z2
+        event_type: SegmentExported
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          first_seq: 1
+          last_seq: 3
+          first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+          file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+          manifest_hash: 43de04ae2020c830f98522c6201bf4a736a2ddc579809d1ed0adff2e999fde90
+        artifact_refs: []
+        pii_refs: []
+        seq: 2
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: e117a7a0527f9e725ba6ad66847a6d3d0d7f99d652f5133227db4d26295bb9c2
+      hash: 6a777dd4d7a806422e6fd6a7e170c5fba57743841e50d1d1bc11dc469b7d2da5
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000003
+        stream_id: ctl:ws_01J8Z2
+        event_type: SegmentExported
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          first_seq: 4
+          last_seq: 9
+          first_prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+          last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+          file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+          manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+        artifact_refs: []
+        pii_refs: []
+        seq: 3
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: 6a777dd4d7a806422e6fd6a7e170c5fba57743841e50d1d1bc11dc469b7d2da5
+      hash: a1faf179f36fa098976204f186fba12023e44973811de1cca10f3cfcfade0d25
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000004
+        stream_id: ctl:ws_01J8Z2
+        event_type: AnchorComputed
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          leaves:
+          - hash: '1111111111111111111111111111111111111111111111111111111111111111'
+            seq: 9
+            stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          - hash: a1faf179f36fa098976204f186fba12023e44973811de1cca10f3cfcfade0d25
+            seq: 2
+            stream_id: ctl:ws_01J8Z2
+          root: e418c78be06ec8a1add6418303c8457a8ea862fdf58c7bf34f084a63e33fd980
+          token: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        artifact_refs:
+        - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        pii_refs: []
+        seq: 4
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: a1faf179f36fa098976204f186fba12023e44973811de1cca10f3cfcfade0d25
+      hash: fa8641f2d139cdff1953d8a93f1c068afdc7ea1dbff8ed8b285ee61dc6e69ab9
+    expect:
+      seq: 4
+      check: anchor_self_mismatch
+  - name: anchor_names_another_events_hash
+    clause: '§11 anchor_self_mismatch: that event''s hash'
+    chain:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000001
+        stream_id: ctl:ws_01J8Z2
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_type: control
+          workspace_id: ws_01J8Z2
+        artifact_refs: []
+        pii_refs: []
+        seq: 1
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: e117a7a0527f9e725ba6ad66847a6d3d0d7f99d652f5133227db4d26295bb9c2
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000002
+        stream_id: ctl:ws_01J8Z2
+        event_type: SegmentExported
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          first_seq: 1
+          last_seq: 3
+          first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+          file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+          manifest_hash: 43de04ae2020c830f98522c6201bf4a736a2ddc579809d1ed0adff2e999fde90
+        artifact_refs: []
+        pii_refs: []
+        seq: 2
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: e117a7a0527f9e725ba6ad66847a6d3d0d7f99d652f5133227db4d26295bb9c2
+      hash: 6a777dd4d7a806422e6fd6a7e170c5fba57743841e50d1d1bc11dc469b7d2da5
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000003
+        stream_id: ctl:ws_01J8Z2
+        event_type: SegmentExported
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          first_seq: 4
+          last_seq: 9
+          first_prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+          last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+          file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+          manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+        artifact_refs: []
+        pii_refs: []
+        seq: 3
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: 6a777dd4d7a806422e6fd6a7e170c5fba57743841e50d1d1bc11dc469b7d2da5
+      hash: a1faf179f36fa098976204f186fba12023e44973811de1cca10f3cfcfade0d25
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000004
+        stream_id: ctl:ws_01J8Z2
+        event_type: AnchorComputed
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          leaves:
+          - hash: '1111111111111111111111111111111111111111111111111111111111111111'
+            seq: 9
+            stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          - hash: 6a777dd4d7a806422e6fd6a7e170c5fba57743841e50d1d1bc11dc469b7d2da5
+            seq: 3
+            stream_id: ctl:ws_01J8Z2
+          root: 7093903f464f62aaf9cfaf4c341faab760b67a767857a236ea42c9b8fd376fc3
+          token: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        artifact_refs:
+        - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        pii_refs: []
+        seq: 4
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: a1faf179f36fa098976204f186fba12023e44973811de1cca10f3cfcfade0d25
+      hash: 6649b6ecc40948010e608cc090c8226683c5841938fe02d068a406060851f5fd
+    expect:
+      seq: 4
+      check: anchor_self_mismatch
+  - name: anchor_leaves_its_own_stream_out
+    clause: '§11 anchor_self_mismatch: a leaf for its own stream'
+    chain:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000001
+        stream_id: ctl:ws_01J8Z2
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_type: control
+          workspace_id: ws_01J8Z2
+        artifact_refs: []
+        pii_refs: []
+        seq: 1
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: e117a7a0527f9e725ba6ad66847a6d3d0d7f99d652f5133227db4d26295bb9c2
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000002
+        stream_id: ctl:ws_01J8Z2
+        event_type: SegmentExported
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          first_seq: 1
+          last_seq: 3
+          first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+          file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+          manifest_hash: 43de04ae2020c830f98522c6201bf4a736a2ddc579809d1ed0adff2e999fde90
+        artifact_refs: []
+        pii_refs: []
+        seq: 2
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: e117a7a0527f9e725ba6ad66847a6d3d0d7f99d652f5133227db4d26295bb9c2
+      hash: 6a777dd4d7a806422e6fd6a7e170c5fba57743841e50d1d1bc11dc469b7d2da5
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000003
+        stream_id: ctl:ws_01J8Z2
+        event_type: SegmentExported
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          first_seq: 4
+          last_seq: 9
+          first_prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+          last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+          file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+          manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+        artifact_refs: []
+        pii_refs: []
+        seq: 3
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: 6a777dd4d7a806422e6fd6a7e170c5fba57743841e50d1d1bc11dc469b7d2da5
+      hash: a1faf179f36fa098976204f186fba12023e44973811de1cca10f3cfcfade0d25
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3C3A00000000000000004
+        stream_id: ctl:ws_01J8Z2
+        event_type: AnchorComputed
+        schema_version: 1
+        event_time: '2026-09-21T16:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          leaves:
+          - hash: '1111111111111111111111111111111111111111111111111111111111111111'
+            seq: 9
+            stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          root: bc2b129aeecb77d158317790cb90072fda27567c90e04738c9ea4b92c8963825
+          token: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        artifact_refs:
+        - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        pii_refs: []
+        seq: 4
+        recorded_at: '2026-09-21T16:00:00.000000000Z'
+        prev_hash: a1faf179f36fa098976204f186fba12023e44973811de1cca10f3cfcfade0d25
+      hash: ddafeb509fd675ee34d3ae300a781c7309ec0f56d9afdaac695e19e695b98664
+    expect:
+      seq: 4
+      check: anchor_self_mismatch
+  trusted_starts:
+    records:
+    - event_id: 01J8Z3C4A000000000000000G1
+      event_type: SegmentExported
+      stream_id: ctl:ws_01J8Z2
+      payload:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        first_seq: 4
+        last_seq: 9
+        first_prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+        last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+        file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+    - event_id: 01J8Z3C4A000000000000000S1
+      event_type: AnchorComputed
+      stream_id: ctl:ws_01J8Z2
+      payload:
+        leaves:
+        - hash: '1111111111111111111111111111111111111111111111111111111111111111'
+          seq: 9
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        - hash: '2222222222222222222222222222222222222222222222222222222222222222'
+          seq: 3
+          stream_id: ctl:ws_01J8Z2
+        root: bdc1de83e8b91718fc143aae7ce5069976ff385c79d7c0cc58a030a3fabf1435
+        token: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - event_id: 01J8Z3C4A000000000000000U1
+      event_type: AnchorComputed
+      stream_id: ctl:ws_01J8Z2
+      payload:
+        leaves:
+        - hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          seq: 12
+          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        - hash: '4444444444444444444444444444444444444444444444444444444444444444'
+          seq: 5
+          stream_id: ctl:ws_01J8Z2
+        root: 43ba4c738cb4ff4ec68eb127b9aca6088c6d28bd945bcec15491542f0fda894f
+        token: null
+    - event_id: 01J8Z3C4A000000000000000F1
+      event_type: SegmentExported
+      stream_id: ctl:ws_01J8Z9
+      payload:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        first_seq: 20
+        last_seq: 30
+        first_prev_hash: '9999999999999999999999999999999999999999999999999999999999999999'
+        last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
+        file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
+        manifest_hash: 0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d
+    cases:
+    - name: genesis_at_seq_one
+      clause: '§11: the genesis start'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 1
+      request: &id068
+        kind: genesis
+      expect:
+        from_seq: 1
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+    - name: genesis_after_seq_one
+      clause: '§11: genesis is seq 1 only'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 2
+      request: *id068
+      expect: null
+    - name: segment_at_its_first_seq
+      clause: '§9.14: a SegmentExported''s start'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request: &id069
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      expect:
+        from_seq: 4
+        prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+    - name: segment_entered_inside
+      clause: '§9.14: a segment starts at its first_seq'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 5
+      request: *id069
+      expect: null
+    - name: segment_of_another_stream
+      clause: '§9.14: the segment''s own stream'
+      stream_id: agent:ws_01J8Z2:agent_a
+      from_seq: 4
+      request: *id069
+      expect: null
+    - name: manifest_not_recorded
+      clause: '§9.14: an absent manifest'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: '8888888888888888888888888888888888888888888888888888888888888888'
+      expect: null
+    - name: stamped_anchor_after_its_leaf
+      clause: '§9.14: a stamped anchor''s leaf at n - 1'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request: &id070
+        kind: anchor
+        anchor_event_id: 01J8Z3C4A000000000000000S1
+      expect:
+        from_seq: 10
+        prev_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+    - name: stamped_anchor_at_its_leaf
+      clause: '§9.14: the leaf is the event before the start'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 9
+      request: *id070
+      expect: null
+    - name: unstamped_anchor_is_no_start
+      clause: '§9.14, DEC-783 item 8: a null token vouches for nothing'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 13
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C4A000000000000000U1
+      expect: null
+    - name: anchor_without_the_stream
+      clause: '§9.14: the anchor has no leaf for the stream'
+      stream_id: agent:ws_01J8Z2:agent_a
+      from_seq: 10
+      request: *id070
+      expect: null
+    - name: another_workspaces_segment
+      clause: '§9.14, DEC-767: only the workspace''s own records'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 20
+      request:
+        kind: manifest
+        manifest_hash: 0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d
+      expect: null
