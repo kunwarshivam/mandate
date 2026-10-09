@@ -105,6 +105,10 @@ export function versionInvariants(cases: readonly VersionCase[]) {
       }
     });
 
+    it("bind every gate decision to the version in force when the gate decided, as GateDecided's config_refs do", () => {
+      for (const d of ws.decisions.filter((x) => x.agent_id === a.agent_id)) expect(d.mandate_version, d.event_id).toBe(inEffect(a, d.at)?.mandate_version);
+    });
+
     it("journal every later application, applied or rejected, on the activity timeline", () => {
       const events = (ws.timeline[a.agent_id] ?? []).filter((e) => e.kind === "version" && !e.text.startsWith("Mandate version 1 confirmed"));
       expect(events.map((e) => e.at).sort()).toEqual(

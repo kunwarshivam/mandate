@@ -269,8 +269,9 @@ item above (C-3, C-9) are not repeated.
         all at 1440px and in both themes. `npm run shots` now waits for every chart on screen to
         show its line, and the spec covers the paused and reconciliation Homes.
         ([#1106](https://github.com/kunwarshivam/mandate/pull/1106))
-- [ ] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
-      and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6)
+- [x] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
+      and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6) Done
+      in [#1118](https://github.com/kunwarshivam/mandate/pull/1118).
 - [ ] **Positions on a phone as two-line rows**, so the value and the P&L are on screen. (C-14)
 - [ ] **Shots without the scenario panel**, and each scenario captured on the agent it affects.
       Tooling. (C-27, C-28)
