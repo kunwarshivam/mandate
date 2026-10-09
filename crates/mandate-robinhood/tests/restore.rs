@@ -611,7 +611,6 @@ fn a_successor_with_its_own_submit_keeps_its_own_instrument_and_side() {
 /// before the test fails. Beside each, a key with one unshared non-empty text id and its own
 /// instrument and side still cancels by it (`AGENTS.md` rule 13).
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_with_a_broker_order_id_that_is_not_non_empty_text_is_in_doubt() {
     let odd = [
         ("01JEMPTYID", json!(""), false),
@@ -659,7 +658,6 @@ fn a_key_with_a_broker_order_id_that_is_not_non_empty_text_is_in_doubt() {
 /// whole stream is read, so an `OrderSubmitted` of the origin that disagrees, arriving after the
 /// successor's record, leaves the successor in doubt too. One that agrees keeps it placed.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_late_disagreeing_submit_of_an_origin_leaves_its_successor_in_doubt() {
     let replaced = |s: &mut Stream, old: &ClientOrderId, new: &ClientOrderId, ids: [&str; 2]| {
         s.changed(old, "accepted", Some(Some(ids[0])), NONE);
@@ -690,7 +688,6 @@ fn a_late_disagreeing_submit_of_an_origin_leaves_its_successor_in_doubt() {
 /// `OrderSubmitted` after the inheriting record still leaves the key in doubt, and so does a
 /// `replaces` cycle with no `OrderSubmitted`, which the rebuild must still finish.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_successors_own_submit_wins_wherever_it_falls_in_the_stream() {
     let (old, new, next) = (
         key("01JREVERSEOLD"),
@@ -820,7 +817,6 @@ fn generated_id(n: usize, choice: usize) -> Option<Value> {
 /// readable submits, or with none a successor's origin's; it is placed with one unshared non-empty
 /// text id and no odd one.
 #[test]
-#[ignore = "pending E7-6"]
 fn which_keys_are_placed_never_depends_on_how_the_stream_interleaves_its_keys() {
     let keys = [
         key("01JMIX0"),
