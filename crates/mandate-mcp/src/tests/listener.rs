@@ -1,4 +1,4 @@
-//! The callback listener and the login's lifetime (E7-24 O1b, DEC-859). Only loopback is dialed.
+//! The callback listener and the login's lifetime (E7-24 O1b, DEC-861). Only loopback is dialed.
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;

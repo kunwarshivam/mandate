@@ -1,4 +1,4 @@
-//! The code exchange, and LT-9's canary scan of a whole login (E7-24 O1b, DEC-859).
+//! The code exchange, and LT-9's canary scan of a whole login (E7-24 O1b, DEC-861).
 
 use std::time::Duration;
 

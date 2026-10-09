@@ -186,7 +186,7 @@ impl PendingLogin {
 /// A login's lifetime from when it began; a callback at or after it is spent (DEC-691 item 6).
 pub const LOGIN_LIFETIME: Duration = Duration::from_secs(600);
 
-/// The token, a [`SecretString`] only: never printed, displayed or written (LT-9, DEC-859).
+/// The token, a [`SecretString`] only: never printed, displayed or written (LT-9, DEC-861).
 #[cfg_attr(not(test), allow(dead_code, reason = "the MCP session (O2) reads it"))]
 #[derive(Debug)]
 pub struct AccessToken {
@@ -208,7 +208,7 @@ impl CallbackListener {
 
     /// One request from one connection, then closed. `clock` started when `login` began; at or
     /// after [`LOGIN_LIFETIME`] it is [`McpError::LoginExpired`]. Else `GET <target> HTTP/1.1`
-    /// within 8 KiB goes to [`PendingLogin::callback`] (DEC-859 items 1 to 3).
+    /// within 8 KiB goes to [`PendingLogin::callback`] (DEC-861 items 1 to 3).
     pub async fn accept(
         self,
         login: PendingLogin,
@@ -221,7 +221,7 @@ impl CallbackListener {
 
 impl AuthServer {
     /// The code exchange (RFC 6749 §4.1.3, RFC 7636 §4.5): one form `POST` to the token endpoint;
-    /// only a `200` `Bearer` answer is a token, and no error carries a secret (DEC-859 items 4, 5).
+    /// only a `200` `Bearer` answer is a token, and no error carries a secret (DEC-861 items 4, 5).
     pub async fn exchange(
         &self,
         code: AuthorizationCode,
