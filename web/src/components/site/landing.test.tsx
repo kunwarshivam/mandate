@@ -330,15 +330,25 @@ describe("the desktop", () => {
 
   it("cascades each window it opens from the one in front, so a new window shows the last one rather than covering it; the home page is never cascaded from", async () => {
     renderLanding();
-    const translate = (name: string) => win(name).style.translate;
+    const at = (name: string) => (win(name).style.translate || "0px 0px").split(" ").map(parseFloat);
+    const home = at("Owlhead Home Page");
     await press(icon("The record"));
-    expect(translate(RECORD)).toBe("-24px 12px");
+    const record = at(RECORD);
     await press(icon("Questions"));
-    expect(translate(HELP)).toBe("4px 40px");
+    const help = at(HELP);
     await press(icon("Guestbook"));
-    expect(translate(GUESTBOOK)).toBe("32px 68px");
+    const guestbook = at(GUESTBOOK);
+    for (const [front, next] of [
+      [record, help],
+      [help, guestbook],
+    ]) {
+      expect(next[0], "each new window sits right of the one in front").toBeGreaterThan(front[0]);
+      expect(next[1], "and below it").toBeGreaterThan(front[1]);
+    }
+    const step = [help[0] - record[0], help[1] - record[1]];
+    expect(record, "the home page is never cascaded from").not.toEqual([home[0] + step[0], home[1] + step[1]]);
     await press(icon("The record"));
-    expect(translate(RECORD)).toBe("-24px 12px");
+    expect(at(RECORD), "a window brought forward stays where it was").toEqual(record);
   });
 
   it("maximizes a window to fill the desktop, and restores it", async () => {

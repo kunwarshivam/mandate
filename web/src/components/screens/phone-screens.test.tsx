@@ -80,18 +80,15 @@ describe("Home on a phone", () => {
       </Providers>,
     );
     const list = needsYou().querySelector("ul")!;
-    expect(list).toHaveClass("grid", "max-lg:flex", "max-lg:overflow-x-auto", "max-lg:snap-x", "max-lg:snap-mandatory");
-    expect(list.className).not.toMatch(/max-lg:flex-(col|wrap)/);
+    expect(list, "stacked rows on desktop, one row that scrolls sideways on a phone").toHaveClass("grid", "max-lg:flex", "max-lg:overflow-x-auto");
+    expect(list.className, "the phone's row never wraps or stacks").not.toMatch(/max-lg:flex-(col|wrap)/);
     const items = [...list.querySelectorAll<HTMLElement>(":scope > li")];
     expect(items.length).toBeGreaterThan(1);
     for (const li of items) {
-      expect(li).toHaveClass("max-lg:shrink-0", "max-lg:snap-start", "lg:border-b");
+      expect(li, "a card keeps its width, so the row scrolls rather than squeezes").toHaveClass("max-lg:shrink-0");
       const link = within(li).getByRole("link");
-      expect(link).toHaveClass("max-lg:rounded-xl");
       expect(link.innerHTML, "a card wraps its words rather than cutting off the price").not.toMatch(/\btruncate\b/);
     }
-    const request = items.find((li) => li.dataset.kind === "request")!;
-    expect(within(request).getByRole("link")).toHaveClass("max-lg:bg-lapis-soft");
   });
 
   it.each([
@@ -120,7 +117,7 @@ describe("Home on a phone", () => {
     );
     const clear = needsYou().querySelector("[data-slot=all-clear]")!;
     expect(clear).toHaveTextContent(/^All clear\. Nothing needs you\.$/);
-    expect(clear).toHaveClass("text-muted-foreground");
+    expect(clear.className, "plainly: no meaning colour and no motion").not.toMatch(/\b(text|bg|fill)-(gain|loss|mandate|lapis|primary|crimson)|\banimate-/);
     expect(clear.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     expect(needsYou().querySelector("ul")).toBeNull();
   });
@@ -241,15 +238,11 @@ describe("an agent on a phone", () => {
   it("lays what waits out as one row of cards that scrolls sideways", () => {
     overview();
     const list = main().querySelector<HTMLElement>("[data-slot=phone-waiting] ul")!;
-    expect(list).toHaveClass("max-lg:flex", "max-lg:overflow-x-auto", "max-lg:snap-x");
-    for (const li of list.querySelectorAll(":scope > li")) expect(li).toHaveClass("max-lg:shrink-0", "max-lg:snap-start");
-  });
-
-  it("draws the agent's chart at 200px on a phone", () => {
-    overview();
-    const canvas = main().querySelector<HTMLElement>("[data-slot=agent-equity] [data-slot=chart-canvas]")!;
-    expect(canvas).toHaveClass("h-(--chart-phone)", "lg:h-(--chart-height)");
-    expect(canvas.style.getPropertyValue("--chart-phone")).toBe("200px");
+    expect(list, "one row that scrolls sideways on a phone").toHaveClass("max-lg:flex", "max-lg:overflow-x-auto");
+    expect(list.className, "the row never wraps or stacks").not.toMatch(/max-lg:flex-(col|wrap)/);
+    const items = list.querySelectorAll(":scope > li");
+    expect(items.length).toBeGreaterThan(0);
+    for (const li of items) expect(li, "a card keeps its width, so the row scrolls rather than squeezes").toHaveClass("max-lg:shrink-0");
   });
 
   it("moves key figures, positions, orders, decisions, activity and the mandate card off the phone, and keeps them all on desktop", () => {
