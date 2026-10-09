@@ -11,7 +11,7 @@ use crate::wire::{Check, Decimal, EventId, Id, Ref, Rules, is_pointer, is_word, 
 /// omits it is refused rather than read as null; `current_base` is a member exactly when `code` is
 /// [`ProblemCode::StaleBase`] (§3.5: "the body names the current base", API-19).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct Problem {
     #[serde(rename = "type")]
     pub type_uri: String,
@@ -190,7 +190,12 @@ pub enum Effect {
 /// One finding of a 422 or of validation, shared with the validate read model
 /// (`envelope.schema.json#/$defs/Violation`, DEC-682 item 22). `path` is a JSON pointer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    remote = "Self",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum Violation {
     /// The body's shape or canonical form; `code` is a lowercase wire code.
     Schema {
@@ -320,3 +325,5 @@ pub enum ProblemError {
     #[error("current_base must be present exactly when the code is stale_base")]
     CurrentBaseMismatch,
 }
+
+crate::wire::object_only!(Problem, Violation);

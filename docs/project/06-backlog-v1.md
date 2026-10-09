@@ -4667,16 +4667,19 @@ From the independent review of the E10-10 A1 implementation, part 1 ([#993](http
   `type` at the member. It is still refused either way.~~ Done
   ([#1104](https://github.com/kunwarshivam/mandate/pull/1104), tests;
   [#1117](https://github.com/kunwarshivam/mandate/pull/1117), the fix).
-- **Refuse a tagged object written as a JSON array** (#1104's review). `decode` accepts an
+- ~~**Refuse a tagged object written as a JSON array** (#1104's review). `decode` accepts an
   internally tagged object written as a JSON array (`"who": ["user","a"]`) for `Actor`, `Scope`
   and the problem's tagged violation, which the schema refuses. Leniency only: the array form
   decodes to the same value the object form does. Fix with a strict object-only deserializer;
-  tests first.
-- **Refuse a plain object written as a JSON array** (the review of the tests for the tagged form,
+  tests first.~~ Done ([#1124](https://github.com/kunwarshivam/mandate/pull/1124), tests,
+  [DEC-881](decisions/DEC-881.md); this change, the fix, `wire::object_only!`).
+- ~~**Refuse a plain object written as a JSON array** (the review of the tests for the tagged form,
   [DEC-881](decisions/DEC-881.md) item 3). serde's derived structs also read a JSON array, their
   members in order, so `decode` accepts a whole `KillSwitchRequest` written as
   `[{"kind": "agent", "id": "a"}]` and a `record` written as an array, which the schemas refuse.
-  Leniency only, like the tagged form. Tests first, then its own decision and fix.
+  Leniency only, like the tagged form. Tests first, then its own decision and fix.~~ Done
+  ([#1132](https://github.com/kunwarshivam/mandate/pull/1132), tests,
+  [DEC-882](decisions/DEC-882.md); this change, the fix, the same macro on every derived struct).
 
 From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
 
