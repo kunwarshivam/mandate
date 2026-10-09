@@ -14,6 +14,7 @@ mandate-authn = { path = "crates/mandate-authn", version = "0.0.0" }
 mandate-backtest = { path = "crates/mandate-backtest", version = "0.0.0" }
 mandate-builder = { path = "crates/mandate-builder", version = "0.0.0" }
 mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
+mandate-dispatcher = { path = "crates/mandate-dispatcher", version = "0.0.0" }
 mandate-domain = { path = "crates/mandate-domain", version = "0.0.0" }
 mandate-executor = { path = "crates/mandate-executor", version = "0.0.0" }
 mandate-identity = { path = "crates/mandate-identity", version = "0.0.0" }

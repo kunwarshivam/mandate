@@ -727,7 +727,6 @@ proptest! {
 /// DEC-727, written by hand: a relayed send signs as a role mailbox (item 2's list), never as a
 /// person, so `sub` names no member to the relay or the push service (NT-2).
 #[test]
-#[ignore = "pending E8-14"]
 fn a_relayed_subject_is_a_role_mailbox_never_a_person() -> Result<(), WebPushError> {
     let roles = ["push", "notifications", "postmaster", "abuse", "security"];
     for role in roles {

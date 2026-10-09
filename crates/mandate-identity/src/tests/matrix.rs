@@ -41,6 +41,8 @@ use crate::{
 use super::rows::{ORG_ROLES, OWED, RISK_REDUCING, ROLE_COLUMNS, ROWS};
 use super::{ByMember, Everything, Failing, O1, O2, Unreadable, W1, W2, W3, hosted_in, paired};
 
+mod seeded;
+
 const SPEC: &str = include_str!("../../../../docs/specs/identity.md");
 
 const USER: PrincipalId = PrincipalId(0x31);
@@ -334,6 +336,28 @@ fn expected_in(
     kind: SessionKind,
 ) -> Expected {
     reduction_limited(row, expected(row, principal, ms, scope), kind)
+}
+
+/// The ID-5 oracle over a failed membership read, shared by the outage test and the seeded
+/// tests: a row that reads memberships is answered from the session's snapshot when it is
+/// risk-reducing and refused `membership_unavailable` otherwise; a row that reads none answers as
+/// with no outage.
+fn outage_expected(
+    row: &Row,
+    principal: &Principal,
+    snapshot: &[Membership],
+    scope: Scope,
+    kind: SessionKind,
+) -> Expected {
+    let client_outside = matches!(principal, Principal::Client { .. }) && scope != WS1;
+    let read = scope != Scope::Principal && !client_outside && paired(scope);
+    match (row.inactive, read, row.risk_reducing) {
+        (true, _, _) => Err(Refusal::InactivePermission),
+        (false, false, _) | (false, true, true) => {
+            expected_in(row, principal, snapshot, scope, kind)
+        }
+        (false, true, false) => Err(Refusal::MembershipUnavailable),
+    }
 }
 
 /// A reduction-only session's limit to its own rows, applied to an answer.
@@ -722,13 +746,8 @@ fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() 
                                 matches!(principal, Principal::Client { .. }) && scope != WS1;
                             let read =
                                 scope != Scope::Principal && !client_outside && paired(scope);
-                            let want = match (row.inactive, read, row.risk_reducing) {
-                                (true, _, _) => Err(Refusal::InactivePermission),
-                                (false, false, _) | (false, true, true) => {
-                                    expected_in(row, principal, &snapshot, scope, kind_of_session)
-                                }
-                                (false, true, false) => Err(Refusal::MembershipUnavailable),
-                            };
+                            let want =
+                                outage_expected(row, principal, &snapshot, scope, kind_of_session);
                             let got = authorize(
                                 &Failing,
                                 principal,

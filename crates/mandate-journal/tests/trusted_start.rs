@@ -102,7 +102,6 @@ fn anchor(leaves: &[(&str, u64, Digest)], stamped: bool) -> String {
 
 /// Every vector case: its records, request and answer exactly; nothing typed here.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_trusted_start_vector_resolves_as_its_vector_says() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
     let fixture = parse(&std::fs::read(path).unwrap()).unwrap();
@@ -142,7 +141,6 @@ fn every_trusted_start_vector_resolves_as_its_vector_says() {
 
 /// §11 and workspace API §4.8.1: genesis is seq 1 with 64 zeros, and no other seq, records or not.
 #[test]
-#[ignore = "pending E12-3"]
 fn genesis_is_seq_one_with_zeros_only() {
     let (payload, _) = segment(ACCT, 1, 3, Digest::ZERO);
     for records in [vec![], vec![row(CTL, "E1", "SegmentExported", &payload)]] {
@@ -156,7 +154,6 @@ fn genesis_is_seq_one_with_zeros_only() {
 /// `first_prev_hash`, never at another seq, for another stream, or as an anchor; a manifest hash
 /// no record holds is refused.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_segment_starts_its_own_stream_at_its_first_seq() {
     let (acct, acct_hash) = segment(ACCT, 4, 9, digest("p4"));
     let (agent, agent_hash) = segment(AGENT, 1, 3, Digest::ZERO);
@@ -183,7 +180,6 @@ fn a_segment_starts_its_own_stream_at_its_first_seq() {
 /// §9.14, DEC-783 item 8: an `AnchorComputed` with a `token` starts `s` at `n` from its leaf for `s`
 /// whose `seq` is `n − 1`; an anchor whose `token` is `null` is never a start, though its leaves fit.
 #[test]
-#[ignore = "pending E12-3"]
 fn only_a_stamped_anchor_starts_the_seq_after_its_leaf() {
     let (a9, g4, c3) = (digest("a9"), digest("g4"), digest("c3"));
     let leaves = [(ACCT, 9, a9), (AGENT, 4, g4), (CTL, 3, c3)];
@@ -212,7 +208,6 @@ fn only_a_stamped_anchor_starts_the_seq_after_its_leaf() {
 /// §9.14, DEC-767: a start is looked up among its stream's own workspace's records only, so another
 /// workspace's record is refused as an absent one, and that workspace's streams use its records.
 #[test]
-#[ignore = "pending E12-3"]
 fn another_workspaces_record_is_refused_as_an_absent_one() {
     let (seg, seg_hash) = segment(ACCT, 4, 9, digest("p4"));
     let (own, own_hash) = segment(FOREIGN_ACCT, 4, 9, digest("q4"));
@@ -232,9 +227,9 @@ fn another_workspaces_record_is_refused_as_an_absent_one() {
 }
 
 /// No start from an unreadable record (AGENTS.md rule 3) or for a stream with no workspace segment,
-/// not even genesis; a record answers only as its own `event_type`.
+/// not even genesis; a record answers only as its own `event_type`, and only on the workspace's
+/// control stream: a usable record on another stream of the same workspace is not a start.
 #[test]
-#[ignore = "pending E12-3"]
 fn an_unreadable_record_a_malformed_stream_or_another_type_is_refused() {
     let (seg, seg_hash) = segment(ACCT, 4, 9, digest("p4"));
     let (bad, bad_hash) = segment("acct::A1", 4, 9, digest("p4"));
@@ -246,6 +241,8 @@ fn an_unreadable_record_a_malformed_stream_or_another_type_is_refused() {
     let mut unparsed = row(CTL, "B3", "AnchorComputed", &stamped);
     let mut unparsed_segment = row(CTL, "B4", "SegmentExported", &as_anchor);
     (unparsed.body, unparsed_segment.body) = (b"{".to_vec(), b"{".to_vec());
+    let (off_control, off_control_hash) = segment(ACCT, 6, 9, digest("p6"));
+    let off_control_anchor = anchor(&[(ACCT, 11, digest("a11"))], true);
     let records = [
         row(CTL, "B1", "SegmentExported", &bad_prev),
         row(CTL, "B2", "AnchorComputed", &bad_leaf),
@@ -255,6 +252,8 @@ fn an_unreadable_record_a_malformed_stream_or_another_type_is_refused() {
         row("ctl:", "N2", "AnchorComputed", &stamped),
         row(CTL, "T1", "VerificationRun", &stamped),
         row(CTL, "T2", "AnchorComputed", &as_anchor),
+        row(AGENT, "S1", "SegmentExported", &off_control),
+        row(ACCT, "S2", "AnchorComputed", &off_control_anchor),
     ];
     let resolve = |s, n, request| resolve_trusted_start(&records, s, n, request);
     for (name, s, n, request) in [
@@ -267,6 +266,13 @@ fn an_unreadable_record_a_malformed_stream_or_another_type_is_refused() {
         ("an empty workspace's anchor", "acct::A1", 10, at("N2")),
         ("an anchor's payload under another type", ACCT, 10, at("T1")),
         ("a segment unparsed, or as an anchor", ACCT, 5, by(other)),
+        (
+            "a segment on an agent stream",
+            ACCT,
+            6,
+            by(off_control_hash),
+        ),
+        ("a stamped anchor on an account stream", ACCT, 12, at("S2")),
     ] {
         assert_eq!(resolve(s, n, request), REFUSED, "{name}");
     }
@@ -287,7 +293,6 @@ impl Rng {
 /// Random segments and anchors on two workspaces, some stamped, some naming a foreign stream; each
 /// request's answer comes only from the starts recorded while building usable records.
 #[test]
-#[ignore = "pending E12-3"]
 fn random_records_resolve_as_built() {
     let workspaces = [
         (CTL, [ACCT, AGENT, CTL]),

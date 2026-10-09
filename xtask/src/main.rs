@@ -10961,6 +10961,128 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// The runner, `a-lib` and the live-only `rh-host`, a workspace member outside
+    /// `default-members` that nothing depends on: the default build and a `-p a-lib` build do not
+    /// reach it (DEC-868 item 2).
+    fn live_only_outside_defaults() -> Metadata {
+        let runner = member(RUNNER, &[("rh-host", None)]);
+        let mut meta = workspace(vec![
+            with_features(runner, &[("live", &["dep:rh-host"])]),
+            member("a-lib", &[]),
+            member("rh-host", &[]),
+        ]);
+        meta.workspace_default_members
+            .retain(|id| id != "rh-host 0.0.0");
+        meta
+    }
+
+    /// [`live_only_outside_defaults`] as cargo resolves it for any invocation: every member is a
+    /// node, and no edge reaches `rh-host`.
+    fn unreached_host(_: &[String]) -> Result<Resolve> {
+        Ok(resolved(&[
+            (RUNNER, &[], &[]),
+            ("a-lib", &[], &[]),
+            ("rh-host", &[], &[]),
+        ]))
+    }
+
+    /// `--manifest-path`, in either spelling, makes cargo build the package at that path, which
+    /// the selection cannot read from `-p` or `default-members`, so such a build selects every
+    /// member and holds a live-only member nothing depends on (#1169 review, major; DEC-176
+    /// tightening); a `-p` build with no path does not.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_build_with_a_manifest_path_selects_every_member() -> Result<()> {
+        let flows = [workflow(&[
+            (
+                "host-manifest",
+                "cargo test --manifest-path crates/rh-host/Cargo.toml",
+            ),
+            (
+                "glued-host-manifest",
+                "cargo test --manifest-path=crates/rh-host/Cargo.toml",
+            ),
+            ("lib-tests", "cargo test -p a-lib"),
+        ])];
+        let problems = resolved_live_problems(
+            &live_policy(),
+            &live_only_outside_defaults(),
+            &flows,
+            &unreached_host,
+        )?;
+        names(
+            &problems,
+            &["rh-host", "host-manifest", "glued-host-manifest"],
+            &["lib-tests"],
+        );
+        Ok(())
+    }
+
+    /// A `cd` before a cargo command in a run step, after `&&` or on an earlier line of a `run: |`
+    /// block, makes cargo build the package of that directory, so the build selects every member
+    /// and holds a live-only member nothing depends on (#1169 review, major; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_build_after_a_cd_selects_every_member() -> Result<()> {
+        let flows = [ci_file(
+            ".github/workflows/ci.yml",
+            "on: push\njobs:\n  host-cd:\n    steps:\n      - run: cd crates/rh-host && cargo test\n  \
+             host-block:\n    steps:\n      - run: |\n          cd crates/rh-host\n          \
+             cargo test\n  lib-tests:\n    steps:\n      - run: cargo test -p a-lib\n",
+        )];
+        let problems = resolved_live_problems(
+            &live_policy(),
+            &live_only_outside_defaults(),
+            &flows,
+            &unreached_host,
+        )?;
+        names(
+            &problems,
+            &["rh-host", "host-cd", "host-block"],
+            &["lib-tests"],
+        );
+        Ok(())
+    }
+
+    /// A step's `working-directory:`, or one a job's or the workflow's `defaults: run:` gives,
+    /// makes cargo build the package of that directory, so the build selects every member and
+    /// holds a live-only member nothing depends on (#1169 review, major; DEC-176 tightening); a
+    /// job in another file with no working directory does not.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_build_in_a_working_directory_selects_every_member() -> Result<()> {
+        let flows = [
+            ci_file(
+                ".github/workflows/ci.yml",
+                "on: push\njobs:\n  host-step:\n    steps:\n      - working-directory: \
+                 crates/rh-host\n        run: cargo test\n  host-job:\n    defaults:\n      \
+                 run:\n        working-directory: crates/rh-host\n    steps:\n      - run: cargo \
+                 test\n",
+            ),
+            ci_file(
+                ".github/workflows/nightly.yml",
+                "on: push\ndefaults:\n  run:\n    working-directory: crates/rh-host\njobs:\n  \
+                 host-workflow:\n    steps:\n      - run: cargo test\n",
+            ),
+            ci_file(
+                ".github/workflows/lib.yml",
+                "on: push\njobs:\n  lib-tests:\n    steps:\n      - run: cargo test -p a-lib\n",
+            ),
+        ];
+        let problems = resolved_live_problems(
+            &live_policy(),
+            &live_only_outside_defaults(),
+            &flows,
+            &unreached_host,
+        )?;
+        names(
+            &problems,
+            &["rh-host", "host-step", "host-job", "host-workflow"],
+            &["lib-tests"],
+        );
+        Ok(())
+    }
+
     /// A resolve that fails, or an invocation word the shell expands, is a problem naming the job
     /// rather than an abort, and so is a default build that cannot be resolved (DEC-868 item 3).
     #[test]

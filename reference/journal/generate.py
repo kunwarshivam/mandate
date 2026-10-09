@@ -3826,6 +3826,7 @@ def render(
     broker_profile: dict,
     connections_section: dict,
     request_section: dict,
+    range_section: dict,
     workspace_section: dict,
     client_section: dict,
     hold_section: dict,
@@ -3849,6 +3850,7 @@ def render(
             "broker_profile": broker_profile,
             "connections": connections_section,
             "connection_requests": request_section,
+            "connection_ranges": range_section,
             "workspace_api": workspace_section,
             "client_actor": client_section,
             "hold": hold_section,
@@ -3903,6 +3905,7 @@ def main(argv: list[str] | None = None) -> int:
     broker_profile = build_broker_profile_section(control_section)
     connections_section = connections.build_section()
     request_section = connections.build_request_section()
+    range_section = connections.build_range_section()
     workspace_section = workspace.build_section()
     client_section = clients.build_section()
     hold_section = holds.build_section()
@@ -3935,6 +3938,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += connections.run_mutants(connections_section)
     problems += connections.check_section(request_section)
     problems += connections.run_request_mutants(request_section)
+    problems += connections.check_section(range_section)
+    problems += connections.run_range_mutants(range_section, request_section)
     problems += workspace.check_section(workspace_section)
     problems += workspace.run_mutants(workspace_section)
     problems += clients.check_section(client_section)
@@ -3968,6 +3973,7 @@ def main(argv: list[str] | None = None) -> int:
         broker_profile,
         connections_section,
         request_section,
+        range_section,
         workspace_section,
         client_section,
         hold_section,
@@ -3990,6 +3996,7 @@ def main(argv: list[str] | None = None) -> int:
         or check_broker_profile(reread["broker_profile"])
         or connections.check_section(reread["connections"])
         or connections.check_section(reread["connection_requests"])
+        or connections.check_section(reread["connection_ranges"])
         or workspace.check_section(reread["workspace_api"])
         or clients.check_section(reread["client_actor"])
         or holds.check_section(reread["hold"])
@@ -4054,6 +4061,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(request_section['invalid_drafts'])} invalid and {len(request_section['valid_drafts'])} valid connection-request "
         f"drafts, {len(request_section['sequences'])} rule-131 sequences; {len(connections.REQUEST_VALIDATOR_MUTANTS)} "
         f"validator, {len(connections.REQUEST_STREAM_MUTANTS)} stream, and {connections.REQUEST_VECTOR_MUTANTS} vector mutants caught; "
+        f"{len(range_section['sequences'])} connection ranges and {len(connections.RANGE_MUTANTS)} range mutants caught; "
         f"{len(workspace_section['drafts'])} workspace API drafts, {len(workspace_section['invalid_drafts'])} invalid and "
         f"{len(workspace_section['valid_drafts'])} valid; {len(workspace.VALIDATOR_MUTANTS)} validator and "
         f"{len(workspace.vector_mutants(workspace_section))} vector mutants caught; "
