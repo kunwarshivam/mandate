@@ -8248,6 +8248,16 @@ jq -r "$filter" "$src"
     /// because a variable can carry a `--features` or `--cfg` flag past a line-based scan: even
     /// `--target $TARGET`, `--target "$TARGET"`, `--target ${TARGET}` and `> out $FLAGS` are
     /// refused (the coordinator's rulings under DEC-176: they only refuse more).
+    ///
+    /// The forms #738 handles, pinned so none can be dropped (#738 review, third round): every
+    /// redirection form skips just its one target (`>|`, `1>`, `2>>`, `&>>`, `>&`, `<<<`, `<>`,
+    /// `>out`, `2>&-`, `>&2`, and a here-doc's `<<EOF`), and a here-doc's body lines are read as
+    /// commands; a command after a newline in a `run: |` block, `|&`, `(`, `{`, `!`, `if`, `then`,
+    /// `do` or `else` is judged on its own; a cargo command wrapped in `env`, `$(...)`, a backtick
+    /// or `bash -c "..."` is read, and one `xargs` feeds cannot be; every `-p` is read; `cargo` is
+    /// also named by its path; a cargo configuration array is read item by item; and `deploy/`'s
+    /// scripts are checked like CI's. A wrapper over a cargo command without `live`, and a
+    /// here-doc without cargo, stay allowed.
     #[test]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
         let policy = live_policy();
@@ -8262,6 +8272,8 @@ jq -r "$filter" "$src"
             "cargo build -p x 2> \"$LOG\"",
             "cargo build -p a-lib < \"$IN\" | tee \"$LOG\"",
             "cargo build 2> \"$LOG\" -p x",
+            "env RUST_LOG=info cargo test -p x",
+            "bash -c \"cargo test -p x\"",
         ];
         for line in allowed {
             let files = [ci_file(".github/workflows/ci.yml", line)];
@@ -8290,6 +8302,7 @@ jq -r "$filter" "$src"
             "cargo build -p the-runner --features \" live\"",
             "cargo check -p the-runner --all --features live",
             "cargo check -p the-runner --workspace --features live",
+            "ship = [\"run\", \"-p\", \"the-runner\", \"--features\", \"live\"]",
         ];
         for line in refused {
             let files = [ci_file(".cargo/config.toml", &format!("[alias]\n{line}\n"))];
@@ -8377,6 +8390,19 @@ jq -r "$filter" "$src"
                 ".github/scripts/build.sh",
                 "set -e\ncargo check -p the-runner --features \"other\" --target $TARGET\n",
             ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p x <<EOF $F\nhello\nEOF\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncat <<EOF\ncargo build --features live\nEOF\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: |\n      cargo check -p the-runner --features live\n      cargo build $F\n",
+            ),
+            ("deploy/run.sh", "set -e\ncargo build --features live\n"),
         ];
         for (path, text) in refused_across_lines {
             let files = [ci_file(path, text)];
@@ -8401,6 +8427,33 @@ jq -r "$filter" "$src"
             "cargo build >/dev/null $(cat f)",
             "cargo build & cargo build -p the-runner --features live",
             "cargo build -p a-lib &> out $FLAGS",
+            "cargo build -p x >| out $F",
+            "cargo build -p x 1> out $F",
+            "cargo build -p x 2>> out $F",
+            "cargo build -p x &>> out $F",
+            "cargo build -p x >& out $F",
+            "cargo build -p x <<< in $F",
+            "cargo build -p x <> f $F",
+            "cargo build -p x >out $F",
+            "cargo build -p x 2>&- $F",
+            "cargo build -p x >&2 $F",
+            "cargo build -p x > $X --features live",
+            "true |& cargo build $F",
+            "( cargo build $F )",
+            "{ cargo build $F; }",
+            "! cargo build $F",
+            "if cargo build $F; then",
+            "if true; then cargo build $F; fi",
+            "for i in 1; do cargo build $F; done",
+            "if true; then :; else cargo build $F; fi",
+            "env VAR=1 cargo build $F",
+            "xargs cargo build",
+            "echo $(cargo build --features live)",
+            "echo `cargo build --features live`",
+            "bash -c \"cargo build -p x $F\"",
+            "cargo build -p a -p b --features live",
+            "cargo check -p the-runner -p a-lib --features live",
+            "/usr/bin/cargo build --features live",
         ];
         for line in refused_by_words_before_an_operator {
             let files = [ci_file(
@@ -8424,6 +8477,15 @@ jq -r "$filter" "$src"
             "rustflags = [\"--cfg\", \"feature = \\\"live\\\"\"]",
             "rustflags = [\"--cfg\", 'feature\t=\t\"live\"']",
         ];
+        let allowed_in_a_script = ["set -e\ncat <<EOF\nno build here\nEOF\n"];
+        for text in allowed_in_a_script {
+            let files = [ci_file(".github/scripts/build.sh", text)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
         for line in refused_spaced_cfg {
             let files = [ci_file(".cargo/config.toml", &format!("[build]\n{line}\n"))];
             let problems = live_feature_problems(&policy, &meta(), &files)?;
@@ -8483,9 +8545,9 @@ jq -r "$filter" "$src"
     }
 
     /// The files the check reads are every file that decides a build: workflows (`.yml` and
-    /// `.yaml`), scripts, composite actions under `.github/actions`, and `.cargo/config.toml`
-    /// (aliases and `rustflags`); a repository without the optional ones reads the rest (#738
-    /// review, finding 4).
+    /// `.yaml`), scripts, composite actions under `.github/actions`, `deploy/`'s shell scripts
+    /// (the demo host's runbook, DEC-822), and `.cargo/config.toml` (aliases and `rustflags`); a
+    /// repository without the optional ones reads the rest (#738 review, finding 4).
     #[test]
     fn ci_files_reads_every_file_that_decides_a_build() -> Result<()> {
         let root = env::temp_dir().join(format!("mandate-xtask-ci-files-{}", std::process::id()));
@@ -8510,6 +8572,8 @@ jq -r "$filter" "$src"
             ".github/actions/e/action.yaml",
             ".cargo/config.toml",
             ".github/pull_request_template.md",
+            "deploy/f.sh",
+            "deploy/README.md",
         ] {
             write(path)?;
         }
@@ -8530,6 +8594,7 @@ jq -r "$filter" "$src"
                 ".github/scripts/c.sh",
                 ".github/workflows/a.yml",
                 ".github/workflows/b.yaml",
+                "deploy/f.sh",
             ]
         );
         Ok(())
@@ -8565,7 +8630,8 @@ jq -r "$filter" "$src"
 
     /// The lint job runs the live-feature check over its own repository (#738 review, finding
     /// 2): a fixture workspace with a clean workflow passes, and a workflow that runs `live`
-    /// fails the job naming the check, before the workspace checks run.
+    /// fails the job naming the check, before the workspace checks run. The fixture has the
+    /// `deploy/` directory main's lint job runs ShellCheck over (#795), with one clean script.
     #[test]
     fn the_lint_job_runs_the_live_feature_check_on_its_repository() -> Result<()> {
         let root = env::temp_dir().join(format!("mandate-xtask-lint-live-{}", std::process::id()));
@@ -8576,6 +8642,11 @@ jq -r "$filter" "$src"
         let workflows = root.join(".github/workflows");
         fs::create_dir_all(&workflows)?;
         fs::create_dir_all(root.join(".github/scripts"))?;
+        fs::create_dir_all(root.join("deploy"))?;
+        fs::write(
+            root.join("deploy/clean.sh"),
+            "#!/usr/bin/env bash\nset -euo pipefail\necho \"deployed\"\n",
+        )?;
         let workflow = |run: &str| {
             format!(
                 "on: push\njobs:\n  check:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: {run}\n"

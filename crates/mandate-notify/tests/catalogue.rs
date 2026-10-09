@@ -66,7 +66,6 @@ fn the_crate_lists_every_kind_once_in_the_catalogues_order() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn every_kind_maps_to_its_key_class_and_text_key() {
     for (kind, key, class, text) in CATALOGUE {
         assert_eq!(answer("key", kind.key()), key);
@@ -76,14 +75,12 @@ fn every_kind_maps_to_its_key_class_and_text_key() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn every_class_is_journaled_by_its_key() {
     let keys = [Action, Safety, Info].map(|c| answer("class key", c.key()));
     assert_eq!(keys, ["action", "safety", "info"]);
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn every_text_key_renders_its_fixed_english_text() {
     for (text, key, english) in TEXTS {
         assert_eq!(answer("key", text.key()), key);
@@ -97,7 +94,6 @@ fn every_text_key_renders_its_fixed_english_text() {
 /// urgency, outcome, and trade words NT-12 adds, as whole words, and no figure at all. A word added
 /// to either list belongs in both.
 #[test]
-#[ignore = "pending E8-9"]
 fn no_text_advises_urges_or_counts() {
     let advice = "recommend estimate target scorecard expected suggest".split(' ');
     let forbidden =

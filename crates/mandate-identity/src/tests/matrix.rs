@@ -59,6 +59,11 @@ fn just_after_now() -> UtcNanos {
     UtcNanos::from_parts(NOW_SECS, 1).unwrap()
 }
 
+/// One day before `now`: a role whose cool-off ended well before the request, which still counts.
+fn a_day_before_now() -> UtcNanos {
+    UtcNanos::from_parts(NOW_SECS - 86_400, 0).unwrap()
+}
+
 const WS1: Scope = Scope::Workspace {
     org: O1,
     workspace: W1,
@@ -355,17 +360,23 @@ fn subsets(roles: &[Role]) -> Vec<BTreeSet<Role>> {
 }
 
 /// `roles` with their effective-from instants: one nanosecond after `now` for those in `cooling`,
-/// exactly `now` for the rest, so the boundary itself is effective.
-fn dated(roles: &BTreeSet<Role>, cooling: &BTreeSet<Role>) -> BTreeMap<Role, UtcNanos> {
+/// and `settled` for the rest, which is at or before `now`.
+fn dated(
+    roles: &BTreeSet<Role>,
+    cooling: &BTreeSet<Role>,
+    settled: UtcNanos,
+) -> BTreeMap<Role, UtcNanos> {
     roles
         .iter()
         .map(|r| match cooling.contains(r) {
             true => (*r, just_after_now()),
-            false => (*r, now()),
+            false => (*r, settled),
         })
         .collect()
 }
 
+/// A membership whose roles not in `cooling` became effective exactly at `now`, so the boundary
+/// itself is effective.
 fn membership(
     member: PrincipalId,
     scope: Scope,
@@ -373,29 +384,53 @@ fn membership(
     roles: &BTreeSet<Role>,
     cooling: &BTreeSet<Role>,
 ) -> Membership {
+    membership_since(member, scope, state, roles, cooling, now())
+}
+
+/// `membership`, with the roles not in `cooling` effective from `settled`.
+fn membership_since(
+    member: PrincipalId,
+    scope: Scope,
+    state: MembershipState,
+    roles: &BTreeSet<Role>,
+    cooling: &BTreeSet<Role>,
+    settled: UtcNanos,
+) -> Membership {
     Membership {
         member,
         scope,
         state,
-        roles: dated(roles, cooling),
+        roles: dated(roles, cooling, settled),
     }
 }
 
 /// The member's org membership in O1 and workspace membership in W1, both holding `roles` in
 /// `state`, of which only the scope's kind may act (no inheritance either way), and none in W2,
-/// O2, or W3; plus a decoy user holding every role in both, whose roles reach nobody else.
+/// O2, or W3; plus a decoy user holding every role in both, whose roles reach nobody else. The
+/// member's roles not in `cooling` became effective exactly at `now`.
 fn memberships(
     member: PrincipalId,
     roles: &BTreeSet<Role>,
     cooling: &BTreeSet<Role>,
     state: MembershipState,
 ) -> Vec<Membership> {
+    memberships_since(member, roles, cooling, now(), state)
+}
+
+/// `memberships`, with the member's roles not in `cooling` effective from `settled`.
+fn memberships_since(
+    member: PrincipalId,
+    roles: &BTreeSet<Role>,
+    cooling: &BTreeSet<Role>,
+    settled: UtcNanos,
+    state: MembershipState,
+) -> Vec<Membership> {
     let all: BTreeSet<Role> = Role::ALL.into_iter().collect();
     let none = BTreeSet::new();
     let active = MembershipState::Active;
     vec![
-        membership(member, Scope::Org(O1), state, roles, cooling),
-        membership(member, WS1, state, roles, cooling),
+        membership_since(member, Scope::Org(O1), state, roles, cooling, settled),
+        membership_since(member, WS1, state, roles, cooling, settled),
         membership(DECOY, Scope::Org(O1), active, &all, &none),
         membership(DECOY, WS1, active, &all, &none),
     ]
@@ -565,16 +600,19 @@ fn the_matrix_parses_by_its_grammar_and_every_column_grants() {
 }
 
 #[test]
-#[ignore = "pending E9-2"]
 fn id2_authorize_grants_exactly_the_matrix_for_every_role_set_kind_and_scope() {
     let rows = matrix();
     let mut checked = 0u64;
     let reviewable = BTreeSet::from([Role::Operator, Role::Approver]);
     for roles in subsets(&Role::ALL) {
         let coolings = [
-            BTreeSet::new(),
-            roles.intersection(&reviewable).copied().collect(),
-            roles.clone(),
+            (BTreeSet::new(), now()),
+            (BTreeSet::new(), a_day_before_now()),
+            (
+                roles.intersection(&reviewable).copied().collect(),
+                a_day_before_now(),
+            ),
+            (roles.clone(), now()),
         ];
         for state in [
             MembershipState::Invited,
@@ -585,8 +623,8 @@ fn id2_authorize_grants_exactly_the_matrix_for_every_role_set_kind_and_scope() {
             MembershipState::Expired,
             MembershipState::Revoked,
         ] {
-            for cooling in &coolings {
-                let ms = memberships(USER, &roles, cooling, state);
+            for (cooling, settled) in &coolings {
+                let ms = memberships_since(USER, &roles, cooling, *settled, state);
                 let user = Principal::User { id: USER };
                 check(&rows, &user, &ByMember(&ms), &ms, &mut checked);
                 check(&rows, &user, &Everything(&ms), &ms, &mut checked);
@@ -641,7 +679,7 @@ fn id2_authorize_grants_exactly_the_matrix_for_every_role_set_kind_and_scope() {
             &mut checked,
         );
     }
-    assert!(checked > 2_000_000, "only {checked} cases checked");
+    assert!(checked > 15_000_000, "only {checked} cases checked");
 }
 
 /// A failed membership read never refuses a risk-reducing row (identity spec §4.5, DEC-642 item 10):
@@ -650,7 +688,6 @@ fn id2_authorize_grants_exactly_the_matrix_for_every_role_set_kind_and_scope() {
 /// other row; a reduction-only session still reaches only its rows; principal scope reads nothing;
 /// and the principals that never read memberships answer as their column says.
 #[test]
-#[ignore = "pending E9-2"]
 fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() {
     let rows = matrix();
     let user = Principal::User { id: USER };
@@ -664,12 +701,15 @@ fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() 
     let mut checked = 0u64;
     for roles in subsets(&Role::ALL) {
         let coolings = [
-            BTreeSet::new(),
-            roles.intersection(&reviewable).copied().collect(),
+            (BTreeSet::new(), now()),
+            (
+                roles.intersection(&reviewable).copied().collect(),
+                a_day_before_now(),
+            ),
         ];
-        for cooling in coolings {
+        for (cooling, settled) in coolings {
             let snapshot: Vec<Membership> =
-                memberships(USER, &roles, &cooling, MembershipState::Active)
+                memberships_since(USER, &roles, &cooling, settled, MembershipState::Active)
                     .into_iter()
                     .filter(|m| m.member == USER)
                     .collect();
@@ -752,7 +792,6 @@ fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() 
 /// A snapshot entry serves only its own scope (DEC-816): with W1's entry holding every role and
 /// W2's none, a request in W2 during an outage gets nothing from W1's roles.
 #[test]
-#[ignore = "pending E9-2"]
 fn a_snapshot_entry_never_serves_another_workspace() {
     let ws2 = Scope::Workspace {
         org: O1,
@@ -799,7 +838,6 @@ fn a_snapshot_entry_never_serves_another_workspace() {
 /// org kill switch is still authorized from the snapshot, with no set, and the route's workspace is
 /// checked against its own record instead.
 #[test]
-#[ignore = "pending E9-2"]
 fn org_fanout_workspaces_come_from_the_store() {
     let owner = BTreeSet::from([Role::OrgOwner]);
     let none = BTreeSet::new();
@@ -918,7 +956,6 @@ fn org_fanout_workspaces_come_from_the_store() {
 /// operator by their columns; each grant flagged `membership_unverified`; and a reduction-only
 /// session still reaches only its rows.
 #[test]
-#[ignore = "pending E9-2"]
 fn an_unreadable_workspace_record_never_refuses_risk_reduction() {
     let rows = matrix();
     let user = Principal::User { id: USER };
@@ -1038,7 +1075,6 @@ fn org_owner() -> Vec<Membership> {
 /// workspace; a context built live checks the route's workspace against its set alone, needing no
 /// record.
 #[test]
-#[ignore = "pending E9-2"]
 fn an_org_route_with_no_set_and_no_record_is_pending_never_refused() {
     let ms = org_owner();
     let unhosted = WorkspaceId(0x29);
@@ -1082,7 +1118,6 @@ fn an_org_route_with_no_set_and_no_record_is_pending_never_refused() {
 /// enumerated it answers `NoSetYet`, never a refusal, a caller-named set, or part of one; live, it
 /// answers exactly the store's set, unflagged.
 #[test]
-#[ignore = "pending E9-2"]
 fn every_workspace_has_no_set_during_an_outage_and_the_full_set_live() {
     let ms = org_owner();
     let session = session(SessionKind::Full, ms.clone());

@@ -99,7 +99,6 @@ fn seed(journal: &mut Journal, event_type: &str, payload: &str) {
 /// §4.2's: W-002, as 1000 x 0.05 at the stop is over 0.02 x 1000 a day. A shown deployment checks
 /// what its gesture does, the V-rules among them.
 #[test]
-#[ignore = "pending E10-16"]
 fn a_shown_code_is_the_gestures_and_showing_writes_nothing() {
     let (mut journal, mut store) = (Journal::default(), Store::new());
     store.put_artifact(SPY.as_bytes()).unwrap();
@@ -142,7 +141,6 @@ fn a_shown_code_is_the_gestures_and_showing_writes_nothing() {
 /// deployment's code, with no warnings, whatever the rules now say, and writes nothing; while
 /// another version is active, the agent is refused `agent_active`, even for a confirmed version.
 #[test]
-#[ignore = "pending E10-16"]
 fn a_deployed_agent_shows_its_version_and_refuses_another() {
     let (mut journal, mut store) = (Journal::default(), Store::new());
     store.put_artifact(SPY.as_bytes()).unwrap();
@@ -233,7 +231,6 @@ fn a_deployed_agent_shows_its_version_and_refuses_another() {
 /// Warnings are shown sorted by code (DEC-530 item 4), for a confirmation and for a deployment: a
 /// mandate with a rule after its catch-all warns W-005 as well as W-002 (mandate spec §4.2).
 #[test]
-#[ignore = "pending E10-16"]
 fn warnings_are_shown_sorted_by_code() {
     let (mut journal, mut store) = (Journal::default(), Store::new());
     store.put_artifact(SPY.as_bytes()).unwrap();
@@ -431,7 +428,6 @@ fn refusals_without_a_database(tag: &str) {
 }
 
 #[test]
-#[ignore = "pending E10-16"]
 fn the_binary_refuses_a_bad_owner_a_missing_file_and_no_database() {
     refusals_without_a_database("refusals");
 }
@@ -451,7 +447,6 @@ fn dsn(db: &TestDb) -> String {
 /// version and a wrong code each exit non-zero with their code and commit nothing. No output,
 /// stdout or stderr, names any part of the DSN.
 #[test]
-#[ignore = "pending E10-16"]
 fn the_binary_creates_confirms_and_deploys_in_postgres() {
     refusals_without_a_database("binary");
     let Some(db) = TestDb::new() else {

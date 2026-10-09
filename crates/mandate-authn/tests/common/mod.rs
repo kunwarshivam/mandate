@@ -154,6 +154,12 @@ impl TestIssuer {
     /// members or odd types, with `signer`'s key whatever `alg` the header names.
     pub fn sign_raw(&self, signer: Signer, header: &str, payload: &str) -> String {
         let input = format!("{}.{}", b64(header.as_bytes()), b64(payload.as_bytes()));
+        self.sign_input(signer, &input)
+    }
+
+    /// Signs the signing input `input` exactly as given, so a test can sign segment text that is
+    /// not canonical base64url, and appends the signature.
+    pub fn sign_input(&self, signer: Signer, input: &str) -> String {
         let sig = match signer {
             Signer::Es256 => self
                 .es
