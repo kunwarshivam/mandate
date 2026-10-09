@@ -93,6 +93,10 @@ pub enum NoticeKind {
     IntegrityIncident,
     CredentialAdded,
     NewDevice,
+    /// A member added or removed one of their own push addresses, with step-up: the only
+    /// out-of-band sign that a stolen session added a watcher or silenced the member's safety
+    /// notices (spec §3.2, DEC-795 item 6).
+    NotificationAddressChanged,
     RecoveryUsed,
     RoleGranted,
     MemberDeactivated,
@@ -114,23 +118,28 @@ pub enum NoticeKind {
 
 impl NoticeKind {
     #[rustfmt::skip]
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::ApprovalRequested, Self::ApprovalReminder, Self::RiskLimit, Self::KillSwitch,
         Self::AgentHeld, Self::AccountRestriction, Self::Protection, Self::ExitStalled,
         Self::Reconciliation, Self::ExternalActivity, Self::AccountState, Self::DataFeedDown,
-        Self::IntegrityIncident, Self::CredentialAdded, Self::NewDevice, Self::RecoveryUsed,
-        Self::RoleGranted, Self::MemberDeactivated, Self::Deprovisioned, Self::BreakGlass,
-        Self::VersionRiskIncreasing, Self::DelegationAdded, Self::ConnectionAdded, Self::WentLive,
-        Self::ClientConnected, Self::ChannelLost, Self::DailyBrief, Self::DelegationEnded,
-        Self::ModelStatus, Self::ResearchStatus, Self::SpendCap, Self::ApprovalClosed,
+        Self::IntegrityIncident, Self::CredentialAdded, Self::NewDevice,
+        Self::NotificationAddressChanged, Self::RecoveryUsed, Self::RoleGranted,
+        Self::MemberDeactivated, Self::Deprovisioned, Self::BreakGlass, Self::VersionRiskIncreasing,
+        Self::DelegationAdded, Self::ConnectionAdded, Self::WentLive, Self::ClientConnected,
+        Self::ChannelLost, Self::DailyBrief, Self::DelegationEnded, Self::ModelStatus,
+        Self::ResearchStatus, Self::SpendCap, Self::ApprovalClosed,
     ];
 
     /// The kind's key as spec §3.2 writes it, for `OwnerAlertSent` and `NoticeIssued`.
     ///
     /// # Errors
-    /// Never: every kind has a key.
+    /// [`NotifyError::Unimplemented`] for [`Self::NotificationAddressChanged`] until E8-9 adds it
+    /// (DEC-77); every other kind has a key.
     pub fn key(self) -> Result<&'static str, NotifyError> {
         Ok(match self {
+            Self::NotificationAddressChanged => {
+                return Err(NotifyError::Unimplemented { story: "E8-9" });
+            }
             Self::ApprovalRequested => "approval_requested",
             Self::ApprovalReminder => "approval_reminder",
             Self::RiskLimit => "risk_limit",
@@ -169,9 +178,13 @@ impl NoticeKind {
     /// The kind's class, from spec §3.2's table.
     ///
     /// # Errors
-    /// Never: every kind has a class.
+    /// [`NotifyError::Unimplemented`] for [`Self::NotificationAddressChanged`] until E8-9 adds it
+    /// (DEC-77); every other kind has a class.
     pub fn class(self) -> Result<Class, NotifyError> {
         Ok(match self {
+            Self::NotificationAddressChanged => {
+                return Err(NotifyError::Unimplemented { story: "E8-9" });
+            }
             Self::ApprovalRequested | Self::ApprovalReminder => Class::Action,
             Self::RiskLimit
             | Self::KillSwitch
@@ -210,9 +223,13 @@ impl NoticeKind {
     /// and the next brief (spec §3.1).
     ///
     /// # Errors
-    /// Never: every kind has a text key or none.
+    /// [`NotifyError::Unimplemented`] for [`Self::NotificationAddressChanged`] until E8-9 adds it
+    /// (DEC-77); every other kind has a text key or none.
     pub fn text_key(self) -> Result<Option<TextKey>, NotifyError> {
         Ok(match self {
+            Self::NotificationAddressChanged => {
+                return Err(NotifyError::Unimplemented { story: "E8-9" });
+            }
             Self::ApprovalRequested | Self::ApprovalReminder => Some(TextKey::ApprovalNeeded),
             Self::RiskLimit
             | Self::KillSwitch
