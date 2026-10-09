@@ -6,6 +6,12 @@
     }
   },
   {
+    "label": "compromised null",
+    "set": {
+      "/compromised": null
+    }
+  },
+  {
     "label": "a reason member",
     "set": {
       "/reason": "leaked"
