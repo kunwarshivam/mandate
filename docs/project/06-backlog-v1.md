@@ -1529,6 +1529,13 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 ### E12 Audit explorer
 
 - **E12-1 (Must)** As an auditor, I want a causal trace from any fill back to its causes.
+  *Follow-ups (A2 review):* the quoted items' `author` reads `owner_selected` for an owner-selected
+  signal model's output through `config_refs.mandate_version`, with the founder's label, once
+  [DEC-773](decisions/DEC-773.md) is decided. Slice A2b tests: `payload.client_order_id` with its
+  lower-`seq` filter, `OrderRequestRecorded`, `payload.approval`, `payload.outputs_used[]`, the
+  approval's `outputs[]`, `payload.thesis_id`, `OrderSubmitted` version 1, the quoted members of
+  `ThesisProposed` and `ModelInvocationRecorded`, a missing singular `IntentReceived`, and
+  [DEC-772](decisions/DEC-772.md) items 8 and 9.
 - **E12-2 (Must)** As an auditor, I want per-agent timelines with filters and JSON/CSV export.
 - **E12-3 (Should)** As an auditor, I want to run chain verification from the UI.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach

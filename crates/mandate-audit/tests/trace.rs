@@ -20,6 +20,8 @@ use proptest::test_runner::{TestCaseError, TestRunner};
 
 const AGENTS: [&str; 2] = ["AG1", "AG2"];
 const EV: &str = "payload.evidence[]";
+const PROPOSED: &str = r#"{"instrument_id":"inst","side":"buy","type":"limit","tif":"day","qty":"1",
+    "limit_price":"10","purpose":"open"}"#;
 
 /// Each output's stream (0 to 3), `causation_id`, and evidence, as indices into a pool of ids.
 type Spec = Vec<((usize, Option<usize>), Vec<usize>)>;
@@ -57,7 +59,7 @@ fn draft(id: &str, stream: &str, event_type: &str, caused: Option<&str>, payload
 fn output(evidence: &[String], invalidation: Option<&str>, thesis_ref: Option<&str>) -> String {
     let evidence: Vec<String> = evidence.iter().map(|e| quote(Some(e))).collect();
     format!(
-        r#"{{"model_id":"quant.momentum","model_version":"1.0.0","content_hash":"sha256:{}",
+        r#"{{"model_id":"llm.research_agent","model_version":"1.0.0","content_hash":"sha256:{}",
         "instrument_id":"inst","as_of":"{T}","expires_at":"{T}","direction":"long",
         "conviction":"1","confidence":"1","horizon_s":60,"thesis_ref":{},"evidence":[{}],
         "invalidation":{},"thesis_id":null,"lineage_id":null,"ignored":null}}"#,
@@ -151,13 +153,13 @@ fn walk(g: &Graph, workspace: WorkspaceId, start: &str) -> (Vec<(String, u16)>, 
 }
 
 /// Traces `start` as `workspace` and checks what does not depend on the links: each node is the
-/// journal's row, `as_of` holds the heads of the nodes' streams (DEC-772 item 6), and no other
-/// workspace's stream id appears anywhere in the response (AU-1).
-fn traced(g: &Graph, workspace: WorkspaceId, start: &str) -> Trace {
+/// journal's row, `as_of` holds the heads of the nodes' streams and of `also`, the streams the walk
+/// read that hold no node (DEC-772 item 6), and no other workspace's stream id appears (AU-1).
+fn traced(g: &Graph, workspace: WorkspaceId, start: &str, also: &[&str]) -> Trace {
     let read = MemoryRead::new(&g.fx.journal);
     let trace = read.trace(&tenant(workspace), start).unwrap();
     assert_eq!(trace.start, start);
-    let mut streams = BTreeSet::new();
+    let mut streams: BTreeSet<String> = also.iter().map(|s| s.to_string()).collect();
     for node in &trace.nodes {
         let row = g.fx.journal.event(&node.event.event_id).unwrap();
         assert_eq!(node.event.stream_id, row.stream_id);
@@ -187,9 +189,10 @@ fn traced(g: &Graph, workspace: WorkspaceId, start: &str) -> Trace {
     trace
 }
 
-/// [`traced`], and the nodes, hops and `truncated` of the oracle's [`walk`].
+/// [`traced`], and the nodes, hops and `truncated` of the oracle's [`walk`]. Its links are looked
+/// up by id alone, so the walk reads no stream that holds no node.
 fn walked(g: &Graph, workspace: WorkspaceId, start: &str) -> Trace {
-    let trace = traced(g, workspace, start);
+    let trace = traced(g, workspace, start, &[]);
     let nodes: Vec<(String, u16)> = trace
         .nodes
         .iter()
@@ -265,7 +268,7 @@ fn cycles_and_self_links_end_at_already_shown() {
     g.add(&stream, &b, Some(&a), &[c.clone(), b.clone()]);
     g.add(&stream, &c, Some(&d), from_ref(&a));
     g.add(&stream, &d, Some(&b), &[]);
-    let trace = traced(&g, WS_A, &a);
+    let trace = traced(&g, WS_A, &a, &[]);
     let (shown, again) = (HopStatus::Shown, HopStatus::AlreadyShown);
     assert_eq!(
         trace.hops,
@@ -300,7 +303,7 @@ fn forged_links_read_as_absent_ones_and_a_foreign_start_is_not_found() {
     g.add(&agent(WS_B, "AG1"), &theirs, Some(&mine), from_ref(&mine));
     let forged = [theirs.clone(), prefixed, event_id(999_999)];
     g.add(&agent(WS_A, "AG1"), &mine, Some(&theirs), &forged);
-    let trace = traced(&g, WS_A, &mine);
+    let trace = traced(&g, WS_A, &mine, &[]);
     let lost = |link: &str| hop(&mine, link, None, HopStatus::NotRecorded);
     let expected = [lost("causation_id"), lost(EV), lost(EV), lost(EV)];
     assert_eq!((trace.nodes.len(), trace.hops), (1, expected.to_vec()));
@@ -310,8 +313,8 @@ fn forged_links_read_as_absent_ones_and_a_foreign_start_is_not_found() {
     }
 }
 
-/// DEC-762 item 2: 16 hops deep is shown whole; one more is `beyond_bound` and truncates. A link
-/// from depth 16 to a shown event is still `already_shown` (DEC-772 item 2).
+/// DEC-762 item 2: 16 hops deep is shown whole; one more is `beyond_bound` and truncates, an absent
+/// target too. A link from depth 16 to a shown event is still `already_shown` (DEC-772 item 2).
 #[test]
 #[ignore = "pending E12-1"]
 fn the_depth_bound_is_sixteen_hops() {
@@ -319,25 +322,27 @@ fn the_depth_bound_is_sixteen_hops() {
     let stream = agent(WS_A, "AG2");
     let chain = |base: u64, len: u64| (0..len).map(|i| event_id(base + i)).collect::<Vec<_>>();
     let (whole, cut) = (chain(720_000, 17), chain(730_000, 18));
-    for pair in whole.windows(2).chain(cut.windows(2)) {
+    for pair in whole.windows(2).chain(cut[..17].windows(2)) {
         g.add(&stream, &pair[0], Some(&pair[1]), &[]);
     }
     g.add(&stream, &whole[16], None, &[whole[0].clone()]);
+    g.add(&stream, &cut[16], Some(&cut[17]), &[event_id(999_999)]);
     g.add(&stream, &cut[17], None, &[]);
     let trace = walked(&g, WS_A, &whole[0]);
     let last = hop(&whole[16], EV, Some(&whole[0]), HopStatus::AlreadyShown);
     assert_eq!((trace.nodes.len(), trace.truncated), (17, false));
     assert_eq!((trace.hops.len(), trace.hops.last()), (17, Some(&last)));
     let trace = walked(&g, WS_A, &cut[0]);
-    let beyond = hop(&cut[16], "causation_id", None, HopStatus::BeyondBound);
+    let beyond = |link: &str| hop(&cut[16], link, None, HopStatus::BeyondBound);
     assert_eq!((trace.nodes.len(), trace.truncated), (17, true));
     assert_eq!(
-        (trace.nodes[16].depth, trace.hops.last()),
-        (16, Some(&beyond))
+        (trace.nodes[16].depth, &trace.hops[16..]),
+        (16, &[beyond("causation_id"), beyond(EV)][..])
     );
 }
 
-/// DEC-762 item 2: 256 events, the start included, are shown whole; a 257th is `beyond_bound`.
+/// DEC-762 item 2: 256 events, the start included, are shown whole; a 257th is `beyond_bound`,
+/// one of an unexpected type too (DEC-772 item 2).
 #[test]
 #[ignore = "pending E12-1"]
 fn the_node_bound_is_256_events() {
@@ -362,6 +367,18 @@ fn the_node_bound_is_256_events() {
         (256, 256, true)
     );
     assert_eq!(trace.hops.last(), Some(&beyond));
+    let (typed, proposed) = (event_id(750_003), event_id(750_004));
+    let event = draft(&proposed, &stream, "IntentProposed", Some(&cut), PROPOSED);
+    g.fx.append_draft(&stream, proposed.clone(), &event);
+    let cited: Vec<String> = leaves[..254].iter().chain([&proposed]).cloned().collect();
+    g.add(&stream, &typed, None, &cited);
+    let trace = traced(&g, WS_A, &typed, &[]);
+    let beyond = hop(&proposed, "causation_id", None, HopStatus::BeyondBound);
+    assert_eq!(
+        (trace.nodes.len(), trace.hops.len(), trace.truncated),
+        (256, 256, true)
+    );
+    assert_eq!(trace.hops.last(), Some(&beyond));
 }
 
 /// DEC-762 item 2, DEC-772 item 3: 1,024 hops are recorded whole; at a 1,025th the walk stops and
@@ -380,7 +397,7 @@ fn the_hop_bound_is_1024_hops() {
     assert_eq!((trace.hops.len(), trace.truncated), (1024, true));
 }
 
-/// AU-4, API-18, DEC-772 item 7: an output's injected text and thesis artifact are served only as
+/// AU-4, API-18, DEC-772 item 7, DEC-773: an output's injected text and thesis artifact are served only as
 /// quoted, attributed items, in §4.8.1's order, and an event id written in that text is not a link.
 #[test]
 #[ignore = "pending E12-1"]
@@ -395,13 +412,13 @@ fn model_text_is_only_quoted_and_never_followed() {
     let payload = output(from_ref(&cited), Some(&injected), Some(&thesis));
     let event = draft(&start, &stream, "ModelOutputRecorded", None, &payload);
     g.fx.append_draft(&stream, start.clone(), &event);
-    let trace = traced(&g, WS_A, &start);
+    let trace = traced(&g, WS_A, &start, &[]);
     let item = |path: &str, text: &str, artifact: Option<&str>| Quoted {
         path: path.to_owned(),
         quoted: QuotedContent {
             author: Author::PlatformAuthored,
             text: text.to_owned(),
-            model_id: "quant.momentum".to_owned(),
+            model_id: "llm.research_agent".to_owned(),
             model_version: "1.0.0".to_owned(),
             produced_at: T.to_owned(),
             event_id: start.clone(),
@@ -418,10 +435,11 @@ fn model_text_is_only_quoted_and_never_followed() {
     assert_eq!(quotes, [&quoted[..], &[]]);
 }
 
-/// DEC-761 items 1 and 2, DEC-772 item 5: an `intent_id` is looked up on the from event's own
-/// account stream and on `agent:{ws}:{agent_id}` of the path's workspace only. A forged one naming
-/// another workspace's `IntentProposed`, or one on another agent's stream, is `not_recorded`; an
-/// `IntentProposed` whose `causation_id` names an output is `unexpected_type`, shown, not followed.
+/// DEC-761 items 1 and 2, DEC-772 items 5 and 6: an `intent_id` is looked up on the from event's
+/// own account stream and on `agent:{ws}:{agent_id}` of the path's workspace only, which `as_of`
+/// covers. A forged one naming another workspace's `IntentProposed`, or one on another agent's
+/// stream, is `not_recorded`, as is "every `GateDecided`" with none; an `IntentProposed` whose
+/// `causation_id` names an output is `unexpected_type`, shown, not followed.
 #[test]
 #[ignore = "pending E12-1"]
 fn intent_links_are_scoped_to_the_named_streams_and_typed() {
@@ -437,14 +455,12 @@ fn intent_links_are_scoped_to_the_named_streams_and_typed() {
         elsewhere,
     ] = [1, 2, 3, 4, 5, 6, 7].map(|n| event_id(780_000 + n));
     g.add(&agent(WS_A, "AG1"), &output_a, Some(&own), &[]);
-    let proposed = r#"{"instrument_id":"inst","side":"buy","type":"limit","tif":"day","qty":"1",
-        "limit_price":"10","purpose":"open"}"#;
     for (id, stream) in [
         (&proposed_a, agent(WS_A, "AG1")),
         (&proposed_other, agent(WS_A, "AG2")),
         (&proposed_b, agent(WS_B, "AG1")),
     ] {
-        let event = draft(id, &stream, "IntentProposed", Some(&output_a), proposed);
+        let event = draft(id, &stream, "IntentProposed", Some(&output_a), PROPOSED);
         g.fx.append_draft(&stream, id.clone(), &event);
     }
     for (id, intent) in [
@@ -459,19 +475,21 @@ fn intent_links_are_scoped_to_the_named_streams_and_typed() {
         let event = draft(id, &account, "IntentReceived", None, &received);
         g.fx.append_draft(&account, id.clone(), &event);
     }
-    let link = "payload.intent_id";
+    let (link, read) = ("payload.intent_id", agent(WS_A, "AG1"));
+    let lost = |from: &str| hop(from, link, None, HopStatus::NotRecorded);
     for start in [&forged, &elsewhere] {
-        let trace = traced(&g, WS_A, start);
+        let trace = traced(&g, WS_A, start, &[&read]);
         let again = hop(start, link, Some(start), HopStatus::AlreadyShown);
-        let lost = hop(start, link, None, HopStatus::NotRecorded);
-        assert_eq!((trace.nodes.len(), trace.hops), (1, vec![again, lost]));
+        let expected = vec![again, lost(start), lost(start)];
+        assert_eq!((trace.nodes.len(), trace.hops), (1, expected));
     }
-    let trace = traced(&g, WS_A, &own);
+    let trace = traced(&g, WS_A, &own, &[]);
     let found = HopStatus::UnexpectedType {
         event_type: "ModelOutputRecorded".to_owned(),
     };
     let expected = [
         hop(&own, link, Some(&own), HopStatus::AlreadyShown),
+        lost(&own),
         hop(&own, link, Some(&proposed_a), HopStatus::Shown),
         hop(&proposed_a, "causation_id", Some(&output_a), found),
     ];
