@@ -1,9 +1,0 @@
-file = "crates/mandate-webpush/src/tests.rs"
-test = "no_label_of_an_endpoint_host_starts_or_ends_with_a_hyphen"
-reason = """
-E8-14's DEC-722 tightening of DEC-792's allowlist (item 2, on an endpoint's host). It checks
-`PushAllowlist::parse` and `PushEndpoint::parse_allowed`, which #896 implemented, so there is no
-stub to stop at: until the DEC-722 implementation, the parser accepts what the test refuses, which
-is the behaviour it fails on. The implementation deletes this file with the test's `#[ignore]`
-line.
-"""

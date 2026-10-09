@@ -12,9 +12,9 @@
   `crates/mandate-notify/tests/catalogue.rs` (every §3.2 kind to its class and text key, §4.2's
   texts, NT-12's wording), and `crates/mandate-notify/tests/payload.rs` (the payload, the link,
   the origin), and `crates/mandate-notify/tests/send.rs` (the opaque recipient, the provider's
-  idempotency digest against `sha256sum` literals, the rendered message; pending E8-9),
-  `tests/provider.rs` (pending E8-9), and `tests/canary.rs` (the canaries live, the scan pending
-  E8-9); and the
+  idempotency digest against `sha256sum` literals, the rendered message),
+  `tests/provider.rs` (the closed reasons, the fixture provider), and `tests/canary.rs` (the
+  canaries and the scan); and the
   `compile_fail` doctests in `crates/mandate-notify/src/lib.rs` (no constructor of a notice id
   from text), live.
 - **Run:** `cargo nextest run -p mandate-notify`; `cargo test -p mandate-notify --doc`;

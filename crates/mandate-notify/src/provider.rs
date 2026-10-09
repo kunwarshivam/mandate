@@ -1,7 +1,7 @@
 //! The provider interface every channel adapter implements (notifications spec §5.2, DEC-710 item
 //! 8, DEC-712), and the fixture provider tests send through.
 
-use crate::{AddressHandle, IdempotencyKey, Notification, NotifyError, Origin};
+use crate::{AddressHandle, IdempotencyKey, Notification, NotifyError, Origin, rendered};
 
 /// Why a send did not go through: spec §5.2's closed enum, `address_missing` (an active address
 /// whose vault entry is gone) included (DEC-712). The dispatcher's own `not_pending` and
@@ -32,10 +32,21 @@ impl Reason {
     /// The reason as `NoticeAttempted` journals it, as spec §5.2 writes it (`address_missing`).
     ///
     /// # Errors
-    /// Never once implemented: every reason has a key.
+    /// Never: every reason has a key.
     pub fn key(self) -> Result<&'static str, NotifyError> {
-        let _ = self;
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(match self {
+            Self::Timeout => "timeout",
+            Self::RateLimited => "rate_limited",
+            Self::ProviderError => "provider_error",
+            Self::AddressRejected => "address_rejected",
+            Self::AuthFailed => "auth_failed",
+            Self::TooLarge => "too_large",
+            Self::RecipientNotPermitted => "recipient_not_permitted",
+            Self::AddressMissing => "address_missing",
+            Self::Bounced => "bounced",
+            Self::Complained => "complained",
+            Self::Unsubscribed => "unsubscribed",
+        })
     }
 }
 
@@ -85,19 +96,20 @@ impl FixtureProvider {
     /// A fixture provider whose vault holds `vault`'s addresses, which it never records.
     ///
     /// # Errors
-    /// Never once implemented.
+    /// Never.
     pub fn holding(vault: Vec<(AddressHandle, String)>) -> Result<Self, NotifyError> {
-        let _ = vault;
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(Self {
+            vault,
+            sent: Vec::new(),
+        })
     }
 
     /// Every accepted send, in order.
     ///
     /// # Errors
-    /// Never once implemented.
+    /// Never.
     pub fn sent(&self) -> Result<&[Sent], NotifyError> {
-        let _ = self;
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(&self.sent)
     }
 }
 
@@ -109,7 +121,18 @@ impl Provider for FixtureProvider {
         address: &AddressHandle,
         key: &IdempotencyKey,
     ) -> Result<Outcome, NotifyError> {
-        let _ = (self, origin, notification, address, key);
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        if !self.vault.iter().any(|(held, _)| held == address) {
+            return Ok(Outcome::Permanent {
+                reason: Reason::AddressMissing,
+            });
+        }
+        self.sent.push(Sent {
+            address: address.clone(),
+            key: key.hex()?.to_owned(),
+            message: rendered(origin, notification)?,
+        });
+        Ok(Outcome::Accepted {
+            provider_message_id: format!("fixture-{}", self.sent.len()),
+        })
     }
 }
