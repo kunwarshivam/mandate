@@ -1,9 +1,12 @@
-//! The API-7 operations' lenient decoder, part 1 (workspace API spec §5, DEC-682 item 27, DEC-886),
-//! pending E10-10: every server case of `schemas/workspace-api/examples/lenient/api7.json`, a body
-//! that is not a JSON object, and API-4's comparison over the members kept. The kept value's oracle
-//! is the test's own: the body with each listed pointer removed, `null` members read as absent.
+//! The API-7 operations' lenient decoder (workspace API spec §5, DEC-682 item 27, DEC-886), pending
+//! E10-10: every server case of `schemas/workspace-api/examples/lenient/api7.json`, a body that is
+//! not a JSON object, API-4's comparison over the members kept, each member of each operation
+//! corrupted against a hard-member list typed from the spec, workspace members (#1155), duplicates,
+//! and the bodies DEC-886 reads. The kept value's oracle is the test's own: the body with each
+//! listed pointer removed, `null` members read as absent.
 
 use mandate_api::lenient::{Api7, ApprovalAnswer, decode_lenient};
+use mandate_api::problem::Violation;
 use mandate_api::requests::{
     EndDelegationRequest, HoldRequest, KillSwitchRequest, OwnerExitRequest, PauseRequest,
 };
@@ -248,5 +251,330 @@ fn a_valid_value_for_a_member_once_dropped_is_a_different_call() -> Result<(), S
             "{operation}: the fix differs in a kept member"
         );
     }
+    Ok(())
+}
+
+/// Each operation's hard body members, typed from §5's text ("only their hard members are strict:
+/// the path ids, the kill switch's `scope`, an owner exit's `instrument`, and a Skip's `verdict` and
+/// `content_hash`"), never read from the crate.
+fn hard(operation: &str) -> &'static [&'static str] {
+    match operation {
+        "kill_switch" => &["scope"],
+        "owner_exit" => &["instrument"],
+        "respond_approval" => &["verdict", "content_hash"],
+        _ => &[],
+    }
+}
+
+/// An owner exit's bid confirmation, all or nothing (§5, DEC-682 item 27).
+const BID: [&str; 4] = ["bid", "bid_size", "quoted_at", "floor"];
+
+/// Each operation's well-formed body, every member it names present and valid.
+fn examples() -> Vec<(&'static str, Value)> {
+    let record = json!({"artifact": HASH, "ui_build": BUILD});
+    let at = "2026-10-08T14:30:00.000000000Z";
+    let step_up = json!({"assertion_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "authenticated_at": at,
+        "method": "passkey"});
+    let bid = json!({"asset_id": ASSET, "bid": "101.5", "bid_size": "10", "quoted_at": at,
+        "floor": "99.5"});
+    vec![
+        ("pause", json!({"record": record})),
+        ("hold", json!({"record": record})),
+        ("end_delegation", json!({"record": record})),
+        (
+            "kill_switch",
+            json!({"scope": {"kind": "agent", "id": "agt_1"}, "record": record,
+            "environment_shown": "paper", "owner_exit": [bid], "step_up": step_up}),
+        ),
+        (
+            "owner_exit",
+            json!({"instrument": ASSET, "bid": "101.5", "bid_size": "10",
+            "quoted_at": at, "floor": "99.5", "record": record, "step_up": step_up}),
+        ),
+        (
+            "respond_approval",
+            json!({"verdict": "skipped", "content_hash": HASH, "record": record,
+            "step_up": step_up, "delegation": null}),
+        ),
+    ]
+}
+
+/// Values no member of these bodies takes: the wrong type, garbage text, and an object naming an
+/// unknown member (DEC-886 item 3).
+fn corruptions() -> [Value; 3] {
+    [json!(5), json!("garbage"), json!({"zz": 1})]
+}
+
+/// The pointers a corruption of `member` drops: the whole confirmation for a bid member, in the
+/// order the sent body names them, else the member alone.
+fn dropped_for(operation: &str, body: &Value, member: &str) -> Vec<String> {
+    let group = operation == "owner_exit" && BID.contains(&member);
+    let names = body.as_object().into_iter().flat_map(|o| o.keys());
+    let names = names.filter(|n| *n == member || group && BID.contains(&n.as_str()));
+    names.map(|n| format!("/{n}")).collect()
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn a_corrupt_non_hard_member_is_dropped_and_listed_and_the_rest_kept() -> Result<(), String> {
+    for (operation, example) in examples() {
+        let label = format!("{operation} example");
+        assert_kept(
+            &label,
+            example.clone(),
+            &[],
+            lenient(operation, example.to_string().as_bytes()),
+        )?;
+        let mut members: Vec<String> = example
+            .as_object()
+            .into_iter()
+            .flat_map(|o| o.keys().cloned())
+            .collect();
+        members.push("zz_unknown".to_owned());
+        for member in members
+            .iter()
+            .filter(|m| !hard(operation).contains(&m.as_str()))
+        {
+            for bad in corruptions() {
+                let mut body = example.clone();
+                body[member.as_str()] = bad.clone();
+                let label = format!("{operation} {member} = {bad}");
+                let dropped = dropped_for(operation, &body, member);
+                let dropped: Vec<&str> = dropped.iter().map(String::as_str).collect();
+                let outcome = lenient(operation, body.to_string().as_bytes());
+                assert_kept(&label, body, &dropped, outcome)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn a_corrupt_or_missing_hard_member_is_refused() {
+    for (operation, example) in examples() {
+        for member in hard(operation) {
+            let mut missing = example.clone();
+            missing.as_object_mut().map(|o| o.remove(*member));
+            let label = format!("{operation} without {member}");
+            assert_refused(&label, lenient(operation, missing.to_string().as_bytes()));
+            for bad in corruptions().into_iter().chain([json!(null), json!({})]) {
+                let mut body = example.clone();
+                body[*member] = bad.clone();
+                let label = format!("{operation} {member} = {bad}");
+                assert_refused(&label, lenient(operation, body.to_string().as_bytes()));
+            }
+        }
+    }
+    for scope in [
+        json!({"kind": "agent"}),
+        json!({"kind": "connection", "id": "bad id!"}),
+    ] {
+        let body = json!({"scope": scope}).to_string();
+        assert_refused(&body, lenient("kill_switch", body.as_bytes()));
+    }
+}
+
+const WORKSPACE_MEMBERS: [&str; 3] = ["workspace", "workspace_id", "ws"];
+
+#[test]
+#[ignore = "pending E10-10"]
+fn a_workspace_member_is_dropped_and_listed_and_never_applied() -> Result<(), String> {
+    for (operation, example) in examples() {
+        for name in WORKSPACE_MEMBERS {
+            let mut body = example.clone();
+            body[name] = json!("ws_other");
+            let label = format!("{operation} /{name}");
+            let pointer = format!("/{name}");
+            let outcome = lenient(operation, body.to_string().as_bytes());
+            assert_kept(&label, body, &[pointer.as_str()], outcome)?;
+            let mut nested = example.clone();
+            nested["record"][name] = json!("ws_other");
+            let label = format!("{operation} /record/{name}");
+            let outcome = lenient(operation, nested.to_string().as_bytes());
+            assert_kept(&label, nested, &["/record"], outcome)?;
+        }
+    }
+    for name in WORKSPACE_MEMBERS {
+        scope_member_is_dropped_and_the_scope_kept(name)?;
+    }
+    Ok(())
+}
+
+/// The scope kinds, each with a valid id.
+fn scopes() -> [(&'static str, Value); 3] {
+    [
+        ("agent", json!("agt_1")),
+        ("connection", json!("con_1")),
+        ("workspace", json!(null)),
+    ]
+}
+
+/// DEC-886 item 1: `name` inside the hard `scope` of each kind is dropped and listed at
+/// `/scope/<name>`, and the kept scope is the scope without it, so the stop never moves.
+fn scope_member_is_dropped_and_the_scope_kept(name: &str) -> Result<(), String> {
+    for (kind, id) in scopes() {
+        let body = json!({"scope": {"kind": kind, "id": id, name: "ws_other"}});
+        let label = format!("kill switch {kind} scope naming {name}");
+        let (kept, listed) = lenient("kill_switch", body.to_string().as_bytes())
+            .map_err(|e| format!("{label}: {e:?}"))?;
+        assert_eq!(listed, [format!("/scope/{name}")], "{label}: dropped");
+        let scope = without_nulls(json!({"kind": kind, "id": id}));
+        assert_eq!(
+            without_nulls(kept)["scope"],
+            scope,
+            "{label}: the stop never moves"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn any_unknown_member_inside_the_scope_is_dropped_and_the_scope_kept() -> Result<(), String> {
+    for name in ["zz", "label", "org"] {
+        scope_member_is_dropped_and_the_scope_kept(name)?;
+    }
+    Ok(())
+}
+
+/// `names` as pointers, in the order `text` first names each of them: body order, read from the
+/// text sent rather than from `Value`'s member order (DEC-886 item 11).
+fn in_text_order(text: &str, names: &[&str]) -> Vec<String> {
+    let mut found: Vec<(usize, String)> = names
+        .iter()
+        .map(|n| {
+            (
+                text.find(&format!("\"{n}\"")).unwrap_or(usize::MAX),
+                format!("/{n}"),
+            )
+        })
+        .collect();
+    found.sort();
+    found.into_iter().map(|(_, pointer)| pointer).collect()
+}
+
+/// `text` decoded and checked against the pointers `dropped` lists, in text order.
+fn assert_text_kept(operation: &str, text: &str, dropped: &[&str]) -> Result<(), String> {
+    let body: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let order = in_text_order(text, dropped);
+    let order: Vec<&str> = order.iter().map(String::as_str).collect();
+    assert_kept(text, body, &order, lenient(operation, text.as_bytes()))
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn a_duplicate_inside_the_scope_is_refused_and_a_duplicate_bid_drops_the_group()
+-> Result<(), String> {
+    for scope in [
+        r#"{"kind": "agent", "id": "agt_1", "id": "agt_2"}"#,
+        r#"{"kind": "workspace", "kind": "agent", "id": "agt_1"}"#,
+        r#"{"kind": "workspace", "id": null, "id": null}"#,
+    ] {
+        let body = format!(r#"{{"scope": {scope}}}"#);
+        let code = first_code(lenient("kill_switch", body.as_bytes()));
+        assert_eq!(code, "duplicate_member", "{body}");
+    }
+    let at = "2026-10-08T14:30:00.000000000Z";
+    let text = format!(
+        r#"{{"floor": "99.5", "instrument": "{ASSET}", "bid": "101.5", "quoted_at": "{at}",
+        "bid_size": "10", "bid": "102"}}"#
+    );
+    assert_text_kept("owner_exit", &text, &BID)?;
+    let text = format!(r#"{{"instrument": "{ASSET}", "bid": "1", "bid": "2"}}"#);
+    assert_text_kept("owner_exit", &text, &["bid"])
+}
+
+/// The first violation's code, or what the decoder answered instead.
+fn first_code(outcome: Outcome) -> String {
+    match outcome {
+        Err(Refused::Invalid { violations }) => match violations.first() {
+            Some(Violation::Schema { code, .. }) => code.clone(),
+            other => format!("{other:?}"),
+        },
+        other => format!("{other:?}"),
+    }
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn a_duplicate_non_hard_member_is_dropped_once_and_a_hard_one_refused() -> Result<(), String> {
+    let record = json!({"artifact": HASH, "ui_build": BUILD}).to_string();
+    let twice = format!(r#"{{"record": {record}, "x": 1, "record": {record}, "x": 2}}"#);
+    for operation in ["pause", "hold", "end_delegation"] {
+        assert_kept(
+            operation,
+            json!({"record": 0, "x": 0}),
+            &["/record", "/x"],
+            lenient(operation, twice.as_bytes()),
+        )?;
+    }
+    let inner = format!(
+        r#"{{"record": {{"artifact": "{HASH}", "artifact": "{HASH}", "ui_build": "{BUILD}"}}}}"#
+    );
+    assert_kept(
+        "a nested duplicate",
+        json!({"record": 0}),
+        &["/record"],
+        lenient("pause", inner.as_bytes()),
+    )?;
+    let scope = r#"{"kind": "agent", "id": "agt_1"}"#;
+    let skip = format!(r#""verdict": "skipped", "content_hash": "{HASH}""#);
+    let refused = [
+        (
+            "kill_switch",
+            format!(r#"{{"scope": {scope}, "scope": {scope}}}"#),
+        ),
+        (
+            "owner_exit",
+            format!(r#"{{"instrument": "{ASSET}", "instrument": "{ASSET}"}}"#),
+        ),
+        (
+            "respond_approval",
+            format!(r#"{{{skip}, "verdict": "skipped"}}"#),
+        ),
+        (
+            "respond_approval",
+            format!(r#"{{{skip}, "content_hash": "{HASH}"}}"#),
+        ),
+    ];
+    for (operation, body) in refused {
+        let code = first_code(lenient(operation, body.as_bytes()));
+        assert_eq!(code, "duplicate_member", "{operation} {body}");
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn the_open_bodies_are_read_as_dec_886_says() -> Result<(), String> {
+    let at = "2026-10-08T14:30:00.000000000Z";
+    let workspace = json!({"scope": {"kind": "workspace"}});
+    assert_kept(
+        "item 2",
+        workspace.clone(),
+        &[],
+        lenient("kill_switch", workspace.to_string().as_bytes()),
+    )?;
+    let mixed = format!(
+        r#"{{"instrument": "{ASSET}", "quoted_at": "{at}", "bid": "101.5", "floor": "99.5",
+        "bid_size": null}}"#
+    );
+    assert_text_kept("owner_exit", &mixed, &BID)?;
+    let nulls = json!({"instrument": ASSET, "bid": null, "bid_size": null, "quoted_at": null,
+        "floor": null});
+    assert_kept(
+        "item 4, all null",
+        nulls.clone(),
+        &[],
+        lenient("owner_exit", nulls.to_string().as_bytes()),
+    )?;
+    let empty = json!({"scope": {"kind": "agent", "id": "agt_1"}, "owner_exit": []});
+    assert_kept(
+        "item 9",
+        empty.clone(),
+        &[],
+        lenient("kill_switch", empty.to_string().as_bytes()),
+    )?;
     Ok(())
 }
