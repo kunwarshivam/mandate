@@ -1,5 +1,5 @@
 //! The membership fold of journal spec §9.12 and identity spec §5 (E9-7, DEC-657): a workspace's
-//! membership records fold to each member's state, its effective and kept roles, each invitation's
+//! membership records fold to each member's state, its effective roles, each invitation's
 //! state, and the `workspace_users` count V-047 reads (§5.3, ID-7).
 //!
 //! It reads [`MembershipRecord`]s, this crate's own minimal input, which the workspace store's
@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_identity_seal::Seal;
 use mandate_time::UtcNanos;
 
 use crate::{MembershipState, PrincipalId, Role};
@@ -85,8 +86,9 @@ pub struct MembershipRecord {
 }
 
 impl MembershipRecord {
-    /// The record at `seq` on the control stream, committed at `event_time`.
-    pub fn new(seq: u64, event_time: UtcNanos, event: MembershipEvent) -> Self {
+    /// The record at `seq` on the control stream, committed at `event_time`, for the seal's holder.
+    pub fn new(seal: Seal, seq: u64, event_time: UtcNanos, event: MembershipEvent) -> Self {
+        let _: Seal = seal;
         Self {
             seq,
             event_time,
@@ -97,10 +99,10 @@ impl MembershipRecord {
 
 /// A workspace's membership records, folded. A reading at *t* folds, in `seq` order, only the
 /// records whose `event_time` is at or before *t*, and reads each cool-off and expiry against *t*
-/// (§9.12). A record that does not fit the state it finds, or one whose `seq` is not above the
-/// previous record's, makes the fold unreadable from it on; unreadable latches, and
-/// [`Self::workspace_users`] then reads 1 (§5.3, rule 3). Its fields are private, so a count is
-/// only ever what the fold read.
+/// (§9.12). A record that does not fit the state it finds, or is out of order (DEC-657 item 4),
+/// makes it unreadable from that record's `event_time`; unreadable latches, and
+/// [`Self::workspace_users`] then reads 1 (§5.3, rule 3). Only the seal's holders build one
+/// (DEC-642 items 4 and 7), so a count is only ever what the fold read from the store's records.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MembershipFold {
     records: Vec<MembershipRecord>,
@@ -112,8 +114,8 @@ pub struct MembershipFold {
               other form DEC-137 names"
 )]
 impl MembershipFold {
-    /// The fold of `records`, given in `seq` order.
-    pub fn new(_records: Vec<MembershipRecord>) -> Self {
+    /// The fold of `records`, given in `seq` order, for a holder of the seal.
+    pub fn new(_seal: Seal, _records: Vec<MembershipRecord>) -> Self {
         todo!()
     }
 
@@ -135,12 +137,6 @@ impl MembershipFold {
     /// The member's roles whose cool-off ended at or before `at`, while it is `cooling_off` or
     /// `active`; empty in every other state.
     pub fn effective_roles(&self, _member: PrincipalId, _at: UtcNanos) -> BTreeSet<Role> {
-        todo!()
-    }
-
-    /// The roles a `deactivated` member keeps for a reactivation at `at`, each it held when
-    /// deactivated, effective or still cooling, less those removed since; empty in other states.
-    pub fn kept_roles(&self, _member: PrincipalId, _at: UtcNanos) -> BTreeSet<Role> {
         todo!()
     }
 
