@@ -288,7 +288,6 @@ fn the_agent_chain_rebuilds_to_the_vectors_hashes_and_verifies() {
 /// `ApprovalRevalidated`, has no vector until §9.1 closes the approval events' schemas, so this
 /// runs the first clause and `mode_event_mismatch` only.
 #[test]
-#[ignore = "pending E12-3"]
 fn the_failing_agent_vectors_fail_at_their_seq_with_their_check() {
     for (name, range, seq, code) in agent_failing() {
         expect(&range, Some((seq, &code)), &name);
@@ -296,7 +295,6 @@ fn the_failing_agent_vectors_fail_at_their_seq_with_their_check() {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn the_failing_unanchored_hold_vectors_fail_at_their_first_failure() {
     for (name, range, first) in hold_unanchored() {
         if let Some(seq) = first {
@@ -319,7 +317,6 @@ fn the_passing_unanchored_hold_vectors_and_their_full_chains_verify() {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn a_tail_range_fails_closed_at_its_first_version_2_copy() {
     for (case, index) in opening_with_a_copy() {
         let what = format!("{} from {TAIL}", case["name"]);
@@ -329,7 +326,6 @@ fn a_tail_range_fails_closed_at_its_first_version_2_copy() {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn the_lowest_seq_wins_across_the_agent_checks() {
     let cases = list("hold", "range_verification");
     let hold = cases.iter().find(|c| c["name"] == HELD_COPY).unwrap();
@@ -359,7 +355,6 @@ fn the_agent_checks_run_on_no_other_stream_type() {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn an_agent_check_is_reported_before_the_anchor_and_the_token() {
     let honest = Range::chain(&[]);
     let not_the_head = Digest::of(b"not the head");

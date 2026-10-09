@@ -1,8 +1,0 @@
-file = "crates/mandate-journal/tests/connection_fold.rs"
-test = "a_version_1_connect_is_judged_only_from_the_first_request"
-reason = """
-E7-17 (journal spec v0.32, DEC-699): `verify_connection_lifecycle` is already implemented for
-rules 66 to 68, and does not check stream rule 131 or rule 67's two exceptions for a revocation that
-closed a request yet, so this test fails on that answer rather than at a stub. The fold code PR that
-adds them deletes this file with the test's `#[ignore]` line.
-"""

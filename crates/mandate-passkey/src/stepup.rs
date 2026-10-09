@@ -314,24 +314,28 @@ pub enum Proof<'a> {
 /// A step-up as the caller presents it with the action it wants to commit.
 ///
 /// Its workspace and principal are the request's, read from the [`TenantContext`] `authorize`
-/// returned ([DEC-649], ID-8): [`Presentation::new`] is the request path. The public ID fields
-/// stay only until the test fixture moves to `new`; DEC-649 item 4 then makes them private, so
-/// no caller can name a workspace or principal it was not authorized for.
+/// returned ([DEC-649], ID-8): [`Presentation::new`] is the only way to build one. The ID fields
+/// are private (DEC-649 item 4), so no caller can name a workspace or principal it was not
+/// authorized for:
+///
+/// ```compile_fail,E0451
+/// use mandate_identity::{PrincipalId, WorkspaceId};
+/// use mandate_passkey::stepup::{Action, Presentation, Proof};
+///
+/// fn named(w: WorkspaceId, p: PrincipalId, action: Action) -> Presentation<'static> {
+///     Presentation { workspace_id: w, principal_id: p, action, proof: Proof::CliConfirm }
+/// }
+/// ```
 ///
 /// [DEC-649]: ../../../docs/project/decisions/DEC-649.md
 #[derive(Debug, Clone, Copy)]
 pub struct Presentation<'a> {
-    pub workspace_id: WorkspaceId,
-    pub principal_id: PrincipalId,
+    workspace_id: WorkspaceId,
+    principal_id: PrincipalId,
     pub action: Action,
     pub proof: Proof<'a>,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "E9-4's stub for DEC-649: `new` returns a plain value, which has no `Unimplemented`, \
-              so it is todo!(), the other form DEC-137 names"
-)]
 impl<'a> Presentation<'a> {
     /// The step-up the request `context` presents: the context's workspace and principal, with
     /// `action` and `proof` ([DEC-649] item 1). The context is the one `authorize` returned for
@@ -351,8 +355,12 @@ impl<'a> Presentation<'a> {
     ///
     /// [DEC-649]: ../../../docs/project/decisions/DEC-649.md
     pub fn new(context: &TenantContext, action: Action, proof: Proof<'a>) -> Self {
-        let _ = (context, action, proof);
-        todo!()
+        Self {
+            workspace_id: context.workspace(),
+            principal_id: context.principal(),
+            action,
+            proof,
+        }
     }
 }
 

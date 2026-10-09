@@ -10,11 +10,11 @@
 
 use std::collections::BTreeSet;
 
-use mandate_canon::Digest;
+use mandate_canon::{Digest, Key, Object, Value, to_canonical};
 use mandate_time::UtcNanos;
 
 use crate::ConnectError;
-use crate::checks::Reason;
+use crate::checks::{Check, Reason};
 use crate::record::{AccountRef, Broker, ConnectionId, Environment};
 
 /// Journal spec §9.8's `step_up`: the evidence one connect spent (identity spec §7.2).
@@ -194,32 +194,151 @@ pub enum StartPlan {
 
 /// The connect's step-up digest (kind `connection`): SHA-256 of the canonical `{action:
 /// "connect", workspace_id, broker, environment: "paper"}` (DEC-693 items 1, 2, 5). A
-/// non-paper environment is `EnvironmentRefused` and never digested.
+/// non-paper environment is `EnvironmentRefused` and never digested. Any broker is bound; only
+/// [`plan_start`] refuses one the route does not serve (DEC-883 item 3).
+///
+/// Its member names are valid canonical keys, so the `InvalidRecord` it would return for one that
+/// is not cannot occur.
 pub fn connect_digest(
     workspace_id: &str,
     broker: Broker,
     environment: Environment,
 ) -> Result<Digest, ConnectError> {
-    let _ = (workspace_id, broker, environment);
-    Err(ConnectError::Unimplemented { story: "E10-13" })
+    if environment != Environment::Paper {
+        return Err(ConnectError::EnvironmentRefused);
+    }
+    let members = [
+        ("action", Value::Str("connect".to_owned())),
+        ("workspace_id", Value::Str(workspace_id.to_owned())),
+        ("broker", Value::Str(broker.code().to_owned())),
+        ("environment", Value::Str(environment.as_str().to_owned())),
+    ];
+    let object = members
+        .into_iter()
+        .map(|(name, value)| Key::new(name).map(|key| (key, value)))
+        .collect::<Result<Object, _>>()
+        .map_err(|_| ConnectError::InvalidRecord {
+            member: "connect digest",
+        })?;
+    Ok(Digest::of(&to_canonical(&Value::Object(object))))
 }
 
 /// Plans a connect's start: exactly `[Requested]` with the request's members, or the first
 /// refusal that holds, in DEC-883's order: step-up not verified, environment not paper, broker
 /// not Alpaca, a fold that cannot answer, an open request, an establishment, a used `account_ref`.
+/// Step-up comes first so an unverified caller learns nothing of the control stream (DEC-883).
 pub fn plan_start(start: &StartRequest, facts: &StartFacts) -> Result<StartPlan, ConnectError> {
-    let _ = (start, facts);
-    Err(ConnectError::Unimplemented { story: "E10-13" })
+    let evidence = match &start.step_up {
+        StepUpCheck::Verified(evidence) => evidence,
+        StepUpCheck::NotVerified => return Ok(StartPlan::Refused(StartRefusal::StepUpNotVerified)),
+    };
+    Ok(match start_refusal(start, facts) {
+        Some(refusal) => StartPlan::Refused(refusal),
+        None => StartPlan::Commit(vec![ManagerEffect::Requested(RequestMembers {
+            connection_id: start.connection_id.clone(),
+            account_ref: start.account_ref.clone(),
+            broker: start.broker,
+            environment: start.environment,
+            user: start.user.clone(),
+            step_up: evidence.clone(),
+        })]),
+    })
+}
+
+/// The first refusal after step-up, in [`plan_start`]'s order; `None` lets the start commit.
+fn start_refusal(start: &StartRequest, facts: &StartFacts) -> Option<StartRefusal> {
+    if start.environment != Environment::Paper {
+        Some(StartRefusal::EnvironmentRefused)
+    } else if start.broker != Broker::Alpaca {
+        Some(StartRefusal::BrokerRefused)
+    } else if facts.id == IdFold::CannotAnswer || facts.account_ref == AccountRefFold::CannotAnswer
+    {
+        Some(StartRefusal::FoldCannotAnswer)
+    } else if facts.id == IdFold::RequestOpen {
+        Some(StartRefusal::RequestOpen)
+    } else if facts.id == IdFold::Established {
+        Some(StartRefusal::AlreadyEstablished)
+    } else if facts.account_ref == AccountRefFold::Used {
+        Some(StartRefusal::AccountRefUsed)
+    } else {
+        None
+    }
 }
 
 /// Plans a connect's finish, by DEC-884's order: a fold that cannot answer, no open request, and a
 /// request a revoke closed come first, whatever the outcome. Then a passed outcome is exactly
 /// `[Established]`, and a refused one exactly `[ConnectRefused]` with journal spec §9.8's check
 /// and reason, every request member repeated. Never an effect and a refusal together (DEC-697).
+///
+/// With the request open, a passed `live` request is `LiveNotServed` (rule 64, DEC-884 item 2),
+/// and `already_connected` naming the request's own id is `ExistingIsSelf` (rule 55, item 3); each
+/// leaves the request open for its teardown.
 pub fn plan_finish(
     fold: &RequestFold,
     outcome: &ConnectOutcome,
 ) -> Result<FinishPlan, ConnectError> {
-    let _ = (fold, outcome);
-    Err(ConnectError::Unimplemented { story: "E10-13" })
+    let request = match fold {
+        RequestFold::CannotAnswer => {
+            return Ok(FinishPlan::Refused(FinishRefusal::FoldCannotAnswer));
+        }
+        RequestFold::NotOpen => return Ok(FinishPlan::Refused(FinishRefusal::NotOpen)),
+        RequestFold::ClosedByRevoke => return Ok(FinishPlan::ClosedByRevoke),
+        RequestFold::Open(request) => request.clone(),
+    };
+    let effect = match outcome {
+        ConnectOutcome::Passed { .. } if request.environment != Environment::Paper => {
+            return Ok(FinishPlan::Refused(FinishRefusal::LiveNotServed));
+        }
+        ConnectOutcome::Refused(RefusalCause::AlreadyConnected(existing))
+            if *existing == request.connection_id =>
+        {
+            return Ok(FinishPlan::Refused(FinishRefusal::ExistingIsSelf));
+        }
+        ConnectOutcome::Passed { scopes } => ManagerEffect::Established {
+            request,
+            scopes: scopes.clone(),
+        },
+        ConnectOutcome::Refused(cause) => ManagerEffect::ConnectRefused {
+            request,
+            refused: refused_as(cause),
+        },
+    };
+    Ok(FinishPlan::Commit(vec![effect]))
+}
+
+/// `ConnectionRefused`'s `check`, `reason`, and `existing_connection_id` for `cause`, as journal
+/// spec §9.8's reasons table writes them: an executor reason under its own check,
+/// `account_mismatch` under `account`, `already_connected` under `uniqueness` naming the holder,
+/// and the four teardowns with `check` `null` (rules 54 and 55, DEC-884 item 4).
+fn refused_as(cause: &RefusalCause) -> RefusedAs {
+    let (check, reason, existing_connection_id) = match cause {
+        RefusalCause::Check(reason) => (Some(check_of(*reason).code()), reason.code(), None),
+        RefusalCause::AccountMismatch => (Some(Check::Account.code()), "account_mismatch", None),
+        RefusalCause::AlreadyConnected(existing) => (
+            Some("uniqueness"),
+            "already_connected",
+            Some(existing.clone()),
+        ),
+        RefusalCause::Timeout => (None, "timeout", None),
+        RefusalCause::RestartPastDeadline => (None, "restart_past_deadline", None),
+        RefusalCause::ExecutorStopped => (None, "executor_stopped", None),
+        RefusalCause::StartFailed => (None, "start_failed", None),
+    };
+    RefusedAs {
+        check,
+        reason,
+        existing_connection_id,
+    }
+}
+
+/// The check whose row of journal spec §9.8's reasons table holds `reason`.
+fn check_of(reason: Reason) -> Check {
+    match reason {
+        Reason::ScopeMismatch | Reason::FundMovement | Reason::PermissionsUnreadable => {
+            Check::Scope
+        }
+        Reason::WrongEnvironment | Reason::ReachesBoth => Check::Environment,
+        Reason::AccountUnreadable | Reason::NotDedicated => Check::Account,
+        Reason::ToolsMissing | Reason::ContractDrift => Check::Contract,
+    }
 }

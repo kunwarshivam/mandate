@@ -384,7 +384,6 @@ fn malformed() -> Vec<String> {
 
 /// DEC-726 item 5: the core takes an absent field as the empty one and refuses it, posting nothing.
 #[test]
-#[ignore = "pending E8-14"]
 fn a_request_without_authorization_is_refused_and_nothing_is_posted() -> Result<(), RelayError> {
     assert!(!shaped("")?, "an empty field is refused");
     for pair in PAIRS {
@@ -394,7 +393,6 @@ fn a_request_without_authorization_is_refused_and_nothing_is_posted() -> Result<
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn a_malformed_authorization_is_refused() -> Result<(), RelayError> {
     assert!(shaped(&header(B, SIG, KEY))?, "the table bends a good one");
     for bad in malformed() {
@@ -406,7 +404,6 @@ fn a_malformed_authorization_is_refused() -> Result<(), RelayError> {
 
 /// The parts DEC-726 item 4 fixes are 223 octets, so 801 octets of claims make exactly 1 024.
 #[test]
-#[ignore = "pending E8-14"]
 fn an_authorization_over_1024_octets_is_refused() -> Result<(), RelayError> {
     let (at_cap, over) = (header(&seg(801), SIG, KEY), header(&seg(802), SIG, KEY));
     assert_eq!((at_cap.len(), over.len()), (1_024, 1_025));
@@ -416,7 +413,6 @@ fn an_authorization_over_1024_octets_is_refused() -> Result<(), RelayError> {
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn a_valid_authorization_is_forwarded_byte_for_byte() -> Result<(), RelayError> {
     for valid in [shortest(), header(B, SIG, KEY), header(&seg(801), SIG, KEY)] {
         assert!(shaped(&valid)?, "{valid:.60}");
@@ -442,7 +438,6 @@ impl VapidSigner for FixedSigner {
 /// on a short and on a 253-octet allowlisted host, and for a 287-octet subject with the 253-octet
 /// host and a 20-digit `exp`, is never refused by the cap.
 #[test]
-#[ignore = "pending E8-14"]
 fn a_header_from_vapid_authorization_passes() -> Result<(), Box<dyn std::error::Error>> {
     let allowlist = PushAllowlist::parse(&DEFAULT_PUSH_ALLOWLIST)?;
     let [a, b, c] = ["a", "b", "c"].map(|l| l.repeat(63));
@@ -471,7 +466,6 @@ fn a_header_from_vapid_authorization_passes() -> Result<(), Box<dyn std::error::
 /// DEC-726 item 3, NT-1, CP-1: a header whose claims (`aud` and `sub`, so the decoded segment),
 /// signature and key carry canaries reaches no log entry and no answer, forwarded or refused.
 #[test]
-#[ignore = "pending E8-14"]
 fn the_authorization_never_reaches_the_log() -> Result<(), Box<dyn std::error::Error>> {
     let allowlist = PushAllowlist::parse(&DEFAULT_PUSH_ALLOWLIST)?;
     let endpoint =
@@ -511,7 +505,6 @@ fn the_authorization_never_reaches_the_log() -> Result<(), Box<dyn std::error::E
 /// DEC-726 item 6: the header is checked after every DEC-724 check, so each earlier fault keeps
 /// its refusal beside a bad header, and alone the bad header is the refusal.
 #[test]
-#[ignore = "pending E8-14"]
 fn authorization_is_checked_last() -> Result<(), RelayError> {
     #[rustfmt::skip]
     let faults = [
@@ -533,7 +526,6 @@ fn authorization_is_checked_last() -> Result<(), RelayError> {
 /// DEC-726 item 7: the ciphertext's 512 and the endpoint's 2 048 hold beside a header at its cap,
 /// which lowers neither, and beside the shortest header, which raises neither.
 #[test]
-#[ignore = "pending E8-14"]
 fn the_caps_do_not_share_room() -> Result<(), RelayError> {
     let fill = |total: usize| format!("{FCM}{}", "a".repeat(total.saturating_sub(FCM.len())));
     for h in [header(&seg(801), SIG, KEY), shortest()] {
@@ -555,7 +547,6 @@ fn the_caps_do_not_share_room() -> Result<(), RelayError> {
 
 /// DEC-726 item 2: each forward carries its own request's header, never one the relay adds.
 #[test]
-#[ignore = "pending E8-14"]
 fn the_relay_adds_no_authorization_of_its_own() -> Result<(), RelayError> {
     let (first, second) = (header(B, SIG, KEY), shortest());
     assert!(shaped(&first)? && shaped(&second)?);

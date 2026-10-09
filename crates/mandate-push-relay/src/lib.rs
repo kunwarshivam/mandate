@@ -24,6 +24,15 @@ const MAX_ENDPOINT_LEN: usize = 2_048;
 /// The relay id's length in lowercase hex digits (DEC-724 item 2).
 const RELAY_ID_LEN: usize = 32;
 
+/// The longest `authorization` the relay forwards (DEC-726 item 4).
+const MAX_AUTHORIZATION_LEN: usize = 1_024;
+
+/// An ES256 signature's 64 octets in unpadded base64url (DEC-726 item 4).
+const SIGNATURE_LEN: usize = 86;
+
+/// An uncompressed P-256 point's 65 octets in unpadded base64url (DEC-726 item 4).
+const KEY_LEN: usize = 87;
+
 /// Why a request was not forwarded or answered. `code()` is stable and carries no input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum RelayError {
@@ -121,8 +130,10 @@ pub trait RelayLog {
 }
 
 /// Checks, in order, the relay id, the endpoint (on `allowlist` and at most 2 048 octets), the
-/// urgency and TTL of one class, and the ciphertext (at most `mandate_webpush::MAX_BODY_LEN`
-/// octets); posts once through `push`, answering its status; and records one [`LogEntry`] in `log`.
+/// urgency and TTL of one class, the ciphertext (at most `mandate_webpush::MAX_BODY_LEN` octets),
+/// and last the authorization ([`check_authorization`], DEC-726 item 6); posts once through `push`
+/// with the authorization byte for byte, answering its status; and records one [`LogEntry`] in
+/// `log`, which holds neither the endpoint nor the authorization.
 pub fn relay(
     request: &RelayRequest<'_>,
     allowlist: &PushAllowlist,
@@ -141,8 +152,9 @@ pub fn relay(
     answer
 }
 
-/// The checks after the relay id, in DEC-724 item 8's order, then the one `POST` (item 6). The
-/// forward carries the endpoint as given, the pair and the body, never the relay id (item 5).
+/// The checks after the relay id, in DEC-724 item 8's order with DEC-726 item 6's authorization
+/// last, then the one `POST` (DEC-724 item 6). The forward carries the endpoint and the
+/// authorization as given, the pair and the body, never the relay id (DEC-724 item 5).
 fn check_and_post(
     request: &RelayRequest<'_>,
     allowlist: &PushAllowlist,
@@ -157,6 +169,7 @@ fn check_and_post(
     if request.ciphertext.len() > MAX_BODY_LEN {
         return Err(RelayError::TooLarge);
     }
+    check_authorization(request.authorization)?;
     let forward = Forward {
         endpoint: request.endpoint,
         urgency,
@@ -175,8 +188,33 @@ fn check_and_post(
 /// 86 characters and `<d>` 87, and at most 1 024 octets in all; anything else, the empty field
 /// included, is [`RelayError::InvalidAuthorization`]. It decodes nothing (item 2).
 pub fn check_authorization(field: &str) -> Result<(), RelayError> {
-    let _ = field;
-    Err(RelayError::Unimplemented { story: "E8-14" })
+    let parts = field
+        .strip_prefix("vapid t=")
+        .and_then(|rest| rest.split_once(", k="))
+        .map(|(token, key)| (token.split('.').collect::<Vec<_>>(), key));
+    let well_formed = match parts {
+        Some((segments, key)) => match segments.as_slice() {
+            [a, b, c] => {
+                !a.is_empty()
+                    && !b.is_empty()
+                    && c.len() == SIGNATURE_LEN
+                    && key.len() == KEY_LEN
+                    && [a, b, c, key].iter().all(|s| s.bytes().all(is_base64url))
+            }
+            _ => false,
+        },
+        None => false,
+    };
+    if well_formed && field.len() <= MAX_AUTHORIZATION_LEN {
+        Ok(())
+    } else {
+        Err(RelayError::InvalidAuthorization)
+    }
+}
+
+/// One character of unpadded base64url: `A`-`Z`, `a`-`z`, `0`-`9`, `-` or `_` (RFC 4648 §5).
+fn is_base64url(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
 }
 
 /// DEC-700 item 3's three fixed pairs, for `action`, `safety` and `info`; any other pair is

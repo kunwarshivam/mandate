@@ -351,7 +351,7 @@ function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
       </AgentFrame>
     );
   }
-  const checks = gateChecks(decision, agent.mandate);
+  const checks = gateChecks(decision, agent);
   const exit = isExit(decision.action.purpose);
   const order: AnyOrder | undefined = decision.client_order_id ? findOrder(agent, decision.client_order_id) : undefined;
   const resultLabel = (c: GateCheck) => (c.result === "failed" && exit ? "Held" : CHECK_RESULT_LABEL[c.result]);

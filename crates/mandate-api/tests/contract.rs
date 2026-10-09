@@ -757,7 +757,6 @@ fn misjudged<T: DeserializeOwned + Validate + Debug>(cases: &[Judged]) -> Vec<St
 /// The controls: the object form is accepted, `kind` first or last, a one-item array that serde
 /// already refuses is `type`, and a scalar is `type` at the same pointer.
 #[test]
-#[ignore = "pending E10-10"]
 fn an_actor_given_as_an_array_is_refused_as_type_at_its_member() {
     let cases: [Judged; 11] = [
         (
@@ -830,7 +829,6 @@ fn an_actor_given_as_an_array_is_refused_as_type_at_its_member() {
 /// `type` at `/scope` like an [`Actor`]'s, `[]` included, through the request that carries it
 /// (DEC-881). The controls: each object form is accepted, and a scalar is `type` at `/scope`.
 #[test]
-#[ignore = "pending E10-10"]
 fn a_kill_switch_scope_given_as_an_array_is_refused_as_type_at_scope() {
     let cases: [Judged; 9] = [
         (br#"{"scope": ["agent", "a"]}"#, Some(("/scope", "type"))),
@@ -865,7 +863,6 @@ fn invalid_problem(violation: &str) -> Vec<u8> {
 /// so its array form is refused as `type` at its item, `/violations/0`, `[]` included (DEC-881).
 /// The controls: the object form is accepted, and a scalar is `type` at the same pointer.
 #[test]
-#[ignore = "pending E10-10"]
 fn a_problems_violation_given_as_an_array_is_refused_as_type_at_its_item() {
     let bodies = [
         (
@@ -944,7 +941,6 @@ fn misjudged_rows<T: DeserializeOwned + Validate + Debug>(rows: &[Row]) -> Vec<S
 /// as it refuses a scalar body (DEC-882, DEC-681 item 10). The controls: each object form is
 /// accepted, and a scalar is `type` at `""`.
 #[test]
-#[ignore = "pending E10-10"]
 fn a_request_body_given_as_an_array_is_refused_as_type_at_the_root() {
     let root = Some(("", "type"));
     let mut wrong = misjudged_rows::<PauseRequest>(&[
@@ -1029,7 +1025,6 @@ fn a_request_body_given_as_an_array_is_refused_as_type_at_the_root() {
 /// an item inside it (DEC-882). The controls: the object form is accepted, `null` where the schema
 /// allows it, and a scalar is `type` at the same pointer.
 #[test]
-#[ignore = "pending E10-10"]
 fn a_nested_object_given_as_an_array_is_refused_as_type_at_its_member() {
     let record = Some(("/record", "type"));
     let mut wrong = misjudged_rows::<PauseRequest>(&[
@@ -1094,7 +1089,6 @@ fn a_nested_object_given_as_an_array_is_refused_as_type_at_its_member() {
 /// step at `/steps/<index>`, and a preview's delegation at `/delegation` (DEC-882). The controls:
 /// the object form is accepted, and a scalar is `type` where the array stood.
 #[test]
-#[ignore = "pending E10-10"]
 fn a_response_given_as_an_array_is_refused_as_type_where_the_array_stands() {
     let root = Some(("", "type"));
     let mut wrong = misjudged_rows::<CommandStatus>(&[

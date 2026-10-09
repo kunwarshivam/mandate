@@ -305,7 +305,6 @@ fn the_control_checks_run_on_no_other_stream_type() {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn the_failing_vectors_fail_at_their_seq_with_their_check() {
     for (case, seq, check) in SECTIONS.into_iter().flat_map(failing) {
         for command in BOTH {
@@ -316,7 +315,6 @@ fn the_failing_vectors_fail_at_their_seq_with_their_check() {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn the_lowest_seq_wins_between_the_two_control_checks() {
     const BAD_READ: &str = "break_glass_cause_mismatch";
     const BAD_ANCHOR: &str = "anchor_self_mismatch";
@@ -339,7 +337,6 @@ fn the_lowest_seq_wins_between_the_two_control_checks() {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn a_control_check_is_reported_before_a_later_anchor_failure() {
     let honest = range("cold_records", "anchor_names_the_head_before_it");
     let not_the_head = Digest::of(b"not the head");
@@ -361,7 +358,6 @@ fn a_control_check_is_reported_before_a_later_anchor_failure() {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn a_control_check_is_reported_before_the_token() {
     let honest = range("cold_records", "anchor_names_the_head_before_it");
     let failing = SECTIONS.into_iter().flat_map(failing);

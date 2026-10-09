@@ -12,7 +12,7 @@ use crate::wire::{Asset, Check, Decimal, EventId, Id, Ref, Rules, Timestamp, is_
 
 /// `POST /agents/{agent_id}/pause` (§5.4): `{}` is valid (DEC-682 item 8).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct PauseRequest {
     #[serde(default)]
     pub record: Option<Record>,
@@ -20,7 +20,7 @@ pub struct PauseRequest {
 
 /// `POST /agents/{agent_id}/hold` (§4.2, DEC-191): `{}` is valid (DEC-682 item 8).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct HoldRequest {
     #[serde(default)]
     pub record: Option<Record>,
@@ -28,7 +28,7 @@ pub struct HoldRequest {
 
 /// `POST /agents/{agent_id}/delegations/{delegation_id}/end` (§5.3): `{}` is valid.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct EndDelegationRequest {
     #[serde(default)]
     pub record: Option<Record>,
@@ -37,7 +37,7 @@ pub struct EndDelegationRequest {
 /// Lifting a hold a client set (§4.2, DEC-191). A `null` step-up is forwarded, and the runtime
 /// refuses it (DEC-682 item 9).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct LiftHoldRequest {
     #[serde(deserialize_with = "Option::deserialize")]
     pub record: Option<Record>,
@@ -48,7 +48,7 @@ pub struct LiftHoldRequest {
 /// `POST /agents/{agent_id}/resume` (§5.4). A `null` step-up is forwarded, and the runtime refuses
 /// it (`OwnerCommandRefused`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct ResumeRequest {
     #[serde(deserialize_with = "Option::deserialize")]
     pub record: Option<Record>,
@@ -59,7 +59,7 @@ pub struct ResumeRequest {
 /// `POST /agents/{agent_id}/acknowledgments` (§4.2): the event acknowledged, declared after the
 /// nullable members so serde names a missing one of them first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct AcknowledgeRequest {
     #[serde(deserialize_with = "Option::deserialize")]
     pub record: Option<Record>,
@@ -71,7 +71,7 @@ pub struct AcknowledgeRequest {
 /// `POST /agents/{agent_id}/requests` (§4.6, DEC-682 item 16). Who asked comes from the channel,
 /// never the body (API-6).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct OwnerRequest {
     pub instrument: Asset,
     pub side: Side,
@@ -92,7 +92,7 @@ crate::wire::rules!(none: ResumeRequest, AcknowledgeRequest, OwnerRequest);
 
 /// `POST /mandate-versions/{mandate_version}/confirm` (§5.1): each confirmed path is a pointer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct ConfirmRequest {
     #[serde(deserialize_with = "Option::deserialize")]
     pub agent_id: Option<Id>,
@@ -110,7 +110,7 @@ pub struct ConfirmRequest {
 /// `POST /approvals/{approval_id}/responses` (§5.2). A `skipped` names no delegation (DEC-682
 /// item 11).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct ApprovalResponseRequest {
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
@@ -131,7 +131,7 @@ pub enum Verdict {
 
 /// The previewed delegation an `approved` adds (§5.3).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct DelegationChosen {
     pub preview_id: Id,
     pub mandate_version: Ref,
@@ -141,7 +141,7 @@ pub struct DelegationChosen {
 /// takes the three nullable members `null` and a timed shape takes all three; `max_orders` is 1 to
 /// 1,000.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct DelegationPreviewRequest {
     #[serde(deserialize_with = "Option::deserialize")]
     pub max_order_usd: Option<Decimal>,
@@ -164,7 +164,7 @@ pub enum Shape {
 
 /// `POST /agents/{agent_id}/stop` (§4.2, DEC-682 item 10): a warning exactly with `release`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct StopRequest {
     #[serde(deserialize_with = "Option::deserialize")]
     pub warning_shown: Option<Ref>,
@@ -177,7 +177,7 @@ pub struct StopRequest {
 
 /// `POST /kill-switch` (§5.4, DEC-682 item 7): only `scope` is required.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct KillSwitchRequest {
     pub scope: Scope,
     #[serde(default)]
@@ -193,7 +193,12 @@ pub struct KillSwitchRequest {
 /// What a kill switch stops, tagged on `kind`: a workspace scope's `id` is `null` and no other's
 /// is (DEC-682 item 7), so serde holds the schema's `if`/`then`. No org scope (DEC-436 item 13).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    remote = "Self",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum Scope {
     Agent {
         id: Id,
@@ -217,7 +222,7 @@ pub enum Environment {
 
 /// The displayed bid an owner confirmed to sell an equity outside the regular session (§5.4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct BidConfirmation {
     pub asset_id: Asset,
     pub bid: Decimal,
@@ -228,7 +233,7 @@ pub struct BidConfirmation {
 
 /// `POST /agents/{agent_id}/exits` (§5.4, DEC-682 item 12): only `instrument` is required.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct OwnerExitRequest {
     pub instrument: Asset,
     #[serde(default)]
@@ -248,7 +253,7 @@ pub struct OwnerExitRequest {
 /// `POST /connections/{connection_id}/revoke` (§4.5, §5.6, DEC-682 item 18): `compromised` absent
 /// is `false`, the ordinary revoke (DEC-681 item 8), and `null` is refused.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct RevokeRequest {
     #[serde(default)]
     pub compromised: bool,
@@ -306,3 +311,23 @@ impl Rules for StopRequest {
 crate::wire::rules!(checked: ConfirmRequest, ApprovalResponseRequest, DelegationPreviewRequest);
 crate::wire::rules!(checked: StopRequest);
 crate::wire::rules!(none: KillSwitchRequest, OwnerExitRequest, RevokeRequest);
+
+crate::wire::object_only!(
+    PauseRequest,
+    HoldRequest,
+    EndDelegationRequest,
+    LiftHoldRequest,
+    ResumeRequest,
+    AcknowledgeRequest,
+    OwnerRequest,
+    ConfirmRequest,
+    ApprovalResponseRequest,
+    DelegationChosen,
+    DelegationPreviewRequest,
+    StopRequest,
+    KillSwitchRequest,
+    Scope,
+    BidConfirmation,
+    OwnerExitRequest,
+    RevokeRequest
+);
