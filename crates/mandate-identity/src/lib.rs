@@ -655,7 +655,7 @@ impl OrgContext {
     /// names and never part of one. With no enumerated set (built during a membership-store outage)
     /// it is [`EveryWorkspace::NoSetYet`], not a refusal: the caller treats it as pending and
     /// retries, never as a denial. No route calls it until a route story decides it (identity spec
-    /// §4.5); its `Err` is only this stub's.
+    /// §4.5). It never returns `Err` today; the `Result` keeps the signature the route stories use.
     pub fn into_every_workspace(self) -> Result<EveryWorkspace, Refusal> {
         Ok(match &self.workspaces {
             Some(set) => EveryWorkspace::Contexts(set.iter().map(|w| self.tenant(*w)).collect()),
