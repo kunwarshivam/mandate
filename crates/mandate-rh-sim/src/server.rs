@@ -196,6 +196,9 @@ fn read_request(stream: &mut TcpStream) -> Option<(String, Vec<u8>)> {
     let mut bytes = Vec::new();
     let mut buf = [0u8; 4096];
     loop {
+        if bytes.len() > MAX_REQUEST {
+            return None;
+        }
         if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
             let head = String::from_utf8(bytes.get(..end)?.to_vec()).ok()?;
             let length: usize = header(&head, "content-length")?.parse().ok()?;
@@ -204,9 +207,6 @@ fn read_request(stream: &mut TcpStream) -> Option<(String, Vec<u8>)> {
             if bytes.len() >= total {
                 return Some((head, bytes.get(start..total)?.to_vec()));
             }
-        }
-        if bytes.len() > MAX_REQUEST {
-            return None;
         }
         let read = stream.read(&mut buf).ok()?;
         if read == 0 {

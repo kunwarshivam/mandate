@@ -688,7 +688,6 @@ fn body_of(answer: &str) -> Value {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn dropping_the_server_closes_its_listener() -> Outcome {
     let addr = {
         let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
@@ -712,7 +711,6 @@ fn dropping_the_server_closes_its_listener() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn each_status_line_carries_its_standard_reason_phrase() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let addr = server.addr()?;
@@ -740,7 +738,6 @@ fn each_status_line_carries_its_standard_reason_phrase() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_body_that_is_not_json_is_a_parse_error_under_400() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let session = Wire::connect(&server.url()?).session.unwrap();
@@ -763,7 +760,6 @@ fn a_body_that_is_not_json_is_a_parse_error_under_400() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_session_the_server_never_gave_is_404_with_code_32001_and_reaches_nothing() -> Outcome {
     let (server, wire) = served(Variant::Honest)?;
     let stale = format!("{}x", wire.session.unwrap());
@@ -787,7 +783,6 @@ fn a_session_the_server_never_gave_is_404_with_code_32001_and_reaches_nothing() 
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn every_initialize_gets_a_session_of_its_own() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let url = server.url()?;
@@ -799,7 +794,6 @@ fn every_initialize_gets_a_session_of_its_own() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn get_equity_orders_refuses_every_filter_it_does_not_model() -> Outcome {
     let (_server, mut wire) = served(Variant::Honest)?;
     let placed = wire.call(
@@ -833,7 +827,6 @@ fn get_equity_orders_refuses_every_filter_it_does_not_model() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn anything_but_post_to_mcp_is_404_never_400() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let session = Wire::connect(&server.url()?).session.unwrap();
@@ -884,7 +877,6 @@ fn request_of(total: usize, addr: SocketAddr, session: &str) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_request_of_one_mib_is_answered_and_one_byte_more_is_closed_unanswered() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let session = Wire::connect(&server.url()?).session.unwrap();
