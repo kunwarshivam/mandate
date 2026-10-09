@@ -442,7 +442,6 @@ fn gate_account(rules: AccountRules, figures: [&str; 3]) -> Result<AccountSnapsh
 /// prior-close equity is `last_equity` (§9.2, DEC-524 items 2 and 4). Each expected excess is
 /// worked by hand, and the accounts differ in every figure, so no constant passes.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_gate_takes_the_brokers_maintenance_excess_and_prior_close_equity() {
     let cases = [
         (["1000000", "0", "1000000"], "1000000"),
@@ -466,7 +465,6 @@ fn the_gate_takes_the_brokers_maintenance_excess_and_prior_close_equity() {
 /// Another declaration flows through as it was declared: the gate's account type and regime are
 /// the connector's, never the shell's, whichever of §7.2's types and §9.2's regimes it names.
 #[test]
-#[ignore = "pending E7-19"]
 fn another_declared_account_type_or_regime_reaches_the_gate() {
     let figures = ["250000.5", "40000.25", "248000"];
     let intraday = DayTradeRegime::IntradayMargin {
@@ -502,7 +500,6 @@ fn another_declared_account_type_or_regime_reaches_the_gate() {
 /// refuses its opening, since nothing yet turns it into §9.2's `exits_only` (DEC-840; `AGENTS.md`
 /// rule 3). Each has its own reason.
 #[test]
-#[ignore = "pending E7-19"]
 fn an_unreadable_maintenance_figure_or_a_deficit_refuses_the_run() {
     let cases = [
         (
