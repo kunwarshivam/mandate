@@ -177,8 +177,8 @@ const CLOSED_BY_E7_17: &[(&str, &[&str])] = &[
     ("ConnectionCredentialRefreshed", &[ACCT]),
 ];
 
-/// The control-stream records journal spec v0.19 to v0.21 close (§9.8 to §9.10, DEC-670 to
-/// DEC-672), with the configuration each names. `ModelInvocationRecorded` is also catalogued on the
+/// The control-stream records journal spec v0.21 and v0.22 close (§9.9 and §9.10, DEC-670 and
+/// DEC-671), with the configuration each names. `ModelInvocationRecorded` is also catalogued on the
 /// agent stream, where it stays open, so it is kept out of [`SPEC`] until E10-15's implementation;
 /// `the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream` asserts what each
 /// becomes.
@@ -1384,77 +1384,66 @@ fn the_connection_records_are_catalogued_and_closed_on_their_streams() {
     }
 }
 
-/// §9.8 to §9.10's records are catalogued on the control stream with the configuration they name,
+/// §9.9 and §9.10's records are catalogued on the control stream with the configuration they name,
 /// and closed there: an unlisted member is refused `schema`, never `unknown_schema`. The compiler's
 /// record stays catalogued, and open, on the agent stream. `OwnerCommandIssued` is catalogued on the
-/// control stream too: a payload with no `command` is refused at that member, since §9.10 reads it
+/// control stream too: a payload with no `command` is refused at that member, since §9.11 reads it
 /// for every command.
 #[test]
 #[ignore = "pending E10-15"]
 fn the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream() {
+    let wrong_stream = (InvalidReason::WrongStream, "event_type".to_owned());
     for (event_type, refs) in CLOSED_BY_E10_15 {
         for kind in [ACCT, AGENT, CTL, CLOCK] {
-            let refused = Draft::parse(&draft(event_type, kind, refs)).unwrap_err();
             let want = match kind {
                 CTL => (InvalidReason::Schema, "payload.unregistered".to_owned()),
                 AGENT if *event_type == "ModelInvocationRecorded" => {
                     (InvalidReason::UnknownSchema, "payload".to_owned())
                 }
-                _ => (InvalidReason::WrongStream, "event_type".to_owned()),
+                _ => wrong_stream.clone(),
             };
-            assert_eq!(
-                (refused.reason, refused.path),
-                want,
-                "{event_type} in {kind}"
-            );
+            let got = refused(event_type, kind, refs);
+            assert_eq!(got, want, "{event_type} in {kind}");
         }
         for missing in refs.iter() {
-            let refused = Draft::parse(&draft(event_type, CTL, &[])).unwrap_err();
-            assert_eq!(
-                (refused.reason, refused.path),
-                (
-                    InvalidReason::MissingConfigRef,
-                    format!("config_refs.{missing}")
-                ),
-                "{event_type} without {missing}"
+            let want = (
+                InvalidReason::MissingConfigRef,
+                format!("config_refs.{missing}"),
             );
+            let got = refused(event_type, CTL, &[]);
+            assert_eq!(got, want, "{event_type} without {missing}");
         }
     }
     for kind in [ACCT, AGENT, CTL, CLOCK] {
-        let refused = Draft::parse(&draft("OwnerCommandIssued", kind, &[])).unwrap_err();
-        let want = if kind == CTL {
-            (InvalidReason::Schema, "payload.command".to_owned())
-        } else {
-            (InvalidReason::WrongStream, "event_type".to_owned())
+        let want = match kind {
+            CTL => (InvalidReason::Schema, "payload.command".to_owned()),
+            _ => wrong_stream.clone(),
         };
-        assert_eq!(
-            (refused.reason, refused.path),
-            want,
-            "OwnerCommandIssued in {kind}"
-        );
+        let got = refused("OwnerCommandIssued", kind, &[]);
+        assert_eq!(got, want, "OwnerCommandIssued in {kind}");
     }
 }
 
-/// The compiler's record is on the control stream (§9.8), but on the agent stream
+/// What `Draft::parse` refuses a catalogue draft with, and where.
+fn refused(event_type: &str, kind: &str, refs: &[&str]) -> (InvalidReason, String) {
+    let refused = Draft::parse(&draft(event_type, kind, refs)).unwrap_err();
+    (refused.reason, refused.path)
+}
+
+/// The compiler's record is on the control stream (§9.9), but on the agent stream
 /// `ModelInvocationRecorded` stays catalogued and open, needing `model_version`, before and after
 /// E10-15 (E15-8 closes it there).
 #[test]
 fn the_model_invocation_stays_open_on_the_agent_stream() {
-    let refused = Draft::parse(&draft("ModelInvocationRecorded", AGENT, &[MOD])).unwrap_err();
-    assert_eq!(
-        (refused.reason, refused.path),
-        (InvalidReason::UnknownSchema, "payload".to_owned())
+    let (mir, unknown) = ("ModelInvocationRecorded", InvalidReason::UnknownSchema);
+    assert_eq!(refused(mir, AGENT, &[MOD]), (unknown, "payload".to_owned()));
+    let missing = (
+        InvalidReason::MissingConfigRef,
+        "config_refs.model_version".to_owned(),
     );
-    let refused = Draft::parse(&draft("ModelInvocationRecorded", AGENT, &[])).unwrap_err();
-    assert_eq!(
-        (refused.reason, refused.path),
-        (
-            InvalidReason::MissingConfigRef,
-            "config_refs.model_version".to_owned()
-        )
-    );
+    assert_eq!(refused(mir, AGENT, &[]), missing);
     for kind in [ACCT, CLOCK] {
-        let refused = Draft::parse(&draft("ModelInvocationRecorded", kind, &[MOD])).unwrap_err();
-        assert_eq!(refused.reason, InvalidReason::WrongStream, "{kind}");
+        let wrong_stream = (InvalidReason::WrongStream, "event_type".to_owned());
+        assert_eq!(refused(mir, kind, &[MOD]), wrong_stream, "{kind}");
     }
 }
