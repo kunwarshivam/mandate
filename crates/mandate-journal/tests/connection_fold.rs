@@ -1087,14 +1087,13 @@ fn bind(prefix: &[StoredEvent], start: TrustedStart) -> Result<VerifiedPrefix<'_
 
 /// Where a caller runs a range from (DEC-892 item 3, DEC-889): anchored on the fold of `prefix`
 /// once `bind` verifies it and binds it to `start`, and unanchored when `bind` refuses it or the
-/// fold finds it broken. A stub's report panics.
+/// fold finds it broken. Anything else, a stub's report included, fails with its variant named.
 fn verified_start(prefix: &[StoredEvent], start: TrustedStart) -> ConnectionStart {
     match bind(prefix, start).map(|bound| ConnectionAnchor::from_verified(&bound)) {
         Ok(Ok(anchor)) => ConnectionStart::Anchored(anchor),
         Ok(Err(ConnectionAnchorError::Broken))
         | Err(PrefixError::Unverified(_) | PrefixError::Unbound) => ConnectionStart::Unanchored,
-        Ok(Err(stub)) => panic!("{stub:?}"),
-        Err(stub) => panic!("{stub:?}"),
+        unexpected => panic!("neither an anchor nor a refusal: {unexpected:?}"),
     }
 }
 
@@ -1279,7 +1278,7 @@ fn a_forged_short_or_unbound_prefix_runs_the_range_unanchored() {
 }
 
 /// DEC-889 item 2: an anchored run judges its anchor's stream only, and fails closed at the first
-/// connection record of another; an empty prefix's anchor takes the range's first record's stream.
+/// judged record of another; an empty prefix's anchor takes the range's first judged record's stream.
 #[test]
 #[ignore = "pending E7-17"]
 fn an_anchored_run_fails_closed_at_another_streams_record() {
@@ -1295,5 +1294,23 @@ fn an_anchored_run_fails_closed_at_another_streams_record() {
             at(&chain[3], ConnectionCheck::Unanchored),
             "split at {k}"
         );
+    }
+}
+
+/// DEC-889 item 2 and DEC-885 I6: another control stream's `ConnectionRevoked` is never judged, so
+/// it never fails an anchored run, which still fails closed at that stream's next judged record.
+#[test]
+#[ignore = "pending E7-17"]
+fn an_anchored_run_passes_another_streams_revocation() {
+    let records = ["request X A1", "establish X A1", "revoke Y"];
+    let foreign = ["revoke X ws=ws_01J8Z3", "establish Z A2 ws=ws_01J8Z3"];
+    let chain = sealed(&control(&[&records[..], &foreign[..]].concat()));
+    let (prefix, _) = chain.split_at(2);
+    for (range, want) in [
+        (&chain[2..4], Ok(())),
+        (&chain[2..], at(&chain[4], ConnectionCheck::Unanchored)),
+    ] {
+        let start = verified_start(prefix, start_after(prefix));
+        assert_eq!(verify_connection_lifecycle_from(start, range), want);
     }
 }
