@@ -15,30 +15,26 @@ use crate::SpecError;
 use crate::document::DelegationId;
 use crate::validate::ValidatedMandate;
 
-/// One delegation's journaled usage (§6.5 condition 4): the orders it has lifted and their total
-/// value.
+/// One delegation's journaled usage (§6.5 condition 4): the orders it lifted and their total.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelegationUsage {
     pub orders: u32,
     pub total_usd: Usd,
 }
 
-/// The effective policy of §4.3 as the figure reads it: whether `auto` is allowed, and whether the
-/// version is `policy_nonconforming`.
+/// §4.3's effective policy as the figure reads it: is `auto` allowed, is the version nonconforming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EffectivePolicy {
     pub auto_allowed: bool,
     pub nonconforming: bool,
 }
 
-/// The figure's inputs besides the mandate, as §4.2's table lists them. `None` is an input that is
-/// not known.
+/// The figure's inputs besides the mandate (§4.2's table); `None` is an input that is not known.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnaskedInputs {
     /// The journaled risk clock *t* (§5.2); for an agent not yet deployed, the validation instant.
     pub now: Option<UtcNanos>,
-    /// §5.3's count of openings and increases submitted in the risk day; 0 for an agent not yet
-    /// deployed.
+    /// §5.3's openings and increases submitted in the risk day; 0 for an agent not yet deployed.
     pub orders_today: Option<u32>,
     /// Usage per delegation. A delegation with no entry has used nothing.
     pub usage: Option<BTreeMap<DelegationId, DelegationUsage>>,
