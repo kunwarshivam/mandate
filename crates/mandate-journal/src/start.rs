@@ -2,10 +2,12 @@
 //! trusted start of a range, resolved from the workspace's own control-stream records, never from
 //! the request ([workspace API spec](../../../docs/specs/workspace-api.md) §4.8.1). The reference
 //! is `reference/journal/control.py`'s `trusted_start`; the vectors are `cold_records.trusted_starts`.
+//! It also reads an `AnchorComputed` row as the anchor a verifier checks ([`anchor_record`], §10,
+//! §11).
 
 use mandate_canon::{Digest, Value, parse};
 
-use crate::{StoredEvent, StreamId, StreamType, TrustedStart};
+use crate::{Anchor, ArtifactRef, StoredEvent, StreamId, StreamType, TrustedStart};
 
 /// Workspace API §4.8.1's `trusted_start`: it names the record to read, never the `prev_hash`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +82,32 @@ pub fn resolve_trusted_start(
             prev_hash,
         })
         .ok_or(refused)
+}
+
+/// An `AnchorComputed` as a verifier reads it (§9.14): its leaves and root exactly as recorded,
+/// neither sorted nor recomputed, so §11's anchor checks judge what the record holds, and its
+/// timestamp token, `None` when the record's `token` is `null`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnchorRecord {
+    pub anchor: Anchor,
+    pub token: Option<ArtifactRef>,
+}
+
+/// Why a row gave no [`AnchorRecord`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnchorRecordError {
+    /// The row is not an `AnchorComputed` at schema version 1.
+    NotAnAnchor,
+    /// Its body does not parse, or a member of its payload is missing or not of §9.14's type.
+    Malformed,
+    /// Not built yet (DEC-77).
+    Unimplemented { story: &'static str },
+}
+
+/// The anchor an `AnchorComputed` row records (§9.14, §10).
+pub fn anchor_record(row: &StoredEvent) -> Result<AnchorRecord, AnchorRecordError> {
+    let _ = row;
+    Err(AnchorRecordError::Unimplemented { story: "E12-3" })
 }
 
 fn workspace_of(stream_id: &str) -> Option<&str> {

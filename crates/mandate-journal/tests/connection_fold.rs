@@ -410,6 +410,80 @@ fn only_a_record_that_enters_suspended_moves_the_suspension_a_rotation_must_foll
     );
 }
 
+/// The records before a second suspension: a binding, a first suspension that a `reauthorize`
+/// check (record 3) and its rotation (record 4) clear, the owner's acknowledgment back to `active`,
+/// and a second entry into `suspended` at record 7.
+fn suspended_twice() -> Vec<(&'static str, String)> {
+    vec![
+        check("connect"),
+        ("established_copy", String::new()),
+        (
+            "state_degraded",
+            moved("active", "suspended", "authorization_failed"),
+        ),
+        check("reauthorize"),
+        ("rotated_copy", String::new()),
+        (
+            "state_degraded",
+            moved("suspended", "suspended", "condition_cleared") + &set("causation_id", &id(4)),
+        ),
+        (
+            "state_degraded",
+            moved("suspended", "active", "acknowledged"),
+        ),
+        (
+            "state_degraded",
+            moved("active", "suspended", "credential_expired"),
+        ),
+    ]
+}
+
+/// Rule 68 (journal spec v0.35 §9.8): a `condition_cleared` out of `suspended` names a rotation
+/// whose `reauthorize` check came after the `ConnectionStateChanged` that last entered `suspended`,
+/// the *latest* entry, not any earlier one. After a second entry into `suspended`, neither the
+/// first suspension's rotation nor a new rotation resting on the first suspension's check clears
+/// it: each is refused at the clearing record. A check after the second entry, and its rotation,
+/// clear it. Every vector enters `suspended` at most once, so none tells the two suspensions apart;
+/// the expected answers are §9.8's text, written by hand.
+#[test]
+fn a_clearing_rotation_follows_the_latest_entry_into_suspended() {
+    let clearing = |cause: usize| {
+        (
+            "state_degraded",
+            moved("suspended", "suspended", "condition_cleared") + &set("causation_id", &id(cause)),
+        )
+    };
+    let judged = |more: Vec<(&'static str, String)>| {
+        let mut records = suspended_twice();
+        records.extend(more);
+        written(&records, verify_connection_lifecycle)
+    };
+    assert_eq!(judged(Vec::new()), Ok(()), "the prefix itself is valid");
+    assert_eq!(
+        judged(vec![clearing(4)]),
+        refused(8, ConnectionStreamRule::AccountStream),
+        "the first suspension's rotation does not clear the second"
+    );
+    assert_eq!(
+        judged(vec![("rotated_copy", String::new()), clearing(8)]),
+        refused(9, ConnectionStreamRule::AccountStream),
+        "a rotation after the second entry rests on the first suspension's check"
+    );
+    assert_eq!(
+        judged(vec![
+            check("reauthorize"),
+            ("rotated_copy", String::new()),
+            clearing(9),
+            (
+                "state_degraded",
+                moved("suspended", "active", "acknowledged")
+            ),
+        ]),
+        Ok(()),
+        "a check after the latest entry into suspended, and its rotation, clear it"
+    );
+}
+
 /// Rule 66: "A version-1 first establishment has no `account_ref`, so it is never
 /// re-established", not even by another version 1 whose absent `account_ref` matches it.
 /// §9.8's text refuses it, and so does `reference/journal/connections.py` since v0.30 (DEC-696).
@@ -798,7 +872,6 @@ fn judged(row: &StoredEvent) -> bool {
 /// answer is the vector's, located by the range row's stream and `seq`, with its code. A `before`
 /// that breaks a rule anchors nothing.
 #[test]
-#[ignore = "pending E7-17"]
 fn every_range_vector_is_judged_from_its_anchor_as_its_vector_says() {
     let mut judged_cases = 0;
     for name in ["connection_ranges", "connection_requests"] {
@@ -862,7 +935,6 @@ fn every_range_vector_is_judged_from_its_anchor_as_its_vector_says() {
 /// the same row; a range from `seq` 1, anchored on nothing or from genesis, is the full chain; and
 /// rows before `k` that break a rule anchor nothing.
 #[test]
-#[ignore = "pending E7-17"]
 fn an_anchored_range_agrees_with_the_full_chain_on_every_split() {
     let chains = full_chains();
     assert!(
@@ -898,7 +970,6 @@ fn an_anchored_range_agrees_with_the_full_chain_on_every_split() {
 /// `k` fail closed at the first one [`judged`] names, with no rule, and pass when it names none, so
 /// a range of revocations passes, anchored or not.
 #[test]
-#[ignore = "pending E7-17"]
 fn an_unanchored_range_fails_closed_at_its_first_judged_record() {
     let mut revocations_passed = 0;
     for chain in full_chains() {
@@ -924,7 +995,6 @@ fn an_unanchored_range_fails_closed_at_its_first_judged_record() {
 /// §11's `connection_cause_mismatch` located: over the 9 `chains`, the full-chain cause check
 /// reports the row [`verify_connection_causes`] reports, by its stream and `seq`.
 #[test]
-#[ignore = "pending E7-17"]
 fn the_located_cause_check_reports_the_full_chain_row() {
     let section = section();
     let cases = list(&section, "chains");

@@ -2,6 +2,8 @@
 //! `MembershipLookup` are sealed to it (DEC-642), so the test doubles below are `cfg(test)` only.
 
 mod demand;
+mod grammar;
+mod id13;
 mod matrix;
 mod roles;
 mod rows;

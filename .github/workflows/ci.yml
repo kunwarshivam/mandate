@@ -1,11 +1,14 @@
 # Per-PR checks (ADR-0001 ES-12, DEC-75, DEC-76, DEC-464). The required checks remain `fast` and
-# `full`. The latter is a quick aggregate over the non-mutation full checks, the mutation plan,
-# every deterministic mutation shard the plan sized to the diff (DEC-538), and the workspace API
-# schemas' mutation sweep (DEC-688). Run `cargo xtask check`
-# locally for the same complete set, unsharded. main itself is covered by the nightly workflow.
-# A documentation-only change takes the short path in both jobs (DEC-112): no toolchain, just
-# typos, the spec guard, and the trailer check (`.github/scripts/docs-checks.sh`). So does a change
-# that touches only documentation and `web/`, whose checks run in `web.yml` (DEC-200).
+# `full`, and both are quick aggregates. `fast` is over `fast-lint` (lint and the spec guard), the
+# three `fast-test` shards of the nextest run, `fast-pending` (pending tests and doctests) and
+# `fast-python` (pytest), which together run exactly `cargo xtask ci fast` (DEC-871). `full` is
+# over the non-mutation full checks, the mutation plan, every deterministic mutation shard the plan
+# sized to the diff (DEC-538), and the workspace API schemas' mutation sweep (DEC-688). Run
+# `cargo xtask check` locally for the same complete set, unsharded. main itself is covered by the
+# nightly workflow. A documentation-only change takes the short path in every job (DEC-112): no
+# toolchain, just typos, the spec guard, and the trailer check (`.github/scripts/docs-checks.sh`)
+# in `fast-lint`. So does a change that touches only documentation and `web/`, whose checks run in
+# `web.yml` (DEC-200).
 # Every diff-based check compares against the first parent of the merge commit a `pull_request`
 # run checks out, main's tip the PR was merged onto: xtask's `choose_base` and
 # `.github/scripts/base-ref.sh` read `GITHUB_EVENT_NAME` for it, and `fetch-depth: 0` keeps both
@@ -40,10 +43,14 @@ env:
   ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
 
 jobs:
-  fast:
+  # DEC-871. `fast`'s parts run in parallel jobs, so each stays under ten minutes (DEC-464):
+  # `cargo xtask ci fast` in one job took 13 to 14.6 minutes. `fast-lint` runs lint and the spec
+  # guard, and the documentation-only short path (DEC-112); the other jobs report success on a
+  # documentation-only change without a toolchain.
+  fast-lint:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
     env:
@@ -72,6 +79,59 @@ jobs:
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         if: steps.change.outputs.docs_only != 'true'
         with:
+          tool: typos@1.50.2,shellcheck@0.11.0
+      - name: Install actionlint (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum --check
+          tar xzf actionlint.tgz actionlint && sudo install actionlint /usr/local/bin/ && rm actionlint actionlint.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          shared-key: fast-lint
+      - run: cargo xtask ci lint
+        if: steps.change.outputs.docs_only != 'true'
+      - run: cargo xtask ci spec-guard
+        if: steps.change.outputs.docs_only != 'true'
+
+  # DEC-871. The workspace's nextest run, in nextest's counted partitions: each shard builds every
+  # test binary and runs its third of the tests, and together they run every test once. The shards
+  # and `fast-pending` build the same test profile, so they share one cache, which only the first
+  # shard saves.
+  fast-test:
+    name: fast-test (${{ matrix.shard }})
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/3", "2/3", "3/3"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        if: steps.change.outputs.docs_only != 'true'
+        with:
           tool: cargo-nextest@0.9.146,typos@1.50.2,shellcheck@0.11.0
       - name: Install actionlint (checksum-verified)
         if: steps.change.outputs.docs_only != 'true'
@@ -79,8 +139,8 @@ jobs:
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum --check
           tar xzf actionlint.tgz actionlint && sudo install actionlint /usr/local/bin/ && rm actionlint actionlint.tgz
-      # `test` runs xtask's own tests, and one of them drives the whole mutation gate over a fixture
-      # repository, so this check needs the tool the gate calls as well (DEC-139).
+      # xtask's own tests drive the whole mutation gate over a fixture repository, so the jobs that
+      # run them need the tool the gate calls as well (DEC-139).
       - name: Install cargo-mutants (checksum-verified)
         if: steps.change.outputs.docs_only != 'true'
         run: |
@@ -92,8 +152,124 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: steps.change.outputs.docs_only != 'true'
-      - run: cargo xtask ci fast
+        with:
+          shared-key: fast-test
+          save-if: ${{ matrix.shard == '1/3' }}
+      - run: cargo xtask ci test-nextest
         if: steps.change.outputs.docs_only != 'true'
+        env:
+          MANDATE_TEST_PARTITION: ${{ matrix.shard }}
+
+  # DEC-871. The pending tests (DEC-110, DEC-137) and the doctests: both need the test profile the
+  # `fast-test` shards build, and run in seconds once it is built.
+  fast-pending:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          tool: cargo-nextest@0.9.146,typos@1.50.2,shellcheck@0.11.0
+      - name: Install actionlint (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum --check
+          tar xzf actionlint.tgz actionlint && sudo install actionlint /usr/local/bin/ && rm actionlint actionlint.tgz
+      # xtask's own tests drive the whole mutation gate over a fixture repository, so the jobs that
+      # run them need the tool the gate calls as well (DEC-139).
+      - name: Install cargo-mutants (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${CARGO_MUTANTS_SHA256}  cargo-mutants.tgz" | sha256sum --check
+          tar xzf cargo-mutants.tgz cargo-mutants && sudo install cargo-mutants /usr/local/bin/ && rm cargo-mutants cargo-mutants.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          shared-key: fast-test
+          save-if: false
+      - run: cargo xtask ci pending
+        if: steps.change.outputs.docs_only != 'true'
+      - run: cargo xtask ci test-doc
+        if: steps.change.outputs.docs_only != 'true'
+
+  # DEC-871. The Python tests, which took about two and a half minutes inside `test`; this job
+  # builds only xtask.
+  fast-python:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          shared-key: fast-python
+      - run: cargo xtask ci test-python
+        if: steps.change.outputs.docs_only != 'true'
+
+  fast:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    permissions: {}
+    if: ${{ always() && !github.event.pull_request.draft }}
+    needs: [fast-lint, fast-test, fast-pending, fast-python]
+    # DEC-871. The required `fast` verdict: every part must succeed, and a matrix succeeds only when
+    # every shard did. A failed, cancelled or skipped part fails it. xtask's tests run this script
+    # over every combination of the four results.
+    steps:
+      - name: Require lint and the spec guard, every test shard, the pending tests and doctests, and pytest
+        env:
+          LINT_RESULT: ${{ needs.fast-lint.result }}
+          TEST_RESULT: ${{ needs.fast-test.result }}
+          PENDING_RESULT: ${{ needs.fast-pending.result }}
+          PYTHON_RESULT: ${{ needs.fast-python.result }}
+        run: |
+          test "$LINT_RESULT" = success
+          test "$TEST_RESULT" = success
+          test "$PENDING_RESULT" = success
+          test "$PYTHON_RESULT" = success
 
   full-checks:
     if: ${{ !github.event.pull_request.draft }}
@@ -114,7 +290,7 @@ jobs:
         run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
       - name: Documentation-only change
         if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; the fast job ran the documentation checks (DEC-112)"
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       # The Postgres journal tests run here, not in `fast` (DEC-109): the supported version, ES-08.
       - name: Start PostgreSQL 18 (digest-pinned)
         if: steps.change.outputs.docs_only != 'true'
@@ -260,7 +436,7 @@ jobs:
         run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
       - name: Documentation-only change
         if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; the fast job ran the documentation checks (DEC-112)"
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: steps.change.outputs.docs_only != 'true'
         with:

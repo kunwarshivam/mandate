@@ -226,7 +226,7 @@ describe("an agent on a phone", () => {
     const badge = header().querySelector<HTMLElement>("[data-slot=mode-badge]")!;
     expect(title.parentElement!.contains(badge)).toBe(true);
     expect(shownOnPhone(badge)).toBe(true);
-    expect(shownOnDesktop(badge)).toBe(false);
+    expect(shownOnDesktop(badge)).toBe(true);
     expect(badge.querySelector("[data-slot=mode-dot]")).not.toBeNull();
     expect(onPhone(within(header()).getAllByRole("button", { name: "Stop this agent…" }))).toHaveLength(1);
     const order = onPhone(main().querySelectorAll("h2")).map((h) => h.textContent);

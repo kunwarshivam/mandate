@@ -12,7 +12,6 @@ import { usd } from "@/lib/format";
 import { MODE_MEANING } from "@/lib/labels";
 import { type Level, type Rail, agentLimits, headroomRows, nextLevel } from "@/lib/limits";
 import { agentHref } from "@/lib/screens";
-import { ModeBadge } from "./mode";
 import { Placeholder } from "./placeholders";
 
 const EASE = [0.23, 1, 0.32, 1] as const;
@@ -254,8 +253,9 @@ export function Headroom({ agent, className }: { agent: Agent; className?: strin
 }
 
 /**
- * The mandate at a glance, for the rail beside an agent's story: its mode, the limit rails in dollars,
- * and the next level where its behaviour changes. The levels ladder and every field live on the
+ * The mandate at a glance, for the rail beside an agent's story: what its mode means, the limit rails
+ * in dollars, and the next level where its behaviour changes. The mode chip itself is the page
+ * header's, beside the name on every tab, so the card does not repeat it (C-8). The levels ladder and every field live on the
  * Mandate tab. Kept short enough to stay in view on a laptop screen as the page scrolls.
  */
 export function MandateCard({ agent, className }: { agent: Agent; className?: string }) {
@@ -266,12 +266,9 @@ export function MandateCard({ agent, className }: { agent: Agent; className?: st
   return (
     <section aria-labelledby={titleId} data-slot="mandate-card" className={cn("grid gap-4 rounded-2xl bg-mandate px-5 py-5 text-mandate-foreground", className)}>
       <div className="grid gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-          <h2 id={titleId} className="text-h2 text-mandate-strong">
-            Your mandate
-          </h2>
-          <ModeBadge mode={agent.mode} />
-        </div>
+        <h2 id={titleId} className="text-h2 text-mandate-strong">
+          Your mandate
+        </h2>
         <div role="group" aria-label="Mode" data-mode={agent.mode} data-slot="mode-field" className="grid gap-1.5">
           <p className="text-sm text-mandate-muted">{MODE_MEANING[agent.mode]}</p>
           {agent.startup === "reconciling" ? (

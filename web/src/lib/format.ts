@@ -97,13 +97,56 @@ function inZone(iso: string, zone: string): { day: string; time: string } {
 /**
  * A time on the record, placed in its day: the clock alone, "14:01:12", when it falls on the same
  * day as `now` in `zone`, and "Sep 26, 2026, 15:12" from any other day, so a time from another day
- * never reads as a time today (C-23). The timeline and every restriction's "since" use it. `now`
- * and `zone` are inputs, so it reads neither the clock nor the viewer's zone setting.
+ * never reads as a time today (C-23). Every restriction's "since" uses it; the timelines place their
+ * times under day headings instead (`byRecordDay`). `now` and `zone` are inputs, so it reads neither
+ * the clock nor the viewer's zone setting.
  */
 export function datedClock(at: string, now: string, zone: string): string {
   const when = inZone(at, zone);
   if (when.day === inZone(now, zone).day) return when.time;
   return `${dateLabel(when.day)}, ${when.time.slice(0, 5)}`;
+}
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** A day's heading on a timeline: "Today", "25 September", or "31 December 2025" from another year. */
+function dayHeading(day: string, today: string): string {
+  if (day === today) return "Today";
+  const [y, m, d] = day.split("-").map(Number);
+  return `${d} ${MONTH_NAMES[m - 1]}${day.slice(0, 4) === today.slice(0, 4) ? "" : ` ${y}`}`;
+}
+
+/** One entry under its day: the clock alone, "14:01:12", and its date, "Sep 25, 2026", for assistive tech. */
+export interface RecordEntry<T> {
+  item: T;
+  time: string;
+  date: string;
+}
+
+export interface RecordDay<T> {
+  heading: string;
+  entries: RecordEntry<T>[];
+}
+
+/**
+ * A timeline's entries under day headings (C-19): "Today", then each earlier day, with the day
+ * boundary and the times both read in `zone`, and "Today" taken from `now`, never the machine's
+ * clock. Consecutive entries on one day share a heading, so a list sorted newest first reads one
+ * heading per day, in order.
+ */
+export function byRecordDay<T>(items: T[], at: (item: T) => string, now: string, zone: string): RecordDay<T>[] {
+  const today = inZone(now, zone).day;
+  const days: (RecordDay<T> & { day: string })[] = [];
+  for (const item of items) {
+    const when = inZone(at(item), zone);
+    let last = days.at(-1);
+    if (last?.day !== when.day) {
+      last = { day: when.day, heading: dayHeading(when.day, today), entries: [] };
+      days.push(last);
+    }
+    last.entries.push({ item, time: when.time, date: dateLabel(when.day) });
+  }
+  return days.map(({ heading, entries }) => ({ heading, entries }));
 }
 
 export function zoneLabel(iso: string): string {
@@ -142,4 +185,9 @@ export function seconds(n: number): string {
   if (n % 3600 === 0) return `${n / 3600} h`;
   if (n % 60 === 0) return `${n / 60} min`;
   return `${n} s`;
+}
+
+/** A natural list, without the serial comma: "A", "A and B", "A, B and C". */
+export function andList(items: readonly string[]): string {
+  return items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }

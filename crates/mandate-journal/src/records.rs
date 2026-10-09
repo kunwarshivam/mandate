@@ -84,6 +84,7 @@ pub(crate) fn schema(
         (READ, 1, StreamType::Control) => Some(&RECORDS_ACCESSED),
         (EXPORT, 1, StreamType::Control) => Some(&EXPORT_CREATED),
         (VERIFICATION, 1, StreamType::Control) => Some(&VERIFICATION_RUN),
+        (VERIFICATION, 2, StreamType::Control) => Some(&VERIFICATION_RUN_V2),
         (ANCHOR, 1, StreamType::Control) => Some(&ANCHOR_COMPUTED),
         (SEGMENT, 1, StreamType::Control) => Some(&SEGMENT_EXPORTED),
         _ => None,
@@ -94,6 +95,7 @@ pub(crate) fn schema(
 /// is reported. `stream`, `actor` and `causation_id` are the envelope's.
 pub(crate) fn rules(
     event_type: &str,
+    schema_version: u64,
     payload: &Value,
     stream: &StreamId,
     actor: Option<&Value>,
@@ -139,9 +141,20 @@ pub(crate) fn rules(
                 "actor.kind",
             )?;
             checked_ranges_rule(ranges)?;
-            let passed = ranges.iter().all(|r| failure(r).is_none());
-            let result = text(Some(payload), "result") == "pass";
-            ensure(result == passed, "payload.result")
+            if schema_version == 1 {
+                let passed = ranges.iter().all(|r| failure(r).is_none());
+                let result = text(Some(payload), "result") == "pass";
+                return ensure(result == passed, "payload.result");
+            }
+            version_2_rule(ranges)?;
+            let outcome = if ranges.iter().any(|r| failure(r).is_some()) {
+                "fail"
+            } else if ranges.iter().any(|r| incomplete(r).is_some()) {
+                "incomplete"
+            } else {
+                "pass"
+            };
+            ensure(text(Some(payload), "result") == outcome, "payload.result")
         }
     }
 }
@@ -191,6 +204,46 @@ fn checked_ranges_rule(ranges: &[Value]) -> Result<(), Invalid> {
                 &at("to_hash"),
             )?;
         }
+    }
+    Ok(())
+}
+
+/// Rule 132: each range's start names its own record and enters where its kind can, `checked`
+/// is bounded by the range and is all of it unless the range failed, a failed range records no
+/// incomplete check, and an anchor start's range never passes.
+fn version_2_rule(ranges: &[Value]) -> Result<(), Invalid> {
+    for (i, range) in ranges.iter().enumerate() {
+        let at = |member: &str| format!("payload.ranges[{i}].{member}");
+        let start = range.get("start");
+        let kind = text(start, "kind");
+        let named = |member: &str| {
+            start
+                .and_then(|s| s.get(member))
+                .is_some_and(|v| *v != Value::Null)
+        };
+        ensure(
+            named("manifest_hash") == (kind == "manifest"),
+            &at("start.manifest_hash"),
+        )?;
+        ensure(
+            named("anchor_event_id") == (kind == "anchor"),
+            &at("start.anchor_event_id"),
+        )?;
+        let from = seq(range, "from_seq");
+        let enters = match kind {
+            "genesis" => from == 1,
+            "anchor" => from >= 2,
+            _ => true,
+        };
+        ensure(enters, &at("start.kind"))?;
+        let length = seq(range, "to_seq").saturating_sub(from).saturating_add(1);
+        let checked = seq(range, "checked");
+        ensure(checked <= length, &at("checked"))?;
+        let failed = failure(range).is_some();
+        ensure(failed || checked == length, &at("checked"))?;
+        let unfinished = incomplete(range).is_some();
+        ensure(!(failed && unfinished), &at("incomplete"))?;
+        ensure(kind != "anchor" || failed || unfinished, &at("incomplete"))?;
     }
     Ok(())
 }
@@ -276,6 +329,10 @@ fn failure(range: &Value) -> Option<&Value> {
     range.get("failure").filter(|f| **f != Value::Null)
 }
 
+fn incomplete(range: &Value) -> Option<&Value> {
+    range.get("incomplete").filter(|f| **f != Value::Null)
+}
+
 fn text<'a>(value: Option<&'a Value>, member: &str) -> &'a str {
     value
         .and_then(|v| v.get(member))
@@ -328,6 +385,54 @@ static CHECKED_RANGE: Ty = Ty::Record(&[
     ),
 ]);
 
+static CHECKED_RANGE_V2: Ty = Ty::Record(&[
+    ("stream_id", Ty::StreamName),
+    ("from_seq", Ty::Int),
+    ("to_seq", Ty::Int),
+    ("prev_hash", Ty::Digest),
+    ("to_hash", Ty::Nullable(&Ty::Digest)),
+    (
+        "start",
+        Ty::Record(&[
+            ("kind", Ty::OneOf(&["genesis", "manifest", "anchor"])),
+            ("manifest_hash", Ty::Nullable(&Ty::Digest)),
+            ("anchor_event_id", Ty::Nullable(&Ty::Ulid)),
+        ]),
+    ),
+    ("checked", Ty::Int),
+    (
+        "failure",
+        Ty::Nullable(&Ty::Record(&[
+            ("check", Ty::OneOf(&CHECKS)),
+            ("seq", Ty::Nullable(&Ty::Int)),
+        ])),
+    ),
+    (
+        "incomplete",
+        Ty::Nullable(&Ty::Record(&[
+            ("check", Ty::OneOf(&["tsa_token_invalid"])),
+            (
+                "cause",
+                Ty::OneOf(&["token_unverifiable", "anchor_unstamped"]),
+            ),
+        ])),
+    ),
+]);
+
+static VERIFICATION_RUN_V2: Ty = Ty::Record(&[
+    ("trigger", Ty::OneOf(&TRIGGERS)),
+    ("ranges", Ty::List(&CHECKED_RANGE_V2)),
+    ("result", Ty::OneOf(&["pass", "incomplete", "fail"])),
+]);
+
+const TRIGGERS: [&str; 5] = [
+    "startup",
+    "segment_export",
+    "weekly",
+    "request",
+    "restore_drill",
+];
+
 static RECORDS_ACCESSED: Ty = Ty::Record(&[
     ("accessor", Ty::Str),
     ("operation", Ty::Ident),
@@ -344,16 +449,7 @@ static EXPORT_CREATED: Ty = Ty::Record(&[
 ]);
 
 static VERIFICATION_RUN: Ty = Ty::Record(&[
-    (
-        "trigger",
-        Ty::OneOf(&[
-            "startup",
-            "segment_export",
-            "weekly",
-            "request",
-            "restore_drill",
-        ]),
-    ),
+    ("trigger", Ty::OneOf(&TRIGGERS)),
     ("ranges", Ty::List(&CHECKED_RANGE)),
     ("result", Ty::OneOf(&["pass", "fail"])),
 ]);
