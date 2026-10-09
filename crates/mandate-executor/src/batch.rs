@@ -163,7 +163,7 @@ pub(crate) fn config_refs(refs: &[(&'static str, Option<&str>)]) -> Result<Objec
     Ok(object)
 }
 
-fn schema_version(event_type: &str) -> u64 {
+pub(crate) fn schema_version(event_type: &str) -> u64 {
     match event_type {
         "IntentReceived" | "GateDecided" | "OrderSubmitted" => 2,
         _ => 1,
