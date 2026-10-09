@@ -190,7 +190,6 @@ const NOT_OBJECT_CODES: [&str; 10] = [
 ];
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_other_four_refuse_a_non_object_at_the_root_as_the_strict_decoder_does() {
     for operation in [
         "end_delegation",
@@ -610,7 +609,6 @@ fn the_open_bodies_are_read_as_dec_886_says() -> Result<(), String> {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn bid_members_sent_only_as_null_or_left_out_are_no_confirmation() -> Result<(), String> {
     let lone = json!({"instrument": ASSET, "bid": null});
     let three = json!({"instrument": ASSET, "bid": null, "bid_size": null, "quoted_at": null});

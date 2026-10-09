@@ -31,10 +31,9 @@
   tagged object holding it; no request schema names such a member; a kill switch's workspace scope
   naming any workspace is refused, `null` accepted.
 - **Lenient decoder:** `crates/mandate-api/src/lenient.rs`, `decode_lenient` for the six API-7
-  bodies (DEC-682 item 27, DEC-689 item 2, DEC-886): members read in body order by its own scan,
-  each through the strict decoder under its pointer. `crates/mandate-api/tests/lenient.rs`, live:
-  every case of
-  `schemas/workspace-api/examples/lenient/api7.json`, its `dropped` exactly and its kept value
+  bodies (DEC-682 item 27, DEC-689 item 2, DEC-886, DEC-887): members read in body order by its
+  own scan, each through the strict decoder under its pointer. `crates/mandate-api/tests/lenient.rs`,
+  live: every case of `schemas/workspace-api/examples/lenient/api7.json`, its `dropped` exactly and its kept value
   against the body with those pointers removed; a body that is not a JSON object read as `{}` with
   `[""]` for pause and hold and refused for the other four; API-4's comparison over the members
   kept; each member of each operation's full example corrupted (wrong type, garbage, an unknown
