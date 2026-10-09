@@ -12425,9 +12425,9 @@ jq -r "$filter" "$src"
 
     /// A path to cargo that the shell computes cannot be read, though its last piece reads
     /// `cargo`: brace expansion (`/usr/{bin,local}/cargo`, two words), a backtick substitution
-    /// and an expansion in the path. Only the closed world's computed-word rule refuses these, so
-    /// dropping `{`, `` ` `` or `$` from it is caught; a literal path to cargo is read (DEC-873
-    /// item 1).
+    /// and an expansion in the path. The backtick runs only `echo`, which the closed world reads,
+    /// so only its computed-word rule refuses these, and dropping `{`, `` ` `` or `$` from it is
+    /// caught; a literal path to cargo is read (DEC-873 item 1).
     #[test]
     #[ignore = "pending E7-28"]
     fn a_computed_path_to_cargo_cannot_be_read() -> Result<()> {
@@ -12440,7 +12440,7 @@ jq -r "$filter" "$src"
             "  backtick-path:",
             "    steps:",
             "      - run: |",
-            "          `pwd`/cargo test -p a-lib",
+            "          `echo /usr/bin`/cargo test -p a-lib",
             "  dollar-path:",
             "    steps:",
             "      - run: $BIN/cargo test -p a-lib",
