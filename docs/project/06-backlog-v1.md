@@ -4753,7 +4753,7 @@ From the independent reviews of L2's E10-10 and E7-17 slices, 2026-10-09 (minors
   impl do). Make it unreachable from outside the crate, or add a test that no code outside the
   macro calls it; tests first.
 - **`crates/mandate-api/tests/body_workspace.rs`** (#1155, round 2).
-  - The module header's sixth line is mis-wrapped and over 100 columns.
+  - The module header's sixth line is wrapped wrongly and over 100 columns.
   - The schema walk follows `properties`, `items`, `oneOf`, `anyOf`, and `$ref` into the
     envelope's `$defs`, not `allOf`, `if`/`then`/`else`, or a schema's local `$defs`. No request
     schema describes an object that way today; extend the walk when one does.
