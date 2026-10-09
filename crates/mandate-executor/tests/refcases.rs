@@ -279,6 +279,16 @@ fn qty(raw: &str) -> Qty {
     common::qty(&canonical(raw))
 }
 
+/// An `unprotected_end` that waits on no acknowledgment: legacy records leave `awaiting` out,
+/// §9.5's closed ones carry it empty (DEC-446 item 7, DEC-859).
+fn awaits_nothing(payload: &mandate_canon::Value) -> bool {
+    match payload.get("awaiting") {
+        None => true,
+        Some(mandate_canon::Value::Array(awaited)) => awaited.is_empty(),
+        Some(_) => false,
+    }
+}
+
 fn text_of<'a>(data: &'a Json, key: &str) -> Option<&'a str> {
     data.get(key).and_then(Json::as_str)
 }
@@ -573,7 +583,7 @@ impl<'p> Drive<'p> {
                             Some("unprotected_start") => {
                                 seen.push(Seen::Journal("unprotected_window_start".to_owned()));
                             }
-                            Some("unprotected_end") if draft.payload.get("awaiting").is_none() => {
+                            Some("unprotected_end") if awaits_nothing(&draft.payload) => {
                                 seen.push(Seen::Journal("unprotected_window_end".to_owned()));
                             }
                             _ => {}

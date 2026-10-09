@@ -2818,7 +2818,9 @@ mod sequence_tests {
     use proptest::prop_oneof;
     use proptest::test_runner::TestRunner;
 
-    use super::closed_form::{assert_before_sent, assert_closed, ids, named, record, records};
+    use super::closed_form::{
+        assert_before_sent, assert_closed, ids, intervals, named, record, records, replayed,
+    };
     use super::{fits, long, rests};
     use crate::error::ExecutorError;
     use crate::fold::fold;
@@ -3095,7 +3097,7 @@ mod sequence_tests {
     }
 
     /// The broker's report of a protective order the executor sent: `status`, `filled` of it.
-    fn broker_answer(order: &SubmitOrder, status: &str, filled: Qty) -> Input {
+    pub(super) fn broker_answer(order: &SubmitOrder, status: &str, filled: Qty) -> Input {
         Input::Broker(Ok(BrokerOutcome::Submitted(BrokerOrder {
             broker_order_id: format!("b-{}", order.client_order_id.as_str()),
             client_order_id: Some(order.client_order_id.as_str().to_owned()),
@@ -13109,17 +13111,185 @@ mod sequence_tests {
         assert_closed(expiry, "expiry_unreplaceable", &[])?;
         Ok(())
     }
+
+    /// Every `ProtectionChanged` `steps` drafted, in order: what [`replayed`] appends.
+    fn step_records<'e>(steps: &[&'e [Effect]]) -> Vec<&'e EventDraft> {
+        steps.iter().flat_map(|step| records(step)).collect()
+    }
+
+    /// E7-19 E1b-P writers (DEC-859 item 1): a re-placement before expiry starts closed, naming
+    /// what it cancels, its entry and owner and no intent (rule 44), and its acknowledgment ends
+    /// the interval closed. Every record appends, and the replay of what the journal stored holds
+    /// one interval from the day's start (0) to the acknowledgment (9), nothing awaited and no
+    /// re-placement left (§5.4, DEC-348 item 2).
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn a_re_placement_before_expiry_journals_closed_and_replays() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let day = trading_day(&mut executor, &ports, "2026-09-21")?;
+        executor.run(Input::Tick(RiskClock::from_secs(4)), &ports)?;
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(9)), &ports)?;
+        let acked = acknowledge_protection(&mut executor, &confirmed, &ports)?;
+        let state = replayed(&executor, &step_records(&[&day, &confirmed, &acked]))?;
+        let replaced = [
+            ("orders", ids(&[OCO])),
+            ("stop", text("140")),
+            ("take_profit", text("170")),
+            ("entry", text("md-held-1")),
+            ("agent_id", text("agent-a")),
+            ("replacing", Value::Bool(true)),
+        ];
+        let start = record(&day, "unprotected_start")?;
+        assert_closed(start, "unprotected_start", &replaced)?;
+        let ended = record(&acked, "unprotected_end")?;
+        assert_closed(
+            ended,
+            "unprotected_end",
+            &[("acknowledged", Value::Bool(true))],
+        )?;
+        assert_eq!(intervals(&state), vec![(0, Some(9), false, false, None)]);
+        assert!(state.awaiting.is_empty() && state.replacing.is_empty());
+        Ok(())
+    }
+
+    /// E7-19 E1b-P writers (DEC-859 item 1): the ends that await nothing. A sequence that sold the
+    /// whole position ends bare, with nothing to cover, and its interval (0 to 5) is over; one
+    /// whose prices are unknown ends `uncovered`, and §5.4's bound then reaches it closed and
+    /// alerts the owner (rule 13: the interval stays open and bounded).
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn the_ends_that_await_nothing_journal_closed_and_replay() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let started = executor.run(sell(EXIT, "10", "139", Purpose::RiskExit)?, &ports)?;
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(5)), &ports)?;
+        let sold = executor.run(filled(EXIT, "10")?, &ports)?;
+        let state = replayed(&executor, &step_records(&[&started, &confirmed, &sold]))?;
+        assert_closed(record(&sold, "unprotected_end")?, "unprotected_end", &[])?;
+        assert_eq!(
+            long(&executor.state, &aapl()?)?,
+            Qty::ZERO,
+            "nothing to cover"
+        );
+        assert_eq!(intervals(&state), vec![(0, Some(5), false, false, None)]);
+        let mut executor = unpriced(&ports)?;
+        let started = executor.run(sell(EXIT, "4", "150", Purpose::RiskExit)?, &ports)?;
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = Held {
+            purpose: Purpose::RiskExit,
+            qty: 4,
+            filled: 0,
+            acked: true,
+            live: false,
+        };
+        let gone = reported(&format!("md-{EXIT}"), &exit)?;
+        let ended = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(gone)), &ports)?;
+        let bound = executor.run(Input::Tick(RiskClock::from_secs(31)), &ports)?;
+        let steps = [&started[..], &confirmed[..], &ended[..], &bound[..]];
+        let state = replayed(&executor, &step_records(&steps))?;
+        let uncovered = [("uncovered", Value::Bool(true))];
+        assert_closed(
+            record(&ended, "unprotected_end")?,
+            "unprotected_end",
+            &uncovered,
+        )?;
+        assert_closed(record(&bound, "interval_limit")?, "interval_limit", &[])?;
+        assert!(alerts(&bound).contains(&"unprotected_interval_limit"));
+        assert_eq!(intervals(&state), vec![(0, None, true, true, None)]);
+        Ok(())
+    }
+
+    /// E7-19 E1b-P writers (DEC-859 item 1), rule 13: protection the broker cancels starts its
+    /// interval closed, naming nothing, and the new OCO for the 10 is journaled and sent in the
+    /// same step, never delayed; its acknowledgment ends the interval (3 to 8).
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn lost_protection_starts_closed_and_is_re_placed_at_once() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(3)), &ports)?;
+        let oco = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: false,
+        };
+        let gone = reported(OCO, &oco)?;
+        let lost = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(gone)), &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(8)), &ports)?;
+        let acked = acknowledge_protection(&mut executor, &lost, &ports)?;
+        let state = replayed(&executor, &step_records(&[&lost, &acked]))?;
+        let start = record(&lost, "unprotected_start")?;
+        assert_closed(start, "unprotected_start", &[])?;
+        let placed = record(&lost, "placed")?;
+        let [id] = &named(placed, "orders")[..] else {
+            return Err(missing("the re-placed OCO"));
+        };
+        assert_eq!(ocos(&lost).len(), 1, "one OCO, sent at once");
+        assert_before_sent(&lost, &[start, placed], id);
+        assert_eq!(intervals(&state), vec![(3, Some(8), false, false, None)]);
+        Ok(())
+    }
+
+    /// E7-19 E1b-P writers (DEC-859 item 1): a passive exit's wait starts closed, naming nothing,
+    /// and its placements end that interval once acknowledged (0 to 15). A passive exit placed
+    /// beside an exit still waiting hands its sequence on with a start naming the intent, entry,
+    /// owner and prices and no order (rule 41), opening an interval at 0 that is still open.
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn the_passive_starts_journal_closed_and_replay() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected_with_an_opening(&ports, "agent-a", true)?;
+        let asked = executor.run(sell(EXIT, "5", "160", Purpose::DiscretionaryExit)?, &ports)?;
+        let waits = executor.run(cancel_accepted(OCO), &ports)?;
+        let sent = executor.run(Input::Tick(RiskClock::from_secs(15)), &ports)?;
+        let acked = acknowledge_protection(&mut executor, &sent, &ports)?;
+        let state = replayed(&executor, &step_records(&[&asked, &waits, &sent, &acked]))?;
+        assert_closed(
+            record(&waits, "unprotected_start")?,
+            "unprotected_start",
+            &[],
+        )?;
+        assert_eq!(intervals(&state), vec![(0, Some(15), false, false, None)]);
+        with_ports!(ports);
+        let (executor, placed) = placed_around_a_waiting_exit(&ports)?;
+        let state = replayed(&executor, &step_records(&[&placed]))?;
+        let handed = [
+            ("intent_id", text(EXIT)),
+            ("entry", text("md-held-1")),
+            ("agent_id", text("agent-b")),
+            ("stop", text("140")),
+            ("take_profit", text("170")),
+        ];
+        assert_closed(
+            record(&placed, "unprotected_start")?,
+            "unprotected_start",
+            &handed,
+        )?;
+        assert_eq!(intervals(&state), vec![(0, None, false, false, None)]);
+        Ok(())
+    }
 }
 
 /// Journal spec §9.5's closed `ProtectionChanged`, E1b-P's oracle (DEC-859): a draft is compared
 /// whole with a record built from §9.5's table, then judged by the journal's own `Draft::parse`.
 #[cfg(test)]
 mod closed_form {
+    use std::collections::BTreeSet;
+
     use mandate_canon::{Key, Object, Value, parse, to_canonical};
-    use mandate_journal::{Draft, Invalid, InvalidReason};
+    use mandate_journal::{AppendOutcome, Draft, Invalid, InvalidReason, MemoryJournal, StreamId};
+    use mandate_time::UtcNanos;
 
     use crate::error::ExecutorError;
-    use crate::reconcile::tests::missing;
+    use crate::fold::fold;
+    use crate::reconcile::tests::{Executor, missing};
+    use crate::state::ExecutorState;
     use crate::types::{BrokerRequest, Effect, EventDraft};
 
     /// §9.5's members in its table's order, typed from the spec, never read from a writer.
@@ -13276,6 +13446,17 @@ mod closed_form {
     /// The vectors' `placed` chain event, seq 7 (`fixtures/refcases/journal.json`), less what only
     /// a sealed row carries, with `payload` in place of its own.
     fn envelope(payload: &Value) -> Result<Value, ExecutorError> {
+        let mut body = chain_body(7)?;
+        body.remove(&Key::new("payload").map_err(|_| missing("payload"))?);
+        body.insert(
+            Key::new("payload").map_err(|_| missing("payload"))?,
+            payload.clone(),
+        );
+        Ok(Value::Object(body))
+    }
+
+    /// The vectors' account-stream chain event at `seq`, less what only a sealed row carries.
+    fn chain_body(seq: u64) -> Result<Object, ExecutorError> {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../fixtures/refcases/journal.json"
@@ -13286,7 +13467,7 @@ mod closed_form {
         let body = fixture.as_ref().and_then(|fixture| {
             let chain = fixture.get("account_stream")?.get("chain")?.as_array()?;
             chain.iter().find_map(|entry| match entry.get("body")? {
-                Value::Object(body) if entry.get("seq").and_then(Value::as_int) == Some(7) => {
+                Value::Object(body) if entry.get("seq").and_then(Value::as_int) == Some(seq) => {
                     Some(body)
                 }
                 _ => None,
@@ -13294,15 +13475,139 @@ mod closed_form {
         });
         let mut body = body
             .cloned()
-            .ok_or_else(|| missing("the vectors' placed record"))?;
-        for member in ["seq", "prev_hash", "recorded_at", "payload"] {
+            .ok_or_else(|| missing("the vectors' chain event"))?;
+        for member in ["seq", "prev_hash", "recorded_at"] {
             body.remove(&Key::new(member).map_err(|_| missing(member))?);
         }
-        body.insert(
-            Key::new("payload").map_err(|_| missing("payload"))?,
-            payload.clone(),
-        );
-        Ok(Value::Object(body))
+        Ok(body)
+    }
+
+    /// `drafted`, in order, appended as one batch after the vectors' `StreamOpened` through the
+    /// journal's own `append` (DEC-446's door), each under an id of its own; answers each payload
+    /// as the journal stored it. A refusal is the error, naming its draft and path.
+    pub(super) fn appended(drafted: &[&EventDraft]) -> Result<Vec<Value>, ExecutorError> {
+        let opened = chain_body(1)?;
+        let stream = opened
+            .get("stream_id")
+            .and_then(Value::as_str)
+            .and_then(StreamId::parse)
+            .ok_or_else(|| missing("the vectors' stream"))?;
+        let mut journal = MemoryJournal::new();
+        let epoch = journal.take_ownership(&stream);
+        let at =
+            UtcNanos::parse("2026-09-21T14:00:00.000000400Z").map_err(|_| missing("a time"))?;
+        let opening = to_canonical(&Value::Object(opened));
+        let first = journal.append(&stream, 0, epoch, at, &[opening.as_slice()]);
+        if !matches!(first, AppendOutcome::Committed(_)) {
+            return Err(missing(&format!("the stream opened, not {first:?}")));
+        }
+        let mut bodies = Vec::new();
+        for (index, draft) in drafted.iter().enumerate() {
+            let mut body = envelope(&draft.payload)?;
+            if let Value::Object(fields) = &mut body {
+                let id = Key::new("event_id").map_err(|_| missing("event_id"))?;
+                fields.insert(id, Value::Str(format!("01J8ZQB{index:019}")));
+            }
+            bodies.push(to_canonical(&body));
+        }
+        let batch: Vec<&[u8]> = bodies.iter().map(Vec::as_slice).collect();
+        match journal.append(&stream, 1, epoch, at, &batch) {
+            AppendOutcome::Committed(rows) => rows
+                .iter()
+                .map(|row| {
+                    let body = parse(&row.body).ok();
+                    let payload = body.as_ref().and_then(|body| body.get("payload"));
+                    payload.cloned().ok_or_else(|| missing("a stored payload"))
+                })
+                .collect(),
+            refused => Err(missing(&format!("every record appended, not {refused:?}"))),
+        }
+    }
+
+    /// The state a restart folds from `executor`'s journal, every record of `drafted` read back
+    /// as [`appended`] stored it, after [`assert_witnessed`] has walked them.
+    pub(super) fn replayed(
+        executor: &Executor,
+        drafted: &[&EventDraft],
+    ) -> Result<ExecutorState, ExecutorError> {
+        assert_witnessed(drafted);
+        let stored = appended(drafted)?;
+        let mut state = ExecutorState::new(executor.state.scope.clone());
+        let mut read_back = 0usize;
+        for event in &executor.journal {
+            let mut event = event.clone();
+            if let Some(at) = drafted.iter().position(|d| d.event_id == event.event_id) {
+                event.payload = stored.get(at).cloned().ok_or_else(|| missing("a row"))?;
+                read_back = read_back.saturating_add(1);
+            }
+            fold(&mut state, &event)?;
+        }
+        assert_eq!(read_back, drafted.len(), "every record is the journal's");
+        Ok(state)
+    }
+
+    /// One interval as a scenario expects it: started, ended, alerted, uncovered, bracket entry.
+    pub(super) type Interval = (i64, Option<i64>, bool, bool, Option<String>);
+
+    /// `state`'s intervals, in the oracle's terms.
+    pub(super) fn intervals(state: &ExecutorState) -> Vec<Interval> {
+        state
+            .unprotected
+            .iter()
+            .map(|interval| {
+                let bracket = interval
+                    .bracket
+                    .as_ref()
+                    .map(|entry| entry.as_str().to_owned());
+                let ended = interval.ended_at.map(|at| at.secs());
+                let flags = (interval.alerted, interval.uncovered);
+                (interval.started_at.secs(), ended, flags.0, flags.1, bracket)
+            })
+            .collect()
+    }
+
+    /// #1123's review minors, judged from the records alone. An `unprotected_end` that awaits
+    /// nothing and is not `uncovered` ends its interval, so it needs a witness: it is
+    /// `acknowledged`, or names the bracket whose legs its `placed` just recorded, or it is bare,
+    /// ending a sequence with nothing to cover — never right after a `placed`, whose end awaits
+    /// it, and never while a bracket's interval is open, which it would close (the fold ends the
+    /// first open interval in the instrument).
+    pub(super) fn assert_witnessed(drafted: &[&EventDraft]) {
+        let read = |draft: &EventDraft, name: &str| {
+            draft
+                .payload
+                .get(name)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        let mut brackets: BTreeSet<String> = BTreeSet::new();
+        let mut previous: Option<&EventDraft> = None;
+        for draft in drafted.iter().copied() {
+            let action = read(draft, "action").unwrap_or_default();
+            let bracket = read(draft, "bracket");
+            let flag = |name: &str| draft.payload.get(name) == Some(&Value::Bool(true));
+            let bare_awaiting = named(draft, "awaiting").is_empty() && !flag("uncovered");
+            if action == "unprotected_end" && bare_awaiting {
+                let placed = previous.filter(|p| read(p, "action").as_deref() == Some("placed"));
+                if flag("acknowledged") {
+                    brackets.clear();
+                } else if let Some(entry) = &bracket {
+                    let legs = placed.and_then(|placed| read(placed, "bracket"));
+                    assert_eq!(
+                        legs.as_ref(),
+                        Some(entry),
+                        "a bracket's end follows its legs"
+                    );
+                    brackets.remove(entry);
+                } else {
+                    assert!(placed.is_none(), "a bare end right after a placement");
+                    assert!(brackets.is_empty(), "a bare end with {brackets:?} open");
+                }
+            } else if let Some(entry) = bracket.filter(|_| action == "unprotected_start") {
+                brackets.insert(entry);
+            }
+            previous = Some(draft);
+        }
     }
 }
 
@@ -13574,9 +13879,12 @@ mod bracket_tests {
     use mandate_canon::Value;
     use mandate_num::{Price, Qty};
 
-    use super::closed_form::{assert_before_sent, assert_closed, ids, named, record};
+    use super::closed_form::{
+        assert_before_sent, assert_closed, ids, intervals, named, record, replayed,
+    };
+    use super::sequence_tests::broker_answer;
     use crate::error::ExecutorError;
-    use crate::ids::IntentId;
+    use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::{clock, object};
     use crate::ports::Ports;
     use crate::reconcile::tests::{
@@ -13586,7 +13894,7 @@ mod bracket_tests {
     use crate::types::{
         AgentId, BrokerOrder, BrokerRequest, BrokerUpdate, Effect, EventDraft, EventId,
         ExecutorConfig, Input, IntentBody, IntentHandoff, ProtectionPrices, Purpose, RiskClock,
-        TimeInForce,
+        SubmitOrder, TimeInForce,
     };
 
     const ENTRY: &str = "01JABCDEFGHJKMNPQRSTVWXYZ1";
@@ -13780,6 +14088,85 @@ mod bracket_tests {
                     assert_before_sent(&ran, &[placed, ended], &id);
                 }
             }
+            Ok(())
+        })
+    }
+
+    /// E7-19 E1b-P writers (DEC-859 item 1), the first paper trade's case (E2): a bracket entry
+    /// filled 4 of 10 starts its interval closed, naming only the entry; at the bound (second 40,
+    /// the shorter of 60 and 30 from its start at 10) its remainder is cancelled and the bound
+    /// alerted closed; cancelled, it gets one GTC OCO for the 4, and the interval ends closed
+    /// awaiting that OCO, then closed again once the broker acknowledges it. Every record
+    /// appends, and the replay of what the journal stored holds the one interval, 10 to 45,
+    /// alerted, with the OCO resting for 4 and nothing awaited.
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn a_partly_filled_bracket_entry_journals_one_oco_and_its_interval_closed()
+    -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            let mut executor = bracketed(ports)?;
+            let first = executor.run(report("partially_filled", "4")?, ports)?;
+            let due = executor.run(Input::Tick(RiskClock::from_secs(40)), ports)?;
+            let cancelled = executor.run(report("canceled", "4")?, ports)?;
+            let sent: Vec<&SubmitOrder> = cancelled
+                .iter()
+                .filter_map(|effect| match effect {
+                    Effect::Broker(BrokerRequest::Submit(order)) => Some(order),
+                    _ => None,
+                })
+                .collect();
+            let [oco] = sent[..] else {
+                return Err(missing("one OCO"));
+            };
+            executor.run(Input::Tick(RiskClock::from_secs(45)), ports)?;
+            let acked = executor.run(broker_answer(oco, "accepted", Qty::ZERO), ports)?;
+            let steps = [&first[..], &due[..], &cancelled[..], &acked[..]].concat();
+            let state = replayed(&executor, &records(&steps))?;
+            let entry = text(&entry_id());
+            let start = record(&first, "unprotected_start")?;
+            assert_closed(start, "unprotected_start", &[("bracket", entry.clone())])?;
+            assert_eq!(cancels(&due), 1, "the remainder is cancelled at the bound");
+            assert_closed(record(&due, "interval_limit")?, "interval_limit", &[])?;
+            let legs = oco.oco.as_ref().map(|legs| legs.qty);
+            assert_eq!((oco.tif, legs), (TimeInForce::Gtc, Some(Qty::parse("4")?)));
+            let id = oco.client_order_id.as_str();
+            let ended = record(&cancelled, "unprotected_end")?;
+            let awaits = [("awaiting", ids(&[id])), ("bracket", entry)];
+            assert_closed(ended, "unprotected_end", &awaits)?;
+            let acknowledged = [("acknowledged", Value::Bool(true))];
+            assert_closed(
+                record(&acked, "unprotected_end")?,
+                "unprotected_end",
+                &acknowledged,
+            )?;
+            let interval = (10, Some(45), true, false, Some(entry_id()));
+            assert_eq!(intervals(&state), vec![interval]);
+            let protection = state.protection.get(&aapl()?);
+            let covered = protection.map(|held| (held.resting.clone(), held.covered_qty));
+            let resting = vec![ClientOrderId::parse(id)?];
+            assert_eq!(covered, Some((resting, Qty::parse("4")?)));
+            assert!(state.awaiting.is_empty(), "nothing awaited");
+            Ok(())
+        })
+    }
+
+    /// E7-19 E1b-P writers (DEC-859 item 1): a bracket entry filled 4, then the rest, ends the
+    /// interval its first fill opened with a closed end naming the entry and awaiting nothing,
+    /// right after its legs' `placed`; the replay holds that interval, 10 to 20.
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn a_bracket_filled_after_its_first_fill_ends_its_interval_closed() -> Result<(), ExecutorError>
+    {
+        with_ports(|ports| {
+            let mut executor = bracketed(ports)?;
+            let first = executor.run(report("partially_filled", "4")?, ports)?;
+            executor.run(Input::Tick(RiskClock::from_secs(20)), ports)?;
+            let filled = executor.run(report("filled", "10")?, ports)?;
+            let state = replayed(&executor, &records(&[&first[..], &filled[..]].concat()))?;
+            let ended = record(&filled, "unprotected_end")?;
+            assert_closed(ended, "unprotected_end", &[("bracket", text(&entry_id()))])?;
+            let interval = (10, Some(20), false, false, Some(entry_id()));
+            assert_eq!(intervals(&state), vec![interval]);
             Ok(())
         })
     }
