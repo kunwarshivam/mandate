@@ -1,7 +1,0 @@
-file = "crates/mandate-executor/tests/list_adoption.rs"
-test = "a_duplicate_client_order_id_lists_on_a_no_query_profile"
-reason = """
-On main, a duplicate client order id still sends GetOrderByClientId directly rather than through query_unknown's E7-23
-stub, so this test fails on the request it sees, not at the stub. The B2b implementation (#1084)
-routes it through query_unknown and deletes this row.
-"""
