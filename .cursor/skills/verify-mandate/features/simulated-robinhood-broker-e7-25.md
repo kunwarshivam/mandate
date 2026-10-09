@@ -20,7 +20,9 @@
   second order; a terminal order never changes and is refused; a fill never exceeds the quantity;
   every state change is a legal transition, and every legal one is accepted; each against the
   test's own oracle), and `crates/mandate-rh-sim/tests/server.rs` (S2: loopback only on a port the system chooses,
-  the session every later request needs, and the listing as the pinned contract and its hash;
-  pending), with fixtures in `tests/common/mod.rs` and the wire client in
-  `tests/common/wire.rs`.
+  the session and revision every later request needs, the listing as the pinned contract and its
+  hash, a tool call driving the core as the core alone would, review, cancel and reads, unlisted
+  tools, and the extra-tool and injection variants; pending), with fixtures in
+  `tests/common/mod.rs`, the wire client in `tests/common/wire.rs`, and its live guard against
+  `mandate-mcp`'s handshake in `crates/mandate-rh-sim/tests/wire.rs`.
 - **Run:** `cargo nextest run -p mandate-rh-sim`.

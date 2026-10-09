@@ -5,6 +5,7 @@
 mod common;
 
 use common::{AAPL, FEE, RULES, SNAPSHOT, SPY, Stream, json, model, spy_mandate};
+use mandate_accounting::InstrumentId;
 use mandate_alpaca::{BarsRequest, DataTransport, HttpRequest, Method, Pause, QuoteRequest};
 use mandate_alpaca::{Response, TradingTransport, TransportError};
 use mandate_artifacts_fs::FsArtifactStore;
@@ -14,8 +15,9 @@ use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_modelhost::Signal;
 use mandate_paper::{Args, Outcome, PaperError, Ports, run};
-use mandate_shell::ShellError;
 use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
+use mandate_shell::paper::daily_closes;
+use mandate_shell::{Cause, ShellError};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 use std::cell::RefCell;
 use std::fs;
@@ -473,4 +475,32 @@ fn a_run_in_the_closing_window_sends_nothing() {
     let expected = "a run clock before the close window";
     assert_eq!(absent(&outcome), expected, "{outcome:?}");
     assert!(scene.posts().is_empty());
+}
+
+/// DEC-846 items 2 and 3: `daily_closes` hands the host every stored close, oldest first, each
+/// with its session, through the shell's trust check: stale bars, or another instrument's, are
+/// untrusted.
+#[test]
+#[ignore = "pending E7-19"]
+fn the_closes_are_the_full_trusted_span_in_order() {
+    let scene = Scene::new("closes", 231..256);
+    let (spy, aapl) = (
+        InstrumentId::new("SPY").unwrap(),
+        InstrumentId::new("AAPL").unwrap(),
+    );
+    let at = |(now, _): Moment| UtcNanos::parse_rfc3339(now).unwrap();
+    let closes = daily_closes(&spy, &scene.args.bars, at(TUESDAY)).unwrap();
+    let seen: Vec<(Date, String)> = closes.iter().map(|(d, p)| (*d, p.to_string())).collect();
+    assert_eq!(
+        (seen.len(), &seen),
+        (25, &scene.closes),
+        "all 25, oldest first"
+    );
+    for (symbol, moment) in [(&spy, WEDNESDAY), (&aapl, TUESDAY)] {
+        let refused = daily_closes(symbol, &scene.args.bars, at(moment));
+        assert!(
+            matches!(refused, Err(Cause::Untrusted { .. })),
+            "{symbol}: {refused:?}"
+        );
+    }
 }
