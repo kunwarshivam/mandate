@@ -69,7 +69,9 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-alpaca/tests/margin.rs` (`last_equity` and `maintenance_margin` parsed from the
   recorded accounts and an edited body whose members all differ) and
   `crates/mandate-executor/tests/margin.rs` (maintenance excess, hand cases and a whole-cent `i128`
-  property). In prose: the hand cases of the brief
+  property); for E1b-0 (E7-19, [DEC-853](../../../../docs/project/decisions/DEC-853.md)),
+  `crates/mandate-executor/tests/cancel_openings.rs` (one agent's openings in one instrument
+  cancelled by command). In prose: the hand cases of the brief
   (the submission chain, the `Unknown` lookup discipline, the
   status mapping, the protective and kill-switch sequences, the ladder, the restriction table, error
   codes), twelve `fault::crash_at_*` cases at the enumerated submission steps, and property tests

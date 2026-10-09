@@ -5,14 +5,15 @@
   and DEC-665 (who may obtain a challenge).
 - **Code:** `crates/mandate-passkey/src/stepup.rs` (`ChallengeRecord` and its canonical form and
   WebAuthn challenge, `consume`, `reverify`, `StepUpRefusal`, and `issue_challenge`, which takes
-  the `TenantContext` `authorize` yields), over `mandate-identity`'s
+  the `TenantContext` `authorize` yields and refuses `forbidden` unless its row is the one the
+  action's kind needs), over `mandate-identity`'s
   `PrincipalId`, `WorkspaceId`, `AssertionId`, `StepUpActionKind`, `StepUpMethod`, and
   `StepUpEvidence`.
 - **Tests:** `crates/mandate-passkey/tests/stepup_api.rs` (the refusal codes),
   `tests/consume.rs` (the record, its canonical form, each refusal, the order with two failures,
   re-verification), `tests/consume_properties.rs` (the refusal is the first injected failure
-  in DEC-662's order), with the fixture in `tests/stepup/mod.rs`; `tests/issue.rs` (pending E9-4:
-  issuance against `authorize` and an oracle parsed from §4.2); and the `compile_fail` doctests on
+  in DEC-662's order), with the fixture in `tests/stepup/mod.rs`; `tests/issue.rs` (issuance
+  against `authorize` and an oracle parsed from §4.2); and the `compile_fail` doctests on
   `ChallengeRecord`, `Used`, `Consumed` (no caller builds one), and `issue_challenge` (no call
   without a context).
 - **Run:** `cargo nextest run -p mandate-passkey` and `cargo test -p mandate-passkey --doc`.

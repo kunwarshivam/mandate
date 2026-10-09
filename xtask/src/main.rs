@@ -10908,6 +10908,13 @@ jq -r "$filter" "$src"
     /// cluster (`-rn`) is one; a key at the `outputs:` key's indent ends its block; a `#` that
     /// starts a comment ends a line however many quotes the comment holds, while one inside a
     /// double quote does not; and an escaped `\"` neither opens nor closes a quote.
+    /// X1 tests correction 12d (after #994's review) adds: a line ending in `|` or `|&` runs on
+    /// into the next; a numeric descriptor's redirection (`2>&1`) before the command word
+    /// and `time -p` are skipped; a here-string counts as an earlier expanding word for rule 2;
+    /// a wrapper is matched by basename (`/usr/bin/env sh`); a pipeline sink that starts with an
+    /// expansion is refused even when its variable is clean; `zsh` is a sink; `${A[]}` and
+    /// `${ARR[1x]}` are not literal indexes; a `set` with a backtick expands; a nameref needs an
+    /// option holding `n`; an escaped backtick expands nothing; and `...` is not `..`.
     #[test]
     #[ignore = "pending E7-26"]
     fn command_words_that_start_with_an_expansion_fail_closed() -> Result<()> {
@@ -10937,6 +10944,18 @@ jq -r "$filter" "$src"
             "\"$*\"".to_owned(),
             "n=$(( $(cargo build --features \"$F\") ))".to_owned(),
             "\"$(dirname \"$0\")/../x.sh\"".to_owned(),
+            format!("{built_across_lines}\n2>&1 $C"),
+            format!("{built_across_lines}\n3>&1 $C"),
+            format!("{built_across_lines}\ntime -p $C"),
+            "C=$(cat f)\ncat <<< \"$C\" | sh".to_owned(),
+            "C=$(cat f)\ncat <<< $C | sh".to_owned(),
+            "cargo check -p the-runner -F 2>x live".to_owned(),
+            format!("{built_across_lines}\necho $C | /usr/bin/env sh"),
+            format!("{built_across_lines}\necho $C | zsh"),
+            "S=sh\ncurl $U | $S".to_owned(),
+            "A=(echo hi)\n\"${A[]}\" x".to_owned(),
+            "ARR=(echo hi)\n\"${ARR[1x]}\" x".to_owned(),
+            "set -- `cmd`; \"$@\"".to_owned(),
             format!("{built_across_lines}\nset -- $C; exec \"$@\""),
             format!("{built_across_lines}\ndeclare -rn R=C\n$R"),
             "echo hi # see \"docs\ncargo build --features live".to_owned(),
@@ -10958,8 +10977,28 @@ jq -r "$filter" "$src"
                 "names the file and the last line: {problems:?}"
             );
         }
+        let refused_at_their_first_line = [
+            format!("{built_across_lines}\necho $C |\nsh"),
+            format!("{built_across_lines}\necho $C |&\nsh"),
+        ];
+        for text in refused_at_their_first_line {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].starts_with(".github/scripts/build.sh:3:"),
+                "a trailing `|` runs the pipeline on into the next line: {problems:?}"
+            );
+        }
         let allowed = [
             ".github/scripts/build.sh",
+            "declare -r R=echo\n$R hi",
+            "declare n=echo\n$n hi",
+            "\\`ls\\` x",
+            "\"$(dirname \"$0\")/.../x.sh\"",
             "\"$@\"",
             "C=echo\n$C hi",
             "x=(echo hi)\n\"${x[@]}\"",
