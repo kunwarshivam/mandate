@@ -7907,14 +7907,16 @@ jq -r "$filter" "$src"
     /// later line is refused; so is `--cfg feature = "live"` with spaces or tabs around the
     /// `=`, in a command, `RUSTFLAGS` or `rustflags`; and so is a cargo command that takes
     /// arguments from a variable, `${...}`, `$(...)` or a backtick (`cargo build $FLAGS`), which
-    /// cannot be read. The words of a cargo command in a CI file, up to the first shell operator
-    /// or redirection (`>`, `>>`, `2>`, `<`, `|`, `;`, `&&`, `||`), may contain no `$` and no
-    /// backtick, because a variable can carry a `--features` or `--cfg` flag past a line-based
-    /// scan: even `--target $TARGET`, `--target "$TARGET"` and `--target ${TARGET}` are refused
-    /// (the coordinator's ruling under DEC-176: it only refuses more). A `$` in a redirect target
-    /// or after an operator cannot carry a cargo flag, so `cargo xtask ci mutants --plan >>
-    /// "$GITHUB_OUTPUT"` and `cargo build -p x 2> "$LOG"` are allowed; a second cargo command
-    /// after `&&`, `||`, `;` or `|` is judged on its own words.
+    /// cannot be read. A cargo command in a CI file is
+    /// read word by word. Only the separators `|`, `;`, `&&`, `||` and a single `&` end its
+    /// words, and a cargo command after one is judged on its own. A redirection (`>`, `>>`,
+    /// `2>`, `<`, `2>&1`, `>/dev/null`, `&>`) does not end them: the operator and its one target
+    /// word are skipped and the words after it are still checked. A `$` or backtick is allowed
+    /// only inside a redirect target word, so `cargo xtask ci mutants --plan >> "$GITHUB_OUTPUT"`
+    /// and `cargo build 2> "$LOG" -p x` are allowed, and any other word with one is refused,
+    /// because a variable can carry a `--features` or `--cfg` flag past a line-based scan: even
+    /// `--target $TARGET`, `--target "$TARGET"`, `--target ${TARGET}` and `> out $FLAGS` are
+    /// refused (the coordinator's rulings under DEC-176: they only refuse more).
     #[test]
     #[ignore = "pending E7-26"]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
@@ -7929,6 +7931,7 @@ jq -r "$filter" "$src"
             "            cargo xtask ci mutants --plan >> \"$GITHUB_OUTPUT\"",
             "cargo build -p x 2> \"$LOG\"",
             "cargo build -p a-lib < \"$IN\" | tee \"$LOG\"",
+            "cargo build 2> \"$LOG\" -p x",
         ];
         for line in allowed {
             let files = [ci_file(".github/workflows/ci.yml", line)];
@@ -8026,6 +8029,10 @@ jq -r "$filter" "$src"
             ),
             (
                 ".github/scripts/build.sh",
+                "set -e\ncargo build -p x > out \\\n  $FLAGS\n",
+            ),
+            (
+                ".github/scripts/build.sh",
                 "set -e\nTARGET=\"x86_64-unknown-linux-gnu --features live\"\ncargo check -p the-runner --target $TARGET\n",
             ),
             (
@@ -8058,6 +8065,12 @@ jq -r "$filter" "$src"
             "cargo check -p the-runner --features live ; cargo build -p the-runner $FLAGS",
             "cargo build -p a-lib || cargo test -p the-runner --features live",
             "cargo build -p a-lib >> \"$OUT\" && cargo build -p the-runner --features live",
+            "cargo build -p a-lib > out $FLAGS",
+            "cargo build 2>&1 $FLAGS",
+            "cargo build < in --target \"$T\"",
+            "cargo build >/dev/null $(cat f)",
+            "cargo build & cargo build -p the-runner --features live",
+            "cargo build -p a-lib &> out $FLAGS",
         ];
         for line in refused_by_words_before_an_operator {
             let files = [ci_file(
