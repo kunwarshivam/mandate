@@ -8,7 +8,7 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 use std::slice::from_ref;
 
-use common::{Fixture, T, WS_A, WS_B, actor, event_id, tenant, text};
+use common::{Fixture, T, WS_A, WS_B, actor, event_id, permitted, tenant, text};
 use mandate_audit::{
     AuditError, Author, Hop, HopStatus, MemoryRead, Quoted, QuotedContent, Trace, TraceRead,
 };
@@ -157,7 +157,7 @@ fn walk(g: &Graph, workspace: WorkspaceId, start: &str) -> (Vec<(String, u16)>, 
 /// read that hold no node (DEC-772 item 6), and no other workspace's stream id appears (AU-1).
 fn traced(g: &Graph, workspace: WorkspaceId, start: &str, also: &[&str]) -> Trace {
     let read = MemoryRead::new(&g.fx.journal);
-    let trace = read.trace(&tenant(workspace), start).unwrap();
+    let trace = read.trace(&permitted(&tenant(workspace)), start).unwrap();
     assert_eq!(trace.start, start);
     let mut streams: BTreeSet<String> = also.iter().map(|s| s.to_string()).collect();
     for node in &trace.nodes {
@@ -247,7 +247,7 @@ fn every_trace_is_the_independent_breadth_first_walk() {
         for (((stream, _), _), id) in spec.iter().zip(&ids) {
             walked(&g, owner(*stream), id);
             let read = MemoryRead::new(&g.fx.journal);
-            let other = read.trace(&tenant(owner(3 - stream)), id);
+            let other = read.trace(&permitted(&tenant(owner(3 - stream))), id);
             prop_assert_eq!(other, Err(AuditError::NotFound));
         }
         Ok(())
@@ -309,7 +309,10 @@ fn forged_links_read_as_absent_ones_and_a_foreign_start_is_not_found() {
     assert_eq!((trace.nodes.len(), trace.hops), (1, expected.to_vec()));
     let read = MemoryRead::new(&g.fx.journal);
     for start in [theirs, event_id(999_999), "x".to_owned(), String::new()] {
-        assert_eq!(read.trace(&tenant(WS_A), &start), Err(AuditError::NotFound));
+        assert_eq!(
+            read.trace(&permitted(&tenant(WS_A)), &start),
+            Err(AuditError::NotFound)
+        );
     }
 }
 
