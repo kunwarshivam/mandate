@@ -1228,6 +1228,13 @@ positions, on fills, or on the regular session. The executor processes the batch
    positions remain at the broker, unprotected, and that the owner must also revoke the leaked key
    at the broker, since revoking it on our side does not stop someone else who holds it. This
    residual is listed for the threat model (#557).
+   The positions they name come only from what is authoritative: the connection's account stream
+   as folded from the journal ([DEC-693](../project/decisions/DEC-693.md) item 8). When nothing
+   authoritative answers (that fold is unavailable, stale, or behind its watermark), they say
+   "unknown", never 0, "none", or an empty list. The display never blocks or delays the batch: no
+   fold read sits before the append, so the kill switch reads no read model and waits on nothing
+   (API-7, API-8, `AGENTS.md` rule 13). Each value is assembled for display only, after the batch
+   commits, or separately for the pre-confirmation render.
 
 The kill-switch half is an API-7 operation: without valid step-up, or while the control stream is
 frozen, the API still commits the kill switch, and refuses only the revocation with
