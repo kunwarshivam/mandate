@@ -437,7 +437,7 @@ fn memberships_since(
 }
 
 /// A session of `kind` whose roles snapshot is `snapshot`.
-fn session(kind: SessionKind, snapshot: Vec<Membership>) -> Session {
+pub(crate) fn session(kind: SessionKind, snapshot: Vec<Membership>) -> Session {
     Session {
         reference: SESSION,
         kind,

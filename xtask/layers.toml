@@ -24,12 +24,13 @@
 #      allowed_dependents list is the only thing that may build an identity session or membership)
 #   1  mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
-#      mandate-authn (E9-1, DEC-650): token verification and sessions as pure functions, with the
-#      issuer's keys and the clock handed in, so it never fetches a key or reads a clock, and
 #      mandate-notify, the closed notice (E8-9, DEC-710): below the journal, so it can never reach
 #      the control-stream writer (notifications spec NT-3)
-#   2  mandate-journal, mandate-accounting, and mandate-passkey, the WebAuthn relying party
-#      (E9-1, DEC-660), which verifies and never signs
+#   2  mandate-journal, mandate-accounting, mandate-passkey, the WebAuthn relying party
+#      (E9-1, DEC-660), which verifies and never signs, and mandate-authn (E9-1, DEC-650, DEC-652):
+#      token verification and sessions as pure functions, with the issuer's keys and the clock
+#      handed in, so it never fetches a key or reads a clock; above mandate-identity, whose sealed
+#      session it builds
 #   3  mandate-spec, mandate-audit (read-only audit reads over the journal, scoped to one
 #      workspace; E12-6)
 #   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
@@ -116,7 +117,7 @@ pure = true
 allowed_external = ["thiserror"]
 
 [crates.mandate-authn]
-layer = 1
+layer = 2
 safety_critical = true
 pure = true
 allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
@@ -138,7 +139,7 @@ layer = 0
 safety_critical = true
 pure = true
 allowed_external = []
-allowed_dependents = ["mandate-identity", "mandate-identity-testkit"]
+allowed_dependents = ["mandate-authn", "mandate-identity", "mandate-identity-testkit"]
 
 [crates.mandate-identity-testkit]
 layer = 11
