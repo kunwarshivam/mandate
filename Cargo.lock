@@ -1868,8 +1868,11 @@ dependencies = [
 name = "mandate-rh-sim"
 version = "0.0.0"
 dependencies = [
+ "mandate-mcp",
  "mandate-num",
  "proptest",
+ "serde_json",
+ "sha2 0.11.0",
  "thiserror",
 ]
 
