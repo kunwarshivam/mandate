@@ -1,0 +1,9 @@
+file = "crates/mandate-api/tests/contract.rs"
+test = "a_nested_object_given_as_an_array_is_refused_as_type_at_its_member"
+reason = """
+E10-10, DEC-882: `decode` is already implemented, and through serde's derived `visit_seq` it
+accepts a `record`, a `step_up`, a chosen `delegation`, and an `owner_exit` bid written as a JSON
+array, and refuses `"record": ["sha256:…", 5]` at `/record/1`, where `type` at the member or item
+is expected, so this test fails on that answer rather than at a stub. The change that reads a
+derived struct only from a JSON object deletes this file with the test's `#[ignore]` line.
+"""
