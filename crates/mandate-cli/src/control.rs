@@ -311,6 +311,28 @@ fn draft(
     payload: Value,
     now: Now,
 ) -> Result<Vec<u8>, ControlError> {
+    let ids = (event_id, None);
+    draft_caused(writer, owner, stream, ids, event_type, shape, payload, now)
+}
+
+/// [`draft`] for an event that names its cause, `ids.1`, as its `causation_id` (journal spec §3).
+///
+/// # Errors
+/// As [`draft`].
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each is one envelope member's source; bundling them would name a type for one caller"
+)]
+fn draft_caused(
+    writer: Writer,
+    owner: &Owner,
+    stream: &StreamId,
+    (event_id, causation): (&str, Option<&str>),
+    event_type: &str,
+    shape: Shape,
+    payload: Value,
+    now: Now,
+) -> Result<Vec<u8>, ControlError> {
     let (kind, id) = match writer {
         Writer::Owner => ("user", owner.user.as_str()),
         Writer::Opener if event_type == "StreamOpened" => ("system", OPENER_ID),
@@ -335,7 +357,7 @@ fn draft(
             "artifact_refs",
             Value::Array(shape.artifact_refs.iter().map(|r| text(r)).collect()),
         ),
-        ("causation_id", Value::Null),
+        ("causation_id", causation.map_or(Value::Null, text)),
         ("clock_source", text("local")),
         ("config_refs", object(shape.config_refs)?),
         ("correlation_id", Value::Null),
@@ -667,6 +689,74 @@ pub(crate) fn commit(
         now,
     )?;
     settle(journal, &stream, event_id, repeat, &bytes, now)
+}
+
+/// A control-stream event the owner confirms that names another event as its cause: its type and
+/// schema version, the cause's event id, and the payload's members other than the step-up evidence.
+#[derive(Debug, Clone)]
+pub(crate) struct Caused {
+    pub(crate) event_type: &'static str,
+    pub(crate) schema_version: u64,
+    pub(crate) causation_id: String,
+    pub(crate) key: Vec<(&'static str, Value)>,
+}
+
+/// Commits `caused` with fresh `cli_confirm` evidence whose `authenticated_at` is the instant the
+/// owner ran the command, a timestamp as journal spec §9.8 types it (DEC-802 item 8). Its event id
+/// is derived from the key, the cause and the control stream's head (DEC-290), so a retry commits
+/// nothing twice.
+///
+/// # Errors
+/// As [`commit`].
+pub(crate) fn commit_caused(
+    journal: &mut dyn ControlJournal,
+    ids: &mut dyn Ids,
+    owner: &Owner,
+    caused: Caused,
+    now: Now,
+) -> Result<Submitted, ControlError> {
+    let Caused {
+        event_type,
+        schema_version,
+        causation_id,
+        mut key,
+    } = caused;
+    let stream = control_stream(owner)?;
+    let head = journal.head(&stream)?.seq;
+    let mut bound = key.clone();
+    bound.push(("causation_id", text(&causation_id)));
+    let event_id = derive(&stream, event_type, &object(bound)?, true, head)?;
+    let evidence = object(vec![
+        ("assertion_id", text(&ids.assertion_id())),
+        ("authenticated_at", text(&now.at.to_string())),
+        ("method", text("cli_confirm")),
+    ])?;
+    key.push(("step_up", evidence));
+    let shape = Shape {
+        schema_version,
+        artifact_refs: Vec::new(),
+        config_refs: Vec::new(),
+    };
+    let named = (event_id.as_str(), Some(causation_id.as_str()));
+    let payload = object(key)?;
+    let bytes = draft_caused(
+        Writer::Owner,
+        owner,
+        &stream,
+        named,
+        event_type,
+        shape,
+        payload,
+        now,
+    )?;
+    settle(
+        journal,
+        &stream,
+        event_id,
+        Repeat::FindsEarlier,
+        &bytes,
+        now,
+    )
 }
 
 /// Every digest reference `value` holds, at any depth: what the envelope's `artifact_refs` lists,

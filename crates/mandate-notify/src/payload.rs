@@ -1,6 +1,6 @@
 //! The notice id, the payload, and the link (notifications spec §4.2, §4.3; NT-1, NT-4).
 
-use mandate_canon::Value;
+use mandate_canon::{Key, Object, Value};
 
 use crate::{NotifyError, TextKey};
 
@@ -27,18 +27,18 @@ impl NoticeId {
     /// # Errors
     /// [`NotifyError::EntropyUnavailable`] when the source fails.
     pub fn mint(random: &mut dyn SecureRandom) -> Result<Self, NotifyError> {
-        let _ = random;
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        let mut bits = [0u8; 16];
+        random.fill(&mut bits)?;
+        Ok(Self(bits))
     }
 
     /// The id's 32 lowercase hex digits, as a link, the payload, and the dispatcher's
     /// `NoticeIssued` and `NoticeAttempted` carry it.
     ///
     /// # Errors
-    /// Never once implemented.
+    /// Never: every id has its 32 digits.
     pub fn hex(&self) -> Result<String, NotifyError> {
-        let _ = self;
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(format!("{:032x}", u128::from_be_bytes(self.0)))
     }
 
     /// Reads back a notice id from its 32 lowercase hex digits, as a link or the dispatcher's own
@@ -48,8 +48,12 @@ impl NoticeId {
     /// # Errors
     /// [`NotifyError::NotANoticeId`] for anything but exactly 32 lowercase hex digits.
     pub fn parse(hex: &str) -> Result<Self, NotifyError> {
-        let _ = hex;
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        if hex.len() != 32 || !hex.bytes().all(is_lowercase_hex_digit) {
+            return Err(NotifyError::NotANoticeId);
+        }
+        u128::from_str_radix(hex, 16)
+            .map(|bits| Self(bits.to_be_bytes()))
+            .map_err(|_| NotifyError::NotANoticeId)
     }
 }
 
@@ -64,10 +68,28 @@ pub struct Notification {
 /// The payload: `{"notice": "<32 lowercase hex>", "text": "<text key>"}` and nothing else.
 ///
 /// # Errors
-/// Never once implemented: both keys are fixed and valid.
+/// Never: both keys are fixed and valid.
 pub fn payload(notification: &Notification) -> Result<Value, NotifyError> {
-    let _ = notification;
-    Err(NotifyError::Unimplemented { story: "E8-9" })
+    let mut members = Object::new();
+    members.insert(
+        payload_key("notice")?,
+        Value::Str(notification.notice.hex()?),
+    );
+    members.insert(
+        payload_key("text")?,
+        Value::Str(notification.text.key()?.to_owned()),
+    );
+    Ok(Value::Object(members))
+}
+
+fn payload_key(key: &str) -> Result<Key, NotifyError> {
+    Key::new(key).map_err(|_| NotifyError::Unrepresentable {
+        what: "payload key",
+    })
+}
+
+fn is_lowercase_hex_digit(digit: u8) -> bool {
+    matches!(digit, b'0'..=b'9' | b'a'..=b'f')
 }
 
 /// The workspace app's fixed origin, `https://<lowercase host>[:<port>]`, from the deployment's
@@ -77,19 +99,47 @@ pub fn payload(notification: &Notification) -> Result<Value, NotifyError> {
 pub struct Origin(String);
 
 impl Origin {
+    /// Reads the origin as DEC-710 item 3 writes it: the host is one or more dot-separated labels,
+    /// each non-empty, of `[a-z0-9-]`, neither starting nor ending with `-`; the port, if any, is
+    /// 1 to 65535 in decimal digits alone, without a leading zero.
+    ///
     /// # Errors
     /// [`NotifyError::InvalidOrigin`] for anything but `https://<lowercase host>[:<port>]`.
     pub fn parse(origin: &str) -> Result<Self, NotifyError> {
-        let _ = origin;
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        let authority = origin
+            .strip_prefix("https://")
+            .ok_or(NotifyError::InvalidOrigin)?;
+        let (host, port) = match authority.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        };
+        if host.split('.').all(is_host_label) && port.is_none_or(is_port) {
+            Ok(Self(origin.to_owned()))
+        } else {
+            Err(NotifyError::InvalidOrigin)
+        }
     }
+}
+
+fn is_host_label(label: &str) -> bool {
+    !label.is_empty()
+        && !label.starts_with('-')
+        && !label.ends_with('-')
+        && label
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+fn is_port(port: &str) -> bool {
+    !port.starts_with('0')
+        && port.bytes().all(|b| b.is_ascii_digit())
+        && port.parse::<u16>().is_ok()
 }
 
 /// The link every channel renders: `<origin>/n/<notice id>` and nothing else (NT-4).
 ///
 /// # Errors
-/// Never once implemented.
+/// Never: the origin was checked when parsed, and every id has its 32 digits.
 pub fn link(origin: &Origin, notice: &NoticeId) -> Result<String, NotifyError> {
-    let _ = (origin, notice);
-    Err(NotifyError::Unimplemented { story: "E8-9" })
+    Ok(format!("{}/n/{}", origin.0, notice.hex()?))
 }

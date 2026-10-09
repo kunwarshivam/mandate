@@ -62,6 +62,14 @@ pub enum McpError {
     NoResponse,
     #[error("the server answered JSON-RPC error {code}")]
     Rpc { code: i64, detail: ServerText },
+    #[error("the tool is not on the allowlist; nothing was sent")]
+    ToolNotAllowed,
+    #[error("the server lists a tool that can move funds")]
+    FundMovementTool,
+    #[error("the server's tool list lacks an allowlisted tool")]
+    ContractMissingTool,
+    #[error("the server's tool contract differs from the pinned one")]
+    ContractDrift,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -87,6 +95,10 @@ impl McpError {
             Self::Malformed => "malformed",
             Self::NoResponse => "no_response",
             Self::Rpc { .. } => "rpc_error",
+            Self::ToolNotAllowed => "tool_not_allowed",
+            Self::FundMovementTool => "fund_movement_tool",
+            Self::ContractMissingTool => "contract_missing_tool",
+            Self::ContractDrift => "contract_drift",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }
