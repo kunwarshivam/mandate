@@ -12397,6 +12397,116 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// A command word built by a backtick substitution cannot be read, whether the substitution
+    /// is the whole word or a piece of it (#1169 round 4 review, bypass 3; DEC-873 item 1).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_backtick_command_word_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  backtick-piece:",
+            "    steps:",
+            "      - run: |",
+            "          `printf ca`rgo test -p rh-host",
+            "  backtick-whole:",
+            "    steps:",
+            "      - run: |",
+            "          `echo cargo` test -p rh-host",
+            "  lib-tests:",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["backtick-piece", "backtick-whole"]);
+        names(&problems, &["backtick-piece"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// The five allowed `CARGO_*` names are read only exactly: a name that extends one
+    /// (`CARGO_PROFILE_DEV_DEBUG_ASSERTIONS`, `CARGO_TERM_COLORS`) or holds one after a prefix
+    /// (`XCARGO_TERM_COLOR`), in job `env`, step `env` or inline, cannot be read (DEC-873 item 5).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn an_allowed_cargo_name_is_read_only_exactly() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  extended-job-env:",
+            "    env:",
+            "      CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: false",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+            "  extended-step-env:",
+            "    steps:",
+            "      - env:",
+            "          CARGO_TERM_COLORS: always",
+            "        run: cargo test -p a-lib",
+            "  extended-inline:",
+            "    steps:",
+            "      - run: CARGO_MUTANTS_VERSIONS=1 cargo test -p a-lib",
+            "  prefixed:",
+            "    env:",
+            "      XCARGO_TERM_COLOR: always",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+            "  exact:",
+            "    env:",
+            "      CARGO_TERM_COLOR: always",
+            "      CARGO_PROFILE_DEV_DEBUG: 0",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &[
+                "extended-job-env",
+                "extended-step-env",
+                "extended-inline",
+                "prefixed",
+            ],
+        );
+        names(&problems, &["extended-job-env"], &["exact"]);
+        Ok(())
+    }
+
+    /// A listed repository script whose comment alone names `cargo` or `.cargo` cannot be read,
+    /// and the problem names the script: a comment is one edit from code (DEC-873 item 2).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_repository_script_comment_naming_cargo_cannot_be_read() -> Result<()> {
+        let flows: Vec<CiFile> = clean_scripts()
+            .into_iter()
+            .map(|file| match file.path.as_str() {
+                ".github/scripts/docs-only.sh" => ci_file(
+                    &file.path,
+                    "#!/usr/bin/env bash\n# the same check cargo runs\necho ok\n",
+                ),
+                ".github/scripts/docs-checks.sh" => ci_file(
+                    &file.path,
+                    "#!/usr/bin/env bash\n# see .cargo/config.toml\necho ok\n",
+                ),
+                _ => file,
+            })
+            .chain([workflow(&[
+                ("word", ".github/scripts/docs-only.sh"),
+                ("dot-cargo", ".github/scripts/docs-checks.sh"),
+                ("clean", ".github/scripts/start-postgres.sh"),
+            ])])
+            .collect();
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["word", "dot-cargo"]);
+        for script in ["docs-only.sh", "docs-checks.sh"] {
+            let named = problems
+                .iter()
+                .any(|p| p.contains(&format!("`.github/scripts/{script}`")));
+            assert!(named, "names `{script}`: {problems:?}");
+        }
+        names(&problems, &["word"], &["clean"]);
+        Ok(())
+    }
+
     /// A flow sequence under `jobs:` is read only when it is flat: one that holds a `:`, a nested
     /// `[`, `{` or `]`, or an `&`, `*` or `!`, even inside a quoted scalar, cannot be read. One
     /// case for each character, so dropping any one from the rule is caught (#1169 round 3
