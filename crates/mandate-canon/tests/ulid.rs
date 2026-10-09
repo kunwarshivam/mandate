@@ -51,6 +51,9 @@ const REFUSED: &[(&str, UlidTextError)] = &[
     ("0000000000000000000000000U", UlidTextError::NotCrockford),
     ("0000000000000 000000000000", UlidTextError::NotCrockford),
     ("000000000000000000000000-0", UlidTextError::NotCrockford),
+    ("00000000000000000000000000\n", UlidTextError::Length),
+    ("0000000000000000000000000\n", UlidTextError::NotCrockford),
+    ("\t000000000000000000000000+", UlidTextError::NotCrockford),
     (
         "0000000000000000000000000\u{e9}",
         UlidTextError::NotCrockford,
@@ -169,7 +172,9 @@ fn every_canonical_text_reads_as_its_value_and_spells_back() {
 #[test]
 #[ignore = "pending E10-10"]
 fn one_foreign_character_anywhere_is_refused() {
-    let foreign = prop::sample::select(vec!['I', 'L', 'O', 'U', 'a', 'z', ' ', '-', '\u{e9}']);
+    let foreign = prop::sample::select(vec![
+        'I', 'L', 'O', 'U', 'a', 'z', ' ', '-', '\n', '\t', '+', '\u{e9}',
+    ]);
     run(
         (canonical_text(), 0_usize..26, foreign),
         |(text, at, ch)| {
