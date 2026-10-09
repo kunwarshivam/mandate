@@ -18,7 +18,7 @@ import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
 import { AlertsScreen } from "./account-screens";
 import { AgentsListScreen } from "./agents-list";
 import { ApprovalRequestScreen } from "./approval-request";
-import { ApprovalsInboxScreen, askSentence } from "./approvals-inbox";
+import { ApprovalsInboxScreen, askSentence, sharedAsks } from "./approvals-inbox";
 import { DashboardScreen } from "./dashboard";
 
 const SCENARIO_IDS = SCENARIOS.map((s) => s.id);
@@ -439,11 +439,14 @@ describe("D5 inbox and D6 request", () => {
     const why = within(rail).getByRole("region", { name: "What sends you a request" });
     const ws = buildWorkspace("approvals");
     const rows = [...why.querySelectorAll("li")];
-    expect(rows).toHaveLength(ws.agents.length);
+    const sets = sharedAsks(ws.agents);
+    expect(rows).toHaveLength(sets.length);
+    expect(sets.flatMap((s) => s.agents)).toHaveLength(ws.agents.length);
     rows.forEach((row, i) => {
-      const agent = ws.agents[i];
-      expect(within(row).getByRole("link", { name: agent.label })).toHaveAttribute("href", `/agents/${agent.agent_id}/mandate`);
-      expect(row).toHaveTextContent(askSentence(agent));
+      for (const agent of sets[i].agents) {
+        expect(within(row).getByRole("link", { name: agent.label })).toHaveAttribute("href", `/agents/${agent.agent_id}/mandate`);
+      }
+      expect(row).toHaveTextContent(sets[i].sentence);
       expect(row).toHaveTextContent(/A request waits .+, then is skipped\.$/);
     });
     expect(askSentence(ws.agents.find((a) => a.agent_id === AGENT_IDS.swing)!)).toMatch(/^Your rules?: (?:[^;]*; )*ask when the combined model score is below 0\.65[;.]/);

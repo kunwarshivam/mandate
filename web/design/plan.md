@@ -289,7 +289,7 @@ item above (C-3, C-9) are not repeated.
 - [ ] **Workspace out of More** until one section is built (a DEC amending DEC-513 item 2); its
       subtitle drops "Rules". (C-20)
 - [ ] **One left edge across densities** on the audit screens. (C-17)
-- [ ] **One paragraph per set of shared rules** on the Approvals rail. (C-12)
+- [x] **One paragraph per set of shared rules** on the Approvals rail. (C-12) Done in [#1189](https://github.com/kunwarshivam/mandate/pull/1189).
 - [ ] **The phone thread header without the slug.** (C-16)
 - [ ] **The welcome page's buttons above the fold on a phone.** (C-2)
 - [x] **The brand owl never wears an agent's colour.** The founder decided it on 2026-10-09
