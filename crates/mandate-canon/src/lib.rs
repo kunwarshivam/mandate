@@ -10,7 +10,7 @@
 )]
 //! Canonical JSON for everything that gets hashed ([journal spec §4](../../../docs/specs/journal.md#4-canonical-serialization),
 //! ADR-0001 ES-07): a strict parser, a value tree sorted by key bytes, a writer, the journal decimal
-//! grammar, and SHA-256. `serde_json` never touches bytes that get hashed.
+//! grammar, SHA-256, and the canonical ULID text. `serde_json` never touches bytes that get hashed.
 
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -20,7 +20,10 @@ use sha2::Digest as _;
 
 mod dec;
 mod parse;
+mod ulid;
 mod write;
+
+pub use ulid::{UlidTextError, decode_ulid, encode_ulid, is_ulid};
 
 /// Largest integer the canonical form admits (journal spec §4.4).
 pub const MAX_INT: u64 = (1 << 53) - 1;

@@ -1,8 +1,0 @@
-file = "crates/mandate-cli/tests/connection.rs"
-test = "the_latest_check_of_its_occasion_decides"
-reason = """
-#907 review: `mandate connection record` is implemented, but it accepts any passing `connect` or
-`reconnect` check the owner names, even one a later check of the same occasion superseded, where
-journal spec §9.8 rule 68 binds the record to the latest. The test fails on that answer, not at a
-stub. E7-11's fix, which requires the latest check of the occasion, deletes this row.
-"""

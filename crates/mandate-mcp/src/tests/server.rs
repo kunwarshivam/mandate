@@ -88,9 +88,11 @@ impl Loopback {
     }
 }
 
+/// `@BASE@` in an answer's headers or body becomes the server's own `http://127.0.0.1:<port>`.
 pub(crate) async fn serve(answers: Vec<Answer>) -> Loopback {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+    let base = format!("http://{}", listener.local_addr().unwrap());
     let seen = Arc::new(Mutex::new(Vec::new()));
     let record = Arc::clone(&seen);
     tokio::spawn(async move {
@@ -104,13 +106,13 @@ pub(crate) async fn serve(answers: Vec<Answer>) -> Loopback {
                     answer.body
                 )
             } else {
-                answer.body
+                answer.body.replace("@BASE@", &base)
             };
             record.lock().unwrap().push(request);
             tokio::time::sleep(answer.delay).await;
             let mut head = format!("HTTP/1.1 {} X\r\nconnection: close\r\n", answer.status);
             for (name, value) in &answer.headers {
-                head.push_str(&format!("{name}: {value}\r\n"));
+                head.push_str(&format!("{name}: {}\r\n", value.replace("@BASE@", &base)));
             }
             head.push_str(&format!("content-length: {}\r\n\r\n", body.len()));
             let _ = stream.write_all((head + &body).as_bytes()).await;
