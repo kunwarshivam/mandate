@@ -125,8 +125,9 @@ pub enum Recorded {
 /// have been after it (CN-5, rule 66; #907 review).
 ///
 /// # Errors
-/// [`ControlError::Refused`] with one of [`CODES`], before any assertion is minted, anything is
-/// appended, or anything is printed; [`ControlError::Journal`] as the other control commands.
+/// [`ControlError::Refused`] with one of [`CODES`], before anything is appended or printed; a pass
+/// that loses a race may mint an assertion id that is discarded; [`ControlError::Journal`] as the
+/// other control commands.
 pub fn record(
     journal: &mut dyn ControlJournal,
     ids: &mut dyn Ids,
