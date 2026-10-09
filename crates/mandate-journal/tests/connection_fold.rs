@@ -554,14 +554,24 @@ fn connection(short: &str) -> &'static str {
 /// Rows of a case written here on the control stream, from the `connection_requests` drafts. Each
 /// record is `request X A1` (a `ConnectionRequested` of connection `X` on the account stream whose
 /// `account_ref` ends `A1`), `establish X A1` (version 2), `version_1 X`, `refuse X connect` (the
-/// deadline's teardown), `refuse X reconnect` (a failed scope check), or `revoke X`.
+/// deadline's teardown), `refuse X reconnect` (a failed scope check), or `revoke X`, then any
+/// `member=text` sets (`ws=ws_01J8Z3` writes it on that workspace's control stream instead).
 fn control(records: &[&str]) -> Vec<StoredEvent> {
     let records: Vec<String> = records
         .iter()
         .enumerate()
         .map(|(i, record)| {
-            let words: Vec<&str> = record.split(' ').collect();
+            let (words, sets): (Vec<&str>, Vec<&str>) =
+                record.split(' ').partition(|w| !w.contains('='));
             let quoted = |s: &str| format!("\"{s}\"");
+            let sets: String = sets
+                .iter()
+                .filter_map(|w| w.split_once('='))
+                .map(|(member, v)| match member {
+                    "ws" => set("stream_id", &quoted(&format!("ctl:{v}"))),
+                    _ => set(&format!("payload.{member}"), &quoted(v)),
+                })
+                .collect();
             let id = set(
                 "event_id",
                 &quoted(&format!("01J8Z4R{:02}A0000000000000000", i + 1)),
@@ -597,7 +607,7 @@ fn control(records: &[&str]) -> Vec<StoredEvent> {
             };
             format!(
                 r#"{{"base_draft":"{base}","changes":[{}]}}"#,
-                more.trim_start_matches(',')
+                (more + &sets).trim_start_matches(',')
             )
         })
         .collect();
@@ -624,6 +634,12 @@ fn a_range_checks_rule_131_only_on_the_requests_it_holds() {
     );
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     assert_eq!(answers, vec![Ok(())], "`range_after_an_unseen_request`");
+    let open = control(&["request X A1", "request Y B7"]);
+    assert_eq!(
+        verify_connection_lifecycle_range(&open),
+        Ok(()),
+        "connects in progress"
+    );
     let closed_twice = control(&["request X A1", "refuse X connect", "establish X A1"]);
     assert_eq!(verify_connection_lifecycle_range(&closed_twice), Ok(()));
     assert_eq!(
@@ -635,6 +651,17 @@ fn a_range_checks_rule_131_only_on_the_requests_it_holds() {
         (&["request X B7", "refuse X connect", "request X B7"][..], 2),
         (&["request X A1", "request X B7"][..], 1),
         (&["request Y B7", "version_1 X"][..], 1),
+        (&["request Z C8", "establish X A1", "request Y A1"][..], 2),
+        (&["request X A1", "establish X A1 broker=robinhood"][..], 1),
+        (&["request X A1", "establish X A1 environment=live"][..], 1),
+        (
+            &["request X A1", "establish X A1 user=user_owner_02"][..],
+            1,
+        ),
+        (
+            &["request X A1", "establish X A1 step_up.method=passkey"][..],
+            1,
+        ),
     ];
     for (records, index) in held {
         assert_eq!(
@@ -689,6 +716,17 @@ fn rule_67_excepts_only_a_revocation_that_closed_a_request() {
         lifecycle(&["revoke X", "request X A1", "refuse X connect"]),
         refused(2, ConnectionStreamRule::Rotated)
     );
+    let once_plain = [
+        "revoke X",
+        "request X A1",
+        "revoke X",
+        "request X B7",
+        "refuse X connect",
+    ];
+    assert_eq!(
+        lifecycle(&once_plain),
+        refused(4, ConnectionStreamRule::Rotated)
+    );
     assert_eq!(
         lifecycle(&["request X A1", "revoke X", "revoke X", "revoke Y"]),
         Ok(())
@@ -722,5 +760,39 @@ fn a_version_1_connect_is_judged_only_from_the_first_request() {
     assert_eq!(
         lifecycle(&["request X A1", "version_1 X"]),
         refused(1, ConnectionStreamRule::Requested)
+    );
+}
+
+/// Rule 131 on each control stream on its own: a connect's refusal repeats its request's `broker`,
+/// `environment`, and `user`; a request's `account_ref` is one no earlier establishment holds,
+/// even one from before the first request; and another workspace's request neither binds this
+/// stream nor counts as its open request or its used `account_ref`.
+#[test]
+#[ignore = "pending E7-17"]
+fn a_request_binds_its_members_and_account_ref_on_its_own_stream() {
+    let lifecycle = |records: &[&str]| verify_connection_lifecycle(&control(records));
+    for member in ["broker=robinhood", "environment=live", "user=user_owner_02"] {
+        let refusal = format!("refuse X connect {member}");
+        assert_eq!(
+            lifecycle(&["request X A1", &refusal]),
+            refused(1, ConnectionStreamRule::Requested),
+            "{member}"
+        );
+    }
+    assert_eq!(
+        lifecycle(&["establish X A1", "request Y A1"]),
+        refused(1, ConnectionStreamRule::Requested)
+    );
+    assert_eq!(
+        lifecycle(&["request Y B7 ws=ws_01J8Z3", "refuse X connect"]),
+        Ok(())
+    );
+    assert_eq!(
+        lifecycle(&["request X A1 ws=ws_01J8Z3", "request X B7"]),
+        Ok(())
+    );
+    assert_eq!(
+        lifecycle(&["request X A1 ws=ws_01J8Z3", "request Y A1"]),
+        Ok(())
     );
 }
