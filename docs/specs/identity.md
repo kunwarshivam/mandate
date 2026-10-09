@@ -1125,8 +1125,8 @@ membership read (§4.5). Their schemas take the field when this journal change l
 
 | Owed journal edit | Story | Note |
 |---|---|---|
-| The membership events above, with schemas, in journal §9 | E9-7's tests PR (DEC-437 item 9) | Already owed by v0.1 |
-| `membership_unverified` (bool) on the risk-reducing operations' events, in journal §3 or §9 | E9-7's tests PR, with the membership events | Added by v0.2 (DEC-642 item 10). The journal spec is in a version queue, so this PR does not edit `journal.md`; no event carries the field before that change lands |
+| The membership events above, with schemas, in journal §9 | E9-7's tests PR (DEC-437 item 9) | Done: journal spec v0.25 closes them in [§9.12](journal.md#912-membership-records-dec-437-item-9-dec-648) ([DEC-648](../project/decisions/DEC-648.md)) |
+| `membership_unverified` (bool) on the risk-reducing operations' events, in journal §3 or §9 | E9-7's tests PR, with the membership events | Added by v0.2 (DEC-642 item 10). No event carries the field before that change lands |
 
 Organization-scope events (ownership, SSO, org policy, the org-scope kill switch) are written to
 each of the org's workspaces' control streams, so each workspace's records are complete on their
