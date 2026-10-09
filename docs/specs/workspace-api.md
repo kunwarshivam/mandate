@@ -651,7 +651,7 @@ recorded, in whatever form the event's schema gives it.
 | **AU-5** | **A timeline misses nothing and repeats nothing.** Paging a timeline with its per-stream cursor yields every matching event of each stream exactly once, in that stream's `seq` order | Fuzz with filters and concurrent appends against a k-way merge oracle over the two streams |
 | **AU-6** | **Served after recorded.** No export byte and no verification result is served before its `ExportCreated` or `VerificationRun` is `Committed` or `AlreadyCommitted` | Fault injection on the append: a failed or `Ambiguous` append serves nothing |
 | **AU-7** | **CSV cells are inert.** No CSV cell starts with `=`, `+`, `-`, `@`, a tab, or a carriage return | Fuzz payload strings over those characters; an independent scan of every cell |
-| **AU-8** | **A verification covers its whole range.** A `pass` or an `incomplete` means every event from `from_seq` to `to_seq` was walked: `checked = to_seq − from_seq + 1`, the first and last `seq` are the range's, and a missing, reordered, or extra event fails | An oracle that counts the range independently; seeded deletions, duplicates, and truncations of the stored range each fail, and an out-of-range `from_seq` or `to_seq` is refused; a range with a stamped anchor is never `pass` (DEC-789) |
+| **AU-8** | **A verification covers its whole range.** A `pass` or an `incomplete` means every event from `from_seq` to `to_seq` was walked: `checked = to_seq − from_seq + 1`, the first and last `seq` are the range's, and a missing, reordered, or extra event fails | An oracle that counts the range independently; seeded deletions, duplicates, and truncations of the stored range each fail, and an out-of-range `from_seq` or `to_seq` is refused; a range with a stamped anchor is never `pass` (DEC-789), including a `genesis` or `manifest` range that holds an anchor's leaf, stamped or with a `null` token, which the record cannot show (DEC-787 item 8) |
 | **AU-9** | **Audit output stays in the workspace.** Pages, traces, gate views, timelines, export files, and verification results are served only from the workspace deployment and are never sent to the global control plane. No request log, metric label, or tracing span carries an event body, a payload member, or an export's content. A notice that an export is ready or a verification is done carries only an opaque id and generic text (rule 6, API-10) | A seeded payload string in the journal; after every route is exercised, a scan of the logs, metrics, spans, notices, and the global control plane's inbound traffic finds it nowhere |
 
 **Who may call.** Every route here is the matrix row "Read records, verification; export": a
@@ -936,15 +936,16 @@ ascending `stream_id` bytes:
   2. the members that are not ids: `from_seq`, `to_seq`, and `trusted_start`'s `kind` and shape,
      each malformed member 422 `invalid` with its `violations` (**Ids and the 404**, item 2). A
      `manifest_hash` or `anchor_event_id` is looked up, not rejected, so a malformed one is absent
-     at step 6;
+     at step 7;
   3. the idempotent replay: a request whose key names a `VerificationRun` already recorded is
      answered from that record (below), and one whose members differ from it is 409
      `idempotency_conflict` (§3.4);
   4. `stream_id`: absent, malformed, or another workspace's is the 404 (**Ids and the 404**,
      item 1);
   5. `range`: 422;
-  6. `trusted_start`: 422;
-  7. the size bound: 422.
+  6. the size bound: 422, before any trusted-start record or cold-store object is read, since it
+     needs only the range and the head;
+  7. `trusted_start`: 422.
 - **The verification's id** ([DEC-788](../project/decisions/DEC-788.md) item 2):
   `verification_id` is the `event_id` of the run's `VerificationRun` (journal spec §9.13), which
   §3.4 derives from the `Idempotency-Key`, as an export's id is its `ExportCreated`'s.
@@ -1036,7 +1037,13 @@ ascending `stream_id` bytes:
   the response, so `phase` is always `recorded` in v1; `running` is reserved for an asynchronous
   run and never sent (DEC-788 item 3).
 - **The replay.** A retry with the same key and members returns the recorded result and is never
-  run again, so a head that has moved since cannot change it (§3.4, DEC-788 item 4).
+  run again, so a head that has moved since cannot change it (§3.4, DEC-788 item 4). §3.4's
+  equality compares the request with the record after one normalisation each way, and nothing
+  else: `stream_id` and `from_seq` are equal; a `to_seq` of `null` matches whatever head the record
+  resolved, and an integer `to_seq` must equal the recorded one; `trusted_start.kind` equals
+  `start.kind`; a `manifest_hash` sent as a `sha256:` ref and the record's bare hex compare as the
+  same digest (**Hash forms**); and `anchor_event_id` is equal. Any other difference is 409
+  `idempotency_conflict`.
 - **`GET /verifications/{id}`** resolves the id among the workspace's control-stream events like
   any event id (**Ids and the 404**). An id that names no version-2 `VerificationRun` with
   `trigger` `request` there is the 404.

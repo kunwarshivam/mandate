@@ -3004,7 +3004,13 @@ incident (§11 "Incomplete").
     cannot answer (DEC-789), a range with an `anchor` start has a non-null `failure` or
     `incomplete`, since its start's token is checked and cannot be proven (`incomplete`). A rule
     cannot check that `start` names a record that exists or fits: §9.14 and workspace API §4.8.1
-    resolve it before the run, and rule 107 already ties `prev_hash` to `from_seq`.
+    resolve it before the run, and rule 107 already ties `prev_hash` to `from_seq`. On a failed
+    range `checked` is only bounded, on purpose: how far a walk got before its first failure
+    depends on the check, and the record needs only the bound to be read safely. Nor can a rule see
+    an anchor inside a range: the record lists no anchors, so a `pass` recorded for a `genesis` or
+    `manifest` range that holds a stamped anchor's leaf, or one with a `null` token, would pass
+    `append`. The run's logic must never write it, and its AU-8 test must show it does not
+    ([DEC-787](../project/decisions/DEC-787.md) item 8).
 133. `VerificationRun` version 2: `result` is `fail` exactly when some range's `failure` is
     non-null, `incomplete` exactly when no range's `failure` is non-null and some range's
     `incomplete` is, and `pass` exactly when every range's `failure` and `incomplete` are null
@@ -3399,7 +3405,9 @@ incomplete, the token check whose failure is `tsa_token_invalid`:
   `TsaVerificationIncomplete`; `mandate journal verify-cold` prints it as
   `result: failed, tsa_verification_incomplete` with a non-zero exit
   ([DEC-490](../project/decisions/DEC-490.md) item 6). That is the same outcome under the CLI's
-  word: a command line has no third exit, and it never prints `verified` for it. The CLI journals
+  word: a command line has no third exit, and it never prints `verified` for it. Its `failed` is
+  only that output form and its non-zero exit; this spec does not count it as a failure (no `fail`
+  result, no SEV-1), and this version does not change the CLI. The CLI journals
   nothing, so no record holds its word; a `VerificationRun` names the check, `tsa_token_invalid`,
   in `incomplete`.
 - **An anchor the range must check whose `token` is `null`** (DEC-789 item 7). Nothing outside the
