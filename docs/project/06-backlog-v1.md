@@ -761,7 +761,9 @@ after U-A1 to U-A5 are recorded.
   shell reading still has limits: a here-doc body fed to a command other than a shell is read as
   commands, `case` arm patterns and `[[ =~ ]]` regex parentheses split a command, and a
   single-quoted string outside the here-doc and text reading is not joined. None hides a refusal
-  rule 1′ makes today; fix each with a pin when a real line needs it.
+  rule 1′ makes today; fix each with a pin when a real line needs it. Rule 2 judges pipelines
+  only, so a shell fed from a file (`sh < <(echo $C)`, `echo $C > f; sh f`) is a disclosed
+  residual (DEC-851 item 5, #985's review); pin and refuse it the same way.
 - **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
   want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
   so that a token that may reach both environments is on the record before it is used
