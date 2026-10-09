@@ -4,10 +4,14 @@
 //! a page is a prefix of one unbounded merge (DEC-777 items 1 to 3). The route, its query parsing,
 //! and the resolution of `account_refs` from the agent's `AgentDeployed` records are the caller's.
 
+use std::collections::{BTreeMap, BTreeSet};
+
+use mandate_canon::{Value, parse};
 use mandate_identity::demand::{Permitted, ReadRecords};
+use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
-use crate::{AuditError, JournalEvent, MemoryRead, PageLimit, Watermark};
+use crate::{AuditError, JournalEvent, MemoryRead, PageLimit, Watermark, segment, served};
 
 /// The most events one timeline page consumes from one stream (DEC-764 item 4). Reaching it stops
 /// the whole page, for every stream (DEC-777 item 3).
@@ -63,9 +67,223 @@ pub trait TimelineRead {
 impl TimelineRead for MemoryRead<'_> {
     fn timeline(
         &self,
-        _tenant: &Permitted<'_, ReadRecords>,
-        _query: &TimelineQuery<'_>,
+        tenant: &Permitted<'_, ReadRecords>,
+        query: &TimelineQuery<'_>,
     ) -> Result<Timeline, AuditError> {
-        Err(AuditError::Unimplemented { story: "E12-2" })
+        let segment = segment(tenant)?;
+        let agent_stream = format!("agent:{segment}:{}", query.agent_id);
+        let mut streams = BTreeMap::new();
+        for account_ref in query.account_refs {
+            let stream_id = format!("acct:{segment}:{account_ref}");
+            let rows = self.rows(&segment, &stream_id)?;
+            streams.insert(stream_id, rows);
+        }
+        let own = self.rows(&segment, &agent_stream)?;
+        if own.is_empty() {
+            return Err(AuditError::NotFound);
+        }
+        streams.insert(agent_stream.clone(), own);
+        let members = Members::of(query.agent_id, &agent_stream, own, &streams);
+        let mut lanes: Vec<Lane<'_>> = streams.iter().map(Lane::start).collect();
+        for cursor in query.after {
+            let lane = lanes
+                .iter_mut()
+                .find(|lane| lane.stream_id == cursor.stream_id)
+                .ok_or(AuditError::NotFound)?;
+            lane.resume(cursor.seq);
+        }
+        let limit = usize::from(query.limit.0);
+        let mut events = Vec::new();
+        while let Some(lane) = lanes
+            .iter_mut()
+            .filter(|lane| !lane.rest.is_empty())
+            .min_by_key(|lane| lane.head_at())
+        {
+            let Some(row) = lane.consume() else { break };
+            if members.holds(row) && query.selects(row) {
+                events.push(served(row));
+                if events.len() >= limit {
+                    break;
+                }
+            }
+            if lane.consumed >= MAX_CONSUMED_PER_STREAM {
+                break;
+            }
+        }
+        Ok(Timeline {
+            events,
+            more: lanes.iter().any(|lane| !lane.rest.is_empty()),
+            next: lanes.iter().map(Lane::cursor).collect(),
+            as_of: streams
+                .values()
+                .filter_map(|rows| rows.last())
+                .map(watermark)
+                .collect(),
+        })
+    }
+}
+
+impl TimelineQuery<'_> {
+    /// Whether the `types`, `from` (inclusive), and `to` (exclusive) filters serve `row`. An event
+    /// they exclude is still consumed (AU-5).
+    fn selects(&self, row: &StoredEvent) -> bool {
+        let at = recorded_at(row);
+        self.types
+            .is_none_or(|types| types.contains(&row.event_type.as_str()))
+            && self.from.is_none_or(|from| at.is_some_and(|at| at >= from))
+            && self.to.is_none_or(|to| at.is_some_and(|at| at < to))
+    }
+}
+
+/// One timeline stream as the merge walks it: the rows after its cursor in the page's snapshot,
+/// the cursor (the last `seq` consumed), and how many events this page consumed from it.
+struct Lane<'a> {
+    stream_id: &'a str,
+    rest: &'a [StoredEvent],
+    cursor: u64,
+    consumed: u64,
+}
+
+impl<'a> Lane<'a> {
+    /// A stream no cursor names, at 0 (DEC-777 item 5).
+    fn start((stream_id, rows): (&'a String, &&'a [StoredEvent])) -> Self {
+        Self {
+            stream_id,
+            rest: rows,
+            cursor: 0,
+            consumed: 0,
+        }
+    }
+
+    /// Resumes after `seq`. A stream's `seq` is gapless from 1 (journal spec §3), so the rows after
+    /// `seq` start at index `seq`; a cursor past the head leaves nothing and is kept as given.
+    fn resume(&mut self, seq: u64) {
+        let rows = self.rest;
+        let after = usize::try_from(seq).unwrap_or(usize::MAX);
+        self.rest = rows.get(after..).unwrap_or_default();
+        self.cursor = seq;
+    }
+
+    /// The `recorded_at` of the next unconsumed row, the merge key. Lanes are in ascending
+    /// `stream_id`, and `min_by_key` keeps the first of equal keys, so ties go to the least
+    /// `stream_id` (DEC-764 item 3).
+    fn head_at(&self) -> Option<UtcNanos> {
+        self.rest.first().and_then(recorded_at)
+    }
+
+    fn consume(&mut self) -> Option<&'a StoredEvent> {
+        let (row, rest) = self.rest.split_first()?;
+        self.rest = rest;
+        self.cursor = row.seq;
+        self.consumed = self.consumed.saturating_add(1);
+        Some(row)
+    }
+
+    fn cursor(&self) -> StreamCursor {
+        StreamCursor {
+            stream_id: self.stream_id.to_owned(),
+            seq: self.cursor,
+        }
+    }
+}
+
+/// Which events are the agent's (DEC-764 item 2), with every lookup read from the timeline's own
+/// streams in the page's snapshot, whole (DEC-777 item 6): the agent's own event ids, the
+/// `intent_id`s whose `IntentReceived` names the agent, and the `client_order_id`s of version-2
+/// `OrderSubmitted`s whose `causation_id` names an `OrderRequestRecorded` naming it (DEC-778).
+struct Members<'a> {
+    agent_id: &'a str,
+    agent_stream: &'a str,
+    own: BTreeSet<&'a str>,
+    intents: BTreeSet<String>,
+    orders: BTreeSet<String>,
+}
+
+impl<'a> Members<'a> {
+    fn of(
+        agent_id: &'a str,
+        agent_stream: &'a str,
+        own: &'a [StoredEvent],
+        streams: &BTreeMap<String, &'a [StoredEvent]>,
+    ) -> Self {
+        let rows = || streams.values().flat_map(|rows| rows.iter());
+        let typed = |event_type: &'static str| {
+            rows()
+                .filter(move |row| row.event_type == event_type)
+                .filter_map(|row| Some((row, Body::of(row)?)))
+        };
+        let intents = typed("IntentReceived")
+            .filter(|(_, body)| body.payload("agent_id") == Some(agent_id))
+            .filter_map(|(_, body)| body.payload("intent_id").map(str::to_owned))
+            .collect();
+        let requests: BTreeSet<&str> = typed("OrderRequestRecorded")
+            .filter(|(_, body)| body.payload("agent_id") == Some(agent_id))
+            .map(|(row, _)| row.event_id.as_str())
+            .collect();
+        let orders = typed("OrderSubmitted")
+            .filter(|(row, _)| row.schema_version == 2)
+            .filter(|(_, body)| body.causation().is_some_and(|c| requests.contains(c)))
+            .filter_map(|(_, body)| body.payload("client_order_id").map(str::to_owned))
+            .collect();
+        Self {
+            agent_id,
+            agent_stream,
+            own: own.iter().map(|row| row.event_id.as_str()).collect(),
+            intents,
+            orders,
+        }
+    }
+
+    fn holds(&self, row: &StoredEvent) -> bool {
+        if row.stream_id == self.agent_stream {
+            return true;
+        }
+        let Some(body) = Body::of(row) else {
+            return false;
+        };
+        let named = body.payload("agent_id").or_else(|| body.payload("agent"));
+        named.is_some_and(|agent| agent == self.agent_id || agent == "*")
+            || body
+                .payload("intent_id")
+                .is_some_and(|i| self.intents.contains(i))
+            || body
+                .payload("client_order_id")
+                .is_some_and(|o| self.orders.contains(o))
+            || body.causation().is_some_and(|c| self.own.contains(c))
+            || row.event_type == "AccountRestrictionChanged"
+            || (row.event_type == "KillSwitchActivated"
+                && body
+                    .payload("scope")
+                    .is_some_and(|scope| scope == "connection" || scope == "workspace"))
+    }
+}
+
+/// A row's parsed canonical body, whose text members membership reads.
+struct Body(Value);
+
+impl Body {
+    fn of(row: &StoredEvent) -> Option<Self> {
+        parse(&row.body).ok().map(Self)
+    }
+
+    fn payload(&self, name: &str) -> Option<&str> {
+        self.0.get("payload")?.get(name)?.as_str()
+    }
+
+    fn causation(&self) -> Option<&str> {
+        self.0.get("causation_id")?.as_str()
+    }
+}
+
+fn recorded_at(row: &StoredEvent) -> Option<UtcNanos> {
+    UtcNanos::parse(&row.recorded_at).ok()
+}
+
+fn watermark(last: &StoredEvent) -> Watermark {
+    Watermark {
+        stream_id: last.stream_id.clone(),
+        seq: last.seq,
+        hash: last.hash,
+        recorded_at: last.recorded_at.clone(),
     }
 }
