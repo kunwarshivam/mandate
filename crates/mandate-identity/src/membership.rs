@@ -1,5 +1,5 @@
 //! The membership fold of journal spec §9.12 and identity spec §5 (E9-7, DEC-657): a workspace's
-//! membership records fold to each member's state, its effective roles, each invitation's
+//! membership records fold to each member's state, its effective and kept roles, each invitation's
 //! state, and the `workspace_users` count V-047 reads (§5.3, ID-7).
 //!
 //! It reads [`MembershipRecord`]s, this crate's own minimal input, which the workspace store's
@@ -140,6 +140,12 @@ impl MembershipFold {
         todo!()
     }
 
+    /// The roles a `deactivated` member keeps for a reactivation at `at`, each it held when
+    /// deactivated, effective or still cooling, less those removed since; empty in other states.
+    pub fn kept_roles(&self, _member: PrincipalId, _at: UtcNanos) -> BTreeSet<Role> {
+        todo!()
+    }
+
     /// The invitation's state at `at`, or `None` if it was not issued by then.
     pub fn invitation(&self, _invitation: InvitationId, _at: UtcNanos) -> Option<InvitationState> {
         todo!()
@@ -169,7 +175,7 @@ pub enum RecordRefusal {
 
 /// The writer's check that a record's `independent_approval_required` equals `effective`, the
 /// workspace's effective policy at the record's `event_time` (mandate spec §4.3), which the caller
-/// reads from the policy fold (DEC-657 item 6). A record with no such member passes.
+/// reads from the policy fold (DEC-657 item 7). A record with no such member passes.
 pub fn check_independence(
     _record: &MembershipRecord,
     _effective: bool,
