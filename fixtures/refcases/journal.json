@@ -20840,6 +20840,45 @@
     }
    },
    {
+    "name": "checked_daily_with_tools_missing",
+    "clause": "rules 57 and 58: a later contract check finds an allowlisted tool absent (DEC-674)",
+    "base_draft": "checked_start",
+    "changes": [
+     {
+      "path": "payload.occasion",
+      "value": "daily"
+     },
+     {
+      "path": "payload.results",
+      "value": [
+       {
+        "check": "account",
+        "result": "passed",
+        "reason": null
+       },
+       {
+        "check": "contract",
+        "result": "failed",
+        "reason": "tools_missing"
+       },
+       {
+        "check": "environment",
+        "result": "passed",
+        "reason": null
+       },
+       {
+        "check": "scope",
+        "result": "passed",
+        "reason": null
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "unreadable_account_without_a_reference",
     "clause": "rule 62",
     "base_draft": "checked_start",
@@ -21053,6 +21092,28 @@
      {
       "path": "payload.reason",
       "value": "lease_expired"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "suspended_on_a_failed_check",
+    "clause": "rule 59: a later tools_missing suspends with check_failed (DEC-674)",
+    "base_draft": "state_degraded",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "active"
+     },
+     {
+      "path": "payload.to",
+      "value": "suspended"
+     },
+     {
+      "path": "payload.reason",
+      "value": "check_failed"
      }
     ],
     "expect": {
@@ -22626,6 +22687,145 @@
           "reason": null
          }
         ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "mcp_later_tools_missing_suspends",
+    "clause": "rules 59, 60, and 68: a later contract check failing with tools_missing suspends with check_failed (DEC-674)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "contract",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       },
+       {
+        "path": "payload.broker",
+        "value": "robinhood"
+       },
+       {
+        "path": "payload.environment",
+        "value": "live"
+       },
+       {
+        "path": "environment",
+        "value": "live"
+       },
+       {
+        "path": "payload.margin_attestation",
+        "value": "cash_account"
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "daily"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "contract",
+          "result": "failed",
+          "reason": "tools_missing"
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "check_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      }
@@ -34541,7 +34741,7 @@
   ]
  },
  "membership": {
-  "spec": "docs/specs/journal.md v0.19 §9.8 (DEC-437 item 9, DEC-648)",
+  "spec": "docs/specs/journal.md v0.25 §9.12 (DEC-437 item 9, DEC-648)",
   "drafts": {
    "invited": {
     "envelope_version": 1,
@@ -34821,7 +35021,7 @@
   "invalid_drafts": [
    {
     "name": "invited.invitation.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34837,7 +35037,7 @@
    },
    {
     "name": "invited.invitation.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34853,7 +35053,7 @@
    },
    {
     "name": "invited.roles.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34869,7 +35069,7 @@
    },
    {
     "name": "invited.invited_by.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34885,7 +35085,7 @@
    },
    {
     "name": "invited.invited_by.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34901,7 +35101,7 @@
    },
    {
     "name": "invited.step_up.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34917,7 +35117,7 @@
    },
    {
     "name": "invited.invited_at.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34933,7 +35133,7 @@
    },
    {
     "name": "invited.invited_at.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34949,7 +35149,7 @@
    },
    {
     "name": "invited.expires_at.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34965,7 +35165,7 @@
    },
    {
     "name": "invited.expires_at.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34981,7 +35181,7 @@
    },
    {
     "name": "invited.session_ref.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -34997,7 +35197,7 @@
    },
    {
     "name": "invited.session_ref.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -35013,7 +35213,7 @@
    },
    {
     "name": "invited.invitation.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -35029,7 +35229,7 @@
    },
    {
     "name": "invited.roles.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -35045,7 +35245,7 @@
    },
    {
     "name": "invited.invited_by.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -35061,7 +35261,7 @@
    },
    {
     "name": "invited.step_up.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -35077,7 +35277,7 @@
    },
    {
     "name": "invited.expires_at.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invited",
     "changes": [
      {
@@ -35093,7 +35293,7 @@
    },
    {
     "name": "invited.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "invited",
     "changes": [
      {
@@ -35109,7 +35309,7 @@
    },
    {
     "name": "invited.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "invited",
     "changes": [
      {
@@ -35125,7 +35325,7 @@
    },
    {
     "name": "invitation_revoked.invitation.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invitation_revoked",
     "changes": [
      {
@@ -35141,7 +35341,7 @@
    },
    {
     "name": "invitation_revoked.invitation.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invitation_revoked",
     "changes": [
      {
@@ -35157,7 +35357,7 @@
    },
    {
     "name": "invitation_revoked.revoked_by.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invitation_revoked",
     "changes": [
      {
@@ -35173,7 +35373,7 @@
    },
    {
     "name": "invitation_revoked.revoked_by.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invitation_revoked",
     "changes": [
      {
@@ -35189,7 +35389,7 @@
    },
    {
     "name": "invitation_revoked.invitation.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invitation_revoked",
     "changes": [
      {
@@ -35205,7 +35405,7 @@
    },
    {
     "name": "invitation_revoked.revoked_by.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "invitation_revoked",
     "changes": [
      {
@@ -35221,7 +35421,7 @@
    },
    {
     "name": "invitation_revoked.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "invitation_revoked",
     "changes": [
      {
@@ -35237,7 +35437,7 @@
    },
    {
     "name": "invitation_revoked.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "invitation_revoked",
     "changes": [
      {
@@ -35253,7 +35453,7 @@
    },
    {
     "name": "activated.member.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35269,7 +35469,7 @@
    },
    {
     "name": "activated.member.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35285,7 +35485,7 @@
    },
    {
     "name": "activated.invitation.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35301,7 +35501,7 @@
    },
    {
     "name": "activated.invitation.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35317,7 +35517,7 @@
    },
    {
     "name": "activated.reason.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35333,7 +35533,7 @@
    },
    {
     "name": "activated.reason.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35349,7 +35549,7 @@
    },
    {
     "name": "activated.roles.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35365,7 +35565,7 @@
    },
    {
     "name": "activated.method.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35381,7 +35581,7 @@
    },
    {
     "name": "activated.method.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35397,7 +35597,7 @@
    },
    {
     "name": "activated.activated_at.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35413,7 +35613,7 @@
    },
    {
     "name": "activated.activated_at.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35429,7 +35629,7 @@
    },
    {
     "name": "activated.independent_approval_required.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35445,7 +35645,7 @@
    },
    {
     "name": "activated.cool_off_ends_at.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35461,7 +35661,7 @@
    },
    {
     "name": "activated.cool_off_ends_at.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35477,7 +35677,7 @@
    },
    {
     "name": "activated.member.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35493,7 +35693,7 @@
    },
    {
     "name": "activated.reason.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35509,7 +35709,7 @@
    },
    {
     "name": "activated.roles.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35525,7 +35725,7 @@
    },
    {
     "name": "activated.method.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35541,7 +35741,7 @@
    },
    {
     "name": "activated.activated_at.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35557,7 +35757,7 @@
    },
    {
     "name": "activated.independent_approval_required.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35573,7 +35773,7 @@
    },
    {
     "name": "activated.cool_off_ends_at.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "activated",
     "changes": [
      {
@@ -35589,7 +35789,7 @@
    },
    {
     "name": "activated.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "activated",
     "changes": [
      {
@@ -35605,7 +35805,7 @@
    },
    {
     "name": "activated.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "activated",
     "changes": [
      {
@@ -35621,7 +35821,7 @@
    },
    {
     "name": "role_changed.member.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35637,7 +35837,7 @@
    },
    {
     "name": "role_changed.member.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35653,7 +35853,7 @@
    },
    {
     "name": "role_changed.changed_by.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35669,7 +35869,7 @@
    },
    {
     "name": "role_changed.changed_by.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35685,7 +35885,7 @@
    },
    {
     "name": "role_changed.added.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35703,7 +35903,7 @@
    },
    {
     "name": "role_changed.removed.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35719,7 +35919,7 @@
    },
    {
     "name": "role_changed.changed_at.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35735,7 +35935,7 @@
    },
    {
     "name": "role_changed.changed_at.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35751,7 +35951,7 @@
    },
    {
     "name": "role_changed.independent_approval_required.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35767,7 +35967,7 @@
    },
    {
     "name": "role_changed.step_up.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35783,7 +35983,7 @@
    },
    {
     "name": "role_changed.member.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35799,7 +35999,7 @@
    },
    {
     "name": "role_changed.changed_by.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35815,7 +36015,7 @@
    },
    {
     "name": "role_changed.added.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35831,7 +36031,7 @@
    },
    {
     "name": "role_changed.removed.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35847,7 +36047,7 @@
    },
    {
     "name": "role_changed.changed_at.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35863,7 +36063,7 @@
    },
    {
     "name": "role_changed.independent_approval_required.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35879,7 +36079,7 @@
    },
    {
     "name": "role_changed.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35895,7 +36095,7 @@
    },
    {
     "name": "role_changed.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -35911,7 +36111,7 @@
    },
    {
     "name": "deactivated.member.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -35927,7 +36127,7 @@
    },
    {
     "name": "deactivated.member.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -35943,7 +36143,7 @@
    },
    {
     "name": "deactivated.by.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -35959,7 +36159,7 @@
    },
    {
     "name": "deactivated.by.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -35975,7 +36175,7 @@
    },
    {
     "name": "deactivated.reason.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -35991,7 +36191,7 @@
    },
    {
     "name": "deactivated.reason.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -36007,7 +36207,7 @@
    },
    {
     "name": "deactivated.member.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -36023,7 +36223,7 @@
    },
    {
     "name": "deactivated.by.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -36039,7 +36239,7 @@
    },
    {
     "name": "deactivated.reason.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -36055,7 +36255,7 @@
    },
    {
     "name": "deactivated.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -36071,7 +36271,7 @@
    },
    {
     "name": "deactivated.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -36087,7 +36287,7 @@
    },
    {
     "name": "reactivated.member.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36103,7 +36303,7 @@
    },
    {
     "name": "reactivated.member.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36119,7 +36319,7 @@
    },
    {
     "name": "reactivated.by.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36135,7 +36335,7 @@
    },
    {
     "name": "reactivated.by.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36151,7 +36351,7 @@
    },
    {
     "name": "reactivated.step_up.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36167,7 +36367,7 @@
    },
    {
     "name": "reactivated.roles.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36183,7 +36383,7 @@
    },
    {
     "name": "reactivated.reactivated_at.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36199,7 +36399,7 @@
    },
    {
     "name": "reactivated.reactivated_at.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36215,7 +36415,7 @@
    },
    {
     "name": "reactivated.independent_approval_required.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36231,7 +36431,7 @@
    },
    {
     "name": "reactivated.cool_off_ends_at.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36247,7 +36447,7 @@
    },
    {
     "name": "reactivated.cool_off_ends_at.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36263,7 +36463,7 @@
    },
    {
     "name": "reactivated.member.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36279,7 +36479,7 @@
    },
    {
     "name": "reactivated.by.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36295,7 +36495,7 @@
    },
    {
     "name": "reactivated.step_up.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36311,7 +36511,7 @@
    },
    {
     "name": "reactivated.roles.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36327,7 +36527,7 @@
    },
    {
     "name": "reactivated.reactivated_at.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36343,7 +36543,7 @@
    },
    {
     "name": "reactivated.independent_approval_required.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36359,7 +36559,7 @@
    },
    {
     "name": "reactivated.cool_off_ends_at.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36375,7 +36575,7 @@
    },
    {
     "name": "reactivated.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36391,7 +36591,7 @@
    },
    {
     "name": "reactivated.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36407,7 +36607,7 @@
    },
    {
     "name": "removed.member.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "removed",
     "changes": [
      {
@@ -36423,7 +36623,7 @@
    },
    {
     "name": "removed.member.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "removed",
     "changes": [
      {
@@ -36439,7 +36639,7 @@
    },
    {
     "name": "removed.by.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "removed",
     "changes": [
      {
@@ -36455,7 +36655,7 @@
    },
    {
     "name": "removed.by.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "removed",
     "changes": [
      {
@@ -36471,7 +36671,7 @@
    },
    {
     "name": "removed.reason.kind",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "removed",
     "changes": [
      {
@@ -36487,7 +36687,7 @@
    },
    {
     "name": "removed.reason.form",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "removed",
     "changes": [
      {
@@ -36503,7 +36703,7 @@
    },
    {
     "name": "removed.member.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "removed",
     "changes": [
      {
@@ -36519,7 +36719,7 @@
    },
    {
     "name": "removed.by.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "removed",
     "changes": [
      {
@@ -36535,7 +36735,7 @@
    },
    {
     "name": "removed.reason.null",
-    "clause": "§9.8 types",
+    "clause": "§9.12 types",
     "base_draft": "removed",
     "changes": [
      {
@@ -36551,7 +36751,7 @@
    },
    {
     "name": "removed.missing",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "removed",
     "changes": [
      {
@@ -36567,7 +36767,7 @@
    },
    {
     "name": "removed.extra",
-    "clause": "§9.8 closed",
+    "clause": "§9.12 closed",
     "base_draft": "removed",
     "changes": [
      {
@@ -36583,7 +36783,7 @@
    },
    {
     "name": "invited_role_unknown",
-    "clause": "§9.8: `role` is a workspace role; an org role is not",
+    "clause": "§9.12: `role` is a workspace role; an org role is not",
     "base_draft": "invited",
     "changes": [
      {
@@ -36601,7 +36801,7 @@
    },
    {
     "name": "added_role_missing_its_end",
-    "clause": "§9.8: each added role is closed",
+    "clause": "§9.12: each added role is closed",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -36621,7 +36821,7 @@
    },
    {
     "name": "step_up_time_as_seconds",
-    "clause": "§9.8: step-up evidence is §9.2's, with a timestamp",
+    "clause": "§9.12: step-up evidence is §9.2's, with a timestamp",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36653,7 +36853,7 @@
    },
    {
     "name": "invited_roles_unsorted",
-    "clause": "rule 54",
+    "clause": "rule 96",
     "base_draft": "invited",
     "changes": [
      {
@@ -36672,7 +36872,7 @@
    },
    {
     "name": "activated_roles_repeated",
-    "clause": "rule 54: a repeat is refused as a swap is",
+    "clause": "rule 96: a repeat is refused as a swap is",
     "base_draft": "activated",
     "changes": [
      {
@@ -36691,7 +36891,7 @@
    },
    {
     "name": "removed_unsorted",
-    "clause": "rule 54",
+    "clause": "rule 96",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -36710,7 +36910,7 @@
    },
    {
     "name": "added_unsorted",
-    "clause": "rule 54",
+    "clause": "rule 96",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -36735,7 +36935,7 @@
    },
    {
     "name": "invited_by_another",
-    "clause": "rule 55: the writer is the inviter",
+    "clause": "rule 97: the writer is the inviter",
     "base_draft": "invited",
     "changes": [
      {
@@ -36751,7 +36951,7 @@
    },
    {
     "name": "revoked_by_another",
-    "clause": "rule 55",
+    "clause": "rule 97",
     "base_draft": "invitation_revoked",
     "changes": [
      {
@@ -36767,7 +36967,7 @@
    },
    {
     "name": "removed_by_another",
-    "clause": "rule 55",
+    "clause": "rule 97",
     "base_draft": "removed",
     "changes": [
      {
@@ -36783,7 +36983,7 @@
    },
    {
     "name": "invited_by_the_system",
-    "clause": "rule 56: an admin invites",
+    "clause": "rule 98: an admin invites",
     "base_draft": "invited",
     "changes": [
      {
@@ -36812,7 +37012,7 @@
    },
    {
     "name": "founding_by_a_user",
-    "clause": "rule 56: the system issues the founding grant (ID-13)",
+    "clause": "rule 98: the system issues the founding grant (ID-13)",
     "base_draft": "founding",
     "changes": [
      {
@@ -36837,7 +37037,7 @@
    },
    {
     "name": "accepted_by_the_system",
-    "clause": "rule 56: the invitee accepts",
+    "clause": "rule 98: the invitee accepts",
     "base_draft": "activated",
     "changes": [
      {
@@ -36862,7 +37062,7 @@
    },
    {
     "name": "deprovisioned_by_a_user",
-    "clause": "rule 56: the directory sync deprovisions",
+    "clause": "rule 98: the directory sync deprovisions",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -36878,7 +37078,7 @@
    },
    {
     "name": "org_deleted_by_a_user",
-    "clause": "rule 56",
+    "clause": "rule 98",
     "base_draft": "removed",
     "changes": [
      {
@@ -36894,7 +37094,7 @@
    },
    {
     "name": "role_changed_by_a_platform_operator",
-    "clause": "rule 56: platform staff never change a membership (ID-12)",
+    "clause": "rule 98: platform staff never change a membership (ID-12)",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -36919,7 +37119,7 @@
    },
    {
     "name": "own_roles_changed",
-    "clause": "rule 57: no admin changes their own roles (ID-13)",
+    "clause": "rule 99: no admin changes their own roles (ID-13)",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -36935,7 +37135,7 @@
    },
    {
     "name": "own_reactivation",
-    "clause": "rule 57",
+    "clause": "rule 99",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -36951,7 +37151,7 @@
    },
    {
     "name": "own_deactivation_as_admin",
-    "clause": "rule 57: leaving is `left`",
+    "clause": "rule 99: leaving is `left`",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -36967,7 +37167,7 @@
    },
    {
     "name": "own_removal",
-    "clause": "rule 57",
+    "clause": "rule 99",
     "base_draft": "removed",
     "changes": [
      {
@@ -36983,7 +37183,7 @@
    },
    {
     "name": "left_by_another",
-    "clause": "rule 57: only the member leaves",
+    "clause": "rule 99: only the member leaves",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -36999,7 +37199,7 @@
    },
    {
     "name": "accepted_without_its_invitation",
-    "clause": "rule 57",
+    "clause": "rule 99",
     "base_draft": "activated",
     "changes": [
      {
@@ -37015,7 +37215,7 @@
    },
    {
     "name": "founding_with_an_invitation",
-    "clause": "rule 57",
+    "clause": "rule 99",
     "base_draft": "founding",
     "changes": [
      {
@@ -37031,7 +37231,7 @@
    },
    {
     "name": "accepted_for_another",
-    "clause": "rule 57: the invitee who signed in is the member",
+    "clause": "rule 99: the invitee who signed in is the member",
     "base_draft": "activated",
     "changes": [
      {
@@ -37047,7 +37247,7 @@
    },
    {
     "name": "invited_to_no_role",
-    "clause": "rule 58",
+    "clause": "rule 100",
     "base_draft": "invited",
     "changes": [
      {
@@ -37063,7 +37263,7 @@
    },
    {
     "name": "activated_with_no_role",
-    "clause": "rule 58",
+    "clause": "rule 100",
     "base_draft": "activated",
     "changes": [
      {
@@ -37083,7 +37283,7 @@
    },
    {
     "name": "founding_without_an_admin",
-    "clause": "rule 58: a workspace always has an admin",
+    "clause": "rule 100: a workspace always has an admin",
     "base_draft": "founding",
     "changes": [
      {
@@ -37102,7 +37302,7 @@
    },
    {
     "name": "role_change_changing_nothing",
-    "clause": "rule 58",
+    "clause": "rule 100",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37126,7 +37326,7 @@
    },
    {
     "name": "role_added_and_removed",
-    "clause": "rule 58",
+    "clause": "rule 100",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37144,7 +37344,7 @@
    },
    {
     "name": "grant_without_step_up",
-    "clause": "rule 59: a grant needs step-up",
+    "clause": "rule 101: a grant needs step-up",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37160,7 +37360,7 @@
    },
    {
     "name": "removal_with_step_up",
-    "clause": "rule 59: a removal carries none",
+    "clause": "rule 101: a removal carries none",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37176,7 +37376,7 @@
    },
    {
     "name": "live_step_up_by_cli_confirm",
-    "clause": "rule 60: `live` takes a passkey only",
+    "clause": "rule 102: `live` takes a passkey only",
     "base_draft": "invited",
     "changes": [
      {
@@ -37196,7 +37396,7 @@
    },
    {
     "name": "paper_step_up_by_password",
-    "clause": "rule 60",
+    "clause": "rule 102",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37212,7 +37412,7 @@
    },
    {
     "name": "cool_off_of_an_hour",
-    "clause": "rule 61: zero or exactly 24 hours",
+    "clause": "rule 103: zero or exactly 24 hours",
     "base_draft": "activated",
     "changes": [
      {
@@ -37228,7 +37428,7 @@
    },
    {
     "name": "cool_off_a_nanosecond_short",
-    "clause": "rule 61",
+    "clause": "rule 103",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37244,7 +37444,7 @@
    },
    {
     "name": "cool_off_before_its_start",
-    "clause": "rule 61",
+    "clause": "rule 103",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37260,7 +37460,7 @@
    },
    {
     "name": "founding_cooling_off",
-    "clause": "rule 61: the founding grant never has one",
+    "clause": "rule 103: the founding grant never has one",
     "base_draft": "founding",
     "changes": [
      {
@@ -37276,7 +37476,7 @@
    },
    {
     "name": "viewer_cooling_off",
-    "clause": "rule 61: only operator and approver may cool off",
+    "clause": "rule 103: only operator and approver may cool off",
     "base_draft": "activated",
     "changes": [
      {
@@ -37295,7 +37495,7 @@
    },
    {
     "name": "added_auditor_cooling_off",
-    "clause": "rule 61, at the added role's own end",
+    "clause": "rule 103, at the added role's own end",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37316,7 +37516,7 @@
    },
    {
     "name": "step_up_after_the_instant",
-    "clause": "rule 60: evidence authenticated after the grant fails closed (mandate spec §6.1)",
+    "clause": "rule 102: evidence authenticated after the grant fails closed (mandate spec §6.1)",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37332,7 +37532,7 @@
    },
    {
     "name": "step_up_a_nanosecond_stale",
-    "clause": "rule 60: 300 seconds and no more",
+    "clause": "rule 102: 300 seconds and no more",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37348,7 +37548,7 @@
    },
    {
     "name": "invitation_of_six_days",
-    "clause": "rule 62: 7 days exactly",
+    "clause": "rule 104: 7 days exactly",
     "base_draft": "invited",
     "changes": [
      {
@@ -37364,7 +37564,7 @@
    },
    {
     "name": "user_without_a_session",
-    "clause": "rule 63: a user acts through a session",
+    "clause": "rule 105: a user acts through a session",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -37380,7 +37580,7 @@
    },
    {
     "name": "system_with_a_session",
-    "clause": "rule 63: the system writes without one",
+    "clause": "rule 105: the system writes without one",
     "base_draft": "founding",
     "changes": [
      {
@@ -37396,7 +37596,7 @@
    },
    {
     "name": "activated_in_the_past",
-    "clause": "rules 61 and 64: the reviewer's probe, a grant dated back to escape its cool-off",
+    "clause": "rules 103 and 106: the reviewer's probe, a grant dated back to escape its cool-off",
     "base_draft": "activated",
     "changes": [
      {
@@ -37422,7 +37622,7 @@
    },
    {
     "name": "changed_a_nanosecond_in_the_future",
-    "clause": "rule 64",
+    "clause": "rule 106",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37438,7 +37638,7 @@
    },
    {
     "name": "invited_a_nanosecond_early",
-    "clause": "rule 64: a week from a self-chosen instant is still refused",
+    "clause": "rule 106: a week from a self-chosen instant is still refused",
     "base_draft": "invited",
     "changes": [
      {
@@ -37458,7 +37658,7 @@
    },
    {
     "name": "reactivated_in_the_past",
-    "clause": "rule 64",
+    "clause": "rule 106",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37474,7 +37674,7 @@
    },
    {
     "name": "cooling_without_independence",
-    "clause": "rule 61: no day is owed when independence is not required",
+    "clause": "rule 103: no day is owed when independence is not required",
     "base_draft": "activated",
     "changes": [
      {
@@ -37490,7 +37690,7 @@
    },
    {
     "name": "operator_at_once_under_independence",
-    "clause": "rule 61: a day is owed",
+    "clause": "rule 103: a day is owed",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37515,7 +37715,7 @@
    },
    {
     "name": "approver_reactivated_at_once_under_independence",
-    "clause": "rule 61",
+    "clause": "rule 103",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37531,7 +37731,7 @@
    },
    {
     "name": "reactivated_with_no_role",
-    "clause": "rule 58",
+    "clause": "rule 100",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37551,7 +37751,7 @@
    },
    {
     "name": "reactivated_roles_unsorted",
-    "clause": "rule 54",
+    "clause": "rule 96",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37570,7 +37770,7 @@
    },
    {
     "name": "rules_reported_in_order",
-    "clause": "§9.1 order: rule 55 before rule 57 before rule 61",
+    "clause": "§9.1 order: rule 97 before rule 99 before rule 103",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37607,7 +37807,7 @@
   "valid_drafts": [
    {
     "name": "activated_without_a_cool_off",
-    "clause": "rule 61: without independence required, an approver activates at once",
+    "clause": "rule 103: without independence required, an approver activates at once",
     "base_draft": "activated",
     "changes": [
      {
@@ -37625,7 +37825,7 @@
    },
    {
     "name": "viewer_activated_at_once",
-    "clause": "rule 61: a role that never cools off",
+    "clause": "rule 103: a role that never cools off",
     "base_draft": "activated",
     "changes": [
      {
@@ -37646,7 +37846,7 @@
    },
    {
     "name": "founding_owner_bundle_in_live",
-    "clause": "rules 56 to 58 and 61: the retail owner bundle (identity spec §4.3)",
+    "clause": "rules 98 to 100 and 103: the retail owner bundle (identity spec §4.3)",
     "base_draft": "founding",
     "changes": [
      {
@@ -37660,7 +37860,7 @@
    },
    {
     "name": "removal_only",
-    "clause": "rules 58 and 59: removing a role needs no step-up",
+    "clause": "rules 100 and 101: removing a role needs no step-up",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37678,7 +37878,7 @@
    },
    {
     "name": "grant_only",
-    "clause": "rule 58: nothing removed",
+    "clause": "rule 100: nothing removed",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37692,7 +37892,7 @@
    },
    {
     "name": "operator_granted_without_a_cool_off",
-    "clause": "rule 61: without independence required, an operator grant is effective at once",
+    "clause": "rule 103: without independence required, an operator grant is effective at once",
     "base_draft": "role_changed",
     "changes": [
      {
@@ -37719,7 +37919,7 @@
    },
    {
     "name": "left",
-    "clause": "rules 56 and 57: a member leaves by themselves",
+    "clause": "rules 98 and 99: a member leaves by themselves",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -37746,7 +37946,7 @@
    },
    {
     "name": "deprovisioned_by_the_directory",
-    "clause": "rule 56",
+    "clause": "rule 98",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -37777,7 +37977,7 @@
    },
    {
     "name": "group_removed",
-    "clause": "rule 56",
+    "clause": "rule 98",
     "base_draft": "deactivated",
     "changes": [
      {
@@ -37808,7 +38008,7 @@
    },
    {
     "name": "removed_by_org_deletion",
-    "clause": "rule 56",
+    "clause": "rule 98",
     "base_draft": "removed",
     "changes": [
      {
@@ -37839,7 +38039,7 @@
    },
    {
     "name": "reactivated_at_once",
-    "clause": "rule 61: without independence required",
+    "clause": "rule 103: without independence required",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37857,7 +38057,7 @@
    },
    {
     "name": "viewer_reactivated_at_once_under_independence",
-    "clause": "rule 61: kept roles that never cool off",
+    "clause": "rule 103: kept roles that never cool off",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37878,7 +38078,7 @@
    },
    {
     "name": "founding_under_independence",
-    "clause": "rule 61: the founding grant never cools off, even where independence is required",
+    "clause": "rule 103: the founding grant never cools off, even where independence is required",
     "base_draft": "founding",
     "changes": [
      {
@@ -37892,7 +38092,7 @@
    },
    {
     "name": "paper_step_up_by_cli_confirm",
-    "clause": "rule 60: `cli_confirm` in paper (DEC-155)",
+    "clause": "rule 102: `cli_confirm` in paper (DEC-155)",
     "base_draft": "invited",
     "changes": [
      {
@@ -37906,7 +38106,7 @@
    },
    {
     "name": "step_up_at_the_window_edge",
-    "clause": "rule 60: exactly 300 seconds is still valid",
+    "clause": "rule 102: exactly 300 seconds is still valid",
     "base_draft": "invited",
     "changes": [
      {
@@ -37920,7 +38120,7 @@
    },
    {
     "name": "step_up_at_the_instant",
-    "clause": "rule 60: zero seconds is valid",
+    "clause": "rule 102: zero seconds is valid",
     "base_draft": "reactivated",
     "changes": [
      {
@@ -37934,7 +38134,7 @@
    },
    {
     "name": "invited_to_every_role",
-    "clause": "rule 54",
+    "clause": "rule 96",
     "base_draft": "invited",
     "changes": [
      {

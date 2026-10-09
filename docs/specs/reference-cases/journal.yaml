@@ -12820,6 +12820,28 @@ connections:
         reason: null
     expect:
       outcome: Valid
+  - name: checked_daily_with_tools_missing
+    clause: 'rules 57 and 58: a later contract check finds an allowlisted tool absent (DEC-674)'
+    base_draft: checked_start
+    changes:
+    - path: payload.occasion
+      value: daily
+    - path: payload.results
+      value:
+      - check: account
+        result: passed
+        reason: null
+      - check: contract
+        result: failed
+        reason: tools_missing
+      - check: environment
+        result: passed
+        reason: null
+      - check: scope
+        result: passed
+        reason: null
+    expect:
+      outcome: Valid
   - name: unreadable_account_without_a_reference
     clause: rule 62
     base_draft: checked_start
@@ -12939,6 +12961,18 @@ connections:
       value: suspended
     - path: payload.reason
       value: lease_expired
+    expect:
+      outcome: Valid
+  - name: suspended_on_a_failed_check
+    clause: 'rule 59: a later tools_missing suspends with check_failed (DEC-674)'
+    base_draft: state_degraded
+    changes:
+    - path: payload.from
+      value: active
+    - path: payload.to
+      value: suspended
+    - path: payload.reason
+      value: check_failed
     expect:
       outcome: Valid
   - name: suspension_cleared
@@ -13159,7 +13193,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id034
+      - &id035
         path: payload.account_ref
         value: 01J8Z2ACCT00000000000000B7
     expect:
@@ -13684,7 +13718,7 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - &id035
+      - &id034
         path: payload.broker
         value: robinhood
       - *id031
@@ -13710,6 +13744,73 @@ connections:
         - check: scope
           result: passed
           reason: null
+    expect:
+      outcome: Valid
+  - name: mcp_later_tools_missing_suspends
+    clause: 'rules 59, 60, and 68: a later contract check failing with tools_missing suspends with check_failed (DEC-674)'
+    records:
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: contract
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: causation_id
+        value: 01J8Z4C1A000000000000000C1
+      - *id034
+      - *id031
+      - *id032
+      - *id033
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.occasion
+        value: daily
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: contract
+          result: failed
+          reason: tools_missing
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+      - path: payload.from
+        value: active
+      - path: payload.to
+        value: suspended
+      - path: payload.reason
+        value: check_failed
+      - path: causation_id
+        value: null
     expect:
       outcome: Valid
   - name: state_on_an_unbound_stream
@@ -13843,7 +13944,7 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id034
+      - *id035
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -13875,7 +13976,7 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id035
+      - *id034
       - *id031
       - *id032
       - *id033
@@ -13913,7 +14014,7 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id035
+      - *id034
       - *id031
       - *id032
       - *id033
@@ -20203,7 +20304,7 @@ hold:
     expect:
     - 1
 membership:
-  spec: docs/specs/journal.md v0.19 §9.8 (DEC-437 item 9, DEC-648)
+  spec: docs/specs/journal.md v0.25 §9.12 (DEC-437 item 9, DEC-648)
   drafts:
     invited:
       envelope_version: 1
@@ -20443,7 +20544,7 @@ membership:
       pii_refs: []
   invalid_drafts:
   - name: invited.invitation.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.invitation
@@ -20453,7 +20554,7 @@ membership:
       reason: schema
       path: payload.invitation
   - name: invited.invitation.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.invitation
@@ -20463,7 +20564,7 @@ membership:
       reason: non_canonical
       path: payload.invitation
   - name: invited.roles.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.roles
@@ -20473,7 +20574,7 @@ membership:
       reason: schema
       path: payload.roles
   - name: invited.invited_by.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.invited_by
@@ -20483,7 +20584,7 @@ membership:
       reason: schema
       path: payload.invited_by
   - name: invited.invited_by.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.invited_by
@@ -20493,7 +20594,7 @@ membership:
       reason: non_canonical
       path: payload.invited_by
   - name: invited.step_up.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.step_up
@@ -20503,7 +20604,7 @@ membership:
       reason: schema
       path: payload.step_up
   - name: invited.invited_at.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.invited_at
@@ -20513,7 +20614,7 @@ membership:
       reason: schema
       path: payload.invited_at
   - name: invited.invited_at.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.invited_at
@@ -20523,7 +20624,7 @@ membership:
       reason: non_canonical
       path: payload.invited_at
   - name: invited.expires_at.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.expires_at
@@ -20533,7 +20634,7 @@ membership:
       reason: schema
       path: payload.expires_at
   - name: invited.expires_at.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.expires_at
@@ -20543,7 +20644,7 @@ membership:
       reason: non_canonical
       path: payload.expires_at
   - name: invited.session_ref.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.session_ref
@@ -20553,7 +20654,7 @@ membership:
       reason: schema
       path: payload.session_ref
   - name: invited.session_ref.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.session_ref
@@ -20563,7 +20664,7 @@ membership:
       reason: non_canonical
       path: payload.session_ref
   - name: invited.invitation.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.invitation
@@ -20573,7 +20674,7 @@ membership:
       reason: schema
       path: payload.invitation
   - name: invited.roles.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.roles
@@ -20583,7 +20684,7 @@ membership:
       reason: schema
       path: payload.roles
   - name: invited.invited_by.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.invited_by
@@ -20593,7 +20694,7 @@ membership:
       reason: schema
       path: payload.invited_by
   - name: invited.step_up.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.step_up
@@ -20603,7 +20704,7 @@ membership:
       reason: schema
       path: payload.step_up
   - name: invited.expires_at.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invited
     changes:
     - path: payload.expires_at
@@ -20613,7 +20714,7 @@ membership:
       reason: schema
       path: payload.expires_at
   - name: invited.missing
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: invited
     changes:
     - path: payload.invitation
@@ -20623,7 +20724,7 @@ membership:
       reason: schema
       path: payload.invitation
   - name: invited.extra
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: invited
     changes:
     - path: payload.note
@@ -20633,7 +20734,7 @@ membership:
       reason: schema
       path: payload.note
   - name: invitation_revoked.invitation.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invitation_revoked
     changes:
     - path: payload.invitation
@@ -20643,7 +20744,7 @@ membership:
       reason: schema
       path: payload.invitation
   - name: invitation_revoked.invitation.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invitation_revoked
     changes:
     - path: payload.invitation
@@ -20653,7 +20754,7 @@ membership:
       reason: non_canonical
       path: payload.invitation
   - name: invitation_revoked.revoked_by.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invitation_revoked
     changes:
     - path: payload.revoked_by
@@ -20663,7 +20764,7 @@ membership:
       reason: schema
       path: payload.revoked_by
   - name: invitation_revoked.revoked_by.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invitation_revoked
     changes:
     - path: payload.revoked_by
@@ -20673,7 +20774,7 @@ membership:
       reason: non_canonical
       path: payload.revoked_by
   - name: invitation_revoked.invitation.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invitation_revoked
     changes:
     - path: payload.invitation
@@ -20683,7 +20784,7 @@ membership:
       reason: schema
       path: payload.invitation
   - name: invitation_revoked.revoked_by.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: invitation_revoked
     changes:
     - path: payload.revoked_by
@@ -20693,7 +20794,7 @@ membership:
       reason: schema
       path: payload.revoked_by
   - name: invitation_revoked.missing
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: invitation_revoked
     changes:
     - path: payload.invitation
@@ -20703,7 +20804,7 @@ membership:
       reason: schema
       path: payload.invitation
   - name: invitation_revoked.extra
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: invitation_revoked
     changes:
     - path: payload.note
@@ -20713,7 +20814,7 @@ membership:
       reason: schema
       path: payload.note
   - name: activated.member.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.member
@@ -20723,7 +20824,7 @@ membership:
       reason: schema
       path: payload.member
   - name: activated.member.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.member
@@ -20733,7 +20834,7 @@ membership:
       reason: non_canonical
       path: payload.member
   - name: activated.invitation.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.invitation
@@ -20743,7 +20844,7 @@ membership:
       reason: schema
       path: payload.invitation
   - name: activated.invitation.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.invitation
@@ -20753,7 +20854,7 @@ membership:
       reason: non_canonical
       path: payload.invitation
   - name: activated.reason.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.reason
@@ -20763,7 +20864,7 @@ membership:
       reason: schema
       path: payload.reason
   - name: activated.reason.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.reason
@@ -20773,7 +20874,7 @@ membership:
       reason: non_canonical
       path: payload.reason
   - name: activated.roles.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.roles
@@ -20783,7 +20884,7 @@ membership:
       reason: schema
       path: payload.roles
   - name: activated.method.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.method
@@ -20793,7 +20894,7 @@ membership:
       reason: schema
       path: payload.method
   - name: activated.method.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.method
@@ -20803,7 +20904,7 @@ membership:
       reason: non_canonical
       path: payload.method
   - name: activated.activated_at.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.activated_at
@@ -20813,7 +20914,7 @@ membership:
       reason: schema
       path: payload.activated_at
   - name: activated.activated_at.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.activated_at
@@ -20823,7 +20924,7 @@ membership:
       reason: non_canonical
       path: payload.activated_at
   - name: activated.independent_approval_required.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.independent_approval_required
@@ -20833,7 +20934,7 @@ membership:
       reason: schema
       path: payload.independent_approval_required
   - name: activated.cool_off_ends_at.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.cool_off_ends_at
@@ -20843,7 +20944,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: activated.cool_off_ends_at.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.cool_off_ends_at
@@ -20853,7 +20954,7 @@ membership:
       reason: non_canonical
       path: payload.cool_off_ends_at
   - name: activated.member.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.member
@@ -20863,7 +20964,7 @@ membership:
       reason: schema
       path: payload.member
   - name: activated.reason.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.reason
@@ -20873,7 +20974,7 @@ membership:
       reason: schema
       path: payload.reason
   - name: activated.roles.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.roles
@@ -20883,7 +20984,7 @@ membership:
       reason: schema
       path: payload.roles
   - name: activated.method.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.method
@@ -20893,7 +20994,7 @@ membership:
       reason: schema
       path: payload.method
   - name: activated.activated_at.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.activated_at
@@ -20903,7 +21004,7 @@ membership:
       reason: schema
       path: payload.activated_at
   - name: activated.independent_approval_required.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.independent_approval_required
@@ -20913,7 +21014,7 @@ membership:
       reason: schema
       path: payload.independent_approval_required
   - name: activated.cool_off_ends_at.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: activated
     changes:
     - path: payload.cool_off_ends_at
@@ -20923,7 +21024,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: activated.missing
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: activated
     changes:
     - path: payload.member
@@ -20933,7 +21034,7 @@ membership:
       reason: schema
       path: payload.member
   - name: activated.extra
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: activated
     changes:
     - path: payload.note
@@ -20943,7 +21044,7 @@ membership:
       reason: schema
       path: payload.note
   - name: role_changed.member.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.member
@@ -20953,7 +21054,7 @@ membership:
       reason: schema
       path: payload.member
   - name: role_changed.member.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.member
@@ -20963,7 +21064,7 @@ membership:
       reason: non_canonical
       path: payload.member
   - name: role_changed.changed_by.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.changed_by
@@ -20973,7 +21074,7 @@ membership:
       reason: schema
       path: payload.changed_by
   - name: role_changed.changed_by.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.changed_by
@@ -20983,7 +21084,7 @@ membership:
       reason: non_canonical
       path: payload.changed_by
   - name: role_changed.added.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -20994,7 +21095,7 @@ membership:
       reason: schema
       path: payload.added
   - name: role_changed.removed.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.removed
@@ -21004,7 +21105,7 @@ membership:
       reason: schema
       path: payload.removed
   - name: role_changed.changed_at.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.changed_at
@@ -21014,7 +21115,7 @@ membership:
       reason: schema
       path: payload.changed_at
   - name: role_changed.changed_at.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.changed_at
@@ -21024,7 +21125,7 @@ membership:
       reason: non_canonical
       path: payload.changed_at
   - name: role_changed.independent_approval_required.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.independent_approval_required
@@ -21034,7 +21135,7 @@ membership:
       reason: schema
       path: payload.independent_approval_required
   - name: role_changed.step_up.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.step_up
@@ -21044,7 +21145,7 @@ membership:
       reason: schema
       path: payload.step_up
   - name: role_changed.member.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.member
@@ -21054,7 +21155,7 @@ membership:
       reason: schema
       path: payload.member
   - name: role_changed.changed_by.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.changed_by
@@ -21064,7 +21165,7 @@ membership:
       reason: schema
       path: payload.changed_by
   - name: role_changed.added.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -21074,7 +21175,7 @@ membership:
       reason: schema
       path: payload.added
   - name: role_changed.removed.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.removed
@@ -21084,7 +21185,7 @@ membership:
       reason: schema
       path: payload.removed
   - name: role_changed.changed_at.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.changed_at
@@ -21094,7 +21195,7 @@ membership:
       reason: schema
       path: payload.changed_at
   - name: role_changed.independent_approval_required.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: role_changed
     changes:
     - path: payload.independent_approval_required
@@ -21104,7 +21205,7 @@ membership:
       reason: schema
       path: payload.independent_approval_required
   - name: role_changed.missing
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: role_changed
     changes:
     - path: payload.member
@@ -21114,7 +21215,7 @@ membership:
       reason: schema
       path: payload.member
   - name: role_changed.extra
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: role_changed
     changes:
     - path: payload.note
@@ -21124,7 +21225,7 @@ membership:
       reason: schema
       path: payload.note
   - name: deactivated.member.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: deactivated
     changes:
     - path: payload.member
@@ -21134,7 +21235,7 @@ membership:
       reason: schema
       path: payload.member
   - name: deactivated.member.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: deactivated
     changes:
     - path: payload.member
@@ -21144,7 +21245,7 @@ membership:
       reason: non_canonical
       path: payload.member
   - name: deactivated.by.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: deactivated
     changes:
     - path: payload.by
@@ -21154,7 +21255,7 @@ membership:
       reason: schema
       path: payload.by
   - name: deactivated.by.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: deactivated
     changes:
     - path: payload.by
@@ -21164,7 +21265,7 @@ membership:
       reason: non_canonical
       path: payload.by
   - name: deactivated.reason.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: deactivated
     changes:
     - path: payload.reason
@@ -21174,7 +21275,7 @@ membership:
       reason: schema
       path: payload.reason
   - name: deactivated.reason.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: deactivated
     changes:
     - path: payload.reason
@@ -21184,7 +21285,7 @@ membership:
       reason: non_canonical
       path: payload.reason
   - name: deactivated.member.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: deactivated
     changes:
     - path: payload.member
@@ -21194,7 +21295,7 @@ membership:
       reason: schema
       path: payload.member
   - name: deactivated.by.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: deactivated
     changes:
     - path: payload.by
@@ -21204,7 +21305,7 @@ membership:
       reason: schema
       path: payload.by
   - name: deactivated.reason.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: deactivated
     changes:
     - path: payload.reason
@@ -21214,7 +21315,7 @@ membership:
       reason: schema
       path: payload.reason
   - name: deactivated.missing
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: deactivated
     changes:
     - path: payload.member
@@ -21224,7 +21325,7 @@ membership:
       reason: schema
       path: payload.member
   - name: deactivated.extra
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: deactivated
     changes:
     - path: payload.note
@@ -21234,7 +21335,7 @@ membership:
       reason: schema
       path: payload.note
   - name: reactivated.member.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.member
@@ -21244,7 +21345,7 @@ membership:
       reason: schema
       path: payload.member
   - name: reactivated.member.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.member
@@ -21254,7 +21355,7 @@ membership:
       reason: non_canonical
       path: payload.member
   - name: reactivated.by.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.by
@@ -21264,7 +21365,7 @@ membership:
       reason: schema
       path: payload.by
   - name: reactivated.by.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.by
@@ -21274,7 +21375,7 @@ membership:
       reason: non_canonical
       path: payload.by
   - name: reactivated.step_up.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.step_up
@@ -21284,7 +21385,7 @@ membership:
       reason: schema
       path: payload.step_up
   - name: reactivated.roles.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.roles
@@ -21294,7 +21395,7 @@ membership:
       reason: schema
       path: payload.roles
   - name: reactivated.reactivated_at.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.reactivated_at
@@ -21304,7 +21405,7 @@ membership:
       reason: schema
       path: payload.reactivated_at
   - name: reactivated.reactivated_at.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.reactivated_at
@@ -21314,7 +21415,7 @@ membership:
       reason: non_canonical
       path: payload.reactivated_at
   - name: reactivated.independent_approval_required.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.independent_approval_required
@@ -21324,7 +21425,7 @@ membership:
       reason: schema
       path: payload.independent_approval_required
   - name: reactivated.cool_off_ends_at.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.cool_off_ends_at
@@ -21334,7 +21435,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: reactivated.cool_off_ends_at.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.cool_off_ends_at
@@ -21344,7 +21445,7 @@ membership:
       reason: non_canonical
       path: payload.cool_off_ends_at
   - name: reactivated.member.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.member
@@ -21354,7 +21455,7 @@ membership:
       reason: schema
       path: payload.member
   - name: reactivated.by.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.by
@@ -21364,7 +21465,7 @@ membership:
       reason: schema
       path: payload.by
   - name: reactivated.step_up.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.step_up
@@ -21374,7 +21475,7 @@ membership:
       reason: schema
       path: payload.step_up
   - name: reactivated.roles.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.roles
@@ -21384,7 +21485,7 @@ membership:
       reason: schema
       path: payload.roles
   - name: reactivated.reactivated_at.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.reactivated_at
@@ -21394,7 +21495,7 @@ membership:
       reason: schema
       path: payload.reactivated_at
   - name: reactivated.independent_approval_required.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.independent_approval_required
@@ -21404,7 +21505,7 @@ membership:
       reason: schema
       path: payload.independent_approval_required
   - name: reactivated.cool_off_ends_at.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: reactivated
     changes:
     - path: payload.cool_off_ends_at
@@ -21414,7 +21515,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: reactivated.missing
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: reactivated
     changes:
     - path: payload.member
@@ -21424,7 +21525,7 @@ membership:
       reason: schema
       path: payload.member
   - name: reactivated.extra
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: reactivated
     changes:
     - path: payload.note
@@ -21434,7 +21535,7 @@ membership:
       reason: schema
       path: payload.note
   - name: removed.member.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: removed
     changes:
     - path: payload.member
@@ -21444,7 +21545,7 @@ membership:
       reason: schema
       path: payload.member
   - name: removed.member.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: removed
     changes:
     - path: payload.member
@@ -21454,7 +21555,7 @@ membership:
       reason: non_canonical
       path: payload.member
   - name: removed.by.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: removed
     changes:
     - path: payload.by
@@ -21464,7 +21565,7 @@ membership:
       reason: schema
       path: payload.by
   - name: removed.by.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: removed
     changes:
     - path: payload.by
@@ -21474,7 +21575,7 @@ membership:
       reason: non_canonical
       path: payload.by
   - name: removed.reason.kind
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: removed
     changes:
     - path: payload.reason
@@ -21484,7 +21585,7 @@ membership:
       reason: schema
       path: payload.reason
   - name: removed.reason.form
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: removed
     changes:
     - path: payload.reason
@@ -21494,7 +21595,7 @@ membership:
       reason: non_canonical
       path: payload.reason
   - name: removed.member.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: removed
     changes:
     - path: payload.member
@@ -21504,7 +21605,7 @@ membership:
       reason: schema
       path: payload.member
   - name: removed.by.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: removed
     changes:
     - path: payload.by
@@ -21514,7 +21615,7 @@ membership:
       reason: schema
       path: payload.by
   - name: removed.reason.null
-    clause: §9.8 types
+    clause: §9.12 types
     base_draft: removed
     changes:
     - path: payload.reason
@@ -21524,7 +21625,7 @@ membership:
       reason: schema
       path: payload.reason
   - name: removed.missing
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: removed
     changes:
     - path: payload.member
@@ -21534,7 +21635,7 @@ membership:
       reason: schema
       path: payload.member
   - name: removed.extra
-    clause: §9.8 closed
+    clause: §9.12 closed
     base_draft: removed
     changes:
     - path: payload.note
@@ -21544,7 +21645,7 @@ membership:
       reason: schema
       path: payload.note
   - name: invited_role_unknown
-    clause: '§9.8: `role` is a workspace role; an org role is not'
+    clause: '§9.12: `role` is a workspace role; an org role is not'
     base_draft: invited
     changes:
     - path: payload.roles
@@ -21555,7 +21656,7 @@ membership:
       reason: non_canonical
       path: payload.roles[0]
   - name: added_role_missing_its_end
-    clause: '§9.8: each added role is closed'
+    clause: '§9.12: each added role is closed'
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -21566,7 +21667,7 @@ membership:
       reason: schema
       path: payload.added[0].cool_off_ends_at
   - name: step_up_time_as_seconds
-    clause: '§9.8: step-up evidence is §9.2''s, with a timestamp'
+    clause: '§9.12: step-up evidence is §9.2''s, with a timestamp'
     base_draft: reactivated
     changes:
     - path: payload.step_up.authenticated_at
@@ -21586,7 +21687,7 @@ membership:
       reason: wrong_stream
       path: event_type
   - name: invited_roles_unsorted
-    clause: rule 54
+    clause: rule 96
     base_draft: invited
     changes:
     - path: payload.roles
@@ -21598,7 +21699,7 @@ membership:
       reason: non_canonical
       path: payload.roles
   - name: activated_roles_repeated
-    clause: 'rule 54: a repeat is refused as a swap is'
+    clause: 'rule 96: a repeat is refused as a swap is'
     base_draft: activated
     changes:
     - path: payload.roles
@@ -21610,7 +21711,7 @@ membership:
       reason: non_canonical
       path: payload.roles
   - name: removed_unsorted
-    clause: rule 54
+    clause: rule 96
     base_draft: role_changed
     changes:
     - path: payload.removed
@@ -21622,7 +21723,7 @@ membership:
       reason: non_canonical
       path: payload.removed
   - name: added_unsorted
-    clause: rule 54
+    clause: rule 96
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -21636,7 +21737,7 @@ membership:
       reason: non_canonical
       path: payload.added
   - name: invited_by_another
-    clause: 'rule 55: the writer is the inviter'
+    clause: 'rule 97: the writer is the inviter'
     base_draft: invited
     changes:
     - path: payload.invited_by
@@ -21646,7 +21747,7 @@ membership:
       reason: schema
       path: payload.invited_by
   - name: revoked_by_another
-    clause: rule 55
+    clause: rule 97
     base_draft: invitation_revoked
     changes:
     - path: payload.revoked_by
@@ -21656,7 +21757,7 @@ membership:
       reason: schema
       path: payload.revoked_by
   - name: removed_by_another
-    clause: rule 55
+    clause: rule 97
     base_draft: removed
     changes:
     - path: payload.by
@@ -21666,7 +21767,7 @@ membership:
       reason: schema
       path: payload.by
   - name: invited_by_the_system
-    clause: 'rule 56: an admin invites'
+    clause: 'rule 98: an admin invites'
     base_draft: invited
     changes:
     - path: actor
@@ -21684,7 +21785,7 @@ membership:
       reason: schema
       path: actor.kind
   - name: founding_by_a_user
-    clause: 'rule 56: the system issues the founding grant (ID-13)'
+    clause: 'rule 98: the system issues the founding grant (ID-13)'
     base_draft: founding
     changes:
     - path: actor
@@ -21700,7 +21801,7 @@ membership:
       reason: schema
       path: actor.kind
   - name: accepted_by_the_system
-    clause: 'rule 56: the invitee accepts'
+    clause: 'rule 98: the invitee accepts'
     base_draft: activated
     changes:
     - path: actor
@@ -21716,7 +21817,7 @@ membership:
       reason: schema
       path: actor.kind
   - name: deprovisioned_by_a_user
-    clause: 'rule 56: the directory sync deprovisions'
+    clause: 'rule 98: the directory sync deprovisions'
     base_draft: deactivated
     changes:
     - path: payload.reason
@@ -21726,7 +21827,7 @@ membership:
       reason: schema
       path: actor.kind
   - name: org_deleted_by_a_user
-    clause: rule 56
+    clause: rule 98
     base_draft: removed
     changes:
     - path: payload.reason
@@ -21736,7 +21837,7 @@ membership:
       reason: schema
       path: actor.kind
   - name: role_changed_by_a_platform_operator
-    clause: 'rule 56: platform staff never change a membership (ID-12)'
+    clause: 'rule 98: platform staff never change a membership (ID-12)'
     base_draft: role_changed
     changes:
     - path: actor
@@ -21752,7 +21853,7 @@ membership:
       reason: schema
       path: actor.kind
   - name: own_roles_changed
-    clause: 'rule 57: no admin changes their own roles (ID-13)'
+    clause: 'rule 99: no admin changes their own roles (ID-13)'
     base_draft: role_changed
     changes:
     - path: payload.member
@@ -21762,7 +21863,7 @@ membership:
       reason: schema
       path: payload.changed_by
   - name: own_reactivation
-    clause: rule 57
+    clause: rule 99
     base_draft: reactivated
     changes:
     - path: payload.member
@@ -21772,7 +21873,7 @@ membership:
       reason: schema
       path: payload.by
   - name: own_deactivation_as_admin
-    clause: 'rule 57: leaving is `left`'
+    clause: 'rule 99: leaving is `left`'
     base_draft: deactivated
     changes:
     - path: payload.member
@@ -21782,7 +21883,7 @@ membership:
       reason: schema
       path: payload.by
   - name: own_removal
-    clause: rule 57
+    clause: rule 99
     base_draft: removed
     changes:
     - path: payload.member
@@ -21792,7 +21893,7 @@ membership:
       reason: schema
       path: payload.by
   - name: left_by_another
-    clause: 'rule 57: only the member leaves'
+    clause: 'rule 99: only the member leaves'
     base_draft: deactivated
     changes:
     - path: payload.reason
@@ -21802,7 +21903,7 @@ membership:
       reason: schema
       path: payload.by
   - name: accepted_without_its_invitation
-    clause: rule 57
+    clause: rule 99
     base_draft: activated
     changes:
     - path: payload.invitation
@@ -21812,7 +21913,7 @@ membership:
       reason: schema
       path: payload.invitation
   - name: founding_with_an_invitation
-    clause: rule 57
+    clause: rule 99
     base_draft: founding
     changes:
     - path: payload.invitation
@@ -21822,7 +21923,7 @@ membership:
       reason: schema
       path: payload.invitation
   - name: accepted_for_another
-    clause: 'rule 57: the invitee who signed in is the member'
+    clause: 'rule 99: the invitee who signed in is the member'
     base_draft: activated
     changes:
     - path: payload.member
@@ -21832,7 +21933,7 @@ membership:
       reason: schema
       path: payload.member
   - name: invited_to_no_role
-    clause: rule 58
+    clause: rule 100
     base_draft: invited
     changes:
     - path: payload.roles
@@ -21842,7 +21943,7 @@ membership:
       reason: schema
       path: payload.roles
   - name: activated_with_no_role
-    clause: rule 58
+    clause: rule 100
     base_draft: activated
     changes:
     - path: payload.roles
@@ -21854,7 +21955,7 @@ membership:
       reason: schema
       path: payload.roles
   - name: founding_without_an_admin
-    clause: 'rule 58: a workspace always has an admin'
+    clause: 'rule 100: a workspace always has an admin'
     base_draft: founding
     changes:
     - path: payload.roles
@@ -21866,7 +21967,7 @@ membership:
       reason: schema
       path: payload.roles
   - name: role_change_changing_nothing
-    clause: rule 58
+    clause: rule 100
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -21880,7 +21981,7 @@ membership:
       reason: schema
       path: payload.added
   - name: role_added_and_removed
-    clause: rule 58
+    clause: rule 100
     base_draft: role_changed
     changes:
     - path: payload.removed
@@ -21891,7 +21992,7 @@ membership:
       reason: schema
       path: payload.removed
   - name: grant_without_step_up
-    clause: 'rule 59: a grant needs step-up'
+    clause: 'rule 101: a grant needs step-up'
     base_draft: role_changed
     changes:
     - path: payload.step_up
@@ -21901,7 +22002,7 @@ membership:
       reason: schema
       path: payload.step_up
   - name: removal_with_step_up
-    clause: 'rule 59: a removal carries none'
+    clause: 'rule 101: a removal carries none'
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -21911,7 +22012,7 @@ membership:
       reason: schema
       path: payload.step_up
   - name: live_step_up_by_cli_confirm
-    clause: 'rule 60: `live` takes a passkey only'
+    clause: 'rule 102: `live` takes a passkey only'
     base_draft: invited
     changes:
     - path: environment
@@ -21923,7 +22024,7 @@ membership:
       reason: schema
       path: payload.step_up.method
   - name: paper_step_up_by_password
-    clause: rule 60
+    clause: rule 102
     base_draft: reactivated
     changes:
     - path: payload.step_up.method
@@ -21933,7 +22034,7 @@ membership:
       reason: schema
       path: payload.step_up.method
   - name: cool_off_of_an_hour
-    clause: 'rule 61: zero or exactly 24 hours'
+    clause: 'rule 103: zero or exactly 24 hours'
     base_draft: activated
     changes:
     - path: payload.cool_off_ends_at
@@ -21943,7 +22044,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: cool_off_a_nanosecond_short
-    clause: rule 61
+    clause: rule 103
     base_draft: reactivated
     changes:
     - path: payload.cool_off_ends_at
@@ -21953,7 +22054,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: cool_off_before_its_start
-    clause: rule 61
+    clause: rule 103
     base_draft: reactivated
     changes:
     - path: payload.cool_off_ends_at
@@ -21963,7 +22064,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: founding_cooling_off
-    clause: 'rule 61: the founding grant never has one'
+    clause: 'rule 103: the founding grant never has one'
     base_draft: founding
     changes:
     - path: payload.cool_off_ends_at
@@ -21973,7 +22074,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: viewer_cooling_off
-    clause: 'rule 61: only operator and approver may cool off'
+    clause: 'rule 103: only operator and approver may cool off'
     base_draft: activated
     changes:
     - path: payload.roles
@@ -21985,7 +22086,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: added_auditor_cooling_off
-    clause: rule 61, at the added role's own end
+    clause: rule 103, at the added role's own end
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -21997,7 +22098,7 @@ membership:
       reason: schema
       path: payload.added[0].cool_off_ends_at
   - name: step_up_after_the_instant
-    clause: 'rule 60: evidence authenticated after the grant fails closed (mandate spec §6.1)'
+    clause: 'rule 102: evidence authenticated after the grant fails closed (mandate spec §6.1)'
     base_draft: role_changed
     changes:
     - path: payload.step_up.authenticated_at
@@ -22007,7 +22108,7 @@ membership:
       reason: schema
       path: payload.step_up.authenticated_at
   - name: step_up_a_nanosecond_stale
-    clause: 'rule 60: 300 seconds and no more'
+    clause: 'rule 102: 300 seconds and no more'
     base_draft: reactivated
     changes:
     - path: payload.step_up.authenticated_at
@@ -22017,7 +22118,7 @@ membership:
       reason: schema
       path: payload.step_up.authenticated_at
   - name: invitation_of_six_days
-    clause: 'rule 62: 7 days exactly'
+    clause: 'rule 104: 7 days exactly'
     base_draft: invited
     changes:
     - path: payload.expires_at
@@ -22027,7 +22128,7 @@ membership:
       reason: schema
       path: payload.expires_at
   - name: user_without_a_session
-    clause: 'rule 63: a user acts through a session'
+    clause: 'rule 105: a user acts through a session'
     base_draft: deactivated
     changes:
     - path: payload.session_ref
@@ -22037,7 +22138,7 @@ membership:
       reason: schema
       path: payload.session_ref
   - name: system_with_a_session
-    clause: 'rule 63: the system writes without one'
+    clause: 'rule 105: the system writes without one'
     base_draft: founding
     changes:
     - path: payload.session_ref
@@ -22047,7 +22148,7 @@ membership:
       reason: schema
       path: payload.session_ref
   - name: activated_in_the_past
-    clause: 'rules 61 and 64: the reviewer''s probe, a grant dated back to escape its cool-off'
+    clause: 'rules 103 and 106: the reviewer''s probe, a grant dated back to escape its cool-off'
     base_draft: activated
     changes:
     - path: payload.activated_at
@@ -22062,7 +22163,7 @@ membership:
       - reason: schema
         path: payload.activated_at
   - name: changed_a_nanosecond_in_the_future
-    clause: rule 64
+    clause: rule 106
     base_draft: role_changed
     changes:
     - path: payload.changed_at
@@ -22072,7 +22173,7 @@ membership:
       reason: schema
       path: payload.changed_at
   - name: invited_a_nanosecond_early
-    clause: 'rule 64: a week from a self-chosen instant is still refused'
+    clause: 'rule 106: a week from a self-chosen instant is still refused'
     base_draft: invited
     changes:
     - path: payload.invited_at
@@ -22084,7 +22185,7 @@ membership:
       reason: schema
       path: payload.invited_at
   - name: reactivated_in_the_past
-    clause: rule 64
+    clause: rule 106
     base_draft: reactivated
     changes:
     - path: payload.reactivated_at
@@ -22094,7 +22195,7 @@ membership:
       reason: schema
       path: payload.reactivated_at
   - name: cooling_without_independence
-    clause: 'rule 61: no day is owed when independence is not required'
+    clause: 'rule 103: no day is owed when independence is not required'
     base_draft: activated
     changes:
     - path: payload.independent_approval_required
@@ -22104,7 +22205,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: operator_at_once_under_independence
-    clause: 'rule 61: a day is owed'
+    clause: 'rule 103: a day is owed'
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -22118,7 +22219,7 @@ membership:
       reason: schema
       path: payload.added[1].cool_off_ends_at
   - name: approver_reactivated_at_once_under_independence
-    clause: rule 61
+    clause: rule 103
     base_draft: reactivated
     changes:
     - path: payload.cool_off_ends_at
@@ -22128,7 +22229,7 @@ membership:
       reason: schema
       path: payload.cool_off_ends_at
   - name: reactivated_with_no_role
-    clause: rule 58
+    clause: rule 100
     base_draft: reactivated
     changes:
     - path: payload.roles
@@ -22140,7 +22241,7 @@ membership:
       reason: schema
       path: payload.roles
   - name: reactivated_roles_unsorted
-    clause: rule 54
+    clause: rule 96
     base_draft: reactivated
     changes:
     - path: payload.roles
@@ -22152,7 +22253,7 @@ membership:
       reason: non_canonical
       path: payload.roles
   - name: rules_reported_in_order
-    clause: '§9.1 order: rule 55 before rule 57 before rule 61'
+    clause: '§9.1 order: rule 97 before rule 99 before rule 103'
     base_draft: role_changed
     changes:
     - path: payload.changed_by
@@ -22172,7 +22273,7 @@ membership:
         path: payload.added[0].cool_off_ends_at
   valid_drafts:
   - name: activated_without_a_cool_off
-    clause: 'rule 61: without independence required, an approver activates at once'
+    clause: 'rule 103: without independence required, an approver activates at once'
     base_draft: activated
     changes:
     - path: payload.independent_approval_required
@@ -22182,7 +22283,7 @@ membership:
     expect:
       outcome: Valid
   - name: viewer_activated_at_once
-    clause: 'rule 61: a role that never cools off'
+    clause: 'rule 103: a role that never cools off'
     base_draft: activated
     changes:
     - path: payload.roles
@@ -22194,7 +22295,7 @@ membership:
     expect:
       outcome: Valid
   - name: founding_owner_bundle_in_live
-    clause: 'rules 56 to 58 and 61: the retail owner bundle (identity spec §4.3)'
+    clause: 'rules 98 to 100 and 103: the retail owner bundle (identity spec §4.3)'
     base_draft: founding
     changes:
     - path: environment
@@ -22202,7 +22303,7 @@ membership:
     expect:
       outcome: Valid
   - name: removal_only
-    clause: 'rules 58 and 59: removing a role needs no step-up'
+    clause: 'rules 100 and 101: removing a role needs no step-up'
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -22212,7 +22313,7 @@ membership:
     expect:
       outcome: Valid
   - name: grant_only
-    clause: 'rule 58: nothing removed'
+    clause: 'rule 100: nothing removed'
     base_draft: role_changed
     changes:
     - path: payload.removed
@@ -22220,7 +22321,7 @@ membership:
     expect:
       outcome: Valid
   - name: operator_granted_without_a_cool_off
-    clause: 'rule 61: without independence required, an operator grant is effective at once'
+    clause: 'rule 103: without independence required, an operator grant is effective at once'
     base_draft: role_changed
     changes:
     - path: payload.added
@@ -22234,7 +22335,7 @@ membership:
     expect:
       outcome: Valid
   - name: left
-    clause: 'rules 56 and 57: a member leaves by themselves'
+    clause: 'rules 98 and 99: a member leaves by themselves'
     base_draft: deactivated
     changes:
     - path: actor
@@ -22250,7 +22351,7 @@ membership:
     expect:
       outcome: Valid
   - name: deprovisioned_by_the_directory
-    clause: rule 56
+    clause: rule 98
     base_draft: deactivated
     changes:
     - path: actor
@@ -22264,7 +22365,7 @@ membership:
     expect:
       outcome: Valid
   - name: group_removed
-    clause: rule 56
+    clause: rule 98
     base_draft: deactivated
     changes:
     - path: actor
@@ -22278,7 +22379,7 @@ membership:
     expect:
       outcome: Valid
   - name: removed_by_org_deletion
-    clause: rule 56
+    clause: rule 98
     base_draft: removed
     changes:
     - path: actor
@@ -22292,7 +22393,7 @@ membership:
     expect:
       outcome: Valid
   - name: reactivated_at_once
-    clause: 'rule 61: without independence required'
+    clause: 'rule 103: without independence required'
     base_draft: reactivated
     changes:
     - path: payload.independent_approval_required
@@ -22302,7 +22403,7 @@ membership:
     expect:
       outcome: Valid
   - name: viewer_reactivated_at_once_under_independence
-    clause: 'rule 61: kept roles that never cool off'
+    clause: 'rule 103: kept roles that never cool off'
     base_draft: reactivated
     changes:
     - path: payload.roles
@@ -22314,7 +22415,7 @@ membership:
     expect:
       outcome: Valid
   - name: founding_under_independence
-    clause: 'rule 61: the founding grant never cools off, even where independence is required'
+    clause: 'rule 103: the founding grant never cools off, even where independence is required'
     base_draft: founding
     changes:
     - path: payload.independent_approval_required
@@ -22322,7 +22423,7 @@ membership:
     expect:
       outcome: Valid
   - name: paper_step_up_by_cli_confirm
-    clause: 'rule 60: `cli_confirm` in paper (DEC-155)'
+    clause: 'rule 102: `cli_confirm` in paper (DEC-155)'
     base_draft: invited
     changes:
     - path: payload.step_up.method
@@ -22330,7 +22431,7 @@ membership:
     expect:
       outcome: Valid
   - name: step_up_at_the_window_edge
-    clause: 'rule 60: exactly 300 seconds is still valid'
+    clause: 'rule 102: exactly 300 seconds is still valid'
     base_draft: invited
     changes:
     - path: payload.step_up.authenticated_at
@@ -22338,7 +22439,7 @@ membership:
     expect:
       outcome: Valid
   - name: step_up_at_the_instant
-    clause: 'rule 60: zero seconds is valid'
+    clause: 'rule 102: zero seconds is valid'
     base_draft: reactivated
     changes:
     - path: payload.step_up.authenticated_at
@@ -22346,7 +22447,7 @@ membership:
     expect:
       outcome: Valid
   - name: invited_to_every_role
-    clause: rule 54
+    clause: rule 96
     base_draft: invited
     changes:
     - path: payload.roles
