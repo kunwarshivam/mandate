@@ -1891,6 +1891,8 @@ def start_from_rows(
     hits = [(row, got) for row in rows if (got := fits(row))]
     if not hits:
         return refused
+    if len(hits) > 1 and "row.first_match" not in skip:
+        return {"outcome": "refused", "cause": "ambiguous_start"}
     row, got = hits[0]
     unchecked = row["event_type"] == "AnchorComputed" and "row.anchor_unchecked" in skip
     failure = None if unchecked else start_row_failure(row, skip)

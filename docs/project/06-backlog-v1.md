@@ -1708,15 +1708,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `StreamId` parses notice streams (journal, E5), then the audit reads list and page them, with a
   case in `crates/mandate-audit/tests/scope.rs`.
 - **E12-7 (Should, after E12-3's run)** As an operator, I want an alert when a requested
-  verification's trusted-start record fails its own checks, so that a damaged or forged control
-  stream row is looked at rather than only refused ([DEC-894](decisions/DEC-894.md) item 2). Today
-  the run refuses it with 422 `trusted_start` and records nothing ([DEC-787](decisions/DEC-787.md)
-  item 3). *Accepted when:* a start record that fails journal spec §11 check 1, 2, or 4, or rule
-  117, raises one operator alert carrying only opaque IDs (the workspace, the request, and the
-  record's `event_id`) and generic text, never the record's body, columns, or payload
-  (`AGENTS.md` rule 6, infrastructure design OPS-10); the alert records no `VerificationRun` and
-  raises no §11 SEV-1, since no range was walked; a cold store that cannot be read raises none,
-  being an outage rather than a damaged record; and a payload capture test covers it.
+  verification's trusted start shows tampering, so that a damaged or forged control stream row is
+  looked at rather than only refused ([DEC-894](decisions/DEC-894.md) items 1 and 2). Today the run
+  refuses it with 422 `trusted_start` and records nothing ([DEC-787](decisions/DEC-787.md) item 3,
+  DEC-894 item 1). *Accepted when:* a start record that fails journal spec §11 check 1, 2, or 4, or
+  rule 117, and a cold manifest whose digest is not the hot record's `manifest_hash`, each raise one
+  operator alert with only opaque IDs (the workspace, the request, the record's `event_id`) and
+  generic text, never the record's body, columns, or payload (`AGENTS.md` rule 6, infrastructure
+  design OPS-10); it records no `VerificationRun` and raises no §11 SEV-1, since no range was
+  walked; an unreadable cold store raises none, being an outage; a payload capture test covers it.
 
 ### E13 Hybrid deployment
 

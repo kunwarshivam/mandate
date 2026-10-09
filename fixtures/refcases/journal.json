@@ -58702,6 +58702,39 @@
      }
     },
     {
+     "name": "segment_exported_twice",
+     "clause": "DEC-893 item 7: the segment recorded again at seq 5, chained, in the foreign row's place",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+     "from_seq": 4,
+     "request": {
+      "kind": "manifest",
+      "manifest_hash": "660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f"
+     },
+     "replace": {
+      "index": 4,
+      "row": {
+       "stream_id": "ctl:ws_01J8Z2",
+       "seq": 5,
+       "event_id": "01J8Z3C6A000000000000000R6",
+       "event_type": "SegmentExported",
+       "schema_version": 1,
+       "environment": "paper",
+       "recorded_at": "2026-09-21T16:00:00.000000000Z",
+       "prev_hash": "c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da",
+       "hash": "5cd88f814002e68b20fc84aeac4191bcda0228387bc5e449e69769faea7189ec",
+       "body": "{\"actor\":{\"build\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"id\":\"control_services\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3C6A000000000000000R6\",\"event_time\":\"2026-09-21T16:00:00.000000000Z\",\"event_type\":\"SegmentExported\",\"payload\":{\"file_sha256\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"first_prev_hash\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"first_seq\":4,\"last_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"last_seq\":9,\"manifest_hash\":\"660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f\",\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1\"},\"pii_refs\":[],\"prev_hash\":\"c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da\",\"recorded_at\":\"2026-09-21T16:00:00.000000000Z\",\"schema_version\":1,\"seq\":5,\"stream_id\":\"ctl:ws_01J8Z2\"}"
+      }
+     },
+     "cold": {
+      "state": "read",
+      "bytes": "{\"file_sha256\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"first_prev_hash\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"first_seq\":4,\"last_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"last_seq\":9,\"stream\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1\"}"
+     },
+     "expect": {
+      "outcome": "refused",
+      "cause": "ambiguous_start"
+     }
+    },
+    {
      "name": "manifest_row_breaks_rule_117",
      "clause": "rule 117: the manifest hash is not its fields'",
      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
