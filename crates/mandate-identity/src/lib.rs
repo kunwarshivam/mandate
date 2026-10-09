@@ -45,6 +45,10 @@
 //! }
 //! ```
 //!
+//! **A sensitive data API can demand the permission too** (DEC-655): it takes a
+//! [`demand::Permitted`] witness, which only [`TenantContext::require`] yields, and only for a
+//! context authorized for the witness's permission ([`demand`]).
+//!
 //! **Org scope and one's own data get sealed contexts too** (DEC-832). An org-scope authorization
 //! yields an [`OrgContext`], carrying the organization's workspaces as the store enumerated them,
 //! never a caller's list; it is not a [`Tenant`], so no data API takes it, and it reaches a
@@ -149,7 +153,8 @@
 //!
 //! **Roles change only through their checks** (ID-13, §4.5): [`change_roles`] refuses a change to
 //! its author's own roles, the org owner role to anyone but an org owner, and a change that leaves
-//! no active org owner or workspace admin (§5.2). Refusals carry DEC-643's codes ([`Refusal`]).
+//! no active org owner or workspace admin (§5.2), and yields the step-up the change needs (ID-4,
+//! DEC-654). Refusals carry DEC-643's codes ([`Refusal`]).
 //!
 //! Every entry point is pure: no clock, no randomness, no I/O, ordered collections only.
 
@@ -158,6 +163,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_time::UtcNanos;
 
+pub mod demand;
 mod matrix;
 mod permission;
 
@@ -537,6 +543,16 @@ impl TenantContext {
     pub fn permission(&self) -> Permission {
         self.permission
     }
+
+    /// The witness a sensitive data API demands (DEC-655 item 2): `Ok` exactly when this context
+    /// was authorized for `P`'s permission, and otherwise [`Refusal::Forbidden`]. The witness
+    /// borrows this context, so it reports this context's workspace, organization, and principal.
+    pub fn require<P: demand::RequiredPermission>(
+        &self,
+    ) -> Result<demand::Permitted<'_, P>, Refusal> {
+        let _ = self;
+        Err(Refusal::Unimplemented { story: "E9-8" })
+    }
 }
 
 /// What every data API over a workspace takes: a [`TenantContext`] for a request, or, from E9-8,
@@ -567,6 +583,7 @@ pub trait Tenant: sealed::Sealed {
 mod sealed {
     pub trait Sealed {}
     impl Sealed for super::TenantContext {}
+    impl<P: super::demand::RequiredPermission> Sealed for super::demand::Permitted<'_, P> {}
 }
 
 /// What an authorization at an organization's scope yields (identity spec §4.5, DEC-832 items 1 to
@@ -767,6 +784,25 @@ impl Tenant for TenantContext {
     }
     fn kind(&self) -> PrincipalKind {
         self.kind
+    }
+}
+
+#[expect(
+    clippy::todo,
+    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
+)]
+impl<P: demand::RequiredPermission> Tenant for demand::Permitted<'_, P> {
+    fn workspace(&self) -> WorkspaceId {
+        todo!()
+    }
+    fn org(&self) -> OrgId {
+        todo!()
+    }
+    fn principal(&self) -> PrincipalId {
+        todo!()
+    }
+    fn kind(&self) -> PrincipalKind {
+        todo!()
     }
 }
 
@@ -1070,8 +1106,8 @@ pub enum Refusal {
     /// The change leaves the workspace with no active workspace admin.
     #[error("the workspace would have no active admin")]
     LastAdmin,
-    /// The stub of a story not yet implemented. It goes when E9-2 is implemented, so no caller
-    /// matches on it.
+    /// The stub of a story not yet implemented. It goes when E9-2 and E9-8 are implemented, so no
+    /// caller matches on it.
     #[error("{story} has not been implemented yet")]
     Unimplemented {
         /// The story.
@@ -1318,6 +1354,10 @@ impl<L: MembershipLookup> Grant<'_, L> {
 /// author's own deactivation is the leave row), then
 /// ID-13, the reserved owner role, and the last-owner and last-admin rules on the state after it.
 /// It reads every membership of the scope through `lookup`, and judges roles at `now`.
+///
+/// It yields the step-up the whole change needs, resolved (DEC-654 item 1): [`StepUp::Required`]
+/// when a part of it does (a grant at a workspace's scope, ID-4; any change through the org
+/// memberships row), otherwise [`StepUp::NotRequired`]; never `ForInvite` or `ForGrant`.
 pub fn change_roles(
     lookup: &impl MembershipLookup,
     author: &Principal,
@@ -1325,7 +1365,7 @@ pub fn change_roles(
     scope: Scope,
     change: &RoleChange,
     now: UtcNanos,
-) -> Result<(), Refusal> {
+) -> Result<StepUp, Refusal> {
     let _ = (lookup, author, session, scope, change, now);
     Err(Refusal::Unimplemented { story: "E9-2" })
 }

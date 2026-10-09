@@ -18,5 +18,5 @@
   `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/bounds.rs` (sessions,
   redirects, timeouts, the exit budget, and a canary in server text),
   `crates/mandate-mcp/src/tests/errors.rs`, and `crates/mandate-mcp/src/tests/contract.rs` (M2: the
-  allowlist, fund-movement refusal, and metadata canary; its part 2 adds the pinned hash and drift).
+  allowlist, fund-movement refusal, and metadata canary; `drift.rs` adds the pinned hash and drift).
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.

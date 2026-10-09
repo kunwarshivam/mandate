@@ -1547,6 +1547,8 @@ name = "mandate-authn"
 version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
+ "mandate-identity",
+ "mandate-identity-seal",
  "mandate-time",
  "proptest",
  "ring",
@@ -1624,6 +1626,7 @@ name = "mandate-connections"
 version = "0.0.0"
 dependencies = [
  "mandate-time",
+ "proptest",
  "secrecy",
  "thiserror",
 ]
@@ -1746,11 +1749,13 @@ dependencies = [
 name = "mandate-mcp"
 version = "0.0.0"
 dependencies = [
+ "mandate-canon",
  "proptest",
  "reqwest",
  "rustls",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror",
  "tokio",
 ]

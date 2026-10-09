@@ -1,10 +1,10 @@
-# Notifications and Approval Channels Spec (v0.2, draft)
+# Notifications and Approval Channels Spec (v0.3, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.2: round 1's minors fixed (E8-16, freeze rule); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
+| **Status** | Draft v0.3: wording and consistency only (DEC-712, DEC-722, and [#763](https://github.com/kunwarshivam/mandate/pull/763)'s review minors; freeze rule); v0.2 fixed round 1's minors (E8-16); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent); v0.3's readings DEC-712 (who dereferences the address, and `send` renders) and DEC-722 (allowlist labels) (Accepted, agent) |
 | **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
@@ -91,7 +91,7 @@ the dispatcher's own predicate (`AGENTS.md`, "Getting it right the first time").
 | ID | Invariant | How it is tested |
 |---|---|---|
 | NT-1 | **Payloads are opaque.** Anything that leaves the workspace deployment as a notice carries exactly a notice id (random, never a journal event id) and one text key from a closed set (§4.2), rendered through fixed templates. Never an instrument, side, quantity, price, order value, P&L, score, thesis, rule, deadline, agent name, mandate content, broker account, or personal data, the recipient's name included (`AGENTS.md` rule 6, [DEC-11](../project/04-decision-log.md#decisions), PX-6). The payload type has no field and no constructor that takes free text from domain data (rung 1). A web push also travels in an envelope the relay and the push service read (§4.6): its `urgency` and TTL are fixed per class, never taken from a deadline or any subject's time, so they reveal at most the class; the push endpoint is an address, under NT-2 | Type test: the payload and every channel's rendered message are built only from `Notification`, whose id type has no constructor from an event id; a captured-payload test seeds a workspace whose instruments, agent names, rule ids, prices, and user names are unique canary strings, drives every notice kind through every channel adapter and the relay, and scans every captured byte for every canary (E8-5's acceptance); an envelope test that every relayed and direct request's `urgency` and TTL equal its class's fixed pair whatever the subject's deadline, against the three pairs written into the test from DEC-700 item 3, not read from §4.6's table or the code's |
-| NT-2 | **Addresses stay minimal and private.** A recipient is journaled and logged only as an opaque user id and a channel. The address is read from the vault at send time, passed to the one provider that needs it, and never journaled, logged, or put in a metric | Log, metric, and journal scans for canary addresses after a full run; a test that the dispatcher's only path to an address is the vault client |
+| NT-2 | **Addresses stay minimal and private.** A recipient is journaled and logged only as an opaque user id and a channel. The address is read from the vault at send time, passed to the one provider that needs it, and never journaled, logged, or put in a metric | Log, metric, and journal scans for canary addresses after a full run; a test that the only path to an address is the vault client, called by the channel adapter (§5.2), and that the dispatcher holds only the handle |
 | NT-3 | **Approval happens only inside the workspace.** A grant, a skip, an acknowledgment, or any owner command reaches the runtime only as a control-stream event that workspace services write after authenticating the user in the workspace deployment ([mandate spec §6.4](mandate.md#64-approvals) "Responses"). No channel adapter, relay, provider webhook, email reply, or chat message can write one | Layering: the notification crates cannot depend on the control-stream writer (`xtask/layers.toml`); a fuzz test feeds every inbound path (replies, chat messages, button callbacks, provider webhooks) and asserts the control stream is unchanged |
 | NT-4 | **Links carry no authority.** A link holds the workspace app's fixed origin and the notice id, nothing else, so it reveals neither an event reference nor a creation time: no session, token, one-time code, or sign-in. Opening it requires sign-in; a grant requires step-up as mandate spec §6.1 and §6.4 require | Template test: every link matches `<origin>/n/<notice id>`; a property test that two notices about one cause get different ids and no id parses as a ULID of any journaled event; an end-to-end test opens a captured link with no session and reaches only the sign-in screen |
 | NT-5 | **Delivery never adds risk** (rule 3). Failure, delay, duplication, or loss of any notice changes no order, intent, limit, or mode. Its only effect on trading state is check 4 (`not_delivered`), which can only refuse a response. An approval nobody could see times out to `skip`. Check 4 is the only effect because only an approval reads delivery, and an approval gates only a risk-adding action: no exit, protective order, risk exit, owner exit, or kill switch is ever gated by an approval (`AGENTS.md` rules 2 and 13). So the claim holds under any later autonomy change that keeps those rules, and one that gated a risk-reducing action on an approval would break rule 13 first | Fault injection: with every push channel failing, hung, or duplicating, a soak run's intents, gate decisions, and modes are identical to a run with perfect delivery, except asks that time out to `skip` |
@@ -319,6 +319,9 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 
 ### 4.5 Chat
 
+**Deferred** (DEC-824): v1 has no chat channel (DEC-438 item 20 is not taken). This section is kept
+as the design for when chat is taken up.
+
 - **Slack:** an incoming webhook into a channel the owner chooses. The webhook URL is a credential:
   it lives in the vault and is never logged (rule 7). Link unfurling is turned off in the message.
 - **Telegram:** the platform's bot posts to the owner's chat. The owner links the chat by sending the
@@ -348,7 +351,9 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
   an IP literal, a trailing dot, a non-ASCII or `xn--` (IDN) label, or a percent-encoded character
   is refused, never normalized into a match. The host must then match the deployment's allowlist,
   whose entries are an exact host or `*.` and a domain; `*.domain` matches a proper subdomain at any
-  depth and never the domain itself. The default list is `fcm.googleapis.com`,
+  depth and never the domain itself. An entry names at least two labels (an exact host of two or
+  more; a wildcard's domain of two or more), and no label of an entry or of an endpoint's host
+  starts or ends with `-` (DEC-722). The default list is `fcm.googleapis.com`,
   `updates.push.services.mozilla.com`, `*.push.apple.com`, and `*.notify.windows.com`. A send follows
   no redirect: a `3xx` answer is a permanent failure, `address_rejected`. One parser
   (`mandate_webpush::PushEndpoint`) serves the workspace API, the dispatcher, and the relay, with one
@@ -404,20 +409,24 @@ The dispatcher **tails the journal**, which is its outbox:
    anywhere else, so a notice can never name an uncommitted event (NT-8, rule 5).
 2. For each new cause it mints a notice id, resolves the recipients (§3.3), and journals
    `NoticeIssued` before any send.
-3. For each recipient and push channel it reads the address from the vault and sends through the
-   channel's adapter (§5.2), then journals the outcome as `NoticeAttempted`.
-   **It reads an address only while it is active**, that is, while its last
+3. For each recipient and push channel it calls the channel's adapter (§5.2) with the closed notice
+   and the address handle, never the address; the adapter renders the message itself and
+   dereferences the handle through the vault client (DEC-712). The dispatcher then journals the
+   outcome as `NoticeAttempted`.
+   **An address is sent to only while it is active**, that is, while its last
    `NotificationAddressChanged` is `added` (workspace API spec §4.11), and only while its host is on
    the allowlist (§4.6). The single exception is the one last send of a
    `notification_address_changed` notice to the very address its `removed` event names: opaque like
    every notice, subject to the allowlist, retried within the safety window (NT-6), and never
-   repeated for a later notice. If the vault entry is already gone when that last send is made, the
-   attempt is `abandoned` with reason `retry_window_ended` (the safety window's reason, from
-   [#763](https://github.com/kunwarshivam/mandate/pull/763)): it is not `address_missing`, marks
+   repeated for a later notice. If the adapter finds the vault entry already gone when that last
+   send is made, the dispatcher journals the attempt `abandoned` with reason `retry_window_ended`
+   (the safety window's reason, from [#763](https://github.com/kunwarshivam/mandate/pull/763)): it
+   is not `address_missing`, marks
    nothing, and raises no `channel_lost`; once the entry is swept, no exception remains. **An active
    address whose vault entry is missing** (repaired by the member removing the address and setting it
-   again, workspace API spec §5.7; removing needs no entry) is a terminal `failed` with reason
-   `address_missing`: it does not mark the address `unreachable`, and it raises `channel_lost` once
+   again, workspace API spec §5.7; removing needs no entry) is reported by the adapter as
+   `permanent { address_missing }` (§5.2), and the dispatcher journals a terminal `failed` with
+   that reason: it does not mark the address `unreachable`, and it raises `channel_lost` once
    (§5.6).
 4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
    issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
@@ -439,7 +448,7 @@ Every channel is one adapter behind one interface:
 
 | Operation | Takes | Returns |
 |---|---|---|
-| `send` | A `Notification` (closed), the rendered template for the channel, an address handle, the idempotency key | `accepted { provider_message_id }`, `retryable { reason }`, or `permanent { reason }` |
+| `send` | A `Notification` (closed), which the adapter renders through the channel's fixed templates itself (DEC-712), an address handle, the idempotency key | `accepted { provider_message_id }`, `retryable { reason }`, or `permanent { reason }` |
 | `receipt` (inbound) | A provider callback, verified by the provider's signature | `delivered`, `bounced`, `complained`, or `unsubscribed`, for a `provider_message_id` |
 
 - Adapters take no string from the caller except the address handle, which they dereference
@@ -451,9 +460,10 @@ Every channel is one adapter behind one interface:
   `complained`, and `unsubscribed` are `permanent`, mark the address `unreachable`, and raise
   `channel_lost` (§5.6) (DEC-700 item 8). The brief's own opt-out is not a receipt and never one of
   these reasons (§5.7).
-- `address_missing` is the dispatcher's own finding (§5.1), not a provider verdict: the address is
-  active but its vault entry is gone. It is `permanent`, marks no address `unreachable`, and raises
-  `channel_lost` once (§5.6).
+- `address_missing` is the platform's own finding, not a provider verdict: the address is active,
+  so the dispatcher sent to it, but the adapter finds no vault entry for its handle, answers
+  `permanent { address_missing }`, and the dispatcher journals it (§5.1, DEC-712). It is
+  `permanent`, marks no address `unreachable`, and raises `channel_lost` once (§5.6).
 - `recipient_not_permitted` is the platform's own refusal (§4.4: a recipient the founder-only mail
   transport may not address), not the provider's verdict on the address. It is `permanent` for that
   notice and channel, is not retried, marks no address `unreachable`, and raises no `channel_lost`
@@ -470,7 +480,9 @@ Every channel is one adapter behind one interface:
 | `info` | Same schedule | Accepted, a permanent failure, or 6 hours, recorded as `abandoned` with reason `retry_window_ended` |
 
 A `retryable` result, a timeout, and a provider 429 all retry. `permanent` stops that channel for
-that notice and, for `address_rejected` or `auth_failed`, marks the address (§5.6); `recipient_not_permitted` and `address_missing` mark nothing (§5.2).
+that notice and, for `address_rejected` or `auth_failed`, marks the address (§5.6), as a receipt's
+`bounced`, `complained`, or `unsubscribed` also does (§5.2); `recipient_not_permitted` and
+`address_missing` mark nothing (§5.2).
 `not_pending` is for `action` only and `retry_window_ended` for `safety` and `info` only.
 
 ### 5.4 Coalescing and rate limits
@@ -707,7 +719,8 @@ and lint header in the change that creates it:
   item 12): `mandate-notify` maps a class and the window's verdict to send, suppress, or defer, and
   the dispatcher computes the verdict, so there is one window rule and one time base.
 - **`mandate-dispatcher`**, the process crate: tails the journal, mints notice ids, resolves
-  recipients, reads addresses through the vault client, drives the adapters, and appends to the
+  recipients, drives the adapters, which dereference address handles through the vault client
+  (§5.2), and appends to the
   notice stream. Its `forbidden_internal` list in `xtask/layers.toml` bars it from reaching, by any
   chain of dependencies, every crate that writes an agent, account, or control stream
   (`mandate-runtime`, `mandate-executor`, `mandate-mcp`, `mandate-shell`, `mandate-cli`,
@@ -747,14 +760,16 @@ readings the agent accepted; most only tighten what the specs already say. v0.2'
 [DEC-702](../project/decisions/DEC-702.md); each only tightens (DEC-176). Items 19 to 26 are the
 founder's (DEC-79: spending, vendors, legal wording, or a new restriction). The founder decided
 items 21 (the sender is the founder's own SMTP submission account), 23 (`notify.owlhead.ai`, with
-SPF, DKIM, and DMARC `p=reject`), and 24 for mail to the founder's own address only (the footer above) in [DEC-820](../project/decisions/DEC-820.md). Items
+SPF, DKIM, and DMARC `p=reject`), and 24 for mail to the founder's own address only (the footer above) in [DEC-820](../project/decisions/DEC-820.md).
 The founder also decided, on 2026-10-08 (DEC-824): item 19's staging is accepted; item 22 is
 accepted, so web push runs through our own self-hosted relay with our own VAPID keys and no vendor;
 item 20 is not taken, so v1 has no chat channel (its channels are email, `web_inbox`, and web push,
 with `cli_inbox`), chat goes to the backlog, and Telegram at M10 stays a later option; and item 25
 is accepted but built after the demo as its own story, since it needs a mandate spec change. Item
 26, and item 24 for any other recipient, stay Proposed; until each is decided, the most
-conservative option holds.
+conservative option holds. v0.3's readings are DEC-712 (the adapter, not the dispatcher,
+dereferences the address handle and renders the notice) and DEC-722 (an allowlist entry names at
+least two labels, and no host label has an edge hyphen); each only tightens (DEC-176).
 
 ---
 

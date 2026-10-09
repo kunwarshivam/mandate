@@ -104,6 +104,15 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   runner is slower; the same 691 tests run, so the saving comes from the harness and not from
   running fewer cases; and DEC-498's 180-second cap and its 192 shards are re-derived from a
   fresh `ubuntu-24.04` measurement, or a successor decision records that they stand.
+- **E1-7 (Should)** As an engineer, I want `xtask`'s own checks under the mutants gate, so that a
+  safety check written in `xtask`, such as X1's live-feature check (E7-26, DEC-529 item 3), cannot
+  lose a rule without a test failing. `xtask/layers.toml` marks `xtask` `safety_critical = false`,
+  so `cargo xtask ci mutants` never mutates it today; X1's mutants were run by hand on its diff
+  (#738 review, finding 3).
+  *Accepted when:* CI runs `cargo mutants -p xtask` on the diff of every PR that changes
+  `xtask/src`, as a shard within DEC-464's ten-minute budget, and fails on any missed mutant; the
+  mutants of `xtask` code that predates the job are either caught or listed, each with its reason,
+  in a follow-up story, so the job starts green.
 
 ### E2 Market data
 
@@ -4587,3 +4596,10 @@ From the independent reviews of three CI and xtask conflict-and-queue fixes ([#7
   - Refuse two feature files with the same `# ` title, which `--index` would list twice.
   - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
     the README is never read as a feature.
+
+From E7-16's M2 implementation (`mandate-mcp`, claim #859; the shared check is lane L2's):
+
+- **E7-16: switch `mandate-mcp`'s private fund-movement tokenizer to `mandate_domain::fund_movement`**
+  once lane L2 lands it (E7-12, DEC-839 item 3). `client.rs`'s `moves_funds`, `words` and
+  `FUND_TOKENS` then go, and the crate gains its `mandate-domain` dependency, so the connector and
+  the scope check cannot disagree on a name.

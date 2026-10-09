@@ -29,17 +29,20 @@ mod draft;
 mod merkle;
 mod schema;
 mod verify;
+mod workspace;
 
 pub use agent::{
     AgentStreamCheck, AgentStreamFailure, HeldAnchor, verify_agent_stream,
     verify_agent_stream_anchored,
 };
 
-/// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, then §9.5's rule 45
-/// on the account stream (DEC-446 item 3). Each draft has already passed `Draft::parse`.
+/// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, §9.5's rule 45 on the
+/// account stream (DEC-446 item 3), then §9.10's rule 84 clause on the control stream (DEC-671).
+/// Each draft has already passed `Draft::parse`.
 pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     agent::check_batch(drafts)?;
-    control::check_batch(drafts)
+    control::check_batch(drafts)?;
+    workspace::check_batch(drafts)
 }
 pub use artifact::{
     ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, check_artifact, get_artifact,

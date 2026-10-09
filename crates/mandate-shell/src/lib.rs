@@ -51,7 +51,7 @@ pub mod tracer;
 
 pub use error::{Cause, ShellError};
 pub use stages::Stage;
-pub use tracer::{ProductionCycle, Report, Setup, run};
+pub use tracer::{ProductionCycle, Report, Setup, run, run_observed};
 
 /// Assembles one production paper cycle. Callers provide deployment inputs and the paper transport;
 /// the returned cycle accepts model outputs but exposes none of its safety-critical stages.
