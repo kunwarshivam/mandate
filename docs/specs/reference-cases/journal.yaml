@@ -35511,3 +35511,2114 @@ verification_runs:
       value: []
     expect:
       outcome: Valid
+segment_rows:
+  spec: docs/specs/journal.md v0.38 §11 and workspace API §4.8.1 step 2.3a (DEC-894, pending)
+  ranges:
+  - name: rows_match_their_files
+    clause: '§11 segment_rows_mismatch: passes'
+    rows: &id108
+    - &id103
+      body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA0A000000000000000E1
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 1
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T14:00:00.000000000Z'
+        recorded_at: '2026-09-21T14:00:00.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          stream_type: account
+          workspace_id: ws_01J8Z2
+          broker: alpaca
+          account_ref: 01J8Z2ACCT00000000000000A2
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
+    - &id104
+      body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA1A000000000000000E2
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 2
+        event_type: IntentReceived
+        schema_version: 2
+        event_time: '2026-09-21T14:00:05.000000000Z'
+        recorded_at: '2026-09-21T14:00:05.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZT80A000000000000000D1
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs:
+          mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        payload:
+          intent_id: 01J8ZT90A000000000000000P1
+          agent_id: agent_a
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          side: buy
+          type: limit
+          tif: day
+          qty: '10'
+          limit_price: '150'
+          purpose: open
+          risk_clock: '2026-09-21T14:00:05.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
+      hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
+    - &id105
+      body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA2A000000000000000E3
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 3
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:10.000000000Z'
+        recorded_at: '2026-09-21T14:00:10.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA1A000000000000000E2
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: intended
+          orders: []
+          awaiting: []
+          qty: null
+          stop: '139'
+          take_profit: '159'
+          intent_id: 01J8ZT90A000000000000000P1
+          bracket: null
+          entry: null
+          agent_id: null
+          replacing: null
+          created_on: null
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:10.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
+      hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+    - &id106
+      body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA3A000000000000000E4
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 4
+        event_type: GateDecided
+        schema_version: 2
+        event_time: '2026-09-21T14:00:15.000000000Z'
+        recorded_at: '2026-09-21T14:00:15.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA1A000000000000000E2
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs:
+          fee_config: sha256:1111111111111111111111111111111111111111111111111111111111111111
+          trading_calendar: sha256:7777777777777777777777777777777777777777777777777777777777777777
+          instrument_snapshot: sha256:4444444444444444444444444444444444444444444444444444444444444444
+          rule_set: sha256:2222222222222222222222222222222222222222222222222222222222222222
+          mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        payload:
+          intent_id: 01J8ZT90A000000000000000P1
+          verdict: allow
+          reason_code: null
+          data_profile: iex
+          quotes_used:
+          - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+            bid: '149.98'
+            ask: '150.02'
+            as_of: '2026-09-21T14:00:05.000000000Z'
+            feed: iex
+          marks_used:
+          - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+            price: '149.98'
+            source: quote
+            kind: risk
+          checks:
+          - id: buying_power
+            result: pass
+            inputs:
+              buying_power: '10000'
+            computed:
+              order_cost: '1500'
+          - id: day_trade_budget
+            result: not_applicable
+            inputs:
+              regime: intraday_margin
+            computed: {}
+          risk_clock: '2026-09-21T14:00:15.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+      hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
+    - &id107
+      body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA4A000000000000000E5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 5
+        event_type: OrderRequestRecorded
+        schema_version: 1
+        event_time: '2026-09-21T14:00:20.000000000Z'
+        recorded_at: '2026-09-21T14:00:20.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          agent_id: agent_a
+          intent_id: 01J8ZT90A000000000000000P1
+          purpose: open
+          extended_hours: false
+          stop_price: null
+          order_class: bracket
+          take_profit: '159'
+          stop: '139'
+          rung: null
+          at_floor: null
+          risk_clock: '2026-09-21T14:00:20.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
+      hash: 7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA5A000000000000000E6
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 6
+        event_type: OrderSubmitted
+        schema_version: 2
+        event_time: '2026-09-21T14:00:25.000000000Z'
+        recorded_at: '2026-09-21T14:00:25.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA4A000000000000000E5
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          client_order_id: md-01J8ZT90A000000000000000P1
+          attempt: 1
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          side: buy
+          type: limit
+          tif: gtc
+          qty: '10'
+          limit_price: '150'
+          risk_clock: '2026-09-21T14:00:25.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae
+      hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA6A000000000000000E7
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 7
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:30.000000000Z'
+        recorded_at: '2026-09-21T14:00:30.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: placed
+          orders:
+          - md-01J8ZT90A000000000000000P1-p1
+          awaiting: []
+          qty: '10'
+          stop: '139'
+          take_profit: '159'
+          intent_id: null
+          bracket: null
+          entry: null
+          agent_id: null
+          replacing: null
+          created_on: '2026-09-21'
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:30.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+      hash: 45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA7A000000000000000E8
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 8
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:35.000000000Z'
+        recorded_at: '2026-09-21T14:00:35.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: unprotected_start
+          orders:
+          - md-01J8ZT90A000000000000000P1-p1
+          awaiting: []
+          qty: null
+          stop: '139'
+          take_profit: '159'
+          intent_id: 01J8ZT90A000000000000000P1
+          bracket: null
+          entry: md-01J8ZT90A000000000000000P1
+          agent_id: agent_a
+          replacing: true
+          created_on: null
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:35.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d
+      hash: affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e
+    segments:
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 1
+        last_seq: 3
+        first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        last_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        file_sha256: 6db23522db87d670d0585d4847389c7b7c528a4df907979a075d35a74ec238a1
+        manifest_hash: efc28bd7b7f513ce53983cbfbb3f2dd2d40382e6094527551f18648659d486a8
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA0A000000000000000E1","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"01J8Z2ACCT00000000000000A2","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T14:00:00.000000400Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZT80A000000000000000D1","clock_source":"local","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA1A000000000000000E2","event_time":"2026-09-21T14:00:05.000000000Z","event_type":"IntentReceived","payload":{"agent_id":"agent_a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","limit_price":"150","purpose":"open","qty":"10","risk_clock":"2026-09-21T14:00:05.000000000Z","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6","recorded_at":"2026-09-21T14:00:05.000000400Z","schema_version":2,"seq":2,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA2A000000000000000E3","event_time":"2026-09-21T14:00:10.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"intended","agent_id":null,"awaiting":[],"bracket":null,"created_on":null,"entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":[],"qty":null,"replacing":null,"risk_clock":"2026-09-21T14:00:10.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5","recorded_at":"2026-09-21T14:00:10.000000400Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 4
+        last_seq: 6
+        first_prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        last_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        file_sha256: c4c5efeb37cfefef7591f582ef8dd47711fadff01c103e795db1444673894f79
+        manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555","rule_set":"sha256:2222222222222222222222222222222222222222222222222222222222222222","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA3A000000000000000E4","event_time":"2026-09-21T14:00:15.000000000Z","event_type":"GateDecided","payload":{"checks":[{"computed":{"order_cost":"1500"},"id":"buying_power","inputs":{"buying_power":"10000"},"result":"pass"},{"computed":{},"id":"day_trade_budget","inputs":{"regime":"intraday_margin"},"result":"not_applicable"}],"data_profile":"iex","intent_id":"01J8ZT90A000000000000000P1","marks_used":[{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","kind":"risk","price":"149.98","source":"quote"}],"quotes_used":[{"as_of":"2026-09-21T14:00:05.000000000Z","ask":"150.02","bid":"149.98","feed":"iex","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"}],"reason_code":null,"risk_clock":"2026-09-21T14:00:15.000000000Z","verdict":"allow"},"pii_refs":[],"prev_hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc","recorded_at":"2026-09-21T14:00:15.000000400Z","schema_version":2,"seq":4,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA4A000000000000000E5","event_time":"2026-09-21T14:00:20.000000000Z","event_type":"OrderRequestRecorded","payload":{"agent_id":"agent_a","at_floor":null,"extended_hours":false,"intent_id":"01J8ZT90A000000000000000P1","order_class":"bracket","purpose":"open","risk_clock":"2026-09-21T14:00:20.000000000Z","rung":null,"stop":"139","stop_price":null,"take_profit":"159"},"pii_refs":[],"prev_hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467","recorded_at":"2026-09-21T14:00:20.000000400Z","schema_version":1,"seq":5,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA4A000000000000000E5","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA5A000000000000000E6","event_time":"2026-09-21T14:00:25.000000000Z","event_type":"OrderSubmitted","payload":{"attempt":1,"client_order_id":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","qty":"10","risk_clock":"2026-09-21T14:00:25.000000000Z","side":"buy","tif":"gtc","type":"limit"},"pii_refs":[],"prev_hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae","recorded_at":"2026-09-21T14:00:25.000000400Z","schema_version":2,"seq":6,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 7
+        last_seq: 8
+        first_prev_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        last_hash: affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e
+        file_sha256: 6913df49c34511193a7fa917b2e9ed2ca90a3bd55f7e32432b1f450ba277e8e4
+        manifest_hash: 956291c9f3af654f71063e8c76519870de7f505f23f1a55e8b772ef968269e41
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA6A000000000000000E7","event_time":"2026-09-21T14:00:30.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"placed","agent_id":null,"awaiting":[],"bracket":null,"created_on":"2026-09-21","entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":null,"orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":"10","replacing":null,"risk_clock":"2026-09-21T14:00:30.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d","recorded_at":"2026-09-21T14:00:30.000000400Z","schema_version":1,"seq":7,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA7A000000000000000E8","event_time":"2026-09-21T14:00:35.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"unprotected_start","agent_id":"agent_a","awaiting":[],"bracket":null,"created_on":null,"entry":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":null,"replacing":true,"risk_clock":"2026-09-21T14:00:35.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d","recorded_at":"2026-09-21T14:00:35.000000400Z","schema_version":1,"seq":8,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e"}
+
+        '
+    start:
+      kind: manifest
+      manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+    from_seq: 4
+    to_seq: 8
+    expect: null
+  - name: start_segment_rewritten
+    clause: '§11 segment_rows_mismatch: a rewrite of the start segment, consistent from the trusted start'
+    rows:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA0A000000000000000E1
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 1
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T14:00:00.000000000Z'
+        recorded_at: '2026-09-21T14:00:00.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          stream_type: account
+          workspace_id: ws_01J8Z2
+          broker: alpaca
+          account_ref: 01J8Z2ACCT00000000000000A2
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA1A000000000000000E2
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 2
+        event_type: IntentReceived
+        schema_version: 2
+        event_time: '2026-09-21T14:00:05.000000000Z'
+        recorded_at: '2026-09-21T14:00:05.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZT80A000000000000000D1
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs:
+          mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        payload:
+          intent_id: 01J8ZT90A000000000000000P1
+          agent_id: agent_a
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          side: buy
+          type: limit
+          tif: day
+          qty: '10'
+          limit_price: '150'
+          purpose: open
+          risk_clock: '2026-09-21T14:00:05.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
+      hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA2A000000000000000E3
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 3
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:10.000000000Z'
+        recorded_at: '2026-09-21T14:00:10.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA1A000000000000000E2
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: intended
+          orders: []
+          awaiting: []
+          qty: null
+          stop: '139'
+          take_profit: '159'
+          intent_id: 01J8ZT90A000000000000000P1
+          bracket: null
+          entry: null
+          agent_id: null
+          replacing: null
+          created_on: null
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:10.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
+      hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA3A000000000000000E4
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 4
+        event_type: GateDecided
+        schema_version: 2
+        event_time: '2026-09-21T14:00:15.000000000Z'
+        recorded_at: '2026-09-21T14:00:15.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA1A000000000000000E2
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs:
+          fee_config: sha256:1111111111111111111111111111111111111111111111111111111111111111
+          trading_calendar: sha256:7777777777777777777777777777777777777777777777777777777777777777
+          instrument_snapshot: sha256:4444444444444444444444444444444444444444444444444444444444444444
+          rule_set: sha256:2222222222222222222222222222222222222222222222222222222222222222
+          mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        payload:
+          intent_id: 01J8ZT90A000000000000000P1
+          verdict: allow
+          reason_code: null
+          data_profile: iex
+          quotes_used:
+          - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+            bid: '149.98'
+            ask: '150.02'
+            as_of: '2026-09-21T14:00:05.000000000Z'
+            feed: iex
+          marks_used:
+          - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+            price: '149.98'
+            source: quote
+            kind: risk
+          checks:
+          - id: buying_power
+            result: pass
+            inputs:
+              buying_power: '10000'
+            computed:
+              order_cost: '1500'
+          - id: day_trade_budget
+            result: not_applicable
+            inputs:
+              regime: intraday_margin
+            computed: {}
+          risk_clock: '2026-09-21T14:00:15.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+      hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA4A000000000000000E5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 5
+        event_type: OrderRequestRecorded
+        schema_version: 1
+        event_time: '2026-09-21T14:00:20.000000000Z'
+        recorded_at: '2026-09-21T14:00:20.000000999Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          agent_id: agent_a
+          intent_id: 01J8ZT90A000000000000000P1
+          purpose: open
+          extended_hours: false
+          stop_price: null
+          order_class: bracket
+          take_profit: '159'
+          stop: '139'
+          rung: null
+          at_floor: null
+          risk_clock: '2026-09-21T14:00:20.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
+      hash: 98405405750ba7ad647acb73637df120d98edeba732627f1940e9880274349fd
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA5A000000000000000E6
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 6
+        event_type: OrderSubmitted
+        schema_version: 2
+        event_time: '2026-09-21T14:00:25.000000000Z'
+        recorded_at: '2026-09-21T14:00:25.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA4A000000000000000E5
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          client_order_id: md-01J8ZT90A000000000000000P1
+          attempt: 1
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          side: buy
+          type: limit
+          tif: gtc
+          qty: '10'
+          limit_price: '150'
+          risk_clock: '2026-09-21T14:00:25.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 98405405750ba7ad647acb73637df120d98edeba732627f1940e9880274349fd
+      hash: 121c751afb212a2cac22233c507e7eb8cd94bf064a20d904942317e038979350
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA6A000000000000000E7
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 7
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:30.000000000Z'
+        recorded_at: '2026-09-21T14:00:30.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: placed
+          orders:
+          - md-01J8ZT90A000000000000000P1-p1
+          awaiting: []
+          qty: '10'
+          stop: '139'
+          take_profit: '159'
+          intent_id: null
+          bracket: null
+          entry: null
+          agent_id: null
+          replacing: null
+          created_on: '2026-09-21'
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:30.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 121c751afb212a2cac22233c507e7eb8cd94bf064a20d904942317e038979350
+      hash: 84e192ce583669cf650312ccb79fd01e1e42e6aaaa1f6836910176ddf65c05ab
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA7A000000000000000E8
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 8
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:35.000000000Z'
+        recorded_at: '2026-09-21T14:00:35.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: unprotected_start
+          orders:
+          - md-01J8ZT90A000000000000000P1-p1
+          awaiting: []
+          qty: null
+          stop: '139'
+          take_profit: '159'
+          intent_id: 01J8ZT90A000000000000000P1
+          bracket: null
+          entry: md-01J8ZT90A000000000000000P1
+          agent_id: agent_a
+          replacing: true
+          created_on: null
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:35.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 84e192ce583669cf650312ccb79fd01e1e42e6aaaa1f6836910176ddf65c05ab
+      hash: f1f39f511dc4e0efd1fd3b43ce39b00997d52203a1e93b4eee712cc19d3fd603
+    segments:
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 1
+        last_seq: 3
+        first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        last_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        file_sha256: 6db23522db87d670d0585d4847389c7b7c528a4df907979a075d35a74ec238a1
+        manifest_hash: efc28bd7b7f513ce53983cbfbb3f2dd2d40382e6094527551f18648659d486a8
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA0A000000000000000E1","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"01J8Z2ACCT00000000000000A2","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T14:00:00.000000400Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZT80A000000000000000D1","clock_source":"local","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA1A000000000000000E2","event_time":"2026-09-21T14:00:05.000000000Z","event_type":"IntentReceived","payload":{"agent_id":"agent_a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","limit_price":"150","purpose":"open","qty":"10","risk_clock":"2026-09-21T14:00:05.000000000Z","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6","recorded_at":"2026-09-21T14:00:05.000000400Z","schema_version":2,"seq":2,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA2A000000000000000E3","event_time":"2026-09-21T14:00:10.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"intended","agent_id":null,"awaiting":[],"bracket":null,"created_on":null,"entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":[],"qty":null,"replacing":null,"risk_clock":"2026-09-21T14:00:10.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5","recorded_at":"2026-09-21T14:00:10.000000400Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 4
+        last_seq: 6
+        first_prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        last_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        file_sha256: c4c5efeb37cfefef7591f582ef8dd47711fadff01c103e795db1444673894f79
+        manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555","rule_set":"sha256:2222222222222222222222222222222222222222222222222222222222222222","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA3A000000000000000E4","event_time":"2026-09-21T14:00:15.000000000Z","event_type":"GateDecided","payload":{"checks":[{"computed":{"order_cost":"1500"},"id":"buying_power","inputs":{"buying_power":"10000"},"result":"pass"},{"computed":{},"id":"day_trade_budget","inputs":{"regime":"intraday_margin"},"result":"not_applicable"}],"data_profile":"iex","intent_id":"01J8ZT90A000000000000000P1","marks_used":[{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","kind":"risk","price":"149.98","source":"quote"}],"quotes_used":[{"as_of":"2026-09-21T14:00:05.000000000Z","ask":"150.02","bid":"149.98","feed":"iex","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"}],"reason_code":null,"risk_clock":"2026-09-21T14:00:15.000000000Z","verdict":"allow"},"pii_refs":[],"prev_hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc","recorded_at":"2026-09-21T14:00:15.000000400Z","schema_version":2,"seq":4,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA4A000000000000000E5","event_time":"2026-09-21T14:00:20.000000000Z","event_type":"OrderRequestRecorded","payload":{"agent_id":"agent_a","at_floor":null,"extended_hours":false,"intent_id":"01J8ZT90A000000000000000P1","order_class":"bracket","purpose":"open","risk_clock":"2026-09-21T14:00:20.000000000Z","rung":null,"stop":"139","stop_price":null,"take_profit":"159"},"pii_refs":[],"prev_hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467","recorded_at":"2026-09-21T14:00:20.000000400Z","schema_version":1,"seq":5,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA4A000000000000000E5","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA5A000000000000000E6","event_time":"2026-09-21T14:00:25.000000000Z","event_type":"OrderSubmitted","payload":{"attempt":1,"client_order_id":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","qty":"10","risk_clock":"2026-09-21T14:00:25.000000000Z","side":"buy","tif":"gtc","type":"limit"},"pii_refs":[],"prev_hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae","recorded_at":"2026-09-21T14:00:25.000000400Z","schema_version":2,"seq":6,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 7
+        last_seq: 8
+        first_prev_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        last_hash: affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e
+        file_sha256: 6913df49c34511193a7fa917b2e9ed2ca90a3bd55f7e32432b1f450ba277e8e4
+        manifest_hash: 956291c9f3af654f71063e8c76519870de7f505f23f1a55e8b772ef968269e41
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA6A000000000000000E7","event_time":"2026-09-21T14:00:30.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"placed","agent_id":null,"awaiting":[],"bracket":null,"created_on":"2026-09-21","entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":null,"orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":"10","replacing":null,"risk_clock":"2026-09-21T14:00:30.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d","recorded_at":"2026-09-21T14:00:30.000000400Z","schema_version":1,"seq":7,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA7A000000000000000E8","event_time":"2026-09-21T14:00:35.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"unprotected_start","agent_id":"agent_a","awaiting":[],"bracket":null,"created_on":null,"entry":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":null,"replacing":true,"risk_clock":"2026-09-21T14:00:35.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d","recorded_at":"2026-09-21T14:00:35.000000400Z","schema_version":1,"seq":8,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e"}
+
+        '
+    start:
+      kind: manifest
+      manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+    from_seq: 4
+    to_seq: 8
+    expect:
+      check: segment_rows_mismatch
+      seq: null
+  - name: in_range_segment_rewritten
+    clause: '§11 segment_rows_mismatch: a rewrite of a segment wholly inside the range'
+    rows:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA0A000000000000000E1
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 1
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T14:00:00.000000000Z'
+        recorded_at: '2026-09-21T14:00:00.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          stream_type: account
+          workspace_id: ws_01J8Z2
+          broker: alpaca
+          account_ref: 01J8Z2ACCT00000000000000A2
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA1A000000000000000E2
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 2
+        event_type: IntentReceived
+        schema_version: 2
+        event_time: '2026-09-21T14:00:05.000000000Z'
+        recorded_at: '2026-09-21T14:00:05.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZT80A000000000000000D1
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs:
+          mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        payload:
+          intent_id: 01J8ZT90A000000000000000P1
+          agent_id: agent_a
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          side: buy
+          type: limit
+          tif: day
+          qty: '10'
+          limit_price: '150'
+          purpose: open
+          risk_clock: '2026-09-21T14:00:05.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
+      hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA2A000000000000000E3
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 3
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:10.000000000Z'
+        recorded_at: '2026-09-21T14:00:10.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA1A000000000000000E2
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: intended
+          orders: []
+          awaiting: []
+          qty: null
+          stop: '139'
+          take_profit: '159'
+          intent_id: 01J8ZT90A000000000000000P1
+          bracket: null
+          entry: null
+          agent_id: null
+          replacing: null
+          created_on: null
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:10.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
+      hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA3A000000000000000E4
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 4
+        event_type: GateDecided
+        schema_version: 2
+        event_time: '2026-09-21T14:00:15.000000000Z'
+        recorded_at: '2026-09-21T14:00:15.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA1A000000000000000E2
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs:
+          fee_config: sha256:1111111111111111111111111111111111111111111111111111111111111111
+          trading_calendar: sha256:7777777777777777777777777777777777777777777777777777777777777777
+          instrument_snapshot: sha256:4444444444444444444444444444444444444444444444444444444444444444
+          rule_set: sha256:2222222222222222222222222222222222222222222222222222222222222222
+          mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        payload:
+          intent_id: 01J8ZT90A000000000000000P1
+          verdict: allow
+          reason_code: null
+          data_profile: iex
+          quotes_used:
+          - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+            bid: '149.98'
+            ask: '150.02'
+            as_of: '2026-09-21T14:00:05.000000000Z'
+            feed: iex
+          marks_used:
+          - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+            price: '149.98'
+            source: quote
+            kind: risk
+          checks:
+          - id: buying_power
+            result: pass
+            inputs:
+              buying_power: '10000'
+            computed:
+              order_cost: '1500'
+          - id: day_trade_budget
+            result: not_applicable
+            inputs:
+              regime: intraday_margin
+            computed: {}
+          risk_clock: '2026-09-21T14:00:15.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+      hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA4A000000000000000E5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 5
+        event_type: OrderRequestRecorded
+        schema_version: 1
+        event_time: '2026-09-21T14:00:20.000000000Z'
+        recorded_at: '2026-09-21T14:00:20.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          agent_id: agent_a
+          intent_id: 01J8ZT90A000000000000000P1
+          purpose: open
+          extended_hours: false
+          stop_price: null
+          order_class: bracket
+          take_profit: '159'
+          stop: '139'
+          rung: null
+          at_floor: null
+          risk_clock: '2026-09-21T14:00:20.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
+      hash: 7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA5A000000000000000E6
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 6
+        event_type: OrderSubmitted
+        schema_version: 2
+        event_time: '2026-09-21T14:00:25.000000000Z'
+        recorded_at: '2026-09-21T14:00:25.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA4A000000000000000E5
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          client_order_id: md-01J8ZT90A000000000000000P1
+          attempt: 1
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          side: buy
+          type: limit
+          tif: gtc
+          qty: '10'
+          limit_price: '150'
+          risk_clock: '2026-09-21T14:00:25.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae
+      hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA6A000000000000000E7
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 7
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:30.000000000Z'
+        recorded_at: '2026-09-21T14:00:30.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: placed
+          orders:
+          - md-01J8ZT90A000000000000000P1-p1
+          awaiting: []
+          qty: '10'
+          stop: '139'
+          take_profit: '159'
+          intent_id: null
+          bracket: null
+          entry: null
+          agent_id: null
+          replacing: null
+          created_on: '2026-09-21'
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:30.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+      hash: 45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA7A000000000000000E8
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 8
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:35.000000000Z'
+        recorded_at: '2026-09-21T14:00:35.000000999Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: unprotected_start
+          orders:
+          - md-01J8ZT90A000000000000000P1-p1
+          awaiting: []
+          qty: null
+          stop: '139'
+          take_profit: '159'
+          intent_id: 01J8ZT90A000000000000000P1
+          bracket: null
+          entry: md-01J8ZT90A000000000000000P1
+          agent_id: agent_a
+          replacing: true
+          created_on: null
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:35.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d
+      hash: be3b754d2ff6ad6fc332d33ff3e316349d61a715d19e1e4a9873d967c63ae6db
+    segments:
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 1
+        last_seq: 3
+        first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        last_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        file_sha256: 6db23522db87d670d0585d4847389c7b7c528a4df907979a075d35a74ec238a1
+        manifest_hash: efc28bd7b7f513ce53983cbfbb3f2dd2d40382e6094527551f18648659d486a8
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA0A000000000000000E1","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"01J8Z2ACCT00000000000000A2","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T14:00:00.000000400Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZT80A000000000000000D1","clock_source":"local","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA1A000000000000000E2","event_time":"2026-09-21T14:00:05.000000000Z","event_type":"IntentReceived","payload":{"agent_id":"agent_a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","limit_price":"150","purpose":"open","qty":"10","risk_clock":"2026-09-21T14:00:05.000000000Z","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6","recorded_at":"2026-09-21T14:00:05.000000400Z","schema_version":2,"seq":2,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA2A000000000000000E3","event_time":"2026-09-21T14:00:10.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"intended","agent_id":null,"awaiting":[],"bracket":null,"created_on":null,"entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":[],"qty":null,"replacing":null,"risk_clock":"2026-09-21T14:00:10.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5","recorded_at":"2026-09-21T14:00:10.000000400Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 4
+        last_seq: 6
+        first_prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        last_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        file_sha256: c4c5efeb37cfefef7591f582ef8dd47711fadff01c103e795db1444673894f79
+        manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555","rule_set":"sha256:2222222222222222222222222222222222222222222222222222222222222222","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA3A000000000000000E4","event_time":"2026-09-21T14:00:15.000000000Z","event_type":"GateDecided","payload":{"checks":[{"computed":{"order_cost":"1500"},"id":"buying_power","inputs":{"buying_power":"10000"},"result":"pass"},{"computed":{},"id":"day_trade_budget","inputs":{"regime":"intraday_margin"},"result":"not_applicable"}],"data_profile":"iex","intent_id":"01J8ZT90A000000000000000P1","marks_used":[{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","kind":"risk","price":"149.98","source":"quote"}],"quotes_used":[{"as_of":"2026-09-21T14:00:05.000000000Z","ask":"150.02","bid":"149.98","feed":"iex","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"}],"reason_code":null,"risk_clock":"2026-09-21T14:00:15.000000000Z","verdict":"allow"},"pii_refs":[],"prev_hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc","recorded_at":"2026-09-21T14:00:15.000000400Z","schema_version":2,"seq":4,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA4A000000000000000E5","event_time":"2026-09-21T14:00:20.000000000Z","event_type":"OrderRequestRecorded","payload":{"agent_id":"agent_a","at_floor":null,"extended_hours":false,"intent_id":"01J8ZT90A000000000000000P1","order_class":"bracket","purpose":"open","risk_clock":"2026-09-21T14:00:20.000000000Z","rung":null,"stop":"139","stop_price":null,"take_profit":"159"},"pii_refs":[],"prev_hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467","recorded_at":"2026-09-21T14:00:20.000000400Z","schema_version":1,"seq":5,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA4A000000000000000E5","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA5A000000000000000E6","event_time":"2026-09-21T14:00:25.000000000Z","event_type":"OrderSubmitted","payload":{"attempt":1,"client_order_id":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","qty":"10","risk_clock":"2026-09-21T14:00:25.000000000Z","side":"buy","tif":"gtc","type":"limit"},"pii_refs":[],"prev_hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae","recorded_at":"2026-09-21T14:00:25.000000400Z","schema_version":2,"seq":6,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 7
+        last_seq: 8
+        first_prev_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        last_hash: affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e
+        file_sha256: 6913df49c34511193a7fa917b2e9ed2ca90a3bd55f7e32432b1f450ba277e8e4
+        manifest_hash: 956291c9f3af654f71063e8c76519870de7f505f23f1a55e8b772ef968269e41
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA6A000000000000000E7","event_time":"2026-09-21T14:00:30.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"placed","agent_id":null,"awaiting":[],"bracket":null,"created_on":"2026-09-21","entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":null,"orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":"10","replacing":null,"risk_clock":"2026-09-21T14:00:30.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d","recorded_at":"2026-09-21T14:00:30.000000400Z","schema_version":1,"seq":7,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA7A000000000000000E8","event_time":"2026-09-21T14:00:35.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"unprotected_start","agent_id":"agent_a","awaiting":[],"bracket":null,"created_on":null,"entry":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":null,"replacing":true,"risk_clock":"2026-09-21T14:00:35.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d","recorded_at":"2026-09-21T14:00:35.000000400Z","schema_version":1,"seq":8,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e"}
+
+        '
+    start:
+      kind: genesis
+      manifest_hash: null
+    from_seq: 1
+    to_seq: 8
+    expect:
+      check: segment_rows_mismatch
+      seq: null
+  - name: start_segment_rewritten_past_to_seq
+    clause: 'workspace API §4.8.1 step 2.3a: the trusted-start segment''s rows past to_seq are compared'
+    rows:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA0A000000000000000E1
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 1
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T14:00:00.000000000Z'
+        recorded_at: '2026-09-21T14:00:00.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          stream_type: account
+          workspace_id: ws_01J8Z2
+          broker: alpaca
+          account_ref: 01J8Z2ACCT00000000000000A2
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA1A000000000000000E2
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 2
+        event_type: IntentReceived
+        schema_version: 2
+        event_time: '2026-09-21T14:00:05.000000000Z'
+        recorded_at: '2026-09-21T14:00:05.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZT80A000000000000000D1
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs:
+          mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        payload:
+          intent_id: 01J8ZT90A000000000000000P1
+          agent_id: agent_a
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          side: buy
+          type: limit
+          tif: day
+          qty: '10'
+          limit_price: '150'
+          purpose: open
+          risk_clock: '2026-09-21T14:00:05.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
+      hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA2A000000000000000E3
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 3
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:10.000000000Z'
+        recorded_at: '2026-09-21T14:00:10.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA1A000000000000000E2
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: intended
+          orders: []
+          awaiting: []
+          qty: null
+          stop: '139'
+          take_profit: '159'
+          intent_id: 01J8ZT90A000000000000000P1
+          bracket: null
+          entry: null
+          agent_id: null
+          replacing: null
+          created_on: null
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:10.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
+      hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA3A000000000000000E4
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 4
+        event_type: GateDecided
+        schema_version: 2
+        event_time: '2026-09-21T14:00:15.000000000Z'
+        recorded_at: '2026-09-21T14:00:15.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA1A000000000000000E2
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs:
+          fee_config: sha256:1111111111111111111111111111111111111111111111111111111111111111
+          trading_calendar: sha256:7777777777777777777777777777777777777777777777777777777777777777
+          instrument_snapshot: sha256:4444444444444444444444444444444444444444444444444444444444444444
+          rule_set: sha256:2222222222222222222222222222222222222222222222222222222222222222
+          mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        payload:
+          intent_id: 01J8ZT90A000000000000000P1
+          verdict: allow
+          reason_code: null
+          data_profile: iex
+          quotes_used:
+          - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+            bid: '149.98'
+            ask: '150.02'
+            as_of: '2026-09-21T14:00:05.000000000Z'
+            feed: iex
+          marks_used:
+          - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+            price: '149.98'
+            source: quote
+            kind: risk
+          checks:
+          - id: buying_power
+            result: pass
+            inputs:
+              buying_power: '10000'
+            computed:
+              order_cost: '1500'
+          - id: day_trade_budget
+            result: not_applicable
+            inputs:
+              regime: intraday_margin
+            computed: {}
+          risk_clock: '2026-09-21T14:00:15.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+      hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA4A000000000000000E5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 5
+        event_type: OrderRequestRecorded
+        schema_version: 1
+        event_time: '2026-09-21T14:00:20.000000000Z'
+        recorded_at: '2026-09-21T14:00:20.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          agent_id: agent_a
+          intent_id: 01J8ZT90A000000000000000P1
+          purpose: open
+          extended_hours: false
+          stop_price: null
+          order_class: bracket
+          take_profit: '159'
+          stop: '139'
+          rung: null
+          at_floor: null
+          risk_clock: '2026-09-21T14:00:20.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
+      hash: 7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA5A000000000000000E6
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 6
+        event_type: OrderSubmitted
+        schema_version: 2
+        event_time: '2026-09-21T14:00:25.000000000Z'
+        recorded_at: '2026-09-21T14:00:25.000000999Z'
+        clock_source: local
+        causation_id: 01J8ZQA4A000000000000000E5
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          client_order_id: md-01J8ZT90A000000000000000P1
+          attempt: 1
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          side: buy
+          type: limit
+          tif: gtc
+          qty: '10'
+          limit_price: '150'
+          risk_clock: '2026-09-21T14:00:25.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae
+      hash: 8b1b8e7a11ea05998ecf47b9c30162ecf426a7505e3554d3cf30122310e3138f
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA6A000000000000000E7
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 7
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:30.000000000Z'
+        recorded_at: '2026-09-21T14:00:30.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: placed
+          orders:
+          - md-01J8ZT90A000000000000000P1-p1
+          awaiting: []
+          qty: '10'
+          stop: '139'
+          take_profit: '159'
+          intent_id: null
+          bracket: null
+          entry: null
+          agent_id: null
+          replacing: null
+          created_on: '2026-09-21'
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:30.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 8b1b8e7a11ea05998ecf47b9c30162ecf426a7505e3554d3cf30122310e3138f
+      hash: 1c14f5f5e454cdde28a0f984a9320a600518b6a03da9962edcbec655b139ac26
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA7A000000000000000E8
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 8
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:35.000000000Z'
+        recorded_at: '2026-09-21T14:00:35.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: unprotected_start
+          orders:
+          - md-01J8ZT90A000000000000000P1-p1
+          awaiting: []
+          qty: null
+          stop: '139'
+          take_profit: '159'
+          intent_id: 01J8ZT90A000000000000000P1
+          bracket: null
+          entry: md-01J8ZT90A000000000000000P1
+          agent_id: agent_a
+          replacing: true
+          created_on: null
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:35.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 1c14f5f5e454cdde28a0f984a9320a600518b6a03da9962edcbec655b139ac26
+      hash: 76ea2e87d17d681bb8c854d56c847024096831bb19017462f06c5c3c5448ec03
+    segments:
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 1
+        last_seq: 3
+        first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        last_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        file_sha256: 6db23522db87d670d0585d4847389c7b7c528a4df907979a075d35a74ec238a1
+        manifest_hash: efc28bd7b7f513ce53983cbfbb3f2dd2d40382e6094527551f18648659d486a8
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA0A000000000000000E1","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"01J8Z2ACCT00000000000000A2","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T14:00:00.000000400Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZT80A000000000000000D1","clock_source":"local","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA1A000000000000000E2","event_time":"2026-09-21T14:00:05.000000000Z","event_type":"IntentReceived","payload":{"agent_id":"agent_a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","limit_price":"150","purpose":"open","qty":"10","risk_clock":"2026-09-21T14:00:05.000000000Z","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6","recorded_at":"2026-09-21T14:00:05.000000400Z","schema_version":2,"seq":2,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA2A000000000000000E3","event_time":"2026-09-21T14:00:10.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"intended","agent_id":null,"awaiting":[],"bracket":null,"created_on":null,"entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":[],"qty":null,"replacing":null,"risk_clock":"2026-09-21T14:00:10.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5","recorded_at":"2026-09-21T14:00:10.000000400Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 4
+        last_seq: 6
+        first_prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        last_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        file_sha256: c4c5efeb37cfefef7591f582ef8dd47711fadff01c103e795db1444673894f79
+        manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555","rule_set":"sha256:2222222222222222222222222222222222222222222222222222222222222222","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA3A000000000000000E4","event_time":"2026-09-21T14:00:15.000000000Z","event_type":"GateDecided","payload":{"checks":[{"computed":{"order_cost":"1500"},"id":"buying_power","inputs":{"buying_power":"10000"},"result":"pass"},{"computed":{},"id":"day_trade_budget","inputs":{"regime":"intraday_margin"},"result":"not_applicable"}],"data_profile":"iex","intent_id":"01J8ZT90A000000000000000P1","marks_used":[{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","kind":"risk","price":"149.98","source":"quote"}],"quotes_used":[{"as_of":"2026-09-21T14:00:05.000000000Z","ask":"150.02","bid":"149.98","feed":"iex","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"}],"reason_code":null,"risk_clock":"2026-09-21T14:00:15.000000000Z","verdict":"allow"},"pii_refs":[],"prev_hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc","recorded_at":"2026-09-21T14:00:15.000000400Z","schema_version":2,"seq":4,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA4A000000000000000E5","event_time":"2026-09-21T14:00:20.000000000Z","event_type":"OrderRequestRecorded","payload":{"agent_id":"agent_a","at_floor":null,"extended_hours":false,"intent_id":"01J8ZT90A000000000000000P1","order_class":"bracket","purpose":"open","risk_clock":"2026-09-21T14:00:20.000000000Z","rung":null,"stop":"139","stop_price":null,"take_profit":"159"},"pii_refs":[],"prev_hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467","recorded_at":"2026-09-21T14:00:20.000000400Z","schema_version":1,"seq":5,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA4A000000000000000E5","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA5A000000000000000E6","event_time":"2026-09-21T14:00:25.000000000Z","event_type":"OrderSubmitted","payload":{"attempt":1,"client_order_id":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","qty":"10","risk_clock":"2026-09-21T14:00:25.000000000Z","side":"buy","tif":"gtc","type":"limit"},"pii_refs":[],"prev_hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae","recorded_at":"2026-09-21T14:00:25.000000400Z","schema_version":2,"seq":6,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 7
+        last_seq: 8
+        first_prev_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        last_hash: affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e
+        file_sha256: 6913df49c34511193a7fa917b2e9ed2ca90a3bd55f7e32432b1f450ba277e8e4
+        manifest_hash: 956291c9f3af654f71063e8c76519870de7f505f23f1a55e8b772ef968269e41
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA6A000000000000000E7","event_time":"2026-09-21T14:00:30.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"placed","agent_id":null,"awaiting":[],"bracket":null,"created_on":"2026-09-21","entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":null,"orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":"10","replacing":null,"risk_clock":"2026-09-21T14:00:30.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d","recorded_at":"2026-09-21T14:00:30.000000400Z","schema_version":1,"seq":7,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA7A000000000000000E8","event_time":"2026-09-21T14:00:35.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"unprotected_start","agent_id":"agent_a","awaiting":[],"bracket":null,"created_on":null,"entry":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":null,"replacing":true,"risk_clock":"2026-09-21T14:00:35.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d","recorded_at":"2026-09-21T14:00:35.000000400Z","schema_version":1,"seq":8,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e"}
+
+        '
+    start:
+      kind: manifest
+      manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+    from_seq: 4
+    to_seq: 5
+    expect:
+      check: segment_rows_mismatch
+      seq: null
+  - name: start_segment_held_in_part
+    clause: 'workspace API §4.8.1 step 2.3a: a segment the snapshot does not hold in full fails'
+    rows:
+    - *id103
+    - *id104
+    - *id105
+    - *id106
+    - *id107
+    segments:
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 1
+        last_seq: 3
+        first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        last_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        file_sha256: 6db23522db87d670d0585d4847389c7b7c528a4df907979a075d35a74ec238a1
+        manifest_hash: efc28bd7b7f513ce53983cbfbb3f2dd2d40382e6094527551f18648659d486a8
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA0A000000000000000E1","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"01J8Z2ACCT00000000000000A2","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T14:00:00.000000400Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZT80A000000000000000D1","clock_source":"local","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA1A000000000000000E2","event_time":"2026-09-21T14:00:05.000000000Z","event_type":"IntentReceived","payload":{"agent_id":"agent_a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","limit_price":"150","purpose":"open","qty":"10","risk_clock":"2026-09-21T14:00:05.000000000Z","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6","recorded_at":"2026-09-21T14:00:05.000000400Z","schema_version":2,"seq":2,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA2A000000000000000E3","event_time":"2026-09-21T14:00:10.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"intended","agent_id":null,"awaiting":[],"bracket":null,"created_on":null,"entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":[],"qty":null,"replacing":null,"risk_clock":"2026-09-21T14:00:10.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5","recorded_at":"2026-09-21T14:00:10.000000400Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 4
+        last_seq: 6
+        first_prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        last_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        file_sha256: c4c5efeb37cfefef7591f582ef8dd47711fadff01c103e795db1444673894f79
+        manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555","rule_set":"sha256:2222222222222222222222222222222222222222222222222222222222222222","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA3A000000000000000E4","event_time":"2026-09-21T14:00:15.000000000Z","event_type":"GateDecided","payload":{"checks":[{"computed":{"order_cost":"1500"},"id":"buying_power","inputs":{"buying_power":"10000"},"result":"pass"},{"computed":{},"id":"day_trade_budget","inputs":{"regime":"intraday_margin"},"result":"not_applicable"}],"data_profile":"iex","intent_id":"01J8ZT90A000000000000000P1","marks_used":[{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","kind":"risk","price":"149.98","source":"quote"}],"quotes_used":[{"as_of":"2026-09-21T14:00:05.000000000Z","ask":"150.02","bid":"149.98","feed":"iex","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"}],"reason_code":null,"risk_clock":"2026-09-21T14:00:15.000000000Z","verdict":"allow"},"pii_refs":[],"prev_hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc","recorded_at":"2026-09-21T14:00:15.000000400Z","schema_version":2,"seq":4,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA4A000000000000000E5","event_time":"2026-09-21T14:00:20.000000000Z","event_type":"OrderRequestRecorded","payload":{"agent_id":"agent_a","at_floor":null,"extended_hours":false,"intent_id":"01J8ZT90A000000000000000P1","order_class":"bracket","purpose":"open","risk_clock":"2026-09-21T14:00:20.000000000Z","rung":null,"stop":"139","stop_price":null,"take_profit":"159"},"pii_refs":[],"prev_hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467","recorded_at":"2026-09-21T14:00:20.000000400Z","schema_version":1,"seq":5,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA4A000000000000000E5","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA5A000000000000000E6","event_time":"2026-09-21T14:00:25.000000000Z","event_type":"OrderSubmitted","payload":{"attempt":1,"client_order_id":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","qty":"10","risk_clock":"2026-09-21T14:00:25.000000000Z","side":"buy","tif":"gtc","type":"limit"},"pii_refs":[],"prev_hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae","recorded_at":"2026-09-21T14:00:25.000000400Z","schema_version":2,"seq":6,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 7
+        last_seq: 8
+        first_prev_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        last_hash: affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e
+        file_sha256: 6913df49c34511193a7fa917b2e9ed2ca90a3bd55f7e32432b1f450ba277e8e4
+        manifest_hash: 956291c9f3af654f71063e8c76519870de7f505f23f1a55e8b772ef968269e41
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA6A000000000000000E7","event_time":"2026-09-21T14:00:30.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"placed","agent_id":null,"awaiting":[],"bracket":null,"created_on":"2026-09-21","entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":null,"orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":"10","replacing":null,"risk_clock":"2026-09-21T14:00:30.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d","recorded_at":"2026-09-21T14:00:30.000000400Z","schema_version":1,"seq":7,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA7A000000000000000E8","event_time":"2026-09-21T14:00:35.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"unprotected_start","agent_id":"agent_a","awaiting":[],"bracket":null,"created_on":null,"entry":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":null,"replacing":true,"risk_clock":"2026-09-21T14:00:35.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d","recorded_at":"2026-09-21T14:00:35.000000400Z","schema_version":1,"seq":8,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e"}
+
+        '
+    start:
+      kind: manifest
+      manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+    from_seq: 4
+    to_seq: 5
+    expect:
+      check: segment_rows_mismatch
+      seq: null
+  - name: start_segment_past_to_seq_matches
+    clause: 'workspace API §4.8.1 step 2.3a: the whole start segment is compared, not the range''s part'
+    rows: *id108
+    segments:
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 1
+        last_seq: 3
+        first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        last_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        file_sha256: 6db23522db87d670d0585d4847389c7b7c528a4df907979a075d35a74ec238a1
+        manifest_hash: efc28bd7b7f513ce53983cbfbb3f2dd2d40382e6094527551f18648659d486a8
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA0A000000000000000E1","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"01J8Z2ACCT00000000000000A2","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T14:00:00.000000400Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZT80A000000000000000D1","clock_source":"local","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA1A000000000000000E2","event_time":"2026-09-21T14:00:05.000000000Z","event_type":"IntentReceived","payload":{"agent_id":"agent_a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","limit_price":"150","purpose":"open","qty":"10","risk_clock":"2026-09-21T14:00:05.000000000Z","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6","recorded_at":"2026-09-21T14:00:05.000000400Z","schema_version":2,"seq":2,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA2A000000000000000E3","event_time":"2026-09-21T14:00:10.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"intended","agent_id":null,"awaiting":[],"bracket":null,"created_on":null,"entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":[],"qty":null,"replacing":null,"risk_clock":"2026-09-21T14:00:10.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5","recorded_at":"2026-09-21T14:00:10.000000400Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 4
+        last_seq: 6
+        first_prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        last_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        file_sha256: c4c5efeb37cfefef7591f582ef8dd47711fadff01c103e795db1444673894f79
+        manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555","rule_set":"sha256:2222222222222222222222222222222222222222222222222222222222222222","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA3A000000000000000E4","event_time":"2026-09-21T14:00:15.000000000Z","event_type":"GateDecided","payload":{"checks":[{"computed":{"order_cost":"1500"},"id":"buying_power","inputs":{"buying_power":"10000"},"result":"pass"},{"computed":{},"id":"day_trade_budget","inputs":{"regime":"intraday_margin"},"result":"not_applicable"}],"data_profile":"iex","intent_id":"01J8ZT90A000000000000000P1","marks_used":[{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","kind":"risk","price":"149.98","source":"quote"}],"quotes_used":[{"as_of":"2026-09-21T14:00:05.000000000Z","ask":"150.02","bid":"149.98","feed":"iex","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"}],"reason_code":null,"risk_clock":"2026-09-21T14:00:15.000000000Z","verdict":"allow"},"pii_refs":[],"prev_hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc","recorded_at":"2026-09-21T14:00:15.000000400Z","schema_version":2,"seq":4,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA4A000000000000000E5","event_time":"2026-09-21T14:00:20.000000000Z","event_type":"OrderRequestRecorded","payload":{"agent_id":"agent_a","at_floor":null,"extended_hours":false,"intent_id":"01J8ZT90A000000000000000P1","order_class":"bracket","purpose":"open","risk_clock":"2026-09-21T14:00:20.000000000Z","rung":null,"stop":"139","stop_price":null,"take_profit":"159"},"pii_refs":[],"prev_hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467","recorded_at":"2026-09-21T14:00:20.000000400Z","schema_version":1,"seq":5,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA4A000000000000000E5","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA5A000000000000000E6","event_time":"2026-09-21T14:00:25.000000000Z","event_type":"OrderSubmitted","payload":{"attempt":1,"client_order_id":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","qty":"10","risk_clock":"2026-09-21T14:00:25.000000000Z","side":"buy","tif":"gtc","type":"limit"},"pii_refs":[],"prev_hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae","recorded_at":"2026-09-21T14:00:25.000000400Z","schema_version":2,"seq":6,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 7
+        last_seq: 8
+        first_prev_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        last_hash: affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e
+        file_sha256: 6913df49c34511193a7fa917b2e9ed2ca90a3bd55f7e32432b1f450ba277e8e4
+        manifest_hash: 956291c9f3af654f71063e8c76519870de7f505f23f1a55e8b772ef968269e41
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA6A000000000000000E7","event_time":"2026-09-21T14:00:30.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"placed","agent_id":null,"awaiting":[],"bracket":null,"created_on":"2026-09-21","entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":null,"orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":"10","replacing":null,"risk_clock":"2026-09-21T14:00:30.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d","recorded_at":"2026-09-21T14:00:30.000000400Z","schema_version":1,"seq":7,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA7A000000000000000E8","event_time":"2026-09-21T14:00:35.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"unprotected_start","agent_id":"agent_a","awaiting":[],"bracket":null,"created_on":null,"entry":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":null,"replacing":true,"risk_clock":"2026-09-21T14:00:35.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d","recorded_at":"2026-09-21T14:00:35.000000400Z","schema_version":1,"seq":8,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e"}
+
+        '
+    start:
+      kind: manifest
+      manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+    from_seq: 4
+    to_seq: 5
+    expect: null
+  - name: segment_past_to_seq_not_judged
+    clause: 'workspace API §4.8.1 step 2.3a: a segment that ends past to_seq, not the start''s, is not judged'
+    rows:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA0A000000000000000E1
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 1
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T14:00:00.000000000Z'
+        recorded_at: '2026-09-21T14:00:00.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          stream_type: account
+          workspace_id: ws_01J8Z2
+          broker: alpaca
+          account_ref: 01J8Z2ACCT00000000000000A2
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA1A000000000000000E2
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 2
+        event_type: IntentReceived
+        schema_version: 2
+        event_time: '2026-09-21T14:00:05.000000000Z'
+        recorded_at: '2026-09-21T14:00:05.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZT80A000000000000000D1
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs:
+          mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        payload:
+          intent_id: 01J8ZT90A000000000000000P1
+          agent_id: agent_a
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          side: buy
+          type: limit
+          tif: day
+          qty: '10'
+          limit_price: '150'
+          purpose: open
+          risk_clock: '2026-09-21T14:00:05.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
+      hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA2A000000000000000E3
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 3
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:10.000000000Z'
+        recorded_at: '2026-09-21T14:00:10.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA1A000000000000000E2
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: intended
+          orders: []
+          awaiting: []
+          qty: null
+          stop: '139'
+          take_profit: '159'
+          intent_id: 01J8ZT90A000000000000000P1
+          bracket: null
+          entry: null
+          agent_id: null
+          replacing: null
+          created_on: null
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:10.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
+      hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA3A000000000000000E4
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 4
+        event_type: GateDecided
+        schema_version: 2
+        event_time: '2026-09-21T14:00:15.000000000Z'
+        recorded_at: '2026-09-21T14:00:15.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA1A000000000000000E2
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs:
+          fee_config: sha256:1111111111111111111111111111111111111111111111111111111111111111
+          trading_calendar: sha256:7777777777777777777777777777777777777777777777777777777777777777
+          instrument_snapshot: sha256:4444444444444444444444444444444444444444444444444444444444444444
+          rule_set: sha256:2222222222222222222222222222222222222222222222222222222222222222
+          mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        payload:
+          intent_id: 01J8ZT90A000000000000000P1
+          verdict: allow
+          reason_code: null
+          data_profile: iex
+          quotes_used:
+          - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+            bid: '149.98'
+            ask: '150.02'
+            as_of: '2026-09-21T14:00:05.000000000Z'
+            feed: iex
+          marks_used:
+          - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+            price: '149.98'
+            source: quote
+            kind: risk
+          checks:
+          - id: buying_power
+            result: pass
+            inputs:
+              buying_power: '10000'
+            computed:
+              order_cost: '1500'
+          - id: day_trade_budget
+            result: not_applicable
+            inputs:
+              regime: intraday_margin
+            computed: {}
+          risk_clock: '2026-09-21T14:00:15.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+      hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA4A000000000000000E5
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 5
+        event_type: OrderRequestRecorded
+        schema_version: 1
+        event_time: '2026-09-21T14:00:20.000000000Z'
+        recorded_at: '2026-09-21T14:00:20.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          agent_id: agent_a
+          intent_id: 01J8ZT90A000000000000000P1
+          purpose: open
+          extended_hours: false
+          stop_price: null
+          order_class: bracket
+          take_profit: '159'
+          stop: '139'
+          rung: null
+          at_floor: null
+          risk_clock: '2026-09-21T14:00:20.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
+      hash: 7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA5A000000000000000E6
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 6
+        event_type: OrderSubmitted
+        schema_version: 2
+        event_time: '2026-09-21T14:00:25.000000000Z'
+        recorded_at: '2026-09-21T14:00:25.000000400Z'
+        clock_source: local
+        causation_id: 01J8ZQA4A000000000000000E5
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          client_order_id: md-01J8ZT90A000000000000000P1
+          attempt: 1
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          side: buy
+          type: limit
+          tif: gtc
+          qty: '10'
+          limit_price: '150'
+          risk_clock: '2026-09-21T14:00:25.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae
+      hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA6A000000000000000E7
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 7
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:30.000000000Z'
+        recorded_at: '2026-09-21T14:00:30.000000400Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: placed
+          orders:
+          - md-01J8ZT90A000000000000000P1-p1
+          awaiting: []
+          qty: '10'
+          stop: '139'
+          take_profit: '159'
+          intent_id: null
+          bracket: null
+          entry: null
+          agent_id: null
+          replacing: null
+          created_on: '2026-09-21'
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:30.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+      hash: 45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZQA7A000000000000000E8
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        seq: 8
+        event_type: ProtectionChanged
+        schema_version: 1
+        event_time: '2026-09-21T14:00:35.000000000Z'
+        recorded_at: '2026-09-21T14:00:35.000000999Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: executor
+          version: 0.1.0
+          build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        config_refs: {}
+        payload:
+          instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+          action: unprotected_start
+          orders:
+          - md-01J8ZT90A000000000000000P1-p1
+          awaiting: []
+          qty: null
+          stop: '139'
+          take_profit: '159'
+          intent_id: 01J8ZT90A000000000000000P1
+          bracket: null
+          entry: md-01J8ZT90A000000000000000P1
+          agent_id: agent_a
+          replacing: true
+          created_on: null
+          sent: null
+          uncovered: null
+          acknowledged: null
+          risk_clock: '2026-09-21T14:00:35.000000000Z'
+        artifact_refs: []
+        pii_refs: []
+        prev_hash: 45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d
+      hash: be3b754d2ff6ad6fc332d33ff3e316349d61a715d19e1e4a9873d967c63ae6db
+    segments:
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 1
+        last_seq: 3
+        first_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        last_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        file_sha256: 6db23522db87d670d0585d4847389c7b7c528a4df907979a075d35a74ec238a1
+        manifest_hash: efc28bd7b7f513ce53983cbfbb3f2dd2d40382e6094527551f18648659d486a8
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA0A000000000000000E1","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"01J8Z2ACCT00000000000000A2","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T14:00:00.000000400Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZT80A000000000000000D1","clock_source":"local","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA1A000000000000000E2","event_time":"2026-09-21T14:00:05.000000000Z","event_type":"IntentReceived","payload":{"agent_id":"agent_a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","limit_price":"150","purpose":"open","qty":"10","risk_clock":"2026-09-21T14:00:05.000000000Z","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6","recorded_at":"2026-09-21T14:00:05.000000400Z","schema_version":2,"seq":2,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA2A000000000000000E3","event_time":"2026-09-21T14:00:10.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"intended","agent_id":null,"awaiting":[],"bracket":null,"created_on":null,"entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":[],"qty":null,"replacing":null,"risk_clock":"2026-09-21T14:00:10.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5","recorded_at":"2026-09-21T14:00:10.000000400Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 4
+        last_seq: 6
+        first_prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
+        last_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        file_sha256: c4c5efeb37cfefef7591f582ef8dd47711fadff01c103e795db1444673894f79
+        manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA1A000000000000000E2","clock_source":"local","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555","rule_set":"sha256:2222222222222222222222222222222222222222222222222222222222222222","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA3A000000000000000E4","event_time":"2026-09-21T14:00:15.000000000Z","event_type":"GateDecided","payload":{"checks":[{"computed":{"order_cost":"1500"},"id":"buying_power","inputs":{"buying_power":"10000"},"result":"pass"},{"computed":{},"id":"day_trade_budget","inputs":{"regime":"intraday_margin"},"result":"not_applicable"}],"data_profile":"iex","intent_id":"01J8ZT90A000000000000000P1","marks_used":[{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","kind":"risk","price":"149.98","source":"quote"}],"quotes_used":[{"as_of":"2026-09-21T14:00:05.000000000Z","ask":"150.02","bid":"149.98","feed":"iex","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"}],"reason_code":null,"risk_clock":"2026-09-21T14:00:15.000000000Z","verdict":"allow"},"pii_refs":[],"prev_hash":"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc","recorded_at":"2026-09-21T14:00:15.000000400Z","schema_version":2,"seq":4,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA4A000000000000000E5","event_time":"2026-09-21T14:00:20.000000000Z","event_type":"OrderRequestRecorded","payload":{"agent_id":"agent_a","at_floor":null,"extended_hours":false,"intent_id":"01J8ZT90A000000000000000P1","order_class":"bracket","purpose":"open","risk_clock":"2026-09-21T14:00:20.000000000Z","rung":null,"stop":"139","stop_price":null,"take_profit":"159"},"pii_refs":[],"prev_hash":"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467","recorded_at":"2026-09-21T14:00:20.000000400Z","schema_version":1,"seq":5,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZQA4A000000000000000E5","clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA5A000000000000000E6","event_time":"2026-09-21T14:00:25.000000000Z","event_type":"OrderSubmitted","payload":{"attempt":1,"client_order_id":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","qty":"10","risk_clock":"2026-09-21T14:00:25.000000000Z","side":"buy","tif":"gtc","type":"limit"},"pii_refs":[],"prev_hash":"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae","recorded_at":"2026-09-21T14:00:25.000000400Z","schema_version":2,"seq":6,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d"}
+
+        '
+    - manifest:
+        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+        first_seq: 7
+        last_seq: 8
+        first_prev_hash: eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d
+        last_hash: affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e
+        file_sha256: 6913df49c34511193a7fa917b2e9ed2ca90a3bd55f7e32432b1f450ba277e8e4
+        manifest_hash: 956291c9f3af654f71063e8c76519870de7f505f23f1a55e8b772ef968269e41
+      file: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA6A000000000000000E7","event_time":"2026-09-21T14:00:30.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"placed","agent_id":null,"awaiting":[],"bracket":null,"created_on":"2026-09-21","entry":null,"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":null,"orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":"10","replacing":null,"risk_clock":"2026-09-21T14:00:30.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d","recorded_at":"2026-09-21T14:00:30.000000400Z","schema_version":1,"seq":7,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d"}
+
+        {"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZQA7A000000000000000E8","event_time":"2026-09-21T14:00:35.000000000Z","event_type":"ProtectionChanged","payload":{"acknowledged":null,"action":"unprotected_start","agent_id":"agent_a","awaiting":[],"bracket":null,"created_on":null,"entry":"md-01J8ZT90A000000000000000P1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8ZT90A000000000000000P1","orders":["md-01J8ZT90A000000000000000P1-p1"],"qty":null,"replacing":true,"risk_clock":"2026-09-21T14:00:35.000000000Z","sent":null,"stop":"139","take_profit":"159","uncovered":null},"pii_refs":[],"prev_hash":"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d","recorded_at":"2026-09-21T14:00:35.000000400Z","schema_version":1,"seq":8,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2"},"hash":"affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e"}
+
+        '
+    start:
+      kind: manifest
+      manifest_hash: 18686305702291b158d7a5a5e3eb193a8f780e0fe9d34abb24ac99dba9de6d0d
+    from_seq: 4
+    to_seq: 7
+    expect: null
+  drafts:
+    run_failed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3V2A000000000000000V2
+      stream_id: ctl:ws_01J8Z2
+      event_type: VerificationRun
+      schema_version: 2
+      event_time: '2026-10-09T18:30:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z3R2A000000000000000R2
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        trigger: request
+        ranges:
+        - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+          from_seq: 1
+          to_seq: 40
+          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          to_hash: null
+          start:
+            kind: genesis
+            manifest_hash: null
+            anchor_event_id: null
+          checked: 17
+          failure:
+            check: rehash_mismatch
+            seq: 17
+          incomplete: null
+        - stream_id: ctl:ws_01J8Z2
+          from_seq: 1
+          to_seq: 9
+          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+          start:
+            kind: genesis
+            manifest_hash: null
+            anchor_event_id: null
+          checked: 9
+          failure: null
+          incomplete: null
+        result: fail
+      artifact_refs: []
+      pii_refs: []
+  valid_drafts:
+  - name: rows_mismatch_for_the_range
+    clause: '§9.13 rule 111: `segment_rows_mismatch` is reported for the range, with seq null (DEC-894)'
+    base_draft: run_failed
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        start:
+          kind: genesis
+          manifest_hash: null
+          anchor_event_id: null
+        checked: 40
+        failure:
+          check: segment_rows_mismatch
+          seq: null
+        incomplete: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        start:
+          kind: genesis
+          manifest_hash: null
+          anchor_event_id: null
+        checked: 9
+        failure: null
+        incomplete: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  invalid_drafts:
+  - name: rows_mismatch_at_a_seq
+    clause: '§9.13 rule 111: `segment_rows_mismatch` names no seq'
+    base_draft: run_failed
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        start:
+          kind: genesis
+          manifest_hash: null
+          anchor_event_id: null
+        checked: 40
+        failure:
+          check: segment_rows_mismatch
+          seq: 17
+        incomplete: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        start:
+          kind: genesis
+          manifest_hash: null
+          anchor_event_id: null
+        checked: 9
+        failure: null
+        incomplete: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.seq
+  - name: rows_mismatch_at_version_1
+    clause: '§9.13: version 1''s closed list of checks does not gain `segment_rows_mismatch` (§8)'
+    base_draft: run_failed
+    changes:
+    - path: schema_version
+      value: 1
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        failure:
+          check: segment_rows_mismatch
+          seq: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.ranges[0].failure.check
