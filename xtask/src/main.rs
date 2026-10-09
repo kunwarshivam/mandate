@@ -18,7 +18,8 @@ usage: cargo xtask <command>
 commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
-                        spec-guard | refcases | reference | supply-chain | postgres | mutants
+                        spec-guard | refcases | reference | schemas | supply-chain | postgres |
+                        mutants | schema-mutants
   ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
   layers                check crate layering and safety-critical policy (xtask/layers.toml)
   markers               check for debt markers and #[ignore] without a pending story
@@ -32,20 +33,34 @@ commands:
 /// The two required-check command groups (DEC-76). `pending` follows `test` in `fast` because it
 /// reuses the test binaries that `test` has just built. CI shards `mutants` separately and makes
 /// its required `full` verdict depend on every shard (DEC-464); the local `check` command still
-/// runs every entry in [`PR_JOBS`] once, unsharded.
+/// runs every entry in [`PR_JOBS`] once, unsharded. `schema-mutants` is CI's own job beside them,
+/// which the required `full` verdict also needs, so `full-checks` stays under ten minutes (DEC-688).
 const FAST_JOB: [&str; 4] = ["lint", "test", "pending", "spec-guard"];
-const FULL_JOB: [&str; 4] = ["refcases", "reference", "supply-chain", "postgres"];
-const PR_JOBS: [&str; 9] = [
+const FULL_JOB: [&str; 5] = [
+    "refcases",
+    "reference",
+    "schemas",
+    "supply-chain",
+    "postgres",
+];
+const PR_JOBS: [&str; 11] = [
     "lint",
     "test",
     "pending",
     "refcases",
     "reference",
+    "schemas",
     "supply-chain",
     "spec-guard",
     "postgres",
     "mutants",
+    "schema-mutants",
 ];
+
+/// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
+/// `mutate_schemas.py`, the `schema-mutants` job, runs all three against each mutant (DEC-688).
+const SCHEMA_CHECKERS: [&str; 3] = ["check_examples.py", "check_planned.py", "check_lenient.py"];
+const SCHEMA_DIR: &str = "schemas/workspace-api";
 
 /// The database the Postgres journal tests use, and the switch that makes its absence a failure
 /// rather than a skip (DEC-109). CI's `full` and nightly jobs set both.
@@ -194,6 +209,13 @@ fn ci(job: &str) -> Result<()> {
             )?;
             mutation_anchors()
         }
+        "schemas" => {
+            for checker in SCHEMA_CHECKERS {
+                pinned_python(&format!("{SCHEMA_DIR}/{checker}"), &[])?;
+            }
+            Ok(())
+        }
+        "schema-mutants" => pinned_python(&format!("{SCHEMA_DIR}/mutate_schemas.py"), &[]),
         "supply-chain" => {
             sh("cargo", &["deny", "--locked", "check"])?;
             deps()?;
@@ -587,7 +609,13 @@ fn reference(script_and_args: &[&str]) -> Result<()> {
     let Some((script, rest)) = script_and_args.split_first() else {
         bail!("no reference script given");
     };
-    let path = format!("reference/{script}");
+    pinned_python(&format!("reference/{script}"), rest)
+}
+
+/// Runs the Python script at `path`, from the repository root, in the environment
+/// `reference/mandate/requirements.txt` pins: the reference implementations' and the workspace API
+/// schema checkers' (DEC-688).
+fn pinned_python(path: &str, rest: &[&str]) -> Result<()> {
     let mut full = vec![
         "run",
         "--no-project",
@@ -596,7 +624,7 @@ fn reference(script_and_args: &[&str]) -> Result<()> {
         "--with-requirements",
         "reference/mandate/requirements.txt",
         "python",
-        path.as_str(),
+        path,
     ];
     full.extend_from_slice(rest);
     sh("uv", &full)
@@ -3891,19 +3919,20 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency,
-        FEATURE_MAP, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_OUT,
-        Metadata, MutantPlan, MutantShard, MutatedCrate, Package, PendingTest, PendingTestRun,
-        REFCASES, TestOutcome, actionlint_workflows, backticked_paths, base_ref_in,
-        behaviour_only_rows, check_schedule, ci, ci_files, classify, contains_dec_id,
-        contains_word, external_oracles, failure_cause, feature_files, feature_map_problems,
-        files_by_extension, first_panic_line, forbidden_reached, generated_pending_markers,
-        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
-        listed_mutant_counts, live_feature_problems, live_test_counts, metadata_in,
-        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
-        mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
-        pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_outcomes, unjudged_mutants, verdicts, workspace_closure, workspace_packages,
+        FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
+        MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package,
+        PendingTest, PendingTestRun, REFCASES, SCHEMA_CHECKERS, SCHEMA_DIR, TestOutcome,
+        actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule,
+        ci, ci_files, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
+        feature_files, feature_map_problems, files_by_extension, first_panic_line,
+        forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
+        is_stub_function, layer_problems, lint, listed_mutant_counts, live_feature_problems,
+        live_test_counts, metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo,
+        mutants_outcome, mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in,
+        pending_problems, pending_tests, plain_comment_lines, proptest_seeds_in, repo_root,
+        shellcheck_scripts, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
+        test_binary, test_outcomes, unjudged_mutants, verdicts, workspace_closure,
+        workspace_packages,
     };
 
     #[test]
@@ -7001,7 +7030,7 @@ mod tests {
         let full = trimmed("full")?;
         assert!(
             full.iter()
-                .any(|l| l == "needs: [full-checks, mutants-plan, mutants]"),
+                .any(|l| l == "needs: [full-checks, mutants-plan, mutants, schema-mutants]"),
             "`full` needs the plan as well as the matrix"
         );
         Ok(())
@@ -7049,6 +7078,7 @@ mod tests {
                             .env("PLAN_RESULT", plan)
                             .env("PLANNED_MUTANTS", planned)
                             .env("MUTANTS_RESULT", matrix)
+                            .env("SCHEMA_MUTANTS_RESULT", "success")
                             .status()?;
                         assert_eq!(
                             status.success(),
@@ -7061,6 +7091,53 @@ mod tests {
             }
         }
         assert_eq!(checked, 512);
+        Ok(())
+    }
+
+    /// DEC-688: the workspace API's three schema checkers run inside `full`, and its mutation sweep
+    /// is CI's own `schema-mutants` job, guarded like the others against drafts, capped at ten
+    /// minutes (DEC-464), and needed by the required `full` verdict, which fails on any result of
+    /// it but success while every other job passed.
+    #[test]
+    fn the_workspace_api_schema_jobs_gate_full() -> Result<()> {
+        assert!(FULL_JOB.contains(&"schemas") && !FULL_JOB.contains(&"schema-mutants"));
+        assert!(PR_JOBS.contains(&"schemas") && PR_JOBS.contains(&"schema-mutants"));
+        for checker in SCHEMA_CHECKERS.iter().chain(["mutate_schemas.py"].iter()) {
+            let path = repo_root()?.join(SCHEMA_DIR).join(checker);
+            assert!(path.is_file(), "{} exists", path.display());
+        }
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let job: Vec<String> = workflow_job(&workflow, "schema-mutants")
+            .context("ci.yml has a `schema-mutants` job")?
+            .iter()
+            .map(|line| line.trim().trim_start_matches("- ").to_owned())
+            .collect();
+        for line in [
+            "if: ${{ !github.event.pull_request.draft }}",
+            "timeout-minutes: 10",
+            "run: cargo xtask ci schema-mutants",
+        ] {
+            assert!(
+                job.iter().any(|l| l == line),
+                "`schema-mutants` has `{line}`"
+            );
+        }
+        let script = full_verdict_script(&workflow)?;
+        for result in ["success", "failure", "cancelled", "skipped", ""] {
+            let status = Command::new("bash")
+                .args(["-e", "-c", &script])
+                .env("FULL_CHECKS_RESULT", "success")
+                .env("PLAN_RESULT", "success")
+                .env("PLANNED_MUTANTS", "0")
+                .env("MUTANTS_RESULT", "skipped")
+                .env("SCHEMA_MUTANTS_RESULT", result)
+                .status()?;
+            assert_eq!(
+                status.success(),
+                result == "success",
+                "`full` with schema-mutants {result:?}"
+            );
+        }
         Ok(())
     }
 
@@ -7135,9 +7212,9 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            4,
-            "one checkout in each source-reading job: `fast`, `full-checks`, the mutation plan, and \
-             the mutants matrix"
+            5,
+            "one checkout in each source-reading job: `fast`, `full-checks`, the mutation plan, \
+             the mutants matrix, and `schema-mutants`"
         );
         for checkout in checkouts {
             assert!(

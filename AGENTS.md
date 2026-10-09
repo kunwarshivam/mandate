@@ -190,11 +190,13 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   `-D warnings`, crate layering, the `live` feature (only the crate `xtask/layers.toml` marks
   `live_feature` may declare one, and CI only compiles it; DEC-529), markers, saved proptest
   seeds, the feature map, typos, ruff), test (nextest, doctests, pytest), pending tests, reference-case fixture drift, the reference
-  implementation checks, supply chain (cargo-deny, the dependency registry, gitleaks), the spec
-  guard, the Postgres journal tests (skipped unless `MANDATE_PG_URL` is set), and mutants on the
-  diff of safety-critical crates. CI runs them as two required checks: `cargo xtask ci fast` (lint,
-  test, pending tests, spec guard) and `full`, an aggregate over `cargo xtask ci full` (fixtures,
-  reference, supply chain, Postgres) and every deterministic `cargo xtask ci mutants` shard. Every
+  implementation checks, the workspace API schema checks (`schemas`), supply chain (cargo-deny,
+  the dependency registry, gitleaks), the spec guard, the Postgres journal tests (skipped unless
+  `MANDATE_PG_URL` is set), mutants on the diff of safety-critical crates, and the workspace API
+  schemas' mutation sweep (`schema-mutants`). CI runs them as two required checks:
+  `cargo xtask ci fast` (lint, test, pending tests, spec guard) and `full`, an aggregate over
+  `cargo xtask ci full` (fixtures, reference, schemas, supply chain, Postgres), every
+  deterministic `cargo xtask ci mutants` shard, and `cargo xtask ci schema-mutants` (DEC-688). Every
   required check and aggregated job must finish in under ten minutes; add parallel shards rather
   than removing tests, baselines, mutants, or safety gates (DEC-464).
 - **New crates** get an entry in `xtask/layers.toml` in the same change; safety-critical crates also
