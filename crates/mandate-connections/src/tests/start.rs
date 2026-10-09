@@ -1,6 +1,6 @@
 //! The start and the callback's `state` (connections spec §5.2 steps 1 to 3; DEC-821 item 3).
 
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 
 use super::support::{VERIFIER, at, client};
 use crate::ConnectError;
@@ -150,6 +150,65 @@ fn an_unknown_state_is_refused() {
     assert_eq!(
         redeem(&mut states, "u1", 1011),
         Ok(binding("u1", Environment::Paper))
+    );
+}
+
+fn begin_with(
+    states: &mut PendingStates,
+    state: &str,
+    user: &str,
+    verifier: &str,
+) -> Result<(), ConnectError> {
+    states
+        .begin(
+            &client(),
+            binding(user, Environment::Paper),
+            state,
+            PkceVerifier(SecretString::from(verifier)),
+            "chal",
+            at(1000),
+        )
+        .map(|_| ())
+}
+
+fn redeemed(
+    states: &mut PendingStates,
+    state: &str,
+    user: &str,
+) -> Result<(String, String), ConnectError> {
+    states
+        .redeem(state, user, at(1010))
+        .map(|r| (r.binding.user_id, r.verifier.0.expose_secret().to_owned()))
+}
+
+#[test]
+#[ignore = "pending E10-13"]
+fn each_state_returns_the_verifier_bound_to_it_at_begin() {
+    let mut states = PendingStates::default();
+    begin_with(&mut states, "st-a", "u1", "verifier-a").unwrap();
+    begin_with(&mut states, "st-b", "u2", "verifier-b").unwrap();
+    assert_eq!(
+        redeemed(&mut states, "st-b", "u2"),
+        Ok(("u2".to_owned(), "verifier-b".to_owned()))
+    );
+    assert_eq!(
+        redeemed(&mut states, "st-a", "u1"),
+        Ok(("u1".to_owned(), "verifier-a".to_owned()))
+    );
+}
+
+#[test]
+#[ignore = "pending E10-13"]
+fn a_state_already_issued_is_refused_and_the_first_binding_is_kept() {
+    let mut states = PendingStates::default();
+    begin_with(&mut states, "st-1", "u1", "verifier-a").unwrap();
+    assert_eq!(
+        begin_with(&mut states, "st-1", "u2", "verifier-b"),
+        Err(ConnectError::StateReused)
+    );
+    assert_eq!(
+        redeemed(&mut states, "st-1", "u1"),
+        Ok(("u1".to_owned(), "verifier-a".to_owned()))
     );
 }
 

@@ -83,7 +83,8 @@ impl PendingStates {
     /// Issues `state` for `binding` and returns the authorization URL: `response_type=code`,
     /// the client id, [`REDIRECT_URI`], the `state`, the PKCE challenge (`S256`),
     /// [`REQUESTED_SCOPES`], and `env` set to the binding's environment. Only a paper binding
-    /// is accepted (DEC-821 item 3; DEC-441 item 21).
+    /// is accepted (DEC-821 item 3; DEC-441 item 21). A `state` already issued and not yet
+    /// redeemed is refused, and the binding and verifier issued with it are kept unchanged.
     pub fn begin(
         &mut self,
         client_id: &ClientId,
@@ -105,8 +106,9 @@ impl PendingStates {
         Err(ConnectError::Unimplemented { story: "E10-13" })
     }
 
-    /// Redeems `state` once. Unknown, expired, or another user's `state` is refused, and in
-    /// every case a `state` that was found is spent, so it can never be tried again.
+    /// Redeems `state` once, returning the binding and the verifier issued with it. Unknown,
+    /// expired, or another user's `state` is refused, and in every case a `state` that was found
+    /// is spent, so it can never be tried again.
     pub fn redeem(
         &mut self,
         state: &str,
