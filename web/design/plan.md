@@ -283,7 +283,7 @@ item above (C-3, C-9) are not repeated.
 - [ ] **The Allowed chip keeps its edge in dark mode**, with its fill in the contrast pairs. (C-18)
 - [ ] **A labelled composer in set-up**, with a flat send button; still no placeholder or example.
       (C-4)
-- [ ] **Alerts says all clear** when every feed answers and no agent is restricted. (C-13)
+- [x] **Alerts says all clear** when every feed answers and no agent is restricted. (C-13) Done in [#1167](https://github.com/kunwarshivam/mandate/pull/1167).
 - [ ] **Day headings on the timeline.** (C-19)
 - [ ] **The status strip's state chips outlined**, not ink. (C-26)
 - [ ] **Workspace out of More** until one section is built (a DEC amending DEC-513 item 2); its
