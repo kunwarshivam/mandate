@@ -11,6 +11,7 @@ use mandate_api::problem::{
     AncestorLevel, CurrentBase, Effect, PolicyLevel, PolicyValue, Problem, ProblemCode,
     ProblemError, Violation,
 };
+use mandate_api::responses::CommandStatus;
 use mandate_api::wire::{
     Asset, Decimal, EventId, Id, Ref, Refused, Timestamp, Validate, decode, encode,
 };
@@ -388,6 +389,35 @@ fn decode_refuses_every_malformed_body_with_one_located_violation() {
             "{found:?}"
         );
     }
+}
+
+/// A refusal on a later line of a pretty-printed body is located there (DEC-681 item 10): the
+/// unknown member `x` on the third line is `/x`.
+#[test]
+#[ignore = "pending E10-10"]
+fn decode_locates_a_refusal_on_a_later_line_of_the_body() {
+    let body = b"{\n  \"bid\": \"1.5\",\n  \"x\": 1,\n  \"effect\": \"none\"\n}\n";
+    assert_eq!(
+        refusal::<Fixture>(body),
+        [("/x".to_owned(), "unknown_member".to_owned())]
+    );
+}
+
+/// A refusal inside an array is located by the item's index (RFC 6901, DEC-681 item 10): an
+/// unknown member of a command status's second step is `/steps/1/extra`, after an earlier array.
+#[test]
+#[ignore = "pending E10-10"]
+fn decode_locates_a_refusal_inside_an_array_by_its_index() {
+    let example =
+        include_str!("../../../schemas/workspace-api/examples/commands.command-status.json");
+    let mut status: Value = serde_json::from_str(example).expect("JSON");
+    let mut second = status["steps"][0].clone();
+    second["extra"] = json!(1);
+    status["steps"].as_array_mut().expect("steps").push(second);
+    assert_eq!(
+        refusal::<CommandStatus>(status.to_string().as_bytes()),
+        [("/steps/1/extra".to_owned(), "unknown_member".to_owned())]
+    );
 }
 
 #[test]
