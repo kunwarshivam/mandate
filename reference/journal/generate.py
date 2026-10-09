@@ -4114,7 +4114,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(verification_section['valid_drafts'])} valid; {len(verification.VALIDATOR_MUTANTS)} validator and "
         f"{len(verification.vector_mutants(verification_section))} vector mutants caught; "
         f"{len(rows_section['ranges'])} segment-rows ranges, {len(rows_section['valid_drafts'])} valid and "
-        f"{len(rows_section['invalid_drafts'])} invalid drafts; {len(segment_rows.REFERENCE_MUTANTS)} reference mutants caught"
+        f"{len(rows_section['invalid_drafts'])} invalid drafts; {len(segment_rows.REFERENCE_MUTANTS)} reference and "
+        f"{len(segment_rows.vector_mutants(rows_section))} vector mutants caught"
     )
     return 0
 

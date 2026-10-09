@@ -62,7 +62,6 @@ fn leaf(stream_id: &str, seq: u64) -> AnchorLeaf {
 /// Any anchor §10 computes, stamped or with a `null` token, reads back leaf for leaf, root for
 /// root, and token for token.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_computed_anchor_reads_back_exactly() {
     let heads = prop::collection::btree_map("[a-z]{1,6}", 1u64..1_000_000, 1..9);
     let outcome = TestRunner::deterministic().run(&(heads, any::<bool>()), |(heads, stamped)| {
@@ -86,7 +85,6 @@ fn every_computed_anchor_reads_back_exactly() {
 
 /// A wrong root and unsorted leaves are kept, so §11's `anchor_root_mismatch` still sees them.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_wrong_root_and_unsorted_leaves_are_kept_for_the_anchor_checks() {
     let a = Anchor::compute(vec![leaf("acct:ws_1:A1", 4), leaf("ctl:ws_1", 6)]).unwrap();
     let reversed: Vec<AnchorLeaf> = a.leaves.iter().rev().cloned().collect();
@@ -104,7 +102,6 @@ fn a_wrong_root_and_unsorted_leaves_are_kept_for_the_anchor_checks() {
 /// Another type or version is not an anchor; a payload missing a member, or holding one not of
 /// §9.14's type (a bare-hex or numeric token, a `sha256:` root, a leaf's text `seq`), is malformed.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_row_that_is_not_a_well_formed_anchor_is_refused() {
     use AnchorRecordError::{Malformed, NotAnAnchor};
     let h = Digest::of(b"h").to_hex();
