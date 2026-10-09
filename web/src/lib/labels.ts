@@ -107,16 +107,31 @@ const RULE_FIELD: Record<string, string> = {
   purpose: "the purpose",
 };
 
-const RULE_OP: Record<string, string> = {
-  eq: "is",
-  ne: "is not",
-  gt: "is above",
-  gte: "is at or above",
-  lt: "is below",
-  lte: "is at or below",
-  in: "is",
-  not_in: "is not",
+/** One value compared: the words and the value for exactly one value, `null` for any other count. */
+const one = (words: string) => (vs: string[]) => (vs.length === 1 ? `${words} ${vs[0]}` : null);
+
+/**
+ * A rule's comparison and its values as the sentence reads them, `null` when the values do not fit
+ * the comparison: none, or several for a comparison of one value.
+ */
+const RULE_OP: Record<string, (values: string[]) => string | null> = {
+  eq: one("is"),
+  ne: one("is not"),
+  gt: one("is above"),
+  gte: one("is at or above"),
+  lt: one("is below"),
+  lte: one("is at or below"),
+  in: (vs) => (vs.length === 0 ? null : `is ${vs.join(" or ")}`),
+  not_in: (vs) => {
+    if (vs.length === 0) return null;
+    if (vs.length === 1) return `is not ${vs[0]}`;
+    if (vs.length === 2) return `is neither ${vs[0]} nor ${vs[1]}`;
+    return `is none of ${vs.slice(0, -1).join(", ")} or ${vs.at(-1)}`;
+  },
 };
+
+/** What a rule says when its operator is one this page does not know, or its values do not fit it: never the raw operator. */
+const RULE_CONDITION_UNREAD = "meets this rule's condition";
 
 /** A rule's value as the owner wrote it: dollars for a dollar field, whole dollars without cents; a purpose by its label. */
 function ruleValue(field: string, value: string): string {
@@ -133,7 +148,8 @@ function ruleValue(field: string, value: string): string {
 export function ruleSentence(rule: AutonomyRule): string {
   const { field, op, value } = rule.when;
   const values = (Array.isArray(value) ? value : [value]).map((v) => ruleValue(field, v));
-  return `${RULE_THEN[rule.then]} when ${RULE_FIELD[field] ?? `the ${field.replaceAll("_", " ")}`} ${RULE_OP[op] ?? op} ${values.join(" or ")}`;
+  const compare = (Object.hasOwn(RULE_OP, op) ? RULE_OP[op](values) : null) ?? RULE_CONDITION_UNREAD;
+  return `${RULE_THEN[rule.then]} when ${RULE_FIELD[field] ?? `the ${field.replaceAll("_", " ")}`} ${compare}`;
 }
 
 /**
