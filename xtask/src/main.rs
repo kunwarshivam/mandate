@@ -9988,6 +9988,69 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// DEC-851 item 1 reads through a wrapper: `env` (with `-i`, `-u X` and `VAR=val`),
+    /// `command`, `exec`, `xargs`, `sudo` (each with its options), `nice`, `nohup` and
+    /// `timeout N` are skipped to find the command that runs an expanding command line, and `.`
+    /// or `source` of a process substitution or a here-string that expands is refused too (the
+    /// coordinator's ruling on #962's review, under DEC-176; X1 tests correction 10). A wrapped
+    /// script, and `.` of a file path built by a substitution, stay allowed.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn wrapped_shells_and_sourced_expansions_are_refused() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let refused = [
+            "env bash -c \"$C\"",
+            "command sh -c \"$C\"",
+            "exec sh -c \"$C\"",
+            "xargs sh -c \"$C\"",
+            "sudo sh -c \"$C\"",
+            ". <(echo \"$C\")",
+            "source /dev/stdin <<< \"$C\"",
+            "env -i PATH=/bin bash -c \"$C\"",
+            "env -u X sh -c \"$C\"",
+            "xargs -r -n 1 sh -c \"$C\"",
+            "sudo -u root -E sh -c \"$C\"",
+            "nice -n 5 bash -c \"$C\"",
+            "nohup sh -c \"$C\"",
+            "timeout 5 bash -c \"$C\"",
+            "command eval \"$C\"",
+            "source <(echo \"$C\")",
+        ];
+        for line in refused {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let allowed = [
+            "sudo -u x ./script.sh",
+            ". \"$(dirname \"${BASH_SOURCE[0]}\")/lib.sh\"",
+            "source ./lib.sh",
+            "env FOO=1 bash script.sh \"$A\"",
+            "timeout 5 ./x.sh \"$A\"",
+            "xargs -r sudo rm -f",
+        ];
+        for line in allowed {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{line}"
+            );
+        }
+        Ok(())
+    }
+
     /// A marked crate that is not a workspace member is no runner, so even the compile-only form
     /// naming it is refused, beside the membership problem (#738 review, finding 2: the
     /// membership test of the runner).
