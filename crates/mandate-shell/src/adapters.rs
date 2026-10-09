@@ -2435,7 +2435,6 @@ mod tests {
     /// DEC-838 item 5: the profile handed to the core executor replaces its transitional one in
     /// the state it has folded, which it keeps.
     #[test]
-    #[ignore = "pending E7-23"]
     fn core_executor_keeps_its_fold_and_takes_the_profile_it_is_handed() -> Result<(), String> {
         let (mut core, _) = CoreExecutor::pair(account_scope(), Some(test_executor_context()?));
         let opened = stream_opened()?;

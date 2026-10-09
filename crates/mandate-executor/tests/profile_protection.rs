@@ -408,7 +408,6 @@ fn re_place_no_longer_reads_the_asset_class_and_asks_the_profile() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn an_offset_of_one_is_refused_and_never_sent_as_a_zero_limit() {
     let sent = protective_shape(
         &regular(&simple_stop_limit(Qf::Whole)),

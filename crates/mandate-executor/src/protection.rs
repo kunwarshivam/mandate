@@ -1868,6 +1868,17 @@ fn uncovered(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
     changed(batch, instrument, "unprotected_end", uncovered).map(|_| ())
 }
 
+/// The asset class whose row protection reads: the snapshot's, and a US equity's for an
+/// instrument it does not classify, as before B2a, so a position keeps its protection (DEC-841
+/// item 1, `AGENTS.md` rule 13).
+fn protected_class(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> AssetClass {
+    batch
+        .ports
+        .instruments
+        .asset_class(instrument)
+        .unwrap_or(AssetClass::UsEquity)
+}
+
 /// What [`re_place`] hands [`protective_shape`] as the clock's session, which it never reads:
 /// protection reads the protective order's own session (DEC-838 item 4).
 const UNREAD_CLOCK: MarketSession = MarketSession::Regular;
@@ -1876,9 +1887,10 @@ const UNREAD_CLOCK: MarketSession = MarketSession::Regular;
 /// recorded. With shares left to cover and no prices to place at, the shortfall is journaled and
 /// alerted ([`unprotectable`]), and the `unprotected_end` that ends the sequence is marked
 /// `uncovered`: the interval stays open and bounded, since nothing covers the shares (DEC-367
-/// item 4, #468's round-4 review, m2). A profile that offers no form for the shares, or an
-/// instrument the snapshot does not classify, ends the same way: journaled and alerted, never an
-/// error and never a silent skip (DEC-838 item 1, DEC-841).
+/// item 4, #468's round-4 review, m2). A profile that offers no form for the shares ends the same
+/// way: journaled and alerted, never an error and never a silent skip (DEC-838 item 1, DEC-841
+/// item 2). An instrument the snapshot does not classify is protected as a US equity (DEC-841
+/// item 1).
 fn re_place(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -1893,10 +1905,8 @@ fn re_place(
         changed(batch, instrument, "unprotected_end", Vec::new())?;
         return Ok(());
     }
-    let class = batch.ports.instruments.asset_class(instrument);
-    let (Some(prices), Some(class), Some(profile)) =
-        (sequence.prices, class, batch.view.profile.as_ref())
-    else {
+    let class = protected_class(batch, instrument);
+    let (Some(prices), Some(profile)) = (sequence.prices, batch.view.profile.as_ref()) else {
         return uncovered(batch, instrument);
     };
     let offset = batch
@@ -5342,7 +5352,6 @@ mod sequence_tests {
     /// or crypto's under no offset) is never ended silently and never answered with an error: it
     /// is journaled, alerted and left `uncovered`.
     #[test]
-    #[ignore = "pending E7-23"]
     fn a_stop_only_placement_with_no_shape_is_journaled_alerted_and_left_uncovered()
     -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -5364,7 +5373,6 @@ mod sequence_tests {
     /// whose only row is equities', crypto's stop-only placement, which the transitional Alpaca
     /// profile re-places as one stop-limit, has no shape and is left `uncovered`.
     #[test]
-    #[ignore = "pending E7-23"]
     fn the_profile_set_with_with_profile_is_the_one_protection_reads() -> Result<(), ExecutorError>
     {
         let (config, fees) = (executor_config(), fees()?);
@@ -5459,7 +5467,6 @@ mod sequence_tests {
     /// recorded a take-profit is re-placed as Alpaca's one GTC stop-limit at stop × (1 − offset),
     /// never as an OCO, which Alpaca's crypto row does not offer.
     #[test]
-    #[ignore = "pending E7-23"]
     fn a_crypto_re_placement_with_a_take_profit_sends_one_stop_limit() -> Result<(), ExecutorError>
     {
         let (config, fees) = (executor_config(), fees()?);
