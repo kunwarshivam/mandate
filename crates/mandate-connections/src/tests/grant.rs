@@ -6,7 +6,6 @@ use crate::ConnectError;
 use crate::grant::{GrantedScopes, check_scope};
 
 #[test]
-#[ignore = "pending E10-13"]
 fn granted_scopes_must_equal_the_request() {
     let both = GrantedScopes(BTreeSet::from(["data".to_owned(), "trading".to_owned()]));
     for granted in ["trading data", "data trading"] {
