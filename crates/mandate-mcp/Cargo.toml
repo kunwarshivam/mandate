@@ -18,6 +18,7 @@ secrecy.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 thiserror.workspace = true
+tokio = { workspace = true, features = ["net"] }
 
 [dev-dependencies]
 proptest.workspace = true

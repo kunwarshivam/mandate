@@ -39,7 +39,10 @@ mod error;
 mod frame;
 mod transport;
 
-pub use auth::{AuthServer, AuthorizationCode, ClientRegistration, LoopbackRedirect, PendingLogin};
+pub use auth::{
+    AccessToken, AuthServer, AuthorizationCode, CallbackListener, ClientRegistration,
+    LOGIN_LIFETIME, LoopbackRedirect, PendingLogin,
+};
 pub use budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
 pub use client::{ALLOWLIST, ContractHash, McpClient};
 pub use endpoint::PinnedEndpoint;

@@ -43,7 +43,7 @@ fn server(authorize: &str) -> AuthServer {
     }
 }
 
-fn client(port: u16) -> ClientRegistration {
+pub(crate) fn client(port: u16) -> ClientRegistration {
     let redirect = LoopbackRedirect::new(port).unwrap();
     let client_id = "c-1".to_owned();
     ClientRegistration {

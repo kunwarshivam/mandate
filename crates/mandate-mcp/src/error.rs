@@ -90,6 +90,8 @@ pub enum McpError {
     StateMismatch,
     #[error("the authorization server refused the login")]
     AuthorizationDenied,
+    #[error("the login's lifetime ended before its callback")]
+    LoginExpired,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -129,6 +131,7 @@ impl McpError {
             Self::RandomUnavailable => "random_unavailable",
             Self::StateMismatch => "state_mismatch",
             Self::AuthorizationDenied => "authorization_denied",
+            Self::LoginExpired => "login_expired",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }
