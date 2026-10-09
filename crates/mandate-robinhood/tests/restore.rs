@@ -2,9 +2,10 @@
 //! connector's `ClientOrderId` → `order_id` map rebuilt from the account stream at start. A key
 //! with one distinct id cancels by it; no id, two ids, an in-doubt place, or version-1 records give
 //! `NotSent` (`no_order_id`) with nothing called. Oracles: records typed from §9.16's member list
-//! and a recording tool double. A key the stream submitted is never placed again. Part 3 adds the
-//! distinct-id property here, whose oracle counts ids from the generated choices, and the restart
-//! against `mandate-rh-sim` in that crate's `tests/robinhood.rs`.
+//! and a recording tool double. A key the stream names anywhere is never placed again
+//! (DEC-872). Part 3 adds the distinct-id property here, whose oracle counts ids from the
+//! generated choices, and the restart against `mandate-rh-sim` in that crate's
+//! `tests/robinhood.rs`.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -176,7 +177,6 @@ fn cancelled_by(id: &str) -> (CallClass, &'static str, Value) {
 const NONE: Value = Value::Null;
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_restored_key_cancels_by_its_one_journaled_id_with_its_own_instrument_and_side() {
     let (spy, qqq) = (key("01JSPY"), key("01JQQQ"));
     let mut s = Stream::default();
@@ -224,7 +224,6 @@ fn refused_with_nothing_called(records: &[FoldedEvent], keys: &[&ClientOrderId])
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_whose_records_carry_no_id_is_not_sent_and_nothing_is_called() {
     let lone = key("01JLONE");
     let mut s = Stream::default();
@@ -236,7 +235,6 @@ fn a_key_whose_records_carry_no_id_is_not_sent_and_nothing_is_called() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn two_different_ids_under_one_key_are_not_sent_and_nothing_is_called() {
     let torn = key("01JTORN");
     let mut s = Stream::default();
@@ -250,7 +248,6 @@ fn two_different_ids_under_one_key_are_not_sent_and_nothing_is_called() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn an_in_doubt_place_is_not_sent_neither_placed_again_nor_guessed() {
     let (silent, lost) = (key("01JSILENT"), key("01JLOST"));
     let mut s = Stream::default();
@@ -264,7 +261,6 @@ fn an_in_doubt_place_is_not_sent_neither_placed_again_nor_guessed() {
 /// DEC-870: a replacement successor's own record carries its own id, and its instrument and side
 /// are those of the order it replaces, through every link of the chain.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_replacement_successor_is_found_by_its_own_id() {
     let (first, second, third) = (
         key("01JFIRST"),
@@ -319,7 +315,6 @@ fn a_replacement_successor_is_found_by_its_own_id() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn version_1_records_give_no_recoverable_id() {
     let (old, new) = (key("01JOLD"), successor("01JREPLACEV1"));
     let mut s = Stream::default();
@@ -334,7 +329,6 @@ fn version_1_records_give_no_recoverable_id() {
 /// DEC-860 item 4 across a restart: a key the stream submitted, whether its place is in doubt
 /// or answered, is never placed again; a `Submit` of it is `Unknown` with nothing called.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_the_journal_submitted_is_never_placed_again() {
     let (silent, lost, placed, fresh) = (key("01JA"), key("01JB"), key("01JC"), key("01JNEW"));
     let mut s = Stream::default();
@@ -374,9 +368,9 @@ fn a_key_the_journal_submitted_is_never_placed_again() {
 }
 
 /// Random streams over four keys. The oracle counts each key's distinct non-null ids from the
-/// generated choices, never from the records: one id cancels by it, none or two is `NotSent`.
+/// generated choices, never from the records: one id that no other key carries cancels by it;
+/// none, two, or one shared with another key is `NotSent` (DEC-872 item 2).
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_cancels_exactly_when_its_records_carry_one_distinct_id() {
     let keys: Vec<ClientOrderId> = (0..4).map(|n| key(&format!("01JPROP{n}"))).collect();
     let choice = (0..keys.len(), 0..6_usize);
@@ -408,7 +402,8 @@ fn a_key_cancels_exactly_when_its_records_carry_one_distinct_id() {
             let one = ids
                 .get(&n)
                 .filter(|set| set.len() == 1)
-                .and_then(|set| set.first());
+                .and_then(|set| set.first())
+                .filter(|id| ids.values().filter(|set| set.contains(*id)).count() == 1);
             let outcome = cancel(&mut c, key);
             match one {
                 Some(id) => {
@@ -425,4 +420,182 @@ fn a_key_cancels_exactly_when_its_records_carry_one_distinct_id() {
         Ok(())
     });
     verdict.unwrap();
+}
+
+/// A protective stop to `Submit` under `key`: risk-reducing, so nothing but the key refuses it.
+fn protective_stop(key: &ClientOrderId) -> BrokerRequest {
+    BrokerRequest::Submit(SubmitOrder {
+        client_order_id: key.clone(),
+        instrument: InstrumentId::new("SPY").unwrap(),
+        side: Side::Sell,
+        qty: Qty::parse("2").unwrap(),
+        order_type: OrderType::StopLimit,
+        tif: TimeInForce::Gtc,
+        limit_price: Some(Price::parse("475").unwrap()),
+        stop_price: Some(Price::parse("480").unwrap()),
+        bracket: None,
+        oco: None,
+        extended_hours: false,
+        purpose: Purpose::Protective,
+    })
+}
+
+/// DEC-860 item 4, DEC-870 item 2 and DEC-872: each of `keys` is in doubt, so a `Submit` of it
+/// is `Unknown` and its cancel `NotSent`, with nothing called and nothing guessed. A fresh key
+/// is still reviewed and placed.
+fn never_placed_again_nor_guessed(records: &[FoldedEvent], keys: &[&ClientOrderId]) {
+    let (mut c, calls) = restored(records, "confirmed");
+    let in_doubt = ConnectorError::Unknown(BrokerUnknown::Ambiguous);
+    for key in keys {
+        let outcome = call(&mut c, &protective_stop(key));
+        assert_eq!(outcome, Err(in_doubt), "placed again: {}", key.as_str());
+        assert_eq!(cancel(&mut c, key), Err(NO_ORDER_ID), "{}", key.as_str());
+    }
+    assert!(calls.borrow().is_empty(), "CN-7: {:?}", calls.borrow());
+    let outcome = call(&mut c, &protective_stop(&key("01JFRESH")));
+    assert!(
+        matches!(outcome, Ok(BrokerOutcome::Submitted(_))),
+        "{outcome:?}"
+    );
+    let tools: Vec<&str> = calls.borrow().iter().map(|(_, tool, _)| *tool).collect();
+    assert_eq!(tools, ["review_equity_order", "place_equity_order"]);
+}
+
+/// DEC-872 item 1: an `OrderSubmitted` whose `side` or `instrument_id` is missing or cannot be
+/// read still names its key, and so does a successor that `replaces` it, each with its own id.
+#[test]
+fn a_submitted_key_whose_record_cannot_be_read_is_never_placed_again() {
+    let mut s = Stream::default();
+    beside_a_known_order(&mut s);
+    let unreadable = [
+        ("01JNOSIDE", json!({"instrument_id": "SPY"})),
+        (
+            "01JBADSIDE",
+            json!({"instrument_id": "SPY", "side": "short"}),
+        ),
+        ("01JNUMSIDE", json!({"instrument_id": "SPY", "side": 1})),
+        ("01JNOINSTRUMENT", json!({"side": "sell"})),
+        (
+            "01JBADINSTRUMENT",
+            json!({"instrument_id": "", "side": "sell"}),
+        ),
+        (
+            "01JNUMINSTRUMENT",
+            json!({"instrument_id": 7, "side": "sell"}),
+        ),
+    ];
+    let mut keys = Vec::new();
+    for (intent, members) in unreadable {
+        let k = key(intent);
+        let mut payload = json!({"client_order_id": k.as_str(), "qty": "2", "type": "limit",
+            "tif": "day", "limit_price": "499", "attempt": 1});
+        for (member, value) in members.as_object().into_iter().flatten() {
+            payload[member] = value.clone();
+        }
+        s.push("OrderSubmitted", payload);
+        let id = format!("rh-{intent}");
+        s.changed(&k, "accepted", Some(Some(&id)), NONE);
+        keys.push(k);
+    }
+    let heir = successor("01JREPLACEHEIR");
+    let to_unreadable = json!({"replaces": keys[1].as_str()});
+    s.changed(&heir, "accepted", Some(Some("rh-heir")), to_unreadable);
+    keys.push(heir);
+    never_placed_again_nor_guessed(&s.0, &keys.iter().collect::<Vec<_>>());
+}
+
+/// DEC-872 item 1: a key named only by an `OrderStateChanged` has no instrument or side to
+/// cancel against, whatever id it carries.
+#[test]
+fn a_key_named_only_by_a_state_change_is_never_placed_again_nor_guessed() {
+    let stray = key("01JSTRAY");
+    let mut s = Stream::default();
+    beside_a_known_order(&mut s);
+    s.changed(&stray, "accepted", Some(Some("rh-stray")), NONE);
+    never_placed_again_nor_guessed(&s.0, &[&stray]);
+}
+
+/// DEC-872 item 1: a successor whose `replaces` names a key the stream never submitted, so its
+/// chain reaches no instrument or side; the missing key is named too.
+#[test]
+fn an_orphan_successor_is_never_placed_again_nor_guessed() {
+    let (orphan, missing) = (successor("01JREPLACEORPHAN"), key("01JNEVERSUBMITTED"));
+    let mut s = Stream::default();
+    beside_a_known_order(&mut s);
+    let to_missing = json!({"replaces": missing.as_str()});
+    s.changed(&orphan, "accepted", Some(Some("rh-orphan")), to_missing);
+    never_placed_again_nor_guessed(&s.0, &[&orphan, &missing]);
+}
+
+/// DEC-872 item 1: a successor named only by the old order's `replaced_by`, with no record of
+/// its own.
+#[test]
+fn a_successor_named_only_by_replaced_by_is_never_placed_again() {
+    let (old, new) = (key("01JOLDORDER"), successor("01JREPLACEUNSEEN"));
+    let mut s = Stream::default();
+    s.submitted(&old, "SPY", "buy");
+    s.changed(&old, "accepted", Some(Some("rh-old")), NONE);
+    let link = json!({"replaced_by": new.as_str(), "replaced_by_broker_order_id": "rh-new"});
+    s.changed(&old, "replaced", Some(Some("rh-old")), link);
+    never_placed_again_nor_guessed(&s.0, &[&new]);
+}
+
+/// DEC-872 item 2: one broker id under two keys is a corruption, and a cancel by it could cancel
+/// an order the other key owns, so neither key cancels by it.
+#[test]
+fn two_keys_carrying_one_id_are_both_in_doubt() {
+    let (first, second) = (key("01JSHAREA"), key("01JSHAREB"));
+    let mut s = Stream::default();
+    beside_a_known_order(&mut s);
+    s.submitted(&first, "SPY", "buy");
+    s.submitted(&second, "SPY", "buy");
+    s.changed(&first, "accepted", Some(Some("rh-shared")), NONE);
+    s.changed(&second, "accepted", Some(Some("rh-shared")), NONE);
+    never_placed_again_nor_guessed(&s.0, &[&first, &second]);
+}
+
+/// DEC-872 item 3: two `OrderSubmitted` records under one key that disagree on instrument or
+/// side leave it in doubt; two that agree exactly keep it placed by its one id.
+#[test]
+fn two_submits_of_one_key_that_disagree_are_in_doubt() {
+    let (sides, symbols, same) = (key("01JTWOSIDES"), key("01JTWOSYMBOLS"), key("01JSAME"));
+    let mut s = Stream::default();
+    s.submitted(&sides, "SPY", "buy");
+    s.submitted(&sides, "SPY", "sell");
+    s.submitted(&symbols, "SPY", "buy");
+    s.submitted(&symbols, "QQQ", "buy");
+    s.submitted(&same, "QQQ", "sell");
+    s.submitted(&same, "QQQ", "sell");
+    for (key, id) in [
+        (&sides, "rh-sides"),
+        (&symbols, "rh-symbols"),
+        (&same, "rh-same"),
+    ] {
+        s.changed(key, "accepted", Some(Some(id)), NONE);
+    }
+    never_placed_again_nor_guessed(&s.0, &[&sides, &symbols]);
+    let (mut c, calls) = restored(&s.0, "confirmed");
+    let expected = order(&same, "rh-same", "QQQ", Side::Sell);
+    assert_eq!(cancel(&mut c, &same), Ok(BrokerOutcome::Order(expected)));
+    assert_eq!(*calls.borrow(), [cancelled_by("rh-same")]);
+}
+
+/// DEC-872 item 3: a successor with its own `OrderSubmitted` keeps its own instrument and side,
+/// never those of the order it `replaces`.
+#[test]
+fn a_successor_with_its_own_submit_keeps_its_own_instrument_and_side() {
+    let (old, new) = (key("01JOLDSPY"), successor("01JREPLACEOWN"));
+    let mut s = Stream::default();
+    s.submitted(&old, "SPY", "buy");
+    s.changed(&old, "accepted", Some(Some("rh-old")), NONE);
+    s.submitted(&new, "QQQ", "sell");
+    let link = json!({"replaced_by": new.as_str(), "replaced_by_broker_order_id": "rh-new"});
+    s.changed(&old, "replaced", Some(Some("rh-old")), link);
+    let back = json!({"replaces": old.as_str()});
+    s.changed(&new, "accepted", Some(Some("rh-new")), back);
+    never_placed_again_nor_guessed(&s.0, &[]);
+    let (mut c, calls) = restored(&s.0, "confirmed");
+    let expected = order(&new, "rh-new", "QQQ", Side::Sell);
+    assert_eq!(cancel(&mut c, &new), Ok(BrokerOutcome::Order(expected)));
+    assert_eq!(*calls.borrow(), [cancelled_by("rh-new")]);
 }

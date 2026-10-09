@@ -1,0 +1,8 @@
+file = "crates/mandate-journal/tests/connection_fold.rs"
+test = "every_revocation_vector_is_judged_as_its_vector_says"
+reason = """
+E7-17 (journal spec v0.37 rule 68, DEC-888): the connection fold is already implemented and has
+no stub; it skips a `ConnectionRevoked` on an account stream, so this test fails on the fold's
+answer, each of the four account-stream revocation vectors passing, rather than at a stub. The
+code PR that refuses it under rule 68 deletes this file with the test's `#[ignore]` line.
+"""

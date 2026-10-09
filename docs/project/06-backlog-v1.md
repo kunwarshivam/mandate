@@ -1677,6 +1677,11 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   and run logic in `mandate-audit`) goes first; its route waits for `mandate-api-server`, which the
   first route's story creates ([DEC-680](decisions/DEC-680.md) item 1, claim
   [#750](https://github.com/kunwarshivam/mandate/issues/750)).
+  *Follow-up (Should; [DEC-890](decisions/DEC-890.md)):* multi-stream export verification. `verify`
+  and `verify-cold` take a control stream and its account streams together, so they can run
+  journal spec §11's `connection_cause_mismatch`, which no single-stream export can (DEC-885 item
+  6). Its report then drops DEC-890's `not run: connection_cause_mismatch` line for the exports it
+  covers.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
@@ -1702,6 +1707,16 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   so `mandate-audit`'s `StreamType::Notice` is unreachable and an `ntf:` id reads as absent. Owed:
   `StreamId` parses notice streams (journal, E5), then the audit reads list and page them, with a
   case in `crates/mandate-audit/tests/scope.rs`.
+- **E12-7 (Should, after E12-3's run)** As an operator, I want an alert when a requested
+  verification's trusted start shows tampering, so that a damaged or forged control stream row is
+  looked at rather than only refused ([DEC-894](decisions/DEC-894.md) items 1 and 2). Today the run
+  refuses it with 422 `trusted_start` and records nothing ([DEC-787](decisions/DEC-787.md) item 3,
+  DEC-894 item 1). *Accepted when:* a start record that fails journal spec §11 check 1, 2, or 4, or
+  rule 117, and a cold manifest whose digest is not the hot record's `manifest_hash`, each raise one
+  operator alert with only opaque IDs (the workspace, the request, the record's `event_id`) and
+  generic text, never the record's body, columns, or payload (`AGENTS.md` rule 6, infrastructure
+  design OPS-10); it records no `VerificationRun` and raises no §11 SEV-1, since no range was
+  walked; an unreadable cold store raises none, being an outage; a payload capture test covers it.
 
 ### E13 Hybrid deployment
 
@@ -4770,7 +4785,9 @@ From the independent reviews of L2's E10-10 and E7-17 slices, 2026-10-09 (minors
   never applied, so every bid member present is dropped and listed once. It only drops more.
   State it in one sentence in workspace API spec §5, or as its own decision from L2's range, at
   L2's next workspace API spec change.
-- **Journal spec v0.37** (L2, after v0.36), each item tightening or risk-neutral:
+- **Journal spec v0.37** (L2, after v0.36), each item tightening or risk-neutral. The spec and
+  vectors land in v0.37 ([DEC-888](decisions/DEC-888.md)); what remains is the tests PR that reads
+  the `connection_revocations` section, then the fold's change that refuses the record:
   - §9.8 and §11: a `ConnectionRevoked` belongs to the control stream; one on an account stream
     is judged and refused under rule 68, the fail-closed reading the coordinator ruled under
     DEC-176, as `reference/journal/connections.py`'s `judged()` already reads it (#1159's

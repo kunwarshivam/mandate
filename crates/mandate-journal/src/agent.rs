@@ -10,7 +10,9 @@ use mandate_num::Ratio;
 use mandate_time::UtcNanos;
 
 use crate::schema::{Ty, is_ident};
-use crate::{Draft, Invalid, InvalidReason, StoredEvent, StreamId, StreamType, TrustedStart};
+use crate::{
+    Draft, Invalid, InvalidReason, StoredEvent, StreamId, StreamType, TrustedStart, VerifiedPrefix,
+};
 
 /// The event types §9.1 closes on the agent stream.
 const CLOSED: [&str; 12] = [
@@ -216,6 +218,54 @@ pub enum HeldAnchor {
     NoVersionTwo,
     /// The `held` the last version-2 `AgentModeChanged` before the range carried, at its `seq`.
     Carried { seq: u64, held: bool },
+}
+
+/// Why [`held_anchor`] gave no anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldAnchorError {
+    /// Never returned now that E12-3 built the fold; kept, as `PrefixError` keeps its own, so a
+    /// caller's match stays the same across the crate's stubs (DEC-77).
+    Unimplemented { story: &'static str },
+}
+
+/// The hold anchor of a range of one agent stream, folded from its verified prefix (§11's
+/// `held_mismatch`, DEC-787 item 7, DEC-892). Only `AgentModeChanged` records are read, by the
+/// expected-hold rule: a hold sets it, a lift clears it, every other record keeps it. No version 2
+/// gives `NoVersionTwo`, else `Carried` at the last version 2. A prefix that breaks `held_mismatch`,
+/// or is not one agent stream's, gives `Unknown`, so the range fails closed (DEC-885 I5).
+pub fn held_anchor(prefix: &VerifiedPrefix<'_>) -> Result<HeldAnchor, HeldAnchorError> {
+    let rows = prefix.rows();
+    let Some(first) = rows.first() else {
+        return Ok(HeldAnchor::NoVersionTwo);
+    };
+    let agent =
+        StreamId::parse(&first.stream_id).is_some_and(|s| s.stream_type() == StreamType::Agent);
+    if !agent || rows.iter().any(|row| row.stream_id != first.stream_id) {
+        return Ok(HeldAnchor::Unknown);
+    }
+    let mut held = Held::at(1, HeldAnchor::NoVersionTwo);
+    let mut last_v2 = None;
+    for row in rows.iter().filter(|r| r.event_type == "AgentModeChanged") {
+        let Ok(body) = parse(&row.body) else {
+            return Ok(HeldAnchor::Unknown);
+        };
+        let payload = body.get("payload").cloned().unwrap_or(Value::Null);
+        if !held.carries(row.schema_version, &payload) {
+            return Ok(HeldAnchor::Unknown);
+        }
+        if row.schema_version == 2 {
+            last_v2 = Some(row.seq);
+        }
+    }
+    Ok(match last_v2 {
+        None => HeldAnchor::NoVersionTwo,
+        Some(seq) => held
+            .last
+            .map_or(HeldAnchor::Unknown, |held| HeldAnchor::Carried {
+                seq,
+                held,
+            }),
+    })
 }
 
 /// [`verify_agent_stream`] with §11's `held_mismatch` anchored on `anchor`, the stored chain's

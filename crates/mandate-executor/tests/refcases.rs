@@ -89,6 +89,9 @@ fn holding(
 /// coordinator's ruling on #174, DEC-348 item 1). Every other action keeps the fixture's order.
 const INTERVAL_START: &str = "unprotected_window_start";
 
+/// The journal action that ends one: listed exactly as often as the step ends an interval.
+const INTERVAL_END: &str = "unprotected_window_end";
+
 /// The step kinds of other streams, which this harness skips by name: they drive nothing here, so
 /// their `actions` are asserted by nobody here (the coordinator's ruling on #174, DEC-348 item 3).
 const SKIPPED: [&str; 2] = ["fees_charged", "conduct_breach"];
@@ -277,6 +280,29 @@ fn price(raw: &str) -> mandate_num::Price {
 
 fn qty(raw: &str) -> Qty {
     common::qty(&canonical(raw))
+}
+
+/// The interval mark a `ProtectionChanged` payload is, read as the fold reads it (`fold.rs`'s
+/// `protection_changed`): an `unprotected_start` opens one; an `unprotected_end` ends one when it
+/// is `acknowledged`, or awaits nothing and is not `uncovered`. `awaiting` is absent or joined
+/// text on legacy records and a list on §9.5's closed ones (DEC-446 item 7, DEC-859).
+fn window_mark(payload: &mandate_canon::Value) -> Option<&'static str> {
+    let flag = |name: &str| payload.get(name) == Some(&mandate_canon::Value::Bool(true));
+    let awaits_nothing = match payload.get("awaiting") {
+        None => true,
+        Some(mandate_canon::Value::Array(awaited)) => awaited.is_empty(),
+        Some(mandate_canon::Value::Str(joined)) => joined.split([' ', ',']).all(str::is_empty),
+        Some(_) => false,
+    };
+    match payload.get("action").and_then(mandate_canon::Value::as_str) {
+        Some("unprotected_start") => Some(INTERVAL_START),
+        Some("unprotected_end")
+            if flag("acknowledged") || (awaits_nothing && !flag("uncovered")) =>
+        {
+            Some(INTERVAL_END)
+        }
+        _ => None,
+    }
 }
 
 fn text_of<'a>(data: &'a Json, key: &str) -> Option<&'a str> {
@@ -565,18 +591,8 @@ impl<'p> Drive<'p> {
                 Effect::Broker(BrokerRequest::GetAccount) => seen.push(Seen::RefreshAccount),
                 Effect::Journal(draft) => match draft.event_type.as_str() {
                     "ProtectionChanged" => {
-                        match draft
-                            .payload
-                            .get("action")
-                            .and_then(mandate_canon::Value::as_str)
-                        {
-                            Some("unprotected_start") => {
-                                seen.push(Seen::Journal("unprotected_window_start".to_owned()));
-                            }
-                            Some("unprotected_end") if draft.payload.get("awaiting").is_none() => {
-                                seen.push(Seen::Journal("unprotected_window_end".to_owned()));
-                            }
-                            _ => {}
+                        if let Some(mark) = window_mark(&draft.payload) {
+                            seen.push(Seen::Journal(mark.to_owned()));
                         }
                     }
                     "ExternalActivityIngested" => {
@@ -1338,6 +1354,20 @@ impl Drive<'_> {
                 from = at.saturating_add(1);
             }
         }
+        let ends = |count: usize| (count, self.case.id.clone(), index);
+        let listed_ends = expected
+            .iter()
+            .filter(|(kind, argument)| kind == "journal" && argument.as_str() == Some(INTERVAL_END))
+            .count();
+        let seen_ends = seen
+            .iter()
+            .filter(|s| matches!(s, Seen::Journal(what) if what == INTERVAL_END))
+            .count();
+        assert_eq!(
+            ends(seen_ends),
+            ends(listed_ends),
+            "interval ends: {seen:?}"
+        );
         if expected.iter().any(|(kind, argument)| {
             kind == "cancel_all_orders" && argument.as_str() == Some("agent")
         }) {
@@ -2036,6 +2066,54 @@ fn a_reconciliation_check_reports_the_steps_own_cash() {
         common::broker_account().cash,
         "never the shared default account's cash"
     );
+}
+
+/// The window marks follow the fold's reads in either form: a legacy end with no `awaiting` and a
+/// closed one with it empty end the interval; one awaiting an order, as a list or joined text, or
+/// `uncovered`, does not, unless `acknowledged`; a passive start opens none (`fold.rs`).
+#[test]
+fn the_window_marks_are_the_folds_starts_and_ends() {
+    let payload = |pairs: serde_json::Value| -> mandate_canon::Value {
+        mandate_canon::parse(pairs.to_string().as_bytes()).unwrap_or(mandate_canon::Value::Null)
+    };
+    let end = |extra: serde_json::Value| {
+        let mut pairs = serde_json::json!({ "action": "unprotected_end" });
+        if let (Some(all), Some(more)) = (pairs.as_object_mut(), extra.as_object()) {
+            all.extend(more.clone());
+        }
+        window_mark(&payload(pairs))
+    };
+    let cases = [
+        (end(serde_json::json!({})), Some(INTERVAL_END)),
+        (
+            end(serde_json::json!({ "awaiting": [] })),
+            Some(INTERVAL_END),
+        ),
+        (end(serde_json::json!({ "awaiting": ["md-1-p2"] })), None),
+        (end(serde_json::json!({ "awaiting": "md-1-p2" })), None),
+        (
+            end(serde_json::json!({ "awaiting": [], "uncovered": true })),
+            None,
+        ),
+        (end(serde_json::json!({ "uncovered": true })), None),
+        (
+            end(serde_json::json!({ "awaiting": ["md-1-p2"], "acknowledged": true })),
+            Some(INTERVAL_END),
+        ),
+        (
+            window_mark(&payload(
+                serde_json::json!({ "action": "unprotected_start" }),
+            )),
+            Some(INTERVAL_START),
+        ),
+        (
+            window_mark(&payload(serde_json::json!({ "action": "passive_start" }))),
+            None,
+        ),
+    ];
+    for (at, (mark, expected)) in cases.into_iter().enumerate() {
+        assert_eq!(mark, expected, "case {at}");
+    }
 }
 
 /// DEC-348 item 2: only a step that lists the interval's end after its `submit_protective` has
