@@ -51,6 +51,29 @@ fn verdict(class: Class, w: Option<QuietHours>, at: &str) -> QuietVerdict {
     )
 }
 
+/// DEC-725 item 3: an attempt part-way into a wall minute. One in the first minute after the window
+/// is outside it and sends; one in the last minute inside is held to the window's end. Pins the
+/// boundary #1029's review checked by hand, in both DST states and at both edges of the window.
+#[test]
+fn an_attempt_part_way_into_a_minute_is_judged_by_its_wall_minute() {
+    let night = window((23, 0), (7, 0));
+    let hold = |s| HoldUntil(t(s));
+    #[rustfmt::skip]
+    let rows = [
+        ("2026-01-16T03:59:30Z", Send, Send),
+        ("2026-01-16T04:00:30Z", hold("2026-01-16T12:00:00Z"), Suppress),
+        ("2026-01-16T11:59:30Z", hold("2026-01-16T12:00:00Z"), Suppress),
+        ("2026-01-16T12:00:30Z", Send, Send),
+        ("2026-07-16T10:59:30Z", hold("2026-07-16T11:00:00Z"), Suppress),
+        ("2026-07-16T11:00:30Z", Send, Send),
+    ];
+    for (at, info, action) in rows {
+        assert_eq!(verdict(Safety, night, at), Send, "safety at {at}");
+        assert_eq!(verdict(Info, night, at), info, "info at {at}");
+        assert_eq!(verdict(Action, night, at), action, "action at {at}");
+    }
+}
+
 /// §5.8, NT-7, DEC-725 items 2, 3: 23:00 to 07:00 in both DST states and across both changes.
 #[test]
 fn quiet_hours_act_by_class_in_both_dst_states_and_across_each_change() {
