@@ -142,6 +142,41 @@ fn an_ordinary_revoke_is_refused_for_each_reason_alone() {
     }
 }
 
+/// DEC-698, over every combination of step-up, agents fold, and positions fold: an ordinary revoke
+/// that several refusals hold for refuses with the first of step-up, a fold that cannot answer,
+/// positions held, agents not stopped, so a caller without step-up learns nothing of the account.
+/// The expected plan is this test's own ordered check, never the code under test's.
+#[test]
+#[ignore = "pending E10-13"]
+fn an_ordinary_revoke_refuses_with_the_first_reason_in_dec_698_order() {
+    let held = PositionsFold::Answered(BTreeSet::from([asset(1)]));
+    let positions_folds = [PositionsFold::CannotAnswer, flat(), held];
+    for step_up in [StepUp::Verified, StepUp::NotVerified] {
+        for agents in [AllStopped, SomeNotStopped, CannotAnswer] {
+            for positions in positions_folds.clone() {
+                let positions_held =
+                    matches!(&positions, PositionsFold::Answered(assets) if !assets.is_empty());
+                let fold_cannot_answer =
+                    agents == CannotAnswer || positions == PositionsFold::CannotAnswer;
+                let expected = if step_up == StepUp::NotVerified {
+                    RevokePlan::Refused(StepUpNotVerified)
+                } else if fold_cannot_answer {
+                    RevokePlan::Refused(FoldCannotAnswer)
+                } else if positions_held {
+                    RevokePlan::Refused(PositionsHeld)
+                } else if agents == SomeNotStopped {
+                    RevokePlan::Refused(AgentsNotStopped)
+                } else {
+                    RevokePlan::Commit(vec![revocation("conn_01", RevokeReason::Owner)])
+                };
+                let case = format!("{step_up:?} {agents:?} {positions:?}");
+                let plan = plan_ordinary(&conn("conn_01"), step_up, &facts(agents, positions));
+                assert_eq!(plan.unwrap(), expected, "{case}");
+            }
+        }
+    }
+}
+
 /// DEC-693 item 8: positions nothing authoritative answers for are "unknown", never none.
 #[test]
 #[ignore = "pending E10-13"]
