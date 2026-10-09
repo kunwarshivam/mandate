@@ -1640,6 +1640,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   cites a `PlatformOperatorAction` (with the E12-3 tests PR); "never a ticker" in
   `RecordsAccessed.resources` and `operation` is prose only, both being `id`-typed; and the client
   clause of rules 109 and 110 is unreachable, since rule 83 refuses a client first.
+  *Parked (Could; coordinator, 2026-10-09):* derive `mandate journal verify` and `verify-cold`'s
+  trusted start from a control-stream export (`--start-manifest` or `--start-anchor` with
+  `--control`) through `mandate_journal::resolve_trusted_start` ([DEC-784](decisions/DEC-784.md)).
+  Journal spec §11 takes the raw `(from_seq, trusted_prev_hash)` the CLI already accepts
+  ([DEC-115](04-decision-log.md#decisions) item 5, [DEC-490](decisions/DEC-490.md)); the
+  derivation the spec requires is the workspace API's `POST /verifications` (§4.8.1,
+  [DEC-767](decisions/DEC-767.md)), done first. This adds ergonomics, not trust: an offline control
+  export proves no more than its own chain until [DEC-265](04-decision-log.md#decisions) item 1
+  lets an anchor's token be verified.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
