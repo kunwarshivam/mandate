@@ -1151,7 +1151,7 @@ classification: "risk_increasing", step_up_digest}`, where `step_up_digest` is S
 `{content_hash, mandate_version}`. `unasked_usd_after` is mandate spec §4.2's unasked dollars for
 that version at the agent's current state, a decimal string rounded up to the cent, or `null` when
 an input is not known, which the card shows as "not known", never as 0
-([DEC-695](../project/decisions/DEC-695.md), Proposed). One step-up over that digest approves the
+([DEC-695](../project/decisions/DEC-695.md), Accepted). One step-up over that digest approves the
 action and confirms the version, as §6.5 requires. The response call then commits one batch: `MandateVersionCreated`,
 `MandateConfirmed`, and `ApprovalResponseSubmitted` naming the shape; the new delegation's
 `source_approval_id` is this approval.

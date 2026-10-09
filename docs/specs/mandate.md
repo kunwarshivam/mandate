@@ -20,8 +20,8 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
-- **v0.7, amended ([DEC-695](../project/decisions/DEC-695.md), Proposed, waiting for the
-  founder):** §4.2 states the unasked-dollars figure of [DEC-189](../project/04-decision-log.md#decisions)
+- **v0.7, amended ([DEC-695](../project/decisions/DEC-695.md), Accepted by the founder on
+  2026-10-09):** §4.2 states the unasked-dollars figure of [DEC-189](../project/04-decision-log.md#decisions)
   as a formula: its inputs, an unknown that is never shown as 0, its zero cases, and each `auto`
   path's slices under the daily order count, rounded up to the cent. It has no gross-exposure cap,
   because headroom can grow within the day. `unasked_usd` in the reference model computes it, and
@@ -554,7 +554,7 @@ propose within the envelope, that each admission is decided by `autonomy.admissi
 agent's own confidence is self-reported and uncalibrated (DEC-126).
 
 **Unasked dollars** ([DEC-189](../project/04-decision-log.md#decisions),
-[DEC-695](../project/decisions/DEC-695.md), Proposed). One figure, shown on this screen, the
+[DEC-695](../project/decisions/DEC-695.md), Accepted). One figure, shown on this screen, the
 contract card, D6's delegation variant, the daily brief (D13), and D15: an upper bound on the order
 value of opening and increasing orders the agent could have decided `auto` (§6.2) from the risk
 clock *t* to the end of its risk day (§5.4). Within that day only a new version or a policy change
@@ -1418,7 +1418,7 @@ until the owner confirms them, §7), because they only reduce risk.
   `universe.max_instruments` 5 (DEC-117) and `behavior.research.max_revisions_per_lineage` 3
   (DEC-111). Both are shown as proposed and both need confirmation.
 - **The loss answer** of goal-first onboarding ([DEC-182](../project/04-decision-log.md#decisions);
-  [DEC-695](../project/decisions/DEC-695.md) items 6 and 7, Proposed) maps to three fields and no
+  [DEC-695](../project/decisions/DEC-695.md) items 6 and 7, Accepted) maps to three fields and no
   others. A fraction, or a dollar amount divided by `capital.allocation_usd`, is rounded **down** to
   whole basis points to give F. `capital.max_loss_from_allocation` is F (`user_stated`, with the
   quoted span); `risk.max_drawdown` D is 0.8 × F and `risk.max_daily_loss` is 0.2 × F
