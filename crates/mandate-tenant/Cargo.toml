@@ -1,0 +1,16 @@
+[package]
+name = "mandate-tenant"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The sealed Tenant trait every data API over a workspace takes, and the ID values it returns, for the crates xtask/layers.toml allows only (DEC-642 item 7, DEC-668)"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
