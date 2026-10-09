@@ -733,6 +733,7 @@ fn a_relayed_subject_is_a_role_mailbox_never_a_person() -> Result<(), WebPushErr
     for role in roles {
         VapidSubject::parse(&format!("mailto:{role}@example.invalid"))?.check_relayed()?;
     }
+    VapidSubject::parse("mailto:push@notify.owlhead.ai")?.check_relayed()?;
     #[rustfmt::skip]
     let people = [
         "mailto:alice@example.invalid", "mailto:alice.smith@example.invalid",
@@ -740,6 +741,8 @@ fn a_relayed_subject_is_a_role_mailbox_never_a_person() -> Result<(), WebPushErr
         "mailto:noreply@example.invalid", "mailto:alice@push.example.invalid", "mailto:push@",
         "mailto:push@example.invalid?cc=alice@example.invalid", "mailto:push@alice@example.invalid",
         "https://example.invalid/contact", "https://example.invalid/~alice",
+        "mailto:push@EXAMPLE.invalid", "mailto:push@exa_mple.invalid", "mailto:push@example.invalid/",
+        "mailto:push@example.invalid#alice", "mailto:push@example.invalid:443",
     ];
     for uri in people {
         let checked = VapidSubject::parse(uri)?.check_relayed();
