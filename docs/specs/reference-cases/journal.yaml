@@ -34034,6 +34034,107 @@ cold_records:
       expect:
         outcome: refused
         cause: rule_117
+    - name: segment_copied_with_a_duplicate_key
+      clause: 'DEC-895 item 1: a candidate row fails §11 check 1, the good row beside it'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace:
+        index: 4
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 5
+          event_id: 01J8Z3C6A000000000000000R3
+          event_type: SegmentExported
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da
+          hash: 98e68201a4c17f210ccd1c2843a441dd8986e1139cc0683ece559037f44c1a88
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R3","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"first_prev_hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"manifest_hash":"660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":5,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: non_canonical
+    - name: anchor_copied_with_a_duplicate_key
+      clause: 'DEC-895 item 1: a candidate row fails §11 check 1, the good row beside it'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 4
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 5
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da
+          hash: 8209c8b379e15962ca4df1bf3bd6060856761da42b2d2496e8fc8d8bf1390341
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"token":null,"leaves":[{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"e1dcdef4be357a4c522d472dd31bdcb2b8029506ea5536152e1a0d1ba03e976d","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":5,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: non_canonical
+    - name: anchor_leaf_edited_and_rehashed
+      clause: 'DEC-895 item 2, §11 anchor_root_mismatch: the root no longer covers the leaves'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: e6d0c53dfb3e5ee9b742780619a87ae3cde9b4161242ee3d9a924da98f2834c2
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"e1dcdef4be357a4c522d472dd31bdcb2b8029506ea5536152e1a0d1ba03e976d","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: anchor_root_mismatch
+    - name: anchor_leaves_reordered_and_rehashed
+      clause: 'DEC-895 item 2, §11 anchor_root_mismatch: the leaves out of stream order'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: 3b81a55a6dcfb14bd9835c97b093e4e61aaf6d3c2a500ff0e20f44f83968567a
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"},{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}],"root":"5da2f852b17489d0e0bf70941605f99b87170f5b027b4804d492f0b71fd8afd1","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: anchor_root_mismatch
 verification_runs:
   spec: docs/specs/journal.md v0.36 §9.13 and §11 (DEC-788, DEC-789)
   drafts:
