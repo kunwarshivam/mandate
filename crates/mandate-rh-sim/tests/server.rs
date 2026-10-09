@@ -10,9 +10,10 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr};
 
 use common::wire::Wire;
-use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, limit, price, qty, sim};
+use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, limit, price, qty, ref_id, sim};
 use mandate_mcp::{ALLOWLIST, PROTOCOL_VERSION};
-use mandate_rh_sim::{CONTRACT, INJECTION, OrderRequest, ServerError, SimServer, State, Variant};
+use mandate_rh_sim::{CONTRACT, Event, Fault, Garble, INJECTION, Order, OrderRequest, OrderType};
+use mandate_rh_sim::{ServerError, Side, SimError, SimServer, State, TimeInForce, Variant};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -142,11 +143,63 @@ fn state_text(state: State) -> &'static str {
     }
 }
 
+/// An order record as `get_equity_orders` must show it, built here from the core's order: every
+/// field list-and-match reads (connections spec §6.2), under the contract's parameter names, with
+/// numbers as decimal text (LT-12).
+fn row(o: &Order) -> Value {
+    let side = match o.side {
+        Side::Buy => "buy",
+        Side::Sell => "sell",
+    };
+    let kind = match o.order_type {
+        OrderType::Market => "market",
+        OrderType::Limit => "limit",
+        OrderType::StopMarket => "stop_market",
+        OrderType::StopLimit => "stop_limit",
+    };
+    let tif = match o.time_in_force {
+        TimeInForce::Gfd => "gfd",
+        TimeInForce::Gtc => "gtc",
+    };
+    json!({"id": o.id, "symbol": o.symbol, "side": side, "type": kind, "time_in_force": tif,
+        "quantity": o.quantity.to_string(), "limit_price": o.limit_price.map(|p| p.to_string()),
+        "state": state_text(o.state)})
+}
+
+/// The account's records over MCP, each checked against [`row`] of the core's order.
+fn listed(wire: &mut Wire, held: &[Order]) -> Vec<Value> {
+    let answer = wire.call("get_equity_orders", json!({"account_number": AGENTIC}));
+    let rows = answer["structuredContent"]["orders"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(rows.len(), held.len(), "{answer}");
+    for (served, order) in rows.iter().zip(held) {
+        for (key, value) in row(order).as_object().unwrap() {
+            assert_eq!(&served[key], value, "{key} of {served}");
+        }
+    }
+    rows
+}
+
+const STATES: [State; 10] = [
+    State::New,
+    State::Queued,
+    State::Confirmed,
+    State::Unconfirmed,
+    State::PartiallyFilled,
+    State::Filled,
+    State::Cancelled,
+    State::Rejected,
+    State::Failed,
+    State::Voided,
+];
+
 fn refused(result: &Value) -> bool {
     result["isError"] == json!(true)
 }
 
-fn orders(server: &SimServer, account: &str) -> Result<Vec<mandate_rh_sim::Order>, ServerError> {
+fn orders(server: &SimServer, account: &str) -> Result<Vec<Order>, ServerError> {
     server.drive(|s| s.orders(account).unwrap())
 }
 
@@ -445,5 +498,142 @@ fn review_reads_and_cancel_drive_the_core_and_review_places_nothing() -> Outcome
         "get_equity_orders",
     ];
     assert_eq!(server.calls()?, [calls, then].concat());
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_lost_answer_leaves_one_order_the_client_finds_only_by_its_fields() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    let mut direct = sim().unwrap();
+    let lose = Event::Script(Fault::LoseAnswer);
+    server.drive(|s| s.apply(lose.clone()).unwrap())?;
+    direct.apply(lose).unwrap();
+    let request = limit("buy", "2", "501", 1);
+    let answer = wire.call_raw("place_equity_order", arguments(&request));
+    assert!(answer.is_none(), "no byte of an answer arrives");
+    assert_eq!(direct.place(&request), Err(SimError::AnswerLost));
+    let held = direct.orders(AGENTIC).unwrap();
+    assert_eq!(orders(&server, AGENTIC)?, held, "the core acted");
+    let rows = listed(&mut wire, &held);
+    assert_eq!(
+        rows[0].get("ref_id"),
+        None,
+        "records do not echo ref_id unless scripted"
+    );
+    let resent = wire.call(
+        "place_equity_order",
+        arguments(&limit("buy", "3", "490", 1)),
+    );
+    assert_eq!(
+        resent["structuredContent"]["id"],
+        json!(held[0].id),
+        "dedup by ref_id"
+    );
+    assert_eq!(
+        orders(&server, AGENTIC)?,
+        held,
+        "a re-send makes no second order"
+    );
+    server.drive(|s| s.apply(Event::EchoRefId(true)).unwrap())?;
+    let echoed = listed(&mut wire, &held);
+    assert_eq!(echoed[0]["ref_id"], json!(ref_id(1)));
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn two_lost_answers_for_one_body_leave_records_nothing_tells_apart() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    for n in [1, 2] {
+        server.drive(|s| s.apply(Event::Script(Fault::LoseAnswer)).unwrap())?;
+        let answer = wire.call_raw(
+            "place_equity_order",
+            arguments(&limit("buy", "1", "501", n)),
+        );
+        assert!(answer.is_none(), "{n}");
+    }
+    let held = orders(&server, AGENTIC)?;
+    let mut rows = listed(&mut wire, &held);
+    assert_ne!(rows[0]["id"], rows[1]["id"], "two orders");
+    for row in &mut rows {
+        assert_eq!(row.get("ref_id"), None);
+        row.as_object_mut().unwrap().remove("id");
+    }
+    assert_eq!(
+        rows[0], rows[1],
+        "every field list-and-match reads is the same"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_garbled_answer_follows_an_order_the_core_placed_and_only_that_answer_is_bent() -> Outcome {
+    let states: Vec<&str> = STATES.iter().map(|s| state_text(*s)).collect();
+    let all = [
+        Garble::UnknownState,
+        Garble::MissingId,
+        Garble::NumberQuantity,
+        Garble::NotJson,
+    ];
+    for garble in all {
+        let (server, mut wire) = served(Variant::Honest)?;
+        server.garble_next(garble)?;
+        let request = limit("buy", "1", "501", 1);
+        let reply = wire
+            .call_raw("place_equity_order", arguments(&request))
+            .unwrap();
+        assert_eq!(reply.status, 200, "{garble:?}");
+        assert_eq!(reply.header("content-type"), Some("application/json"));
+        let mut direct = sim().unwrap();
+        direct.place(&request).unwrap();
+        let held = direct.orders(AGENTIC).unwrap();
+        let bent = match garble {
+            Garble::UnknownState => "state",
+            Garble::MissingId => "id",
+            Garble::NumberQuantity => "quantity",
+            Garble::NotJson => {
+                assert!(serde_json::from_str::<Value>(&reply.body).is_err());
+                ""
+            }
+        };
+        if garble != Garble::NotJson {
+            let result = reply.result();
+            assert!(
+                !refused(&result),
+                "{garble:?}: bent, never a refusal: {result}"
+            );
+            let content = &result["structuredContent"];
+            let expected = row(&held[0]);
+            for (key, value) in expected.as_object().unwrap() {
+                if key != bent {
+                    assert_eq!(&content[key], value, "{garble:?}: {key} of {content}");
+                }
+            }
+            match garble {
+                Garble::UnknownState => {
+                    let state = content["state"].as_str().unwrap();
+                    assert!(!states.contains(&state), "{state}");
+                }
+                Garble::MissingId => assert_eq!(content.get("id"), None),
+                _ => {
+                    assert!(content["quantity"].is_number(), "{content}");
+                    let quantity = content["quantity"].to_string();
+                    assert_eq!(
+                        quantity,
+                        held[0].quantity.to_string(),
+                        "the core's quantity"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            orders(&server, AGENTIC)?,
+            held,
+            "{garble:?}: the core acted"
+        );
+        listed(&mut wire, &held);
+    }
     Ok(())
 }
