@@ -1,10 +1,10 @@
-# Notifications and Approval Channels Spec (v0.3, draft)
+# Notifications and Approval Channels Spec (v0.4, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.3: wording and consistency only (DEC-712, DEC-722, and [#763](https://github.com/kunwarshivam/mandate/pull/763)'s review minors; freeze rule); v0.2 fixed round 1's minors (E8-16); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
+| **Status** | Draft v0.4: the relay carries the deployment's VAPID header, the founder's choice on DEC-724 item 9 ([DEC-726](../project/decisions/DEC-726.md), §4.6, §9); v0.3: wording and consistency only (DEC-712, DEC-722, and [#763](https://github.com/kunwarshivam/mandate/pull/763)'s review minors; freeze rule); v0.2 fixed round 1's minors (E8-16); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent); v0.3's readings DEC-712 (who dereferences the address, and `send` renders) and DEC-722 (allowlist labels) (Accepted, agent) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent); v0.3's readings DEC-712 (who dereferences the address, and `send` renders) and DEC-722 (allowlist labels) (Accepted, agent); v0.4's relay request, [DEC-726](../project/decisions/DEC-726.md) (item 1 decided by the founder; items 2 to 8 Accepted, agent) |
 | **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
@@ -345,7 +345,8 @@ as the design for when chat is taken up.
 
 - **Encryption.** The workspace deployment encrypts the payload to the subscribing browser with Web
   Push message encryption (RFC 8291) and signs with its own application server key (RFC 8292). The
-  browser's push service and the relay see only ciphertext, of a payload that is opaque anyway.
+  browser's push service and the relay see only ciphertext, of a payload that is opaque anyway, and
+  the deployment's signed VAPID header, which carries no notice content (below, DEC-726).
 - **Only the browsers' push services** ([DEC-792](../project/decisions/DEC-792.md)).
   A subscription's endpoint is accepted, stored, and sent to only if it parses as `https`, port 443
   (none written, or `:443`), with no user information, and a host that is a lowercase ASCII name:
@@ -362,9 +363,26 @@ as the design for when chat is taken up.
 - **Direct or relayed.** A managed workspace deployment sends to the push service directly. A hybrid
   deployment whose egress allows only the global control plane sends through the relay over its
   existing outbound mutual-TLS link ([HLD §4](../HLD.md#workspace-deployment)).
-- **The relay** accepts `{relay_id, endpoint, urgency, ttl_s, ciphertext}`. It checks that the
-  ciphertext is at most 512 bytes and `urgency` is `high` (`action`, `safety`) or `normal`
-  (`info`), forwards, and returns the push service's status.
+- **The relay** accepts `{relay_id, endpoint, urgency, ttl_s, authorization, ciphertext}`, every
+  field required ([DEC-724](../project/decisions/DEC-724.md),
+  [DEC-726](../project/decisions/DEC-726.md)). It checks, in this order, the relay id, the
+  endpoint, that `urgency` is `high` (`action`, `safety`) or `normal` (`info`) with its class's
+  TTL, that the ciphertext is at most 512 bytes, and the `authorization`; it then forwards once
+  and returns the push service's status.
+- **The VAPID header goes through the relay unopened** (the founder, DEC-726). `authorization` is
+  the deployment's own RFC 8292 header, `vapid t=<JWT>, k=<public key>`, built for each request
+  with that attempt's time and never reused, journaled, or logged by the deployment; the private
+  key never leaves the deployment. The relay treats the field as opaque: it checks only that it is
+  exactly the form `mandate_webpush` writes (`vapid t=<a>.<b>.<c>, k=<d>`, unpadded base64url,
+  `<c>` 86 characters and `<d>` 87) and at most 1 024 octets, and refuses anything else, an absent
+  or empty field included, as `invalid_authorization` without posting. It never decodes the token
+  or checks its signature, adds no `Authorization` of its own, and forwards the field byte for byte
+  as the `Authorization` header. It never logs, stores, or echoes it: its log stays the `relay_id`
+  and the closed answer, and its refusals are closed codes that carry no input. The token's claims
+  are encoded, not encrypted: `aud` is the push service's origin, `exp` a fixed 12 hours after
+  signing (never a deadline, NT-1), and `sub` the deployment's one contact URI (DEC-790 item 4).
+  So NT-1's captured-payload scan, and control plane design CP-1's canary scan, decode the claims
+  segment and scan it as well as the raw bytes.
 - **The envelope is fixed per class** (NT-1, DEC-700 item 3). `urgency` and `ttl_s` are a pair per
   class, the same whether the push goes through the relay or straight to the push service:
   `action` `high` and 3 600 s, `safety` `high` and 86 400 s (its retry window), `info` `normal` and
@@ -374,9 +392,10 @@ as the design for when chat is taken up.
   interruption, retries continue per §5.3 until the approval stops being pending, the pull channels
   list the request throughout, and an ask nobody answers times out to `skip` (NT-5). The `endpoint` is the
   subscription's push endpoint: an address, held and handled under NT-2, and the relay logs only
-  its `relay_id`. It stores no ciphertext after the
+  its `relay_id`. It stores no ciphertext or header after the
   attempt, logs opaque ids and counts only, and has no route into any workspace deployment. The size
-  cap bounds what a compromised deployment could smuggle through it.
+  caps (512 bytes of ciphertext, 1 024 octets of header, 2 048 octets of endpoint) bound what a
+  compromised deployment could smuggle through it.
 - **The service worker** shows the rendered text and, on a tap, opens the link. It caches no
   approval, position, or mandate content (P5, 09-product-experience §7).
 - **Native push** (after v1) goes through the relay, which alone holds the app's push credentials;
@@ -696,9 +715,9 @@ stateDiagram-v2
 | **Someone with the user's email or chat account** | Reads notices; follows links; tries a password reset | They learn that an approval or alert exists, and its timing. A link opens only a sign-in; nothing is approved by reply (NT-3); recovery must not rest on email alone (§8, identity spec) | Activity timing is visible to them |
 | **Someone who obtains a Telegram linking code** (shoulder-surfing, a shared screen, a screenshot) | Sends the code to the bot from their own chat before the owner does | The code lives 10 minutes, is single use, and a new code revokes the old one (§4.5); it can only record a chat address, never act or read content; the owner's own later attempt with that code records nothing | Whoever uses a live code first binds their own chat and receives the opaque notices (generic text and a link that opens only a sign-in) until the owner links their own chat with a new code, which replaces the address |
 | **A leaked Slack webhook** | Posts fake messages into the owner's channel | They can post phishing text but not act; same defences as the phisher | Phishing surface |
-| **Malicious relay operator or push service** | Reads, drops, delays, replays, or forges push | Reads only ciphertext of an opaque payload. Dropping or delaying turns into a `skip` or a later alert, and email and chat do not pass through the relay. A replay is a duplicate. A forged push can only show our generic text or a link to the fixed origin the service worker opens | Traffic analysis: the count and timing of notices per workspace reveal activity levels (§12 item 4) |
+| **Malicious relay operator or push service** | Reads, drops, delays, replays, or forges push | Reads only ciphertext of an opaque payload, and a VAPID header with no notice content (§4.6). Dropping or delaying turns into a `skip` or a later alert, and email and chat do not pass through the relay. A replay is a duplicate. A forged push can only show our generic text or a link to the fixed origin the service worker opens | Traffic analysis: the count and timing of notices per workspace reveal activity levels (§12 item 4). A relay operator holding a header until its `exp` can post to endpoints it has seen on that push service, but without the browser's keys only a push with no body or one the browser cannot decrypt (DEC-726 item 8) |
 | **Malicious insider at the platform** | Tries to approve through the notification path, or to read content from it | The notification path has no write to the control stream (NT-3); check 3 refuses any actor that is not a listed user; there is no content in the path to read | Insider risks elsewhere belong to the threat model |
-| **A compromised workspace deployment** | Tries to exfiltrate data through notices | The relay's 512-byte cap and schema check bound it; email and chat leave directly and are bounded only by the deployment's own code | A fully compromised deployment has the data anyway; the threat model owns it |
+| **A compromised workspace deployment** | Tries to exfiltrate data through notices | The relay's caps (512 bytes of ciphertext, a 1 024-octet header of one fixed shape, a 2 048-octet endpoint) and schema check bound it; email and chat leave directly and are bounded only by the deployment's own code | A fully compromised deployment has the data anyway; the threat model owns it |
 | **Notification flooding** (a bug, a hostile connected agent, or market chaos) | Floods the owner so real alerts are ignored, or exhausts the provider quota | Ask budget and one pending risk-adding approval per agent; owner-connected agents' asks count against the client budget (DEC-195); `safety` storms are coalesced; quotas never refuse `safety` | An owner may still tune out a burst of `attention_needed` |
 | **Link replay or forwarding** | Replays a captured link, or forwards a notice to someone else | The link carries no authority; the receiver must sign in as a member of the workspace and pass check 3 and step-up; a replayed submission re-uses a step-up assertion and is refused `step_up_reused` | None beyond showing a sign-in page |
 | **Forged provider webhook** | Fakes bounces to silence a channel | Webhooks are signature-verified; even a forged one only marks an address lost, which alerts the user on other channels | A silenced channel until the user re-verifies |
@@ -771,7 +790,10 @@ is accepted but built after the demo as its own story, since it needs a mandate 
 26, and item 24 for any other recipient, stay Proposed; until each is decided, the most
 conservative option holds. v0.3's readings are DEC-712 (the adapter, not the dispatcher,
 dereferences the address handle and renders the notice) and DEC-722 (an allowlist entry names at
-least two labels, and no host label has an edge hyphen); each only tightens (DEC-176).
+least two labels, and no host label has an edge hyphen); each only tightens (DEC-176). v0.4 records
+the founder's choice on DEC-724 item 9 in [DEC-726](../project/decisions/DEC-726.md) item 1 (the
+relay request carries the deployment's VAPID header, loosening control plane design CP-1 by that
+one field); its items 2 to 8 only tighten (DEC-176).
 
 ---
 
