@@ -366,6 +366,10 @@ pub struct EncodeError;
 pub enum Refused {
     #[error("the body is invalid")]
     Invalid { violations: Vec<Violation> },
+    /// What [`crate::lenient::decode_lenient`]'s stub returns until E10-10 implements it (DEC-77,
+    /// DEC-886 item 13).
+    #[error("E10-10 has not been implemented yet")]
+    Unimplemented,
 }
 
 /// Why a scalar's text was refused.

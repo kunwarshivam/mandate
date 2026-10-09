@@ -19,10 +19,13 @@
 //! - [`problem`]: the RFC 9457 problem document of §3.5, with closed `code` and `effect`.
 //! - [`wire`]: the scalar members (decimals as canonical strings, never JSON numbers, §3.1) and the
 //!   one decoder every request body goes through.
+//! - [`lenient`]: the API-7 operations' lenient decoder, which drops and lists what DEC-682
+//!   item 27 lets them drop (DEC-886).
 //! - [`idempotency`]: the `Idempotency-Key` grammar and the event id derived from it (§3.4).
 
 pub mod envelope;
 pub mod idempotency;
+pub mod lenient;
 pub mod problem;
 pub mod requests;
 pub mod responses;

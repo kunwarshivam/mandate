@@ -1288,6 +1288,9 @@ story buys a service, and none uses a real identity-provider account in tests (s
   context and its ID fields are private (DEC-649; #1134, #1144, #1150, #1154). Still owed, each by
   its own lane:
   - *Workspace API* (L2, `mandate-api`): a request body naming another workspace is refused.
+    Lenient API-7 operations (DEC-682 item 27) drop and list a workspace member and never apply
+    it, which the lenient decoder's tests (`crates/mandate-api/tests/lenient.rs`, DEC-886) pin as
+    pending E10-10.
   - *Row-level security* (the workspace store): rows keyed on `workspace_id` under a per-transaction
     setting only the context sets, and `no_principal_reads_the_membership_index_of_another`.
   - *Own-credential API* (the workspace store): `own_credential_api_takes_no_principal_id`, a
