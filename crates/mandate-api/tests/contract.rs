@@ -12,6 +12,7 @@ use mandate_api::problem::{
     AncestorLevel, CurrentBase, Effect, PolicyLevel, PolicyValue, Problem, ProblemCode,
     ProblemError, Violation,
 };
+use mandate_api::requests::KillSwitchRequest;
 use mandate_api::responses::CommandStatus;
 use mandate_api::wire::{
     Asset, Decimal, EventId, Id, Ref, Refused, Timestamp, Validate, decode, encode,
@@ -720,6 +721,166 @@ fn a_refusal_inside_a_tagged_object_is_located_at_that_object() {
         .collect();
     let mut wrong = mislocated::<Acted>(&cases);
     wrong.extend(mislocated::<Crowd>(&crowd));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A body, and the one `(path, code)` `decode` refuses it with, or `None` when it accepts it.
+type Judged<'a> = (&'a [u8], Option<(&'a str, &'a str)>);
+
+/// Each body `decode` judges otherwise than expected, with what it answered: `None` for a body it
+/// accepted, or each violation's `(path, code)`.
+fn misjudged<T: DeserializeOwned + Validate + Debug>(cases: &[Judged]) -> Vec<String> {
+    cases
+        .iter()
+        .filter_map(|(body, want)| {
+            let want = want.map(|(path, code)| vec![(path.to_owned(), code.to_owned())]);
+            let found = decode::<T>(body).err().map(|_| refusal::<T>(body));
+            (found != want).then(|| {
+                format!(
+                    "{}: want {want:?}, got {found:?}",
+                    String::from_utf8_lossy(body)
+                )
+            })
+        })
+        .collect()
+}
+
+/// An [`Actor`] is an object: the schema allows no other JSON type. serde's internally tagged
+/// enums also read a JSON array, its first item as the tag and the rest as the variant's members
+/// in order, so `["user", "a"]` would decode as the user `a`. `decode` refuses the array form as
+/// `type` at the tagged object, as a member (`/who`) and as an array item (`/crowd/<index>`), and
+/// an empty array as `type` too, not as a `kind` that is `missing` (DEC-881, DEC-681 item 10).
+/// The controls: the object form is accepted, and a scalar is `type` at the same pointer.
+#[test]
+#[ignore = "pending E10-10"]
+fn an_actor_given_as_an_array_is_refused_as_type_at_its_member() {
+    let cases: [Judged; 10] = [
+        (
+            br#"{"effect": "none", "who": ["user", "a"]}"#,
+            Some(("/who", "type")),
+        ),
+        (
+            br#"{"who": ["user", "a"], "effect": "none"}"#,
+            Some(("/who", "type")),
+        ),
+        (
+            br#"{"effect": "none", "who": ["client", "a", "b"]}"#,
+            Some(("/who", "type")),
+        ),
+        (br#"{"effect": "none", "who": []}"#, Some(("/who", "type"))),
+        (
+            br#"{"effect": "none", "who": ["bogus", "a"]}"#,
+            Some(("/who", "type")),
+        ),
+        (
+            br#"{"effect": "none", "who": ["user"]}"#,
+            Some(("/who", "type")),
+        ),
+        (
+            br#"{"effect": "none", "who": {"kind": "user", "id": "a"}}"#,
+            None,
+        ),
+        (
+            br#"{"effect": "none", "who": {"kind": "client", "id": "a", "on_behalf_of": "b"}}"#,
+            None,
+        ),
+        (br#"{"effect": "none", "who": 5}"#, Some(("/who", "type"))),
+        (
+            br#"{"effect": "none", "who": "user"}"#,
+            Some(("/who", "type")),
+        ),
+    ];
+    let crowd: [Judged; 5] = [
+        (
+            br#"{"effect": "none", "crowd": [["user", "a"]]}"#,
+            Some(("/crowd/0", "type")),
+        ),
+        (
+            br#"{"effect": "none", "crowd": [{"kind": "user", "id": "a"}, ["client", "a", "b"]]}"#,
+            Some(("/crowd/1", "type")),
+        ),
+        (
+            br#"{"crowd": [{"kind": "user", "id": "a"}, [], {"kind": "user", "id": "b"}], "effect": "none"}"#,
+            Some(("/crowd/1", "type")),
+        ),
+        (
+            br#"{"effect": "none", "crowd": [{"kind": "user", "id": "a"}, {"kind": "user", "id": "b"}]}"#,
+            None,
+        ),
+        (
+            br#"{"effect": "none", "crowd": [{"kind": "user", "id": "a"}, 5]}"#,
+            Some(("/crowd/1", "type")),
+        ),
+    ];
+    let mut wrong = misjudged::<Acted>(&cases);
+    wrong.extend(misjudged::<Crowd>(&crowd));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A kill switch's `scope` is an object (`requests.schema.json`), so its array form is refused as
+/// `type` at `/scope` like an [`Actor`]'s, `[]` included, through the request that carries it
+/// (DEC-881). The controls: each object form is accepted, and a scalar is `type` at `/scope`.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_kill_switch_scope_given_as_an_array_is_refused_as_type_at_scope() {
+    let cases: [Judged; 9] = [
+        (br#"{"scope": ["agent", "a"]}"#, Some(("/scope", "type"))),
+        (
+            br#"{"scope": ["connection", "a"]}"#,
+            Some(("/scope", "type")),
+        ),
+        (
+            br#"{"scope": ["workspace", null]}"#,
+            Some(("/scope", "type")),
+        ),
+        (br#"{"scope": []}"#, Some(("/scope", "type"))),
+        (br#"{"scope": {"kind": "agent", "id": "a"}}"#, None),
+        (br#"{"scope": {"kind": "connection", "id": "a"}}"#, None),
+        (br#"{"scope": {"kind": "workspace", "id": null}}"#, None),
+        (br#"{"scope": 5}"#, Some(("/scope", "type"))),
+        (br#"{"scope": "agent"}"#, Some(("/scope", "type"))),
+    ];
+    let wrong = misjudged::<KillSwitchRequest>(&cases);
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// An `invalid` problem whose one violation is `violation`, written by hand.
+fn invalid_problem(violation: &str) -> Vec<u8> {
+    format!(
+        r#"{{"type": "https://mandate.dev/problems/invalid", "status": 422, "code": "invalid", "title": "Invalid request", "effect": "none", "event_id": null, "retryable": false, "violations": [{violation}]}}"#
+    )
+    .into_bytes()
+}
+
+/// A problem's violation is an object tagged on `kind` (`envelope.schema.json#/$defs/Violation`),
+/// so its array form is refused as `type` at its item, `/violations/0`, `[]` included (DEC-881).
+/// The controls: the object form is accepted, and a scalar is `type` at the same pointer.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_problems_violation_given_as_an_array_is_refused_as_type_at_its_item() {
+    let bodies = [
+        (
+            invalid_problem(r#"["schema", "/bid", "type", "m"]"#),
+            Some(("/violations/0", "type")),
+        ),
+        (
+            invalid_problem(r#"["rule", "/bid", "V-022", "m"]"#),
+            Some(("/violations/0", "type")),
+        ),
+        (invalid_problem("[]"), Some(("/violations/0", "type"))),
+        (
+            invalid_problem(
+                r#"{"kind": "schema", "path": "/bid", "code": "type", "message": "m"}"#,
+            ),
+            None,
+        ),
+        (invalid_problem("5"), Some(("/violations/0", "type"))),
+    ];
+    let cases: Vec<Judged> = bodies
+        .iter()
+        .map(|(body, want)| (body.as_slice(), *want))
+        .collect();
+    let wrong = misjudged::<Problem>(&cases);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
