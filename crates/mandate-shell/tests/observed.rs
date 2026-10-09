@@ -261,7 +261,6 @@ fn text<'v>(payload: &'v Value, member: &str) -> Option<&'v str> {
 /// observation names the stored closes by their digest. The agent stream verifies against the
 /// store, and fails §11 check 6 without the closes, so `data_ref` is a checked artifact reference.
 #[test]
-#[ignore = "pending E15-13"]
 fn the_observation_is_journaled_before_the_output_and_names_its_artifact() {
     let observed = Observed::at(TUESDAY, 631);
     let (outcome, stages, posts) = run_at(TUESDAY, &observed, Some(observed.stored()));
@@ -301,7 +300,6 @@ fn the_observation_is_journaled_before_the_output_and_names_its_artifact() {
 /// (DEC-503 item 2), which sends nothing without them. Each refusal is `market_data_untrusted`:
 /// the observed data is not the run's, so nothing is appended for it.
 #[test]
-#[ignore = "pending E15-13"]
 fn an_observation_whose_artifact_is_not_stored_stops_the_run_before_any_order() {
     let observed = Observed::at(TUESDAY, 631);
     let door = |store| {
@@ -339,7 +337,6 @@ fn an_observation_whose_artifact_is_not_stored_stops_the_run_before_any_order() 
 /// record each one's own observation and the host's own `as_of` and `expires_at` for it, the last
 /// close's end and that plus the pinned 86400 s, never the run clock or a value the shell holds.
 #[test]
-#[ignore = "pending E15-13"]
 fn the_cycle_records_the_hosts_output_for_each_observation() {
     let pinned = format!("sha256:{}", Digest::of(model().as_bytes()));
     let cases = [
@@ -371,7 +368,6 @@ fn the_cycle_records_the_hosts_output_for_each_observation() {
 /// carries one of each, the observation first, and the restart stops at the open cycle with no
 /// second submission.
 #[test]
-#[ignore = "pending E15-13"]
 fn the_order_holds_on_replay() {
     let observed = Observed::at(TUESDAY, 631);
     let (mut stages, setup, posts) = cycle(TUESDAY, Some(observed.stored()));
