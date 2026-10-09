@@ -551,7 +551,6 @@ impl ControlJournal for Racing {
 /// stream starts with, the rival that commits concurrently, the control stream's length after, and
 /// the outcome. One account, one connection, one establishment.
 #[test]
-#[ignore = "pending E7-11"]
 fn concurrent_records_bind_one_connection_and_one_establishment() {
     let cases = "- | E:conn_rh_live_02:A | 1 account_ref_bound
                  - | E:conn_rh_live_02:B | 1 account_maybe_connected
@@ -619,7 +618,6 @@ fn concurrent_records_bind_one_connection_and_one_establishment() {
 /// stream's checks in order (the first is [`CHECK`]), which of them `--checked` names, and the
 /// outcome.
 #[test]
-#[ignore = "pending E7-11"]
 fn the_latest_check_of_its_occasion_decides() {
     let reconnecting = "E:conn_rh_live_01:A R:conn_rh_live_01";
     let cases = format!(

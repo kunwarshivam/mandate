@@ -1,8 +1,0 @@
-file = "crates/mandate-cli/tests/connection.rs"
-test = "concurrent_records_bind_one_connection_and_one_establishment"
-reason = """
-#907 review: `mandate connection record` is implemented, but it checks CN-5 and journal spec §9.8
-rule 66 against the control rows it read once and then appends at whatever head the stream has, so
-a record that raced it commits a second connection on one account. The test fails on that answer,
-not at a stub. E7-11's race fix, which appends at the head the rows were read at, deletes this row.
-"""
