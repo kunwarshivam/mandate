@@ -82,7 +82,7 @@ ASSET_ID = T("asset_id")
 ASSET_ID_FORM = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
-REFUSED_COMMANDS = {"agent": ("resume", "stop"), "acct": ("acknowledge",)}
+REFUSED_COMMANDS = {"agent": ("resume", "stop", "lift_hold"), "acct": ("acknowledge",)}
 REFUSAL_REASONS = ("step_up_missing", "step_up_stale", "step_up_reused", "step_up_method", "not_independent")
 MODEL_KIND = "model_version"
 MODEL_MEMBERS = ("model_id", "model_version", "admits_instruments")
@@ -496,6 +496,42 @@ SCHEMAS[("ctl", "ClientRevoked")] = rec(
     ("client_id", IDENT_T), ("user", STR), ("reason", one_of(*REVOCATION_ACTORS))
 )
 
+# §9.11 (DEC-672): the hold on new openings. `OwnerCommandIssued` is closed for its two hold commands
+# only; the agent stream's two copies gain the hold at `schema_version` 2. `AgentModeChanged` version 1
+# is `generate.py`'s (§9.1), so only version 2 is registered here.
+HOLD_COMMANDS = ("hold_openings", "lift_hold")
+MODE_ORDER = ("normal", "exits_only", "paused", "stopped")
+OWNER_MODE_REASONS = ("owner_pause", "owner_resume", "owner_stop", "owner_hold", "owner_lift_hold")
+# The members, and their order, are the CLI's `OwnerCommandIssued` for every command
+# (`mandate-cli`'s `agent::issued`), so M7 closes the other commands without renaming any.
+SCHEMAS[("ctl", "OwnerCommandIssued")] = rec(
+    ("agent", IDENT_T),
+    ("command", one_of(*HOLD_COMMANDS)),
+    ("scope", one_of("agent")),
+    ("subject", IDENT_T),
+    ("release", NULL),
+    ("warning_shown", NULL),
+    ("bid", NULL),
+    ("bid_size", NULL),
+    ("floor", NULL),
+    ("user", STR),
+    ("submitted_at", INT),
+    ("step_up", opt(rec(("assertion_id", STR), ("authenticated_at", INT), ("method", STR)))),
+)
+MODE_CHANGED_V2 = rec(
+    ("from", one_of(*MODE_ORDER)),
+    ("to", one_of(*MODE_ORDER)),
+    ("reason", one_of("restriction_changed", "awaiting_reconciliation", "kill_switch", *OWNER_MODE_REASONS)),
+    ("lifecycle", one_of("normal", "paused", "stopped")),
+    ("held", BOOL),
+)
+REFUSAL_V2 = rec(
+    ("command", one_of("resume", "stop", "acknowledge", "lift_hold")),
+    ("reason", one_of(*REFUSAL_REASONS)),
+    ("effective_at", TS),
+)
+CLIENT_EVENTS = (*CLIENT_EVENTS, "OwnerCommandIssued")
+
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
 ACCOUNT_STREAM_REF_ALT = "01J8Z2ACCT00000000000000A2"
@@ -590,6 +626,8 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2),
     ("ctl", "ConnectionRevoked"): (1, 2),
+    ("agent", "AgentModeChanged"): (1, 2),
+    ("agent", "OwnerCommandRefused"): (1, 2),
 }
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "StreamOpened", 1): rec(
@@ -610,6 +648,14 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "ConnectionEstablished", 2): rec(*ESTABLISHED_V2.fields, ("risk_clock", RISK_CLOCK)),
     ("ctl", "MandateConfirmed", 2): CONFIRMED_V2,
     ("ctl", "ConnectionRevoked", 2): REVOKED_V2,
+    ("agent", "AgentModeChanged", 1): rec(
+        ("from", one_of(*MODE_ORDER)),
+        ("to", one_of(*MODE_ORDER)),
+        ("reason", one_of("restriction_changed", "awaiting_reconciliation", "kill_switch", *OWNER_MODE_REASONS[:3])),
+        ("lifecycle", one_of("normal", "paused", "stopped")),
+    ),
+    ("agent", "AgentModeChanged", 2): MODE_CHANGED_V2,
+    ("agent", "OwnerCommandRefused", 2): REFUSAL_V2,
 }
 
 
@@ -1122,6 +1168,23 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
                 rule("89.owner", p["user"] == actor["id"], "payload.user")
             if p["reason"] == "admin":
                 rule("89.admin", p["user"] != actor["id"], "payload.user")
+    if event_type == "OwnerCommandIssued":
+        hold = p["command"] == "hold_openings"
+        allowed = ("user", "client") if hold else ("user",)
+        if "rule.90.client_lifts" in skip:
+            allowed = ("user", "client")
+        if rule("90", actor["kind"] in allowed, "actor.kind"):
+            rule("91", p["user"] == human(actor), "payload.user")
+        rule("91.subject", p["subject"] == p["agent"], "payload.subject")
+        if hold:
+            rule("92", p["step_up"] is None, "payload.step_up")
+    if event_type == "AgentModeChanged":
+        reason = p["reason"]
+        held = p.get("held") is True
+        if reason in ("owner_hold", "owner_lift_hold"):
+            rule("93", held == (reason == "owner_hold"), "payload.held")
+        floor = max(MODE_ORDER.index(p["lifecycle"]), 1 if held and "rule.94.held" not in skip else 0)
+        rule("94", MODE_ORDER.index(p["to"]) >= floor, "payload.to")
 
 
 def act_failure(p: dict, skip: frozenset[str]) -> str | None:
@@ -1266,6 +1329,9 @@ def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[
         and f"rule.27.{kind}" not in skip
     ):
         return [Violation(f"rule.27.{kind}", "schema", "causation_id")]
+    copied = event_type == "AgentModeChanged" and draft["payload"]["reason"] in OWNER_MODE_REASONS
+    if copied and draft["causation_id"] is None and "rule.95" not in skip:
+        return [Violation("rule.95", "schema", "causation_id")]
     return []
 
 
@@ -1290,6 +1356,20 @@ def envelope_violations(draft: dict, skip: frozenset[str]) -> list[Violation]:
     if client and actor["build"] is not None and "rule.82" not in skip:
         return [Violation("rule.82", "schema", "actor.build")]
     return []
+
+
+def open_command_violations(draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.11: an `OwnerCommandIssued` whose command is not a hold command stays open until M7
+    closes it. Its `command` is read, and a client may issue none of them (rule 90); nothing else
+    about it is refused here, so a kill switch from any principal is always recorded."""
+    out = []
+    if not isinstance(draft["payload"].get("command"), str):
+        out.append(Violation("types", "schema", "payload.command"))
+    elif draft["actor"]["kind"] == "client" and "rule.90.client_commands" not in skip:
+        out.append(Violation("rule.90", "schema", "actor.kind"))
+    if "artifact_refs" not in skip and draft["artifact_refs"] != sorted(digest_strings(draft["payload"])):
+        out.append(Violation("artifact_refs", "artifact_refs", "artifact_refs"))
+    return out
 
 
 def human(actor: dict) -> str:
@@ -1334,6 +1414,9 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     versions = VERSIONED_VERSIONS.get((stream[0], event_type), (1,))
     if draft["schema_version"] not in versions:
         return [*out, Violation("catalogue", "unknown_schema", "payload")]
+    command = draft["payload"].get("command") if isinstance(draft["payload"], dict) else None
+    if event_type == "OwnerCommandIssued" and command not in HOLD_COMMANDS and "closed.owner_commands" not in skip:
+        return out + open_command_violations(draft, skip)
     if (stream[0], event_type) in SCHEMAS and draft["schema_version"] == 1:
         schema = SCHEMAS[(stream[0], event_type)]
     else:

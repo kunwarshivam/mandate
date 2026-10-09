@@ -1,13 +1,31 @@
 //! A scripted HTTP/1.1 server on a loopback port: one canned answer per connection, in order,
 //! and a record of every request it read. No test reaches the network.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::{McpTransport, PinnedEndpoint, SystemMonotonic, TransportConfig};
+use crate::{McpTransport, Monotonic, PinnedEndpoint, SystemMonotonic, TransportConfig};
+
+/// A monotonic clock a test moves by hand: nanoseconds since its origin, shared by its clones.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StepClock(Arc<AtomicU64>);
+
+impl StepClock {
+    pub fn set(&self, at: Duration) {
+        self.0
+            .store(u64::try_from(at.as_nanos()).unwrap(), Ordering::SeqCst);
+    }
+}
+
+impl Monotonic for StepClock {
+    fn elapsed(&self) -> Duration {
+        Duration::from_nanos(self.0.load(Ordering::SeqCst))
+    }
+}
 
 pub(crate) struct Answer {
     pub status: u16,
@@ -62,6 +80,11 @@ impl Loopback {
     pub fn transport(&self, config: TransportConfig) -> McpTransport {
         let endpoint = PinnedEndpoint::new("127.0.0.1", &self.url).unwrap();
         McpTransport::new(endpoint, config, Box::new(SystemMonotonic::start())).unwrap()
+    }
+
+    pub fn transport_with_clock(&self, config: TransportConfig, clock: &StepClock) -> McpTransport {
+        let endpoint = PinnedEndpoint::new("127.0.0.1", &self.url).unwrap();
+        McpTransport::new(endpoint, config, Box::new(clock.clone())).unwrap()
     }
 }
 
