@@ -111,7 +111,6 @@ fn pinned() -> Pinned {
 /// order; a record of another type carrying a registration's payload does not count, and neither
 /// does a later `model_version` registration of another id, version or hash.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_latest_policy_set_and_registry_govern() {
     let early = policy_set(&[&level("workspace", r#""max_orders_per_day":100"#)]);
     let late = policy_set(&[&level("workspace", r#""max_orders_per_day":60"#)]);
@@ -151,7 +150,6 @@ fn the_latest_policy_set_and_registry_govern() {
 /// nothing: the mandate conforms, every value it states is the effective one, and `auto` stays as
 /// the mandate has it (mandate spec §4.3, stricter-of).
 #[test]
-#[ignore = "pending E7-19"]
 fn a_looser_policy_never_loosens_the_confirmed_mandate() {
     let mandate = Mandate::parse(&json(MANDATE)).unwrap();
     let stated = values_of(&mandate).unwrap();
@@ -178,7 +176,6 @@ fn a_looser_policy_never_loosens_the_confirmed_mandate() {
 /// no refusal, but the violations, which deny every action that adds risk (DEC-534), and an
 /// overlay that forbids `auto`.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_mandate_beyond_a_later_policy_is_nonconforming_not_refused() {
     let tight = level(
         "workspace",
@@ -215,7 +212,6 @@ fn a_mandate_beyond_a_later_policy_is_nonconforming_not_refused() {
 /// `policy.schema.json` and journal spec §9 say; and the registry must be shaped as §9 says and
 /// hold exactly one entry equal to the pinned model's registration (DEC-484 item 5).
 #[test]
-#[ignore = "pending E7-19"]
 fn an_unregistered_unreadable_or_mismatched_policy_or_registry_refuses() {
     let policy = policy_set(&[&level("workspace", r#""max_orders_per_day":100"#)]);
     let entries = registry(&[ENTRY]);
@@ -309,7 +305,6 @@ fn an_unregistered_unreadable_or_mismatched_policy_or_registry_refuses() {
 /// silent fallback). Each later object is missing from the store, corrupt, off its schema, or, for
 /// the registry, without the pinned model's entry.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_later_unusable_policy_or_registry_never_falls_back_to_an_earlier_one() {
     let policy = policy_set(&[&level("workspace", r#""max_orders_per_day":100"#)]);
     let entries = registry(&[ENTRY]);
