@@ -8301,6 +8301,13 @@ jq -r "$filter" "$src"
     /// The backstop's match ignores case, so a bare `LIVE` or `Live` word is refused in a command
     /// without `cargo`, and an empty feature value (`--features ""`, `--features=` with nothing
     /// after it) is no complete literal, so it is refused (X1 tests correction 6, #923 review).
+    ///
+    /// A command is compile-only only when its subcommand, the word right after its cargo word
+    /// and before any `--`, is `check` (X1 tests correction 8, #923 review): a `cargo check` or a
+    /// `check` after `--`, which go to the program `run` or `test` builds, and a `check` that is
+    /// the value of an option before the subcommand (`cargo --config check run`) leave the command
+    /// a build, so its `live` is refused, once, at its line. The compile-only form CI runs stays
+    /// allowed.
     #[test]
     #[ignore = "pending E7-26"]
     fn the_backstop_and_the_feature_value_rules_refuse_ci_bypasses() -> Result<()> {
@@ -8319,6 +8326,8 @@ jq -r "$filter" "$src"
             "bash -c \"cargo test -p x\"",
             "cargo build --features paper,sim",
             "echo \"cargo test -p x\"",
+            "      - run: cargo check -p the-runner --features live",
+            "      - run: cargo check --locked -p the-runner --features=live",
         ];
         for line in allowed {
             let files = [ci_file(".github/workflows/ci.yml", line)];
@@ -8527,10 +8536,22 @@ jq -r "$filter" "$src"
             "cmd=\"cargo build --features $A$B\"; $cmd",
             "read -r cmd <<< \"cargo build --features $A$B\"; $cmd",
         ];
+        let refused_where_check_is_not_the_subcommand = [
+            "cargo run -p the-runner --features live -- cargo check",
+            "cargo test -p the-runner --features live -- cargo check",
+            "cargo build -p the-runner --features live -- check",
+            "cargo +nightly run -p the-runner --features live -- cargo check",
+            "cargo --locked run -p the-runner --features live -- check",
+            "cargo --locked run -p the-runner --features live -- cargo check",
+            "cargo run --features live -- cargo check -p the-runner",
+            "/usr/bin/cargo run -p the-runner --features live -- /usr/bin/cargo check",
+            "cargo --config check run -p the-runner --features live",
+        ];
         let refused_at_line_two = refused_with_no_cargo_word
             .iter()
             .chain(&refused_through_a_command_word_that_may_be_cargo)
-            .chain(&refused_by_the_cargo_word_rule);
+            .chain(&refused_by_the_cargo_word_rule)
+            .chain(&refused_where_check_is_not_the_subcommand);
         for line in refused_at_line_two {
             let files = [ci_file(
                 ".github/scripts/build.sh",
