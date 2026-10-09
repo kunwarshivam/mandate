@@ -10,7 +10,8 @@ use mandate_notify::{Class, Outcome, Reason, Retry, next_attempt};
 use mandate_push_relay::RelayError;
 use mandate_time::UtcNanos;
 use mandate_webpush::{
-    DEFAULT_PUSH_ALLOWLIST, NoticeClass, PushAllowlist, VapidSigner, VapidSubject, WebPushError,
+    DEFAULT_PUSH_ALLOWLIST, NoticeClass, PushAllowlist, Urgency, VapidSigner, VapidSubject,
+    WebPushError,
 };
 use std::cell::Cell;
 use std::error::Error;
@@ -20,9 +21,10 @@ type Checked = Result<(), Box<dyn Error>>;
 const FCM: &str = "https://fcm.googleapis.com/fcm/send/dGVzdA";
 const ROLE: &str = "mailto:push@example.invalid";
 const PERSON: &str = "mailto:alice@example.invalid";
-const RELAYED: Route<'static> = Route::Relayed {
-    relay_id: "0123456789abcdef0123456789abcdef",
-};
+const RELAY_ID: &str = "0123456789abcdef0123456789abcdef";
+const RELAYED: Route<'static> = Route::Relayed { relay_id: RELAY_ID };
+/// An `https` address whose host is well formed but on no allowlist.
+const OFF_LIST: &str = "https://push.example.invalid/send/dGVzdA";
 const NOW: u64 = 1_791_000_000;
 const TWELVE_HOURS_S: u64 = 43_200;
 const SAFETY_WINDOW_S: u64 = 86_400;
@@ -290,5 +292,163 @@ fn a_prepared_attempt_has_no_debug() -> std::io::Result<()> {
             "{name} implements no Debug"
         );
     }
+    Ok(())
+}
+
+/// DEC-700 item 3 and spec §4.6, written out here: each class's fixed `urgency`, as the enum and
+/// as the relay's wire string, and its TTL in seconds.
+#[rustfmt::skip]
+const CLASS_PAIRS: [(NoticeClass, Urgency, &str, u32); 3] = [
+    (NoticeClass::Action, Urgency::High, "high", 3_600),
+    (NoticeClass::Safety, Urgency::High, "high", 86_400),
+    (NoticeClass::Info, Urgency::Normal, "normal", 21_600),
+];
+
+/// A body whose every byte differs from its neighbours, so a truncation, a reordering, or a
+/// changed byte shows.
+fn distinct_body() -> Vec<u8> {
+    (0..=u8::MAX).collect()
+}
+
+/// One attempt with every input chosen by the test; the outer `Result` is the fixture's own
+/// parsing, the inner one is what [`prepare`] answered.
+fn prepare_with(
+    signer: &Counting,
+    class: NoticeClass,
+    endpoint: &str,
+    body: &[u8],
+    subject: &str,
+    route: Route<'_>,
+) -> Result<Result<Prepared, DispatchError>, Box<dyn Error>> {
+    let allowlist = PushAllowlist::parse(&DEFAULT_PUSH_ALLOWLIST)?;
+    let subject = VapidSubject::parse(subject)?;
+    Ok(prepare(&Attempt {
+        endpoint,
+        allowlist: &allowlist,
+        body,
+        class,
+        signer,
+        subject: &subject,
+        now_unix_s: NOW,
+        route,
+    }))
+}
+
+/// #1180 minor (A), DEC-700 item 3, spec §4.6: every class's request carries that class's fixed
+/// `urgency` and TTL, the same direct or relayed, and the relay's request carries the same pair.
+#[test]
+fn each_class_carries_its_fixed_urgency_and_ttl_on_both_routes() -> Checked {
+    for (class, urgency, wire, ttl_s) in CLASS_PAIRS {
+        let direct = prepare_with(&Counting::default(), class, FCM, &BODY, ROLE, Route::Direct)??;
+        let Prepared::Direct(push) = direct else {
+            return Err("a direct attempt took another path".into());
+        };
+        assert_eq!(
+            (push.urgency, push.ttl_s),
+            (urgency, ttl_s),
+            "{wire} direct"
+        );
+        let relayed = prepare_with(&Counting::default(), class, FCM, &BODY, ROLE, RELAYED)??;
+        let Prepared::Relayed(relayed) = relayed else {
+            return Err("a relayed attempt took another path".into());
+        };
+        assert_eq!(
+            (relayed.push.urgency, relayed.push.ttl_s),
+            (urgency, ttl_s),
+            "{wire} relayed"
+        );
+        let request = relayed.request()?;
+        assert_eq!(
+            (request.urgency, request.ttl_s),
+            (wire, ttl_s),
+            "{wire} relay request"
+        );
+    }
+    Ok(())
+}
+
+/// #1180 minor (A), DEC-726 item 7, spec §4.6: the relay's request carries the attempt's relay id,
+/// endpoint, sealed body, and the prepared push request's own header, each unchanged; that header
+/// is the one a direct send of the same attempt signs, since the test signer's bytes are fixed.
+#[test]
+fn the_relay_request_carries_the_attempt_through_unchanged() -> Checked {
+    let body = distinct_body();
+    let action = NoticeClass::Action;
+    let relayed = prepare_with(&Counting::default(), action, FCM, &body, ROLE, RELAYED)??;
+    let Prepared::Relayed(relayed) = relayed else {
+        return Err("a relayed attempt took another path".into());
+    };
+    let direct = prepare_with(
+        &Counting::default(),
+        action,
+        FCM,
+        &body,
+        ROLE,
+        Route::Direct,
+    )??;
+    let direct_header = header(direct, Route::Direct)?;
+    let request = relayed.request()?;
+    assert_eq!(request.relay_id, RELAY_ID);
+    assert_eq!(request.endpoint, FCM);
+    assert_eq!(request.ciphertext, body.as_slice());
+    assert_eq!(request.authorization, relayed.push.authorization);
+    assert_eq!(request.authorization, direct_header);
+    assert!(
+        request.authorization.starts_with("vapid t="),
+        "a VAPID header"
+    );
+    Ok(())
+}
+
+/// #1180 minor (C), spec §4.6: the body `mandate_webpush::encrypt` sealed is sent byte for byte,
+/// direct or relayed, for every class.
+#[test]
+fn the_sealed_body_arrives_byte_for_byte_on_both_routes() -> Checked {
+    let body = distinct_body();
+    for (class, _, wire, _) in CLASS_PAIRS {
+        let direct = prepare_with(&Counting::default(), class, FCM, &body, ROLE, Route::Direct)??;
+        let Prepared::Direct(push) = direct else {
+            return Err("a direct attempt took another path".into());
+        };
+        assert_eq!(push.body, body, "{wire} direct");
+        let relayed = prepare_with(&Counting::default(), class, FCM, &body, ROLE, RELAYED)??;
+        let Prepared::Relayed(relayed) = relayed else {
+            return Err("a relayed attempt took another path".into());
+        };
+        assert_eq!(relayed.push.body, body, "{wire} relayed");
+        assert_eq!(
+            relayed.request()?.ciphertext,
+            body.as_slice(),
+            "{wire} relay request"
+        );
+    }
+    Ok(())
+}
+
+/// #1180 minor (B), DEC-727 item 3, DEC-728 item 2, spec §4.6: a relayed attempt with both a
+/// person's subject and an address off the allowlist is refused for its subject, signing nothing,
+/// since the subject is checked first; with a role subject, or on a direct route, the same address
+/// is still the endpoint error, and nothing is signed either.
+#[test]
+fn a_relayed_send_refuses_the_subject_before_the_endpoint() -> Checked {
+    let signer = Counting::default();
+    let safety = NoticeClass::Safety;
+    let both_bad = prepare_with(&signer, safety, OFF_LIST, &BODY, PERSON, RELAYED)?;
+    assert!(
+        matches!(both_bad, Ok(Prepared::Refused(PROVIDER_ERROR))),
+        "the subject refusal comes first"
+    );
+    let endpoint_error = DispatchError::WebPush(WebPushError::InvalidEndpoint);
+    for (subject, route) in [
+        (ROLE, RELAYED),
+        (ROLE, Route::Direct),
+        (PERSON, Route::Direct),
+    ] {
+        let Err(error) = prepare_with(&signer, safety, OFF_LIST, &BODY, subject, route)? else {
+            return Err(format!("{subject}: an address off the allowlist was prepared").into());
+        };
+        assert_eq!(error, endpoint_error, "{subject}");
+    }
+    assert_eq!(signer.signed.get(), 0, "nothing was signed");
     Ok(())
 }

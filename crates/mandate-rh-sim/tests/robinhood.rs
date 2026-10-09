@@ -5,7 +5,8 @@
 //! the allowlist (LT-8). Part 3: an alert refuses an opening and never a protective order (LT-5),
 //! `Cancel` goes by the broker's `order_id`, and what the profile does not offer is not sent. The
 //! tests correction for #1097 pins the review, cancel and refusal paths no test above reaches,
-//! with a rewrite of one tool's answer after the server has answered. These tests live here, not in
+//! with a rewrite of one tool's answer after the server has answered. C3 part 3 (DEC-870): a
+//! cancel after a restart, by the id the journal holds. These tests live here, not in
 //! `mandate-robinhood`, so no product crate depends on the simulator (first live trade brief).
 //! Oracles: the simulator's own records and call log, `sha2`, and the spec's tables typed here.
 
@@ -19,10 +20,11 @@ use std::task::{Context, Poll, Waker};
 use common::wire::Wire;
 use common::{AGENTIC, price, qty, sim};
 use mandate_accounting::{InstrumentId, Side as Way};
+use mandate_canon::parse;
 use mandate_executor::{
     ActivityCursor, BracketLegs, BrokerConnector, BrokerOutcome, BrokerRequest, ClientOrderId,
-    ConnectorError, EventId, IntentId, OcoLegs, OrderListing, OrderOrigin, OrderType as Kind,
-    Purpose, RiskClock, SubmitOrder, TimeInForce as Tif,
+    ConnectorError, EventId, FoldedEvent, IntentId, OcoLegs, OrderListing, OrderOrigin,
+    OrderType as Kind, Purpose, RiskClock, Seq, SubmitOrder, TimeInForce as Tif,
 };
 use mandate_mcp::{ALLOWLIST, CallClass, McpError};
 use mandate_rh_sim::{Event, Fault, Garble, MarketHours, OrderType, Session, Side, SimServer};
@@ -857,4 +859,88 @@ fn a_cancel_answered_with_the_order_cancelled_is_cancel_accepted() {
             client_order_id: id
         })
     );
+}
+
+/// What the executor journals for an order the first connector placed (journal spec §9.16): its
+/// `OrderSubmitted`, then an `OrderStateChanged` version 2 carrying the place answer's id, or
+/// `null` for a place answered in doubt.
+fn journaled(orders: &[(&ClientOrderId, Option<&str>)]) -> Vec<FoldedEvent> {
+    let mut payloads = Vec::new();
+    for (key, id) in orders {
+        let key = key.as_str();
+        payloads.push((
+            "OrderSubmitted",
+            json!({"client_order_id": key, "instrument_id": "SPY",
+            "side": "buy", "qty": "2", "type": "limit", "tif": "day", "limit_price": "499"}),
+        ));
+        payloads.push((
+            "OrderStateChanged",
+            json!({"client_order_id": key, "state": "accepted",
+            "risk_clock": "2026-10-09T14:30:00Z", "attempted": null, "broker_status": "accepted",
+            "filled_qty": null, "reject_code": null, "replaces": null, "replaced_by": null,
+            "replaced_by_broker_order_id": null, "lookup": null, "ignored": false,
+            "cancel_requested": false, "cancel_confirmed": false, "cancel_overdue": false,
+            "adopted": false, "ladder_step": false, "broker_order_id": id}),
+        ));
+    }
+    let event = |(n, (event_type, payload)): (usize, (&str, Value))| FoldedEvent {
+        stream: "account".to_owned(),
+        seq: Seq(u64::try_from(n).unwrap() + 1),
+        event_id: EventId(format!("01JEVENT{n:018}")),
+        event_type: event_type.to_owned(),
+        causation_id: None,
+        payload: parse(payload.to_string().as_bytes()).unwrap(),
+    };
+    payloads.into_iter().enumerate().map(event).collect()
+}
+
+/// Journal spec §9.16, DEC-860 item 7: the connector that placed two orders is gone. The one
+/// restored from the account stream cancels the journaled one at the broker by its id, and the
+/// one journaled with no id stays live, with nothing called for it (CN-7).
+#[test]
+#[ignore = "pending E7-6"]
+fn a_cancel_after_a_restart_finds_its_order_id_from_the_journal() {
+    let server = server();
+    let (found, lost) = (key("01JRESTART"), key("01JNOID"));
+    let mut first = connector(&server);
+    let BrokerOutcome::Submitted(placed) = run(&mut first, &submit(buy("01JRESTART"))).unwrap()
+    else {
+        panic!()
+    };
+    let BrokerOutcome::Submitted(live) = run(&mut first, &submit(buy("01JNOID"))).unwrap() else {
+        panic!()
+    };
+    drop(first);
+    let records = journaled(&[(&found, Some(&placed.broker_order_id)), (&lost, None)]);
+    let wire = RefCell::new(Wire::connect(&server.url().unwrap()));
+    let probe = Rc::default();
+    let tools = Loopback {
+        server: &server,
+        wire,
+        probe,
+    };
+    let mut restarted = RobinhoodConnector::restore(tools, AGENTIC.to_owned(), &records).unwrap();
+    let cancel = |key: &ClientOrderId| BrokerRequest::Cancel {
+        client_order_id: key.clone(),
+    };
+    let accepted = BrokerOutcome::CancelAccepted {
+        client_order_id: found.as_str().to_owned(),
+    };
+    assert_eq!(run(&mut restarted, &cancel(&found)), Ok(accepted));
+    let refused = ConnectorError::NotSent {
+        code: "no_order_id",
+    };
+    assert_eq!(run(&mut restarted, &cancel(&lost)), Err(refused));
+    let orders = server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap();
+    let mut states: Vec<(String, State)> = orders.into_iter().map(|o| (o.id, o.state)).collect();
+    states.sort();
+    let expected = [
+        (placed.broker_order_id.clone(), State::Cancelled),
+        (live.broker_order_id.clone(), State::Confirmed),
+    ];
+    assert_eq!(
+        states, expected,
+        "the order with no id stays live, never guessed"
+    );
+    assert_eq!(calls(&server), [REVIEW, PLACE, REVIEW, PLACE, CANCEL]);
 }

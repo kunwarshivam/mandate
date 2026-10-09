@@ -18,10 +18,10 @@ use clap::{Args, Subcommand};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
 use mandate_journal::{
-    Anchor, AnchorLeaf, ArtifactError, ArtifactRef, ArtifactSource, ControlVerifyError, EventCheck,
-    EventFailure, HeldAnchor, RangeCheck, StoredEvent, StreamId, StreamType, TrustedStart,
-    verify_agent_stream_anchored, verify_anchor, verify_anchor_self, verify_break_glass_causes,
-    verify_events,
+    Anchor, AnchorLeaf, ArtifactError, ArtifactRef, ArtifactSource, ConnectionCheckError,
+    ConnectionStart, ControlVerifyError, EventCheck, EventFailure, HeldAnchor, RangeCheck,
+    StoredEvent, StreamId, StreamType, TrustedStart, verify_agent_stream_anchored, verify_anchor,
+    verify_anchor_self, verify_break_glass_causes, verify_connection_lifecycle_from, verify_events,
 };
 
 pub mod cold;
@@ -97,20 +97,85 @@ pub struct StreamFailure {
 }
 
 /// §11's range checks of `stream`'s type over `rows`, entered at `start`: the failure at the lowest
-/// `seq`, ties going to §11's listing order (DEC-782 items 1 and 2). Other types run none. The CLI
-/// cannot read the chain before the range, so the agent checks get no hold anchor and a tail range
-/// fails closed at its first version-2 copy (DEC-782 item 4). A check the library has not built is
-/// an error, never a pass (DEC-77).
+/// `seq`, ties going to §11's listing order (DEC-782 items 1 and 2). A control stream runs its own
+/// two checks and `connection_lifecycle_mismatch`, an account stream the latter alone (DEC-890
+/// items 1 and 2), an agent stream its three, and other types none. The CLI cannot read the chain
+/// before the range, so the agent checks get no hold anchor and a tail range fails closed at its
+/// first version-2 copy (DEC-782 item 4), as a connection range does at its first judged record.
+/// A check the library has not built is an error, never a pass (DEC-77).
 pub(crate) fn stream_checks(
     stream: &StreamId,
     rows: &[StoredEvent],
     start: TrustedStart,
 ) -> anyhow::Result<Option<StreamFailure>> {
     match stream.stream_type() {
-        StreamType::Control => control_checks(rows, start),
+        StreamType::Control => {
+            let control = control_checks(rows, start)?;
+            let connection = connection_checks(rows, start);
+            Ok(control.into_iter().chain(connection).min_by_key(|f| f.seq))
+        }
+        StreamType::Account => Ok(connection_checks(rows, start)),
         StreamType::Agent => Ok(agent_checks(rows, start)),
         _ => Ok(None),
     }
+}
+
+/// DEC-890's report line, printed just before `result:`: `connection_cause_mismatch` follows a
+/// cause across the control stream and its account streams (journal spec §11, DEC-885 item 6),
+/// which a single-stream export never holds, so neither command runs it.
+pub(crate) const CAUSE_NOT_RUN: &str = concat!(
+    "not run: connection_cause_mismatch ",
+    "(needs the control stream and its account streams together)"
+);
+
+/// The records journal spec §11's `connection_lifecycle_mismatch` judges on a control stream (its
+/// "No anchor" list); a `ConnectionRevoked` is never judged.
+const CONTROL_JUDGED: [&str; 4] = [
+    "ConnectionRequested",
+    "ConnectionEstablished",
+    "ConnectionCredentialRotated",
+    "ConnectionRefused",
+];
+
+/// The connection records on an account stream (§9.8, "Who writes what"), each judged by rule 68.
+const ACCOUNT_JUDGED: [&str; 5] = [
+    "ConnectionChecked",
+    "ConnectionStateChanged",
+    "ConnectionCredentialRefreshed",
+    "ConnectionEstablished",
+    "ConnectionCredentialRotated",
+];
+
+/// Whether a run that reached the stream checks prints [`CAUSE_NOT_RUN`]: the export is a control
+/// or account stream holding a record its stream type's lifecycle rules judge (DEC-890 item 4),
+/// whatever the result from there. A control export of requests and refusals only prints it too:
+/// the cause check would judge nothing there, and it still did not run.
+pub(crate) fn cause_not_run(stream: &StreamId, rows: &[StoredEvent]) -> bool {
+    let judged: &[&str] = match stream.stream_type() {
+        StreamType::Control => &CONTROL_JUDGED,
+        StreamType::Account => &ACCOUNT_JUDGED,
+        _ => &[],
+    };
+    rows.iter()
+        .any(|row| judged.contains(&row.event_type.as_str()))
+}
+
+/// `connection_lifecycle_mismatch` over one control or account stream (DEC-890 item 1): stream
+/// rules 66 to 68 and 131 each hold on their own stream (journal spec §9.8), so a range from `seq`
+/// 1 is that stream's full chain (DEC-885 I4). The CLI cannot fold the chain before any other
+/// range, so it has no connection anchor and fails closed at its first judged record (DEC-885
+/// items 2 and 4).
+fn connection_checks(rows: &[StoredEvent], start: TrustedStart) -> Option<StreamFailure> {
+    let from = match start.from_seq {
+        1 => ConnectionStart::Genesis,
+        _ => ConnectionStart::Unanchored,
+    };
+    verify_connection_lifecycle_from(from, rows).err().map(
+        |ConnectionCheckError::Failed(failure)| StreamFailure {
+            seq: failure.seq,
+            code: failure.code(),
+        },
+    )
 }
 
 /// The agent stream's `intent_action_mismatch`, `mode_event_mismatch` and `held_mismatch`, which
@@ -247,8 +312,15 @@ pub fn verify(args: &VerifyArgs, report: &mut impl Write) -> anyhow::Result<Outc
         .with_context(|| format!("reading the export {}", args.export.display()))?;
     let artifacts = open_source(args.store.as_deref())?;
     let anchor = args.anchor.as_deref().map(read_anchor).transpose()?;
-    let outcome = check(&export, start, artifacts.as_ref(), anchor.as_ref())?;
-    let lines = [
+    let mut not_run = false;
+    let outcome = check(
+        &export,
+        start,
+        artifacts.as_ref(),
+        anchor.as_ref(),
+        &mut not_run,
+    )?;
+    let mut lines = vec![
         format!("export: {}", args.export.display()),
         format!("lines: {}", line_count(&export)),
         format!(
@@ -257,8 +329,9 @@ pub fn verify(args: &VerifyArgs, report: &mut impl Write) -> anyhow::Result<Outc
         ),
         format!("artifact store: {}", shown(args.store.as_deref())),
         format!("anchor: {}", shown(args.anchor.as_deref())),
-        format!("result: {outcome}"),
     ];
+    lines.extend(not_run.then(|| CAUSE_NOT_RUN.to_owned()));
+    lines.push(format!("result: {outcome}"));
     writeln!(report, "{}", lines.join("\n")).context("writing the report")?;
     Ok(outcome)
 }
@@ -281,11 +354,14 @@ fn line_count(export: &[u8]) -> usize {
 /// Runs spec §11 in DEC-782's order: the per-event checks over the whole range first, then the
 /// range checks of the stream's type, then the per-range anchor checks. Reading the export is part
 /// of check 1, so an unreadable line fails there.
+/// Sets `not_run` when the run reaches the stream checks on an export [`cause_not_run`] names, so
+/// the report carries DEC-890's line whatever the result from there.
 fn check(
     export: &[u8],
     start: TrustedStart,
     artifacts: &dyn ArtifactSource,
     anchor: Option<&Anchor>,
+    not_run: &mut bool,
 ) -> anyhow::Result<Outcome> {
     let rows = match rows(export, start.from_seq) {
         Ok(rows) => rows,
@@ -319,6 +395,7 @@ fn check(
             ),
         )
     })?;
+    *not_run = cause_not_run(&stream, &rows);
     if let Some(failure) = stream_checks(&stream, &rows, start)? {
         return Ok(Outcome::Stream(failure));
     }

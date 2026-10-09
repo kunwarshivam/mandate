@@ -1677,6 +1677,11 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   and run logic in `mandate-audit`) goes first; its route waits for `mandate-api-server`, which the
   first route's story creates ([DEC-680](decisions/DEC-680.md) item 1, claim
   [#750](https://github.com/kunwarshivam/mandate/issues/750)).
+  *Follow-up (Should; [DEC-890](decisions/DEC-890.md)):* multi-stream export verification. `verify`
+  and `verify-cold` take a control stream and its account streams together, so they can run
+  journal spec §11's `connection_cause_mismatch`, which no single-stream export can (DEC-885 item
+  6). Its report then drops DEC-890's `not run: connection_cause_mismatch` line for the exports it
+  covers.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
@@ -4743,6 +4748,48 @@ From the independent review of the E10-10 A1 implementation, part 1 ([#993](http
   Leniency only, like the tagged form. Tests first, then its own decision and fix.~~ Done
   ([#1132](https://github.com/kunwarshivam/mandate/pull/1132), tests,
   [DEC-882](decisions/DEC-882.md); [#1143](https://github.com/kunwarshivam/mandate/pull/1143), the fix, the same macro on every derived struct).
+
+From the independent reviews of L2's E10-10 and E7-17 slices, 2026-10-09 (minors; [#1143](https://github.com/kunwarshivam/mandate/pull/1143), [#1155](https://github.com/kunwarshivam/mandate/pull/1155), [#1175](https://github.com/kunwarshivam/mandate/pull/1175), [#1178](https://github.com/kunwarshivam/mandate/pull/1178), [#1151](https://github.com/kunwarshivam/mandate/pull/1151)):
+
+- **Restrict the lenient inherent `deserialize` that `#[serde(remote = "Self")]` leaves** (#1143).
+  Every derived wire shape in `mandate-api` keeps a public inherent `Self::deserialize` that reads
+  an array in an object's place; only the `Deserialize` impl `object_only!` writes is strict. No
+  caller outside that macro uses the inherent one today (the macro's `visit_map` and `Serialize`
+  impl do). Make it unreachable from outside the crate, or add a test that no code outside the
+  macro calls it; tests first.
+- **`crates/mandate-api/tests/body_workspace.rs`** (#1155, round 2).
+  - The module header's sixth line is wrapped wrongly and over 100 columns.
+  - The schema walk follows `properties`, `items`, `oneOf`, `anyOf`, and `$ref` into the
+    envelope's `$defs`, not `allOf`, `if`/`then`/`else`, or a schema's local `$defs`. No request
+    schema describes an object that way today; extend the walk when one does.
+- **`crates/mandate-api/tests/lenient.rs`** (#1175, #1178).
+  - API-4's test asserts `dropped` in body order with members whose body order is also
+    alphabetical, so it cannot tell the two apart; the server-case test pins body order. Give the
+    API-4 bodies a non-alphabetical order.
+  - [DEC-886](decisions/DEC-886.md) item 10 says the server's cases cover non-JSON refusal for
+    ending a delegation and for Skip; `api7.json` covers only the kill switch and an owner exit,
+    and the other two come from `check_lenient.py`'s `UNPARSABLE_OK` and the spec. The tests cover
+    all four. Correct the citation where the reading is next restated (DEC-886 is Accepted).
+- **A duplicated bid member drops the whole confirmation** (#1178). The tests read DEC-886 items 6
+  and 3/4 together: a duplicated non-hard member is dropped, and a partial bid confirmation is
+  never applied, so every bid member present is dropped and listed once. It only drops more.
+  State it in one sentence in workspace API spec §5, or as its own decision from L2's range, at
+  L2's next workspace API spec change.
+- **Journal spec v0.37** (L2, after v0.36), each item tightening or risk-neutral. The spec and
+  vectors land in v0.37 ([DEC-888](decisions/DEC-888.md)); what remains is the tests PR that reads
+  the `connection_revocations` section, then the fold's change that refuses the record:
+  - §9.8 and §11: a `ConnectionRevoked` belongs to the control stream; one on an account stream
+    is judged and refused under rule 68, the fail-closed reading the coordinator ruled under
+    DEC-176, as `reference/journal/connections.py`'s `judged()` already reads it (#1159's
+    review). `mandate-journal`'s fold ignores one today (#1183), so a tests PR pinning the
+    refusal, then its implementation, follow the spec change;
+  - a `connections` vector that enters `suspended` twice on one account stream, so the reference
+    vectors kill a fold that confuses two suspensions ([#1174](https://github.com/kunwarshivam/mandate/pull/1174));
+  - [DEC-885](decisions/DEC-885.md)'s "refuses more and admits nothing new" is to read "admits
+    nothing the full chain refuses" where v0.35's change history restates it (#1151, minor 1);
+  - the status table's "Test vectors" row lists `connection_ranges` (#1151, minor 3);
+  - §9.16: a replacement successor's own record carries `replaced_by_broker_order_id` as its
+    `broker_order_id`, or `null` (DEC-870, pending in [#1182](https://github.com/kunwarshivam/mandate/pull/1182)).
 
 From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
 

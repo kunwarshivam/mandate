@@ -125,7 +125,7 @@ function AllTimeline() {
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   return (
     <Panel>
-      <Timeline events={events} now={now} />
+      <Timeline events={events} now={now} headingLevel={2} />
     </Panel>
   );
 }

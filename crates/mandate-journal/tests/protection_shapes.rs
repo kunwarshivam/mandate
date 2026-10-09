@@ -65,7 +65,6 @@ fn draft(section: &Value, case: &Value) -> Vec<u8> {
 /// as `ProtectionChanged` at schema version 1: a start naming no order, an end or a bound awaiting
 /// no cancel, and a re-placement naming its entry and owner with no intent.
 #[test]
-#[ignore = "pending E7-19"]
 fn every_protection_shape_base_and_valid_draft_parses() {
     let section = section();
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
@@ -115,7 +114,6 @@ fn every_protection_shape_base_and_valid_draft_parses() {
 /// v0.32's code refuses four of them at another member, because it refuses their v0.33-valid
 /// parts first, which is the answer this test fails on until the journal enforces v0.33.
 #[test]
-#[ignore = "pending E7-19"]
 fn every_protection_shape_invalid_draft_is_refused_at_its_path() {
     let section = section();
     let invalid = list(&section, "invalid_drafts");
