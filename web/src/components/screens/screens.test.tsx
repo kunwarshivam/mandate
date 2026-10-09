@@ -136,7 +136,7 @@ describe("D1 dashboard", () => {
     const askedHref = decisionHref(asked.agent_id, asked.event_id);
     const others = ws.decisions.filter((d) => d.event_id !== asked.event_id);
     const decisionRegions = () => [...main().querySelectorAll<HTMLElement>("section[aria-labelledby$=decisions-title]")];
-    const shownHrefs = (region: HTMLElement) => within(region).getAllByRole("listitem").map((li) => within(li).getByRole("link").getAttribute("href"));
+    const shownHrefs = (region: HTMLElement) => [...region.querySelectorAll<HTMLElement>("[data-slot=timeline-entry]")].map((li) => within(li).getByRole("link").getAttribute("href"));
     const closed = (status: "acted" | "expired") => (w: Workspace) => ({
       ...w,
       approvals: w.approvals.map((a) => (a.approval_id === APPROVAL_IDS.swingXyz ? { ...a, status } : a)),
@@ -260,7 +260,7 @@ describe("D2 agent detail", () => {
     expect(headings).toEqual(expect.arrayContaining(["Equity against your mandate", "Key figures", "Positions", "Working orders", "Recent decisions", "Activity", "News"]));
     const activity = within(main()).getByRole("region", { name: "Activity" });
     expect(story.some((col) => col.contains(activity))).toBe(true);
-    expect(activity.querySelectorAll("li").length).toBeLessThanOrEqual(5);
+    expect(activity.querySelectorAll("[data-slot=record-entry]").length).toBeLessThanOrEqual(5);
     expect(within(activity).getByRole("link", { name: "View all activity" })).toHaveAttribute("href", `/agents/${AGENT_IDS.btc}/activity`);
   });
 
@@ -401,8 +401,10 @@ describe("D2 agent detail", () => {
     });
     const today = within(main()).getAllByText("An order today.")[0].parentElement as HTMLElement;
     const late = within(main()).getAllByText("An order late the evening before, written in UTC.")[0].parentElement as HTMLElement;
-    expect(today.querySelector("time")).toHaveTextContent(/^13:10:00$/);
-    expect(late.querySelector("time")).toHaveTextContent(/^Sep 27, 2026, 23:59$/);
+    expect(within(main()).getAllByRole("list", { name: "Today" })[0]).toContainElement(today);
+    expect(within(main()).getAllByRole("list", { name: "27 September" })[0]).toContainElement(late);
+    expect(today.querySelector("time")).toHaveTextContent(/^Sep 28, 2026, 13:10:00$/);
+    expect(late.querySelector("time")).toHaveTextContent(/^Sep 27, 2026, 23:59:00$/);
   });
 
   it("shows the mode banner with what is blocked, when it ends, and who acts", () => {
