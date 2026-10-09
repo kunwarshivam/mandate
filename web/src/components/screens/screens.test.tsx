@@ -14,6 +14,7 @@ import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { RECORD_AFTER_MS, dockStop, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
+import { AlertsScreen } from "./account-screens";
 import { AgentsListScreen } from "./agents-list";
 import { ApprovalRequestScreen } from "./approval-request";
 import { ApprovalsInboxScreen, askSentence } from "./approvals-inbox";
@@ -297,6 +298,51 @@ describe("D2 agent detail", () => {
     renderScreen(`/agents/${AGENT_IDS.swing}`, <AgentDetailScreen agentId={AGENT_IDS.swing} />, "reconciliation");
     expect(main().querySelector("[data-slot=reconciling]")).toHaveTextContent("Checking with the broker. Nothing is needed from you.");
     expect(main().querySelector("[data-slot=mode-banner]")).not.toBeNull();
+  });
+
+  it("dates a restriction that began on an earlier day on Home's agent card, and leaves today's as a time (C-23)", () => {
+    renderScreen("/", <DashboardScreen />, "drawdown");
+    const card = within(within(main()).getByRole("region", { name: "Agents" })).getAllByRole("article").find((a) => a.textContent?.includes("Agent 1")) as HTMLElement;
+    const restrictions = within(card).getByLabelText("Restrictions");
+    expect(restrictions).toHaveTextContent("Drawdown: sizes scaled since Sep 26, 2026, 15:12");
+    expect(restrictions).toHaveTextContent("Drawdown: selling only since 14:01:12");
+    expect(restrictions).not.toHaveTextContent("since 15:12:40");
+  });
+
+  it("dates a restriction that began on an earlier day in the agent's mode banner, and leaves today's as a time (C-23)", () => {
+    renderScreen(`/agents/${AGENT_IDS.btc}`, <AgentDetailScreen agentId={AGENT_IDS.btc} />, "drawdown");
+    const banner = main().querySelector("[data-slot=mode-banner]") as HTMLElement;
+    const item = (title: string) => within(banner).getByText(title).closest("li") as HTMLElement;
+    expect(item("Drawdown: sizes scaled")).toHaveTextContent("since Sep 26, 2026, 15:12");
+    expect(item("Drawdown: selling only")).toHaveTextContent("since 14:01:12");
+    expect(banner).not.toHaveTextContent("since 15:12:40");
+  });
+
+  it("dates a restriction on the Alerts screen when it began on an earlier day (C-23)", () => {
+    renderScreen("/alerts", <AlertsScreen />, "drawdown");
+    const scaled = within(main()).getByRole("link", { name: /Agent 1: Drawdown: sizes scaled/ });
+    expect(scaled).toHaveTextContent("Since Sep 26, 2026, 15:12.");
+    expect(within(main()).getByRole("link", { name: /Agent 1: Drawdown: selling only/ })).toHaveTextContent("Since 14:01:12.");
+  });
+
+  it("dates an older timeline entry through the same formatter, by the day in Eastern time, not the offset it is written in (C-23)", () => {
+    setPathname(`/agents/${AGENT_IDS.btc}`);
+    renderWithRuntime(<AppShell><AgentDetailScreen agentId={AGENT_IDS.btc} /></AppShell>, "normal", {
+      workspace: (ws) => ({
+        ...ws,
+        timeline: {
+          ...ws.timeline,
+          [AGENT_IDS.btc]: [
+            { event_id: "c23-today", at: "2026-09-28T13:10:00-04:00", kind: "order", text: "An order today." },
+            { event_id: "c23-late", at: "2026-09-28T03:59:00Z", kind: "order", text: "An order late the evening before, written in UTC." },
+          ],
+        },
+      }),
+    });
+    const today = within(main()).getAllByText("An order today.")[0].parentElement as HTMLElement;
+    const late = within(main()).getAllByText("An order late the evening before, written in UTC.")[0].parentElement as HTMLElement;
+    expect(today.querySelector("time")).toHaveTextContent(/^13:10:00$/);
+    expect(late.querySelector("time")).toHaveTextContent(/^Sep 27, 2026, 23:59$/);
   });
 
   it("shows the mode banner with what is blocked, when it ends, and who acts", () => {

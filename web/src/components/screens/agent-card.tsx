@@ -14,7 +14,7 @@ import { Placeholder } from "@/components/domain/placeholders";
 import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { Agent } from "@/fixtures/types";
 import { equityWindow, mandateLevels } from "@/lib/chart-data";
-import { clock, quantity, usd } from "@/lib/format";
+import { RECORD_ZONE, datedClock, quantity, usd } from "@/lib/format";
 import { headroomLine } from "@/lib/limits";
 import { describeRestriction } from "@/lib/restrictions";
 
@@ -124,7 +124,7 @@ export function AgentCard({
               <span key={`${r.code}-${r.symbol ?? ""}`} data-source={d.source} className="inline-flex items-center gap-x-1.5">
                 {i > 0 ? <span aria-hidden>·</span> : null}
                 <span title={`Blocks ${d.blocks.toLowerCase()}. Ends when: ${d.endsWhen.charAt(0).toLowerCase() + d.endsWhen.slice(1)}.`}>
-                  <span className="font-medium text-foreground">{d.title}</span> since {clock(r.since)}
+                  <span className="font-medium text-foreground">{d.title}</span> since {datedClock(r.since, now, RECORD_ZONE)}
                 </span>
               </span>
             );

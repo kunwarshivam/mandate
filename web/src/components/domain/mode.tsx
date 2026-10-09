@@ -3,7 +3,7 @@
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { ActiveRestriction, AgentMode } from "@/fixtures/types";
-import { clock } from "@/lib/format";
+import { RECORD_ZONE, datedClock } from "@/lib/format";
 import { MODE_LABEL, MODE_MEANING } from "@/lib/labels";
 import { type RestrictionSource, SOURCE_LABEL, describeRestriction } from "@/lib/restrictions";
 
@@ -71,11 +71,14 @@ export function SourceTag({ source, className }: { source: RestrictionSource; cl
 export function ModeBanner({
   mode,
   restrictions,
+  now,
   showMode = true,
   className,
 }: {
   mode: AgentMode;
   restrictions: ActiveRestriction[];
+  /** The screen's now, which decides whether a "since" carries its date (C-23). */
+  now: string;
   /** Off where the mode is already stated right above, so it is not said twice. */
   showMode?: boolean;
   className?: string;
@@ -99,7 +102,7 @@ export function ModeBanner({
                 <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <SourceTag source={text.source} />
                   <span className="font-semibold">{text.title}</span>
-                  <span className="text-sm text-muted-foreground">since {clock(r.since)}</span>
+                  <span className="text-sm text-muted-foreground">since {datedClock(r.since, now, RECORD_ZONE)}</span>
                 </p>
                 <dl className="grid gap-x-5 gap-y-1 text-sm sm:grid-cols-[6rem_1fr]">
                   <dt className="text-muted-foreground">Blocks</dt>
