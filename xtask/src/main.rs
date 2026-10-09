@@ -12316,8 +12316,8 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
-    /// `cargo-<subcommand>` binaries and `cargo.exe` are cargo: their invocations are judged, and
-    /// one hidden in a shell string cannot be read; a `cargo-*` file named as a plain argument
+    /// `cargo-<subcommand>` binaries and `cargo.exe` are cargo: their invocations are judged as
+    /// builds, and one hidden in a shell string or a substitution cannot be read; a `cargo-*` file named as a plain argument
     /// (`tar xzf cargo-mutants.tgz cargo-mutants`) is not an invocation (#1169 round 3 review,
     /// bypass 4; DEC-176 tightening).
     #[test]
@@ -12327,6 +12327,11 @@ jq -r "$filter" "$src"
             ("exe", "cargo.exe test -p rh-host"),
             ("exe-path", "/usr/bin/cargo.exe test -p rh-host"),
             ("hidden-binary", "bash -c 'cargo-nextest nextest run'"),
+            (
+                "substituted-binary",
+                "echo \"$(cargo-nextest nextest run -p rh-host)\"",
+            ),
+            ("substituted-exe", "echo \"$(cargo.exe test -p rh-host)\""),
             ("lib-tests", "cargo-nextest nextest run -p a-lib"),
             (
                 "unpack",
@@ -12334,12 +12339,17 @@ jq -r "$filter" "$src"
             ),
         ])];
         let problems = host_problems(&flows)?;
-        unreadable(&problems, &["hidden-binary"]);
-        names(
+        unreadable(
             &problems,
-            &["rh-host", "nextest-binary", "exe", "exe-path"],
-            &["lib-tests", "unpack"],
+            &["hidden-binary", "substituted-binary", "substituted-exe"],
         );
+        for job in ["nextest-binary", "exe", "exe-path"] {
+            let judged = problems
+                .iter()
+                .any(|p| p.contains(&format!("`{job}`")) && p.contains("`rh-host`"));
+            assert!(judged, "`{job}` is judged as a build: {problems:?}");
+        }
+        names(&problems, &["rh-host"], &["lib-tests", "unpack"]);
         Ok(())
     }
 
@@ -12460,7 +12470,8 @@ jq -r "$filter" "$src"
     /// Cargo reached without a literal `cargo` word cannot be read, and neither can the triggers
     /// that make it possible: `eval`, a pipe into a shell or an interpreter, `sh -c`,
     /// `python -c`, `perl -e`, `node -e`, a glob in a command word, a double-quoted `run:` with a
-    /// `\`, and a step `shell:` that is not bash or sh (#1169 round 3 review, bypass 6; DEC-176
+    /// `\` (a line continuation, or an escape such as `\x67`), and a step `shell:` that is not
+    /// bash or sh (#1169 round 3 review, bypass 6; DEC-176
     /// tightening).
     #[test]
     fn cargo_without_a_cargo_word_cannot_be_read() -> Result<()> {
@@ -12474,6 +12485,9 @@ jq -r "$filter" "$src"
             "    steps:",
             "      - run: \"car\\",
             "          go test -p rh-host\"",
+            "  quoted-escape:",
+            "    steps:",
+            "      - run: \"car\\x67o test -p rh-host\"",
             "  pipe-sh:",
             "    steps:",
             "      - run: printf '%s%s test -p rh-host' car go | sh",
@@ -12509,6 +12523,7 @@ jq -r "$filter" "$src"
         let jobs = [
             "eval-split",
             "quoted-continuation",
+            "quoted-escape",
             "pipe-sh",
             "pipe-python",
             "bash-c",
