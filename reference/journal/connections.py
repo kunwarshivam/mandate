@@ -5,9 +5,9 @@ validator judges every closed schema. This module builds the `connections` secti
 each record, an invalid draft for every member type and rule, valid drafts for the cases a rule
 might be misread to refuse, `sequences` for the stream rules 66 to 68, which need a stream's
 earlier records, and `chains` for §11's `connection_cause_mismatch`, which follows a cause from one
-stream to the other. It folds each sequence and chain by its own path, checks that no base draft
-carries a secret-shaped member (CN-1) and that the account-stream drafts are on the stream the
-establishment binds, and shows every seeded bug caught.
+stream to the other. It folds each sequence and chain by its own path, each stream on its own
+(v0.30, DEC-696), checks that no base draft carries a secret-shaped member (CN-1) and that the
+account-stream drafts are on the stream the establishment binds, and shows every seeded bug caught.
 """
 
 from __future__ import annotations
@@ -30,11 +30,12 @@ from control import (
 from control import invalid as control_invalid
 from control import valid as control_valid
 
-SPEC = "docs/specs/journal.md v0.20 §9.8 (DEC-800)"
+SPEC = "docs/specs/journal.md v0.30 §9.8 and §11 (DEC-800, DEC-696)"
 AT = "2026-09-22T13:00:00.000000000Z"
 CLOCK = "2026-09-22T13:00:00.000000000Z"
 ACCOUNT_STREAM = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 OTHER_ACCOUNT_REF = "01J8Z2ACCT00000000000000B7"
+OTHER_WORKSPACE = "ws_01J8Z3"
 CONNECTION = "conn_alpaca_paper"
 OTHER_CONNECTION = "conn_alpaca_paper_2"
 OWNER = "user_owner_01"
@@ -751,6 +752,13 @@ def rotation_copy(index: int, *more: dict) -> dict:
     return record("rotated_copy", index, *more)
 
 
+def on_b(base: dict, *more: dict) -> dict:
+    """A record of the second connection, on its own account stream."""
+    return with_changes(
+        base, change("stream_id", f"acct:{WORKSPACE}:{OTHER_ACCOUNT_REF}"), change("payload.connection_id", OTHER_CONNECTION), *more
+    )
+
+
 # A passing connect check and the copy of the establishment it caused: the stream is bound.
 BOUND = (checked(1, "connect"), bound(2))
 
@@ -776,6 +784,14 @@ def sequences() -> list[dict]:
            change("payload.margin_attestation", "cash_account")]
     narrower = change("payload.scopes", ["trading"])
     suspended = [*BOUND, moved(3, "active", "suspended", "authorization_failed")]
+    interleaved = [
+        checked(1, "connect"),
+        on_b(checked(2, "connect")),
+        bound(3),
+        on_b(bound(4), change("payload.account_ref", OTHER_ACCOUNT_REF)),
+        checked(5),
+        on_b(moved(6, "active", "degraded", "network_errors")),
+    ]
     return [
         sequence(
             "connect_revoke_reconnect",
@@ -820,6 +836,18 @@ def sequences() -> list[dict]:
         ),
         sequence("reconnect_another_broker", "rule 66", [established(1), revoked(2), established(3, change("payload.broker", "kraken_derivatives_us"))], (2, "66")),
         sequence("version_1_never_reestablished", "rule 66", [established(1, *v1), revoked(2), established(3)], (2, "66")),
+        sequence(
+            "version_1_never_reestablished_at_version_1",
+            "rule 66: a version-1 first establishment has no account_ref, so it is never re-established (DEC-696)",
+            [established(1, *v1), revoked(2), established(3, *v1)],
+            (2, "66"),
+        ),
+        sequence(
+            "revoked_on_another_control_stream",
+            "rule 66: each rule holds on its own stream; another workspace's revocation revokes nothing here (DEC-696)",
+            [established(1), with_changes(revoked(2), change("stream_id", f"ctl:{OTHER_WORKSPACE}")), established(3)],
+            (2, "66"),
+        ),
         sequence(
             "two_connections_one_account",
             "rule 66: one account_ref, one connection (CN-5)",
@@ -883,6 +911,17 @@ def sequences() -> list[dict]:
                 checked(3, "daily", *results("contract", contract="tools_missing")),
                 moved(4, "active", "suspended", "check_failed"),
             ],
+        ),
+        sequence(
+            "two_account_streams_interleave",
+            "rule 68: each account stream is folded on its own, one connection each (DEC-696)",
+            interleaved,
+        ),
+        sequence(
+            "a_reauthorize_on_another_account_stream_admits_no_rotation",
+            "rule 68: the rotation's reauthorize check is on its own stream (DEC-696)",
+            [*interleaved, on_b(rotation_copy(7))],
+            (6, "68"),
         ),
         sequence(
             "state_on_an_unbound_stream",
@@ -1005,20 +1044,25 @@ def all_passed(p: dict, mcp: bool) -> bool:
     return all(r["result"] == "passed" for r in p["results"]) and (not mcp or "contract" in listed)
 
 
+def new_fold() -> dict:
+    """One stream's fold: the control stream's (rules 66 and 67) or an account stream's (rule 68)."""
+    return {
+        "first": {}, "latest": {}, "scopes": {}, "holder_of": {},
+        "owner": None, "binding": None, "current": "active", "cleared": False,
+        "last_check": {}, "rotations": {}, "suspended_at": -1,
+    }
+
+
 def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> tuple[int, str] | None:
-    """The first record that breaks rule 66, 68, or 69, folding each stream in order."""
-    first: dict[str, dict] = {}
-    latest: dict[str, str] = {}
-    scopes: dict[str, list[str]] = {}
-    holder_of: dict[str, str] = {}
-    current, cleared, owner = "active", False, None
-    binding: dict | None = None
-    last_check: dict[str, tuple[int, bool]] = {}
-    rotations: dict[str, int] = {}
-    suspended_at = -1
+    """The first record that breaks rule 66, 67, or 68. Each rule holds on its own stream (§9.8), so
+    each stream has its own fold."""
+    folds: dict[str, dict] = {}
     for i, d in enumerate(drafts):
         p, kind = d["payload"], d["event_type"]
         cid = p.get("connection_id")
+        stream = d["stream_id"].split(":")[0] if "stream.per_stream" in skip else d["stream_id"]
+        f = folds.setdefault(stream, new_fold())
+        first, latest, scopes, holder_of = f["first"], f["latest"], f["scopes"], f["holder_of"]
         if d["stream_id"].startswith("ctl:"):
             if kind == "ConnectionEstablished":
                 prior = first.get(cid)
@@ -1026,7 +1070,8 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
                     same = all(
                         p[m] == prior[m] or f"stream.66.{m}" in skip for m in ("broker", "environment")
                     ) and (p.get("account_ref") == prior.get("account_ref") or "stream.66.account_ref" in skip)
-                    if (latest[cid] != "ConnectionRevoked" and "stream.66.revoked" not in skip) or not same:
+                    version_1 = prior.get("account_ref") is None and "stream.66.version_1" not in skip
+                    if (latest[cid] != "ConnectionRevoked" and "stream.66.revoked" not in skip) or not same or version_1:
                         return i, "66"
                 holder = holder_of.get(p.get("account_ref"))
                 if holder is not None and holder != cid and "stream.66.unique" not in skip:
@@ -1053,9 +1098,10 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
                     if p["broker"] != prior["broker"] or p["environment"] != prior["environment"]:
                         return i, "67"
             continue
-        owner = cid if owner is None else owner
-        if cid != owner and "stream.68.one_connection" not in skip:
+        f["owner"] = cid if f["owner"] is None else f["owner"]
+        if cid != f["owner"] and "stream.68.one_connection" not in skip:
             return i, "68"
+        binding, last_check, rotations = f["binding"], f["last_check"], f["rotations"]
         mcp = binding is not None and binding["broker"] in MCP_BROKERS
         if kind == "ConnectionChecked":
             if p["occasion"] in ("executor_start", "daily") and binding is None and "stream.68.bound" not in skip:
@@ -1076,7 +1122,7 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
             listed = last_check.get(f"{occasion}.listed", (-1, False))[1]
             if p["broker"] in MCP_BROKERS and not listed and "stream.68.mcp" not in skip:
                 return i, "68"
-            binding = p
+            f["binding"] = p
             continue
         if binding is None and "stream.68.bound" not in skip:
             return i, "68"
@@ -1089,20 +1135,20 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
             continue
         if kind != "ConnectionStateChanged":
             continue
-        if p["from"] != current and "stream.68.from" not in skip:
+        if p["from"] != f["current"] and "stream.68.from" not in skip:
             return i, "68"
-        if p["reason"] == "acknowledged" and not cleared and "stream.68.cleared" not in skip:
+        if p["reason"] == "acknowledged" and not f["cleared"] and "stream.68.cleared" not in skip:
             return i, "68"
         if p["reason"] == "condition_cleared" and p["from"] == "suspended":
             check_at = rotations.get(d["causation_id"])
             if check_at is None and "stream.68.rotation" not in skip:
                 return i, "68"
-            if check_at is not None and check_at < suspended_at and "stream.68.after" not in skip:
+            if check_at is not None and check_at < f["suspended_at"] and "stream.68.after" not in skip:
                 return i, "68"
         if p["to"] == "suspended" and p["from"] != "suspended":
-            suspended_at = i
-        cleared = p["reason"] == "condition_cleared"
-        current = p["to"]
+            f["suspended_at"] = i
+        f["cleared"] = p["reason"] == "condition_cleared"
+        f["current"] = p["to"]
     return None
 
 
@@ -1136,6 +1182,11 @@ def chains() -> list[dict]:
 
     def swap(index: int, replacement: dict) -> list[dict]:
         return [replacement if i == index else r for i, r in enumerate(good)]
+
+    def after_v1(occasion: str) -> list[dict]:
+        v1 = [change("schema_version", 1), change("causation_id", None),
+              *(delete(f"payload.{m}") for m in ("account_ref", "user", "step_up", "margin_attestation"))]
+        return [established(1, *v1), revoked(2), checked(3, occasion), record("established_v2", 4, change("causation_id", record_id(3)))]
 
     return [
         chain("connect_then_reauthorize", "§11: every cause on its stream, for its connection, passing", good),
@@ -1172,6 +1223,21 @@ def chains() -> list[dict]:
             2,
         ),
         chain("copy_of_nothing", "§11: a copy names its original", swap(5, rotation_copy(6, change("causation_id", record_id(4)))), 5),
+        chain("reconnected_after_version_1", "§11: reconnect after an establishment of either version (DEC-696)", after_v1("reconnect")),
+        chain("connect_check_after_version_1", "§11: reconnect after an establishment of either version (DEC-696)", after_v1("connect"), 3),
+        chain(
+            "rotated_on_another_control_stream",
+            "§11: a rotation rests on its own control stream's establishment (DEC-696)",
+            swap(4, with_changes(rot, change("stream_id", f"ctl:{OTHER_WORKSPACE}"))),
+            4,
+        ),
+        chain(
+            "rotated_in_another_workspace_on_its_check",
+            "§11: a rotation rests on its own control stream's establishment (DEC-696)",
+            [*good[:3], with_changes(reauth, change("stream_id", f"acct:{OTHER_WORKSPACE}:{ACCOUNT_STREAM_REF}")),
+             with_changes(rot, change("stream_id", f"ctl:{OTHER_WORKSPACE}"))],
+            4,
+        ),
     ]
 
 
@@ -1179,28 +1245,29 @@ def chain_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> in
     """§11's `connection_cause_mismatch`: the first record whose cause on the other stream is not
     the one §9.8 names."""
     by_id = {d["event_id"]: d for d in drafts}
-    established_ids: set[str] = set()
-    refs: dict[str, str] = {}
+    established: dict[tuple[str, str], tuple[str | None, str]] = {}
     for i, d in enumerate(drafts):
         p, kind = d["payload"], d["event_type"]
         cause = by_id.get(d["causation_id"]) if d["causation_id"] else None
         if d["stream_id"].startswith("ctl:") and kind in ("ConnectionEstablished", "ConnectionCredentialRotated"):
-            if kind == "ConnectionEstablished" and d["schema_version"] != 2:
-                continue
             cid = p["connection_id"]
+            key = ("" if "chain.per_stream" in skip else d["stream_id"], cid)
             if kind == "ConnectionEstablished":
-                refs[cid] = p["account_ref"]
-                occasion = "reconnect" if cid in established_ids else "connect"
-                established_ids.add(cid)
-                broker = p["broker"]
+                occasion = "reconnect" if key in established else "connect"
+                if d["schema_version"] != 2:
+                    if "chain.version_1" not in skip:
+                        established[key] = (p.get("account_ref"), p["broker"])
+                    continue
+                established[key] = (p["account_ref"], p["broker"])
             else:
                 occasion = "reauthorize"
-                broker = next((e["payload"]["broker"] for e in drafts if e["event_type"] == "ConnectionEstablished"
-                               and e["payload"]["connection_id"] == cid), None)
+            account_ref, broker = established.get(key, (None, None))
+            workspace = d["stream_id"].split(":")[1]
             ok = (
-                cause is not None
+                key in established
+                and cause is not None
                 and cause["event_type"] == "ConnectionChecked"
-                and (cause["stream_id"] == f"acct:{WORKSPACE}:{refs.get(cid)}" or "chain.stream" in skip)
+                and (cause["stream_id"] == f"acct:{workspace}:{account_ref}" or "chain.stream" in skip)
                 and (cause["payload"]["connection_id"] == cid or "chain.connection" in skip)
                 and (cause["payload"]["occasion"] == occasion or "chain.occasion" in skip)
                 and (all_passed(cause["payload"], False) or "chain.passed" in skip)
@@ -1341,6 +1408,8 @@ STREAM_MUTANTS = (
     "stream.66.environment",
     "stream.66.account_ref",
     "stream.66.unique",
+    "stream.66.version_1",
+    "stream.per_stream",
     "stream.67.rotated",
     "stream.67.narrow",
     "stream.67.connect",
@@ -1366,6 +1435,8 @@ CHAIN_MUTANTS = (
     "chain.mcp",
     "chain.copy",
     "chain.original",
+    "chain.version_1",
+    "chain.per_stream",
 )
 
 

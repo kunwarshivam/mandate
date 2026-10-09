@@ -46,3 +46,12 @@
   `mandate-identity` at their old paths; closed by its `allowed_dependents` list
   (`mandate-identity`, `mandate-identity-system`). The codecs are tested in
   `crates/mandate-tenant/src/tests.rs`; run `cargo nextest run -p mandate-tenant`.
+- **System context:** `mandate-identity-system` (layer 2, safety-critical, pure; E9-8, DEC-642
+  items 5 to 8, DEC-668): `SystemContext`, its `Registration` and `SystemActor`, and the `Grants`
+  impl through which `mandate_identity::demand::require` yields a witness only for a listed
+  permission; its `allowed_dependents` list is empty until E9-8 creates the bootstrap crates.
+  Pending tests in `crates/mandate-identity-system/tests/system_context.rs` (accessors, own
+  workspace only, `forbidden` on Read records, and the registration-membership property with its
+  own oracle) and `compile_fail` doctests in its `src/lib.rs`; run
+  `cargo nextest run -p mandate-identity-system --run-ignored all` and
+  `cargo test -p mandate-identity-system --doc`.

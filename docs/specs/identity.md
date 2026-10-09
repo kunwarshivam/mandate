@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.3 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md), and [DEC-832](../project/decisions/DEC-832.md); v0.3 adds one's own memberships and session, one's own notification address, principal scope, who may obtain a step-up challenge, reduction-only sessions' workspaces, and `refresh_failed`, [DEC-816](../project/decisions/DEC-816.md)). Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by the founder in [DEC-820](../project/decisions/DEC-820.md) and applied by DEC-640; DEC-642 item 10 (a failed membership read never refuses a risk-reducing operation) is accepted by the founder, 2026-10-08; items 16 to 21 are Proposed and wait for the founder |
+| **Status** | v0.3 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md), and [DEC-832](../project/decisions/DEC-832.md); v0.3 adds one's own memberships and session, one's own notification address, principal scope, who may obtain a step-up challenge, reduction-only sessions' workspaces, and `refresh_failed`, [DEC-816](../project/decisions/DEC-816.md)). [DEC-668](../project/decisions/DEC-668.md) item 1 narrows DEC-642 item 7's wording: §4.5's `mandate-tenant` also holds the ID values. Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by the founder in [DEC-820](../project/decisions/DEC-820.md) and applied by DEC-640; DEC-642 item 10 (a failed membership read never refuses a risk-reducing operation) is accepted by the founder, 2026-10-08; items 16 to 21 are Proposed and wait for the founder |
 | **Implements** | [HLD §4](../HLD.md#4-architecture) (org directory, workspace deployment, deployment modes) and [§8](../HLD.md#8-multi-tenancy-and-security); PRD [FR-1.1 to FR-1.6](../product/04-prd-v1.md#61-identity-and-tenancy); backlog E9 |
 | **Depends on** | [Mandate spec §4.3, V-047, §6.1, §6.4, §6.5](mandate.md#43-policy-hierarchy-dec-51-dec-98); [journal spec §2, §3, §6.4, §7](journal.md#3-event-envelope); [infrastructure design §5, OPS-6](../design/infrastructure.md#5-secrets-and-the-vault); [inference spec INF-9, INF-11](inference.md#2-invariants); [DEC-141](../project/04-decision-log.md#decisions), [DEC-211](../project/04-decision-log.md#decisions), [DEC-411](../project/decisions/DEC-411.md) |
 | **Read by** | The workspace services API spec (`docs/specs/workspace-api.md`, DEC-436), the notifications spec (`docs/specs/notifications.md`, DEC-438), and the threat model (`docs/security/threat-model.md`, DEC-439), all drafted in parallel. They take roles, principals, and step-up from here |
@@ -545,10 +545,15 @@ Cargo feature involved:
   ([DEC-645](../project/decisions/DEC-645.md)), together with `mandate-identity-seal`; E9-8 adds
   `mandate-tenant` and `mandate-identity-system` under the same check.
 - **Two seals**, so no crate that builds sessions or memberships can mint a context:
-  - `mandate-tenant` holds only the `Tenant` trait (re-exported as `mandate_identity::Tenant`) and
-    its sealing supertrait. Its allowed dependents are `mandate-identity` and
-    `mandate-identity-system`, and nothing else, so only `TenantContext` and `SystemContext`
-    implement `Tenant`. Data APIs take either context through it.
+  - `mandate-tenant` holds the `Tenant` trait (re-exported as `mandate_identity::Tenant`), its
+    sealing supertrait, the plain ID values the trait's methods return (`WorkspaceId`, `OrgId`,
+    `PrincipalId`, `PrincipalKind`), and `SessionRef` with the ULID text codec and its error,
+    which `mandate-identity` re-exports at their old paths; it never re-exports the supertrait.
+    It holds nothing that builds a context, a session, or a membership
+    ([DEC-668](../project/decisions/DEC-668.md) item 1). Its allowed
+    dependents are `mandate-identity` and `mandate-identity-system`, and nothing else, so only
+    `TenantContext` and `SystemContext` implement `Tenant`. Data APIs take either context through
+    it.
   - `mandate-identity-seal` holds the tokens that the constructors of `Membership` and `Session`
     and the impls of `MembershipLookup` require. Its allowed dependents are `mandate-identity`,
     `mandate-authn`, the workspace store crate, and `mandate-identity-testkit` (a `tool`-layer

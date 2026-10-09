@@ -2,6 +2,7 @@ import type { OrderState, Workspace } from "@/fixtures/types";
 import { MODE_LABEL } from "./labels";
 import { agentLimits, levelNoun, nearLossLimits } from "./limits";
 import { RESTRICTIONS, type RestrictionSource } from "./restrictions";
+import { agentHref, orderHref } from "./screens";
 
 const HEALTH_WORD = { market_data: "Market data", broker: "Broker", deployment: "Deployment", relay: "Push relay" } as const;
 
@@ -37,7 +38,9 @@ export function alertLines(ws: Workspace): AlertLine[] {
 /**
  * What Needs you lists under the requests (DEC-513): the agents' conditions, one line per agent and
  * condition with every instrument it covers in one pair of brackets, and no feed. A degraded feed is
- * the status strip's and the Alerts screen's to say, and it asks nothing of the owner.
+ * the status strip's and the Alerts screen's to say, and it asks nothing of the owner. An order whose
+ * state is unknown turns Stop loud, so it is one of its agent's conditions too, with no instrument,
+ * opening the order's record, or the agent's orders when there are several (C-25).
  */
 export function needsYouLines(ws: Workspace): AlertLine[] {
   const lines: AlertLine[] = [];
@@ -54,6 +57,15 @@ export function needsYouLines(ws: Workspace): AlertLine[] {
         text: `${a.label}: ${lowerFirst(RESTRICTIONS[code as keyof typeof RESTRICTIONS].label)}${symbols.length > 0 ? ` (${symbols.join(", ")})` : ""}`,
         href: `/agents/${a.agent_id}`,
         source,
+      });
+    }
+    const unknown = a.orders.filter((o) => o.state === "Unknown");
+    if (unknown.length > 0) {
+      lines.push({
+        key: `${a.agent_id}-unknown-order`,
+        text: `${a.label}: ${unknown.length === 1 ? "an order's state is unknown" : `${unknown.length} orders' states are unknown`}`,
+        href: unknown.length === 1 ? orderHref(a.agent_id, unknown[0].client_order_id) : agentHref(a.agent_id, "orders"),
+        source: "account",
       });
     }
   }

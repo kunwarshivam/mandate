@@ -98,18 +98,19 @@ Pixelarticons icons (DEC-478), Motion, Vitest. No third-party analytics, session
   the mark and the wordmark side by side. The old M mark in `assets/brand/` is the codename's and is
   not used in the UI.
 - **Ink on light, off-white on dark** (DEC-204, amending DEC-203). In the app the mark, wordmark
-  and lockup take the type colour: ink #14161A on the light theme, off-white on the dark one. The
+  and lockup take the type colour: ink #0F1113 on the light theme, off-white on the dark one. The
   favicon, app icons and share image are the ink mark on an off-white tile, the same in every
-  browser theme. The brand is never volt and never on a coloured block.
+  browser theme. The traced mark is never azure or sun and never on a coloured block.
 - **No tagline** (the founder, 2026-09-28). No line under or beside the name, and no `description`
   in the page metadata or the share card. The one exception is the landing page's `description`,
   for search results (DEC-212); its share card still carries the name and the image alone.
-- **Palette (DEC-214, replacing DEC-205's ultramarine).** Ink and Volt, light and dark: ink
-  #14161A type on cool paper #FBFDFE in light mode and the reverse in dark (night #0B0D11); volt
-  #7C9217 as the one accent (lines, rails, marks; never body text, never a block), deep volt
-  #4C5A09 for volt as text, volt tint #F2FCD7 for the mandate's field, and neon volt #C8E928 as
-  the highlight, always under ink type; crimson for the kill switch alone. About 60/30/10 paper,
-  ink and volt.
+- **Palette (DEC-217, replacing DEC-214's Ink and Volt).** Azure and Sun, light and dark: ink
+  #0F1113 type on cool paper #FBFDFE in light mode and the reverse in dark (night #07080A); azure
+  #0858BC (azure-600) for the mandate's rules, rails and marks and the account's line (never text,
+  never a block), deep azure #043E89 (azure-800) for the primary action, links, the mandate's
+  labels and the focus ring, the pale azure #D0E3FE (azure-200) for the mandate's field, and sun
+  #FED254 (sun-300) as the highlight, always under ink type; green and red for a gain and a loss;
+  crimson for the kill switch alone. About 60/30/10 paper, ink, and azure and sun.
   The brand assets take these values from `src/lib/brand-palette.ts`, which derives them from the
   UI palette (`COLOR.md`).
 - **Type (DEC-209).** Public Sans, one self-hosted variable family for everything, tabular

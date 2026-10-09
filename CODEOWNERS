@@ -33,6 +33,7 @@
 /crates/mandate-identity/   @kunwarshivam
 /crates/mandate-identity-seal/ @kunwarshivam
 /crates/mandate-tenant/     @kunwarshivam
+/crates/mandate-identity-system/ @kunwarshivam
 /crates/mandate-notify/     @kunwarshivam
 /crates/mandate-identity-testkit/ @kunwarshivam
 /crates/mandate-passkey/    @kunwarshivam
