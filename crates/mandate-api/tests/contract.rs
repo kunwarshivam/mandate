@@ -3,7 +3,7 @@
 //! with `sha2` and encoded in Crockford base 32 here, and the closed enums' values are typed from
 //! the spec's text, never read back from the crate.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 
 use mandate_api::envelope::Actor;
@@ -723,6 +723,98 @@ fn a_refusal_inside_a_tagged_object_is_located_at_that_object() {
         .collect();
     let mut wrong = mislocated::<Acted>(&cases);
     wrong.extend(mislocated::<Crowd>(&crowd));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Decimals keyed by any name, so a refusal can be met on a member whose name the body chooses.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Book {
+    prices: BTreeMap<String, Decimal>,
+    effect: Effect,
+}
+
+impl Validate for Book {
+    fn validate(&self) -> Result<(), Refused> {
+        Ok(())
+    }
+}
+
+/// A member's name is escaped in its pointer as RFC 6901 says, `~` as `~0` before `/` as `~1`
+/// (DEC-681 item 10): `a/b~c` is `a~1b~0c`, `~/` is `~0~1`, and `~01` is `~001`, never the
+/// unescaped name nor one escaped in the other order. Each code that names a member is covered, at
+/// the root, nested, and in an array's item.
+#[test]
+fn a_members_name_is_escaped_in_its_pointer() {
+    let fixture: [(&[u8], &str, &str); 4] = [
+        (
+            br#"{"bid": "1.5", "effect": "none", "a/b~c": 1}"#,
+            "/a~1b~0c",
+            "unknown_member",
+        ),
+        (
+            br#"{"bid": "1.5", "effect": "none", "~/": 1}"#,
+            "/~0~1",
+            "unknown_member",
+        ),
+        (
+            br#"{"bid": "1.5", "effect": "none", "~01": 1}"#,
+            "/~001",
+            "unknown_member",
+        ),
+        (
+            br#"{"bid": "1.5", "a/b~c": 1, "a/b~c": 2, "effect": "none"}"#,
+            "/a~1b~0c",
+            "duplicate_member",
+        ),
+    ];
+    let nest: [(&[u8], &str, &str); 4] = [
+        (br#"{"head": {"bid": "1.5", "effect": "none", "a/b~c": 1}, "list": []}"#, "/head/a~1b~0c", "unknown_member"),
+        (br#"{"list": [{"bid": "1.5", "~/": 1, "effect": "none"}], "head": {"bid": "1.5", "effect": "none"}}"#, "/list/0/~0~1", "unknown_member"),
+        (br#"{"list": [], "head": {"a/b~c": 1, "a/b~c": 2}}"#, "/head/a~1b~0c", "duplicate_member"),
+        (br#"{"head": {"bid": "1.5", "effect": "none", "a/b~c": {"x~/y": 1, "x~/y": 2}}, "list": []}"#, "/head/a~1b~0c/x~0~1y", "duplicate_member"),
+    ];
+    let book: [(&[u8], &str, &str); 3] = [
+        (
+            br#"{"prices": {"a/b~c": 1.5, "z": "1"}, "effect": "none"}"#,
+            "/prices/a~1b~0c",
+            "type",
+        ),
+        (
+            br#"{"prices": {"a/b~c": "1.50", "z": "1"}, "effect": "none"}"#,
+            "/prices/a~1b~0c",
+            "non_canonical",
+        ),
+        (
+            br#"{"prices": {"~/": "1", "~/": "2"}, "effect": "none"}"#,
+            "/prices/~0~1",
+            "duplicate_member",
+        ),
+    ];
+    let mut wrong = mislocated::<Fixture>(&fixture);
+    wrong.extend(mislocated::<Nest>(&nest));
+    wrong.extend(mislocated::<Book>(&book));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A custom refusal on a map's last entry is located at that entry, its key escaped (RFC 6901,
+/// DEC-681 item 10): `/prices/a~1b~0c`, never the map.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_custom_refusal_on_a_maps_last_entry_is_located_at_its_escaped_key() {
+    let book: [(&[u8], &str, &str); 2] = [
+        (
+            br#"{"prices": {"z": "1", "a/b~c": "1.50"}, "effect": "none"}"#,
+            "/prices/a~1b~0c",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "prices": {"~/": "1.50"}}"#,
+            "/prices/~0~1",
+            "non_canonical",
+        ),
+    ];
+    let wrong = mislocated::<Book>(&book);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
