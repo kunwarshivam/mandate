@@ -2151,7 +2151,6 @@ fn assert_overlay_denied(
 /// rule and the ask fixture's `ask` rule both become `deny`, named `policy_overlay`. The run
 /// records the deny and places nothing.
 #[test]
-#[ignore = "pending E7-19"]
 fn an_opening_under_a_nonconforming_mandate_is_denied_by_the_policy_overlay() {
     let mut context = run_context(true);
     context.governance = Some(nonconforming());
@@ -2169,7 +2168,6 @@ fn an_opening_under_a_nonconforming_mandate_is_denied_by_the_policy_overlay() {
 /// DEC-534 item 2 (D4d): an increase is denied the same way. No fixture sizes an increase, since
 /// the tracer's account starts flat, so the run's own sizing is retargeted to one.
 #[test]
-#[ignore = "pending E7-19"]
 fn an_increase_under_a_nonconforming_mandate_is_denied_by_the_policy_overlay() {
     let mut context = run_context(true);
     context.governance = Some(nonconforming());
