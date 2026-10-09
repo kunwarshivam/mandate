@@ -7962,11 +7962,14 @@ jq -r "$filter" "$src"
     /// `parallel`, every shell and every wrapper included. A quoted word holding a space,
     /// `cargo` or a `$` is re-read as a command line unless its command is known
     /// non-executing, every later stage of its pipeline is too, and it is not inside a `$( … )`
-    /// or `<( … )` whose consumer executes (`echo "…" | sh`, `source <(echo "…")`); a bare
+    /// `<( … )` or `>( … )` whose consumer executes (`echo "…" | sh`, `source <(echo "…")`,
+    /// `tee >(sh)`); a bare
     /// assignment captures its `$( … )` and does not execute it. A here-doc's lines and a
     /// here-string's (`<<<`) target are read as commands unless their command is known
     /// non-executing, so `cat <<EOF` holding `$F` is allowed. Defining an array (`x=( … )`, one
-    /// word) is never refused beyond the live-token backstop; a command word that expands a
+    /// word) is never refused beyond the live-token backstop and the cargo-word rule below, so
+    /// `a=(cargo build --features "$A$B")` is refused on its own line beside `run_it "${a[@]}"`;
+    /// a command word that expands a
     /// whole array (`"${x[@]}"`, `${x[*]}`) is refused when any definition of that array in the
     /// file holds `cargo` or an expansion, or the file defines no such array (the coordinator's
     /// eighth-round rulings under DEC-176). A re-read word that is exactly one whole-array
@@ -7982,6 +7985,20 @@ jq -r "$filter" "$src"
     /// possibly cargo inside a `run:` value only (`run: ${{ inputs.cmd }} build $F`), and not in a
     /// job name, an `env:` value, a `with:` input or a cache key. The live-token backstop still
     /// reads every word of every line.
+    ///
+    /// The cargo-word rule closes what a known non-executing command can still run (`awk`'s
+    /// `system` or `getline`, `sed`'s `e` flag, a `git -c alias.x=!…`, `tee >(sh)`, a script
+    /// written and then run, a command held in a scalar; the coordinator's tenth-round ruling
+    /// under DEC-176). In every position, whatever the command, a word, quoted or not, holding
+    /// the token `cargo` (a run of letters, digits, `_`, `-` and `.` that is `cargo`, so
+    /// `!cargo` holds it and `.cargo` and `cargo-nextest` do not) is refused when it also holds
+    /// a `$`, a backtick or a `%`
+    /// format directive; when it holds `--all-features`; or when it holds `--features` or `-F`
+    /// whose value in the same word is not a complete literal of `[a-z0-9_,-]` without the
+    /// token `live` (cut off by a closing quote, empty, or followed by an expansion). A script
+    /// fetched or written at run time (`curl … | sh`, a generated file) cannot be read by a
+    /// static scan; the cargo-word rule is what leaves such a script no way to carry a computed
+    /// feature, and the live-token backstop no way to carry `live` itself.
     #[test]
     #[ignore = "pending E7-26"]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
@@ -7998,6 +8015,8 @@ jq -r "$filter" "$src"
             "cargo build 2> \"$LOG\" -p x",
             "env RUST_LOG=info cargo test -p x",
             "bash -c \"cargo test -p x\"",
+            "cargo build --features paper,sim",
+            "echo \"cargo test -p x\"",
         ];
         for line in allowed {
             let files = [ci_file(".github/workflows/ci.yml", line)];
@@ -8191,10 +8210,22 @@ jq -r "$filter" "$src"
             "$c build --features $'\\x6cive'",
             "$c build --features $(echo li)ve",
         ];
-        let without_a_plain_cargo_word = refused_with_no_cargo_word
+        let refused_by_the_cargo_word_rule = [
+            "awk 'BEGIN{system(\"cargo build --features \" a b)}' a=li b=ve",
+            "awk 'BEGIN{\"cargo build --features \" a b | getline}' a=li b=ve",
+            "sed -e \"s/x/cargo build --features $A$B/e\"",
+            "git -c \"alias.b=!cargo build --features $A$B\" b",
+            "echo \"cargo build --features $A$B\" | tee >(sh)",
+            "printf 'cargo build --features %s%s\\n' $A $B > x.sh; sh x.sh",
+            "echo \"cargo build --features $A$B\" > x.sh; bash x.sh",
+            "cmd=\"cargo build --features $A$B\"; $cmd",
+            "read -r cmd <<< \"cargo build --features $A$B\"; $cmd",
+        ];
+        let refused_at_line_two = refused_with_no_cargo_word
             .iter()
-            .chain(&refused_through_a_command_word_that_may_be_cargo);
-        for line in without_a_plain_cargo_word {
+            .chain(&refused_through_a_command_word_that_may_be_cargo)
+            .chain(&refused_by_the_cargo_word_rule);
+        for line in refused_at_line_two {
             let files = [ci_file(
                 ".github/scripts/build.sh",
                 &format!("set -e\n{line}\n"),
@@ -8381,11 +8412,6 @@ jq -r "$filter" "$src"
             ),
             (
                 ".github/scripts/build.sh",
-                "set -e\na=(cargo build --features \"$A$B\")\nrun_it \"${a[@]}\"\n",
-                ":3",
-            ),
-            (
-                ".github/scripts/build.sh",
                 "set -e\nif cargo build --features \"$A$B\"; then\n",
                 ":2",
             ),
@@ -8430,6 +8456,11 @@ jq -r "$filter" "$src"
             );
         }
         let refused_on_two_lines = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\na=(cargo build --features \"$A$B\")\nrun_it \"${a[@]}\"\n",
+                [":2", ":3"],
+            ),
             (
                 ".github/scripts/build.sh",
                 "set -e\nFLAGS=\"--features live\"\ncargo build $FLAGS\n",
