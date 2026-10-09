@@ -413,6 +413,161 @@ fn decode_locates_a_refusal_inside_an_array_by_its_index() {
     );
 }
 
+/// Two [`Fixture`]s, one a member and one in an array, so a refusal can be met at every depth.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Nest {
+    head: Fixture,
+    list: Vec<Fixture>,
+}
+
+impl Validate for Nest {
+    fn validate(&self) -> Result<(), Refused> {
+        Ok(())
+    }
+}
+
+/// Each `(body, expected)` whose refusal differs from the expected `(path, code)`, with what
+/// `decode` reported instead.
+fn mislocated<T: DeserializeOwned + Validate + Debug>(
+    cases: &[(&[u8], &str, &str)],
+) -> Vec<String> {
+    cases
+        .iter()
+        .filter_map(|(body, path, code)| {
+            let found = refusal::<T>(body);
+            let want = [((*path).to_owned(), (*code).to_owned())];
+            (found != want).then(|| {
+                format!(
+                    "{}: want {want:?}, got {found:?}",
+                    String::from_utf8_lossy(body)
+                )
+            })
+        })
+        .collect()
+}
+
+/// A custom refusal on an object's last member is located at that member, where serde can name it
+/// (DEC-681 item 10): at the root, in a nested object, and in an array's object, pretty-printed or
+/// not. A first member, and `missing` at the object that lacks it, are the controls.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_custom_refusal_on_an_objects_last_member_is_located_at_the_member() {
+    let fixture: [(&[u8], &str, &str); 4] = [
+        (
+            br#"{"effect": "none", "bid": "1.50"}"#,
+            "/bid",
+            "non_canonical",
+        ),
+        (
+            b"{\n  \"effect\": \"none\",\n  \"bid\": \"1.50\"\n}\n",
+            "/bid",
+            "non_canonical",
+        ),
+        (
+            br#"{"bid": "1.50", "effect": "none"}"#,
+            "/bid",
+            "non_canonical",
+        ),
+        (br#"{"effect": "none"}"#, "", "missing"),
+    ];
+    let ok = r#"{"bid": "1.5", "effect": "none"}"#;
+    let last = r#"{"effect": "none", "bid": "1.50"}"#;
+    let first = r#"{"bid": "1.50", "effect": "none"}"#;
+    let nested = [
+        (
+            format!(r#"{{"list": [], "head": {last}}}"#),
+            "/head/bid",
+            "non_canonical",
+        ),
+        (
+            format!(r#"{{"head": {last}, "list": []}}"#),
+            "/head/bid",
+            "non_canonical",
+        ),
+        (
+            format!(r#"{{"head": {first}, "list": []}}"#),
+            "/head/bid",
+            "non_canonical",
+        ),
+        (
+            format!(r#"{{"head": {ok}, "list": [{ok}, {last}]}}"#),
+            "/list/1/bid",
+            "non_canonical",
+        ),
+        (
+            format!(r#"{{"list": [{last}, {ok}], "head": {ok}}}"#),
+            "/list/0/bid",
+            "non_canonical",
+        ),
+        (
+            format!(r#"{{"list": [{first}], "head": {ok}}}"#),
+            "/list/0/bid",
+            "non_canonical",
+        ),
+        (
+            r#"{"head": {"effect": "none"}, "list": []}"#.to_owned(),
+            "/head",
+            "missing",
+        ),
+    ];
+    let nested: Vec<(&[u8], &str, &str)> = nested
+        .iter()
+        .map(|(body, path, code)| (body.as_bytes(), *path, *code))
+        .collect();
+    let mut wrong = mislocated::<Fixture>(&fixture);
+    wrong.extend(mislocated::<Nest>(&nested));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// `text` with each `@` replaced by `bad`.
+fn spliced(text: &str, bad: &[u8]) -> Vec<u8> {
+    text.bytes()
+        .flat_map(|byte| {
+            if byte == b'@' {
+                bad.to_vec()
+            } else {
+                vec![byte]
+            }
+        })
+        .collect()
+}
+
+/// A body whose string holds bytes that are not UTF-8 is not UTF-8 JSON (§3.1), so it is not
+/// exactly one JSON value: `malformed` at `""` (DEC-681 item 10), whether the string is the whole
+/// body, a member's value at any depth, or a member's name. Bad bytes outside a string are the
+/// control, already refused so.
+#[test]
+#[ignore = "pending E10-10"]
+fn invalid_utf8_inside_a_string_is_malformed_at_the_root() {
+    let ok = r#"{"bid": "1.5", "effect": "none"}"#;
+    let fixtures = [
+        r#"{"bid": "1@", "effect": "none"}"#.to_owned(),
+        r#"{"bid": "1.5", "effect": "none@"}"#.to_owned(),
+        r#"{"bid": "1.5", "effect": "none", "x@": 1}"#.to_owned(),
+        r#"{"bid": "1.5", @"effect": "none"}"#.to_owned(),
+    ];
+    let nests = [
+        r#"{"head": {"bid": "1.5", "effect": "@"}, "list": []}"#.to_owned(),
+        format!(r#"{{"head": {ok}, "list": [{ok}, {{"bid": "@1", "effect": "none"}}]}}"#),
+        r#"{"head": {"b@id": "1.5", "effect": "none"}, "list": []}"#.to_owned(),
+    ];
+    let mut wrong = Vec::new();
+    for bad in [&b"\xff"[..], b"\xc3\x28", b"\xed\xa0\x80"] {
+        let whole = spliced(r#""1@""#, bad);
+        wrong.extend(mislocated::<Decimal>(&[(&whole, "", "malformed")]));
+        for text in &fixtures {
+            let body = spliced(text, bad);
+            wrong.extend(mislocated::<Fixture>(&[(&body, "", "malformed")]));
+        }
+        for text in &nests {
+            let body = spliced(text, bad);
+            wrong.extend(mislocated::<Nest>(&[(&body, "", "malformed")]));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 #[test]
 fn idempotency_keys_are_16_to_64_url_safe_characters() {
     for good in [
