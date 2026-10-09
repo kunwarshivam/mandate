@@ -37,6 +37,8 @@ ADMIN = "01J8Z4M0AD0000000000000AD1"
 MEMBER = "01J8Z4M0BE0000000000000ME1"
 INVITATION = "01J8Z4M0C00000000000000N01"
 SERVICES = {"kind": "system", "id": "control_services", "version": "0.1.0", "build": "sha256:" + "d" * 64}
+CLIENT = {"kind": "client", "id": "client_b_01", "version": "1", "build": None, "on_behalf_of": ADMIN}
+AGENT = {"kind": "agent", "id": "agent_a", "version": "0.1.0", "build": "sha256:" + "c" * 64}
 IDS = {
     "invited": "01J8Z4M1A000000000000000M1",
     "invitation_revoked": "01J8Z4M1B000000000000000M2",
@@ -440,6 +442,30 @@ def invalid_drafts() -> list[dict]:
             "actor.kind",
         ),
         invalid(
+            "group_removed_by_a_user",
+            "rule 98: the identity provider's group removal is the system's",
+            "deactivated",
+            [change("payload.reason", "group_removed")],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "deactivated_by_a_client",
+            "rule 98: a client never changes a membership (ID-11)",
+            "deactivated",
+            [change("actor", CLIENT), change("payload.by", CLIENT["id"]), change("payload.session_ref", None)],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "role_changed_by_an_agent",
+            "rule 98: only a user or the system writes a membership record",
+            "role_changed",
+            [change("actor", AGENT), change("payload.changed_by", AGENT["id"]), change("payload.session_ref", None)],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
             "own_roles_changed",
             "rule 99: no admin changes their own roles (ID-13)",
             "role_changed",
@@ -785,7 +811,8 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "removal_only",
-            "rules 100 and 101: removing a role needs no step-up",
+            "rules 100 and 101: removing a role needs no step-up; the same record offboards a deactivated "
+            "member (DEC-654 item 7), whose state only the fold sees",
             "role_changed",
             [change("payload.added", []), change("payload.step_up", None)],
         ),
@@ -804,6 +831,12 @@ def valid_drafts() -> list[dict]:
                 change("payload.removed", []),
                 change("payload.independent_approval_required", False),
             ],
+        ),
+        valid(
+            "admin_granted_at_once_under_independence",
+            "rule 103: `workspace_admin` never cools off, even where independence is required",
+            "role_changed",
+            [change("payload.added", [{"role": "workspace_admin", "cool_off_ends_at": AT}]), change("payload.removed", [])],
         ),
         valid(
             "left",
@@ -1010,6 +1043,7 @@ VALIDATOR_MUTANTS = (
     "boundary.rule_103_ignores_independence",
     "boundary.rule_103_founding_cools",
     "boundary.rule_103_either",
+    "boundary.rule_103_admin_cools",
     "record.extra",
     "record.missing",
     *sorted({f"loose.payload.{member}" for cases in MEMBER_CASES.values() for member, _, _ in cases}),

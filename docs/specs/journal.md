@@ -706,7 +706,9 @@ spec v0.22 ([DEC-671](../project/decisions/DEC-671.md)). The
 credential, session, service-account, host-CLI, and break-glass records are listed with the members
 the identity spec names and close in their own change, as §9.2's other records do; until then
 `append` refuses them as `unknown_event_type`. `ScopeHalted` and `ScopeReenabled` are not catalogued: they
-exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4).
+exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor is
+`NotificationAddressChanged`: its row and schema come with the notification records' change
+([DEC-720](../project/decisions/DEC-720.md), [DEC-795](../project/decisions/DEC-795.md)).
 
 **Scheduler stream:** `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`,
 `ClockToleranceExceeded`.
@@ -2442,7 +2444,11 @@ before `expires_at` and `expired` from it; `MemberInvitationRevoked` makes it `r
 and each removal at once; on an activation or reactivation, `operator` and `approver` are effective
 from its `cool_off_ends_at` and every other role at once;
 `MemberDeactivated` makes the member `deactivated`, keeping its roles for a reactivation; and
-`MemberRemoved` makes it `removed`. `removed`, `expired`, and `revoked` are terminal: a removed
+`MemberRemoved` makes it `removed`. A `MemberRoleChanged` whose `added` is empty may remove kept
+roles from a `deactivated` member, so an admin can strip a suspended member's roles while offboarding
+([DEC-654](../project/decisions/DEC-654.md) item 7); a grant to a `deactivated` member is still
+refused. A deactivated member whose kept roles are all removed cannot be reactivated, since rule 100
+refuses a `MemberReactivated` with no roles: they return only by removal and a new invitation. `removed`, `expired`, and `revoked` are terminal: a removed
 member comes back only through a new invitation, which starts a new membership with no role of the
 old one. An invitation an activation used is `accepted`, the fold's own name for it: identity spec
 §5.1 has no such state, because the membership it started takes over. A record that does not fit the
@@ -2451,12 +2457,21 @@ naming an invitation never issued or a member never activated; a second activati
 whose membership is not `removed`; an activation by an invitation that is not `invited` at
 `activated_at` (so `activated_at` < `expires_at`, and an invitation activates at most once) or with
 roles other than the invitation's; a role change for a member who is not `active` or `cooling_off`,
-or that removes a role the member does not hold or adds one it does; a reactivation of a member who
+other than a removal only from a `deactivated` member, or that removes a role the member does not
+hold (for a `deactivated` member, one it does not keep) or adds one it does; a reactivation of a member who
 is not `deactivated`, or with roles other than those kept; a deactivation of one who is not
 `active` or `cooling_off`; a removal of one who is not `deactivated`; and a revocation of an
 invitation that is not `invited`. Such a record is refused by workspace services before it is committed; a fold that meets one anyway reads the
 membership as unreadable, and `workspace_users` as 1 (identity spec §5.3). The cross-record checks
-are the identity crate's (E9-7), not `append`'s.
+are the identity crate's (E9-7), not `append`'s. Besides the state checks above, they are: the
+author of an admin's record is an `active` member whose `workspace_admin` role is effective at
+`event_time` ([DEC-654](../project/decisions/DEC-654.md) item 2); the last owner and last admin
+rules (identity spec §5.2); that a step-up assertion was never used before (rule 102); that a
+record's `independent_approval_required` equals the workspace's effective policy at `event_time`
+(rule 103); and that no record carries an entry that changes nothing: `change_roles` passes one
+(DEC-654 item 6), but the fold refuses granting a held role or removing one not held, and rule 100
+refuses a record left with no entry, so workspace services drop such entries before committing and
+commit nothing when none is left.
 
 The state at an instant *t* folds the records whose `event_time` is at or before *t* (rule 106 makes
 that each record's own instant), and reads each cool-off and expiry against *t*: `workspace_users`
