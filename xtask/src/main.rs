@@ -12423,6 +12423,37 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// A path to cargo that the shell computes cannot be read, though its last piece reads
+    /// `cargo`: brace expansion (`/usr/{bin,local}/cargo`, two words), a backtick substitution
+    /// and an expansion in the path. Only the closed world's computed-word rule refuses these, so
+    /// dropping `{`, `` ` `` or `$` from it is caught; a literal path to cargo is read (DEC-873
+    /// item 1).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_computed_path_to_cargo_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  brace-path:",
+            "    steps:",
+            "      - run: /usr/{bin,local}/cargo test -p a-lib",
+            "  backtick-path:",
+            "    steps:",
+            "      - run: |",
+            "          `pwd`/cargo test -p a-lib",
+            "  dollar-path:",
+            "    steps:",
+            "      - run: $BIN/cargo test -p a-lib",
+            "  literal-path:",
+            "    steps:",
+            "      - run: /usr/bin/cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["brace-path", "backtick-path", "dollar-path"]);
+        names(&problems, &["brace-path"], &["literal-path"]);
+        Ok(())
+    }
+
     /// The five allowed `CARGO_*` names are read only exactly: a name that extends one
     /// (`CARGO_PROFILE_DEV_DEBUG_ASSERTIONS`, `CARGO_TERM_COLORS`) or holds one after a prefix
     /// (`XCARGO_TERM_COLOR`), in job `env`, step `env` or inline, cannot be read (DEC-873 item 5).
