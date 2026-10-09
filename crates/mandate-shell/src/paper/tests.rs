@@ -6,6 +6,7 @@ use std::rc::Rc;
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{
     Asset, AssetSnapshot, Exchange as BrokerExchange, Feed, LatestQuote, MinuteBar, MinuteBars,
+    alpaca_account_rules,
 };
 use mandate_builder::buy_action;
 use mandate_canon::Digest;
@@ -287,6 +288,7 @@ fn facts_at(asset_at: &str, quote_at: &str) -> Result<PaperFacts, String> {
     Ok(PaperFacts {
         broker: BrokerFacts {
             account: account()?,
+            account_rules: alpaca_account_rules(),
             positions: Vec::new(),
             open_orders: Vec::new(),
             asset: AssetSnapshot {
@@ -963,7 +965,6 @@ fn the_gate_template_carries_the_snapshot_and_nothing_invented() -> Result<(), S
     assert_eq!(template.config_refs, loaded.config_refs);
     assert_eq!(template.risk.agent_equity, usd("1000")?);
     assert_eq!(template.account.equity, usd("1000000")?);
-    assert_eq!(template.account.prior_close_equity, Usd::ZERO);
     assert_eq!(
         template.account.model_buying_power,
         usd("999998.99")?,
@@ -1016,7 +1017,7 @@ fn the_gate_template_carries_the_snapshot_and_nothing_invented() -> Result<(), S
 fn each_fact_that_does_not_hold_refuses_the_assembly() -> Result<(), String> {
     type Breaks = fn(&mut PaperFacts) -> Result<(), String>;
     let account = "an active, unblocked paper account";
-    let asset = "the reviewed AAPL asset record";
+    let asset = "the bound instrument's asset record";
     let current_asset = "a current asset record";
     let quote = "a current, uncrossed IEX quote";
     let cases: [(&str, &str, Breaks); 18] = [

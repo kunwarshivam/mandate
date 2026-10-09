@@ -8,7 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::{
-    ArtifactError, ArtifactRef, ArtifactStore, Environment, StoredEvent, get_artifact,
+    ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, Environment, StoredEvent,
+    get_artifact,
 };
 use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
 use mandate_spec::validate::validate;
@@ -19,13 +20,13 @@ use crate::control::{
     Submitted, code_of, commit_choice, control_stream, decide, object, seconds, text,
 };
 
-const CREATED: &str = "MandateVersionCreated";
-const CONFIRMED: &str = "MandateConfirmed";
+pub(crate) const CREATED: &str = "MandateVersionCreated";
+pub(crate) const CONFIRMED: &str = "MandateConfirmed";
 
 /// The document's members that are not envelope paths (mandate spec §4.1 V-020).
 const SYSTEM_FIELDS: [&str; 2] = ["mandate_schema_version", "source_text_ref"];
 
-fn refused(reason: &'static str) -> ControlError {
+pub(crate) fn refused(reason: &'static str) -> ControlError {
     ControlError::Refused { reason }
 }
 
@@ -37,7 +38,7 @@ fn reference(digest: Digest) -> String {
     format!("sha256:{}", digest.to_hex())
 }
 
-fn paper_only(owner: &Owner) -> Result<(), ControlError> {
+pub(crate) fn paper_only(owner: &Owner) -> Result<(), ControlError> {
     if owner.environment == Environment::Paper {
         Ok(())
     } else {
@@ -46,19 +47,19 @@ fn paper_only(owner: &Owner) -> Result<(), ControlError> {
 }
 
 /// One control-stream event as a command reads it.
-struct Row {
-    seq: u64,
+pub(crate) struct Row {
+    pub(crate) seq: u64,
     event_id: String,
-    event_type: String,
+    pub(crate) event_type: String,
     payload: Value,
 }
 
 impl Row {
-    fn member(&self, name: &str) -> Option<&str> {
+    pub(crate) fn member(&self, name: &str) -> Option<&str> {
         self.payload.get(name).and_then(Value::as_str)
     }
 
-    fn submitted(&self) -> Submitted {
+    pub(crate) fn submitted(&self) -> Submitted {
         Submitted {
             event_id: self.event_id.clone(),
             seq: self.seq,
@@ -66,7 +67,7 @@ impl Row {
     }
 }
 
-fn rows(journal: &dyn ControlJournal, owner: &Owner) -> Result<Vec<Row>, ControlError> {
+pub(crate) fn rows(journal: &dyn ControlJournal, owner: &Owner) -> Result<Vec<Row>, ControlError> {
     let stream = control_stream(owner)?;
     journal.rows(&stream)?.into_iter().map(row).collect()
 }
@@ -84,14 +85,14 @@ fn row(stored: StoredEvent) -> Result<Row, ControlError> {
 }
 
 /// The latest event of `event_type` naming `version`.
-fn latest<'a>(rows: &'a [Row], event_type: &str, version: &str) -> Option<&'a Row> {
+pub(crate) fn latest<'a>(rows: &'a [Row], event_type: &str, version: &str) -> Option<&'a Row> {
     rows.iter()
         .rev()
         .find(|r| r.event_type == event_type && r.member("mandate_version") == Some(version))
 }
 
 /// The document's envelope paths: its top-level members but the system fields, ascending.
-fn envelope_paths(document: &Value) -> Vec<String> {
+pub(crate) fn envelope_paths(document: &Value) -> Vec<String> {
     let members = document.as_object().into_iter().flat_map(|o| o.keys());
     members
         .map(|k| k.as_str())
@@ -102,16 +103,16 @@ fn envelope_paths(document: &Value) -> Vec<String> {
 
 /// What one command commits: its event type, the payload members it chose, and whether it is
 /// stepped up.
-type Event = (&'static str, Vec<(&'static str, Value)>, bool);
+pub(crate) type Event = (&'static str, Vec<(&'static str, Value)>, bool);
 
 /// Stores `record` and commits `event` naming `version` and the record, both in its
-/// `artifact_refs`, unless a re-run finds it committed (DEC-290).
-fn commit(
+/// `artifact_refs`, and binding `config_refs`, unless a re-run finds it committed (DEC-290).
+pub(crate) fn commit(
     journal: &mut dyn ControlJournal,
     store: &mut dyn ArtifactStore,
     owner: &Owner,
     (event_type, mut key, stepped_up): Event,
-    (version, record): (&str, &Value),
+    (version, record, config_refs): (&str, &Value, Vec<(&'static str, Value)>),
     now: Now,
 ) -> Result<Submitted, ControlError> {
     let bytes = to_canonical(record);
@@ -136,6 +137,7 @@ fn commit(
     let shape = Shape {
         schema_version: 1,
         artifact_refs,
+        config_refs,
     };
     commit_choice(journal, owner, decided, shape, now)
 }
@@ -182,11 +184,21 @@ pub fn create(
         vec![("provenance", Value::Array(provenance))],
         false,
     );
-    commit(journal, store, owner, event, (&version, &record), now)
+    commit(
+        journal,
+        store,
+        owner,
+        event,
+        (&version, &record, Vec::new()),
+        now,
+    )
 }
 
 /// The stored document `version` names, parsed, and the mandate it is.
-fn stored(store: &dyn ArtifactStore, version: &str) -> Result<(Value, Mandate), ControlError> {
+pub(crate) fn stored(
+    store: &dyn ArtifactSource,
+    version: &str,
+) -> Result<(Value, Mandate), ControlError> {
     let reference = ArtifactRef::parse(version).ok_or_else(|| refused("version_unknown"))?;
     let bytes = get_artifact(store, &reference).map_err(|e| match e {
         ArtifactError::Missing => refused("document_missing"),
@@ -200,7 +212,7 @@ fn stored(store: &dyn ArtifactStore, version: &str) -> Result<(Value, Mandate), 
 
 /// Every control-stream record as the fact the spec's fold reads (DEC-505 item 1), or
 /// `control_stream_invalid` for one that cannot be mapped.
-fn facts(rows: &[Row], store: &dyn ArtifactStore) -> Result<Vec<JournaledFact>, ControlError> {
+fn facts(rows: &[Row], store: &dyn ArtifactSource) -> Result<Vec<JournaledFact>, ControlError> {
     let documents = |d: &Digest| {
         let bytes = get_artifact(store, &ArtifactRef::from_digest(*d)).ok()?;
         parse(&bytes).ok()
@@ -214,26 +226,29 @@ fn facts(rows: &[Row], store: &dyn ArtifactStore) -> Result<Vec<JournaledFact>, 
     Ok(facts)
 }
 
-/// Every V-rule but V-002 on `mandate` as if `paths` were confirmed, in the context the control
-/// stream folds to (DEC-530 item 5); the warnings, by code.
-fn check_rules(
+/// Every V-rule but V-002 on `mandate` for `agent` (an id no deployment names, for a
+/// confirmation), as if `confirming` were confirmed when it is given, in the context the control
+/// stream folds to (DEC-530 items 5 and 9); the warnings, by code.
+pub(crate) fn check_rules(
     rows: &[Row],
-    store: &dyn ArtifactStore,
-    mandate: &Mandate,
-    (digest, paths): (Digest, &[String]),
+    store: &dyn ArtifactSource,
+    (mandate, agent): (&Mandate, &str),
+    confirming: Option<(Digest, &[String])>,
     now: Now,
 ) -> Result<Vec<&'static str>, ControlError> {
     let mut facts = facts(rows, store)?;
-    facts.push(JournaledFact::MandateConfirmed {
-        version: MandateVersion::named(digest),
-        confirmed_paths: paths.iter().map(|p| Pointer::new(p)).collect(),
-    });
+    if let Some((digest, paths)) = confirming {
+        facts.push(JournaledFact::MandateConfirmed {
+            version: MandateVersion::named(digest),
+            confirmed_paths: paths.iter().map(|p| Pointer::new(p)).collect(),
+        });
+    }
     let membership = Membership {
         workspace_users: 1,
         approver_users: 1,
     };
     let args = ContextArgs {
-        agent: AgentId::new(""),
+        agent: AgentId::new(agent),
         connection_id: mandate.connection_id.clone(),
         validation_date: now.at.date(),
         membership: Some(membership),
@@ -262,9 +277,9 @@ fn check_rules(
 
 /// Each pinned instrument is named by the latest registered instrument snapshot whose object
 /// names its asset id, with its symbol (DEC-505 item 1, DEC-523 item 5).
-fn check_instruments(
+pub(crate) fn check_instruments(
     rows: &[Row],
-    store: &dyn ArtifactStore,
+    store: &dyn ArtifactSource,
     document: &Value,
 ) -> Result<(), ControlError> {
     let mut snapshots: BTreeMap<String, String> = BTreeMap::new();
@@ -328,7 +343,7 @@ pub fn confirm(
     }
     let paths = envelope_paths(&document);
     let digest = Digest::of(&to_canonical(&document));
-    let warnings = check_rules(&rows, store, &mandate, (digest, &paths), now)?;
+    let warnings = check_rules(&rows, store, (&mandate, ""), Some((digest, &paths)), now)?;
     check_instruments(&rows, store, &document)?;
     let last = rows.iter().rev().find(|r| r.event_type == CONFIRMED);
     if let Some(earlier) = last.filter(|r| r.member("mandate_version") == Some(version)) {
@@ -351,5 +366,12 @@ pub fn confirm(
     ])?;
     let paths = Value::Array(paths.iter().map(|p| text(p)).collect());
     let event = (CONFIRMED, vec![("confirmed_paths", paths)], true);
-    commit(journal, store, owner, event, (version, &record), now)
+    commit(
+        journal,
+        store,
+        owner,
+        event,
+        (version, &record, Vec::new()),
+        now,
+    )
 }

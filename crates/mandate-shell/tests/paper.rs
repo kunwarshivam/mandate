@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use mandate_alpaca::{
     BarsRequest, DataTransport, HttpRequest, Method, Pause, QuoteRequest, Response,
-    TradingTransport, TransportError,
+    TradingTransport, TransportError, alpaca_account_rules,
 };
 use mandate_canon::{DecStr, Value};
 use mandate_journal::{AppendOutcome, StoredEvent};
@@ -369,11 +369,21 @@ fn assemble(
             cause,
         }
     })?;
-    let liquidity =
-        liquidity_facts(daily, &facts.minute_bars, now()).map_err(|cause| ShellError::Refused {
-            stage: Stage::MarketData,
-            cause,
-        })?;
+    assert_eq!(
+        facts.account_rules,
+        alpaca_account_rules(),
+        "the preflight carries the connector's declared account rules (DEC-840)"
+    );
+    let liquidity = liquidity_facts(
+        artifacts.production_identity().symbol,
+        daily,
+        &facts.minute_bars,
+        now(),
+    )
+    .map_err(|cause| ShellError::Refused {
+        stage: Stage::MarketData,
+        cause,
+    })?;
     let agent = AgentId(TEST_AGENT.to_owned());
     let contexts = load_contexts(
         &artifacts,
@@ -398,6 +408,7 @@ fn assemble(
         account_ref: TEST_ACCOUNT_REF.to_owned(),
         executor: Some(contexts.executor),
         run: Some(contexts.run),
+        artifacts: None,
         transport: broker.clone(),
     });
     let inner = match journal {
