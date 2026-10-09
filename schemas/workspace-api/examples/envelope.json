@@ -62,6 +62,12 @@
       "message": "A decimal is a canonical string."
     },
     {
+      "kind": "schema",
+      "path": "/labels/display name",
+      "code": "unknown_member",
+      "message": "Not a member of this request."
+    },
+    {
       "kind": "rule",
       "path": "/autonomy/delegations/0",
       "code": "V-022",
