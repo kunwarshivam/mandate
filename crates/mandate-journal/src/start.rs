@@ -236,10 +236,13 @@ impl Wanted<'_> {
             .flatten(),
             Wanted::Anchor(anchor_event_id) => {
                 let leaf_seq = from_seq.checked_sub(1)?;
-                let stamped = payload.get("token").is_some_and(|t| *t != Value::Null);
-                let leaf = (row.event_id == anchor_event_id && stamped)
-                    .then(|| payload.get("leaves").and_then(Value::as_array))
-                    .flatten()?
+                if row.event_id != anchor_event_id {
+                    return None;
+                }
+                payload.get("token").filter(|t| **t != Value::Null)?;
+                let leaf = payload
+                    .get("leaves")
+                    .and_then(Value::as_array)?
                     .iter()
                     .find(|l| {
                         l.get("stream_id").and_then(Value::as_str) == Some(stream_id)
