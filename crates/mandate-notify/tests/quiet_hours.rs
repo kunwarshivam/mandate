@@ -53,7 +53,6 @@ fn verdict(class: Class, w: Option<QuietHours>, at: &str) -> QuietVerdict {
 
 /// §5.8, NT-7, DEC-725 items 2, 3: 23:00 to 07:00 in both DST states and across both changes.
 #[test]
-#[ignore = "pending E8-10"]
 fn quiet_hours_act_by_class_in_both_dst_states_and_across_each_change() {
     let night = window((23, 0), (7, 0));
     let hold = |s| HoldUntil(t(s));
@@ -85,7 +84,6 @@ fn quiet_hours_act_by_class_in_both_dst_states_and_across_each_change() {
 
 /// DEC-725 item 3: a window the spring gap skips or the autumn hour repeats.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_window_in_the_skipped_or_repeated_hour_ends_at_the_first_instant_outside_it() {
     let (gap, half_gap, repeat) = (
         window((1, 30), (2, 30)),
@@ -120,7 +118,6 @@ fn a_window_in_the_skipped_or_repeated_hour_ends_at_the_first_instant_outside_it
 /// DEC-725 items 2 and 4: `safety` reads no offset; the other classes refuse an instant none
 /// covers, and of two offsets from one instant the later in the table is in force.
 #[test]
-#[ignore = "pending E8-10"]
 fn only_action_and_info_need_an_offset() {
     let (night, at) = (window((23, 0), (7, 0)), t("2026-01-16T04:00:00Z"));
     assert_eq!(answer("safety", quiet_hours(Safety, night, at, &[])), Send);
@@ -168,7 +165,6 @@ proptest! {
     /// NT-7 and DEC-725 item 3 against a minute walk, over random offset tables with changes
     /// near `at`: `safety` is never held, with any table or none.
     #[test]
-    #[ignore = "pending E8-10"]
     fn quiet_hours_match_a_minute_walk(
         class in prop::sample::select(vec![Action, Safety, Info]),
         (start, end) in (0u16..1_440, 0u16..1_440),
