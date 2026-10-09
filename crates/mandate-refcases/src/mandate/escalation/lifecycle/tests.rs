@@ -1,7 +1,9 @@
 //! The map's own pieces, on inputs no reference case reaches: a name bound twice or missing, a
 //! reference mark or a quorum with a member too many, a cause record of the right type and the
-//! wrong reason, a handoff no record authorises, a member supplied with no value, and an intent
-//! whose step reads another mandate version than its request bound.
+//! wrong reason, a handoff no record authorises, a member supplied with no value, an unstated
+//! answer member the runtime writes with a value, a re-validation's label under every
+//! re-classification, and an intent whose step reads another mandate version than its request
+//! bound.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,8 +15,8 @@ use mandate_runtime::{
 use serde_json::json;
 
 use super::{
-    As, Asked, Ran, Shell, bind, extra_fault, handoffs, member, object, seconds, strip, text,
-    translate,
+    As, Asked, NULL_UNLESS_STATED, Ran, Shell, bind, decided_by_now, extra_fault, handoffs, member,
+    object, seconds, strip, text, translate, unstated_fault, unstated_quorum,
 };
 use crate::ensure;
 
@@ -274,4 +276,183 @@ fn an_intent_reads_the_version_its_request_bound() -> Result<(), String> {
         !shell.intended(&want("sha256:v2"), &intent, &ran).is_empty(),
         || "`now`'s version passed".to_owned(),
     )
+}
+
+fn settings() -> ApprovalSettings {
+    ApprovalSettings {
+        approvers: BTreeSet::from(["u1".to_owned()]),
+        author: "u0".to_owned(),
+        timeout_s: 300,
+        environment: Environment::Paper,
+    }
+}
+
+/// Journal spec §9.7 (DEC-533 item 3): an `ApprovalResponded` member a case leaves unstated passes
+/// only as `null`. A quorum, or a `false` or a text in `separation_of_duties` or `delegation`, fails
+/// it, and so does a `null` in any other unstated member, or in another record.
+#[test]
+fn an_unstated_answer_member_passes_only_as_null() -> Result<(), String> {
+    let quorum = object(vec![
+        ("required", seconds(1)?),
+        ("independent", Value::Bool(false)),
+    ])?;
+    for name in ["quorum", "separation_of_duties", "delegation"] {
+        ensure(NULL_UNLESS_STATED.contains(&name), || {
+            format!("`{name}` is not read as `null`")
+        })?;
+        ensure(
+            unstated_fault("ApprovalResponded", name, &Value::Null).is_none(),
+            || format!("a `null` `{name}` failed"),
+        )?;
+        for got in [quorum.clone(), Value::Bool(false), text("none")] {
+            ensure(
+                unstated_fault("ApprovalResponded", name, &got).is_some(),
+                || format!("an unstated `{name}` of {got:?} passed"),
+            )?;
+        }
+        ensure(
+            unstated_fault("ApprovalRevalidated", name, &Value::Null).is_some(),
+            || format!("an unstated `{name}` passed on another record"),
+        )?;
+    }
+    ensure(
+        unstated_fault("ApprovalResponded", "reason", &Value::Null).is_some(),
+        || "an unstated `reason` passed as `null`".to_owned(),
+    )
+}
+
+/// The same reading through the whole comparison of one draft: a runtime `ApprovalResponded` that
+/// writes an unstated member as a value is reported naming it, and as `null` is not.
+#[test]
+fn a_responded_draft_with_an_unstated_value_fails_naming_it() -> Result<(), String> {
+    let mut shell = Shell::started(settings(), 0)?;
+    let ran = |payload: Value| Ran {
+        drafts: vec![draft("E1", "ApprovalResponded", payload)],
+        effects: Vec::new(),
+        clock: 0,
+        asked: None,
+        now: None,
+        decision: None,
+    };
+    let want = json!({"type": "ApprovalResponded", "clock": "1970-01-01T00:00:00Z"});
+    let quorum = object(vec![
+        ("required", seconds(1)?),
+        ("independent", Value::Bool(false)),
+    ])?;
+    for name in ["quorum", "separation_of_duties", "delegation"] {
+        for (got, named) in [(Value::Null, false), (quorum.clone(), true)] {
+            let ran = ran(object(vec![
+                ("role", text("approver")),
+                (name, got.clone()),
+            ])?);
+            let Some(written) = ran.drafts.first() else {
+                return Err("no draft".to_owned());
+            };
+            let faults = shell.compare_draft(&want, written, &ran);
+            let naming = faults
+                .iter()
+                .any(|fault| fault.contains(&format!("`{name}`")));
+            ensure(naming == named, || {
+                format!("`{name}` of {got:?}: {faults:?}")
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Rule 48: a step whose grant check 7 judged must state its `quorum`, so the case never reads one
+/// as `null`; a step check 7 did not judge need not.
+#[test]
+fn a_judged_grant_states_its_quorum() -> Result<(), String> {
+    let step = |verdict: &str, result: &str, reason: Option<&str>| json!({"verdict": verdict, "result": result, "reason": reason});
+    for judged in [
+        step("approved", "admitted", None),
+        step("approved", "counted", None),
+        step("approved", "refused", Some("duplicate_approver")),
+        step("approved", "refused", Some("not_independent")),
+    ] {
+        ensure(unstated_quorum(&judged).is_some(), || {
+            format!("{judged} passed with no `quorum`")
+        })?;
+        let mut members = judged.as_object().cloned().unwrap_or_default();
+        members.insert(
+            "quorum".to_owned(),
+            json!({"required": 1, "independent": false}),
+        );
+        let stated = serde_json::Value::Object(members);
+        ensure(unstated_quorum(&stated).is_none(), || {
+            format!("{stated} failed")
+        })?;
+    }
+    for unjudged in [
+        step("skipped", "admitted", None),
+        step("skipped", "refused", Some("duplicate_approver")),
+        step("approved", "refused", Some("not_pending")),
+        step("approved", "refused", Some("late")),
+    ] {
+        ensure(unstated_quorum(&unjudged).is_none(), || {
+            format!("{unjudged} failed with no `quorum`")
+        })?;
+    }
+    Ok(())
+}
+
+/// DEC-533 item 4: `decided_by_now` is an `ask`'s own label, and `null` for an `auto`, a `deny` or
+/// an `ask` with no label; that value is the one expected when the runtime writes none or another.
+/// DEC-830 item 2: the one superseded value the runtime wrote before E8-3, the label whatever the
+/// decision or `""` with none, also passes. Any third value fails.
+#[test]
+fn decided_by_now_is_the_ask_label_or_null() -> Result<(), String> {
+    let label = |by: &str| text(by);
+    let cases = [
+        (
+            json!({"decision": "auto", "by": null}),
+            Value::Null,
+            label(""),
+            vec![label("rule:big_order")],
+        ),
+        (
+            json!({"decision": "auto", "by": "rule:other"}),
+            Value::Null,
+            label("rule:other"),
+            vec![label(""), label("rule:big_order")],
+        ),
+        (
+            json!({"decision": "deny", "by": "rule:no_more"}),
+            Value::Null,
+            label("rule:no_more"),
+            vec![label(""), label("rule:other")],
+        ),
+        (
+            json!({"decision": "ask", "by": "rule:big_order"}),
+            label("rule:big_order"),
+            label("rule:big_order"),
+            vec![Value::Null, label(""), label("rule:other")],
+        ),
+        (
+            json!({"decision": "ask", "by": null}),
+            Value::Null,
+            label(""),
+            vec![label("rule:other")],
+        ),
+    ];
+    for (classification, spec, superseded, others) in cases {
+        for got in [&spec, &superseded] {
+            let want = decided_by_now(&classification, Some(got))?;
+            ensure(&want == got, || {
+                format!("{classification}: {got:?} failed, {want:?} expected")
+            })?;
+        }
+        for got in others.iter().chain([&Value::Bool(false)]) {
+            let want = decided_by_now(&classification, Some(got))?;
+            ensure(want == spec && &want != got, || {
+                format!("{classification}: {got:?} expects {want:?}, not {spec:?}")
+            })?;
+        }
+        let none = decided_by_now(&classification, None)?;
+        ensure(none == spec, || {
+            format!("{classification}: none written expects {none:?}, not {spec:?}")
+        })?;
+    }
+    Ok(())
 }

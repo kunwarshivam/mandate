@@ -1,0 +1,7 @@
+file = "crates/mandate-executor/tests/properties.rs"
+test = "no_resting_order_is_submitted_inside_an_unprotected_interval"
+reason = """
+E7-4's, let past the kill switch's stub by slice 7 (#668; DEC-485 item 17), failing on behaviour
+the slice does not own (defect E2): an opening rests while protection is cancelled for an exit
+(backlog: "E7-4 (stream K), E2 from E7-4 slice 7's tests correction", DEC-506 item 8).
+"""

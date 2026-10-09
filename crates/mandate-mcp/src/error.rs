@@ -10,13 +10,6 @@ use serde_json::value::RawValue;
 pub struct ServerText(Box<RawValue>);
 
 impl ServerText {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "called by E7-16's implementation, which reads every answer"
-        )
-    )]
     pub(crate) fn new(raw: Box<RawValue>) -> Self {
         Self(raw)
     }

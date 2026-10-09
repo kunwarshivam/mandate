@@ -1,0 +1,8 @@
+file = "crates/mandate-shell/tests/tracer.rs"
+test = "outlier_close"
+reason = """
+E2-14's wrong-high-print rule. The shell deliberately owns no price-trust arithmetic (DEC-138
+item 3), so the end-to-end test reaches the existing production path and proves the missing
+market-data behavior by observing the forbidden submission. E2-14 deletes both the marker and
+this file when its founder-gated price-trust rule lands.
+"""

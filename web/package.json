@@ -10,6 +10,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "pending": "node scripts/pending.mjs",
     "test:e2e": "playwright test",
     "test:e2e:auth": "playwright test -c playwright.auth.config.ts",
     "brand": "node scripts/brand-assets.mjs",
