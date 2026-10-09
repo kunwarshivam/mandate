@@ -2818,6 +2818,7 @@ mod sequence_tests {
     use proptest::prop_oneof;
     use proptest::test_runner::TestRunner;
 
+    use super::closed_form::{assert_before_sent, assert_closed, ids, named, record};
     use super::{fits, long, rests};
     use crate::error::ExecutorError;
     use crate::fold::fold;
@@ -4924,9 +4925,8 @@ mod sequence_tests {
         assert_eq!(
             protection_drafts(&started)
                 .first()
-                .and_then(|draft| draft.payload.get("orders"))
-                .and_then(Value::as_str),
-            Some(OCO)
+                .map(|draft| named(draft, "orders")),
+            Some(vec![OCO.to_owned()])
         );
         Ok(())
     }
@@ -7870,9 +7870,8 @@ mod sequence_tests {
         assert_eq!(
             protection_drafts(&started)
                 .first()
-                .and_then(|draft| draft.payload.get("orders"))
-                .and_then(Value::as_str),
-            Some(OCO),
+                .map(|draft| named(draft, "orders")),
+            Some(vec![OCO.to_owned()]),
             "{:?}",
             drafted(&started)
         );
@@ -9379,8 +9378,9 @@ mod sequence_tests {
                             .parse::<u32>()
                             .map_err(|error| format!("a short rung's {name}: {error}"))
                     };
-                    let (short, sent) = (number("qty")?, number("sent")?);
+                    let sent = number("sent")?;
                     let left = self.between.get(&intent).copied().unwrap_or(0);
+                    let short = left.saturating_sub(sent);
                     let counts = self.counted_for(&intent);
                     if self.sums
                         && (short == 0 || sent != counts || short != left.saturating_sub(counts))
@@ -12988,6 +12988,205 @@ mod sequence_tests {
         assert_eq!(long(&state, &aapl()?)?, Qty::parse("8")?, "netted once");
         Ok(())
     }
+
+    /// E7-19 E1b-P ([DEC-859](../../../docs/project/decisions/DEC-859.md)), journal spec §9.5: an
+    /// exit sequence's own records are closed. Its start names the resting OCO as a list, the
+    /// exit's intent, the entry, its agent as `agent_id`, and the prices; the confirmed cancel
+    /// names the OCO; the re-placement's `placed` names its new order, the quantity it covers and
+    /// the prices, and the end awaits that order. Both are journaled before it is sent (rule 5).
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn an_exit_sequences_records_are_closed() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let prices = [("stop", text("140")), ("take_profit", text("170"))];
+        let started = executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+        let start = record(&started, "unprotected_start")?;
+        let exit = [
+            ("intent_id", text(EXIT)),
+            ("entry", text("md-held-1")),
+            ("agent_id", text("agent-a")),
+            ("orders", ids(&[OCO])),
+        ];
+        assert_closed(
+            start,
+            "unprotected_start",
+            &[&exit[..], &prices[..]].concat(),
+        )?;
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        let cancelled = record(&confirmed, "cancelled")?;
+        assert_closed(cancelled, "cancelled", &[("orders", ids(&[OCO]))])?;
+        let settled = executor.run(filled(EXIT, "5")?, &ports)?;
+        let placed = record(&settled, "placed")?;
+        let id = format!("md-held-1-p{}", placed.event_id.0);
+        let covers = [("orders", ids(&[&id])), ("qty", text("5"))];
+        assert_closed(placed, "placed", &[&covers[..], &prices[..]].concat())?;
+        let ended = record(&settled, "unprotected_end")?;
+        assert_closed(ended, "unprotected_end", &[("awaiting", ids(&[&id]))])?;
+        assert_before_sent(&settled, &[placed, ended], &id);
+        Ok(())
+    }
+}
+
+/// Journal spec §9.5's closed `ProtectionChanged`, E1b-P's oracle (DEC-859): a draft is compared
+/// whole with a record built from §9.5's table, then judged by the journal's own `Draft::parse`.
+#[cfg(test)]
+mod closed_form {
+    use mandate_canon::{Key, Object, Value, parse, to_canonical};
+    use mandate_journal::Draft;
+
+    use crate::error::ExecutorError;
+    use crate::reconcile::tests::missing;
+    use crate::types::{BrokerRequest, Effect, EventDraft};
+
+    /// §9.5's members in its table's order, typed from the spec, never read from a writer.
+    const MEMBERS: &str = "instrument_id action orders awaiting qty stop take_profit intent_id \
+        bracket entry agent_id replacing created_on sent uncovered acknowledged risk_clock";
+
+    /// Every `ProtectionChanged` drafted in `effects`, in order.
+    pub(super) fn records(effects: &[Effect]) -> Vec<&EventDraft> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "ProtectionChanged" => Some(draft),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The one record of `action` in `effects`.
+    pub(super) fn record<'e>(
+        effects: &'e [Effect],
+        action: &str,
+    ) -> Result<&'e EventDraft, ExecutorError> {
+        let found: Vec<&EventDraft> = records(effects)
+            .into_iter()
+            .filter(|draft| draft.payload.get("action").and_then(Value::as_str) == Some(action))
+            .collect();
+        match found[..] {
+            [one] => Ok(one),
+            _ => Err(missing(&format!("one {action} record, not {found:?}"))),
+        }
+    }
+
+    /// The client order ids a member names: §9.5's list or legacy joined text (DEC-446 item 7).
+    pub(super) fn named(draft: &EventDraft, member: &str) -> Vec<String> {
+        match draft.payload.get(member) {
+            Some(Value::Array(ids)) => ids
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect(),
+            Some(Value::Str(joined)) => joined
+                .split([' ', ','])
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Client order ids as §9.5 types `orders` and `awaiting`: a list, never joined text.
+    pub(super) fn ids(named: &[&str]) -> Value {
+        Value::Array(
+            named
+                .iter()
+                .map(|id| Value::Str((*id).to_owned()))
+                .collect(),
+        )
+    }
+
+    /// Asserts `draft` is §9.5's closed version-1 record of `action` on `AAPL`: the members
+    /// `named` as given, every other list empty and every other member null, its own `risk_clock`,
+    /// and no other member, so no legacy `instrument`, `agent`, `limit`, `reason`, or joined
+    /// `orders`; and that the journal admits it.
+    pub(super) fn assert_closed(
+        draft: &EventDraft,
+        action: &str,
+        named: &[(&str, Value)],
+    ) -> Result<(), ExecutorError> {
+        let mut expected = Object::new();
+        let members: Vec<&str> = MEMBERS.split_whitespace().collect();
+        assert_eq!(members.len(), 17, "§9.5's table has seventeen members");
+        for member in members.iter().copied() {
+            let given = named.iter().find(|(name, _)| *name == member);
+            let value = match (member, given) {
+                ("instrument_id", _) => Value::Str("AAPL".to_owned()),
+                ("action", _) => Value::Str(action.to_owned()),
+                ("risk_clock", _) => draft.payload.get(member).cloned().unwrap_or(Value::Null),
+                (_, Some((_, value))) => value.clone(),
+                ("orders" | "awaiting", None) => Value::Array(Vec::new()),
+                (_, None) => Value::Null,
+            };
+            expected.insert(Key::new(member).map_err(|_| missing(member))?, value);
+        }
+        for (name, _) in named {
+            assert!(
+                members.contains(name),
+                "{name} is no member of §9.5's table"
+            );
+        }
+        assert_eq!(
+            (draft.schema_version, &draft.payload),
+            (1, &Value::Object(expected)),
+            "{action}: §9.5's closed record"
+        );
+        let refused = Draft::parse(&to_canonical(&envelope(&draft.payload)?)).err();
+        assert!(
+            refused.is_none(),
+            "{action}: the journal refuses it: {refused:?}"
+        );
+        Ok(())
+    }
+
+    /// `AGENTS.md` rule 5: each of `drafted` is in `effects` before the submission of `id`.
+    pub(super) fn assert_before_sent(effects: &[Effect], drafted: &[&EventDraft], id: &str) {
+        let sent = effects.iter().position(|effect| {
+            matches!(effect, Effect::Broker(BrokerRequest::Submit(order))
+                if order.client_order_id.as_str() == id)
+        });
+        for draft in drafted {
+            let journaled = effects.iter().position(
+                |effect| matches!(effect, Effect::Journal(each) if each.event_id == draft.event_id),
+            );
+            assert!(
+                matches!((journaled, sent), (Some(journaled), Some(sent)) if journaled < sent),
+                "{id}: journaled at {journaled:?}, sent at {sent:?} (rule 5)"
+            );
+        }
+    }
+
+    /// The vectors' `placed` chain event, seq 7 (`fixtures/refcases/journal.json`), less what only
+    /// a sealed row carries, with `payload` in place of its own.
+    fn envelope(payload: &Value) -> Result<Value, ExecutorError> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/refcases/journal.json"
+        );
+        let fixture = std::fs::read(path)
+            .ok()
+            .and_then(|bytes| parse(&bytes).ok());
+        let body = fixture.as_ref().and_then(|fixture| {
+            let chain = fixture.get("account_stream")?.get("chain")?.as_array()?;
+            chain.iter().find_map(|entry| match entry.get("body")? {
+                Value::Object(body) if entry.get("seq").and_then(Value::as_int) == Some(7) => {
+                    Some(body)
+                }
+                _ => None,
+            })
+        });
+        let mut body = body
+            .cloned()
+            .ok_or_else(|| missing("the vectors' placed record"))?;
+        for member in ["seq", "prev_hash", "recorded_at", "payload"] {
+            body.remove(&Key::new(member).map_err(|_| missing(member))?);
+        }
+        body.insert(
+            Key::new("payload").map_err(|_| missing("payload"))?,
+            payload.clone(),
+        );
+        Ok(Value::Object(body))
+    }
 }
 
 #[cfg(test)]
@@ -13258,6 +13457,7 @@ mod bracket_tests {
     use mandate_canon::Value;
     use mandate_num::{Price, Qty};
 
+    use super::closed_form::{assert_before_sent, assert_closed, ids, named, record};
     use crate::error::ExecutorError;
     use crate::ids::IntentId;
     use crate::payload::{clock, object};
@@ -13417,19 +13617,66 @@ mod bracket_tests {
             .collect()
     }
 
+    /// E7-19 E1b-P (DEC-859), §9.5: a bracket entry's placements are closed. Filled at once, only
+    /// its legs are `placed`, for its 10; filled 4 then cancelled, the OCO's `placed` and the end
+    /// awaiting it are journaled before it is sent (rule 5). Each names the entry and the day.
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn a_bracket_entrys_placements_are_closed() -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            let entry = text(&entry_id());
+            let prices = [
+                ("stop", text("140")),
+                ("take_profit", text("170")),
+                ("bracket", entry.clone()),
+                ("created_on", text("2026-09-22")),
+            ];
+            for (status, filled) in [("filled", "10"), ("canceled", "4")] {
+                let mut executor = bracketed(ports)?;
+                let day = object(vec![
+                    ("date", text("2026-09-22")),
+                    ("originated", Value::Bool(true)),
+                    ("risk_clock", clock(RiskClock::from_secs(10))?),
+                ])?;
+                executor.commit_one("TradingDayStarted", day)?;
+                let day = executor
+                    .journal
+                    .last()
+                    .cloned()
+                    .ok_or_else(|| missing("day"))?;
+                executor.run(Input::Journal(day), ports)?;
+                if status == "canceled" {
+                    executor.run(report("partially_filled", "4")?, ports)?;
+                }
+                let ran = executor.run(report(status, filled)?, ports)?;
+                let placed = record(&ran, "placed")?;
+                if status == "filled" {
+                    assert_eq!(records(&ran), vec![placed], "filled at once, only the legs");
+                }
+                let id = format!("{}-p{}", entry_id(), placed.event_id.0);
+                let covers = [("orders", ids(&[&id])), ("qty", text(filled))];
+                assert_closed(placed, "placed", &[&covers[..], &prices[..]].concat())?;
+                if status == "canceled" {
+                    let ended = record(&ran, "unprotected_end")?;
+                    let awaits = [("awaiting", ids(&[&id])), ("bracket", entry.clone())];
+                    assert_closed(ended, "unprotected_end", &awaits)?;
+                    assert_before_sent(&ran, &[placed, ended], &id);
+                }
+            }
+            Ok(())
+        })
+    }
+
     /// The `placed` record in `effects`, and the protective order it names.
     fn placed(effects: &[Effect]) -> Result<(&EventDraft, String), ExecutorError> {
         let record = records(effects)
             .into_iter()
             .find(|draft| draft.payload.get("action").and_then(Value::as_str) == Some("placed"))
             .ok_or_else(|| missing("the placed record"))?;
-        let named = record
-            .payload
-            .get("orders")
-            .and_then(Value::as_str)
-            .ok_or_else(|| missing("the placed order's id"))?
-            .to_owned();
-        Ok((record, named))
+        let [id] = &named(record, "orders")[..] else {
+            return Err(missing("the placed order's id"));
+        };
+        Ok((record, id.clone()))
     }
 
     /// §2.3 (DEC-346 item 4): the protective order a `placed` record names is `{entry}-p{record}`,
@@ -13706,8 +13953,10 @@ mod bracket_tests {
 #[cfg(test)]
 mod remainder_pins {
     use mandate_accounting::{InstrumentId, Side};
+    use mandate_canon::Value;
     use mandate_num::{Qty, SignedQty};
 
+    use super::closed_form::{assert_closed, record};
     use super::sendable;
     use crate::batch::Batch;
     use crate::error::ExecutorError;
@@ -13820,7 +14069,8 @@ mod remainder_pins {
     }
 
     /// What each ladder's next rung sends, in the order given, each in the same step, and the
-    /// `rung_short` records that step journals as (exit, short by, sent).
+    /// `rung_short` records that step journals as (exit, sent): what it did not send is no member
+    /// of §9.5's closed record.
     #[expect(
         clippy::type_complexity,
         reason = "a test's answer: the sends and the short records, read side by side"
@@ -13828,7 +14078,7 @@ mod remainder_pins {
     fn sends(
         state: &ExecutorState,
         ladders: &[(&str, &str)],
-    ) -> Result<(Vec<(String, Qty)>, Vec<(String, String, String)>), ExecutorError> {
+    ) -> Result<(Vec<(String, Qty)>, Vec<(String, String)>), ExecutorError> {
         ports_for(|ports| {
             let mut batch = Batch::new(state, ports)?;
             let aapl = InstrumentId::new("AAPL")?;
@@ -13853,11 +14103,7 @@ mod remainder_pins {
                         if draft.event_type == "ProtectionChanged"
                             && field(draft, "action") == "rung_short" =>
                     {
-                        Some((
-                            field(draft, "intent_id"),
-                            field(draft, "qty"),
-                            field(draft, "sent"),
-                        ))
+                        Some((field(draft, "intent_id"), field(draft, "sent")))
                     }
                     _ => None,
                 })
@@ -13900,7 +14146,7 @@ mod remainder_pins {
         let state = two_ladders("agent-b", false)?;
         let (five, two) = (Qty::parse("5")?, Qty::parse("2")?);
         let expected = vec![(SEQUENCE.to_owned(), five), (LONE.to_owned(), two)];
-        let short = vec![(LONE.to_owned(), "2".to_owned(), "2".to_owned())];
+        let short = vec![(LONE.to_owned(), "2".to_owned())];
         assert_eq!(
             sends(&state, &[(SEQUENCE, "5"), (LONE, "4")])?,
             (expected.clone(), short.clone())
@@ -13912,6 +14158,27 @@ mod remainder_pins {
             "the order the ladders are stepped in changes nothing: the id order decides"
         );
         Ok(())
+    }
+
+    /// E7-19 E1b-P (DEC-859), §9.5: a short rung's record is closed. It names the exit's intent
+    /// and what the rung sent; what it did not send and why are no members (rules 42 and 44).
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn a_short_rungs_record_is_closed() -> Result<(), ExecutorError> {
+        let state = two_ladders("agent-b", false)?;
+        ports_for(|ports| {
+            let mut batch = Batch::new(&state, ports)?;
+            let aapl = InstrumentId::new("AAPL")?;
+            for (exit, left) in [(SEQUENCE, "5"), (LONE, "4")] {
+                sendable(&mut batch, &aapl, &intent(exit), Qty::parse(left)?)?;
+            }
+            let named = [
+                ("intent_id", Value::Str(LONE.to_owned())),
+                ("sent", Value::Str("2".to_owned())),
+            ];
+            assert_closed(record(&batch.effects, "rung_short")?, "rung_short", &named)?;
+            Ok(())
+        })
     }
 
     /// DEC-410 item 1's guard: a lone ladder whose exit was abandoned counts nothing. With the
