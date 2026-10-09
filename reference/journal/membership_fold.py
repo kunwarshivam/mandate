@@ -475,12 +475,14 @@ class Fold:
             m = self.members.get(p["member"])
             if m is None:
                 return self.unknown_member()
-            if m.status not in LIVE:
+            if m.status not in LIVE and "fold.role_change_any_state" not in self.skip:
                 return self.refuse()
-            if any(r not in m.roles for r in p["removed"]) or any(a["role"] in m.roles for a in p["added"]):
+            if any(r not in m.roles for r in p["removed"]) and "fold.unheld_role_removed" not in self.skip:
+                return self.refuse()
+            if any(a["role"] in m.roles for a in p["added"]) and "fold.held_role_added" not in self.skip:
                 return self.refuse()
             for r in p["removed"]:
-                del m.roles[r]
+                m.roles.pop(r, None)
             for a in p["added"]:
                 end = at if "fold.per_role_cool_off_ignored" in self.skip else instant_nanos(a["cool_off_ends_at"])
                 m.roles[a["role"]] = end
@@ -488,18 +490,19 @@ class Fold:
             m = self.members.get(p["member"])
             if m is None:
                 return self.unknown_member()
-            if m.status not in LIVE:
+            if m.status not in LIVE and "fold.deactivate_any_state" not in self.skip:
                 return self.refuse()
             m.kept, m.roles, m.status = sorted(m.roles), {}, "deactivated"
         elif kind == "MemberReactivated":
             m = self.members.get(p["member"])
             reactivatable = ("deactivated", "removed") if "fold.removed_reactivates" in self.skip else ("deactivated",)
-            if m is None or m.status not in reactivatable or list(p["roles"]) != m.kept:
+            kept = list(p["roles"]) == m.kept if m else False
+            if m is None or m.status not in reactivatable or not (kept or "fold.reactivation_roles_unchecked" in self.skip):
                 return self.refuse()
             self.start(m, p["roles"], at, instant_nanos(p["cool_off_ends_at"]))
         elif kind == "MemberRemoved":
             m = self.members.get(p["member"])
-            if m is None or m.status != "deactivated":
+            if m is None or (m.status != "deactivated" and "fold.remove_any_state" not in self.skip):
                 return self.refuse()
             m.status = "removed"
         return None
@@ -514,11 +517,16 @@ class Fold:
 
     def activate(self, p: dict, at: int) -> None:
         previous = self.members.get(p["member"])
-        if previous is not None and previous.status != "removed":
+        if previous is not None and previous.status != "removed" and "fold.second_activation_tolerated" not in self.skip:
             return self.refuse()
         if p["reason"] == "invitation_accepted":
             inv = self.invitations.get(p["invitation"])
-            if inv is None or not self.open(inv, at) or inv["roles"] != list(p["roles"]):
+            if inv is None:
+                return self.refuse()
+            reused = inv["state"] == "accepted" and "fold.invitation_reused" in self.skip
+            if not (self.open(inv, at) or reused):
+                return self.refuse()
+            if inv["roles"] != list(p["roles"]) and "fold.invitation_roles_unchecked" not in self.skip:
                 return self.refuse()
             inv["state"] = "accepted"
         m = Member(status="cooling_off", until=0)
@@ -677,6 +685,15 @@ FOLD_MUTANTS = (
     "fold.revoke_unknown_tolerated",
     "fold.unknown_member_tolerated",
     "fold.duplicate_invitation_tolerated",
+    "fold.second_activation_tolerated",
+    "fold.invitation_reused",
+    "fold.invitation_roles_unchecked",
+    "fold.reactivation_roles_unchecked",
+    "fold.unheld_role_removed",
+    "fold.held_role_added",
+    "fold.role_change_any_state",
+    "fold.deactivate_any_state",
+    "fold.remove_any_state",
 )
 
 
