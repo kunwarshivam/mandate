@@ -7,7 +7,8 @@
 - **Tests:** `crates/mandate-robinhood/tests/shape.rs` (profile, `ref_id`, states),
   `crates/mandate-robinhood/tests/restore.rs` (C3, DEC-870, DEC-872 and DEC-874: the `order_id`
   map rebuilt from the account stream, the distinct-id property, the odd-id and record-order
-  tests, and the interleaving property), and
+  tests, and the interleaving property; DEC-876's two-`replaces` tests and its interleaving
+  property are pending E7-6, each with a `xtask/behaviour-only/` row), and
   `crates/mandate-rh-sim/tests/robinhood.rs` (`Submit` against `SimServer` over loopback: review
   then place, a deduplicated re-send, LT-6's lost and garbled answers, LT-5's alerts, `Cancel`
   by `order_id`, what the profile does not offer, and a cancel after a restart by
