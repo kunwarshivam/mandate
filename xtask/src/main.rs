@@ -1831,7 +1831,9 @@ fn is_cargo(word: &str) -> bool {
 /// `<crate>?/` prefix. A word is read without the brackets and commas of a cargo configuration
 /// array (`["--features", "live"]`). Beside them, the live-token backstop: any word that holds
 /// the token `live` ([`holds_live`]) and is not the feature list of the one compile-only form is
-/// refused, whatever the command.
+/// refused, whatever the command. The command is compile-only only when its subcommand, the word
+/// right after its cargo word, is `check`: a `cargo check` after `--`, or a `check` that is an
+/// option's value (`cargo --config check run`), leaves it a build (#923 review).
 fn command_live_flag(words: &[String], ctx: LineContext) -> LiveFlag {
     let names: Vec<&str> = words
         .iter()
@@ -1884,9 +1886,9 @@ fn command_live_flag(words: &[String], ctx: LineContext) -> LiveFlag {
     if !passes_live {
         return unreadable;
     }
-    let checks = names
-        .windows(2)
-        .any(|pair| is_cargo(pair[0]) && pair[1] == "check");
+    let checks = cargo_at
+        .and_then(|at| names.get(at.saturating_add(1)))
+        .is_some_and(|subcommand| *subcommand == "check");
     let packages: Vec<&str> = names
         .windows(2)
         .filter(|pair| pair[0] == "-p" || pair[0] == "--package")
