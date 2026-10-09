@@ -39,6 +39,8 @@ pub fn ulid(text: &str) -> u128 {
 }
 pub const ISSUED: &str = "2026-10-08T15:00:00.123456789Z";
 pub const EXPIRES: &str = "2026-10-08T15:05:00.123456789Z";
+/// When the fixture passkey's enrolment cool-off ended, a day before the challenge.
+pub const COOL_OFF_ENDS: &str = "2026-10-07T15:00:00.000000000Z";
 
 pub fn at(text: &str) -> UtcNanos {
     UtcNanos::parse(text).expect("a fixture instant")
@@ -68,6 +70,10 @@ pub fn mallory() -> PrincipalId {
 
 pub fn workspace() -> WorkspaceId {
     WorkspaceId(ulid(WORKSPACE))
+}
+
+pub fn other_workspace() -> WorkspaceId {
+    WorkspaceId(ulid(OTHER_WORKSPACE))
 }
 
 pub fn challenge_id() -> AssertionId {
@@ -140,7 +146,7 @@ impl Case {
         let enrolled = EnrolledCredential {
             principal_id: alice(),
             credential: authenticator.credential(7),
-            cool_off_ends: at("2026-10-07T15:00:00.000000000Z"),
+            cool_off_ends: at(COOL_OFF_ENDS),
         };
         Self {
             authenticator,
