@@ -145,6 +145,41 @@ pub fn verify_events(
     })
 }
 
+/// One range walked position by position (§11's per-event checks; §9.13 rules 111 and 132;
+/// workspace API §4.8.1 "Coverage", AU-8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RangeWalk {
+    /// The events of the range that passed every per-event check, counted from `from_seq`.
+    pub checked: u64,
+    /// The `hash` of the event at `to_seq` when every position passed, else the first failure,
+    /// reported at the position walked, whatever `seq` the row there holds.
+    pub outcome: Result<Digest, EventFailure>,
+}
+
+/// Why a range could not be walked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeWalkError {
+    /// `from_seq` is 0 or `to_seq` is below it, so the bounds name no range (rule 107).
+    NotARange,
+    /// The walk is not built yet (DEC-77).
+    Unimplemented { story: &'static str },
+}
+
+/// Walks `rows`, the stored events read for the range `start.from_seq` to `to_seq`, running §11's
+/// per-event checks at each position from `from_seq` in turn: the row at position `p` must be the
+/// event `p`, and the first failure is reported at `p`, never at the `seq` the row holds. A row the
+/// walk expects and does not find fails `seq_gap` at the expected position, and a row left over
+/// after `to_seq` fails `seq_gap` at `to_seq`, the last position rule 111 lets a failure name.
+pub fn walk_range(
+    rows: &[StoredEvent],
+    start: TrustedStart,
+    to_seq: u64,
+    artifacts: &dyn ArtifactSource,
+) -> Result<RangeWalk, RangeWalkError> {
+    let _ = (rows, start, to_seq, artifacts);
+    Err(RangeWalkError::Unimplemented { story: "E12-3" })
+}
+
 /// The stored columns equal the body's fields (spec §11 check 2).
 fn columns_match(row: &StoredEvent, body: &Value) -> bool {
     let text = |name: &str| body.get(name).and_then(Value::as_str);
