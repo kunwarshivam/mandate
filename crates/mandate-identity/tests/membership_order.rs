@@ -54,7 +54,6 @@ fn last() -> MembershipRecord {
 /// DEC-659: the first membership record has nothing to follow, so it passes whatever its `seq`,
 /// instant, and type, though the same record after one at a higher `seq` is refused.
 #[test]
-#[ignore = "pending E9-7"]
 fn the_first_membership_record_passes() {
     let ahead = record(u64::MAX, 90_000, invited(1, set(VIEWER), 90_000));
     let founding = [("founding", founded(true))];
@@ -75,7 +74,6 @@ fn the_first_membership_record_passes() {
 /// last record's passes, an equal `event_time` too, since only "before" is out of order; one
 /// nanosecond earlier, the same record is refused.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_later_or_equal_event_time_with_a_higher_seq_passes() {
     let event = || Event::Removed {
         member: PrincipalId(B),
@@ -111,7 +109,6 @@ fn a_later_or_equal_event_time_with_a_higher_seq_passes() {
 /// with a higher `seq`, so a late record never latches the fold unreadable after commit; at the
 /// last record's own instant it passes.
 #[test]
-#[ignore = "pending E9-7"]
 fn an_earlier_event_time_is_refused() {
     let event = || Event::Deactivated {
         member: PrincipalId(B),
@@ -148,7 +145,6 @@ fn an_earlier_event_time_is_refused() {
 /// DEC-659: a `seq` equal to or below the last record's is refused, whatever its `event_time`;
 /// the next `seq` at the same instant passes.
 #[test]
-#[ignore = "pending E9-7"]
 fn an_equal_or_lower_seq_is_refused() {
     let event = || invited(2, set(VIEWER), 7_200);
     for (seq, at) in [(4, 3_600), (4, 7_200), (3, 7_200), (0, 90_000)] {
@@ -176,7 +172,6 @@ fn an_equal_or_lower_seq_is_refused() {
 
 /// DEC-659: the guard applies to all seven membership record types, as last record and as next.
 #[test]
-#[ignore = "pending E9-7"]
 fn every_membership_record_type_is_guarded() {
     for (before, b) in every_type() {
         for (after, a) in every_type() {
@@ -202,7 +197,6 @@ fn every_membership_record_type_is_guarded() {
 /// it refuses is the record the fold would read as out of order, so a writer that obeys the guard
 /// never latches the fold unreadable by order.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_record_the_guard_passes_is_one_the_fold_reads_in_order() {
     let base = || vec![founding(), (3_600, invited(1, set(VIEWER), 3_600))];
     assert!(
@@ -252,7 +246,6 @@ fn oracle(last: Option<(u64, i64, u32)>, next: (u64, i64, u32)) -> bool {
 /// DEC-659 over random pairs of records of every type, near each boundary: `seq`s around 0 and
 /// `u64::MAX`, and instants a second or a nanosecond apart, against [`oracle`].
 #[test]
-#[ignore = "pending E9-7"]
 fn the_guard_equals_an_independent_oracle_over_random_pairs() {
     let seq = (0..2usize, 0..4u64).prop_map(|(b, o)| [0, u64::MAX - 3][b] + o);
     let nanos = (0..3usize).prop_map(|i| [0, 1, 999_999_999][i]);
