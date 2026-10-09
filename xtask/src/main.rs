@@ -1469,6 +1469,10 @@ fn feature_map_index() -> Result<()> {
     Ok(())
 }
 
+/// The text a [`CiFile`] holds when its file cannot be read as UTF-8 (a dangling symlink, a
+/// non-UTF-8 build file), which [`live_feature_problems`] refuses rather than aborting on it.
+const UNREADABLE: &str = "\0";
+
 /// One of the [`ci_files`], by its path in the repository, with its text.
 struct CiFile {
     path: String,
@@ -1500,8 +1504,7 @@ fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
     files
         .into_iter()
         .map(|file| {
-            let text =
-                fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+            let text = fs::read_to_string(&file).unwrap_or_else(|_| UNREADABLE.to_owned());
             let path = file
                 .strip_prefix(root)
                 .unwrap_or(&file)
@@ -1626,6 +1629,13 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
     }
     let mut compile_only_seen = false;
     for file in ci {
+        if file.text.contains('\0') {
+            problems.push(format!(
+                "{}: cannot be read as text, so the check cannot judge it",
+                file.path
+            ));
+            continue;
+        }
         let yaml = file.path.ends_with(".yml") || file.path.ends_with(".yaml");
         let (run_lines, with_lines) = (
             block_lines(&file.text, "run"),
@@ -1633,7 +1643,11 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
         );
         let lines = logical_lines(&file.path, &file.text);
         let text_lines = text_only_lines(&lines, yaml);
-        let (variables, arrays) = definitions(&lines);
+        let Definitions {
+            variables,
+            arrays,
+            runs_positional,
+        } = definitions(&lines);
         for ((number, line), text_only) in lines.iter().zip(text_lines) {
             let at = format!("{}:{number}", file.path);
             let ctx = LineContext {
@@ -1643,6 +1657,7 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
                 with_value: yaml && with_lines.contains(number),
                 variables: &variables,
                 arrays: &arrays,
+                runs_positional,
                 quoted_reread: false,
             };
             let flag = if text_only {
@@ -1718,7 +1733,7 @@ fn logical_lines(path: &str, text: &str) -> Vec<(usize, String)> {
             let folds = fold_below.is_some_and(|column| indent > column) && !next.trim().is_empty();
             if let Some(head) = command.trim_end().strip_suffix('\\') {
                 command = head.to_owned();
-            } else if !folds {
+            } else if !folds && !runs_on(&command) {
                 break;
             }
             command.push(' ');
@@ -1728,6 +1743,30 @@ fn logical_lines(path: &str, text: &str) -> Vec<(usize, String)> {
         logical.push((start, command));
     }
     logical
+}
+
+/// Whether the shell runs `command` on into the next line: it ends inside a double-quoted string,
+/// or its code, before any comment, ends with `|`, `|&` or `||` (an `&&` ends a command, so the
+/// next line is judged on its own either way). Quotes are read as the shell reads them, a
+/// backslash escaping the next character outside single quotes, and a `#` that starts a word
+/// outside quotes begins a comment.
+fn runs_on(command: &str) -> bool {
+    let (mut quote, mut escaped, mut word_start) = (None, false, true);
+    let mut code = String::new();
+    for c in command.chars() {
+        match (quote, c) {
+            _ if escaped => escaped = false,
+            (q, '\\') if q != Some('\'') => escaped = true,
+            (None, '#') if word_start => break,
+            (None, '"' | '\'') => quote = Some(c),
+            (Some(open), _) if c == open => quote = None,
+            _ => {}
+        }
+        code.push(c);
+        word_start = quote.is_none() && c.is_whitespace();
+    }
+    let code = code.trim_end();
+    quote == Some('"') || (quote.is_none() && (code.ends_with('|') || code.ends_with("|&")))
 }
 
 /// A workflow line `key: value` or `- key: value`: the column its key starts at, and its value.
@@ -1846,18 +1885,44 @@ fn shell_tokens(line: &str, nested: &mut Vec<(String, usize)>) -> Vec<ShellToken
             }
             (_, '\\') if quote != Some('\'') => {
                 quoted = true;
-                word.get_or_insert_with(String::new)
-                    .extend(chars.get(index));
+                let current = word.get_or_insert_with(String::new);
+                if matches!(next, Some('$' | '`')) {
+                    current.push('\\');
+                }
+                current.extend(chars.get(index));
                 index = index.saturating_add(1);
                 None
             }
             _ => {
-                let arithmetic =
-                    next == Some('(') && chars.get(index.saturating_add(1)) == Some(&'(');
-                if quote != Some('\'') && matches!(c, '$' | '`') && !arithmetic {
+                let arithmetic = c == '$'
+                    && next == Some('(')
+                    && chars.get(index.saturating_add(1)) == Some(&'(');
+                let current = word.get_or_insert_with(String::new);
+                current.push(c);
+                if quote != Some('\'') && arithmetic {
+                    let mut depth = 0_usize;
+                    while let Some(&d) = chars.get(index) {
+                        let opens = chars.get(index.saturating_add(1)) == Some(&'(');
+                        if d == '$' && opens && chars.get(index.saturating_add(2)) != Some(&'(') {
+                            index = index.saturating_add(1);
+                            substitution(&chars, '$', &mut index, nested, tokens.len());
+                            current.push('$');
+                            continue;
+                        }
+                        index = index.saturating_add(1);
+                        current.push(d);
+                        depth = match d {
+                            '(' => depth.saturating_add(1),
+                            ')' => depth.saturating_sub(1),
+                            _ => depth,
+                        };
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                } else if quote != Some('\'') && matches!(c, '$' | '`') {
                     substitution(&chars, c, &mut index, nested, tokens.len());
                 }
-                word.get_or_insert_with(String::new).push(c);
                 None
             }
         };
@@ -1927,6 +1992,8 @@ struct LineContext<'a> {
     /// The file's arrays, each with the elements of all its definitions (`x=( … )`,
     /// `x+=( … )`), in order.
     arrays: &'a BTreeMap<String, String>,
+    /// Whether the file runs `"$@"` as a command word ([`Definitions`]).
+    runs_positional: bool,
     /// A quoted argument word or here-string re-read as a command line, where an unreadable
     /// definition is not refused, only a readable one read through.
     quoted_reread: bool,
@@ -1935,21 +2002,32 @@ struct LineContext<'a> {
 /// The scalar variables `lines` assign (`C=…` resets, `C+=…` appends), each value concatenated
 /// in order, or none once a definition holds `$` or a backtick; and the arrays they define
 /// (`x=( … )`, `x+=( … )`), each with every definition's elements, none reset.
-type Definitions = (BTreeMap<String, Option<String>>, BTreeMap<String, String>);
+/// Beside them, whether the file runs `"$@"` as a command word, which makes a `set` that
+/// expands a way to build that command.
+struct Definitions {
+    variables: BTreeMap<String, Option<String>>,
+    arrays: BTreeMap<String, String>,
+    runs_positional: bool,
+}
 
 /// [`Definitions`] of the file whose logical lines are `lines`.
 fn definitions(lines: &[(usize, String)]) -> Definitions {
     let mut variables: BTreeMap<String, Option<String>> = BTreeMap::new();
     let mut arrays: BTreeMap<String, String> = BTreeMap::new();
+    let mut runs_positional = false;
     for (_, line) in lines {
         let (mut at_command_start, mut reading) = (true, false);
-        let (mut declaring, mut printing) = (false, false);
+        let (mut declaring, mut printing) = (None::<String>, false);
+        let mut command: Vec<String> = Vec::new();
         for token in shell_tokens(line, &mut Vec::new()) {
             let ShellToken::Word(word, _) = token else {
                 (at_command_start, reading) = (!matches!(token, ShellToken::Redirect), false);
-                (declaring, printing) = (false, false);
+                (declaring, printing) = (None, false);
+                runs_positional |= runs_positional_command(&command);
+                command.clear();
                 continue;
             };
+            command.push(word.clone());
             if printing {
                 if word == "-v" {
                     reading = true;
@@ -1967,11 +2045,23 @@ fn definitions(lines: &[(usize, String)]) -> Definitions {
                     "export" | "declare" | "local" | "readonly" | "typeset"
                 )
             {
-                declaring = true;
+                declaring = Some(word);
                 continue;
             }
-            if declaring && !word.contains('=') {
-                continue;
+            if let Some(builtin) = &declaring {
+                let names = matches!(builtin.as_str(), "declare" | "local" | "typeset");
+                if names && word.starts_with('-') && word.contains('n') {
+                    reading = true;
+                    continue;
+                }
+                if reading {
+                    let name = word.split_once('=').map_or(word.as_str(), |(name, _)| name);
+                    variables.insert(name.to_owned(), None);
+                    continue;
+                }
+                if !word.contains('=') {
+                    continue;
+                }
             }
             if reading {
                 if !word.starts_with('-') {
@@ -2016,8 +2106,67 @@ fn definitions(lines: &[(usize, String)]) -> Definitions {
                 _ => at_command_start = false,
             }
         }
+        runs_positional |= runs_positional_command(&command);
     }
-    (variables, arrays)
+    Definitions {
+        variables,
+        arrays,
+        runs_positional,
+    }
+}
+
+/// Whether `words`, one command's, run `"$@"` as the command word, after keywords and wrappers.
+fn runs_positional_command(words: &[String]) -> bool {
+    let named: Vec<&str> = words
+        .iter()
+        .map(String::as_str)
+        .skip_while(|word| is_skipped_word(word))
+        .collect();
+    unwrapped(&named).first() == Some(&"$@")
+}
+
+/// Whether a definition's text is clean: it holds no expansion, no `cargo` and no `live`.
+fn clean_definition(text: &str) -> bool {
+    !text.contains(['$', '`']) && !text.to_ascii_lowercase().contains("cargo") && !holds_live(text)
+}
+
+/// Whether a command word that starts with an expansion is one of the few DEC-851 item 6 lets
+/// through: `"$@"`; a sole `$C` or `${C}`, or a whole array, whose definitions are all readable
+/// and clean; `"$(dirname "$0")/<literal path>"` with no `..` segment, given the substitution at
+/// the command word's position; or `"${ARR[<literal index>]}"` of an array whose definitions are
+/// all clean.
+fn allowlisted_command_word(word: &str, substitution: Option<&str>, ctx: LineContext) -> bool {
+    let clean_variable = |name: &str| {
+        ctx.variables
+            .get(name)
+            .is_some_and(|value| value.as_deref().is_some_and(clean_definition))
+    };
+    let clean_array = |name: &str| {
+        ctx.variables.get(name) != Some(&None)
+            && ctx
+                .arrays
+                .get(name)
+                .is_some_and(|text| clean_definition(text))
+    };
+    let clean_element = || {
+        let (name, index) = word
+            .strip_prefix("${")?
+            .strip_suffix("]}")?
+            .split_once('[')?;
+        let literal = !index.is_empty() && index.chars().all(|c| c.is_ascii_digit());
+        Some(literal && clean_array(name))
+    };
+    let script_beside = word.strip_prefix("$/").is_some_and(|path| {
+        !path.is_empty()
+            && !path.contains(['$', '`'])
+            && !path.split('/').any(|segment| segment == "..")
+            && matches!(substitution, Some("dirname \"$0\"" | "dirname $0"))
+    });
+    word == "$@"
+        || sole_variable(word).is_some_and(clean_variable)
+        || sole_array(word).is_some_and(clean_array)
+        || script_beside
+        || clean_element().unwrap_or(false)
 }
 
 /// The array a word expands whole when it is solely `${NAME[@]}` or `${NAME[*]}`.
@@ -2047,15 +2196,24 @@ fn sole_variable(word: &str) -> Option<&str> {
 /// indented further than the key: a `run:` value, or the inputs of a `with:` block.
 fn block_lines(text: &str, key: &str) -> BTreeSet<usize> {
     let mut lines = BTreeSet::new();
-    let mut block: Option<usize> = None;
+    let (mut block, mut outputs): (Option<usize>, Option<usize>) = (None, None);
     for (number, line) in (1_usize..).zip(text.lines()) {
         let indent = line.len().saturating_sub(line.trim_start().len());
         if block.is_some_and(|column| line.trim().is_empty() || indent > column) {
             lines.insert(number);
             continue;
         }
+        if outputs.is_some_and(|column| !line.trim().is_empty() && indent <= column) {
+            outputs = None;
+        }
+        let named =
+            |name: &str| line.trim_start_matches([' ', '-']).split(':').next() == Some(name);
+        if outputs.is_none() && named("outputs") {
+            outputs = yaml_value(line).map(|(column, _)| column);
+            continue;
+        }
         block = yaml_value(line)
-            .filter(|_| line.trim_start_matches([' ', '-']).split(':').next() == Some(key))
+            .filter(|_| outputs.is_none() && named(key))
             .map(|(column, _)| column);
         if block.is_some() {
             lines.insert(number);
@@ -2289,17 +2447,27 @@ impl PipelineCommand {
     fn command(&self) -> Vec<&str> {
         self.words
             .iter()
+            .skip(self.command_index())
             .map(|(word, _, _)| word.as_str())
-            .skip_while(|word| is_skipped_word(word))
             .collect()
     }
 
     /// The token position of the command word, or none for a bare assignment.
     fn command_position(&self) -> Option<usize> {
+        self.words.get(self.command_index()).map(|(_, _, at)| *at)
+    }
+
+    /// The index of the command word: past the [`is_skipped_word`]s and a `-p` after `time`.
+    fn command_index(&self) -> usize {
+        let mut after_time = false;
         self.words
             .iter()
-            .find(|(word, _, _)| !is_skipped_word(word))
-            .map(|(_, _, at)| *at)
+            .position(|(word, _, _)| {
+                let skipped = is_skipped_word(word) || (after_time && word == "-p");
+                after_time = word == "time";
+                !skipped
+            })
+            .unwrap_or(self.words.len())
     }
 }
 
@@ -2331,7 +2499,21 @@ fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag 
                 command.here_strings.push(text);
             }
             ShellToken::Word(text, quoted) => command.words.push((text, quoted, at)),
-            ShellToken::Redirect => target_next = true,
+            ShellToken::Redirect => {
+                let descriptor = command.words.last().is_some_and(|(word, quoted, _)| {
+                    !quoted && !word.is_empty() && word.chars().all(|c| c.is_ascii_digit())
+                });
+                let before_command = command
+                    .words
+                    .iter()
+                    .rev()
+                    .skip(1)
+                    .all(|(word, _, _)| is_skipped_word(word));
+                if descriptor && before_command {
+                    command.words.pop();
+                }
+                target_next = true;
+            }
             ShellToken::HereString => here_string_next = true,
             ShellToken::Pipe | ShellToken::End => {
                 command.end = at;
@@ -2412,15 +2594,54 @@ fn pipeline_live_flag(
             let definition = ctx.arrays.get(name);
             let builds_live =
                 |text: &String| text.to_ascii_lowercase().contains("cargo") || holds_live(text);
-            let refused = if ctx.quoted_reread {
-                definition.is_some_and(builds_live)
-            } else {
-                ctx.variables.get(name) == Some(&None)
-                    || definition.is_none_or(|text| builds_live(text) || text.contains(['$', '`']))
-            };
-            if refused {
+            if ctx.quoted_reread && definition.is_some_and(builds_live) {
                 verdict = verdict.min(LiveFlag::Unreadable);
             }
+        }
+        let command_at = command
+            .words
+            .iter()
+            .filter(|(word, _, _)| !is_skipped_word(word))
+            .nth(named.len().saturating_sub(unwrapped_named.len()))
+            .map(|(_, _, at)| *at);
+        let expanding_command_word = !ctx.quoted_reread
+            && unwrapped_named.first().is_some_and(|word| {
+                word.starts_with(['$', '`'])
+                    && (ctx.expression_command || !word.contains("${{"))
+                    && !allowlisted_command_word(
+                        word,
+                        substitutions
+                            .iter()
+                            .find(|(_, at)| Some(*at) == command_at)
+                            .map(|(inner, _)| inner.as_str()),
+                        ctx,
+                    )
+            });
+        let sink = unwrapped_named.first().filter(|_| index > 0);
+        let variable_sink = sink.is_some_and(|word| word.starts_with(['$', '`']));
+        let fed_to_shell = sink
+            .and_then(|word| word.rsplit('/').next())
+            .is_some_and(|word| matches!(word, "sh" | "bash" | "dash" | "ksh" | "zsh" | "mksh"))
+            && pipeline
+                .get(..index)
+                .unwrap_or_default()
+                .iter()
+                .any(|earlier| {
+                    earlier
+                        .words
+                        .iter()
+                        .map(|(word, _, _)| word)
+                        .chain(&earlier.here_strings)
+                        .any(|word| word.contains(['$', '`']))
+                });
+        let sets_positional = ctx.runs_positional
+            && unwrapped_named.first() == Some(&"set")
+            && unwrapped_named
+                .iter()
+                .skip(1)
+                .any(|word| word.contains(['$', '`']));
+        if expanding_command_word || variable_sink || fed_to_shell || sets_positional {
+            verdict = verdict.min(LiveFlag::Unreadable);
         }
         let builds = (matches!(named.first(), Some(&"awk" | &"sed")) && executing_form(&named))
             || runs_expanding_line(
@@ -2501,7 +2722,10 @@ fn runs_expanding_line(named: &[&str], here_strings: &[String], sourced_expands:
 /// values), `builtin`, and `timeout` (its options and its duration).
 fn unwrapped<'w>(mut named: &'w [&'w str]) -> &'w [&'w str] {
     loop {
-        let (with_value, takes_word): (&[&str], bool) = match named.first().copied() {
+        let wrapper = named
+            .first()
+            .map(|word| word.rsplit('/').next().unwrap_or(word));
+        let (with_value, takes_word): (&[&str], bool) = match wrapper {
             Some("env") => (&["-u", "-C", "-S"], false),
             Some("command" | "exec" | "nohup") => (&["-a"], false),
             Some("xargs") => (&["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"], false),
@@ -2519,8 +2743,7 @@ fn unwrapped<'w>(mut named: &'w [&'w str]) -> &'w [&'w str] {
         while let Some(word) = rest.first() {
             let skip = if with_value.contains(word) {
                 2
-            } else if word.starts_with('-') || (named.first() == Some(&"env") && word.contains('='))
-            {
+            } else if word.starts_with('-') || (wrapper == Some("env") && word.contains('=')) {
                 1
             } else {
                 break;
@@ -10916,7 +11139,6 @@ jq -r "$filter" "$src"
     /// `${ARR[1x]}` are not literal indexes; a `set` with a backtick expands; a nameref needs an
     /// option holding `n`; an escaped backtick expands nothing; and `...` is not `..`.
     #[test]
-    #[ignore = "pending E7-26"]
     fn command_words_that_start_with_an_expansion_fail_closed() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
@@ -11206,7 +11428,6 @@ jq -r "$filter" "$src"
     /// tests correction 12b, after #979's review; DEC-851 item 6), and so is one holding a NUL
     /// byte (X1 tests correction 12c, after #994's planted NUL).
     #[test]
-    #[ignore = "pending E7-26"]
     fn an_unreadable_build_file_is_refused_by_path() -> Result<()> {
         let root = fixture_repository(
             "build-file-unreadable",

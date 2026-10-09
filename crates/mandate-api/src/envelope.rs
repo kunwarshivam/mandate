@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::wire::{EventId, Id, Ref, Timestamp};
+use crate::wire::{Check, EventId, Id, Ref, Rules, Timestamp, is_stream_id};
 
 /// The API's version, `v1` (§3.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -13,7 +13,7 @@ pub enum ApiVersion {
 }
 
 /// The last event of one stream a response reflects (§6.1, `common.schema.json#/$defs/Watermark`).
-/// `stream_id`'s grammar and `seq`'s bounds, 1 to 2^53 - 1, are pending rules.
+/// `stream_id` follows journal spec §2, and `seq` is 1 to 2^53 - 1.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Watermark {
@@ -65,5 +65,14 @@ pub enum StepUpStatus {
     Unbound,
 }
 
-crate::wire::rules!(pending: Watermark);
+impl Rules for Watermark {
+    fn rules(&self, at: &str, check: &mut Check) {
+        let stream = is_stream_id(&self.stream_id, &["ctl", "clock", "ntf"]);
+        check.rule(stream, &format!("{at}/stream_id"), "pattern");
+        let seq = (1..=mandate_canon::MAX_INT).contains(&self.seq);
+        check.rule(seq, &format!("{at}/seq"), "range");
+    }
+}
+
+crate::wire::rules!(checked: Watermark);
 crate::wire::rules!(none: ApiVersion, Actor, Record, StepUpEvidence, StepUpStatus);

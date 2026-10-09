@@ -14,6 +14,7 @@
   closing route 2, the reduction-only session, and an idle lapse that a granted refresh does not
   restore), `crates/mandate-authn/tests/admit.rs` (the sealed identity session's kind and
   snapshot, no session on a refusal, and a clock behind refusing only `Other`) and
-  `crates/mandate-authn/tests/routes_properties.rs` (a property over random histories, a backwards
-  clock included, against a folded oracle in which a lapse ends the session), all live.
+  `crates/mandate-authn/tests/routes_properties.rs` (a property over random histories of
+  `authorize`, `admit`, and refresh, a backwards clock and waits aimed at each deadline to the
+  second included, against a folded oracle in which a lapse ends the session), all live.
 - **Run:** `cargo nextest run -p mandate-authn`.
