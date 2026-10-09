@@ -70,7 +70,8 @@ the owl, the rules and the record.
       dialog that keeps Tab inside but is not modal, mounted in the frame's sheet layer under the
       dock and the tab bar, like the More sheet. `e2e/stop-visible.spec.ts` pins it at 390 and
       1280px, opened with ⌘K and with its button, and the palette's "Stop…" from the keyboard.
-      (#1038)
+      (#1038) The review's follow-up names the dialog "Command palette", gives focus back to its
+      opener when Escape closes it, and `e2e/command-bar.spec.ts` pins the Tab wrap both ways.
 
 ## C. The cutting pass (one PR, no new rules)
 
