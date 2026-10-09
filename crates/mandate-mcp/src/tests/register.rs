@@ -54,7 +54,8 @@ fn the_loopback_redirect_is_an_ip_literal_with_the_callback_path() {
 async fn registration_asks_for_a_public_client_with_the_one_loopback_redirect() {
     let echoed = json!({"client_id": "c-1", "redirect_uris": [CALLBACK],
         "token_endpoint_auth_method": "none"});
-    for answer in [echoed, json!({"client_id": "c-1"})] {
+    let minimal = json!({"client_id": "c-1", "token_endpoint_auth_method": "none"});
+    for answer in [echoed, minimal] {
         let (client, server) = register(created(&answer)).await;
         let redirect = LoopbackRedirect::new(49152).unwrap();
         let expected = ClientRegistration {
@@ -163,5 +164,45 @@ async fn a_client_id_with_del_or_a_control_character_is_refused() {
     for id in ["c\u{7f}1", "c\u{1}1"] {
         let (client, _) = register(created(&json!({"client_id": id}))).await;
         assert_eq!(refused(client), "malformed", "{id:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_answer_that_echoes_every_member_sent_registers_the_client() {
+    let answer = json!({"client_id": "c-1", "client_name": "Mandate",
+        "redirect_uris": [CALLBACK], "grant_types": ["authorization_code"],
+        "response_types": ["code"], "token_endpoint_auth_method": "none"});
+    let (client, _) = register(created(&answer)).await;
+    assert_eq!(client.unwrap().client_id, "c-1");
+}
+
+#[tokio::test]
+#[ignore = "pending E7-24"]
+async fn an_answer_without_the_auth_method_or_with_other_grants_is_refused() {
+    let none = || json!({"client_id": "c-1", "token_endpoint_auth_method": "none"});
+    let with = |key: &str, value: Value| {
+        let mut answer = none();
+        answer
+            .as_object_mut()
+            .unwrap()
+            .insert(key.to_owned(), value);
+        answer
+    };
+    let cases = [
+        json!({"client_id": "c-1"}),
+        json!({"client_id": "c-1", "redirect_uris": [CALLBACK]}),
+        with(
+            "grant_types",
+            json!(["authorization_code", "refresh_token"]),
+        ),
+        with("grant_types", json!("authorization_code")),
+        with("grant_types", json!([])),
+        with("response_types", json!(["code", "token"])),
+        with("response_types", json!("code")),
+    ];
+    for answer in cases {
+        let (client, server) = register(created(&answer)).await;
+        assert_eq!(refused(client), "malformed", "{answer}");
+        assert_eq!(server.seen().len(), 1, "{answer}");
     }
 }
