@@ -692,7 +692,6 @@ struct Metadata {
     /// The members a cargo invocation selects when it names no package: `default-members`, or
     /// every member when the workspace sets none. A live-only package counts in a build only
     /// when the build's selected packages reach it (DEC-868 item 2).
-    #[cfg_attr(not(test), expect(dead_code, reason = "E7-28 reads it"))]
     workspace_default_members: Vec<String>,
 }
 
@@ -1781,6 +1780,7 @@ fn resolved_live_problems(
             ));
         }
         compile_only_seen |= compile_only;
+        let reached = reached_ids(&resolve, &selected_ids(meta, &resolve, &words));
         for node in &resolve.nodes {
             let name = node_name(meta, &node.id);
             let runner_allowed = compile_only && runner == Some(name);
@@ -1791,10 +1791,11 @@ fn resolved_live_problems(
                     listed(", turned on by", &by)
                 ));
             }
-            if live_only.contains(name) && !compile_only {
+            if live_only.contains(name) && !compile_only && reached.contains(node.id.as_str()) {
                 let by: BTreeSet<&str> = resolve
                     .nodes
                     .iter()
+                    .filter(|other| reached.contains(other.id.as_str()))
                     .filter(|other| other.dependencies.contains(&node.id))
                     .map(|other| node_name(meta, &other.id))
                     .collect();
@@ -1806,6 +1807,82 @@ fn resolved_live_problems(
         }
     }
     Ok(problems)
+}
+
+/// The ids of `resolve` an invocation's `words` select, which a build starts from: each package
+/// `-p`/`--package` names, every member less each `--exclude` under `--workspace` or `--all`, and
+/// otherwise `meta`'s default members (`[]` is the default build). A selection the check cannot
+/// match to a node, a pattern or an unknown name, selects every member, so it can only refuse more.
+fn selected_ids<'a>(
+    meta: &'a Metadata,
+    resolve: &'a Resolve,
+    words: &[String],
+) -> BTreeSet<&'a str> {
+    let (mut named, mut excluded, mut whole) = (Vec::new(), Vec::new(), false);
+    let mut rest = words.iter().map(String::as_str);
+    while let Some(word) = rest.next() {
+        match word {
+            "--" => break,
+            "--workspace" | "--all" => whole = true,
+            "-p" | "--package" => named.extend(rest.next()),
+            "--exclude" => excluded.extend(rest.next()),
+            _ => {
+                if let Some(package) = word
+                    .strip_prefix("--package=")
+                    .or_else(|| word.strip_prefix("-p").filter(|glued| !glued.is_empty()))
+                {
+                    named.push(package);
+                } else if let Some(package) = word.strip_prefix("--exclude=") {
+                    excluded.push(package);
+                }
+            }
+        }
+    }
+    let members = || meta.workspace_members.iter().map(String::as_str).collect();
+    if whole {
+        let mut all: BTreeSet<&str> = members();
+        all.retain(|id| !excluded.contains(&node_name(meta, id)));
+        return all;
+    }
+    if named.is_empty() {
+        return meta
+            .workspace_default_members
+            .iter()
+            .map(String::as_str)
+            .collect();
+    }
+    let mut ids = BTreeSet::new();
+    for spec in named {
+        let name = spec.split(['@', ':']).next().unwrap_or(spec);
+        let matching: Vec<&str> = resolve
+            .nodes
+            .iter()
+            .map(|node| node.id.as_str())
+            .filter(|id| node_name(meta, id) == name)
+            .collect();
+        if matching.is_empty() {
+            return members();
+        }
+        ids.extend(matching);
+    }
+    ids
+}
+
+/// The ids of `resolve` that `roots` reach through its dependency edges, `roots` included.
+fn reached_ids<'a>(resolve: &'a Resolve, roots: &BTreeSet<&'a str>) -> BTreeSet<&'a str> {
+    let mut reached = roots.clone();
+    let mut pending: Vec<&str> = roots.iter().copied().collect();
+    while let Some(id) = pending.pop() {
+        let Some(node) = resolve.nodes.iter().find(|node| node.id == id) else {
+            continue;
+        };
+        for dep in &node.dependencies {
+            if reached.insert(dep.as_str()) {
+                pending.push(dep);
+            }
+        }
+    }
+    reached
 }
 
 /// The workspace member marked `live_feature` in `policy`, when exactly one is.
@@ -1884,7 +1961,9 @@ fn is_compile_only(words: &[String], runner: &str) -> bool {
     let mut rest = words.iter().map(String::as_str);
     while let Some(word) = rest.next() {
         match word {
-            "--workspace" | "--all" | "--exclude" | "--all-features" => return false,
+            "--workspace" | "--all" | "--exclude" | "--all-features" | "--manifest-path" => {
+                return false;
+            }
             "-p" | "--package" => packages.extend(rest.next()),
             "--features" | "-F" => features.extend(rest.next()),
             _ => {
@@ -1895,7 +1974,7 @@ fn is_compile_only(words: &[String], runner: &str) -> bool {
                     .or_else(|| cluster_rest(word))
                 {
                     features.push(list);
-                } else if word.starts_with("-p") {
+                } else if word.starts_with("-p") || word.starts_with("--manifest-path=") {
                     return false;
                 }
             }
@@ -1995,11 +2074,11 @@ fn workflow_cargo_invocations(file: &CiFile) -> Vec<(String, Vec<String>)> {
     invocations
 }
 
-/// The [`Resolve`] `cargo metadata --format-version 1 --locked --offline` gives at `root` for the
+/// The [`Resolve`] `cargo metadata --format-version 1 --locked` gives at `root` for the
 /// feature flags among a cargo invocation's `words` (`--features`, `-F`, a short-flag cluster,
 /// `--all-features`, `--no-default-features`), read up to a `--`.
 fn cargo_resolve(root: &Path, words: &[String]) -> Result<Resolve> {
-    let mut args = vec!["metadata", "--format-version", "1", "--locked", "--offline"];
+    let mut args = vec!["metadata", "--format-version", "1", "--locked"];
     let mut rest = words.iter().map(String::as_str);
     while let Some(word) = rest.next() {
         match word {
@@ -10814,7 +10893,6 @@ jq -r "$filter" "$src"
     /// `-p` build of another crate; a `--workspace` build selects it and is named, and so is a
     /// build whose selected crate depends on it.
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_live_only_workspace_member_nothing_selected_reaches_passes() -> Result<()> {
         let crates = || {
             let runner = member(RUNNER, &[("rh-host", None)]);
@@ -10867,7 +10945,6 @@ jq -r "$filter" "$src"
     /// form, builds another manifest's workspace and is named like any other job resolving
     /// `live` (#1140 review, minor; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn the_compile_only_form_with_a_manifest_path_is_refused() -> Result<()> {
         let flows = [workflow(&[
             (
