@@ -212,7 +212,8 @@ pub struct ConnectionRecord {
 
 impl ConnectionRecord {
     /// A new record, `Active`. Refused when it breaks connections spec §3 to §6:
-    /// - an Alpaca API key that is not paper (`EnvironmentRefused`; DEC-441 item 3);
+    /// - an Alpaca credential, an API key or OAuth, that is not paper (`EnvironmentRefused`;
+    ///   DEC-441 item 3, DEC-821 item 7);
     /// - an `auth_kind` the broker does not use (`InvalidRecord { member: "auth_kind" }`): Alpaca
     ///   an API key or OAuth, Robinhood MCP OAuth only, Kraken an API key only;
     /// - `scopes` empty, or one that is empty or holds a character outside printable ASCII or a
@@ -332,10 +333,12 @@ impl Registry {
     }
 
     /// Adds a record, or replaces the revoked record a reconnect reuses, re-checking what
-    /// [`Registry::admit`] checks. A record whose id another record holds, revoked or not, is
-    /// `InvalidConnectionId`; one whose fingerprint a revoked record holds must be that record's
-    /// reconnect (its id and `account_ref`, else `AlreadyConnected`; its broker and environment,
-    /// else `ReconnectMismatch`).
+    /// [`Registry::admit`] checks, the key's rotation among them (`FingerprintRotating`). A record
+    /// whose id another record holds, revoked or not, is `InvalidConnectionId`; one whose
+    /// fingerprint a revoked record holds must be that record's reconnect (its id and
+    /// `account_ref`, else `AlreadyConnected`; its broker and environment, else
+    /// `ReconnectMismatch`); one with a new id and fingerprint whose `account_ref` another record
+    /// holds, revoked or not, is `InvalidAccountRef` (CN-5).
     pub fn insert(&mut self, record: ConnectionRecord) -> Result<(), ConnectError> {
         let _ = record;
         Err(ConnectError::Unimplemented { story: "E7-11" })
