@@ -9935,7 +9935,9 @@ jq -r "$filter" "$src"
     /// the file assigns (`C=…`, `C+=…`) is read through those definitions, concatenated in order,
     /// as arrays are: it is refused when that value builds or runs `live`, and when a definition
     /// cannot be read statically because it expands (DEC-851 item 2; X1 tests correction 10). A
-    /// quoted word a shell runs (`echo "$C" | sh`) is read through the same definitions.
+    /// quoted word a shell runs (`echo "$C" | sh`) is read through the same definitions. A
+    /// variable `read` sets is a definition whose value cannot be read, so it is refused as a
+    /// command word and allowed as an argument (the coordinator's ruling on #970).
     /// An expansion of a variable the file never assigns, `"$@"`, a positional parameter or an
     /// environment input, is not refused by this rule, and a clean definition stays allowed.
     #[test]
@@ -9951,6 +9953,8 @@ jq -r "$filter" "$src"
             format!("{built_across_lines}\n${{C}} -p the-runner"),
             "C=$(cat cmd.txt)\n$C".to_owned(),
             "C=echo\nC+=\" $X\"\n\"$C\"".to_owned(),
+            "read -r C < f\n$C".to_owned(),
+            "while read -r C; do $C; done < f".to_owned(),
             format!("{built_across_lines}\necho \"$C\" | sh"),
         ];
         for text in refused_at_the_expansion {
@@ -9973,6 +9977,7 @@ jq -r "$filter" "$src"
             "$TOOL --version",
             "C=echo; $C hi",
             "C=echo\nC+=\" hi\"\n$C",
+            "read -r C < f\necho \"$C\"",
         ];
         for text in allowed {
             let files = [ci_file(
@@ -9992,8 +9997,9 @@ jq -r "$filter" "$src"
     /// `command`, `exec`, `xargs`, `sudo` (each with its options), `nice`, `nohup` and
     /// `timeout N` are skipped to find the command that runs an expanding command line, and `.`
     /// or `source` of a process substitution or a here-string that expands is refused too (the
-    /// coordinator's ruling on #962's review, under DEC-176; X1 tests correction 10). A wrapped
-    /// script, and `.` of a file path built by a substitution, stay allowed.
+    /// coordinator's ruling on #962's review, under DEC-176; X1 tests correction 10). A `{` is
+    /// skipped like a keyword, and `dash`, `ksh` and `mksh` are shells too (#969's review). A
+    /// wrapped script, and `.` of a file path built by a substitution, stay allowed.
     #[test]
     #[ignore = "pending E7-26"]
     fn wrapped_shells_and_sourced_expansions_are_refused() -> Result<()> {
@@ -10016,6 +10022,12 @@ jq -r "$filter" "$src"
             "timeout 5 bash -c \"$C\"",
             "command eval \"$C\"",
             "source <(echo \"$C\")",
+            "{ eval \"$C\"; }",
+            "{ bash -c \"$C\"; }",
+            "dash -c \"$C\"",
+            "ksh -c \"$C\"",
+            "mksh -c \"$C\"",
+            "/bin/dash -c \"$C\"",
         ];
         for line in refused {
             let files = [ci_file(
