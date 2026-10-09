@@ -33,6 +33,8 @@
 //!   and only the token-exchange process sends it. Every other request is a
 //!   [`hosts::PaperRequest`], which can address only the paper host; the executor sends only
 //!   those, and its egress contains no live host (DEC-821 item 4).
+//! - [`revoke`] plans the platform-side revoke, ordinary or on a compromised credential, for the
+//!   **API process**, which maps each planned effect to its journal event (DEC-694).
 
 pub mod checks;
 pub mod error;
@@ -40,6 +42,7 @@ pub mod exchange;
 pub mod grant;
 pub mod hosts;
 pub mod record;
+pub mod revoke;
 pub mod start;
 pub mod vault;
 
