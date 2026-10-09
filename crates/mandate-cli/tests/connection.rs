@@ -295,13 +295,13 @@ fn a_rerun_with_the_same_code_answers_the_committed_event() {
     let mut j = passing("connect");
     let mut ids = FixedIds::default();
     let code = shown(&mut j, &request());
-    let first = attempt(&mut j, &mut ids, &request(), Some(&code))
-        .0
-        .unwrap();
-    let again = attempt(&mut j, &mut ids, &request(), Some(&code))
-        .0
-        .unwrap();
+    let (first, first_out) = attempt(&mut j, &mut ids, &request(), Some(&code));
+    let (again, again_out) = attempt(&mut j, &mut ids, &request(), Some(&code));
+    let (first, again) = (first.unwrap(), again.unwrap());
     assert_eq!(first, again);
+    for printed in [&first_out, &again_out] {
+        assert!(!printed.contains(PII), "{printed}");
+    }
     assert_eq!(j.rows(&stream(CONTROL)).unwrap().len(), 1);
     assert_eq!(ids.assertions, 1, "the re-run spends no assertion");
 }
@@ -551,7 +551,6 @@ impl ControlJournal for Racing {
 /// stream starts with, the rival that commits concurrently, the control stream's length after, and
 /// the outcome. One account, one connection, one establishment.
 #[test]
-#[ignore = "pending E7-11"]
 fn concurrent_records_bind_one_connection_and_one_establishment() {
     let cases = "- | E:conn_rh_live_02:A | 1 account_ref_bound
                  - | E:conn_rh_live_02:B | 1 account_maybe_connected
@@ -619,7 +618,6 @@ fn concurrent_records_bind_one_connection_and_one_establishment() {
 /// stream's checks in order (the first is [`CHECK`]), which of them `--checked` names, and the
 /// outcome.
 #[test]
-#[ignore = "pending E7-11"]
 fn the_latest_check_of_its_occasion_decides() {
     let reconnecting = "E:conn_rh_live_01:A R:conn_rh_live_01";
     let cases = format!(

@@ -6,5 +6,11 @@
   (`SessionRecord`, `SessionLimits`, `ProviderAnswer`, `EndReason`, `SubjectStanding`, and `admit`,
   which builds `mandate_identity::Session` through the seal), stubbed.
 - **Tests:** `crates/mandate-authn/tests/session_api.rs` (a refresh secret's `Debug` and the
-  `SessionRevoked` reason codes, live; the digest-only record, pending).
+  `SessionRevoked` reason codes, live; the digest-only record, pending);
+  `crates/mandate-authn/tests/session.rs` (org-kind limits that may only shorten, the 5-minute
+  access token, idle and absolute limits that end the session as `expired`, a clock behind the
+  session, refresh rotation with reuse revoking the family) and
+  `crates/mandate-authn/tests/routes.rs` (an unreachable provider, a failed refresh, a deprovision
+  closing route 2, the reduction-only session, and an idle lapse that a granted refresh does not
+  restore), pending.
 - **Run:** `cargo nextest run -p mandate-authn`.

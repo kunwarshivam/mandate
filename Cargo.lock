@@ -1625,6 +1625,7 @@ dependencies = [
 name = "mandate-connections"
 version = "0.0.0"
 dependencies = [
+ "mandate-domain",
  "mandate-time",
  "proptest",
  "secrecy",
@@ -1795,6 +1796,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-paper"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-alpaca",
+ "mandate-artifacts-fs",
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-marketdata",
+ "mandate-modelhost",
+ "mandate-num",
+ "mandate-shell",
+ "mandate-spec",
+ "mandate-time",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-passkey"
 version = "0.0.0"
 dependencies = [
@@ -1849,8 +1868,11 @@ dependencies = [
 name = "mandate-rh-sim"
 version = "0.0.0"
 dependencies = [
+ "mandate-mcp",
  "mandate-num",
  "proptest",
+ "serde_json",
+ "sha2 0.11.0",
  "thiserror",
 ]
 

@@ -2,13 +2,20 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.17:** §7.3's `connection_unavailable` row no longer lists a reconnect as lifting the
+  restriction: the connection's condition clears by good probes for `degraded`, by
+  re-authorization for `suspended` ([DEC-800](../project/decisions/DEC-800.md) item 5, journal
+  §9.8 rule 68, DEC-824 item 6), and for contract drift as
+  [DEC-687](../project/decisions/DEC-687.md) item 3 says, then the owner acknowledges. Text only,
+  a tightening under DEC-176: no reference case and no outcome for a broker restriction changes,
+  and no exit, protective order, cancel, or kill switch is held.
 - **v0.16:** §5.2 "Alpaca capability matrix" becomes "Broker capability profiles": each connector
   declares a profile of its broker's published rules, shared code reads it and never names a
   broker, and Robinhood's equity profile sits beside Alpaca's
@@ -837,7 +844,7 @@ restriction the broker never imposed is never journaled as the broker's
 |---|---|---|---|
 | `broker_reject` | Rows 2 and 3 (rejects) | Account restricted by the broker | The owner acknowledges and the account is refreshed |
 | `broker_notice` | Rows 1 and 4 (status, flags, notices) | Account restricted by the broker | The owner acknowledges and the account is refreshed |
-| `connection_unavailable` | Row 5 | A distinct alert: the platform cannot reach or use the connection; the broker has not restricted the account | The connection's own condition clears (good probes, a released connector version for contract drift, or a reconnect; connections spec §9.1), **then** the owner acknowledges. An account refresh neither is needed nor lifts it |
+| `connection_unavailable` | Row 5 | A distinct alert: the platform cannot reach or use the connection; the broker has not restricted the account | The connection's own condition clears (good probes for `degraded`, re-authorization for `suspended`, and for contract drift [DEC-687](../project/decisions/DEC-687.md) item 3; connections spec §9.1), **then** the owner acknowledges. A reconnect does not lift it by itself. An account refresh neither is needed nor lifts it |
 
 Causes lift independently: a `connection_unavailable` restriction that clears leaves any broker
 restriction standing, and the reverse.
