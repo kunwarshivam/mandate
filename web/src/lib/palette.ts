@@ -196,8 +196,8 @@ export function rampValue(ref: RampRef): string {
  * Light: paper surfaces and ink type. Azure-800 is the primary action and links (the deep azure,
  * as dark's primary is the bright one, so no primary text sits in the saturated azure-600 the
  * mandate's rules and markers use); ink is the
- * account's fill, the Stop control and a stopped agent. Azure is the mandate (a pale azure field
- * under azure-500 rules and markers, azure-700 labels). Sun is too light for a line or a label on
+ * account's fill, the Stop control and a stopped agent. Azure is the mandate (a pale azure-200 field
+ * under azure-600 rules and markers, azure-800 labels). Sun is too light for a line or a label on
  * paper, so it appears as the highlight, a sun-300 fill that always carries ink type, and as an
  * asset series. `lapis` keeps its name as the account's role.
  */
