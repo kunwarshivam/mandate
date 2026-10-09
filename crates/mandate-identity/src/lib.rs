@@ -188,6 +188,7 @@ pub mod demand;
 mod matrix;
 mod membership;
 mod permission;
+mod writer;
 
 pub use mandate_tenant::{
     OrgId, PrincipalId, PrincipalKind, SessionRef, Tenant, UlidTextError, WorkspaceId,
@@ -198,6 +199,9 @@ pub use membership::{
     RecordRefusal, check_independence, check_order,
 };
 pub use permission::Permission;
+pub use writer::{
+    ATTEMPTS, Appended, ControlEntry, ControlStream, ControlView, WriteError, write_membership,
+};
 
 /// An authenticated principal, with what its kind's column of §4.2 is scoped to.
 #[derive(Debug, Clone, PartialEq, Eq)]
