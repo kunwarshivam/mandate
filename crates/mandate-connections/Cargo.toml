@@ -10,6 +10,7 @@ description = "Broker connections: the Alpaca OAuth connect core and its guardra
 workspace = true
 
 [dependencies]
+mandate-canon.workspace = true
 mandate-domain.workspace = true
 mandate-time.workspace = true
 secrecy.workspace = true
