@@ -20,6 +20,7 @@ mod profile;
 pub use connector::{RobinhoodConnector, Tools};
 pub use profile::robinhood as robinhood_profile;
 
+use mandate_canon::Digest;
 use mandate_executor::ClientOrderId;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -34,14 +35,38 @@ pub enum RobinhoodError {
 /// The `ref_id` for the order with this idempotency key (DEC-860 item 1): a UUID version 8
 /// (RFC 9562 §5.8) whose 122 free bits are the first 16 bytes of the SHA-256 of the key's text,
 /// written in lower case. A restart derives the same value, so a re-sent order carries it.
-pub fn ref_id(_key: &ClientOrderId) -> Result<String, RobinhoodError> {
-    Err(RobinhoodError::Unimplemented { story: "E7-6" })
+pub fn ref_id(key: &ClientOrderId) -> Result<String, RobinhoodError> {
+    let digest = Digest::of(key.as_str().as_bytes());
+    let mut bytes: Vec<u8> = digest.as_bytes().iter().take(16).copied().collect();
+    if let Some(version) = bytes.get_mut(6) {
+        *version = (*version & 0x0f) | 0x80;
+    }
+    if let Some(variant) = bytes.get_mut(8) {
+        *variant = (*variant & 0x3f) | 0x80;
+    }
+    let mut text = String::with_capacity(36);
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 4 | 6 | 8 | 10) {
+            text.push('-');
+        }
+        for nibble in [byte >> 4, byte & 0x0f] {
+            text.extend(char::from_digit(u32::from(nibble), 16));
+        }
+    }
+    Ok(text)
 }
 
 /// The status text the executor's §5.7 table reads for a contract `state` (connections spec
 /// §6.2, DEC-860 item 3): `new`, `queued`, `confirmed` and `unconfirmed` are `accepted`;
 /// `partially_filled` and `filled` are themselves; `cancelled` and `voided` are `canceled`;
 /// `rejected` and `failed` are `rejected`. Any other value is [`RobinhoodError::UnknownState`].
-pub fn executor_status(_state: &str) -> Result<&'static str, RobinhoodError> {
-    Err(RobinhoodError::Unimplemented { story: "E7-6" })
+pub fn executor_status(state: &str) -> Result<&'static str, RobinhoodError> {
+    match state {
+        "new" | "queued" | "confirmed" | "unconfirmed" => Ok("accepted"),
+        "partially_filled" => Ok("partially_filled"),
+        "filled" => Ok("filled"),
+        "cancelled" | "voided" => Ok("canceled"),
+        "rejected" | "failed" => Ok("rejected"),
+        _ => Err(RobinhoodError::UnknownState),
+    }
 }

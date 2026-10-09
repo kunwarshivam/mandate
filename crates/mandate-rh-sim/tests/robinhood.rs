@@ -177,7 +177,6 @@ fn classes(probe: &Probe) -> Vec<(CallClass, &'static str)> {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_submit_reviews_then_places_once_on_the_account_with_its_ref_id() {
     let server = server();
     let (mut c, probe) = probed(&server);
@@ -224,7 +223,6 @@ fn a_submit_reviews_then_places_once_on_the_account_with_its_ref_id() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_resend_after_a_restart_carries_the_same_ref_id_and_the_broker_keeps_one_order() {
     let server = server();
     let first = run(&mut connector(&server), &submit(buy("01JOPEN"))).unwrap();
@@ -246,7 +244,6 @@ fn a_resend_after_a_restart_carries_the_same_ref_id_and_the_broker_keeps_one_ord
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_lost_place_answer_is_unknown_and_never_placed_again() {
     let server = server();
     server
@@ -277,7 +274,6 @@ fn a_lost_place_answer_is_unknown_and_never_placed_again() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_garbled_place_answer_is_unknown_never_rejected_or_filled() {
     for garble in [
         Garble::UnknownState,
@@ -307,7 +303,6 @@ fn a_garbled_place_answer_is_unknown_never_rejected_or_filled() {
 
 /// Connections spec §6.2 through the place answer: each state a fresh order may start in.
 #[test]
-#[ignore = "pending E7-6"]
 fn each_state_a_place_answers_reads_as_the_spec_says() {
     let scripted = [
         (State::New, "accepted"),
@@ -344,7 +339,6 @@ fn each_state_a_place_answers_reads_as_the_spec_says() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn an_alert_refuses_an_opening_before_the_place() {
     let server = server();
     server
@@ -365,7 +359,6 @@ fn an_alert_refuses_an_opening_before_the_place() {
 /// Rule 13 and DEC-860 item 6: a protective stop-limit draws on the reserved budget and is placed
 /// even under an alert; the simulator then refuses it, which a place reads as `Unknown`.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_protective_stop_limit_is_risk_reducing_and_no_alert_holds_it() {
     let server = server();
     let (mut c, probe) = probed(&server);
@@ -407,7 +400,6 @@ fn a_protective_stop_limit_is_risk_reducing_and_no_alert_holds_it() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_cancel_goes_by_the_order_id_and_is_refused_once_terminal() {
     let server = server();
     let (mut c, probe) = probed(&server);
@@ -469,7 +461,6 @@ fn a_cancel_goes_by_the_order_id_and_is_refused_once_terminal() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn what_the_profile_does_not_offer_is_not_sent() {
     let server = server();
     let mut c = connector(&server);
