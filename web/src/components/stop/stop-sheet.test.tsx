@@ -124,6 +124,7 @@ describe("Stop sheet choices", () => {
       expect(owl).toHaveAttribute("aria-hidden", "true");
       expect(owl).toHaveAttribute("data-mood", mood);
       expect(owl).toHaveClass("size-8");
+      expect(owl, "a long name must not squeeze the sprite below whole pixels (DESIGN.md, the owls)").toHaveClass("shrink-0");
       const alone = render(<AgentOwl agent={agent} className="size-8" />).container.querySelector("svg[data-slot=owl]")!;
       expect(bodyPixels(owl!), `${agent.label}'s owl wears its own feathers`).toEqual(bodyPixels(alone));
       const badge = trigger.querySelector("[data-slot=mode-badge]")!;
