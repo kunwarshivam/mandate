@@ -408,15 +408,16 @@ fn protection_changed_rules(p: Payload<'_>) -> Result<(), Invalid> {
     let schema = InvalidReason::Schema;
     let action = p.text("action");
     let named = |members: &[&str]| members.contains(&action);
-    let covers_orders = named(&["placed", "cancelled", "passive_start", "unprotected_start"]);
+    let starts = named(&["passive_start", "unprotected_start"]);
+    let names_orders = named(&["placed", "cancelled"]);
     ensure(
-        p.list("orders").is_empty() != covers_orders,
+        starts || p.list("orders").is_empty() != names_orders,
         schema,
         "payload.orders",
     )?;
-    let covers_awaiting = named(&["interval_limit", "unprotected_end"]);
+    let may_await = named(&["interval_limit", "unprotected_end"]);
     ensure(
-        p.list("awaiting").is_empty() != covers_awaiting,
+        may_await || p.list("awaiting").is_empty(),
         schema,
         "payload.awaiting",
     )?;
@@ -443,9 +444,10 @@ fn protection_changed_rules(p: Payload<'_>) -> Result<(), Invalid> {
     )?;
     let has = |member: &str| !p.is_null(member);
     let intents = named(&["intended", "rung_short"]);
-    if named(&["passive_start", "unprotected_start"]) {
-        let set = has("intent_id");
-        for member in ["intent_id", "entry", "agent_id"] {
+    if starts {
+        let replacing = p.0.get("replacing") == Some(&Value::Bool(true));
+        let set = has("intent_id") || (replacing && has("entry"));
+        for member in ["entry", "agent_id"] {
             ensure(has(member) == set, schema, &format!("payload.{member}"))?;
         }
     } else {
