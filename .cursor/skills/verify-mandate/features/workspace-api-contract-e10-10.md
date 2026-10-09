@@ -28,8 +28,12 @@
   `crates/mandate-api/tests/lenient.rs`, pending E10-10: every case of
   `schemas/workspace-api/examples/lenient/api7.json`, its `dropped` exactly and its kept value
   against the body with those pointers removed; a body that is not a JSON object read as `{}` with
-  `[""]` for pause and hold and refused for the other four; and API-4's comparison over the members
-  kept.
+  `[""]` for pause and hold and refused for the other four; API-4's comparison over the members
+  kept; each member of each operation's full example corrupted (wrong type, garbage, an unknown
+  nested member), dropped and listed when not hard and refused when hard, against a hard-member
+  list typed from §5; a `workspace`, `workspace_id` or `ws` member at the root, in a record, or in
+  the hard `scope`, dropped and listed and never moving the stop (#1155); duplicates; and DEC-886's
+  items 2, 4 and 9.
 - **Schemas:** `crates/mandate-api/tests/schemas.rs`: live enum and member drift against
   `schemas/workspace-api/` (DEC-683), each member `null`-able and optional exactly as its schema
   says, a kill switch scope's `null` id exactly for `workspace`, and no `serde(flatten)`; pending,
