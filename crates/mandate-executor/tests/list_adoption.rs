@@ -514,7 +514,6 @@ fn one_listing(ran: &Ran, id: &ClientOrderId, path: &str) {
 /// DEC-862 item 3, each half alone: an intent of another agent with no order, then an order of
 /// another agent with no intent of its own.
 #[test]
-#[ignore = "pending E7-23"]
 fn another_agents_intent_or_order_alone_stops_the_listing() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -529,7 +528,6 @@ fn another_agents_intent_or_order_alone_stops_the_listing() {
 /// DEC-863 item 3: an earlier order of ours differing from the lost one in any one matched member
 /// is no lookalike, so the one exact record is adopted.
 #[test]
-#[ignore = "pending E7-23"]
 fn an_earlier_order_differing_in_one_member_is_no_lookalike() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -553,7 +551,6 @@ fn an_earlier_order_differing_in_one_member_is_no_lookalike() {
 /// DEC-863 item 3: an order of ours whose request the fold does not hold (a replacement the
 /// broker linked) counts as a lookalike on instrument, side and quantity alone.
 #[test]
-#[ignore = "pending E7-23"]
 fn an_order_with_no_folded_request_is_a_lookalike_on_instrument_side_and_quantity() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -567,7 +564,6 @@ fn an_order_with_no_folded_request_is_a_lookalike_on_instrument_side_and_quantit
 
 /// DEC-862 item 3: a listing answer on a profile that queries by client order id was never asked.
 #[test]
-#[ignore = "pending E7-23"]
 fn a_listing_under_a_queryable_profile_adopts_nothing() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -588,7 +584,6 @@ fn sent(ports: &Ports<'_>) -> (Shell, ClientOrderId) {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn a_duplicate_client_order_id_lists_on_a_no_query_profile() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -604,7 +599,6 @@ fn a_duplicate_client_order_id_lists_on_a_no_query_profile() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn a_reconciliation_missing_the_order_lists_on_a_no_query_profile() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -620,7 +614,6 @@ fn a_reconciliation_missing_the_order_lists_on_a_no_query_profile() {
 /// Rule 5's bound: a risk exit waits on the agent's unanswered opening past the window, which
 /// marks it overdue and `Unknown`.
 #[test]
-#[ignore = "pending E7-23"]
 fn an_overdue_opening_lists_on_a_no_query_profile() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -646,7 +639,6 @@ fn an_overdue_opening_lists_on_a_no_query_profile() {
 /// Restart re-queries every `Unknown` order: the new process is given the profile before it
 /// folds the journal, then `Started`.
 #[test]
-#[ignore = "pending E7-23"]
 fn a_restart_lists_an_unknown_order_on_a_no_query_profile() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
