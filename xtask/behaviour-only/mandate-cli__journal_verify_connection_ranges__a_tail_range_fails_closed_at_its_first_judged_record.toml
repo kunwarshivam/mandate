@@ -1,8 +1,0 @@
-file = "crates/mandate-cli/tests/journal_verify_connection_ranges.rs"
-test = "a_tail_range_fails_closed_at_its_first_judged_record"
-reason = """
-E12-3 W3 (DEC-782 item 5, DEC-885, DEC-890): both verifiers already run and answer verified, an
-anchor code, or a control check, so there is no stub to stop at; `connection_lifecycle_mismatch`
-is a library function the CLI does not call yet, and the report has no DEC-890 line. W3's
-implementation PR wires both in and deletes the ignore line and this row.
-"""

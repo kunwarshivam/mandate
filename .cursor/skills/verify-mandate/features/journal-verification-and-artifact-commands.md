@@ -31,7 +31,7 @@
   token; no single-stream export runs `connection_cause_mismatch`, and the report says so in
   DEC-890's `not run:` line just before `result:`, which no agent stream, connection-free export,
   or run stopped at checks 1 to 6 prints; from the `connections`, `connection_requests` and
-  `connection_ranges` sequences; pending until W3's implementation lands).
+  `connection_ranges` sequences).
   Planted bugs per test: the task brief.
 - **Reference cases:** `journal::tamper::*` and `journal::export_line_seq_1` in
   `fixtures/refcases/journal.json`, read directly rather than through `mandate-refcases`.
