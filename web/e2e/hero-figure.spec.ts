@@ -230,8 +230,13 @@ for (const width of [320, 360, 390]) {
       ["$1,234,567", ".89"],
       ["−$1,234,567", ".89"],
     ]) {
+      /**
+       * Set, measured and restored in one synchronous call: the setter redraws the figure at once and
+       * every read below forces layout, while yielding (as a wait for the next frame did) let any
+       * React render of the hero put the real balance back before the read.
+       */
       const fit = await page.evaluate(
-        async ({ whole, cents }) => {
+        ({ whole, cents }) => {
           type Part = { type: string; value: string | number; key: string; pos?: number };
           const figure = document.querySelector("[data-slot=account-equity-value]")!;
           // Number Flow's element takes `data` but only keeps it as `_data`.
@@ -252,7 +257,6 @@ for (const width of [320, 360, 390]) {
           const before = { data: flow._data, height: figure.getBoundingClientRect().height };
           flow.animated = false;
           flow.data = { pre, integer, fraction, post: [], valueAsString: whole + cents, value: Number(`${digits.replaceAll(",", "")}${cents}`) };
-          await new Promise(requestAnimationFrame);
           const text = flow.getBoundingClientRect();
           const section = figure.closest("section")!.getBoundingClientRect();
           const result = {
