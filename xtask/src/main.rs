@@ -11095,6 +11095,18 @@ jq -r "$filter" "$src"
     /// refused as a command word like any other expansion; an escaped `\$` expands nothing, a double-quoted string
     /// runs on across lines, and a job's `outputs:` is not a `run:` step, so the real lines those
     /// read stay allowed, as do `x+=( … )` and `x[i]=…`, which do not start with an expansion.
+    /// X1 tests correction 12c (after #994's surviving mutants) adds: a `..` segment takes the
+    /// `dirname` path off the allowlist; a wrapped `exec "$@"` runs `"$@"` too; a nameref in a
+    /// cluster (`-rn`) is one; a key at the `outputs:` key's indent ends its block; a `#` that
+    /// starts a comment ends a line however many quotes the comment holds, while one inside a
+    /// double quote does not; and an escaped `\"` neither opens nor closes a quote.
+    /// X1 tests correction 12d (after #994's review) adds: a line ending in `|` or `|&` runs on
+    /// into the next; a numeric descriptor's redirection (`2>&1`) before the command word
+    /// and `time -p` are skipped; a here-string counts as an earlier expanding word for rule 2;
+    /// a wrapper is matched by basename (`/usr/bin/env sh`); a pipeline sink that starts with an
+    /// expansion is refused even when its variable is clean; `zsh` is a sink; `${A[]}` and
+    /// `${ARR[1x]}` are not literal indexes; a `set` with a backtick expands; a nameref needs an
+    /// option holding `n`; an escaped backtick expands nothing; and `...` is not `..`.
     #[test]
     fn command_words_that_start_with_an_expansion_fail_closed() -> Result<()> {
         let policy = live_policy();
@@ -11122,6 +11134,22 @@ jq -r "$filter" "$src"
             "ARR=(cargo build)\n\"${ARR[1]}\" x".to_owned(),
             "\"$*\"".to_owned(),
             "n=$(( $(cargo build --features \"$F\") ))".to_owned(),
+            "\"$(dirname \"$0\")/../x.sh\"".to_owned(),
+            format!("{built_across_lines}\n2>&1 $C"),
+            format!("{built_across_lines}\n3>&1 $C"),
+            format!("{built_across_lines}\ntime -p $C"),
+            "C=$(cat f)\ncat <<< \"$C\" | sh".to_owned(),
+            "C=$(cat f)\ncat <<< $C | sh".to_owned(),
+            "cargo check -p the-runner -F 2>x live".to_owned(),
+            format!("{built_across_lines}\necho $C | /usr/bin/env sh"),
+            format!("{built_across_lines}\necho $C | zsh"),
+            "S=sh\ncurl $U | $S".to_owned(),
+            "A=(echo hi)\n\"${A[]}\" x".to_owned(),
+            "ARR=(echo hi)\n\"${ARR[1x]}\" x".to_owned(),
+            "set -- `cmd`; \"$@\"".to_owned(),
+            format!("{built_across_lines}\nset -- $C; exec \"$@\""),
+            format!("{built_across_lines}\ndeclare -rn R=C\n$R"),
+            "echo hi # see \"docs\ncargo build --features live".to_owned(),
             "\"$((1 + 2))\"".to_owned(),
             "ARR=(echo hi)\n\"${ARR[$i]}\" x".to_owned(),
         ];
@@ -11140,8 +11168,28 @@ jq -r "$filter" "$src"
                 "names the file and the last line: {problems:?}"
             );
         }
+        let refused_at_their_first_line = [
+            format!("{built_across_lines}\necho $C |\nsh"),
+            format!("{built_across_lines}\necho $C |&\nsh"),
+        ];
+        for text in refused_at_their_first_line {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].starts_with(".github/scripts/build.sh:3:"),
+                "a trailing `|` runs the pipeline on into the next line: {problems:?}"
+            );
+        }
         let allowed = [
             ".github/scripts/build.sh",
+            "declare -r R=echo\n$R hi",
+            "declare n=echo\n$n hi",
+            "\\`ls\\` x",
+            "\"$(dirname \"$0\")/.../x.sh\"",
             "\"$@\"",
             "C=echo\n$C hi",
             "x=(echo hi)\n\"${x[@]}\"",
@@ -11158,6 +11206,8 @@ jq -r "$filter" "$src"
             "psql <<SQL\nDO \\$\\$\nBEGIN\nEND\n\\$\\$;\nSQL",
             "case \"$a\" in\n  -*) flags+=(\"$arg\") ;;\n  *) args+=(\"$arg\") ;;\nesac",
             "values[$1]=\"$2\"",
+            "m=\"say \\\"hi\n$(git log --format=%B)\"",
+            "m=\"a # b\n$(git log --format=%B)\"",
         ];
         for text in allowed.iter().skip(1) {
             let files = [ci_file(allowed[0], &format!("set -e\n{text}\n"))];
@@ -11180,12 +11230,27 @@ jq -r "$filter" "$src"
             Vec::<String>::new(),
             "a job's `outputs: run:` is not a `run:` step"
         );
+        let after_outputs = ci_file(
+            ".github/workflows/x.yml",
+            concat!(
+                "jobs:\n  a:\n    runs-on: ubuntu-latest\n    outputs:\n",
+                "      run: ${{ steps.check.outputs.run }}\n",
+                "    steps:\n      - run: ${{ inputs.cmd }}\n",
+            ),
+        );
+        let problems = live_feature_problems(&policy, &meta(), &[after_outputs])?;
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].starts_with(".github/workflows/x.yml:7:"),
+            "a key at the `outputs:` key's own indent ends its block, so the step's `run:` is read: {problems:?}"
+        );
         Ok(())
     }
 
     /// A build file the check cannot read as text, a dangling symlink or a file that is not
     /// UTF-8, is reported as a problem naming its path, not an error that aborts the check (X1
-    /// tests correction 12b, after #979's review; DEC-851 item 6).
+    /// tests correction 12b, after #979's review; DEC-851 item 6), and so is one holding a NUL
+    /// byte (X1 tests correction 12c, after #994's planted NUL).
     #[test]
     fn an_unreadable_build_file_is_refused_by_path() -> Result<()> {
         let root = fixture_repository(
@@ -11194,11 +11259,12 @@ jq -r "$filter" "$src"
         )?;
         std::os::unix::fs::symlink(root.join("missing"), root.join("Makefile"))?;
         fs::write(root.join("justfile"), [0xff_u8, 0xfe, b'\n'])?;
+        fs::write(root.join("Dockerfile"), "RUN echo hi\0\n")?;
         let read = ci_files(&root);
         fs::remove_dir_all(&root).ok();
         let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read?)?;
-        assert_eq!(problems.len(), 2, "{problems:?}");
-        for path in ["Makefile", "justfile"] {
+        assert_eq!(problems.len(), 3, "{problems:?}");
+        for path in ["Makefile", "justfile", "Dockerfile"] {
             assert!(
                 problems
                     .iter()

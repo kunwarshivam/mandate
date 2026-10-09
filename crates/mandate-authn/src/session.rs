@@ -22,6 +22,8 @@ const INDIVIDUAL_IDLE_S: i64 = 86_400;
 const INDIVIDUAL_ABSOLUTE_S: i64 = 604_800;
 const BUSINESS_IDLE_S: i64 = 3_600;
 const BUSINESS_ABSOLUTE_S: i64 = 43_200;
+/// The provider statuses that mean it is unavailable, an outage (§6.4 route 1), not a refusal.
+const OUTAGE_STATUS: std::ops::RangeInclusive<u16> = 500..=599;
 
 /// The kind of organization a workspace belongs to, which sets its session defaults (§6.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -444,7 +446,9 @@ impl SessionRecord {
     /// [`EndReason::RefreshFailed`]. A refresh at or after the absolute lifetime or a full
     /// session's idle timeout, or a grant to an outage session whose idle timeout lapsed, ends it
     /// with [`EndReason::Expired`] (DEC-816 item 8). A `now` earlier than the last activity is
-    /// refused [`SessionRefusal::ClockBehind`] and changes nothing.
+    /// refused [`SessionRefusal::ClockBehind`] and changes nothing. A deprovision or a failed
+    /// answer ends the session before `next` is checked, so a `next` used before is refused
+    /// [`SessionRefusal::RefreshSecretReused`] only on a grant or an outage (DEC-658).
     pub fn refresh(
         &mut self,
         presented: &RefreshSecret,
@@ -467,6 +471,13 @@ impl SessionRecord {
             }
             return Err(SessionRefusal::UnknownRefreshToken);
         }
+        match answer {
+            ProviderAnswer::Deprovision => return Err(self.revoke(EndReason::Deprovisioned)),
+            ProviderAnswer::Status(code) if !OUTAGE_STATUS.contains(&code) => {
+                return Err(self.revoke(EndReason::RefreshFailed));
+            }
+            ProviderAnswer::Granted | ProviderAnswer::Unreachable | ProviderAnswer::Status(_) => {}
+        }
         let next = digest_of(next);
         if next == current || self.rotated.contains(&next) {
             return Err(SessionRefusal::RefreshSecretReused);
@@ -484,11 +495,10 @@ impl SessionRecord {
                     access_expires_at: access_until,
                 })
             }
-            ProviderAnswer::Unreachable | ProviderAnswer::Status(500..=599) => {
+            ProviderAnswer::Unreachable | ProviderAnswer::Status(_) => {
                 self.reach = Reach::Outage;
                 Ok(Refreshed::Outage)
             }
-            ProviderAnswer::Status(_) => Err(self.revoke(EndReason::RefreshFailed)),
             ProviderAnswer::Deprovision => Err(self.revoke(EndReason::Deprovisioned)),
         }
     }

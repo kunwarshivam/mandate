@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{Fixture, T, WS_A, acct, limit, tenant, text, workspaces};
+use common::{Fixture, T, WS_A, acct, limit, permitted, tenant, text, workspaces};
 use mandate_audit::{AuditError, Head, JournalEvent, JournalRead, MemoryRead, PageLimit};
 use mandate_canon::{Digest, parse};
 use mandate_journal::StreamId;
@@ -85,7 +85,9 @@ fn a_page_serves_the_events_after_the_cursor_in_seq_order_with_the_head() {
     let fx = Fixture::new(5);
     let stream = acct(&text(WS_A), "ACCT1");
     let read = MemoryRead::new(&fx.journal);
-    let page = read.page(&tenant(WS_A), &stream, 2, limit(3)).unwrap();
+    let page = read
+        .page(&permitted(&tenant(WS_A)), &stream, 2, limit(3))
+        .unwrap();
     assert_eq!(page.stream_id, stream);
     assert_eq!(
         page.head,
@@ -100,10 +102,14 @@ fn a_page_serves_the_events_after_the_cursor_in_seq_order_with_the_head() {
     );
     assert_eq!(page.next_after_seq, 5, "the cursor is the last seq served");
     assert!(!page.at_head, "seq 6 is still to read");
-    let rest = read.page(&tenant(WS_A), &stream, 5, limit(3)).unwrap();
+    let rest = read
+        .page(&permitted(&tenant(WS_A)), &stream, 5, limit(3))
+        .unwrap();
     assert_eq!(rest.events.iter().map(|e| e.seq).collect::<Vec<_>>(), [6]);
     assert!(rest.at_head);
-    let whole = read.page(&tenant(WS_A), &stream, 0, limit(1000)).unwrap();
+    let whole = read
+        .page(&permitted(&tenant(WS_A)), &stream, 0, limit(1000))
+        .unwrap();
     assert_eq!(whole.events.len(), 6);
     assert!(whole.at_head);
     assert_eq!(&whole.events[2..5], page.events.as_slice());
@@ -119,7 +125,7 @@ fn the_default_limit_is_one_hundred_within_one_to_one_thousand() {
     fx.marks(&stream, 1100);
     let read = MemoryRead::new(&fx.journal);
     let page = |l: PageLimit| {
-        read.page(&tenant(WS_A), &stream, 0, l)
+        read.page(&permitted(&tenant(WS_A)), &stream, 0, l)
             .unwrap()
             .events
             .len()
@@ -143,19 +149,23 @@ fn a_cursor_at_or_past_the_head_gives_an_empty_page_at_the_head() {
     let stream = acct(&text(WS_A), "ACCT2");
     let read = MemoryRead::new(&fx.journal);
     for after in [4, 5, 1000, MAX_SEQ] {
-        let page = read.page(&tenant(WS_A), &stream, after, limit(10)).unwrap();
+        let page = read
+            .page(&permitted(&tenant(WS_A)), &stream, after, limit(10))
+            .unwrap();
         assert!(page.events.is_empty(), "after {after}");
         assert_eq!(page.next_after_seq, after);
         assert!(page.at_head);
         assert_eq!(page.head, head_of(&fx, &stream));
     }
-    let last = read.page(&tenant(WS_A), &stream, 3, limit(10)).unwrap();
+    let last = read
+        .page(&permitted(&tenant(WS_A)), &stream, 3, limit(10))
+        .unwrap();
     assert_eq!(last.events.iter().map(|e| e.seq).collect::<Vec<_>>(), [4]);
     assert_eq!(last.next_after_seq, 4);
     assert!(last.at_head);
     for after in [MAX_SEQ + 1, u64::MAX] {
         assert_eq!(
-            read.page(&tenant(WS_A), &stream, after, limit(10)),
+            read.page(&permitted(&tenant(WS_A)), &stream, after, limit(10)),
             Err(AuditError::AfterSeqOutOfRange { after_seq: after }),
             "an after_seq above 2^53 - 1 is refused"
         );
@@ -198,7 +208,8 @@ proptest! {
         let segments = workspaces();
         let (workspace, account) = FUZZ_STREAMS[0];
         let target = acct(&segments[workspace], account);
-        let me = tenant(WS_A);
+        let context = tenant(WS_A);
+        let me = permitted(&context);
         let mut cursor = 0u64;
         let mut served: Vec<JournalEvent> = Vec::new();
         let read_page = |fx: &Fixture, cursor: &mut u64, served: &mut Vec<JournalEvent>, l: u64| {
