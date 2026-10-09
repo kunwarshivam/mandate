@@ -15,4 +15,5 @@ mandate-time.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+mandate-canon.workspace = true
 proptest.workspace = true
