@@ -105,7 +105,6 @@ fn sent_bodies() -> Vec<&'static str> {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn every_server_case_is_kept_and_listed_or_refused_as_it_says() -> Result<(), String> {
     let cases: Value = serde_json::from_str(CASES).map_err(|e| e.to_string())?;
     let cases = cases["cases"].as_array().ok_or("cases is an array")?;
@@ -150,7 +149,6 @@ const NOT_OBJECTS: [&[u8]; 10] = [
 ];
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_pause_or_hold_body_that_is_not_an_object_is_read_as_empty() -> Result<(), String> {
     for operation in ["pause", "hold"] {
         for body in NOT_OBJECTS {
@@ -162,7 +160,6 @@ fn a_pause_or_hold_body_that_is_not_an_object_is_read_as_empty() -> Result<(), S
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_other_four_refuse_a_body_that_is_not_an_object() {
     for operation in [
         "end_delegation",
@@ -213,7 +210,6 @@ fn idempotency_cases() -> Vec<(&'static str, Value, Value)> {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn bodies_differing_only_in_dropped_members_keep_equal_values() -> Result<(), String> {
     for (operation, base, extra) in idempotency_cases() {
         let (want, none) = lenient(operation, base.to_string().as_bytes())
@@ -237,7 +233,6 @@ fn bodies_differing_only_in_dropped_members_keep_equal_values() -> Result<(), St
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_valid_value_for_a_member_once_dropped_is_a_different_call() -> Result<(), String> {
     let record = json!({"artifact": HASH, "ui_build": BUILD});
     for operation in ["pause", "hold", "end_delegation"] {
@@ -315,7 +310,6 @@ fn dropped_for(operation: &str, body: &Value, member: &str) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_corrupt_non_hard_member_is_dropped_and_listed_and_the_rest_kept() -> Result<(), String> {
     for (operation, example) in examples() {
         let label = format!("{operation} example");
@@ -350,7 +344,6 @@ fn a_corrupt_non_hard_member_is_dropped_and_listed_and_the_rest_kept() -> Result
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_corrupt_or_missing_hard_member_is_refused() {
     for (operation, example) in examples() {
         for member in hard(operation) {
@@ -378,7 +371,6 @@ fn a_corrupt_or_missing_hard_member_is_refused() {
 const WORKSPACE_MEMBERS: [&str; 3] = ["workspace", "workspace_id", "ws"];
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_workspace_member_is_dropped_and_listed_and_never_applied() -> Result<(), String> {
     for (operation, example) in examples() {
         for name in WORKSPACE_MEMBERS {
@@ -430,7 +422,6 @@ fn scope_member_is_dropped_and_the_scope_kept(name: &str) -> Result<(), String> 
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn any_unknown_member_inside_the_scope_is_dropped_and_the_scope_kept() -> Result<(), String> {
     for name in ["zz", "label", "org"] {
         scope_member_is_dropped_and_the_scope_kept(name)?;
@@ -463,7 +454,6 @@ fn assert_text_kept(operation: &str, text: &str, dropped: &[&str]) -> Result<(),
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_duplicate_inside_the_scope_is_refused_and_a_duplicate_bid_drops_the_group()
 -> Result<(), String> {
     for scope in [
@@ -497,7 +487,6 @@ fn first_code(outcome: Outcome) -> String {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_duplicate_non_hard_member_is_dropped_once_and_a_hard_one_refused() -> Result<(), String> {
     let record = json!({"artifact": HASH, "ui_build": BUILD}).to_string();
     let twice = format!(r#"{{"record": {record}, "x": 1, "record": {record}, "x": 2}}"#);
@@ -546,7 +535,6 @@ fn a_duplicate_non_hard_member_is_dropped_once_and_a_hard_one_refused() -> Resul
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_open_bodies_are_read_as_dec_886_says() -> Result<(), String> {
     let at = "2026-10-08T14:30:00.000000000Z";
     let workspace = json!({"scope": {"kind": "workspace"}});
