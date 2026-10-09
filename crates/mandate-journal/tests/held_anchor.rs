@@ -8,8 +8,8 @@ use std::path::Path;
 
 use mandate_canon::{Digest, Int, Key, Value, parse, to_canonical};
 use mandate_journal::{
-    AgentStreamCheck, HeldAnchor, PrefixError, StoredEvent, TrustedStart, VerifiedPrefix,
-    held_anchor, verify_agent_stream_anchored,
+    AgentStreamCheck, EventCheck, EventFailure, HeldAnchor, PrefixError, StoredEvent, TrustedStart,
+    VerifiedPrefix, held_anchor, verify_agent_stream_anchored,
 };
 use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
@@ -230,43 +230,35 @@ fn a_prefix_anchors_the_hold_section_11_carries_or_nothing() {
 #[test]
 #[ignore = "pending E12-3"]
 fn bind_refuses_a_forged_truncated_or_unbound_prefix() {
+    use EventCheck::{PrevHashMismatch, RehashMismatch};
+    use PrefixError::{Unbound, Unverified};
+    let lift = mode(2, "owner_lift_hold", false);
     let good = chain(&[mode(2, "owner_hold", true), other()]);
     let start = start_after(&good);
     let mut forged = good.clone();
-    forged[0].body = sealed(AGENT, None, &mode(2, "owner_lift_hold", false)).body;
+    forged[0].body = sealed(AGENT, None, &lift).body;
     let mut rehashed = forged.clone();
     rehashed[0].hash = Digest::of(&rehashed[0].body);
-    let wrong_hash = TrustedStart {
-        prev_hash: Digest::of(b"x"),
-        ..start
-    };
-    let wrong_seq = TrustedStart {
-        from_seq: 4,
-        ..start
-    };
+    let last = [good[0].clone(), sealed(AGENT, good.first(), &lift)];
+    let at = |seq, check| Unverified(EventFailure { seq, check });
+    let (mut wrong_hash, mut wrong_seq, g) = (start, start, &good[..]);
+    (wrong_hash.prev_hash, wrong_seq.from_seq) = (Digest::of(b"x"), 4);
     let cases = [
-        (&good[..0], start, "an empty prefix for from_seq 3"),
-        (&good[..1], start, "a truncated tail"),
-        (&good[..1], TrustedStart::GENESIS, "rows for from_seq 1"),
-        (&good[..], wrong_hash, "a last hash other than prev_hash"),
-        (&good[..], wrong_seq, "a last seq other than from_seq - 1"),
-        (&forged[..], start, "a forged body under its old hash"),
-        (&rehashed[..], start, "a forged body rehashed"),
+        (&g[..0], start, Unbound, "empty, for from_seq 3"),
+        (&g[..1], start, Unbound, "a truncated tail"),
+        (&g[..1], TrustedStart::GENESIS, Unbound, "rows for seq 1"),
+        (g, wrong_hash, Unbound, "a last hash not prev_hash"),
+        (g, wrong_seq, Unbound, "a last seq not from_seq - 1"),
+        (&forged, start, at(1, RehashMismatch), "forged, old hash"),
+        (&rehashed, start, at(2, PrevHashMismatch), "rehashed"),
+        (&last, start, Unbound, "a forged last row rehashed"),
     ];
-    for (rows, start, name) in cases {
-        let refused = bind(rows, start).map(|_| ());
-        let named = matches!(
-            refused,
-            Err(PrefixError::Unbound | PrefixError::Unverified(_))
-        );
-        assert!(named, "{name}: {refused:?}");
+    for (rows, start, want, name) in cases {
+        assert_eq!(bind(rows, start).map(|_| ()), Err(want), "{name}");
         assert_eq!(anchor(rows, start), Ok(HeldAnchor::Unknown), "{name}");
     }
-    assert_eq!(
-        anchor(&good, start),
-        Ok(carried(1, true)),
-        "the sound prefix"
-    );
+    let sound = anchor(&good, start);
+    assert_eq!(sound, Ok(carried(1, true)), "the sound prefix");
 }
 
 #[test]
