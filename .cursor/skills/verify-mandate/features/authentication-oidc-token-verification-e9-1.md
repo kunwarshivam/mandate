@@ -18,5 +18,8 @@
   nonce, `email_verified` for invitations, and the validity window against its own oracle) and
   `crates/mandate-authn/tests/shape.rs` (malformed and oversized tokens, strict base64url from
   hand-written text, the key set's rules and weak or foreign keys, the issuer configuration, any
-  single-byte change, and the ID-9 canary over every printed type), all live.
+  single-byte change, and the ID-9 canary over every printed type), and
+  `crates/mandate-authn/tests/boundaries.rs` (the 60 s skew, `exp` and `nbf` at the edges of the
+  clock's range, a numeric `sub`, an empty `kid`, and the key set's exact `Debug`),
+  all live.
 - **Run:** `cargo nextest run -p mandate-authn`.

@@ -232,7 +232,6 @@ fn untouched(j: &Journal, ids: &FixedIds, out: &str, control_rows: usize) -> boo
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn records_a_checked_live_robinhood_connection_as_version_2() {
     let mut j = passing("connect");
     let alpaca = r#"{"broker":"alpaca","connection_id":"conn_alpaca_paper_01","environment":"paper","scopes":["data","trading"]}"#;
@@ -277,7 +276,6 @@ fn records_a_checked_live_robinhood_connection_as_version_2() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn a_rerun_with_the_same_code_answers_the_committed_event() {
     let mut j = passing("connect");
     let mut ids = FixedIds::default();
@@ -294,7 +292,6 @@ fn a_rerun_with_the_same_code_answers_the_committed_event() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn the_code_binds_the_record_it_shows() {
     let mut j = passing("connect");
     let mut ids = FixedIds::default();
@@ -324,7 +321,6 @@ fn the_code_binds_the_record_it_shows() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn refusals_on_the_request_touch_nothing() {
     let cases = "connection conn*rh live connection_id_invalid
                  account not-a-ulid live account_ref_invalid
@@ -353,7 +349,6 @@ fn refusals_on_the_request_touch_nothing() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn the_cause_is_the_passing_connect_check_on_the_bound_stream() {
     let other_stream = format!("acct:{WORKSPACE}:{OTHER_ACCOUNT}");
     let cases = "other connect a+c+e+s+ pii live check_missing
@@ -404,7 +399,6 @@ fn the_cause_is_the_passing_connect_check_on_the_bound_stream() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn one_account_one_connection_on_the_control_stream() {
     let cases = "E:conn_rh_live_01:A connection_exists
                  E:conn_rh_live_01:A R:conn_rh_live_01 E:conn_rh_live_01:A connection_exists
@@ -440,7 +434,6 @@ fn one_account_one_connection_on_the_control_stream() {
 /// Whatever the check recorded, the command commits exactly when every check it needs is listed
 /// and passed and the account was read; the oracle reads the drawn results itself.
 #[test]
-#[ignore = "pending E7-11"]
 fn commits_exactly_when_every_needed_check_passed() {
     let drawn = (prop::collection::vec(0..3u8, 4), any::<bool>());
     TestRunner::deterministic()
@@ -465,7 +458,6 @@ fn commits_exactly_when_every_needed_check_passed() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn run_refuses_a_bad_request_before_opening_the_journal() {
     let store = std::env::temp_dir().join(format!("mandate-cli-k1b-{}", std::process::id()));
     std::fs::remove_dir_all(&store).ok();

@@ -51,6 +51,13 @@ pub(super) fn page(tools: &[Value], next: &str) -> Answer {
     ))
 }
 
+pub(super) fn cursor(tools: &[Value], next: Value) -> Answer {
+    reply(&format!(
+        r#""result":{}"#,
+        json!({"tools": tools, "nextCursor": next})
+    ))
+}
+
 pub(super) fn handshake() -> Vec<Answer> {
     vec![
         reply(
@@ -296,5 +303,95 @@ fn a_contract_hash_keeps_its_bytes_and_prints_them_as_hex() {
         assert_eq!(hash.as_bytes(), &bytes);
         let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(format!("{hash:?}"), format!("ContractHash({hex})"));
+    }
+}
+
+async fn connect_with(name: &str) -> Result<McpClient, McpError> {
+    let mut tools = base();
+    tools.push(json!({"name": name, "inputSchema": {"type": "object"}}));
+    session(vec![listing(&tools)], None, roomy()).await.1
+}
+
+/// DEC-839 item 2: a cursor is a string or absent; anything else is not a last page.
+#[tokio::test]
+#[ignore = "pending E7-16"]
+async fn a_next_cursor_that_is_not_a_string_is_malformed() {
+    let hidden = [json!({"name": "transfer_funds", "inputSchema": {"type": "object"}})];
+    for next in [json!(5), Value::Null] {
+        let tail = vec![cursor(&base(), next.clone()), listing(&hidden)];
+        let (server, client) = session(tail, None, roomy()).await;
+        assert!(
+            matches!(client, Err(McpError::Malformed)),
+            "{next}: {client:?}"
+        );
+        assert_eq!(server.seen().len(), 3, "{next}");
+    }
+}
+
+/// DEC-839 item 1: an allowlisted tool needs an `inputSchema`, and `null` is none.
+#[tokio::test]
+#[ignore = "pending E7-16"]
+async fn a_null_input_schema_on_an_allowlisted_tool_is_malformed() {
+    let mut tools = base();
+    tools[3]["inputSchema"] = Value::Null;
+    let (_server, client) = session(vec![listing(&tools)], None, roomy()).await;
+    assert!(matches!(client, Err(McpError::Malformed)), "{client:?}");
+}
+
+/// DEC-839 item 3: each token, in a name where it is the only match.
+#[tokio::test]
+#[ignore = "pending E7-16"]
+async fn every_fund_token_alone_refuses_the_connect() {
+    let tokens = [
+        "transfer",
+        "transfers",
+        "withdraw",
+        "withdrawal",
+        "withdrawals",
+        "wire",
+        "ach",
+        "send",
+        "payout",
+        "disburse",
+        "deposit",
+        "deposits",
+        "fund",
+        "funds",
+        "funding",
+    ];
+    for token in tokens {
+        let name = format!("x_{token}");
+        let client = connect_with(&name).await;
+        assert!(
+            matches!(client, Err(McpError::FundMovementTool)),
+            "{name}: {client:?}"
+        );
+    }
+}
+
+/// DEC-839 item 3: the splits at a case change, a digit before a capital, a run of capitals,
+/// and every separator, then lower-casing.
+#[tokio::test]
+#[ignore = "pending E7-16"]
+async fn adversarial_names_are_split_as_dec_839_defines() {
+    for name in ["getFundamentals", ""] {
+        let client = connect_with(name).await;
+        assert!(client.is_ok(), "{name:?}: {client:?}");
+    }
+    for name in [
+        "ACHTransfer",
+        "x2Wire",
+        "payoutV2",
+        "sendEmail",
+        "fund_s",
+        "WIRE",
+        "a.b.send",
+        "_wire",
+    ] {
+        let client = connect_with(name).await;
+        assert!(
+            matches!(client, Err(McpError::FundMovementTool)),
+            "{name}: {client:?}"
+        );
     }
 }

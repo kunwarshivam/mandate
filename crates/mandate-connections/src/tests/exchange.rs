@@ -35,7 +35,6 @@ fn run(
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_connection_never_reaches_the_vault_or_the_token_endpoint() {
     let mut vault = FixtureVault::with_code();
     let mut provider = FixtureProvider::granting("bearer", "trading data");
@@ -48,7 +47,6 @@ fn a_live_connection_never_reaches_the_vault_or_the_token_endpoint() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_paper_exchange_sends_the_one_live_token_request_and_stores_only_the_token() {
     let mut vault = FixtureVault::with_code();
     let mut provider = FixtureProvider::granting("bearer", "trading data");
@@ -96,7 +94,6 @@ fn a_paper_exchange_sends_the_one_live_token_request_and_stores_only_the_token()
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn with_no_code_waiting_nothing_is_sent_or_written() {
     let mut vault = FixtureVault::default();
     let mut provider = FixtureProvider::granting("bearer", "trading data");
@@ -112,7 +109,6 @@ fn with_no_code_waiting_nothing_is_sent_or_written() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refused_grant_stores_no_token_and_deletes_the_entry() {
     let answers = [
         (
@@ -146,7 +142,6 @@ fn a_refused_grant_stores_no_token_and_deletes_the_entry() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn no_secret_reaches_the_grant_or_an_error() {
     let mut vault = FixtureVault::with_code();
     let mut provider = FixtureProvider::granting("bearer", "trading data");

@@ -40,7 +40,6 @@ fn redeem(states: &mut PendingStates, user: &str, secs: i64) -> Result<Binding, 
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_authorization_url_asks_for_paper_and_exactly_trading_and_data() {
     let mut states = PendingStates::default();
     let url = states
@@ -73,7 +72,6 @@ fn the_authorization_url_asks_for_paper_and_exactly_trading_and_data() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_connection_is_refused_and_issues_no_state() {
     let mut states = PendingStates::default();
     let started = states.begin(
@@ -92,7 +90,6 @@ fn a_live_connection_is_refused_and_issues_no_state() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_state_is_redeemed_once() {
     let mut states = issued_at_1000();
     assert_eq!(
@@ -106,7 +103,6 @@ fn a_state_is_redeemed_once() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_state_expires_and_is_spent() {
     let last_good = 1000 + STATE_LIFETIME_SECS - 1;
     let mut fresh = issued_at_1000();
@@ -126,7 +122,6 @@ fn a_state_expires_and_is_spent() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn another_users_redeem_is_refused_and_spends_the_state() {
     let mut states = issued_at_1000();
     assert_eq!(
@@ -140,7 +135,6 @@ fn another_users_redeem_is_refused_and_spends_the_state() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_unknown_state_is_refused() {
     let mut states = issued_at_1000();
     assert_eq!(
@@ -188,7 +182,6 @@ fn owned(workspace: &str, user: &str, verifier: &str) -> (String, String, String
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn each_state_returns_the_workspace_and_verifier_bound_to_it_at_begin() {
     let mut states = PendingStates::default();
     begin_with(&mut states, "st-a", ("ws-a", "u1"), "verifier-a", 1000).unwrap();
@@ -204,7 +197,6 @@ fn each_state_returns_the_workspace_and_verifier_bound_to_it_at_begin() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_state_already_issued_is_refused_and_the_first_binding_is_kept() {
     let mut states = PendingStates::default();
     begin_with(&mut states, "st-1", ("ws-1", "u1"), "verifier-a", 1000).unwrap();
@@ -219,7 +211,6 @@ fn a_state_already_issued_is_refused_and_the_first_binding_is_kept() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_expired_unredeemed_state_is_still_never_reissued() {
     let mut states = PendingStates::default();
     begin_with(&mut states, "st-1", ("ws-1", "u1"), "verifier-a", 1000).unwrap();
@@ -231,7 +222,6 @@ fn an_expired_unredeemed_state_is_still_never_reissued() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_expired_state_redeemed_by_another_user_is_refused_and_spent() {
     let mut states = PendingStates::default();
     begin_with(&mut states, "st-1", ("ws-1", "u1"), "verifier-a", 1000).unwrap();
@@ -251,7 +241,6 @@ fn an_expired_state_redeemed_by_another_user_is_refused_and_spent() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn reserved_characters_in_the_state_and_client_id_are_percent_encoded() {
     let mut states = PendingStates::default();
     let url = states

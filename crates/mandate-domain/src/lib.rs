@@ -21,6 +21,7 @@
 
 use std::collections::BTreeSet;
 
+pub mod fund_movement;
 mod profile;
 
 pub use profile::{
