@@ -35,22 +35,38 @@ fn quote(text: Option<&str>) -> String {
 }
 
 fn draft(id: &str, stream: &str, event_type: &str, caused: Option<&str>, payload: &str) -> Vec<u8> {
+    record(id, stream, (event_type, 1), caused, payload)
+}
+
+/// A draft at any schema version, its `config_refs` every kind an account, agent, or thesis record
+/// requires (`model_version` is the thesis records' `content_hash`, journal spec rule 38).
+fn record(
+    id: &str,
+    stream: &str,
+    typed: (&str, u8),
+    caused: Option<&str>,
+    payload: &str,
+) -> Vec<u8> {
+    let (event_type, version) = typed;
     let refs: BTreeSet<&str> = payload
         .split('"')
         .filter(|s| s.starts_with("sha256:"))
         .collect();
     format!(
         r#"{{"envelope_version":1,"environment":"paper","event_id":"{id}","stream_id":"{stream}",
-        "event_type":"{event_type}","schema_version":1,"event_time":"{T}","clock_source":"local",
-        "causation_id":{},"correlation_id":null,"actor":{},"config_refs":{{"mandate_version":
-        "sha256:{}"}},"payload":{payload},"artifact_refs":[{}],"pii_refs":[]}}"#,
+        "event_type":"{event_type}","schema_version":{version},"event_time":"{T}",
+        "clock_source":"local","causation_id":{},"correlation_id":null,"actor":{},"config_refs":{{
+        "fee_config":"{r}","instrument_snapshot":"{r}","mandate_version":"{r}","model_version":
+        "sha256:{}","rule_set":"{r}","settlement_calendar":"{r}","trading_calendar":"{r}"}},
+        "payload":{payload},"artifact_refs":[{}],"pii_refs":[]}}"#,
         quote(caused),
         actor(),
-        "4".repeat(64),
+        "6".repeat(64),
         refs.iter()
             .map(|r| quote(Some(r)))
             .collect::<Vec<_>>()
-            .join(",")
+            .join(","),
+        r = format!("sha256:{}", "4".repeat(64)),
     )
     .into_bytes()
 }
@@ -549,4 +565,354 @@ fn the_intent_row_at_a_bound_reads_no_agent_stream() {
         );
         assert_eq!(&trace.hops[trace.hops.len() - 3..], &tail[..]);
     }
+}
+
+const INTENT: &str = "payload.intent_id";
+const ORDER: &str = "payload.client_order_id";
+
+fn account(name: &str) -> String {
+    format!("acct:{}:{name}", text(WS_A))
+}
+
+/// An `OrderSubmitted` payload; version 2 adds `risk_clock` (journal spec §9.5).
+fn submitted(order: &str, attempt: u8, version: u8) -> String {
+    let clock = (version == 2).then(|| format!(r#","risk_clock":"{T}""#));
+    format!(
+        r#"{{"client_order_id":"{order}","attempt":{attempt},"instrument_id":"inst","side":"buy",
+        "type":"limit","tif":"day","qty":"1","limit_price":"10"{}}}"#,
+        clock.unwrap_or_default()
+    )
+}
+
+fn filled(order: &str) -> String {
+    format!(
+        r#"{{"fill_id":"f","client_order_id":"{order}","instrument_id":"inst","side":"buy",
+        "qty_gross":"1","price":"10","trade_date":"2026-09-21","risk_clock":"{T}","fees":[]}}"#
+    )
+}
+
+fn receipt(intent: &str, agent: &str) -> String {
+    format!(
+        r#"{{"intent_id":"{intent}","agent_id":"{agent}","instrument_id":"inst","side":"buy",
+        "type":"limit","tif":"day","qty":"1","limit_price":"10","purpose":"open"}}"#
+    )
+}
+
+fn gated(intent: &str) -> String {
+    format!(
+        r#"{{"intent_id":"{intent}","verdict":"allow","reason_code":null,"data_profile":"full",
+        "quotes_used":[],"marks_used":[],"checks":[]}}"#
+    )
+}
+
+/// A `passive_start` `ProtectionChanged`, which carries its own `intent_id` and `agent_id`.
+fn protected(intent: &str, agent: &str) -> String {
+    format!(
+        r#"{{"instrument_id":"inst","action":"passive_start","orders":["o"],"awaiting":[],
+        "qty":null,"stop":null,"take_profit":null,"intent_id":"{intent}","bracket":null,
+        "entry":"e","agent_id":"{agent}","replacing":null,"created_on":null,"sent":null,
+        "uncovered":null,"acknowledged":null,"risk_clock":"{T}"}}"#
+    )
+}
+
+impl Graph {
+    fn put(
+        &mut self,
+        stream: &str,
+        id: &str,
+        typed: (&str, u8),
+        caused: Option<&str>,
+        payload: &str,
+    ) {
+        let event = record(id, stream, typed, caused, payload);
+        self.fx.append_draft(stream, id.to_owned(), &event);
+    }
+
+    /// An `OrderRequestRecorded` and the version-2 `OrderSubmitted` naming it, in one batch
+    /// (journal spec §9.5 rule 45).
+    fn order(&mut self, stream: &str, ids: [&str; 2], intent: Option<&str>, order: &str) {
+        let payload = format!(
+            r#"{{"agent_id":"AG1","intent_id":{},"purpose":"open","extended_hours":false,
+            "stop_price":null,"order_class":null,"take_profit":null,"stop":null,"rung":null,
+            "at_floor":null,"risk_clock":"{T}"}}"#,
+            quote(intent)
+        );
+        let request = record(ids[0], stream, ("OrderRequestRecorded", 1), None, &payload);
+        let submitted = submitted(order, 2, 2);
+        let submit = record(
+            ids[1],
+            stream,
+            ("OrderSubmitted", 2),
+            Some(ids[0]),
+            &submitted,
+        );
+        let batch = [
+            (ids[0].to_owned(), &request[..]),
+            (ids[1].to_owned(), &submit[..]),
+        ];
+        self.fx.append_batch(stream, &batch);
+    }
+}
+
+fn depths(trace: &Trace) -> Vec<(&str, u16)> {
+    let nodes = trace.nodes.iter();
+    nodes
+        .map(|n| (n.event.event_id.as_str(), n.depth))
+        .collect()
+}
+
+/// §4.8.1's fill row, DEC-772 items 4 and 5: a fill links each `OrderSubmitted` of its
+/// `client_order_id` with a lower `seq` on its own account stream, versions 1 and 2 alike, in `seq`
+/// order. A later attempt, another account's, and another order's are no targets; a fill whose
+/// order has only a later submission reads one `not_recorded`. A version-1 submission with no
+/// `causation_id` ends the walk (§4.8.1's version-1 row); a version-2 one leads to its companion, whose
+/// null `intent_id` is no link.
+#[test]
+#[ignore = "pending E12-1"]
+fn a_fill_links_each_earlier_submission_of_its_order_on_its_account() {
+    let mut g = Graph::new();
+    let (acct1, acct2) = (account("ACCT1"), account("ACCT2"));
+    let [
+        first,
+        request,
+        second,
+        other,
+        fill,
+        orphan,
+        later,
+        unpaired,
+        elsewhere,
+    ] = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(|n| event_id(800_000 + n));
+    let v1 = ("OrderSubmitted", 1);
+    g.put(&acct2, &elsewhere, v1, None, &submitted("c1", 1, 1));
+    g.put(&acct1, &first, v1, None, &submitted("c1", 1, 1));
+    g.order(&acct1, [&request, &second], None, "c1");
+    g.put(&acct1, &other, v1, None, &submitted("c2", 1, 1));
+    g.put(&acct1, &fill, ("FillApplied", 1), None, &filled("c1"));
+    g.put(&acct1, &orphan, ("FillApplied", 1), None, &filled("c3"));
+    g.put(&acct1, &later, v1, None, &submitted("c1", 3, 1));
+    g.put(&acct1, &unpaired, v1, None, &submitted("c3", 1, 1));
+    let trace = traced(&g, WS_A, &fill, &[]);
+    let shown = |from: &str, link: &str, to: &str| hop(from, link, Some(to), HopStatus::Shown);
+    let expected = [
+        shown(&fill, ORDER, &first),
+        shown(&fill, ORDER, &second),
+        shown(&second, "causation_id", &request),
+    ];
+    let want = [(&fill, 0), (&first, 1), (&second, 1), (&request, 2)];
+    assert_eq!(trace.hops, expected);
+    assert_eq!(depths(&trace), want.map(|(id, d)| (id.as_str(), d)));
+    let trace = traced(&g, WS_A, &orphan, &[]);
+    assert_eq!(
+        trace.hops,
+        [hop(&orphan, ORDER, None, HopStatus::NotRecorded)]
+    );
+}
+
+/// Every intent record, the intent's `IntentProposed` (on `AG1`, its `causation_id` absent), and
+/// a `GateDecided` of it on `ACCT2`, where no `IntentReceived` is.
+struct Intents {
+    g: Graph,
+    proposed: String,
+    received: String,
+    gates: [String; 2],
+    request: String,
+    submit: String,
+    guard: String,
+    stray: String,
+    foreign: String,
+}
+
+fn intents() -> Intents {
+    let mut g = Graph::new();
+    let (acct1, ag1) = (account("ACCT1"), agent(WS_A, "AG1"));
+    let [
+        proposed,
+        received,
+        gate,
+        regate,
+        request,
+        submit,
+        guard,
+        stray,
+        foreign,
+    ] = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(|n| event_id(810_000 + n));
+    let cause = event_id(999_999);
+    g.put(
+        &ag1,
+        &proposed,
+        ("IntentProposed", 1),
+        Some(&cause),
+        PROPOSED,
+    );
+    g.put(
+        &acct1,
+        &received,
+        ("IntentReceived", 1),
+        None,
+        &receipt(&proposed, "AG1"),
+    );
+    g.put(
+        &account("ACCT2"),
+        &foreign,
+        ("GateDecided", 1),
+        None,
+        &gated(&proposed),
+    );
+    for id in [&gate, &regate] {
+        g.put(&acct1, id, ("GateDecided", 1), None, &gated(&proposed));
+    }
+    g.order(&acct1, [&request, &submit], Some(&proposed), "c1");
+    let changed = ("ProtectionChanged", 1);
+    g.put(&acct1, &guard, changed, None, &protected(&proposed, "AG1"));
+    g.put(&acct1, &stray, changed, None, &protected(&proposed, "AG2"));
+    Intents {
+        g,
+        proposed,
+        received,
+        gates: [gate, regate],
+        request,
+        submit,
+        guard,
+        stray,
+        foreign,
+    }
+}
+
+impl Intents {
+    /// The intent's records in the row's order: its `IntentReceived`, each `GateDecided` in `seq`
+    /// order, its `IntentProposed`.
+    fn records(&self) -> [&str; 4] {
+        let [gate, regate] = &self.gates;
+        [&self.received, gate, regate, &self.proposed].map(String::as_str)
+    }
+
+    /// The hops of `from`'s `intent_id` to every record, each with `status`.
+    fn each(&self, from: &str, status: &HopStatus) -> Vec<Hop> {
+        let records = self.records().into_iter();
+        records
+            .map(|to| hop(from, INTENT, Some(to), status.clone()))
+            .collect()
+    }
+
+    /// The hops of the `IntentReceived` and each `GateDecided` once all four are nodes, then the
+    /// `IntentProposed`'s absent cause.
+    fn closing(&self) -> Vec<Hop> {
+        let mut hops: Vec<Hop> = self.records()[..3]
+            .iter()
+            .flat_map(|from| self.each(from, &HopStatus::AlreadyShown))
+            .collect();
+        hops.push(hop(
+            &self.proposed,
+            "causation_id",
+            None,
+            HopStatus::NotRecorded,
+        ));
+        hops
+    }
+}
+
+/// §4.8.1's `OrderRequestRecorded` row and DEC-772 item 5: a version-2 submission leads to its
+/// order request, whose `intent_id` links the `IntentReceived`, each `GateDecided` of the intent on
+/// its own account stream (not another account's), and the `IntentProposed` on the agent stream of
+/// its `agent_id`; their own `intent_id`s, the `GateDecided`s' read with the `IntentReceived`'s
+/// `agent_id`, return into the trace.
+#[test]
+#[ignore = "pending E12-1"]
+fn an_order_request_links_its_intent_its_gate_decisions_and_its_proposal() {
+    let i = intents();
+    let trace = traced(&i.g, WS_A, &i.submit, &[]);
+    let mut expected = vec![hop(
+        &i.submit,
+        "causation_id",
+        Some(&i.request),
+        HopStatus::Shown,
+    )];
+    expected.extend(i.each(&i.request, &HopStatus::Shown));
+    expected.extend(i.closing());
+    assert_eq!(trace.hops, expected);
+    let want = [(i.submit.as_str(), 0), (&i.request, 1)];
+    let deeper = i.records().map(|id| (id, 2));
+    assert_eq!(depths(&trace), [&want[..], &deeper].concat());
+}
+
+/// §4.8.1's intent row for a `ProtectionChanged`: its `IntentProposed` is looked up on the agent
+/// stream of its own `agent_id`. One naming `AG2` reads it `not_recorded`, with `AG2`'s stream read
+/// and in `as_of`, while the `IntentReceived` reached from it finds it on `AG1`.
+#[test]
+#[ignore = "pending E12-1"]
+fn a_protection_change_looks_up_its_intent_with_its_own_agent() {
+    let i = intents();
+    let trace = traced(&i.g, WS_A, &i.guard, &[]);
+    let mut expected = i.each(&i.guard, &HopStatus::Shown);
+    expected.extend(i.closing());
+    assert_eq!(trace.hops, expected);
+    let trace = traced(&i.g, WS_A, &i.stray, &[&agent(WS_A, "AG2")]);
+    let mut expected = i.each(&i.stray, &HopStatus::Shown);
+    expected[3] = hop(&i.stray, INTENT, None, HopStatus::NotRecorded);
+    let [received, ..] = i.records();
+    expected.extend(i.each(received, &HopStatus::AlreadyShown));
+    expected[7].status = HopStatus::Shown;
+    expected.extend(i.closing()[4..].iter().cloned());
+    assert_eq!(trace.hops, expected);
+}
+
+/// DEC-772 item 5 and §4.8.1's intent row: a `GateDecided` with no `IntentReceived` on its account
+/// stream reads that singular target `not_recorded` and itself `already_shown`; with no `agent_id`
+/// to build the agent stream from, its `IntentProposed` is one `not_recorded`, and no agent stream
+/// is read, though the intent's `IntentProposed` is recorded on `AG1`.
+#[test]
+#[ignore = "pending E12-1"]
+fn a_gate_decision_without_its_intent_received_reads_both_not_recorded() {
+    let i = intents();
+    let trace = traced(&i.g, WS_A, &i.foreign, &[]);
+    let lost = hop(&i.foreign, INTENT, None, HopStatus::NotRecorded);
+    let own = hop(
+        &i.foreign,
+        INTENT,
+        Some(&i.foreign),
+        HopStatus::AlreadyShown,
+    );
+    assert_eq!(trace.hops, [lost.clone(), own, lost]);
+}
+
+/// #1003's reading of the intent row, DEC-772 items 5 and 8: an `intent_id` naming an event of
+/// another type on the agent stream is `unexpected_type`, a node at the next depth with no hops of
+/// its own that counts toward the 256, so a link met after it is `beyond_bound`.
+#[test]
+fn an_intent_naming_another_type_is_a_node_that_counts_and_is_not_followed() {
+    let mut g = Graph::new();
+    let (acct1, ag1) = (account("ACCT1"), agent(WS_A, "AG1"));
+    let [named, intent, start] = [1, 2, 3].map(|n| event_id(820_000 + n));
+    g.add(&ag1, &named, Some(&intent), &[]);
+    g.put(
+        &acct1,
+        &intent,
+        ("IntentReceived", 1),
+        None,
+        &receipt(&named, "AG1"),
+    );
+    let leaves: Vec<String> = (0..253).map(|i| event_id(821_000 + i)).collect();
+    g.add(&ag1, &leaves[0], None, &[event_id(999_999)]);
+    for leaf in &leaves[1..] {
+        g.add(&ag1, leaf, None, &[]);
+    }
+    let cited: Vec<String> = [&intent].into_iter().chain(&leaves).cloned().collect();
+    g.add(&ag1, &start, None, &cited);
+    let trace = traced(&g, WS_A, &start, &[]);
+    let found = HopStatus::UnexpectedType {
+        event_type: "ModelOutputRecorded".to_owned(),
+    };
+    let tail = [
+        hop(&intent, INTENT, Some(&intent), HopStatus::AlreadyShown),
+        hop(&intent, INTENT, None, HopStatus::NotRecorded),
+        hop(&intent, INTENT, Some(&named), found),
+        hop(&leaves[0], EV, None, HopStatus::BeyondBound),
+    ];
+    assert_eq!((trace.hops.len(), &trace.hops[254..]), (258, &tail[..]));
+    let last = depths(&trace)[255];
+    assert_eq!(
+        (trace.nodes.len(), last, trace.truncated),
+        (256, (named.as_str(), 2), true)
+    );
 }
