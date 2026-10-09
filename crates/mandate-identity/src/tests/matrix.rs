@@ -338,7 +338,7 @@ fn expected_in(
     reduction_limited(row, expected(row, principal, ms, scope), kind)
 }
 
-/// The ID-5 oracle over a failed membership read, as `matrix.rs`'s outage test states it: a row
+/// The ID-5 oracle over a failed membership read, shared by the outage test and the seeded tests: a row
 /// that reads memberships is answered from the session's snapshot when it is risk-reducing and
 /// refused `membership_unavailable` otherwise; a row that reads none answers as with no outage.
 fn outage_expected(
