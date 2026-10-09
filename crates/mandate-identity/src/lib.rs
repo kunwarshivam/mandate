@@ -158,7 +158,10 @@
 //!
 //! Every entry point is pure: no clock, no randomness, no I/O, ordered collections only.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    marker::PhantomData,
+};
 
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_time::UtcNanos;
@@ -572,8 +575,14 @@ impl TenantContext {
     pub fn require<P: demand::RequiredPermission>(
         &self,
     ) -> Result<demand::Permitted<'_, P>, Refusal> {
-        let _ = self;
-        Err(Refusal::Unimplemented { story: "E9-8" })
+        if self.permission == P::PERMISSION {
+            Ok(demand::Permitted {
+                context: self,
+                demanded: PhantomData,
+            })
+        } else {
+            Err(Refusal::Forbidden)
+        }
     }
 }
 
@@ -819,22 +828,18 @@ impl Tenant for TenantContext {
     }
 }
 
-#[expect(
-    clippy::todo,
-    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
 impl<P: demand::RequiredPermission> Tenant for demand::Permitted<'_, P> {
     fn workspace(&self) -> WorkspaceId {
-        todo!()
+        self.context.workspace()
     }
     fn org(&self) -> OrgId {
-        todo!()
+        self.context.org()
     }
     fn principal(&self) -> PrincipalId {
-        todo!()
+        self.context.principal()
     }
     fn kind(&self) -> PrincipalKind {
-        todo!()
+        self.context.kind()
     }
 }
 

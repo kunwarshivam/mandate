@@ -10,8 +10,10 @@
 
 use std::collections::BTreeSet;
 
+use mandate_domain::fund_movement::is_fund_movement_name;
+
 use crate::ConnectError;
-use crate::grant::GrantedScopes;
+use crate::grant::{GrantedScopes, REQUESTED_SCOPES_SORTED};
 use crate::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, ConnectionState, Environment};
 
 /// Whether an Alpaca OAuth grant requested with `env=paper` counts as reaching paper only
@@ -121,17 +123,131 @@ pub struct CheckReport {
 }
 
 /// Runs checks 1, 2, 3, and 7 (connections spec §8.1):
-/// 1. scope: OAuth scopes exactly `trading` and `data`; no permission or tool that can move
-///    funds out; a live key whose permissions cannot be read is refused, a paper one recorded;
+/// 1. scope: the grant is the credential's kind; OAuth scopes exactly `trading` and `data`; no
+///    permission, scope, or tool that can move funds out (DEC-676); a live key whose permissions
+///    cannot be read or are empty is refused, a paper one recorded (DEC-685);
 /// 2. environment: from the broker's documented reach only, never a request; a credential that
 ///    may reach both environments is refused, except Alpaca paper OAuth while
 ///    [`ALPACA_PAPER_OAUTH_REACHES_PAPER_ONLY`] holds (DEC-821);
 /// 3. account: readable, and for Robinhood the dedicated agentic account (`dedicated` must be
 ///    `Some(true)`);
-/// 7. contract (MCP only): the allowlisted tools are present and the hash equals the pinned one.
+/// 7. contract (MCP only): the allowlisted tools are present and the hash equals the pinned one,
+///    which only the first connect may lack.
 pub fn run(input: &CheckInput) -> Result<CheckReport, ConnectError> {
-    let _ = input;
-    Err(ConnectError::Unimplemented { story: "E7-12" })
+    let (account, account_pii_ref) = account_check(input);
+    let mut results = vec![(Check::Account, account)];
+    if input.broker == Broker::Robinhood {
+        results.push((Check::Contract, contract_check(input)));
+    }
+    results.push((Check::Environment, environment_check(input)));
+    results.push((Check::Scope, scope_check(input)));
+    Ok(CheckReport {
+        connection_id: input.connection_id.clone(),
+        occasion: input.occasion,
+        results,
+        account_pii_ref,
+    })
+}
+
+/// Whether any name can move funds out (CN-2), by the one rule the MCP client also applies
+/// (DEC-839 item 3; DEC-676 items 1 and 4).
+fn any_moves_funds(names: &BTreeSet<String>) -> bool {
+    names.iter().any(|name| is_fund_movement_name(name))
+}
+
+/// Check 1. A grant of another kind than the credential is refused as a mismatch before any
+/// rule reads it (DEC-676 item 3). A fund-movement name is reported as one before any other
+/// mismatch (CN-2). A live key whose permissions cannot be read, or were read and are empty, is
+/// refused, since it cannot show fund movement absent (DEC-685); a paper or demo key is recorded
+/// and disclosed (DEC-441 item 4). The MCP allowlist is check 7's.
+fn scope_check(input: &CheckInput) -> Outcome {
+    match (input.auth_kind, &input.granted) {
+        (AuthKind::Oauth, Granted::OAuth(GrantedScopes(scopes))) => {
+            if any_moves_funds(scopes) {
+                Outcome::Failed(Reason::FundMovement)
+            } else if !scopes
+                .iter()
+                .map(String::as_str)
+                .eq(REQUESTED_SCOPES_SORTED)
+            {
+                Outcome::Failed(Reason::ScopeMismatch)
+            } else {
+                Outcome::Passed
+            }
+        }
+        (AuthKind::McpOauth, Granted::Tools(tools)) => {
+            if any_moves_funds(tools) {
+                Outcome::Failed(Reason::FundMovement)
+            } else {
+                Outcome::Passed
+            }
+        }
+        (AuthKind::ApiKey, Granted::KeyPermissions(Some(permissions)))
+            if any_moves_funds(permissions) =>
+        {
+            Outcome::Failed(Reason::FundMovement)
+        }
+        (AuthKind::ApiKey, Granted::KeyPermissions(permissions)) => {
+            let shown = permissions.as_ref().is_some_and(|names| !names.is_empty());
+            match input.environment {
+                Environment::Live if !shown => Outcome::Failed(Reason::PermissionsUnreadable),
+                Environment::Live | Environment::Paper => Outcome::Passed,
+            }
+        }
+        _ => Outcome::Failed(Reason::ScopeMismatch),
+    }
+}
+
+/// Check 2, from what each broker documents and never from a request (CN-3): a key is issued
+/// for one environment's host; Robinhood has only live (DEC-124); an Alpaca OAuth grant reaches
+/// paper only when requested with `env=paper` while DEC-821 holds. Any other pairing is not
+/// documented to stay in its environment, so it may reach both (DEC-441 item 21).
+fn environment_check(input: &CheckInput) -> Outcome {
+    match (input.broker, input.auth_kind) {
+        (Broker::Alpaca | Broker::KrakenDerivativesUs, AuthKind::ApiKey) => Outcome::Passed,
+        (Broker::Alpaca, AuthKind::Oauth) => {
+            if input.environment == Environment::Paper && ALPACA_PAPER_OAUTH_REACHES_PAPER_ONLY {
+                Outcome::Passed
+            } else {
+                Outcome::Failed(Reason::ReachesBoth)
+            }
+        }
+        (Broker::Robinhood, AuthKind::McpOauth) => match input.environment {
+            Environment::Live => Outcome::Passed,
+            Environment::Paper => Outcome::Failed(Reason::WrongEnvironment),
+        },
+        _ => Outcome::Failed(Reason::ReachesBoth),
+    }
+}
+
+/// Check 3, and the reference journal rule 62 records: present exactly when the account was read.
+/// The fingerprint comparison is the control services' (rule 58), never the executor's.
+fn account_check(input: &CheckInput) -> (Outcome, Option<AccountPiiRef>) {
+    match &input.account {
+        AccountRead::Unreadable => (Outcome::Failed(Reason::AccountUnreadable), None),
+        AccountRead::Read { pii_ref, dedicated } => {
+            let outcome = if input.broker == Broker::Robinhood && *dedicated != Some(true) {
+                Outcome::Failed(Reason::NotDedicated)
+            } else {
+                Outcome::Passed
+            };
+            (outcome, Some(pii_ref.clone()))
+        }
+    }
+}
+
+/// Check 7 (connections spec §6.2 rule 3): the allowlisted tools must be present, which is
+/// reported over drift, and the hash must equal the pinned one. Only the first connect has no pin
+/// and pins the hash it sees; at any other occasion a missing pin fails closed as drift (DEC-676
+/// item 2).
+fn contract_check(input: &CheckInput) -> Outcome {
+    match (&input.contract, &input.pinned_contract) {
+        (Some(seen), _) if !seen.allowlisted_tools_present => Outcome::Failed(Reason::ToolsMissing),
+        (None, _) => Outcome::Failed(Reason::ToolsMissing),
+        (Some(seen), Some(pinned)) if *pinned == seen.hash => Outcome::Passed,
+        (Some(_), None) if input.occasion == Occasion::Connect => Outcome::Passed,
+        (Some(_), _) => Outcome::Failed(Reason::ContractDrift),
+    }
 }
 
 /// §8.1's order: checks 1, 2, 3, and 7.
