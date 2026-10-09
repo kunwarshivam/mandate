@@ -262,7 +262,7 @@ impl Rules for ConfirmRequest {
     fn rules(&self, at: &str, check: &mut Check) {
         for (index, path) in self.confirmed_paths.iter().enumerate() {
             let at = format!("{at}/confirmed_paths/{index}");
-            check.rule(is_pointer(path, true), &at, "pattern");
+            check.rule(is_pointer(path, false), &at, "pattern");
         }
     }
 }
