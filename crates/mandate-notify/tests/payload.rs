@@ -8,7 +8,6 @@ use mandate_canon::to_canonical;
 use mandate_notify::{NoticeId, Notification, NotifyError, Origin, TextKey, link, payload};
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_payload_is_exactly_the_notice_id_and_the_text_key() {
     let keys = [
         "approval_needed",
@@ -29,7 +28,6 @@ fn the_payload_is_exactly_the_notice_id_and_the_text_key() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn a_link_is_the_origin_then_n_then_the_notice_id() {
     for origin in [ORIGIN, "https://owlhead.corp.internal:8443"] {
         let mut random = Recording::seeded(3);
@@ -43,7 +41,6 @@ fn a_link_is_the_origin_then_n_then_the_notice_id() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn an_origin_is_https_a_lowercase_host_and_an_optional_port() {
     for origin in [
         ORIGIN,
@@ -59,7 +56,6 @@ fn an_origin_is_https_a_lowercase_host_and_an_optional_port() {
 
 /// DEC-710 item 3: nothing but the origin, so a link can hold no token, query, or tracking.
 #[test]
-#[ignore = "pending E8-9"]
 fn an_origin_with_anything_else_is_refused() {
     for origin in [
         "",
