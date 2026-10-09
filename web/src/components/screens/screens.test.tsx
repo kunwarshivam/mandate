@@ -443,7 +443,7 @@ describe("D5 inbox and D6 request", () => {
       expect(row).toHaveTextContent(askSentence(agent));
       expect(row).toHaveTextContent(/A request waits .+, then is skipped\.$/);
     });
-    expect(askSentence(ws.agents.find((a) => a.agent_id === AGENT_IDS.swing)!)).toMatch(/^Your rules?: (.+; )*ask when the combined model score is below 0.65[;.]/);
+    expect(askSentence(ws.agents.find((a) => a.agent_id === AGENT_IDS.swing)!)).toMatch(/^Your rules?: (?:[^;]*; )*ask when the combined model score is below 0\.65[;.]/);
   });
 
   it("gives Approve and Skip the same variant and weight, with no focus or selection", () => {
