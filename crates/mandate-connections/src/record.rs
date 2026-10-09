@@ -496,7 +496,11 @@ impl Registry {
     /// fingerprint a revoked record holds must be that record's reconnect (its id and
     /// `account_ref`, else `AlreadyConnected`; its broker and environment, else
     /// `ReconnectMismatch`); one with a new id and fingerprint whose `account_ref` another record
-    /// holds, revoked or not, is `InvalidAccountRef` (CN-5).
+    /// holds, revoked or not, is `InvalidAccountRef` (CN-5). A reconnect takes the new record's
+    /// members but the state the connection was revoked from, not `active`: its account stream
+    /// continues, and with it that state (connections spec §9.1, journal spec §9.8). A revoked
+    /// record the registry was built with, whose earlier state it was not given, reconnects
+    /// `suspended`, the state that needs the most to leave.
     pub fn insert(&mut self, record: ConnectionRecord) -> Result<(), ConnectError> {
         self.not_rotating()?;
         let held = self
