@@ -234,6 +234,11 @@ impl<'a> Members<'a> {
         }
     }
 
+    /// Whether `row` is the agent's: on its own stream, or naming it or `*`, one of its intents or
+    /// orders, or an event of its stream as `causation_id`. DEC-764 item 2's account-wide clause
+    /// (`AccountRestrictionChanged`, a connection- or workspace-scope `KillSwitchActivated`) is
+    /// omitted until the journal registers those payloads, so that no account stream can hold
+    /// them yet (DEC-779).
     fn holds(&self, row: &StoredEvent) -> bool {
         if row.stream_id == self.agent_stream {
             return true;
@@ -250,11 +255,6 @@ impl<'a> Members<'a> {
                 .payload("client_order_id")
                 .is_some_and(|o| self.orders.contains(o))
             || body.causation().is_some_and(|c| self.own.contains(c))
-            || row.event_type == "AccountRestrictionChanged"
-            || (row.event_type == "KillSwitchActivated"
-                && body
-                    .payload("scope")
-                    .is_some_and(|scope| scope == "connection" || scope == "workspace"))
     }
 }
 
