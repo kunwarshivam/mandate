@@ -207,9 +207,10 @@ fn nothing_that_can_move_funds_out_is_accepted() {
 }
 
 /// Fund movement is judged by whole tokens (DEC-676, amending DEC-839 item 3): a name is split at
-/// every character that is not a letter or digit and at each lower-to-upper case change, lowercased,
-/// and refused when a token is one of DEC-839's and DEC-676's. A word that only contains one, such
-/// as `fundamentals`, is another word.
+/// every character that is not a letter or digit, at each lower-to-upper case change, and before the
+/// last capital of a run of capitals that a lowercase letter follows (`ACHDebit` is `ach`, `debit`);
+/// lowercased; and refused when a token is one of DEC-839's and DEC-676's. A word that only contains
+/// one, such as `fundamentals`, is another word.
 #[test]
 #[ignore = "pending E7-12"]
 fn fund_movement_is_judged_by_whole_tokens() {
@@ -224,6 +225,8 @@ fn fund_movement_is_judged_by_whole_tokens() {
         "disburse_now",
         "get_deposits",
         "add_funds",
+        "ACHDebit",
+        "getACHStatus",
     ] {
         let mut input = robinhood();
         input.granted = Granted::Tools(set(&["get_accounts", "place_equity_order", tool]));
@@ -239,6 +242,7 @@ fn fund_movement_is_judged_by_whole_tokens() {
         "wireless",
         "resend",
         "teacher",
+        "URLParser",
     ] {
         let mut input = robinhood();
         input.granted = Granted::Tools(set(&["get_accounts", "place_equity_order", tool]));
