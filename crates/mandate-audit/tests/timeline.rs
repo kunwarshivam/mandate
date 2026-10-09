@@ -768,3 +768,35 @@ fn membership_lookups_read_only_the_pages_snapshot() {
     let fresh = [vec![opened, gate, fill], later].concat();
     assert_eq!(served(&j), (fresh, j.heads()));
 }
+
+/// A version-1 `OrderSubmitted` of `order`: §9's members without `risk_clock`. It names no intent
+/// and no agent, so only the `client_order_id` rule could make it, or a fill of it, the agent's.
+fn submitted_v1(order: &str) -> String {
+    format!(
+        r#"{{"client_order_id":"{order}","attempt":1,"instrument_id":"inst","side":"buy","type":"limit","tif":"day","qty":"1","limit_price":"10"}}"#
+    )
+}
+
+/// DEC-778 items 1 to 3, with DEC-777 item 6. O5 is requested for the agent and submitted at
+/// version 2 on ACCT2, and filled on ACCT1: its companion, its submission, and the fill are the
+/// agent's, since the order lookup reads every timeline stream. O4 is a version-1 `OrderSubmitted`
+/// on ACCT1 with no companion and no `causation_id`; O6 is one whose `causation_id` names O5's
+/// companion, which names the agent. Neither version-1 record carries an `intent_id` or an agent,
+/// and each `causation_id` is null or names an account-stream event, so only the `client_order_id`
+/// rule is in play: a version-1 order is no one's, and neither it nor its fill is served.
+#[test]
+#[ignore = "pending E12-2"]
+fn order_links_are_version_two_and_read_every_timeline_stream() {
+    let mut j = Journal::new();
+    let s1 = stream(Some("ACCT1"));
+    let placed = order(&mut j, &stream(Some("ACCT2")), 2, ME, "O5");
+    let companion = placed[0].clone();
+    j.one(&s1, 3, ("OrderSubmitted", 1, None, &submitted_v1("O4")));
+    j.one(&s1, 3, ("FillApplied", 1, None, &filled("O4")));
+    let caused = Some(companion.as_str());
+    j.one(&s1, 3, ("OrderSubmitted", 1, caused, &submitted_v1("O6")));
+    j.one(&s1, 3, ("FillApplied", 1, None, &filled("O6")));
+    let fill = j.one(&s1, 4, ("FillApplied", 1, None, &filled("O5")));
+    let expected = [vec![j.opened(&stream(None))], placed, vec![fill]].concat();
+    assert_eq!(served(&j), (expected, j.heads()));
+}
