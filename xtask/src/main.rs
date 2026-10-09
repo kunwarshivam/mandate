@@ -11616,6 +11616,127 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// A `case … in` block's pattern words (`'' | *[!0-9]* | 0?*)`, `0)`, `*)`) are patterns,
+    /// not command words, so their globs are read; a glob in a command position stays
+    /// unreadable, in a `case` arm's body and in a pattern-shaped line outside any `case`
+    /// (#1169 round 4 ruling 1; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_case_pattern_is_no_command_word() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  case-ok:",
+            "    steps:",
+            "      - run: |",
+            "          case \"$PLANNED\" in",
+            "            '' | *[!0-9]* | 0?*) exit 1 ;;",
+            "            0) test \"$RESULT\" = skipped ;;",
+            "            *) test \"$RESULT\" = success ;;",
+            "          esac",
+            "          cargo test -p a-lib",
+            "  glob-in-arm:",
+            "    steps:",
+            "      - run: |",
+            "          case \"$X\" in",
+            "            x) car* test -p rh-host ;;",
+            "          esac",
+            "  no-case:",
+            "    steps:",
+            "      - run: |",
+            "          car*|x) echo",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["glob-in-arm", "no-case"]);
+        names(&problems, &["glob-in-arm"], &["case-ok"]);
+        Ok(())
+    }
+
+    /// The one interpreter line a person has read, `web-e2e.yml`'s `node -p` version probe, is
+    /// read only byte for byte: the same line with one character changed, or with a cargo
+    /// command added, cannot be read (#1169 round 4 ruling 2).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_read_interpreter_line_is_read_only_exactly() -> Result<()> {
+        let probe = r##"echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT""##;
+        let flow = |run: &str| {
+            ci_file(
+                ".github/workflows/web-e2e.yml",
+                &format!("on: push\njobs:\n  web-e2e:\n    steps:\n      - run: {run}\n"),
+            )
+        };
+        assert_eq!(host_problems(&[flow(probe)])?, Vec::<String>::new());
+        let changed = [
+            probe.replace("node -p", "node -e"),
+            probe.replace(".version", ".versions"),
+            format!("{probe}; cargo test -p rh-host"),
+        ];
+        for run in changed {
+            unreadable(&host_problems(&[flow(&run)])?, &["web-e2e"]);
+        }
+        let elsewhere = ci_file(
+            ".github/workflows/ci.yml",
+            &format!("on: push\njobs:\n  web-e2e:\n    steps:\n      - run: {probe}\n"),
+        );
+        unreadable(&host_problems(&[elsewhere])?, &["web-e2e"]);
+        Ok(())
+    }
+
+    /// The repository's own `xtask` alias expands to `run --quiet --locked --package xtask --`,
+    /// whose build selects `xtask` alone; the literal `cargo xtask ci lint` is judged beside it
+    /// and, naming no package, selects every member. An alias chain that loops cannot be read
+    /// (#1169 round 4 ruling 3; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_xtask_alias_selects_xtask_and_a_loop_cannot_be_read() -> Result<()> {
+        let runner = member(RUNNER, &[("rh-host", None)]);
+        let mut meta = workspace(vec![
+            with_features(runner, &[("live", &["dep:rh-host"])]),
+            member("xtask", &[]),
+            member("rh-host", &[]),
+        ]);
+        meta.workspace_default_members
+            .retain(|id| id != "rh-host 0.0.0");
+        let flows = [
+            ci_file(
+                ".cargo/config.toml",
+                "[alias]\nxtask = \"run --quiet --locked --package xtask --\"\nloop-a = \
+                 \"loop-b\"\nloop-b = \"loop-a\"\n",
+            ),
+            workflow(&[
+                ("lint", "cargo xtask ci lint"),
+                ("looping", "cargo loop-a -p xtask"),
+            ]),
+        ];
+        let asked = RefCell::new(Vec::new());
+        let problems = resolved_live_problems(&live_policy(), &meta, &flows, &|w| {
+            asked.borrow_mut().push(w.to_vec());
+            Ok(resolved(&[
+                (RUNNER, &[], &[]),
+                ("xtask", &[], &[]),
+                ("rh-host", &[], &[]),
+            ]))
+        })?;
+        let asked = asked.into_inner();
+        for expected in [
+            words("xtask ci lint"),
+            words("run --quiet --locked --package xtask -- ci lint"),
+        ] {
+            assert!(asked.contains(&expected), "asks {expected:?}: {asked:?}");
+        }
+        let lint_host: Vec<&String> = problems
+            .iter()
+            .filter(|p| p.contains("`lint`") && p.contains("`rh-host`"))
+            .collect();
+        assert_eq!(
+            lint_host.len(),
+            1,
+            "only the literal build holds it: {problems:?}"
+        );
+        unreadable(&problems, &["looping"]);
+        Ok(())
+    }
+
     /// A flow sequence under `jobs:` is read only when it is flat: one that holds a `:`, a nested
     /// `[`, `{` or `]`, or an `&`, `*` or `!`, even inside a quoted scalar, cannot be read. One
     /// case for each character, so dropping any one from the rule is caught (#1169 round 3
