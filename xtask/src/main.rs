@@ -7999,6 +7999,22 @@ jq -r "$filter" "$src"
     /// fetched or written at run time (`curl … | sh`, a generated file) cannot be read by a
     /// static scan; the cargo-word rule is what leaves such a script no way to carry a computed
     /// feature, and the live-token backstop no way to carry `live` itself.
+    ///
+    /// The final round (the coordinator's eleventh-round rulings under DEC-176). An `awk` word
+    /// holding `system(` or `getline`, a `sed` word with an `e` command or an `/e` flag, and a
+    /// `git` with `-c alias.*=!` or a `!` alias make that command executing, so its words are
+    /// re-read; an executing `awk` or `sed` program builds a command no static reading can
+    /// follow, so it is refused outright. The value rule applies to every feature flag, with or
+    /// without `cargo`: `--features`, `--features=`, `FEATURES=` and `--all-features` are feature
+    /// flags in any word, and `-F` only in a command whose command word is `cargo` or may be
+    /// cargo (it holds `$`, a backtick or `${{`, or is a whole-array expansion), or in a re-read
+    /// word holding the token `cargo`, so `awk -F:` and `gh api -F owner="$o"` are no feature
+    /// flags. Outside the one compile-only form, `--all-features` is refused, and so is a value
+    /// that is not a complete literal of `[a-z0-9_,-]` without the token `live`, which any value
+    /// holding `$`, a backtick or `${{` is not. `Makefile`, `*.mk`, `justfile`,
+    /// `Dockerfile*` and `docker-compose*.yml` are read anywhere in the repository. Out of reach:
+    /// Rust sources (`xtask/`, `build.rs`), which code review and the layers check cover, and
+    /// scripts that exist only at run time.
     #[test]
     #[ignore = "pending E7-26"]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
@@ -8221,10 +8237,33 @@ jq -r "$filter" "$src"
             "cmd=\"cargo build --features $A$B\"; $cmd",
             "read -r cmd <<< \"cargo build --features $A$B\"; $cmd",
         ];
+        let refused_through_an_executing_command_at_line_two = [
+            "echo \"cargo build --features $A$B\" | sh",
+            "printf '%s' \"c=cargo; $c build --features $A$B\" | bash",
+            "source <(echo \"cargo build --features $A$B\")",
+            ". <(printf '%s\\n' \"cargo build --features $A$B\")",
+            "sh <<< \"cargo build --features $A$B\"",
+            "x=(cargo build --features \"$A$B\"); \"${x[@]}\"",
+            "watch \"cargo build --features $A$B\"",
+            "parallel \"cargo build --features $A$B\" ::: x",
+            "frobnicate \"cargo build $F\"",
+            "x=($C build --features $A$B); \"${x[@]}\"",
+            "\"${undefined[@]}\" build",
+            "if cargo build --features \"$A$B\"; then",
+            "gh alias set --shell x \"cargo build --features $A$B\"",
+            "ssh h \"cargo build $F\"",
+            "sudo sh -c \"cargo build $F\"",
+            "awk 'BEGIN{system(\"c\" \"argo build --features \" a b)}' a=li b=ve",
+            "echo a | sed \"s/a/c&rgo build --features $A$B/e\"",
+            "git -c 'alias.b=!sh -c \"$0\"' b \"$c $A\"",
+            "make build FEATURES=$A$B",
+            "$C build -F \"$A$B\"",
+        ];
         let refused_at_line_two = refused_with_no_cargo_word
             .iter()
             .chain(&refused_through_a_command_word_that_may_be_cargo)
-            .chain(&refused_by_the_cargo_word_rule);
+            .chain(&refused_by_the_cargo_word_rule)
+            .chain(&refused_through_an_executing_command_at_line_two);
         for line in refused_at_line_two {
             let files = [ci_file(
                 ".github/scripts/build.sh",
@@ -8291,6 +8330,11 @@ jq -r "$filter" "$src"
                 "steps:\n  - name: liveness\n    run: ./probe.sh --liveness\n",
             ),
             (".github/scripts/build.sh", "set -e\necho \"$a $b\"\n"),
+            (".github/scripts/build.sh", "set -e\nawk -F: '{print $1}'\n"),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ngh api -F owner=\"$o\"\n",
+            ),
             (
                 ".github/scripts/build.sh",
                 "set -e\nflags=()\nfor arg in \"$@\"; do flags+=(\"$arg\"); done\nparse_flags \"${flags[@]}\"\n",
@@ -8342,6 +8386,10 @@ jq -r "$filter" "$src"
                 ".github/workflows/ci.yml",
                 "steps:\n  - uses: an/action@v1\n    with:\n      args: -qFlive\n",
             ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: --features ${{ matrix.a }}${{ matrix.b }}\n",
+            ),
         ];
         for (path, text) in refused_inputs_with_no_cargo_word {
             let files = [ci_file(path, text)];
@@ -8352,88 +8400,13 @@ jq -r "$filter" "$src"
         let refused_through_an_executing_command = [
             (
                 ".github/scripts/build.sh",
-                "set -e\necho \"cargo build --features $A$B\" | sh\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nprintf '%s' \"c=cargo; $c build --features $A$B\" | bash\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nsource <(echo \"cargo build --features $A$B\")\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\n. <(printf '%s\\n' \"cargo build --features $A$B\")\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nsh <<< \"cargo build --features $A$B\"\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nx=(cargo build --features \"$A$B\"); \"${x[@]}\"\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nwatch \"cargo build --features $A$B\"\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nparallel \"cargo build --features $A$B\" ::: x\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
                 "set -e\nsetsid sh <<'EOF'\ncargo build --features $A$B\nEOF\n",
                 ":3",
             ),
             (
                 ".github/scripts/build.sh",
-                "set -e\nfrobnicate \"cargo build $F\"\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nx=($C build --features $A$B); \"${x[@]}\"\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\n\"${undefined[@]}\" build\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nif cargo build --features \"$A$B\"; then\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\ngh alias set --shell x \"cargo build --features $A$B\"\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
                 "set -e\necho '\ncargo build $F\n' | sh\n",
                 ":3",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nssh h \"cargo build $F\"\n",
-                ":2",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nsudo sh -c \"cargo build $F\"\n",
-                ":2",
             ),
             (
                 ".github/scripts/build.sh",
@@ -8555,7 +8528,8 @@ jq -r "$filter" "$src"
 
     /// The files the check reads are every file that decides a build: workflows (`.yml` and
     /// `.yaml`), scripts, composite actions under `.github/actions`, `deploy/`'s shell scripts
-    /// (the demo host's runbook, DEC-822), and `.cargo/config.toml` (aliases and `rustflags`); a
+    /// (the demo host's runbook, DEC-822), `.cargo/config.toml` (aliases and `rustflags`), and
+    /// `Makefile`, `*.mk`, `justfile`, `Dockerfile*` and `docker-compose*.yml` anywhere; a
     /// repository without the optional ones reads the rest (#738 review, finding 4).
     #[test]
     #[ignore = "pending E7-26"]
@@ -8584,6 +8558,11 @@ jq -r "$filter" "$src"
             ".github/pull_request_template.md",
             "deploy/f.sh",
             "deploy/README.md",
+            "Makefile",
+            "tools/build.mk",
+            "justfile",
+            "docker/Dockerfile.ci",
+            "docker-compose.ci.yml",
         ] {
             write(path)?;
         }
@@ -8604,7 +8583,12 @@ jq -r "$filter" "$src"
                 ".github/scripts/c.sh",
                 ".github/workflows/a.yml",
                 ".github/workflows/b.yaml",
+                "Makefile",
                 "deploy/f.sh",
+                "docker-compose.ci.yml",
+                "docker/Dockerfile.ci",
+                "justfile",
+                "tools/build.mk",
             ]
         );
         Ok(())
