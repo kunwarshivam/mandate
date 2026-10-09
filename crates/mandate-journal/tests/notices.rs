@@ -129,7 +129,6 @@ fn run(cases: &[&str]) {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_notice_stream_id_parses_to_its_own_stream_type() {
     let id = StreamId::parse(NTF).map(|s| (s.stream_type(), s.as_str().to_owned()));
     assert_eq!(id, Some((StreamType::Notice, NTF.to_owned())));
@@ -139,7 +138,6 @@ fn the_notice_stream_id_parses_to_its_own_stream_type() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_alert_and_notice_records_are_catalogued_and_closed_on_their_streams() {
     let homes: [(&str, &[&str]); 4] = [
         ("OwnerAlertSent", &STREAMS[..3]),
@@ -170,7 +168,6 @@ const NOT_ON_NTF: &str = "IntentReceived GateDecided FillApplied MarkUpdated Age
     OwnerAlertSent";
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_notice_stream_admits_only_its_own_three_records() {
     let opened = envelope(NTF, 9, "StreamOpened", "null", r#"{"unregistered":true}"#);
     assert_eq!(outcome(&opened), "schema@payload.unregistered");
@@ -187,7 +184,6 @@ fn the_notice_stream_admits_only_its_own_three_records() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn every_member_is_required_and_no_unlisted_member_is_admitted() {
     let alerts = STREAMS[..3].iter().map(|s| alert(s, 101, 100));
     let notices = ["opened", "issued", "attempted"].map(base);
@@ -210,7 +206,6 @@ fn every_member_is_required_and_no_unlisted_member_is_admitted() {
 
 /// Non-negotiable 6 and NT-1, NT-2: no record admits trading content, an address, or a sentence.
 #[test]
-#[ignore = "pending E8-9"]
 fn no_alert_or_notice_record_can_carry_trading_content() {
     let content = r#""AAPL buy 10 @ 150.25""#;
     for name in ["alert", "opened", "issued", "attempted"] {
@@ -250,7 +245,6 @@ fn no_alert_or_notice_record_can_carry_trading_content() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_member_types_refuse_event_ids_and_foreign_vocabulary() {
     let ulid = event_id(5);
     let upper = NOTICE.to_uppercase();
@@ -307,7 +301,6 @@ fn the_member_types_refuse_event_ids_and_foreign_vocabulary() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn every_kind_and_vocabulary_member_is_admitted_where_dec_720_allows_it() {
     let mut cases = Vec::new();
     let kinds: Vec<(&str, &str)> = KINDS
@@ -365,7 +358,6 @@ fn every_kind_and_vocabulary_member_is_admitted_where_dec_720_allows_it() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_consistency_rules_refuse_at_their_paths() {
     let other = event_id(2);
     let command = event_id(7);
@@ -433,7 +425,6 @@ fn the_consistency_rules_refuse_at_their_paths() {
 /// Rule N12 spans a batch: an alert's subject is an earlier draft of its own batch that is not an
 /// alert, and no two alerts in the batch name one subject.
 #[test]
-#[ignore = "pending E8-9"]
 fn the_batch_rule_binds_an_alert_to_an_earlier_subject_in_its_batch() {
     let parsed = |draft: Vec<u8>| Draft::parse(&draft).unwrap();
     let mark = || parsed(mark_draft(1, "1"));
