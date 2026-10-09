@@ -76,7 +76,6 @@ fn section(fixture: &Value) -> &Value {
 /// Every valid draft parses: an `ask` the overlay narrowed, suppressed or not, and a `deny` of an
 /// opening the agent or a connected client asked for, each `decided_by: policy_overlay`.
 #[test]
-#[ignore = "pending E7-19"]
 fn every_policy_overlay_valid_draft_parses() {
     let fixture = fixture();
     let valid = list(section(&fixture), "valid_drafts");
@@ -105,7 +104,6 @@ fn every_policy_overlay_valid_draft_parses() {
 /// Every invalid draft is refused with its reason at its path: the overlay's label on an `auto`
 /// (rule 7), with a level appended (rule 5's closed set), and after a denied dry run (rule 5).
 #[test]
-#[ignore = "pending E7-19"]
 fn every_policy_overlay_invalid_draft_is_refused_with_its_reason_at_its_path() {
     let fixture = fixture();
     let invalid = list(section(&fixture), "invalid_drafts");
