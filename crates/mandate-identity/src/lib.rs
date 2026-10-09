@@ -176,10 +176,7 @@
 //!
 //! Every entry point is pure: no clock, no randomness, no I/O, ordered collections only.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    marker::PhantomData,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_time::UtcNanos;
@@ -471,14 +468,13 @@ impl TenantContext {
     pub fn require<P: demand::RequiredPermission>(
         &self,
     ) -> Result<demand::Permitted<'_, P>, Refusal> {
-        if self.permission == P::PERMISSION {
-            Ok(demand::Permitted {
-                context: self,
-                demanded: PhantomData,
-            })
-        } else {
-            Err(Refusal::Forbidden)
-        }
+        demand::require(self)
+    }
+}
+
+impl demand::Grants for TenantContext {
+    fn grants(&self, permission: Permission) -> bool {
+        self.permission == permission
     }
 }
 

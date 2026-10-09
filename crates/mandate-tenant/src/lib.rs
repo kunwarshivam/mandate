@@ -153,8 +153,9 @@ pub enum PrincipalKind {
 /// `SystemContext` of `mandate-identity-system` for the deployment's own background processes
 /// (DEC-642 items 3 and 5 to 7). It is sealed by [`Sealed`], which only this crate's allowed
 /// dependents can name, so no other type implements it, and none of its implementors takes a bare
-/// workspace ID. `mandate-identity` re-exports it as `mandate_identity::Tenant`.
-pub trait Tenant: Sealed {
+/// workspace ID. `mandate-identity` re-exports it as `mandate_identity::Tenant`. It is `Debug`, so
+/// a `Permitted` witness can borrow any context as a `&dyn Tenant` (DEC-668 item 4).
+pub trait Tenant: Sealed + std::fmt::Debug {
     /// The workspace whose data may be reached.
     fn workspace(&self) -> WorkspaceId;
     /// The workspace's organization.
