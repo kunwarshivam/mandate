@@ -521,6 +521,8 @@ def row_cases(rows: list[dict]) -> list[dict]:
     by_anchor = {"kind": "anchor", "anchor_event_id": ROW_IDS[ANCHOR]}
     moved = json.loads(edited(rows[SEGMENT], new_prev(True), True)["body"])["payload"]
     loose = json.loads(rows[ANCHOR]["body"])
+    lost = segment(acct, 10, 12, "1" * 64)
+    stray = row_of({**json.loads(rows[SEGMENT]["body"]), "stream_id": acct, "event_id": "01J8Z3C6A000000000000000R7", "payload": lost})
     twice = row_of({**json.loads(rows[SEGMENT]["body"]), "event_id": "01J8Z3C6A000000000000000R6", "seq": 5, "prev_hash": rows[ANCHOR]["hash"]})
     specs = [
         ("genesis_start_reads_no_record", "§11: the genesis start", acct, 1, {"kind": "genesis"}, None, COLD["unreadable"], "start"),
@@ -555,6 +557,7 @@ def row_cases(rows: list[dict]) -> list[dict]:
         ("manifest_forged_under_its_old_hash", "§11 check 4: the body forged, the stored hash kept", acct, 4,
          {"kind": "manifest", "manifest_hash": moved["manifest_hash"]}, (SEGMENT, edited(rows[SEGMENT], new_prev(True), False)),
          cold_read(seg), "rehash_mismatch"),
+        ("segment_on_an_account_stream", "§9.14: the workspace's control-stream records only", acct, 10, {"kind": "manifest", "manifest_hash": lost["manifest_hash"]}, (FOREIGN, stray), cold_read(lost), "no_start"),
         ("segment_exported_twice", "DEC-893 item 7: the segment recorded again at seq 5, chained, in the foreign row's place", acct, 4, by_hash, (FOREIGN, twice), cold_read(seg), "ambiguous_start"),
         ("manifest_row_breaks_rule_117", "rule 117: the manifest hash is not its fields'", acct, 4, by_hash,
          (SEGMENT, edited(rows[SEGMENT], new_prev(False), True)), cold_read(seg), "rule_117"),
@@ -920,7 +923,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
 RANGE_MUTANTS = ("self.missing", "self.seq", "self.hash")
 START_MUTANTS = ("start.genesis_seq", "start.first_seq", "start.anchor_seq", "start.null_token", "start.workspace")
 ROW_MUTANTS = ("row.non_canonical", "row.column_mismatch", "row.column_workspace", "row.rehash_mismatch", "row.rule_117",
-               "row.anchor_unchecked", "row.first_match", "cold.confirm", "cold.absent_ok", "cold.digest")
+               "row.anchor_unchecked", "row.first_match", "row.non_ctl_stream", "cold.confirm", "cold.absent_ok", "cold.digest")
 
 
 def row_mutant_killers(section: dict, mutant: str) -> list[str]:

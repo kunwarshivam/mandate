@@ -1886,7 +1886,7 @@ def start_from_rows(
             record = {**{k: row[k] for k in ("event_id", "event_type", "stream_id")}, "payload": json.loads(row["body"])["payload"]}
         except (ValueError, KeyError, TypeError):
             return None
-        return trusted_start([record], stream, from_seq, request, skip) if row["stream_id"].startswith("ctl:") else None
+        return trusted_start([record], stream, from_seq, request, skip) if row["stream_id"].startswith("ctl:") or "row.non_ctl_stream" in skip else None
 
     hits = [(row, got) for row in rows if (got := fits(row))]
     if not hits:

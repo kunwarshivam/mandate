@@ -58702,6 +58702,39 @@
      }
     },
     {
+     "name": "segment_on_an_account_stream",
+     "clause": "§9.14: the workspace's control-stream records only",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+     "from_seq": 10,
+     "request": {
+      "kind": "manifest",
+      "manifest_hash": "ee96467e343ed5bfe81970c3165a693f41a9bc1df0b6a096a2d6bc09526c2b44"
+     },
+     "replace": {
+      "index": 4,
+      "row": {
+       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+       "seq": 3,
+       "event_id": "01J8Z3C6A000000000000000R7",
+       "event_type": "SegmentExported",
+       "schema_version": 1,
+       "environment": "paper",
+       "recorded_at": "2026-09-21T16:00:00.000000000Z",
+       "prev_hash": "de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d",
+       "hash": "bba7be932e24630f28bed1c857cd23c0066414b7860791e0cbb428e130e49fd8",
+       "body": "{\"actor\":{\"build\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"id\":\"control_services\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3C6A000000000000000R7\",\"event_time\":\"2026-09-21T16:00:00.000000000Z\",\"event_type\":\"SegmentExported\",\"payload\":{\"file_sha256\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"first_prev_hash\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"first_seq\":10,\"last_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"last_seq\":12,\"manifest_hash\":\"ee96467e343ed5bfe81970c3165a693f41a9bc1df0b6a096a2d6bc09526c2b44\",\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1\"},\"pii_refs\":[],\"prev_hash\":\"de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d\",\"recorded_at\":\"2026-09-21T16:00:00.000000000Z\",\"schema_version\":1,\"seq\":3,\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1\"}"
+      }
+     },
+     "cold": {
+      "state": "read",
+      "bytes": "{\"file_sha256\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"first_prev_hash\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"first_seq\":10,\"last_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"last_seq\":12,\"stream\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1\"}"
+     },
+     "expect": {
+      "outcome": "refused",
+      "cause": "no_start"
+     }
+    },
+    {
      "name": "segment_exported_twice",
      "clause": "DEC-893 item 7: the segment recorded again at seq 5, chained, in the foreign row's place",
      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
