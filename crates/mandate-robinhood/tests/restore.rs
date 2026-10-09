@@ -862,24 +862,29 @@ fn origins_still_cancel(label: &str, records: &[FoldedEvent], all: &[ClientOrder
     assert_eq!(*calls.borrow(), expected, "{label}: rule 13");
 }
 
-/// DEC-876: a successor without its own `OrderSubmitted` whose records name two different
-/// `replaces` targets has no one origin to inherit from, so it is in doubt in either record order,
-/// and whether the two origins disagree (A and B) or agree (A and C). Neither the first link nor
-/// the last decides.
+/// DEC-876: a successor without its own `OrderSubmitted` whose records name two or more different
+/// `replaces` targets has no one origin to inherit from, so it is in doubt in any record order,
+/// whether two origins disagree (A and B) or agree (A and C), and with three (A, B and C). Neither
+/// the first link nor the last decides.
 #[test]
 #[ignore = "pending E7-6"]
 fn a_successor_naming_two_different_origins_is_in_doubt_in_either_order() {
     let torn = successor("01JREPLACETORN");
     let mut placeable = Vec::new();
-    for (first, second, label) in [
-        (0, 1, "A then B"),
-        (1, 0, "B then A"),
-        (0, 2, "A then C"),
-        (2, 0, "C then A"),
-    ] {
+    let variants: [(&[usize], &str); 7] = [
+        (&[0, 1], "A then B"),
+        (&[1, 0], "B then A"),
+        (&[0, 2], "A then C"),
+        (&[2, 0], "C then A"),
+        (&[0, 1, 2], "A then B then C"),
+        (&[2, 0, 1], "C then A then B"),
+        (&[1, 2, 0], "B then C then A"),
+    ];
+    for (targets, label) in variants {
         let (mut s, all) = origins();
-        replacing(&mut s, &torn, &all[first], "rh-torn");
-        replacing(&mut s, &torn, &all[second], "rh-torn");
+        for &target in targets {
+            replacing(&mut s, &torn, &all[target], "rh-torn");
+        }
         placeable.extend(placeable_where_in_doubt(label, &s.0, &[&torn]));
         origins_still_cancel(label, &s.0, &all);
     }
@@ -924,11 +929,14 @@ fn its_own_submit_does_not_rescue_a_key_naming_two_different_origins() {
 
 /// DEC-876 and DEC-874 item 2: a successor without its own `OrderSubmitted` that `replaces` a key
 /// naming two different targets inherits that key's doubt, whether or not the key has its own
-/// readable submit and in either order of its links.
+/// readable submit and in either order of its links. A successor of it with its own readable
+/// submit does not inherit (DEC-872 item 3, DEC-876 item 3), so it still cancels by its one id
+/// with its own instrument and side (`AGENTS.md` rule 13).
 #[test]
 #[ignore = "pending E7-6"]
 fn a_successor_of_a_key_naming_two_different_origins_inherits_its_doubt() {
     let (torn, heir) = (successor("01JREPLACEMIDDLE"), successor("01JREPLACEHEIR2"));
+    let own_heir = successor("01JREPLACEOWNHEIR");
     let mut placeable = Vec::new();
     for (first, second, own, label) in [
         (0, 1, false, "A then B"),
@@ -943,8 +951,19 @@ fn a_successor_of_a_key_naming_two_different_origins_inherits_its_doubt() {
         replacing(&mut s, &torn, &all[first], "rh-middle");
         replacing(&mut s, &torn, &all[second], "rh-middle");
         replacing(&mut s, &heir, &torn, "rh-heir2");
+        replacing(&mut s, &own_heir, &torn, "rh-own-heir");
+        s.submitted(&own_heir, "SPY", "sell");
         placeable.extend(placeable_where_in_doubt(label, &s.0, &[&torn, &heir]));
         origins_still_cancel(label, &s.0, &all);
+        let (mut c, calls) = restored(&s.0, "confirmed");
+        let expected = order(&own_heir, "rh-own-heir", "SPY", Side::Sell);
+        let outcome = cancel(&mut c, &own_heir);
+        assert_eq!(
+            outcome,
+            Ok(BrokerOutcome::Order(expected)),
+            "{label}: rule 13"
+        );
+        assert_eq!(*calls.borrow(), [cancelled_by("rh-own-heir")], "{label}");
     }
     assert!(
         placeable.is_empty(),
