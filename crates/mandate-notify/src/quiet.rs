@@ -37,6 +37,9 @@ pub enum QuietVerdict {
 /// window or `offsets`. The offset in force at an instant is the entry of `offsets` with the latest
 /// `from` at or before it, the later in `offsets` of two with the same `from`.
 ///
+/// The verdict is for push channels only: NT-7 leaves pull channels untouched, so the caller
+/// applies it to push and always delivers to pull channels. The function takes no channel.
+///
 /// # Errors
 /// [`NotifyError::Unrepresentable`] when an `action` or `info` attempt needs an offset that no
 /// entry covers, or an instant falls outside `UtcNanos`'s range.
