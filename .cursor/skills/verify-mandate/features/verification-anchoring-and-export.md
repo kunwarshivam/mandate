@@ -6,8 +6,8 @@
   `crates/mandate-journal/src/control_verify.rs` (§11's control-stream range checks
   `anchor_self_mismatch` and `break_glass_cause_mismatch`, run after `verify_events`; E12-3),
   `crates/mandate-journal/src/start.rs` (§9.14's trusted start of a range, resolved from
-  genesis, a `SegmentExported`, or a stamped `AnchorComputed` among the workspace's own records,
-  and a malformed `stream_id` refused, DEC-784; E12-3).
+  genesis, a `SegmentExported`, or a stamped `AnchorComputed` on the workspace's own control
+  stream only, and a malformed `stream_id` refused, DEC-784; E12-3).
 - **Tests:** `crates/mandate-journal/tests/verify.rs`, `crates/mandate-journal/tests/properties.rs`
   (any tampering detected; rewrites caught only by the anchor; independent Merkle construction),
   `crates/mandate-journal/tests/control_verify.rs` (the two control-stream range checks against

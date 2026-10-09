@@ -5,7 +5,7 @@
 
 use mandate_canon::{Digest, Value, parse};
 
-use crate::{StoredEvent, TrustedStart};
+use crate::{StoredEvent, StreamId, StreamType, TrustedStart};
 
 /// Workspace API §4.8.1's `trusted_start`: it names the record to read, never the `prev_hash`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,14 +24,16 @@ pub enum TrustedStartError {
     /// No usable start: the record is absent, another workspace's (the same refusal, DEC-767), of
     /// another stream, an anchor without a `token`, or does not fit `from_seq` (§4.8.1).
     Refused,
-    /// The resolver is not built yet (DEC-77).
+    /// Never returned now that E12-3 built the resolver; kept, as `ControlVerifyError` keeps its
+    /// own, so a caller's match stays the same across the crate's stubs (DEC-77).
     Unimplemented { story: &'static str },
 }
 
 /// The trusted start of a range of `stream_id` entered at `from_seq`, from `request`, among the
-/// `records` of `stream_id`'s own workspace only: genesis is seq 1 with 64 zeros; a
-/// `SegmentExported` of `stream_id` with `first_seq` = `from_seq` gives its `first_prev_hash`; an
-/// `AnchorComputed` with a `token` gives the `hash` of its leaf for `stream_id` at `from_seq − 1`.
+/// `records` on the control stream of `stream_id`'s own workspace only: genesis is seq 1 with 64
+/// zeros; a `SegmentExported` of `stream_id` with `first_seq` = `from_seq` gives its
+/// `first_prev_hash`; an `AnchorComputed` with a `token` gives the `hash` of its leaf for
+/// `stream_id` at `from_seq − 1`.
 pub fn resolve_trusted_start(
     records: &[StoredEvent],
     stream_id: &str,
@@ -40,9 +42,10 @@ pub fn resolve_trusted_start(
 ) -> Result<TrustedStart, TrustedStartError> {
     let refused = TrustedStartError::Refused;
     let workspace = workspace_of(stream_id).ok_or(refused)?;
-    let own = records
-        .iter()
-        .filter(|r| workspace_of(&r.stream_id) == Some(workspace));
+    let own = records.iter().filter(|r| {
+        StreamId::parse(&r.stream_id).is_some_and(|s| s.stream_type() == StreamType::Control)
+            && workspace_of(&r.stream_id) == Some(workspace)
+    });
     let found = match request {
         StartRequest::Genesis => (from_seq == 1).then_some(Digest::ZERO),
         StartRequest::Manifest { manifest_hash } => own
