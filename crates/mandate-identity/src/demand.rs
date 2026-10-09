@@ -89,13 +89,6 @@ impl RequiredPermission for ReadRecords {
 /// and no constructor but [`TenantContext::require`].
 #[derive(Debug)]
 pub struct Permitted<'a, P: RequiredPermission> {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the Tenant methods read it once E9-8 replaces their todo!() stubs (DEC-137)"
-        )
-    )]
     pub(crate) context: &'a TenantContext,
     pub(crate) demanded: PhantomData<P>,
 }

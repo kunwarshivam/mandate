@@ -1796,6 +1796,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-paper"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-alpaca",
+ "mandate-artifacts-fs",
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-marketdata",
+ "mandate-modelhost",
+ "mandate-num",
+ "mandate-shell",
+ "mandate-spec",
+ "mandate-time",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-passkey"
 version = "0.0.0"
 dependencies = [

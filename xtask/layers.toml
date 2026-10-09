@@ -48,8 +48,8 @@
 #      quant model host (E15-13, DEC-503 item 2), beside the shell so that neither can depend on
 #      the other: the shell cannot run a model, and the host cannot reach sizing, the gate, the
 #      journal, the executor or the connector
-#   9  mandate-paper (planned: the paper adapter, the only crate that sees both the host and the
-#      shell), and mandate-cli (DEC-525): above the model host, so `model register` takes the content object and
+#   9  mandate-paper, the paper adapter (E7-19 slice 5, DEC-503 item 2): the only crate that sees
+#      both the host and the shell, and mandate-cli (DEC-525): above the model host, so `model register` takes the content object and
 #      its hash from `mandate_modelhost::content()` and no caller supplies a hash; its
 #      `forbidden_internal` list keeps it from ever reaching mandate-alpaca, mandate-shell or
 #      mandate-paper, so the founder's CLI cannot place an order
@@ -64,7 +64,6 @@ impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
 planned = [
-    "mandate-paper",
     "mandate-identity-system",
     "mandate-tenant",
     "mandate-identity-seal",
@@ -314,4 +313,12 @@ allowed_external = ["clap", "thiserror", "tokio"]
 layer = 8
 safety_critical = true
 pure = true
+allowed_external = ["thiserror"]
+
+# The paper adapter (E7-19 slice 5, the first paper trade brief's E1a): it hands the model host's
+# output to the shell's production cycle and decides nothing itself.
+[crates.mandate-paper]
+layer = 9
+safety_critical = true
+pure = false
 allowed_external = ["thiserror"]

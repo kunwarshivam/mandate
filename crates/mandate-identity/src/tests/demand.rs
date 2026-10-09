@@ -97,7 +97,6 @@ fn columns() -> [Principal; 6] {
 /// row, is refused `forbidden` unless it is for Read records, which yields a witness; the rows
 /// reached are exactly [`OTHER_ROWS`] and Read records, so no row goes unexercised.
 #[test]
-#[ignore = "pending E9-8"]
 fn a_context_for_another_permission_cannot_read_records() {
     let seen: Vec<_> = ROWS
         .iter()
@@ -118,7 +117,6 @@ fn a_context_for_another_permission_cannot_read_records() {
 /// its workspace, organization, principal, and kind are the fixture's, across two workspaces of two
 /// organizations and two principal kinds, and a context for another permission yields none.
 #[test]
-#[ignore = "pending E9-8"]
 fn require_returns_the_context_it_was_called_on() {
     let contexts = [
         context(&Principal::User { id: ADMIN }, O1, W1, P::ReadRecords),
