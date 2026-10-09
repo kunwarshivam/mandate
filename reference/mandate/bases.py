@@ -108,7 +108,10 @@ REGISTRY = {"quant.mean_reversion": {"version": "1.0.0", "content_hash": H_MR, "
             "llm.news_research": {"version": "0.3.0", "content_hash": H_NEWS, "params": []},
             "llm.research_agent": {"version": "0.1.0", "content_hash": H_RES, "params": [], "admits_instruments": True}}
 CTX = {"account_equity_usd": "25000", "other_allocations_usd": "0", "validation_date": "2026-09-24",
-       "registry": REGISTRY, "approver_users": 1, "workspace_users": 1}
+       "registry": REGISTRY, "approver_users": 1, "workspace_users": 1,
+       "stop_limit_asset_classes": ["crypto"]}
+"""The bases' connection is Alpaca paper, whose profile protects only crypto with a stop-limit (trading spec §5.2), so
+the defaults state it: absent, validation fails closed and every allowed asset class needs the offset (DEC-539)."""
 
 for _n, _m in BASES.items():
     V.validate(_m)

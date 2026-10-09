@@ -1,0 +1,26 @@
+[
+  {
+    "label": "no size",
+    "remove": [
+      "/size"
+    ]
+  },
+  {
+    "label": "auto: /side = \"buy\"",
+    "set": {
+      "/side": "buy"
+    }
+  },
+  {
+    "label": "auto: /side = \"sell\"",
+    "set": {
+      "/side": "sell"
+    }
+  },
+  {
+    "label": "auto: /size null",
+    "set": {
+      "/size": null
+    }
+  }
+]

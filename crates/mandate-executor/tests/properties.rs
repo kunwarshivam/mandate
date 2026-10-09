@@ -807,6 +807,67 @@ fn scripted_awaited() -> impl Strategy<Value = Vec<Step>> {
     })
 }
 
+/// After the protected lead (bracket 01 partly filled at 34): two waits take the clock to 102,
+/// where 01's partial-fill timeout asks its cancel and its interval is alerted; bracket 02 partly
+/// fills at 110; 01's cancel is confirmed at 114, so the OCO for its share is awaited; bracket 03
+/// partly fills at 122, and its start must end 01's awaited interval, not 02's, the latest open one
+/// (#771 review). The script runs to 172, past 02's bound (170) but short of 03's (182), so an
+/// executor that ended 02's interval instead raises no alert inside it and is caught.
+const AWAITED_FIRST_LEAD: [Step; 12] = [
+    Step::Wait,
+    Step::Wait,
+    Step::Intent {
+        which: 2,
+        exiting: false,
+        other: true,
+        protected: true,
+    },
+    Step::Fill,
+    Step::Cancelled,
+    Step::Intent {
+        which: 3,
+        exiting: false,
+        other: true,
+        protected: true,
+    },
+    Step::Fill,
+    Step::Wait,
+    Step::Intent {
+        which: 0,
+        exiting: false,
+        other: false,
+        protected: false,
+    },
+    Step::Intent {
+        which: 0,
+        exiting: false,
+        other: false,
+        protected: false,
+    },
+    Step::Intent {
+        which: 0,
+        exiting: false,
+        other: false,
+        protected: false,
+    },
+    Step::Intent {
+        which: 0,
+        exiting: false,
+        other: false,
+        protected: false,
+    },
+];
+
+fn scripted_awaited_first() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(PROTECTED_LEAD);
+        script.extend(AWAITED_FIRST_LEAD);
+        script.extend(random);
+        script
+    })
+}
+
 /// The steps that age an opening past `max_intent_age_s` (120 seconds) before anything lets it go:
 /// a restart, so the startup reconciliation holds every opening (`startup_reconciliation_pending`),
 /// a fresh plain opening on `AAPL`, four thirty-four-second waits, and the snapshot that ends the
@@ -1987,9 +2048,8 @@ proptest! {
     /// last clock, and an alert counts for it when the draft the notification names is in the
     /// interval's instrument and inside the interval.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_interval_exceeds_the_limit_without_an_alert(
-        script in prop_oneof![scripted_awaited(), scripted_protected()],
+        script in prop_oneof![scripted_awaited(), scripted_awaited_first(), scripted_protected()],
     ) {
         let run = play(&script);
         let accountant = ProtectionAccountant::of(&run.drafts);
@@ -2041,9 +2101,9 @@ proptest! {
     /// (`cancel_overdue`, DEC-160 (7), (13), (18)), and an exit never waits twice on the same
     /// submission of an opening: once that opening's wait went overdue, even before its cancel
     /// could be asked (an unacknowledged opening is queried, never cancelled blind), a cancel asked
-    /// later for the same submission holds no sell; a resubmission starts the wait afresh. And an
-    /// entry that turns terminal partly
-    /// filled, "after that cancel or by any other path", gets its OCO for the filled quantity
+    /// later for the same submission holds no sell; a resubmission starts the wait afresh (DEC-532
+    /// item 3). And an entry that turns terminal partly filled, "after that cancel or by any other
+    /// path", gets its OCO for the filled quantity
     /// (DEC-346 item 6), so a protective submission does not wait on any buy's cancel, plain or
     /// bracket (DEC-521 item 2). A plain buy that fills only adds to the position. A bracket
     /// entry's legs are held until it is completely filled and are sized to its quantity (§5.4),

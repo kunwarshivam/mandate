@@ -444,9 +444,9 @@ fn answered(
             },
         ),
     ];
-    if let Some(applied) = applied {
-        members.push(("quorum", applied));
-    }
+    members.push(("quorum", applied.unwrap_or(Value::Null)));
+    members.push(("separation_of_duties", Value::Null));
+    members.push(("delegation", Value::Null));
     let body = payload::object(members)?;
     let copy = batch.journal("ApprovalResponded", Some(event.event_id.clone()), body)?;
     let (Admission::Admitted, Some(request)) = (admission, pending) else {
@@ -479,6 +479,15 @@ fn mode_now(mode: Mode) -> ModeNow {
         Mode::ExitsOnly => ModeNow::ExitsOnly,
         Mode::Paused => ModeNow::Paused,
         Mode::Stopped => ModeNow::Stopped,
+    }
+}
+
+/// The re-classification's `ask` label, or `null` when it is not an `ask` (journal spec §9.7,
+/// DEC-533 item 4): an `auto` passes check 10 and a `deny` skips, whatever label decided them.
+fn asked_by(classification: &Classification) -> Value {
+    match classification {
+        Classification::Ask { decided_by } if !decided_by.is_empty() => payload::text(decided_by),
+        Classification::Ask { .. } | Classification::Auto | Classification::Deny => Value::Null,
     }
 }
 
@@ -536,10 +545,11 @@ fn revalidated(
     let classification = match classified.autonomy {
         Autonomy::Auto => Classification::Auto,
         Autonomy::Ask => Classification::Ask {
-            decided_by: decided_now.clone(),
+            decided_by: decided_now,
         },
         Autonomy::Deny => Classification::Deny,
     };
+    let asked_label = asked_by(&classification);
     let (dry_run, dry_run_name, dry_run_reason) = match ports.gate.check(&proposal) {
         DryRunVerdict::Allow => (DryRun::Allow, "allow", Value::Null),
         DryRunVerdict::Deny { reason_code } => (
@@ -588,7 +598,7 @@ fn revalidated(
             Value::Bool(current.instrument_restricted),
         ),
         ("decided_by_bound", payload::text(&bound.decided_by)),
-        ("decided_by_now", payload::text(&decided_now)),
+        ("decided_by_now", asked_label),
         ("dry_run", payload::text(dry_run_name)),
         ("dry_run_reason", dry_run_reason),
         (

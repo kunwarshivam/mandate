@@ -35,11 +35,13 @@ The toolchain comes from `.cursor/install.sh` (idempotent, pinned, checksum-veri
 
 ## The feature map
 
-[`feature-map.md`](feature-map.md) lists each feature with its spec anchor, code, tests, reference
-cases, and the command that exercises it. Read it to find what covers the code you are about to
-change. When you add a crate, a reference-case suite, or a feature, add its entry in the same
-change: `cargo xtask ci lint` fails when a crate or suite is missing or a listed path does not
-exist.
+[`features/`](features/README.md) holds one file a feature, each with its spec anchor, code,
+tests, reference cases, and the command that exercises it. `cargo xtask feature-map --index` lists
+them by title; read the ones that cover the code you are about to change. When you add a crate, a
+reference-case suite, or a feature, add or edit its feature's file in the same change, and only
+that file: a new feature is a new file `features/<slug>.md` opening with its `# ` title, and there
+is no list to update. `cargo xtask ci lint` fails when a crate or suite is named in no feature, a
+listed path does not exist, or a feature file has no title.
 
 ## Evidence rules
 
