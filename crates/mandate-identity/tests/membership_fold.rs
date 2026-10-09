@@ -11,6 +11,7 @@ use mandate_canon::{Value, decode_ulid, parse};
 use mandate_identity::{
     InvitationId, MembershipEvent, MembershipFold, MembershipRecord, PrincipalId, Role,
 };
+use mandate_identity_seal::Seal;
 use mandate_time::UtcNanos;
 
 fn instant(text: &str) -> UtcNanos {
@@ -98,6 +99,7 @@ fn record(seq: u64, raw: &Value) -> Option<MembershipRecord> {
         _ => return None,
     };
     Some(MembershipRecord::new(
+        Seal::grant(),
         seq,
         instant(text(raw, "event_time")),
         event,
@@ -127,16 +129,12 @@ fn the_fold_reproduces_every_membership_fold_vector() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
     let fixture = parse(&std::fs::read(path).unwrap()).unwrap();
     let histories = list(fixture.get("membership_fold").unwrap(), "histories");
-    assert!(!histories.is_empty(), "the fixture holds no histories");
+    assert_eq!(histories.len(), 37, "the fixture's histories");
     for history in histories {
         let name = text(history, "name");
         let raw = list(history, "records");
-        let fold = MembershipFold::new(
-            raw.iter()
-                .zip(1..)
-                .filter_map(|(r, seq)| record(seq, r))
-                .collect(),
-        );
+        let records = raw.iter().zip(1..).filter_map(|(r, seq)| record(seq, r));
+        let fold = MembershipFold::new(Seal::grant(), records.collect());
         let end = instant(text(raw.last().unwrap(), "event_time"));
         let unreadable = history.get("unreadable") == Some(&Value::Bool(true));
         assert_eq!(fold.unreadable(end), unreadable, "{name}: unreadable");
