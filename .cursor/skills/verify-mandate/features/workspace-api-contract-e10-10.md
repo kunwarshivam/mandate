@@ -16,7 +16,10 @@
   member, the two policy levels). Live, #993's two decode minors (#1104): a custom refusal
   located at an object's last member, at an array's item, at a map's last entry, and at an
   internally tagged object, and bytes that are not UTF-8 inside a string `malformed` at `""`; and
-  a member's name escaped in its pointer as RFC 6901 says (#1112).
+  a member's name escaped in its pointer as RFC 6901 says (#1112). Pending on behaviour
+  (`xtask/behaviour-only/` rows), DEC-881: an internally tagged object (`Actor`, the kill switch's
+  `scope`, a problem's violation) written as a JSON array, `[]` included, refused as `type` at its
+  member or array item.
 - **Schemas:** `crates/mandate-api/tests/schemas.rs`: live enum and member drift against
   `schemas/workspace-api/` (DEC-683), each member `null`-able and optional exactly as its schema
   says, a kill switch scope's `null` id exactly for `workspace`, and no `serde(flatten)`; pending,
