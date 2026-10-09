@@ -7,7 +7,8 @@ Run from the repository root with the reference environment:
 
 Each fixture passes the schema and every semantic rule of reference/mandate/ref.py, and the order
 builder's answer for it at the fixture quote is asserted here: one share, AUTO, for `mandate.json`;
-ASK for `mandate-ask.json`; a hold for `mandate-small-orders.json`, whose order cap is below one
+ASK for `mandate-ask.json`; DENY by its first rule for `mandate-deny.json`, whose later `auto` rule
+still exceeds a policy that forbids `auto`; a hold for `mandate-small-orders.json`, whose order cap is below one
 share. AAPL is internal test data (DEC-90), not an instrument recommendation.
 """
 
@@ -171,6 +172,11 @@ def main():
     ask = base()
     ask["name"] = "tracer-aapl-ask"
     ask["autonomy"]["rules"][0]["then"] = "ask"
+    deny = base()
+    deny["name"] = "tracer-aapl-deny"
+    deny["autonomy"]["rules"].insert(
+        0, {"id": "no_opens", "then": "deny", "when": {"field": "purpose", "op": "in", "value": ["open"]}}
+    )
     small = base()
     small["name"] = "tracer-aapl-small-orders"
     small["risk"]["max_order_usd"] = "100"
@@ -178,6 +184,7 @@ def main():
     expected = {
         "mandate.json": (one_share, {"action": "buy", "qty": "1", "limit_price": "255.2", "autonomy": "auto"}),
         "mandate-ask.json": (ask, {"action": "buy", "qty": "1", "limit_price": "255.2", "autonomy": "ask"}),
+        "mandate-deny.json": (deny, {"action": "buy", "qty": "1", "limit_price": "255.2", "autonomy": "deny"}),
         "mandate-small-orders.json": (small, {"action": "hold"}),
     }
     for name, (mandate, want) in expected.items():

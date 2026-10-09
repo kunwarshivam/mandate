@@ -17,7 +17,7 @@ use mandate_liquidity::{
     trailing_volume,
 };
 use mandate_num::{Price, Qty, Usd};
-use mandate_time::UtcNanos;
+use mandate_time::{Date, UtcNanos};
 
 use super::absent;
 use super::artifacts::Artifacts;
@@ -192,6 +192,22 @@ pub fn liquidity_facts(
         adv_20d,
         trailing_5m_volume: trailing_volume(&minutes, now).map_err(refusal)?,
     })
+}
+
+/// The pinned instrument's stored daily closes, each with its session, for the model host
+/// (E7-19 slice 5, the first paper trade brief's E1a, DEC-846 item 2): `daily` through the same
+/// trust check [`liquidity_facts`] reads it through, ending on the last completed session at
+/// `now`, and exactly as stored, one a day the manifest lists, in its date order.
+///
+/// # Errors
+/// [`Cause::Untrusted`] or the dataset's own error when the daily bars cannot be trusted at `now`.
+pub fn daily_closes(
+    symbol: &InstrumentId,
+    daily: &Path,
+    now: UtcNanos,
+) -> Result<Vec<(Date, Price)>, Cause> {
+    let _ = (symbol, daily, now);
+    Err(Cause::Unimplemented { story: "E7-19" })
 }
 
 fn refusal(error: LiquidityError) -> Cause {
