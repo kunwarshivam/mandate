@@ -76,6 +76,7 @@ fn every_builder_error_has_its_own_stable_code() {
             BuilderError::OutputInstrumentMismatch,
             "output_instrument_mismatch",
         ),
+        (BuilderError::NoOpeningForm, "no_opening_form"),
     ];
     for (error, code) in &named {
         assert_eq!(error.code(), *code, "{error:?}");

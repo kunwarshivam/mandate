@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mandate_accounting::InstrumentId;
+use mandate_alpaca::Pause;
 use mandate_canon::{Digest, Key, Object, Value};
 use mandate_executor::BrokerRequest;
 use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, get_artifact};
@@ -29,6 +30,7 @@ use crate::map;
 use crate::stages::{
     Admitted, Classifier, ExitPath, Gate, GovernedRefs, JournalWriter, Sizing, Stage, Stages,
 };
+use crate::watch::Watch;
 
 /// What a run is for, besides its stages. Nothing here is secret: every id is opaque (TI-8).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +99,28 @@ pub fn run_observed(
     execute_cycle(stages, setup, &admitted, Some(observation), output)
 }
 
+/// [`run_observed`], then E1b's bounded watch over the one submission (DEC-853 items 5 and 6,
+/// FT-11): a run that submitted nothing watches nothing. Each wake pauses `watch.interval`, reads
+/// the entry back by its client order id and ticks the executor at the clock's time; the first
+/// wake at or past `watch.bound` hands the executor `CancelOpenings` instead of the read. The watch
+/// ends once the broker reports the entry terminal.
+///
+/// # Errors
+/// Every [`ShellError`] is a stop after which nothing further is sent.
+pub fn run_observed_watched<P: Pause>(
+    stages: &mut Stages,
+    setup: &Setup,
+    observation: Observation,
+    output: mandate_runtime::ModelOutput,
+    watch: &Watch<P>,
+) -> Result<Report, ShellError> {
+    let _ = (stages, setup, observation, output, watch);
+    Err(ShellError::Refused {
+        stage: Stage::Executor,
+        cause: Cause::Unimplemented { story: "E7-19" },
+    })
+}
+
 fn admit(stages: &mut Stages) -> Result<Admitted, ShellError> {
     stages.exit.probe().map_err(refused(Stage::FlattenProbe))?;
     stages
@@ -158,6 +182,23 @@ impl ProductionCycle {
     pub fn run(&mut self, output: mandate_runtime::ModelOutput) -> Result<Report, ShellError> {
         let admitted = admit(&mut self.stages)?;
         execute_cycle(&mut self.stages, &self.setup, &admitted, None, output)
+    }
+
+    /// Runs one cycle and its watch, as [`run_observed_watched`] does (E1b, DEC-853).
+    ///
+    /// # Errors
+    /// Every [`ShellError`] is a fail-closed stop after which nothing further is sent.
+    pub fn run_observed_watched<P: Pause>(
+        &mut self,
+        observation: Observation,
+        output: mandate_runtime::ModelOutput,
+        watch: &Watch<P>,
+    ) -> Result<Report, ShellError> {
+        let _ = (observation, output, watch);
+        Err(ShellError::Refused {
+            stage: Stage::Executor,
+            cause: Cause::Unimplemented { story: "E7-19" },
+        })
     }
 
     /// Runs one cycle from the model host's observation and its output, as [`run_observed`] does

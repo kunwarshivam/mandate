@@ -10,9 +10,12 @@
 //!   was read for, character for character (RFC 9728 §3.3, RFC 8414 §3.3).
 //! - **A public client only.** `S256` must be offered and a registration endpoint must exist; a
 //!   registration answer that issues a secret or changes the redirect is refused.
+//! - **One callback per login** (O1b, DEC-855): fresh PKCE and an exact single-use `state`;
+//!   secrets are [`SecretString`]s only, never printed or in an error (LT-9).
 
 use reqwest::header::{ACCEPT, CONTENT_TYPE, WWW_AUTHENTICATE};
 use reqwest::{RequestBuilder, Response, StatusCode, Url};
+use secrecy::SecretString;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
@@ -126,6 +129,57 @@ pub struct ClientRegistration {
     pub(crate) redirect: LoopbackRedirect,
 }
 
+/// A login begun by [`AuthServer::begin`]. [`PendingLogin::callback`] takes it by value and it is
+/// not `Clone`, so a replayed callback has nothing left to match:
+///
+/// ```compile_fail
+/// fn replay(login: mandate_mcp::PendingLogin, target: &str) {
+///     let _ = login.callback(target);
+///     let _ = login.callback(target);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// fn copy(login: &mandate_mcp::PendingLogin) -> mandate_mcp::PendingLogin {
+///     login.clone()
+/// }
+/// ```
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "O1b's implementation reads them")
+)]
+#[derive(Debug)]
+pub struct PendingLogin {
+    pub(crate) state: SecretString,
+    pub(crate) verifier: SecretString,
+    pub(crate) client: ClientRegistration,
+    pub(crate) issuer: Url,
+}
+
+/// The code the callback carried, with the verifier and client that redeem it once at the token
+/// endpoint (O1b part 2).
+#[cfg_attr(not(test), allow(dead_code, reason = "O1b part 2 reads them"))]
+#[derive(Debug)]
+pub struct AuthorizationCode {
+    pub(crate) code: SecretString,
+    pub(crate) verifier: SecretString,
+    pub(crate) client: ClientRegistration,
+}
+
+impl PendingLogin {
+    /// The request-target of the browser's `GET` to the loopback redirect; any target spends the
+    /// login. The path must be exactly `/callback` ([`McpError::Malformed`]); `state` must appear
+    /// once, equal to the login's own once percent-decoded ([`McpError::StateMismatch`]); then an
+    /// `iss`, if any, must appear once and equal the issuer ([`McpError::IssuerMismatch`]); then
+    /// `error` is [`McpError::AuthorizationDenied`], its text unread; `code` must appear once, as
+    /// non-empty visible ASCII ([`McpError::Malformed`]). Other members are not read. No error
+    /// carries the state, the code or the target's text (DEC-855 items 1 to 4).
+    pub fn callback(self, target: &str) -> Result<AuthorizationCode, McpError> {
+        let _ = target;
+        Err(McpError::Unimplemented { story: "E7-24" })
+    }
+}
+
 impl AuthServer {
     /// An unauthenticated `POST` of `initialize` to the endpoint, which must answer `401`; the
     /// Bearer challenge's `resource_metadata` URL, or without one the endpoint's RFC 9728 well-known
@@ -182,6 +236,33 @@ impl AuthServer {
             token_endpoint,
             registration_endpoint,
         })
+    }
+
+    /// [`AuthServer::begin_with`] with 32 bytes each for the verifier and the `state` from the
+    /// operating system's generator, or [`McpError::RandomUnavailable`] if it fails.
+    pub fn begin(&self, client: &ClientRegistration) -> Result<(Url, PendingLogin), McpError> {
+        let _ = client;
+        Err(McpError::Unimplemented { story: "E7-24" })
+    }
+
+    /// The authorization request (RFC 6749 §4.1.1, RFC 7636 §4.3, RFC 8707). The verifier and
+    /// `state` are their seeds as unpadded base64url (RFC 7636 appendix B). The authorization
+    /// endpoint must carry no query ([`McpError::EndpointShape`]); the URL adds exactly
+    /// `response_type` `code`, `client_id`, `redirect_uri`, `code_challenge`
+    /// BASE64URL(SHA-256(verifier)), `code_challenge_method` `S256`, `state`, and `resource` the
+    /// MCP endpoint (DEC-855 items 5 and 6).
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "`begin` calls it (O1b implementation)")
+    )]
+    pub(crate) fn begin_with(
+        &self,
+        client: &ClientRegistration,
+        verifier_seed: &[u8; 32],
+        state_seed: &[u8; 32],
+    ) -> Result<(Url, PendingLogin), McpError> {
+        let _ = (client, verifier_seed, state_seed);
+        Err(McpError::Unimplemented { story: "E7-24" })
     }
 
     /// RFC 7591 registration at the registration endpoint, as a public client: `client_name`

@@ -202,11 +202,12 @@ user with no address on any push channel still has the pull channels.
   causes are `ApprovalRequested`, `OwnerAlertSent`, and the dispatcher's own `NoticeAttempted`
   that marks an address `unreachable` or fails it as `address_missing` (`channel_lost`).
 - **A user's kill switch is one cause.** Journal spec §2 makes it a command that each stream owner
-  journals as `KillSwitchActivated` in its own stream. The command's `OwnerCommandIssued` is the
-  cause: the API writes `OwnerAlertSent` (`kill_switch`) with it on the control stream, and the
-  runtime and executor write none for a `KillSwitchActivated` whose `causation_id` is an owner
-  command. If a stream owner's record ever names an owner command as its cause, the dispatcher
-  de-duplicates it on the command's event id.
+  journals as `KillSwitchActivated` in its own stream. The cause is the `OwnerAlertSent`
+  (`kill_switch`) the API writes with the command's `OwnerCommandIssued` in its batch on the control
+  stream, whose `subject` and `owner_command` name the command (journal spec §9.15, DEC-720 item 8),
+  and the runtime and executor write none for a `KillSwitchActivated` whose `causation_id` is an owner
+  command. If any other alert ever names the same `owner_command`, the dispatcher de-duplicates it
+  on the command's event id, so one user kill switch is one notice.
 - **One subject, one kind.** Where a subject fits two rows (a confirmed version that both increases
   risk and adds a delegation), the first row in §3.2's order wins.
 - Coalescing (§5.4) only merges messages; it never merges causes.
@@ -524,7 +525,8 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 `delivered` means the provider accepted the message, not that a person read it. A later bounce is a
 new record for the same provider message id with `failed` and reason `bounced`; it never retracts an
 earlier `delivered`, and check 4 is satisfied by the pull channel in any case. Journal spec v0.12
-adds the notice stream and these records; E8-9's tests PR closes their payload schemas.
+adds the notice stream and these records; journal spec v0.28 §9.15 closes their payload schemas
+([DEC-720](../project/decisions/DEC-720.md)), and E8-9 registers them.
 
 **The stream type in code.** Journal spec v0.12 (its version history, and the stream table of
 journal spec §2) is where the notice stream's type is described. In code, `mandate_journal::StreamType`
@@ -677,7 +679,7 @@ stateDiagram-v2
 |---|---|---|
 | Mandate spec §6.4 | Payload is exactly a random notice id and one generic text; quiet hours suppress push only; a request is grantable once delivered on one channel; risk-limit alerts ignore quiet hours | Amended in this change (notice id for approval id, DEC-438 item 10, a tightening under DEC-176). This spec adds `web_inbox` as a second pull channel under the same reading as `cli_inbox` (DEC-438 item 3) |
 | Mandate spec §6.5, §6.7 | Delegation ends and fired tripwires produce `OwnerAlertSent` (written by the stream owner) with opaque text; a fired tripwire is a risk-limit alert | Consistent: `delegation_ended` is `info`, a tripwire is `risk_limit` (`safety`); §6.7's sentence amended for the notice id |
-| Journal spec §2, §9 | One writer per stream; the notice stream `ntf:{workspace_id}` with `NoticeIssued` and `NoticeAttempted`; `OwnerAlertSent` written by the subject stream's owner | Amended in this change (journal v0.12); E8-9's tests PR closes the payload schemas |
+| Journal spec §2, §9 | One writer per stream; the notice stream `ntf:{workspace_id}` with `NoticeIssued` and `NoticeAttempted`; `OwnerAlertSent` written by the subject stream's owner | Amended in this change (journal v0.12); journal spec v0.28 §9.15 closes the payload schemas (DEC-720) |
 | Identity spec (DEC-437) | Sign-in from a deep link; step-up per grant within 300 seconds for live; **account recovery for an approver never relies on email or chat alone** (identity spec §10.1 meets it with passkeys, OIDC, recovery codes, and a 24-hour enrolment cool-off); the **receive** column of the roles table (§4.1, settlement X1); the membership and credential events §3.2's account-security rows read (§12.1) | The receive column is owed by #556 under X1; §3.3's interim reading holds until it merges |
 | Workspace API spec (DEC-436) | Resolve a notice id across the user's workspaces with no existence oracle (§3.9, `GET /notices/{notice_id}`); serve approval content; commit `ApprovalResponseSubmitted`; write `OwnerAlertSent` with an owner kill-switch command (§3.4); list the pull channels | Consistent with #560 §3.9 (settlement X3) |
 | Threat model (DEC-439) | Includes §9's attackers; item 5's out-of-band notices for a risk-increasing version, a new connection, going live, a new delegation, and a newly connected client are §3.2's rows | §3.2 now carries the list (settlement X4) |

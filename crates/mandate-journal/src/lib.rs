@@ -28,6 +28,7 @@ mod connections;
 mod control;
 mod draft;
 mod merkle;
+mod records;
 mod schema;
 mod verify;
 mod workspace;

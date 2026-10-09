@@ -48,10 +48,12 @@ pub mod map;
 pub mod paper;
 pub mod stages;
 pub mod tracer;
+pub mod watch;
 
 pub use error::{Cause, ShellError};
 pub use stages::Stage;
-pub use tracer::{ProductionCycle, Report, Setup, run, run_observed};
+pub use tracer::{ProductionCycle, Report, Setup, run, run_observed, run_observed_watched};
+pub use watch::{Watch, close_window_bound, poll_interval};
 
 /// Assembles one production paper cycle. Callers provide deployment inputs and the paper transport;
 /// the returned cycle accepts model outputs but exposes none of its safety-critical stages.

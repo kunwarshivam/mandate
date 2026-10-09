@@ -162,7 +162,6 @@ fn exactly(ran: &Ran, expected: &BTreeSet<String>) -> Option<String> {
 
 /// DEC-853 item 2: the agent's working openings in the instrument are cancelled, and only those.
 #[test]
-#[ignore = "pending E7-19"]
 fn only_that_agents_working_openings_in_that_instrument_are_cancelled() {
     let (ids, mandates, instruments, config) = fixtures();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -176,7 +175,6 @@ fn only_that_agents_working_openings_in_that_instrument_are_cancelled() {
 /// agent's own opening in another instrument are neither cancelled nor journaled, and the
 /// account-wide endpoints are never named (rule 13, the agent scope).
 #[test]
-#[ignore = "pending E7-19"]
 fn exits_protection_other_agents_and_other_instruments_are_untouched() {
     let (ids, mandates, instruments, config) = fixtures();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -195,7 +193,6 @@ fn exits_protection_other_agents_and_other_instruments_are_untouched() {
 /// and its event id is the (epoch, head, ordinal) derivation, so a retried append re-derives it
 /// and the journal answers `AlreadyCommitted` rather than appending twice (journal spec §5.1).
 #[test]
-#[ignore = "pending E7-19"]
 fn each_cancel_is_journaled_before_it_leaves_under_a_derived_id() {
     let (ids, mandates, instruments, config) = fixtures();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -225,7 +222,6 @@ fn each_cancel_is_journaled_before_it_leaves_under_a_derived_id() {
 /// The idempotency key is the order's own client order id: a cancel already asked and not yet
 /// confirmed is not asked again, by a second command or by one after a restart.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_repeated_command_asks_no_second_cancel() {
     let (ids, mandates, instruments, config) = fixtures();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -252,7 +248,6 @@ fn a_repeated_command_asks_no_second_cancel() {
 /// DEC-853 item 3: with nothing working, the command answers `Ok` and changes nothing; once an
 /// opening is working, the same command cancels it.
 #[test]
-#[ignore = "pending E7-19"]
 fn nothing_working_is_a_no_op_not_an_error() {
     let (ids, mandates, instruments, config) = fixtures();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -282,7 +277,6 @@ fn nothing_working_is_a_no_op_not_an_error() {
 /// DEC-853 item 4, §5.7: an `Unknown` opening is left to its query and never cancelled blind;
 /// the accepted opening beside it is still cancelled.
 #[test]
-#[ignore = "pending E7-19"]
 fn an_unknown_opening_is_left_to_its_query() {
     let (ids, mandates, instruments, config) = fixtures();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -299,7 +293,6 @@ fn an_unknown_opening_is_left_to_its_query() {
 /// cancelled. One still `submitting`, one whose cancel is already `pending_cancel`, and one
 /// `unknown` are left alone: none is cancelled, journaled, or queried by the command.
 #[test]
-#[ignore = "pending E7-19"]
 fn only_resting_openings_are_cancelled() {
     let (ids, mandates, instruments, config) = fixtures();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -330,7 +323,6 @@ fn only_resting_openings_are_cancelled() {
 /// working opening orders", so no mode blocks this command, and nor does a missing binding gate
 /// (rule 13: a risk reduction needs no external snapshot).
 #[test]
-#[ignore = "pending E7-19"]
 fn no_mode_and_no_missing_gate_blocks_it() {
     let (ids, mandates, instruments, config) = fixtures();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -375,7 +367,6 @@ fn arbitrary_book() -> impl Strategy<Value = (Vec<Order>, bool, bool)> {
 /// Over random books and a random target, the cancels are exactly the rule's set, each journaled
 /// before it leaves, and nothing else is sent or drafted; an empty set is an empty step.
 #[test]
-#[ignore = "pending E7-19"]
 fn over_random_books_exactly_the_rules_openings_are_cancelled() {
     let (ids, mandates, instruments, config) = fixtures();
     let ports = ports(&ids, &mandates, &instruments, &config);
