@@ -18,7 +18,13 @@ export interface RestrictionText {
   mode: AgentMode | null;
   blocks: string;
   endsWhen: string;
+  /**
+   * Who ends it and, when the owner does, where (critique C-24). A place that is not built yet is
+   * named as coming in the next slice, with no door to it.
+   */
   whoActs: string;
+  /** The owner ends it in the Stop sheet, behind a passkey, so the banner offers to open Stop. */
+  endsInStop?: true;
 }
 
 export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
@@ -36,7 +42,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     mode: "exits_only",
     blocks: "Openings and increases",
     endsWhen: "You acknowledge it with step-up, which resets the high-water mark",
-    whoActs: "You",
+    whoActs: "You, on this agent's Overview. Acknowledging there comes in the next slice.",
   },
   drawdown_flatten: {
     label: "Drawdown: flattened",
@@ -44,7 +50,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "You acknowledge it once the agent is flat",
-    whoActs: "You",
+    whoActs: "You, on this agent's Overview. Acknowledging there comes in the next slice.",
   },
   daily_loss: {
     label: "Daily loss limit",
@@ -52,7 +58,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     mode: "exits_only",
     blocks: "Openings and increases (every new order except protection after a flatten)",
     endsWhen: "A new risk day plus the minimum time; after a flatten, also your acknowledgment once flat",
-    whoActs: "Automatic, then you",
+    whoActs: "Automatic, then you on this agent's Overview. Acknowledging there comes in the next slice.",
   },
   hard_breach: {
     label: "Hard limit reached",
@@ -76,7 +82,8 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     mode: "exits_only",
     blocks: "Openings and increases",
     endsWhen: "You release or close the positions",
-    whoActs: "You",
+    whoActs: "You, in Stop",
+    endsInStop: true,
   },
   external_activity: {
     label: "Activity outside Owlhead on the account",
@@ -84,7 +91,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     mode: "exits_only",
     blocks: "Openings and increases on the account",
     endsWhen: "You acknowledge the activity",
-    whoActs: "You",
+    whoActs: "You, on the account's page in Connections. That page comes in the next slice.",
   },
   account_closing_only: {
     label: "Account closing only",
@@ -92,7 +99,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     mode: "exits_only",
     blocks: "Openings and increases",
     endsWhen: "You acknowledge it and the account refreshes",
-    whoActs: "You",
+    whoActs: "You, on the account's page in Connections. That page comes in the next slice.",
   },
   account_blocked: {
     label: "Account blocked",
@@ -100,7 +107,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "You acknowledge it and the account refreshes",
-    whoActs: "You",
+    whoActs: "You, on the account's page in Connections. That page comes in the next slice.",
   },
   reconciliation_mismatch: {
     label: "Ledger and broker disagree",
@@ -108,7 +115,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "You review the difference and acknowledge it with step-up",
-    whoActs: "You",
+    whoActs: "You, on the account's page in Connections. That page comes in the next slice.",
   },
   startup_reconciliation: {
     label: "Checking with the broker",
@@ -132,7 +139,8 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "You resume the agent, with step-up",
-    whoActs: "You",
+    whoActs: "You, in Stop",
+    endsInStop: true,
   },
   stopped: {
     label: "Stopped",
@@ -156,7 +164,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
     mode: null,
     blocks: "Openings in this instrument",
     endsWhen: "A version re-adds it",
-    whoActs: "You",
+    whoActs: "You, in a new mandate version. Changing instruments comes in the next slice.",
   },
 };
 

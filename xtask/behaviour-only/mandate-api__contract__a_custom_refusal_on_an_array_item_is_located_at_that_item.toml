@@ -1,0 +1,9 @@
+file = "crates/mandate-api/tests/contract.rs"
+test = "a_custom_refusal_on_an_array_item_is_located_at_that_item"
+reason = """
+E10-10's decode minors from #993's review (DEC-681 item 10): `decode` is already implemented, and
+locates a `non_canonical` refusal on an array's item at the parent when it is the last item and at
+the next item otherwise (`/bids/1` for `["1.50", "1"]`), so this test fails on that answer rather
+than at a stub. The change that locates it at the item deletes this file with the test's
+`#[ignore]` line.
+"""

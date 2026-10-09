@@ -763,3 +763,100 @@ fn every_other_request_is_not_sent_and_nothing_is_called() {
     assert_eq!(calls(&server), [REVIEW, PLACE]);
     assert_eq!(classes(&probe).len(), 2);
 }
+
+/// The server's own answer to a cancel, its order record rewritten to show `state` and
+/// `filled_quantity`, in both the structured content and the text block that carries it.
+fn showing(mut result: Value, state: &str, filled: &str) -> Result<String, McpError> {
+    let record = result["structuredContent"].as_object_mut().unwrap();
+    assert_eq!(
+        record["state"], "cancelled",
+        "the server cancelled the order"
+    );
+    record.insert("state".to_owned(), json!(state));
+    record.insert("filled_quantity".to_owned(), json!(filled));
+    let text = result["structuredContent"].to_string();
+    result["content"][0]["text"] = json!(text);
+    Ok(result.to_string())
+}
+
+/// Connections spec §6.2's reading of each state an order may show after a cancel request the
+/// broker took but has not yet carried out, typed here: `new`, `queued`, `confirmed` and
+/// `unconfirmed` working, `partially_filled` working with its fill, and `filled` filled. Each row
+/// carries its own bend of the cancel answer, since a bend takes no state.
+const NOT_CANCELLED: [(&str, &str, &str, Bend); 6] = [
+    ("new", "0", "accepted", |r| showing(r, "new", "0")),
+    ("queued", "0", "accepted", |r| showing(r, "queued", "0")),
+    ("confirmed", "0", "accepted", |r| {
+        showing(r, "confirmed", "0")
+    }),
+    ("unconfirmed", "0", "accepted", |r| {
+        showing(r, "unconfirmed", "0")
+    }),
+    ("partially_filled", "1", "partially_filled", |r| {
+        showing(r, "partially_filled", "1")
+    }),
+    ("filled", "2", "filled", |r| showing(r, "filled", "2")),
+];
+
+/// An opening of 2 SPY placed through the connector, then a cancel of it whose answer `bend`
+/// rewrites; the cancel's outcome and the order's broker `order_id`.
+fn cancel_answered(bend: Bend) -> (Result<BrokerOutcome, ConnectorError>, String) {
+    let server = server();
+    let (mut c, probe) = probed(&server);
+    let BrokerOutcome::Submitted(open) = run(&mut c, &submit(buy("01JOPEN"))).unwrap() else {
+        panic!()
+    };
+    probe.bend.set(Some((CANCEL, bend)));
+    let cancel = BrokerRequest::Cancel {
+        client_order_id: key("01JOPEN"),
+    };
+    let outcome = run(&mut c, &cancel);
+    assert_eq!(calls(&server), [REVIEW, PLACE, CANCEL]);
+    (outcome, open.broker_order_id)
+}
+
+/// DEC-867 items 1 and 2, trading spec §5.7 ("PendingCancel --> Canceled: confirmed"): a cancel
+/// the broker took is `CancelAccepted` only when its answer shows the order `cancelled`. An answer
+/// showing the order still working, part filled or filled is that order, read as §6.2 says, so the
+/// executor keeps the cancel unconfirmed and holds the reservation and the exit behind it.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_cancel_answered_with_an_order_not_cancelled_is_that_order_never_cancel_accepted() {
+    for (state, filled, status, bend) in NOT_CANCELLED {
+        let (outcome, order_id) = cancel_answered(bend);
+        let outcome = outcome.unwrap();
+        assert!(
+            !matches!(outcome, BrokerOutcome::CancelAccepted { .. }),
+            "{state}: {outcome:?}"
+        );
+        let BrokerOutcome::Order(order) = outcome else {
+            panic!("{state}: {outcome:?}")
+        };
+        assert_eq!(order.status, status, "{state}");
+        assert_eq!(order.broker_order_id, order_id, "{state}");
+        assert_eq!(
+            order.client_order_id.as_deref(),
+            Some(key("01JOPEN").as_str()),
+            "{state}"
+        );
+        assert_eq!(
+            (order.qty, order.filled_qty),
+            (qty("2"), qty(filled)),
+            "{state}"
+        );
+    }
+}
+
+/// DEC-867 item 2: the answer that shows the order `cancelled` is the broker's confirmation.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_cancel_answered_with_the_order_cancelled_is_cancel_accepted() {
+    let (outcome, _) = cancel_answered(|r| showing(r, "cancelled", "0"));
+    let id = key("01JOPEN").as_str().to_owned();
+    assert_eq!(
+        outcome,
+        Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: id
+        })
+    );
+}

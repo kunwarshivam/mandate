@@ -1,10 +1,12 @@
 "use client";
 
 import { motion } from "motion/react";
+import { openStop } from "@/components/shell/open-stop";
 import { cn } from "@/lib/utils";
 import type { ActiveRestriction, AgentMode } from "@/fixtures/types";
 import { clock } from "@/lib/format";
 import { MODE_LABEL, MODE_MEANING } from "@/lib/labels";
+import { useCan } from "@/lib/roles";
 import { type RestrictionSource, SOURCE_LABEL, describeRestriction } from "@/lib/restrictions";
 
 /**
@@ -65,6 +67,8 @@ export function SourceTag({ source, className }: { source: RestrictionSource; cl
 
 /**
  * The §4.3 mode banner: every active restriction with what it blocks, how it ends, and who acts.
+ * Where the owner ends one in Stop, the banner opens Stop; Stop keeps its passkey (C-24). A role
+ * that cannot resume or release there is not offered the door.
  * Opening actions are explained here rather than hidden. One calm panel; restrictions sit on
  * hairlines inside it rather than as boxes within a box.
  */
@@ -80,6 +84,7 @@ export function ModeBanner({
   showMode?: boolean;
   className?: string;
 }) {
+  const canEnd = useCan("stop.full");
   if (mode === "normal" && restrictions.length === 0) return null;
   if (!showMode && restrictions.length === 0) return null;
   return (
@@ -107,7 +112,22 @@ export function ModeBanner({
                   <dt className="text-muted-foreground">Ends when</dt>
                   <dd>{text.endsWhen}</dd>
                   <dt className="text-muted-foreground">Who acts</dt>
-                  <dd>{text.whoActs}</dd>
+                  <dd>
+                    {text.whoActs}
+                    {text.endsInStop && canEnd ? (
+                      <>
+                        {" "}
+                        <button
+                          type="button"
+                          onClick={openStop}
+                          aria-haspopup="dialog"
+                          className="font-medium text-lapis underline decoration-lapis/30 underline-offset-4 outline-none hover:decoration-current focus-visible:ring-3 focus-visible:ring-ring"
+                        >
+                          Open Stop
+                        </button>
+                      </>
+                    ) : null}
+                  </dd>
                 </dl>
               </li>
             );

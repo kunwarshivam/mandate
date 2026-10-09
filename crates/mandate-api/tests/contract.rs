@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 
+use mandate_api::envelope::Actor;
 use mandate_api::idempotency::{Derivation, IdempotencyKey, KeyError, event_id};
 use mandate_api::problem::{
     AncestorLevel, CurrentBase, Effect, PolicyLevel, PolicyValue, Problem, ProblemCode,
@@ -411,6 +412,366 @@ fn decode_locates_a_refusal_inside_an_array_by_its_index() {
         refusal::<CommandStatus>(status.to_string().as_bytes()),
         [("/steps/1/extra".to_owned(), "unknown_member".to_owned())]
     );
+}
+
+/// Two [`Fixture`]s, one a member and one in an array, so a refusal can be met at every depth.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Nest {
+    head: Fixture,
+    list: Vec<Fixture>,
+}
+
+impl Validate for Nest {
+    fn validate(&self) -> Result<(), Refused> {
+        Ok(())
+    }
+}
+
+/// Each `(body, expected)` whose refusal differs from the expected `(path, code)`, with what
+/// `decode` reported instead.
+fn mislocated<T: DeserializeOwned + Validate + Debug>(
+    cases: &[(&[u8], &str, &str)],
+) -> Vec<String> {
+    cases
+        .iter()
+        .filter_map(|(body, path, code)| {
+            let found = refusal::<T>(body);
+            let want = [((*path).to_owned(), (*code).to_owned())];
+            (found != want).then(|| {
+                format!(
+                    "{}: want {want:?}, got {found:?}",
+                    String::from_utf8_lossy(body)
+                )
+            })
+        })
+        .collect()
+}
+
+/// A custom refusal on an object's last member is located at that member, where serde can name it
+/// (DEC-681 item 10): at the root, in a nested object, and in an array's object, pretty-printed or
+/// not. A first member, and `missing` at the object that lacks it, are the controls.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_custom_refusal_on_an_objects_last_member_is_located_at_the_member() {
+    let fixture: [(&[u8], &str, &str); 4] = [
+        (
+            br#"{"effect": "none", "bid": "1.50"}"#,
+            "/bid",
+            "non_canonical",
+        ),
+        (
+            b"{\n  \"effect\": \"none\",\n  \"bid\": \"1.50\"\n}\n",
+            "/bid",
+            "non_canonical",
+        ),
+        (
+            br#"{"bid": "1.50", "effect": "none"}"#,
+            "/bid",
+            "non_canonical",
+        ),
+        (br#"{"effect": "none"}"#, "", "missing"),
+    ];
+    let ok = r#"{"bid": "1.5", "effect": "none"}"#;
+    let last = r#"{"effect": "none", "bid": "1.50"}"#;
+    let first = r#"{"bid": "1.50", "effect": "none"}"#;
+    let nested = [
+        (
+            format!(r#"{{"list": [], "head": {last}}}"#),
+            "/head/bid",
+            "non_canonical",
+        ),
+        (
+            format!(r#"{{"head": {last}, "list": []}}"#),
+            "/head/bid",
+            "non_canonical",
+        ),
+        (
+            format!(r#"{{"head": {first}, "list": []}}"#),
+            "/head/bid",
+            "non_canonical",
+        ),
+        (
+            format!(r#"{{"head": {ok}, "list": [{ok}, {last}]}}"#),
+            "/list/1/bid",
+            "non_canonical",
+        ),
+        (
+            format!(r#"{{"list": [{last}, {ok}], "head": {ok}}}"#),
+            "/list/0/bid",
+            "non_canonical",
+        ),
+        (
+            format!(r#"{{"list": [{first}], "head": {ok}}}"#),
+            "/list/0/bid",
+            "non_canonical",
+        ),
+        (
+            r#"{"head": {"effect": "none"}, "list": []}"#.to_owned(),
+            "/head",
+            "missing",
+        ),
+    ];
+    let nested: Vec<(&[u8], &str, &str)> = nested
+        .iter()
+        .map(|(body, path, code)| (body.as_bytes(), *path, *code))
+        .collect();
+    let mut wrong = mislocated::<Fixture>(&fixture);
+    wrong.extend(mislocated::<Nest>(&nested));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A list of decimals beside a closed enum, so a refusal can be met on an array's item.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Quotes {
+    bids: Vec<Decimal>,
+    effect: Effect,
+}
+
+impl Validate for Quotes {
+    fn validate(&self) -> Result<(), Refused> {
+        Ok(())
+    }
+}
+
+/// A custom refusal on an array's item is located at that item by its index (RFC 6901, DEC-681
+/// item 10): the first, a middle, and the last item, with the array the first or last member, and
+/// never the parent or a sibling item. A wrong JSON type on the first item is the control.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_custom_refusal_on_an_array_item_is_located_at_that_item() {
+    let cases: [(&[u8], &str, &str); 6] = [
+        (
+            br#"{"effect": "none", "bids": ["1", "1.50"]}"#,
+            "/bids/1",
+            "non_canonical",
+        ),
+        (
+            br#"{"bids": ["1", "1.50"], "effect": "none"}"#,
+            "/bids/1",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "bids": ["1.50", "1"]}"#,
+            "/bids/0",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "bids": ["1", "1.50", "1"]}"#,
+            "/bids/1",
+            "non_canonical",
+        ),
+        (
+            b"{\n  \"effect\": \"none\",\n  \"bids\": [\n    \"1\",\n    \"1.50\"\n  ]\n}\n",
+            "/bids/1",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "bids": [1, "1"]}"#,
+            "/bids/0",
+            "type",
+        ),
+    ];
+    let wrong = mislocated::<Quotes>(&cases);
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// An [`Actor`], internally tagged on `kind`, beside a closed enum.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Acted {
+    who: Actor,
+    effect: Effect,
+}
+
+impl Validate for Acted {
+    fn validate(&self) -> Result<(), Refused> {
+        Ok(())
+    }
+}
+
+/// [`Actor`]s as an array's items, beside a closed enum.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Crowd {
+    crowd: Vec<Actor>,
+    effect: Effect,
+}
+
+impl Validate for Crowd {
+    fn validate(&self) -> Result<(), Refused> {
+        Ok(())
+    }
+}
+
+/// serde reads an internally tagged object whole before it decodes its members, so it cannot name
+/// the member inside it that it refuses: the refusal is located at the tagged object itself
+/// (DEC-681 item 10), whether that object is its parent's last member or not, and never at the
+/// parent or at a sibling inside it. Every code that serde reports after reading the object is
+/// covered: `type`, `unknown_member`, `non_canonical`, and `missing`. In an array, the tagged object
+/// is its item, `/crowd/<index>`, never the array nor another item. The controls are what serde
+/// names already: the tagged object as a first member, an unknown `kind` or one of the wrong JSON
+/// type at `/who/kind`, and a `who` that is not an object, `type` at `/who`.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_refusal_inside_a_tagged_object_is_located_at_that_object() {
+    let cases: [(&[u8], &str, &str); 15] = [
+        (
+            br#"{"effect": "none", "who": {"kind": 5, "id": "a"}}"#,
+            "/who/kind",
+            "type",
+        ),
+        (
+            br#"{"who": {"id": "a", "kind": null}, "effect": "none"}"#,
+            "/who/kind",
+            "type",
+        ),
+        (br#"{"effect": "none", "who": 5}"#, "/who", "type"),
+        (br#"{"effect": "none", "who": "user"}"#, "/who", "type"),
+        (br#"{"who": 5, "effect": "none"}"#, "/who", "type"),
+        (br#"{"who": null, "effect": "none"}"#, "/who", "type"),
+        (
+            br#"{"effect": "none", "who": {"kind": "user", "id": 5}}"#,
+            "/who",
+            "type",
+        ),
+        (
+            br#"{"effect": "none", "who": {"kind": "user", "id": "a", "x": 1}}"#,
+            "/who",
+            "unknown_member",
+        ),
+        (
+            br#"{"effect": "none", "who": {"kind": "user", "id": "a b"}}"#,
+            "/who",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "who": {"id": "a b", "kind": "user"}}"#,
+            "/who",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "who": {"kind": "client", "id": "a"}}"#,
+            "/who",
+            "missing",
+        ),
+        (
+            br#"{"who": {"kind": "user", "id": 5}, "effect": "none"}"#,
+            "/who",
+            "type",
+        ),
+        (
+            br#"{"who": {"id": "a b", "kind": "user"}, "effect": "none"}"#,
+            "/who",
+            "non_canonical",
+        ),
+        (
+            br#"{"effect": "none", "who": {"id": "a", "kind": "bogus"}}"#,
+            "/who/kind",
+            "enum",
+        ),
+        (
+            br#"{"effect": "none", "who": {"id": "a"}}"#,
+            "/who",
+            "missing",
+        ),
+    ];
+    let user = r#"{"kind": "user", "id": "a"}"#;
+    let crowd = [
+        (
+            format!(r#"{{"effect": "none", "crowd": [{user}, {{"kind": "user", "id": 5}}]}}"#),
+            "/crowd/1",
+            "type",
+        ),
+        (
+            format!(r#"{{"effect": "none", "crowd": [{{"id": "a b", "kind": "user"}}, {user}]}}"#),
+            "/crowd/0",
+            "non_canonical",
+        ),
+        (
+            format!(
+                r#"{{"crowd": [{user}, {{"kind": "user", "id": "a", "x": 1}}, {user}], "effect": "none"}}"#
+            ),
+            "/crowd/1",
+            "unknown_member",
+        ),
+        (
+            format!(r#"{{"effect": "none", "crowd": [{user}, {{"kind": "client", "id": "a"}}]}}"#),
+            "/crowd/1",
+            "missing",
+        ),
+        (
+            format!(r#"{{"effect": "none", "crowd": [{{"kind": "bogus", "id": "a"}}, {user}]}}"#),
+            "/crowd/0/kind",
+            "enum",
+        ),
+        (
+            format!(r#"{{"effect": "none", "crowd": [{{"kind": 5, "id": "a"}}, {user}]}}"#),
+            "/crowd/0/kind",
+            "type",
+        ),
+        (
+            format!(r#"{{"effect": "none", "crowd": [{user}, 5]}}"#),
+            "/crowd/1",
+            "type",
+        ),
+    ];
+    let crowd: Vec<(&[u8], &str, &str)> = crowd
+        .iter()
+        .map(|(body, path, code)| (body.as_bytes(), *path, *code))
+        .collect();
+    let mut wrong = mislocated::<Acted>(&cases);
+    wrong.extend(mislocated::<Crowd>(&crowd));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// `text` with each `@` replaced by `bad`.
+fn spliced(text: &str, bad: &[u8]) -> Vec<u8> {
+    text.bytes()
+        .flat_map(|byte| {
+            if byte == b'@' {
+                bad.to_vec()
+            } else {
+                vec![byte]
+            }
+        })
+        .collect()
+}
+
+/// A body whose string holds bytes that are not UTF-8 is not UTF-8 JSON (§3.1), so it is not
+/// exactly one JSON value: `malformed` at `""` (DEC-681 item 10), whether the string is the whole
+/// body, a member's value at any depth, or a member's name. Bad bytes outside a string are the
+/// control, already refused so.
+#[test]
+#[ignore = "pending E10-10"]
+fn invalid_utf8_inside_a_string_is_malformed_at_the_root() {
+    let ok = r#"{"bid": "1.5", "effect": "none"}"#;
+    let fixtures = [
+        r#"{"bid": "1@", "effect": "none"}"#.to_owned(),
+        r#"{"bid": "1.5", "effect": "none@"}"#.to_owned(),
+        r#"{"bid": "1.5", "effect": "none", "x@": 1}"#.to_owned(),
+        r#"{"bid": "1.5", @"effect": "none"}"#.to_owned(),
+    ];
+    let nests = [
+        r#"{"head": {"bid": "1.5", "effect": "@"}, "list": []}"#.to_owned(),
+        format!(r#"{{"head": {ok}, "list": [{ok}, {{"bid": "@1", "effect": "none"}}]}}"#),
+        r#"{"head": {"b@id": "1.5", "effect": "none"}, "list": []}"#.to_owned(),
+    ];
+    let mut wrong = Vec::new();
+    for bad in [&b"\xff"[..], b"\xc3\x28", b"\xed\xa0\x80"] {
+        let whole = spliced(r#""1@""#, bad);
+        wrong.extend(mislocated::<Decimal>(&[(&whole, "", "malformed")]));
+        for text in &fixtures {
+            let body = spliced(text, bad);
+            wrong.extend(mislocated::<Fixture>(&[(&body, "", "malformed")]));
+        }
+        for text in &nests {
+            let body = spliced(text, bad);
+            wrong.extend(mislocated::<Nest>(&[(&body, "", "malformed")]));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 #[test]

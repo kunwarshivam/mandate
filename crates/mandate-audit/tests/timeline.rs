@@ -1,4 +1,4 @@
-//! E12-2 slices T1a and T1b: the per-agent timeline's core read (workspace API §4.8.1 "Timeline",
+//! E12-2 slices T1a to T1c: the per-agent timeline's core read (workspace API §4.8.1 "Timeline",
 //! AU-1, AU-5, DEC-760, DEC-764, DEC-777): the merge, the filters that still consume, `limit`, the
 //! 10,000-event cap, paging under appends, and the one `NotFound`. Each expectation is written from
 //! the fixture's own appends, never from the code under test.
@@ -12,7 +12,7 @@ use common::{ctl, workspaces};
 use mandate_audit::{AuditError, MAX_CONSUMED_PER_STREAM, MemoryRead, StreamCursor, Timeline};
 use mandate_audit::{TimelineQuery, TimelineRead};
 use mandate_canon::Digest;
-use mandate_journal::StreamId;
+use mandate_journal::{AppendOutcome, InvalidReason, StreamId};
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
 use proptest::test_runner::{TestCaseError, TestRunner};
@@ -577,4 +577,275 @@ fn foreign_and_unknown_ids_are_the_one_not_found() {
         }
     }
     assert!(j.read(&query(&[own], 10)).is_ok());
+}
+
+/// One draft of [`Journal::batch`]: its type, `schema_version`, `causation_id`, and payload.
+type Draft<'d> = (&'d str, u64, Option<&'d str>, &'d str);
+
+impl Journal {
+    /// The id the `k`-th next appended event takes, so a batch can name its own companion.
+    fn upcoming(&self, k: u64) -> String {
+        event_id(self.next + k)
+    }
+
+    /// Appends `drafts` to `to` in one batch at `at(s)`, each with its own `schema_version` and
+    /// `causation_id`; returns their ids.
+    fn batch(&mut self, to: &str, s: u64, drafts: &[Draft<'_>]) -> Vec<String> {
+        let r = format!("sha256:{}", "4".repeat(64));
+        let refs = REFS.map(|k| format!(r#""{k}":"{r}""#)).join(",");
+        let bodies: Vec<(String, String)> = drafts
+            .iter()
+            .map(|(typed, version, cause, payload)| {
+                self.next += 1;
+                let id = event_id(self.next);
+                let cause = cause.map_or("null".to_owned(), |c| format!("\"{c}\""));
+                let body = format!(
+                    r#"{{"envelope_version":1,"environment":"paper","event_id":"{id}","stream_id":"{to}",
+                    "event_type":"{typed}","schema_version":{version},"event_time":"{T}","clock_source":"local",
+                    "causation_id":{cause},"correlation_id":null,"actor":{},"config_refs":{{{refs}}},
+                    "payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#,
+                    actor()
+                );
+                (id, body)
+            })
+            .collect();
+        let batch: Vec<(String, &[u8])> = (bodies.iter())
+            .map(|(id, b)| (id.clone(), b.as_bytes()))
+            .collect();
+        self.fx.append_batch_at(to, &at(s), &batch);
+        bodies.into_iter().map(|(id, _)| id).collect()
+    }
+
+    /// One draft appended alone at `at(s)`; its id.
+    fn one(&mut self, to: &str, s: u64, draft: Draft<'_>) -> String {
+        self.batch(to, s, &[draft]).remove(0)
+    }
+}
+
+/// An `AgentModeApplied` naming `agent` in its `agent` member.
+fn applied(agent: &str) -> String {
+    mode().replace(
+        &format!(r#""agent":"{ME}""#),
+        &format!(r#""agent":"{agent}""#),
+    )
+}
+
+/// An `IntentReceived` (version 1) for `intent`, naming `agent`.
+fn received(intent: &str, agent: &str) -> String {
+    format!(
+        r#"{{"intent_id":"{intent}","agent_id":"{agent}","instrument_id":"inst","side":"buy","type":"limit","tif":"day","qty":"1","limit_price":"10","purpose":"open"}}"#
+    )
+}
+
+/// A `GateDecided` (version 1) for `intent`.
+fn gated(intent: &str) -> String {
+    format!(
+        r#"{{"intent_id":"{intent}","verdict":"allow","reason_code":null,"data_profile":"full","quotes_used":[],"marks_used":[],"checks":[]}}"#
+    )
+}
+
+/// The batch of one order: its `OrderRequestRecorded` naming `agent`, no intent, then its version-2
+/// `OrderSubmitted` as `order`, whose `causation_id` names the companion (journal spec rule 45).
+fn order(j: &mut Journal, to: &str, s: u64, agent: &str, order: &str) -> Vec<String> {
+    let request = format!(
+        r#"{{"agent_id":"{agent}","intent_id":null,"purpose":"open","extended_hours":false,"stop_price":null,"order_class":null,"take_profit":null,"stop":null,"rung":null,"at_floor":null,"risk_clock":"{T}"}}"#
+    );
+    let submitted = format!(
+        r#"{{"client_order_id":"{order}","attempt":1,"instrument_id":"inst","side":"buy","type":"limit","tif":"day","qty":"1","limit_price":"10","risk_clock":"{T}"}}"#
+    );
+    let companion = j.upcoming(1);
+    let drafts = [
+        ("OrderRequestRecorded", 1, None, request.as_str()),
+        ("OrderSubmitted", 2, Some(companion.as_str()), &submitted),
+    ];
+    j.batch(to, s, &drafts)
+}
+
+/// A `FillApplied` of `order`.
+fn filled(order: &str) -> String {
+    format!(
+        r#"{{"fill_id":"F-{order}","client_order_id":"{order}","instrument_id":"inst","side":"buy","qty_gross":"1","price":"10","trade_date":"2026-09-21","risk_clock":"{T}","fees":[]}}"#
+    )
+}
+
+/// The ids served walking from the start, `limit` 1,000; with the cursors at the end.
+fn served(j: &Journal) -> (Vec<String>, Vec<StreamCursor>) {
+    let page = j.page(&query(&[], 1_000));
+    assert!(!page.more, "one page holds this journal");
+    (ids(&page), page.next)
+}
+
+/// DEC-764 item 2, with DEC-777 item 6's reach: which account-stream events are the agent's. One
+/// page walks the whole journal, and the expected list is written here, one verdict per append: the
+/// agent's stream, then ACCT2's `IntentReceived` naming the agent, then ACCT1's members in `seq`
+/// order. Every lookup reads only this timeline's streams: an `IntentReceived` or an order on
+/// ACCT3, which the agent was not deployed on, and an event of `ME`'s stream in another workspace,
+/// make nothing the agent's. A causation link counts only into the agent's own stream. Everything
+/// else, marks among them, is consumed unserved, so `next` ends at every head.
+#[test]
+#[ignore = "pending E12-2"]
+fn account_events_are_the_agents_by_dec_764() {
+    let mut j = Journal::new();
+    let [a, trap, _] = workspaces();
+    let (s1, s3) = (stream(Some("ACCT1")), acct(&a, "ACCT3"));
+    let opened = format!(
+        r#"{{"stream_type":"account","workspace_id":"{a}","broker":"alpaca","account_ref":"ACCT3"}}"#
+    );
+    j.fx.open(&s3, &opened);
+    j.open_agent(&a, "AG2");
+    j.open_agent(&trap, ME);
+    let [i1, i2, i3, i4, i5] = [1, 2, 3, 4, 5].map(|n| event_id(900_000 + n));
+    let mut observe = |to: &str| j.put(to, &at(1), "ObservationRecorded", OBS, 1).remove(0);
+    let own = observe(&stream(None));
+    let theirs = observe(&format!("agent:{a}:AG2"));
+    let elsewhere = observe(&format!("agent:{trap}:{ME}"));
+    j.one(&s3, 1, ("IntentReceived", 1, None, &received(&i3, ME)));
+    order(&mut j, &s3, 1, ME, "O3");
+    let via_acct2 = j.one(
+        &stream(Some("ACCT2")),
+        2,
+        ("IntentReceived", 1, None, &received(&i2, ME)),
+    );
+    let mut expected = vec![j.opened(&stream(None)), own.clone(), via_acct2];
+    let mode_me = j.upcoming(2);
+    let rows: [(&str, Option<&str>, String, bool); 15] = [
+        ("MarkUpdated", None, MARK.to_owned(), false),
+        ("AgentModeApplied", None, applied(ME), true),
+        ("AgentModeApplied", None, applied("*"), true),
+        ("AgentModeApplied", None, applied("AG2"), false),
+        ("IntentReceived", None, received(&i1, ME), true),
+        ("GateDecided", None, gated(&i1), true),
+        ("GateDecided", None, gated(&i2), true),
+        ("IntentReceived", None, received(&i4, "AG2"), false),
+        ("GateDecided", None, gated(&i4), false),
+        ("GateDecided", None, gated(&i3), false),
+        ("GateDecided", None, gated(&i5), false),
+        ("MarkUpdated", Some(&own), MARK.to_owned(), true),
+        ("MarkUpdated", Some(&theirs), MARK.to_owned(), false),
+        ("MarkUpdated", Some(&elsewhere), MARK.to_owned(), false),
+        ("MarkUpdated", Some(&mode_me), MARK.to_owned(), false),
+    ];
+    for (typed, cause, payload, mine) in &rows {
+        let id = j.one(&s1, 3, (typed, 1, *cause, payload));
+        expected.extend(mine.then_some(id));
+    }
+    for (agent, o, mine) in [(ME, "O1", true), ("AG2", "O2", false), (ME, "O3", false)] {
+        let placed = if o == "O3" {
+            Vec::new()
+        } else {
+            order(&mut j, &s1, 4, agent, o)
+        };
+        let fill = j.one(&s1, 4, ("FillApplied", 1, None, &filled(o)));
+        expected.extend(placed.into_iter().chain([fill]).filter(|_| mine));
+    }
+    assert_eq!(served(&j), (expected, j.heads()));
+}
+
+/// DEC-777 item 6 and AU-5: membership lookups read the page's own snapshot, whole. ACCT1's
+/// `GateDecided` and `FillApplied` come before any record that links them to the agent, so the first
+/// page consumes them unserved. The `IntentReceived` and the order that name the agent, appended
+/// after that page, never bring them back: the next page serves only the new records. A fresh walk,
+/// whose snapshot holds those records, serves both, though their links come later in `seq`.
+#[test]
+#[ignore = "pending E12-2"]
+fn membership_lookups_read_only_the_pages_snapshot() {
+    let mut j = Journal::new();
+    let s1 = stream(Some("ACCT1"));
+    let intent = event_id(900_006);
+    let gate = j.one(&s1, 2, ("GateDecided", 1, None, &gated(&intent)));
+    let fill = j.one(&s1, 2, ("FillApplied", 1, None, &filled("O6")));
+    let opened = j.opened(&stream(None));
+    assert_eq!(served(&j), (vec![opened.clone()], j.heads()));
+    let first = j.heads();
+    let linked = j.one(&s1, 3, ("IntentReceived", 1, None, &received(&intent, ME)));
+    let placed = order(&mut j, &s1, 3, ME, "O6");
+    let later = [vec![linked], placed].concat();
+    let page = j.page(&query(&first, 1_000));
+    assert_eq!(
+        (ids(&page), page.next, page.more),
+        (later.clone(), j.heads(), false)
+    );
+    let fresh = [vec![opened, gate, fill], later].concat();
+    assert_eq!(served(&j), (fresh, j.heads()));
+}
+
+/// A version-1 `OrderSubmitted` of `order`: §9's members without `risk_clock`. It names no intent
+/// and no agent, so only the `client_order_id` rule could make it, or a fill of it, the agent's.
+fn submitted_v1(order: &str) -> String {
+    format!(
+        r#"{{"client_order_id":"{order}","attempt":1,"instrument_id":"inst","side":"buy","type":"limit","tif":"day","qty":"1","limit_price":"10"}}"#
+    )
+}
+
+/// DEC-778 items 1 to 3, with DEC-777 item 6. O5 is requested for the agent and submitted at
+/// version 2 on ACCT2, and filled on ACCT1: its companion, its submission, and the fill are the
+/// agent's, since the order lookup reads every timeline stream. O4 is a version-1 `OrderSubmitted`
+/// on ACCT1 with no companion and no `causation_id`; O6 is one whose `causation_id` names O5's
+/// companion, which names the agent. Neither version-1 record carries an `intent_id` or an agent,
+/// and each `causation_id` is null or names an account-stream event, so only the `client_order_id`
+/// rule is in play: a version-1 order is no one's, and neither it nor its fill is served.
+#[test]
+#[ignore = "pending E12-2"]
+fn order_links_are_version_two_and_read_every_timeline_stream() {
+    let mut j = Journal::new();
+    let s1 = stream(Some("ACCT1"));
+    let placed = order(&mut j, &stream(Some("ACCT2")), 2, ME, "O5");
+    let companion = placed[0].clone();
+    j.one(&s1, 3, ("OrderSubmitted", 1, None, &submitted_v1("O4")));
+    j.one(&s1, 3, ("FillApplied", 1, None, &filled("O4")));
+    let caused = Some(companion.as_str());
+    j.one(&s1, 3, ("OrderSubmitted", 1, caused, &submitted_v1("O6")));
+    j.one(&s1, 3, ("FillApplied", 1, None, &filled("O6")));
+    let fill = j.one(&s1, 4, ("FillApplied", 1, None, &filled("O5")));
+    let expected = [vec![j.opened(&stream(None))], placed, vec![fill]].concat();
+    assert_eq!(served(&j), (expected, j.heads()));
+}
+
+/// DEC-779's tripwire. DEC-764 item 2 makes `AccountRestrictionChanged` and a connection- or
+/// workspace-scope `KillSwitchActivated` on an account stream the agent's, but the journal registers
+/// neither payload at schema version 1 or 2, so `append` refuses both and the timeline leaves that
+/// clause out. The day either becomes recordable this test fails, and DEC-779 lapses: that change's
+/// tests PR adds those timeline cases, and the clause follows them (DEC-77).
+#[test]
+fn the_account_wide_records_the_timeline_omits_are_not_yet_recordable() {
+    let mut j = Journal::new();
+    let to = stream(Some("ACCT1"));
+    let a = text(WS_A);
+    let offers = [
+        (
+            "AccountRestrictionChanged",
+            r#"{"restriction":"closing_only","reason":"broker"}"#.to_owned(),
+        ),
+        (
+            "KillSwitchActivated",
+            r#"{"scope":"connection","subject":"ACCT1","reason":"owner"}"#.to_owned(),
+        ),
+        (
+            "KillSwitchActivated",
+            format!(r#"{{"scope":"workspace","subject":"{a}","reason":"owner"}}"#),
+        ),
+        (
+            "KillSwitchActivated",
+            format!(r#"{{"scope":"agent","subject":"{ME}","reason":"owner"}}"#),
+        ),
+    ];
+    for ((typed, payload), version) in offers.iter().flat_map(|o| [(o, 1), (o, 2)]) {
+        j.next += 1;
+        let id = event_id(j.next);
+        let body = format!(
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"{id}","stream_id":"{to}",
+            "event_type":"{typed}","schema_version":{version},"event_time":"{T}","clock_source":"local",
+            "causation_id":null,"correlation_id":null,"actor":{},"config_refs":{{}},
+            "payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#,
+            actor()
+        );
+        let outcome = j.fx.try_append_at(&to, T, &[(id, body.as_bytes())]);
+        let refused = match &outcome {
+            AppendOutcome::Invalid { error, .. } => {
+                error.reason == InvalidReason::UnknownSchema && error.path == "payload"
+            }
+            _ => false,
+        };
+        assert!(refused, "{typed} v{version} {payload}: {outcome:?}");
+    }
 }
