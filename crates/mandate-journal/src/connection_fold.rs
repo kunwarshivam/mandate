@@ -126,30 +126,54 @@ pub enum ConnectionVerifyError {
 /// §11's `connection_lifecycle_mismatch` over the full chain: the first row that breaks rule 66,
 /// 67, 68, or 131.
 pub fn verify_connection_lifecycle(rows: &[StoredEvent]) -> Result<(), ConnectionVerifyError> {
-    lifecycle(rows)
+    Folds::default()
+        .run(&connection_rows(rows))
+        .map_or(Ok(()), |failing| Err(failing.indexed()))
 }
 
-fn lifecycle(rows: &[StoredEvent]) -> Result<(), ConnectionVerifyError> {
-    let rows = connection_rows(rows);
-    let mut controls: BTreeMap<&str, ControlFold<'_>> = BTreeMap::new();
-    let mut accounts: BTreeMap<&str, AccountFold<'_>> = BTreeMap::new();
-    for row in &rows {
-        let stream = row.stored.stream_id.as_str();
-        let refused = match row.stream {
-            StreamType::Control => controls.entry(stream).or_default().admit(row).err(),
-            _ => {
-                let admitted = accounts.entry(stream).or_default().admits(row);
-                (!admitted).then_some(ConnectionStreamRule::AccountStream)
-            }
-        };
-        if let Some(rule) = refused {
-            return Err(mismatch(
-                row.index,
-                ConnectionCheck::LifecycleMismatch(rule),
-            ));
-        }
+/// Each stream's fold of rules 66, 67, 68, and 131, as the full-chain run holds it.
+#[derive(Debug, Clone, Default)]
+struct Folds {
+    controls: BTreeMap<String, ControlFold>,
+    accounts: BTreeMap<String, AccountFold>,
+}
+
+impl Folds {
+    /// Continues each stream's fold over `rows`, stopping at the first that breaks a rule.
+    fn run<'r>(&mut self, rows: &[Row<'r>]) -> Option<Failing<'r>> {
+        rows.iter().find_map(|row| {
+            let stream = row.stored.stream_id.clone();
+            let refused = match row.stream {
+                StreamType::Control => self.controls.entry(stream).or_default().admit(row).err(),
+                _ => {
+                    let admitted = self.accounts.entry(stream).or_default().admits(row);
+                    (!admitted).then_some(ConnectionStreamRule::AccountStream)
+                }
+            };
+            refused.map(|rule| row.failing(ConnectionCheck::LifecycleMismatch(rule)))
+        })
     }
-    Ok(())
+}
+
+/// The first failing row, by its index in the rows given and by the stored row itself.
+struct Failing<'r> {
+    index: usize,
+    stored: &'r StoredEvent,
+    check: ConnectionCheck,
+}
+
+impl Failing<'_> {
+    fn indexed(&self) -> ConnectionVerifyError {
+        mismatch(self.index, self.check)
+    }
+
+    fn located(&self) -> ConnectionCheckError {
+        ConnectionCheckError::Failed(LocatedConnectionFailure {
+            stream_id: self.stored.stream_id.clone(),
+            seq: self.stored.seq,
+            check: self.check,
+        })
+    }
 }
 
 /// Where a range's run of rules 66, 67, 68, and 131 starts (journal spec v0.35 §11, DEC-885).
@@ -168,15 +192,18 @@ pub enum ConnectionStart {
 /// 131 holds after each stream's records `1` to `from_seq − 1`, derived only by folding the stored
 /// chain, never from a read model.
 #[derive(Debug, Clone)]
-pub struct ConnectionAnchor(());
+pub struct ConnectionAnchor(Folds);
 
 impl ConnectionAnchor {
     /// The anchor after `prefix`, the stored rows of the range's streams from `seq` 1 up to its
     /// trusted start, in commit order; `None` when the prefix breaks rule 66, 67, 68, or 131, since
     /// a broken chain anchors nothing (DEC-885 item 2, I5).
     pub fn fold(prefix: &[StoredEvent]) -> Option<ConnectionAnchor> {
-        let _ = prefix;
-        Err(ConnectionCheckError::Unimplemented { story: "E7-17" }).ok()
+        let mut folds = Folds::default();
+        folds
+            .run(&connection_rows(prefix))
+            .is_none()
+            .then_some(ConnectionAnchor(folds))
     }
 }
 
@@ -185,8 +212,6 @@ impl ConnectionAnchor {
 pub enum ConnectionCheckError {
     /// The first row that fails, by its stream and `seq`.
     Failed(LocatedConnectionFailure),
-    /// The check is a DEC-77 stub until `story` lands.
-    Unimplemented { story: &'static str },
 }
 
 /// The first row that fails a connection check, by its stream and `seq`.
@@ -215,8 +240,16 @@ pub fn verify_connection_lifecycle_from(
     start: ConnectionStart,
     rows: &[StoredEvent],
 ) -> Result<(), ConnectionCheckError> {
-    let _ = (start, rows);
-    Err(ConnectionCheckError::Unimplemented { story: "E7-17" })
+    let rows = connection_rows(rows);
+    let failing = match start {
+        ConnectionStart::Genesis => Folds::default().run(&rows),
+        ConnectionStart::Anchored(ConnectionAnchor(mut folds)) => folds.run(&rows),
+        ConnectionStart::Unanchored => rows
+            .iter()
+            .find(|row| row.stream != StreamType::Control || row.stored.event_type != REVOKED)
+            .map(|row| row.failing(ConnectionCheck::Unanchored)),
+    };
+    failing.map_or(Ok(()), |failing| Err(failing.located()))
 }
 
 /// [`verify_connection_causes`] over the full chain, reporting the failing row by its stream and
@@ -224,8 +257,7 @@ pub fn verify_connection_lifecycle_from(
 pub fn verify_connection_causes_from_genesis(
     rows: &[StoredEvent],
 ) -> Result<(), ConnectionCheckError> {
-    let _ = rows;
-    Err(ConnectionCheckError::Unimplemented { story: "E7-17" })
+    causes(&connection_rows(rows)).map_or(Ok(()), |failing| Err(failing.located()))
 }
 
 /// §11's `connection_cause_mismatch`: the first version-2 `ConnectionEstablished` or
@@ -236,13 +268,16 @@ pub fn verify_connection_causes_from_genesis(
 /// names no control-stream original of its type, or whose payload without `risk_clock` differs
 /// from that original's.
 pub fn verify_connection_causes(rows: &[StoredEvent]) -> Result<(), ConnectionVerifyError> {
-    let rows = connection_rows(rows);
+    causes(&connection_rows(rows)).map_or(Ok(()), |failing| Err(failing.indexed()))
+}
+
+fn causes<'r>(rows: &[Row<'r>]) -> Option<Failing<'r>> {
     let by_id: BTreeMap<&str, &Row<'_>> = rows
         .iter()
         .map(|row| (row.stored.event_id.as_str(), row))
         .collect();
     let mut connections: BTreeMap<(&str, &str), (&str, &str)> = BTreeMap::new();
-    for row in &rows {
+    for row in rows {
         let kind = row.stored.event_type.as_str();
         let cause = row.causation().and_then(|id| by_id.get(id)).copied();
         let caused = match row.stream {
@@ -272,10 +307,10 @@ pub fn verify_connection_causes(rows: &[StoredEvent]) -> Result<(), ConnectionVe
             }),
         };
         if !caused {
-            return Err(mismatch(row.index, ConnectionCheck::CauseMismatch));
+            return Some(row.failing(ConnectionCheck::CauseMismatch));
         }
     }
-    Ok(())
+    None
 }
 
 /// Whether `cause` is the passing `ConnectionChecked` of `occasion` that `row`, a control-stream
@@ -317,7 +352,15 @@ struct Row<'a> {
     body: Value,
 }
 
-impl Row<'_> {
+impl<'r> Row<'r> {
+    fn failing(&self, check: ConnectionCheck) -> Failing<'r> {
+        Failing {
+            index: self.index,
+            stored: self.stored,
+            check,
+        }
+    }
+
     fn payload(&self) -> &Value {
         self.body.get("payload").unwrap_or(&Value::Null)
     }
@@ -374,33 +417,37 @@ fn listed(p: &Value, check: &str) -> bool {
 }
 
 /// The connection manager's fold of one control stream (rules 66, 67, and 131).
-#[derive(Default)]
-struct ControlFold<'a> {
+#[derive(Debug, Clone, Default)]
+struct ControlFold {
     /// Each connection's first establishment.
-    first: BTreeMap<&'a str, &'a Value>,
+    first: BTreeMap<String, Value>,
     /// Each connection's latest `ConnectionEstablished` or `ConnectionRevoked`.
-    latest: BTreeMap<&'a str, &'static str>,
+    latest: BTreeMap<String, &'static str>,
     /// Each connection's latest scopes, its establishment's or the latest rotation's.
-    scopes: BTreeMap<&'a str, BTreeSet<&'a str>>,
+    scopes: BTreeMap<String, BTreeSet<String>>,
     /// The connection each `account_ref` belongs to (CN-5).
-    holders: BTreeMap<&'a str, &'a str>,
+    holders: BTreeMap<String, String>,
     /// Each connection's open `ConnectionRequested` (rule 131).
-    open: BTreeMap<&'a str, &'a Value>,
+    open: BTreeMap<String, Value>,
     /// Every `account_ref` a `ConnectionRequested` named; rule 131 binds the stream once it holds one.
-    requested: BTreeSet<&'a str>,
+    requested: BTreeSet<String>,
     /// The connections whose latest revocation closed a request (rule 67's `reconnect` exception).
-    withdrawn: BTreeSet<&'a str>,
+    withdrawn: BTreeSet<String>,
     /// The connections with a revocation that closed no request (rule 67's `connect` clause).
-    plain: BTreeSet<&'a str>,
+    plain: BTreeSet<String>,
 }
 
-impl<'a> ControlFold<'a> {
-    fn admit(&mut self, row: &'a Row<'_>) -> Result<(), ConnectionStreamRule> {
+impl ControlFold {
+    fn admit(&mut self, row: &Row<'_>) -> Result<(), ConnectionStreamRule> {
         let p = row.payload();
         let id = text(p, "connection_id");
-        let first = self.first.get(id).copied();
+        let first = self.first.get(id).cloned();
         let latest = self.latest.get(id).copied();
-        let same = |member: &str| first.is_none_or(|f| text(f, member) == text(p, member));
+        let same = |member: &str| {
+            first
+                .as_ref()
+                .is_none_or(|f| text(f, member) == text(p, member))
+        };
         let scopes: BTreeSet<&str> = p
             .get("scopes")
             .and_then(Value::as_array)
@@ -411,7 +458,7 @@ impl<'a> ControlFold<'a> {
         match row.stored.event_type.as_str() {
             ESTABLISHED => {
                 let account_ref = p.get("account_ref").and_then(Value::as_str);
-                let again = first.is_some_and(|f| {
+                let again = first.as_ref().is_some_and(|f| {
                     latest != Some(REVOKED)
                         || !same("broker")
                         || !same("environment")
@@ -419,7 +466,7 @@ impl<'a> ControlFold<'a> {
                         || f.get("account_ref").and_then(Value::as_str) != account_ref
                 });
                 let held = account_ref.and_then(|r| self.holders.get(r));
-                if again || held.is_some_and(|holder| *holder != id) {
+                if again || held.is_some_and(|holder| holder != id) {
                     return Err(ConnectionStreamRule::Established);
                 }
                 let unrequested = match row.stored.schema_version {
@@ -431,30 +478,32 @@ impl<'a> ControlFold<'a> {
                     return Err(ConnectionStreamRule::Requested);
                 }
                 if let Some(account_ref) = account_ref {
-                    self.holders.entry(account_ref).or_insert(id);
+                    self.holders
+                        .entry(account_ref.to_owned())
+                        .or_insert_with(|| id.to_owned());
                 }
-                self.first.entry(id).or_insert(p);
-                self.latest.insert(id, ESTABLISHED);
-                self.scopes.insert(id, scopes);
+                self.first.entry(id.to_owned()).or_insert_with(|| p.clone());
+                self.latest.insert(id.to_owned(), ESTABLISHED);
+                self.scopes.insert(id.to_owned(), owned(&scopes));
             }
             REVOKED => {
-                self.latest.insert(id, REVOKED);
+                self.latest.insert(id.to_owned(), REVOKED);
                 if self.open.remove(id).is_some() {
-                    self.withdrawn.insert(id);
+                    self.withdrawn.insert(id.to_owned());
                 } else {
                     self.withdrawn.remove(id);
-                    self.plain.insert(id);
+                    self.plain.insert(id.to_owned());
                 }
             }
             ROTATED => {
                 let narrower = self
                     .scopes
                     .get(id)
-                    .is_some_and(|held| scopes.is_subset(held));
+                    .is_some_and(|held| scopes.iter().all(|scope| held.contains(*scope)));
                 if latest != Some(ESTABLISHED) || !narrower {
                     return Err(ConnectionStreamRule::Rotated);
                 }
-                self.scopes.insert(id, scopes);
+                self.scopes.insert(id.to_owned(), owned(&scopes));
             }
             REQUESTED => {
                 let account_ref = text(p, "account_ref");
@@ -465,8 +514,8 @@ impl<'a> ControlFold<'a> {
                 {
                     return Err(ConnectionStreamRule::Requested);
                 }
-                self.open.insert(id, p);
-                self.requested.insert(account_ref);
+                self.open.insert(id.to_owned(), p.clone());
+                self.requested.insert(account_ref.to_owned());
             }
             _ => {
                 let occasion = text(p, "occasion");
@@ -505,9 +554,14 @@ impl<'a> ControlFold<'a> {
     }
 }
 
+/// A record's scopes as a fold keeps them past the record.
+fn owned(scopes: &BTreeSet<&str>) -> BTreeSet<String> {
+    scopes.iter().map(|scope| (*scope).to_owned()).collect()
+}
+
 /// A check as an account stream's fold keeps it: whether it passed every result, whether it
 /// listed `contract`, and the stream's latest entry into `suspended` before it.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct Check {
     passed: bool,
     contract: bool,
@@ -515,33 +569,39 @@ struct Check {
 }
 
 /// The executor's fold of one account stream (rule 68).
-#[derive(Default)]
-struct AccountFold<'a> {
+#[derive(Debug, Clone, Default)]
+struct AccountFold {
     /// The connection whose record came first; every later one names it.
-    owner: Option<&'a str>,
+    owner: Option<String>,
     /// The broker of the latest binding copy; `None` while the stream is `connecting`.
-    broker: Option<&'a str>,
+    broker: Option<String>,
     /// The latest check of each occasion.
-    checks: BTreeMap<&'a str, Check>,
+    checks: BTreeMap<String, Check>,
     /// Each rotation's copy, by event id, with the stream's latest entry into `suspended` before
     /// its `reauthorize` check.
-    rotations: BTreeMap<&'a str, Option<usize>>,
+    rotations: BTreeMap<String, Option<usize>>,
     /// The state the latest `ConnectionStateChanged` left, `active` before any.
-    state: Option<&'a str>,
+    state: Option<String>,
     /// Whether the latest `ConnectionStateChanged` was a `condition_cleared`.
     cleared: bool,
-    /// The index of the `ConnectionStateChanged` that last entered `suspended`.
+    /// How many times the stream has entered `suspended`, so an entry is told from every other
+    /// across the full chain, a range's anchor included.
+    entries: usize,
+    /// The entry into `suspended` the stream last made, by its count.
     suspension: Option<usize>,
 }
 
-impl<'a> AccountFold<'a> {
-    fn admits(&mut self, row: &'a Row<'_>) -> bool {
+impl AccountFold {
+    fn admits(&mut self, row: &Row<'_>) -> bool {
         let p = row.payload();
         let id = text(p, "connection_id");
-        if *self.owner.get_or_insert(id) != id {
+        if self.owner.get_or_insert_with(|| id.to_owned()) != id {
             return false;
         }
-        let mcp = self.broker.is_some_and(|b| MCP_BROKERS.contains(&b));
+        let mcp = self
+            .broker
+            .as_deref()
+            .is_some_and(|b| MCP_BROKERS.contains(&b));
         match row.stored.event_type.as_str() {
             CHECKED => {
                 let occasion = text(p, "occasion");
@@ -551,7 +611,7 @@ impl<'a> AccountFold<'a> {
                     contract,
                     suspension: self.suspension,
                 };
-                self.checks.insert(occasion, check);
+                self.checks.insert(occasion.to_owned(), check);
                 (self.broker.is_some() || UNBOUND_OCCASIONS.contains(&occasion))
                     && (contract || !mcp)
             }
@@ -562,7 +622,7 @@ impl<'a> AccountFold<'a> {
                 };
                 let broker = text(p, "broker");
                 let stream_ref = row.stored.stream_id.rsplit(':').next().unwrap_or_default();
-                self.broker = Some(broker);
+                self.broker = Some(broker.to_owned());
                 text(p, "account_ref") == stream_ref
                     && self.checks.get(occasion).is_some_and(|check| {
                         check.passed && (check.contract || !MCP_BROKERS.contains(&broker))
@@ -572,7 +632,7 @@ impl<'a> AccountFold<'a> {
             ROTATED => match self.checks.get("reauthorize") {
                 Some(check) if check.passed && (check.contract || !mcp) => {
                     self.rotations
-                        .insert(row.stored.event_id.as_str(), check.suspension);
+                        .insert(row.stored.event_id.clone(), check.suspension);
                     true
                 }
                 _ => false,
@@ -583,20 +643,21 @@ impl<'a> AccountFold<'a> {
     }
 
     /// Rule 68's state clause on a `ConnectionStateChanged`.
-    fn moves(&mut self, row: &'a Row<'_>) -> bool {
+    fn moves(&mut self, row: &Row<'_>) -> bool {
         let p = row.payload();
         let (from, to, reason) = (text(p, "from"), text(p, "to"), text(p, "reason"));
         let rotation = row.causation().and_then(|id| self.rotations.get(id));
-        let admitted = from == self.state.unwrap_or("active")
+        let admitted = from == self.state.as_deref().unwrap_or("active")
             && (reason != "acknowledged" || self.cleared)
             && (reason != "condition_cleared"
                 || from != "suspended"
                 || rotation.is_some_and(|suspension| *suspension == self.suspension));
         if to == "suspended" && from != "suspended" {
-            self.suspension = Some(row.index);
+            self.entries = self.entries.saturating_add(1);
+            self.suspension = Some(self.entries);
         }
         self.cleared = reason == "condition_cleared";
-        self.state = Some(to);
+        self.state = Some(to.to_owned());
         admitted
     }
 }
