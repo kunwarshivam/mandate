@@ -114,7 +114,6 @@ impl Chain {
 
 /// Every vector case: its chain from seq 1, and the vector's answer exactly.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_anchor_self_vector_is_judged_as_its_vector_says() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
     let fixture = parse(&std::fs::read(path).unwrap()).unwrap();
@@ -159,7 +158,6 @@ fn every_anchor_self_vector_is_judged_as_its_vector_says() {
 /// first failing anchor is reported at its own `seq`; and an anchor that is a range's first row
 /// names an event before the trusted start, which the range does not check.
 #[test]
-#[ignore = "pending E12-3"]
 fn an_anchor_names_the_event_just_before_it() {
     let mut opening = Chain::from(9);
     opening.anchor(Some((CTL, 1, Digest::of(b"wrong"))));
@@ -209,7 +207,6 @@ impl Rng {
 /// Random ranges of anchors and other records, each anchor's own leaf honest or wrong in one way;
 /// the expected answer is the first wrong anchor after the range's first row, as built.
 #[test]
-#[ignore = "pending E12-3"]
 fn random_anchor_chains_fail_at_their_first_wrong_anchor() {
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
     let mut wrong = Vec::new();
@@ -315,7 +312,6 @@ impl Range {
 
 /// Every vector case: its range from the case's trusted start, and the vector's answer exactly.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_break_glass_vector_is_judged_as_its_vector_says() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
     let fixture = parse(&std::fs::read(path).unwrap()).unwrap();
@@ -366,7 +362,6 @@ fn every_break_glass_vector_is_judged_as_its_vector_says() {
 /// §11: only a `platform_operator`'s `RecordsAccessed` is judged, whatever any other actor's read
 /// or an operator's other record cites.
 #[test]
-#[ignore = "pending E12-3"]
 fn only_an_operators_read_is_judged() {
     let mut range = Range::from(1);
     range.push("StreamOpened", "system", None);
@@ -387,7 +382,6 @@ fn only_an_operators_read_is_judged() {
 /// a later one, the read itself, an earlier record of another type, an action stored as another
 /// workspace's, and a cause naming no event each fail at the read.
 #[test]
-#[ignore = "pending E12-3"]
 fn an_operator_read_cites_an_earlier_action_on_its_own_stream() {
     let mut good = Range::from(1);
     good.push(ACTION, OPERATOR, None);
@@ -428,7 +422,6 @@ fn an_operator_read_cites_an_earlier_action_on_its_own_stream() {
 /// §11 "so of the same workspace": another workspace's action, journaled on its own control
 /// stream, opens a window there and none here, so the full chain fails a read here that cites it.
 #[test]
-#[ignore = "pending E12-3"]
 fn another_workspaces_action_opens_no_window_here() {
     let mut there = Range::from(1);
     there.on(OTHER_CTL, ACTION, OPERATOR, None);
@@ -442,7 +435,6 @@ fn another_workspaces_action_opens_no_window_here() {
 
 /// §9.13 rule 111: the first failing read is reported, at its own `seq`, not its index.
 #[test]
-#[ignore = "pending E12-3"]
 fn the_first_failing_read_is_reported_at_its_seq() {
     let mut range = Range::from(1);
     range.push(ACTION, OPERATOR, None);
@@ -462,7 +454,6 @@ fn the_first_failing_read_is_reported_at_its_seq() {
 /// §11: a cause before a range's trusted start is not judged by that range, but a cause the range
 /// holds still is; the full chain judges a cause that names no event.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_tail_range_judges_only_the_causes_it_holds() {
     let mut tail = Range::from(5);
     tail.push(READ, OPERATOR, Some("E1"));
@@ -501,7 +492,6 @@ fn a_tail_range_judges_only_the_causes_it_holds() {
 /// for each operator read, whether its cause is among the first and, failing that, whether the
 /// range could have held it.
 #[test]
-#[ignore = "pending E12-3"]
 fn random_ranges_are_judged_as_an_independent_walk_says() {
     let mut rng = Rng(0xD1B5_4A32_D192_ED03);
     let mut wrong = Vec::new();
