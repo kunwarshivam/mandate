@@ -3,9 +3,9 @@
 - **Spec:** connections spec §6.2; trading spec §5.2 and §5.7; the first live trade brief's C1.
 - **Code:** `mandate-robinhood`, `crates/mandate-robinhood/` (layer 7, safety-critical, pure;
   C1 implemented: the profile, `ref_id`, the states, `Submit` and `Cancel`; DEC-860; C3
-  implemented: `RobinhoodConnector::restore`, DEC-870).
+  implemented: `RobinhoodConnector::restore`, DEC-870, DEC-872).
 - **Tests:** `crates/mandate-robinhood/tests/shape.rs` (profile, `ref_id`, states),
-  `crates/mandate-robinhood/tests/restore.rs` (C3, DEC-870: the `order_id` map
+  `crates/mandate-robinhood/tests/restore.rs` (C3, DEC-870 and DEC-872: the `order_id` map
   rebuilt from the account stream, and the distinct-id property), and
   `crates/mandate-rh-sim/tests/robinhood.rs` (`Submit` against `SimServer` over loopback: review
   then place, a deduplicated re-send, LT-6's lost and garbled answers, LT-5's alerts, `Cancel`

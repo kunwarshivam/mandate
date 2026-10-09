@@ -67,43 +67,52 @@ impl<T: Tools> RobinhoodConnector<T> {
 
     /// The connector after a restart: [`Self::new`] with its `ClientOrderId` → `order_id` map
     /// rebuilt from the account stream's `records`, in journal order (journal spec §9.16,
-    /// DEC-860 item 7, DEC-870). A key maps to the one distinct `broker_order_id` its version-2
-    /// `OrderStateChanged` records carry, with the instrument and side of its `OrderSubmitted`,
-    /// or of the order it `replaces`. A key with no id, or with two different ids, maps to
-    /// nothing, so its cancel is `NotSent` (`no_order_id`) with nothing called. Every key the
-    /// stream submitted is never placed again: a `Submit` of it is `Unknown` (DEC-860 item 4).
+    /// DEC-860 item 7, DEC-870, DEC-872). A key maps to the one distinct `broker_order_id` its
+    /// version-2 `OrderStateChanged` records carry, when no other key carries that id, with the
+    /// instrument and side of its own readable `OrderSubmitted`, or else of the order it
+    /// `replaces`. A key with no id, two different ids, an id another key carries, or no readable
+    /// instrument and side (two of its `OrderSubmitted` that disagree included) maps to nothing,
+    /// so its cancel is `NotSent` (`no_order_id`) with nothing called. Every key the stream names
+    /// (an `OrderSubmitted` or `OrderStateChanged` key, or a `replaces` or `replaced_by` target)
+    /// is never placed again: a `Submit` of it is `Unknown` (DEC-860 item 4, DEC-872).
     pub fn restore(
         tools: T,
         account_number: String,
         records: &[FoldedEvent],
     ) -> Result<Self, crate::RobinhoodError> {
         let mut connector = Self::new(tools, account_number);
-        let mut submitted: BTreeMap<ClientOrderId, (InstrumentId, Side)> = BTreeMap::new();
+        let mut submitted: BTreeMap<ClientOrderId, Option<(InstrumentId, Side)>> = BTreeMap::new();
         let mut ids: BTreeMap<ClientOrderId, BTreeSet<String>> = BTreeMap::new();
+        let mut named: BTreeSet<ClientOrderId> = BTreeSet::new();
         for record in records {
             let text = |member: &str| record.payload.get(member).and_then(Canon::as_str);
             let Some(key) = text("client_order_id").and_then(|k| ClientOrderId::parse(k).ok())
             else {
                 continue;
             };
+            let link = |member: &str| text(member).and_then(|k| ClientOrderId::parse(k).ok());
             match record.event_type.as_str() {
                 "OrderSubmitted" => {
+                    named.insert(key.clone());
                     let side = match text("side") {
-                        Some("buy") => Side::Buy,
-                        Some("sell") => Side::Sell,
-                        _ => continue,
+                        Some("buy") => Some(Side::Buy),
+                        Some("sell") => Some(Side::Sell),
+                        _ => None,
                     };
-                    let Some(instrument) =
-                        text("instrument_id").and_then(|i| InstrumentId::new(i).ok())
-                    else {
-                        continue;
-                    };
-                    submitted.insert(key, (instrument, side));
+                    let instrument = text("instrument_id").and_then(|i| InstrumentId::new(i).ok());
+                    let read = instrument.zip(side);
+                    let own = submitted.entry(key).or_insert_with(|| read.clone());
+                    if *own != read {
+                        *own = None;
+                    }
                 }
                 "OrderStateChanged" => {
-                    let old = text("replaces").and_then(|k| ClientOrderId::parse(k).ok());
+                    named.insert(key.clone());
+                    named.extend(link("replaced_by"));
+                    let old = link("replaces");
+                    named.extend(old.clone());
                     if let Some(origin) = old.and_then(|old| submitted.get(&old).cloned()) {
-                        submitted.insert(key.clone(), origin);
+                        submitted.entry(key.clone()).or_insert(origin);
                     }
                     let known = ids.entry(key).or_default();
                     if let Some(id) = text("broker_order_id") {
@@ -113,13 +122,22 @@ impl<T: Tools> RobinhoodConnector<T> {
                 _ => {}
             }
         }
-        connector.in_doubt = submitted.keys().cloned().collect();
+        connector.in_doubt = named;
+        let (mut seen, mut shared) = (BTreeSet::new(), BTreeSet::new());
+        for id in ids.values().flatten() {
+            if !seen.insert(id) {
+                shared.insert(id.clone());
+            }
+        }
         for (key, known) in ids {
             let mut only = known.iter();
             let (Some(id), None) = (only.next(), only.next()) else {
                 continue;
             };
-            let Some((instrument, side)) = submitted.get(&key) else {
+            if shared.contains(id) {
+                continue;
+            }
+            let Some(Some((instrument, side))) = submitted.get(&key) else {
                 continue;
             };
             let order = BrokerOrder {
