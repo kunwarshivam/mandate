@@ -488,7 +488,7 @@ SCHEMAS[("ctl", "ClientConnected")] = rec(
 REVOCATION_ACTORS = {
     "owner": ("user",),
     "admin": ("user",),
-    "member_deactivated": ("system",),
+    "member_deactivated": ("user", "system"),
     "deprovisioned": ("system",),
     "compromised": ("user", "system"),
 }

@@ -365,8 +365,8 @@ their second party. Checked at append, after the envelope's types (reason `schem
     `RecordsAccessed` only (`actor.kind`), reported before the payload is read. `RecordsAccessed`'s
     payload is not closed yet (the audit lane closes it); rule 83 admits a client on it at append,
     but a client's read is journaled only once that schema exists, and it must use this actor
-    shape. These are its
-    `propose`, `request`, and `read` and `dry_run` scopes (workspace API §3.8). Whatever identity
+    shape. These three records are what its `propose`, `request`, and `read` and `dry_run` scopes
+    allow (workspace API §3.8). Whatever identity
     spec ID-11 forbids a client (confirming, approving, acknowledging, owner commands, connections,
     membership) is refused at append, and check 3 refuses an approval again at the runtime. A
     client's `hold` command joins the list with the `hold_openings` command (DEC-672).
@@ -1942,8 +1942,8 @@ own stream:
       connection clears only on a credential the control services accepted after the suspension.
 
 No rule here refuses a `ConnectionRevoked`, so §5.6's compromised revocation, whose kill switch
-shares its batch, is never held by one. §9.8 adds no `ConnectionRevoked` version; version 2 arrives in §9.10 (v0.22, DEC-671), and these
-rules count a revocation of either version.
+shares its batch, is never held by one. §9.8 adds no `ConnectionRevoked` version; version 2
+arrives in §9.10 (v0.22, DEC-671), and these rules count a revocation of either version.
 
 **No mapping to `JournaledFact`** beyond `ConnectionEstablished`'s (§9.2): the control-stream
 version, never its copy. The executor folds the account-stream records itself, and the connection
@@ -2106,7 +2106,7 @@ stays registered and unchanged (§8); the workspace API writes version 2.
 |---|---|---|
 | `client_id` | `id` | |
 | `user` | `text` | The user it acted for (opaque) |
-| `reason` | `owner` \| `admin` \| `member_deactivated` \| `deprovisioned` \| `compromised` | Who ended it and why: the client's own user, a workspace admin (identity spec §4.2), the system on a member's deactivation (identity §5.2) or deprovisioning (§11.1), or a suspected compromise: rule 89 |
+| `reason` | `owner` \| `admin` \| `member_deactivated` \| `deprovisioned` \| `compromised` | Who ended it and why: the client's own user, a workspace admin (identity spec §4.2), the deactivating admin or the system on a member's deactivation (identity §5.2), the system on deprovisioning (§11.1), or a suspected compromise: rule 89 |
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 
@@ -2126,8 +2126,8 @@ stays registered and unchanged (§8); the workspace API writes version 2.
 88. `ClientConnected`: the actor is a `user` (`actor.kind`), and `user` is its `id`
     (`payload.user`): a user connects their own client (identity spec §4.2).
 89. `ClientRevoked`: the actor follows the `reason` (`actor.kind`): a `user` for `owner` and
-    `admin`, the `system` for `member_deactivated` and `deprovisioned`, and either for
-    `compromised`. For `owner`, `user` is the actor's `id`; for `admin`, it is not
+    `admin`, the `system` for `deprovisioned`, and either a `user` or the `system` for
+    `member_deactivated` (the deactivating admin, or a scheduled deactivation) and `compromised`. For `owner`, `user` is the actor's `id`; for `admin`, it is not
     (`payload.user`).
 
 `ConnectionRevoked` version 2 maps to the `ConnectionRevoked` fact as version 1 does (§9.2). The

@@ -31418,7 +31418,7 @@
    },
    {
     "name": "deprovisioning_by_a_user",
-    "clause": "rule 89: deactivation and deprovisioning are the system's",
+    "clause": "rule 89: deprovisioning is the system's",
     "base_draft": "client_revoked",
     "changes": [
      {
@@ -31437,10 +31437,77 @@
     }
    },
    {
-    "name": "deactivation_by_a_user",
-    "clause": "rule 89: deactivation is the system's",
+    "name": "deactivation_revoked_by_an_agent",
+    "clause": "rule 89: only a user or the system revokes a deactivated member's clients",
     "base_draft": "client_revoked",
     "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_01",
+       "version": "1",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.reason",
+      "value": "member_deactivated"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "deactivation_revoked_by_a_broker",
+    "clause": "rule 89: only a user or the system revokes a deactivated member's clients",
+    "base_draft": "client_revoked",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "broker",
+       "id": "broker_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.reason",
+      "value": "member_deactivated"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "deactivation_revoked_by_an_operator",
+    "clause": "rule 89: only a user or the system revokes a deactivated member's clients",
+    "base_draft": "client_revoked",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "op_01",
+       "version": "1",
+       "build": null
+      }
+     },
      {
       "path": "payload.reason",
       "value": "member_deactivated"
@@ -31612,7 +31679,7 @@
    },
    {
     "name": "client_revoked_on_deactivation",
-    "clause": "rule 89: identity §5.2 step 2",
+    "clause": "rule 89: a scheduled deactivation is the system's",
     "base_draft": "client_revoked",
     "changes": [
      {
@@ -31623,6 +31690,28 @@
        "version": "0.1.0",
        "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
       }
+     },
+     {
+      "path": "payload.reason",
+      "value": "member_deactivated"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "client_revoked_on_deactivation_by_the_admin",
+    "clause": "rule 89: the deactivating admin revokes the member's clients (identity §5.2)",
+    "base_draft": "client_revoked",
+    "changes": [
+     {
+      "path": "actor.id",
+      "value": "user_admin_01"
      },
      {
       "path": "payload.reason",
