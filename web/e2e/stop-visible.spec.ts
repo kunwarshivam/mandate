@@ -157,7 +157,12 @@ test.describe("Stop answers a press while the page cross-fades (brief §5, rule 
         expect(covering, `${href}: elements over Stop's centre`).toEqual([]);
         expect(missed, `${href}: frames of ${frames} in which Stop took no press`).toBeLessThanOrEqual(CAPTURE_FRAMES);
         const hopEnd = await page.evaluate(() => window.__viewTransitions.started);
-        perHop.push(`${from}→${href}: ${hopEnd - hopStart}`);
+        const hopStarted = hopEnd - hopStart;
+        perHop.push(`${from}→${href}: ${hopStarted}`);
+        expect(
+          hopStarted,
+          `${from}→${href}: view transitions started by this hop (${hopStarted}); a hop without a cross-fade proves nothing for rule 13; per hop so far (route→route: started) ${perHop.join(", ")}`,
+        ).toBeGreaterThanOrEqual(1);
         from = href;
         hopStart = hopEnd;
       }
