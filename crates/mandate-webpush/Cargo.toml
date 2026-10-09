@@ -13,6 +13,7 @@ workspace = true
 aes-gcm.workspace = true
 base64ct.workspace = true
 hkdf.workspace = true
+mandate-notify.workspace = true
 p256 = { workspace = true, features = ["ecdh"] }
 sha2.workspace = true
 thiserror.workspace = true

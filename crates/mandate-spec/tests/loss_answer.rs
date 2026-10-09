@@ -23,7 +23,7 @@ use mandate_spec::draft::{
     proposed_ladder,
 };
 use mandate_spec::validate::{ValidationContext, validate};
-use mandate_spec::{DecGrammar, Mandate, SchemaDec};
+use mandate_spec::{DecGrammar, Mandate, SchemaDec, SpecError};
 use mandate_time::Date;
 use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
@@ -315,4 +315,70 @@ fn a_drafted_loss_answer_and_its_ladder_validate() {
     if let Err(failure) = outcome {
         panic!("{failure}");
     }
+}
+
+/// The outcome the coordinator's condition on #1199 pins for an input mandate spec §7 and DEC-695
+/// give none (#1199's review, minor 2): a typed error, or the question asked again, and never a
+/// panic or a draft. Which of the two is left to the implementation. The stub's own
+/// `SpecError::Unimplemented` is no answer, so its report is in the failure.
+fn unanswered<T: std::fmt::Debug>(
+    case: &str,
+    call: impl FnOnce() -> Result<Draft<T>, SpecError>,
+) -> Option<String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
+        Err(_) => Some(format!("{case}: panicked")),
+        Ok(Err(stub @ SpecError::Unimplemented)) => Some(format!(
+            "{case}: {stub:?} is the stub's report, not a refusal"
+        )),
+        Ok(Err(_) | Ok(Draft::AskAgain(_))) => None,
+        Ok(Ok(Draft::Proposed(drafted))) => Some(format!("{case}: proposed {drafted:?}")),
+    }
+}
+
+fn assert_all_unanswered(failures: Vec<String>) {
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// An answer no allocation can turn into a fraction of it: of a zero or negative allocation, or
+/// below zero itself. Each is refused or asked again, never drafted, and never a panic, whether it
+/// is a share or dollars.
+#[test]
+#[ignore = "pending E10-7"]
+fn a_loss_answer_without_a_positive_allocation_or_amount_is_never_drafted() {
+    let cases = [
+        (Kind::Fraction, "0.1", "0"),
+        (Kind::Usd, "100", "0"),
+        (Kind::Usd, "0", "0"),
+        (Kind::Usd, "-100", "10000"),
+        (Kind::Fraction, "-0.1", "10000"),
+        (Kind::Fraction, "0.1", "-10000"),
+        (Kind::Usd, "100", "-10000"),
+        (Kind::Usd, "-100", "-10000"),
+    ];
+    let failures = cases
+        .into_iter()
+        .filter_map(|(kind, value, allocation)| {
+            let said = answer(kind, value);
+            unanswered(&format!("{kind:?} {value} of {allocation}"), || {
+                loss_answer_fields(&said, dollars(allocation))
+            })
+        })
+        .collect();
+    assert_all_unanswered(failures);
+}
+
+/// A drawdown D no ladder can sit beneath: zero, below zero, or above the whole allocation. The
+/// signed `decimal` grammar is the only one that holds all three. Each is refused or asked again,
+/// never drafted, and never a panic.
+#[test]
+#[ignore = "pending E10-7"]
+fn a_drawdown_outside_zero_to_one_proposes_no_ladder() {
+    let failures = ["0", "-0.08", "-1", "1", "1.5", "2"]
+        .into_iter()
+        .filter_map(|drawdown| {
+            let d = SchemaDec::parse(drawdown, DecGrammar::Decimal).expect("a signed decimal");
+            unanswered(&format!("D = {drawdown}"), || proposed_ladder(&d))
+        })
+        .collect();
+    assert_all_unanswered(failures);
 }

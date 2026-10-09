@@ -5,7 +5,7 @@
   DEC-438 item 13, DEC-700 item 3 (the envelope per class), DEC-792 and DEC-722 (the push-service
   allowlist), DEC-724 (the relay's readings), DEC-726 (the deployment's VAPID header, carried
   opaque, shape-checked last, capped at 1 024 octets, and never logged).
-- **Code:** `mandate-push-relay` (layer 2, pure, over `mandate-webpush` alone):
+- **Code:** `mandate-push-relay` (layer 3, pure, over `mandate-webpush` alone):
   `crates/mandate-push-relay/src/lib.rs` (`relay`, `RelayRequest`, `RelayId`, `Forward`, the
   `PushService` and `RelayLog` traits, `LogEntry`, the closed `RelayError`, and
   `check_authorization`, the header's shape check, run last).

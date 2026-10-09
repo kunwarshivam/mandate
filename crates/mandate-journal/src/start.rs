@@ -3,7 +3,10 @@
 //! the request ([workspace API spec](../../../docs/specs/workspace-api.md) §4.8.1). The reference
 //! is `reference/journal/control.py`'s `trusted_start`; the vectors are `cold_records.trusted_starts`.
 //! It also reads an `AnchorComputed` row as the anchor a verifier checks ([`anchor_record`], §10,
-//! §11).
+//! §11). [`resolve_start_from_rows`] is the resolver over stored rows DEC-893 and DEC-894 define:
+//! its start record is checked, and a manifest start is a [`ManifestStart`] the cold store must
+//! confirm; the reference is `control.py`'s `start_from_rows`, the vectors
+//! `cold_records.trusted_starts.row_cases`.
 
 use mandate_canon::{Digest, Value, parse};
 
@@ -26,6 +29,11 @@ pub enum TrustedStartError {
     /// No usable start: the record is absent, another workspace's (the same refusal, DEC-767), of
     /// another stream, an anchor without a `token`, or does not fit `from_seq` (§4.8.1).
     Refused,
+    /// The cold store could not answer for a manifest start: the segment's manifest object is
+    /// absent or cannot be read (DEC-787 item 5, DEC-893 item 5). Kept apart from `Refused`
+    /// because it is retryable and raises no alert; both are 422 `trusted_start` with nothing
+    /// recorded.
+    ColdUnreadable,
     /// Never returned now that E12-3 built the resolver; kept, as `ControlVerifyError` keeps its
     /// own, so a caller's match stays the same across the crate's stubs (DEC-77).
     Unimplemented { story: &'static str },
@@ -82,6 +90,65 @@ pub fn resolve_trusted_start(
             prev_hash,
         })
         .ok_or(refused)
+}
+
+/// What [`resolve_start_from_rows`] found (DEC-893 item 4): a start ready to walk from, or a
+/// manifest start the cold store has still to confirm.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ResolvedStart {
+    /// Genesis, or a checked stamped anchor: no cold read is needed.
+    Ready(TrustedStart),
+    /// A checked `SegmentExported` that only the hot store vouches for so far.
+    Manifest(ManifestStart),
+}
+
+/// A manifest start the hot store vouches for, not yet a [`TrustedStart`]: only
+/// [`ManifestStart::confirm`] makes it one, so a hot-only manifest start is unrepresentable
+/// (DEC-893 item 4). Only the resolver builds one:
+///
+/// ```compile_fail,E0451
+/// use mandate_journal::{ManifestStart, TrustedStart};
+/// let forged = ManifestStart { start: TrustedStart::GENESIS, manifest_hash: mandate_canon::Digest::ZERO };
+/// ```
+#[derive(Debug, PartialEq, Eq)]
+pub struct ManifestStart {
+    start: TrustedStart,
+    manifest_hash: Digest,
+}
+
+/// The cold store's answer for a segment's manifest object (§6.2): its bytes, no such object, or
+/// no answer at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColdRead {
+    Read(Vec<u8>),
+    Absent,
+    Unreadable,
+}
+
+impl ManifestStart {
+    /// The start, once `Digest::of` the cold manifest's bytes is the record's `manifest_hash`
+    /// (DEC-893 item 4): other bytes are `Refused` (DEC-894 item 1), and an absent or unreadable
+    /// object is `ColdUnreadable` (DEC-787 item 5).
+    pub fn confirm(self, cold: ColdRead) -> Result<TrustedStart, TrustedStartError> {
+        let _ = (self.start, self.manifest_hash, cold);
+        Err(TrustedStartError::Unimplemented { story: "E12-3" })
+    }
+}
+
+/// §9.14's lookup over the stored `rows` of the control stream of `stream_id`'s own workspace
+/// (DEC-893): exactly one row must match `request`, by its columns and its body's `payload`, as
+/// [`resolve_trusted_start`] matches records, and more than one refuses (item 7). That row must
+/// pass §11 checks 1, 2 and 4 in that order, and a `SegmentExported` rule 117 too (item 1); no
+/// other check runs (item 2). Genesis and a checked stamped anchor are [`ResolvedStart::Ready`]; a
+/// checked segment is a [`ManifestStart`].
+pub fn resolve_start_from_rows(
+    rows: &[StoredEvent],
+    stream_id: &str,
+    from_seq: u64,
+    request: StartRequest<'_>,
+) -> Result<ResolvedStart, TrustedStartError> {
+    let _ = (rows, stream_id, from_seq, request);
+    Err(TrustedStartError::Unimplemented { story: "E12-3" })
 }
 
 /// An `AnchorComputed` as a verifier reads it (§9.14): its leaves and root exactly as recorded,
