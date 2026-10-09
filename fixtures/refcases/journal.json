@@ -37518,6 +37518,22 @@
     }
    },
    {
+    "name": "cool_off_a_nanosecond_long",
+    "clause": "rule 103: exactly 24 hours, not at least",
+    "base_draft": "reactivated",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends_at",
+      "value": "2026-10-06T14:00:00.000000001Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends_at"
+    }
+   },
+   {
     "name": "cool_off_before_its_start",
     "clause": "rule 103",
     "base_draft": "reactivated",
@@ -37629,6 +37645,22 @@
      {
       "path": "payload.expires_at",
       "value": "2026-10-11T14:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.expires_at"
+    }
+   },
+   {
+    "name": "invitation_a_nanosecond_past_seven_days",
+    "clause": "rule 104: 7 days exactly, not at least",
+    "base_draft": "invited",
+    "changes": [
+     {
+      "path": "payload.expires_at",
+      "value": "2026-10-12T14:00:00.000000001Z"
      }
     ],
     "expect": {
