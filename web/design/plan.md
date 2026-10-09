@@ -248,6 +248,8 @@ item above (C-3, C-9) are not repeated.
       open; if not, keep the frame's Stop live as the More sheet does. Safety lane. (C-21)
 - [x] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and
       reconciliation conditions do. (C-25, #1057)
+      - Every in-flight order state (`IN_FLIGHT`) now says why too, swept by a test so a state
+        added later can't lose its line. (#1083)
 - [ ] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
       leaves out its "Asked you" row. (C-5)
 - [x] **"At the limit:" on the overview card**, so a limit's action never reads as the current
