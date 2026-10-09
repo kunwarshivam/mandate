@@ -108,6 +108,16 @@ const TABLE: &[(&str, &[&str], bool)] = &[
     ("place_equity_order", &["place", "equity", "order"], false),
     ("getRefunds", &["get", "refunds"], false),
     ("Transferable", &["transferable"], false),
+    ("sends", &["sends"], false),
+    ("wires", &["wires"], false),
+    ("payouts", &["payouts"], false),
+    ("achs", &["achs"], false),
+    ("send_", &["send"], true),
+    ("_send", &["send"], true),
+    ("wire__", &["wire"], true),
+    ("__a..wire--b__", &["a", "wire", "b"], true),
+    ("getABc", &["get", "a", "bc"], false),
+    ("wİre", &["w", "re"], true),
 ];
 
 #[test]
@@ -193,6 +203,41 @@ fn every_token_is_refused_whole_in_any_case_and_inside_a_name() {
                 "{name:?} has {token:?} only inside a longer part"
             );
         }
+        let plural = format!("{token}s");
+        assert_eq!(
+            is_fund_movement_name(&plural),
+            SET.contains(&plural.as_str()),
+            "{plural:?} is refused only when the set lists it"
+        );
+    }
+}
+
+/// Every ASCII character that is not a letter or digit, control characters included.
+fn ascii_separators() -> Vec<char> {
+    (0u8..=0x7f)
+        .map(char::from)
+        .filter(|c| !c.is_ascii_alphanumeric())
+        .collect()
+}
+
+#[test]
+#[ignore = "pending E7-12"]
+fn every_ascii_non_alphanumeric_separates_parts() {
+    let separators = ascii_separators();
+    assert_eq!(separators.len(), 66, "128 ASCII less 62 letters and digits");
+    for c in separators {
+        for (name, parts) in [
+            (format!("send{c}x"), vec!["send", "x"]),
+            (format!("{c}wire"), vec!["wire"]),
+            (format!("ach{c}"), vec!["ach"]),
+            (format!("re{c}send{c}{c}"), vec!["re", "send"]),
+        ] {
+            assert_eq!(name_tokens(&name), parts, "the parts of {name:?}");
+            assert!(is_fund_movement_name(&name), "{name:?} is refused");
+        }
+        let alone = c.to_string();
+        assert_eq!(name_tokens(&alone), Vec::<String>::new(), "{alone:?}");
+        assert!(!is_fund_movement_name(&alone), "{alone:?} is not refused");
     }
 }
 
@@ -216,9 +261,9 @@ fn word() -> impl Strategy<Value = (String, String)> {
     })
 }
 
-/// Words joined by runs of ASCII separators, with or without one non-ASCII character, or by
-/// nothing where a capital follows a lowercase letter or a digit, or follows a capital and is
-/// followed by a lowercase letter. The oracle refuses the name when it inserted a non-ASCII
+/// Words joined by runs of any ASCII non-alphanumerics, with or without one non-ASCII character,
+/// or by nothing where a capital follows a lowercase letter or a digit, or follows a capital and
+/// is followed by a lowercase letter. The oracle refuses the name when it inserted a non-ASCII
 /// character, whatever the words, and otherwise when a word is in the set.
 #[test]
 #[ignore = "pending E7-12"]
@@ -227,7 +272,9 @@ fn a_name_built_from_words_splits_into_them_and_is_refused_iff_one_is_in_the_set
         0.2,
         proptest::sample::select(vec!['é', '·', 'і', '\u{200b}', 'ｗ']),
     );
-    let names = proptest::collection::vec((word(), "[-_. /:]{0,3}", non_ascii), 1..6);
+    let separator = proptest::collection::vec(proptest::sample::select(ascii_separators()), 0..3)
+        .prop_map(String::from_iter);
+    let names = proptest::collection::vec((word(), separator, non_ascii), 1..6);
     let mut runner = TestRunner::new(Config {
         cases: 512,
         failure_persistence: None,
