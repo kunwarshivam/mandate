@@ -2173,6 +2173,7 @@ fn mutants_args(
         "--build-timeout",
         MUTANT_BUILD_TIMEOUT,
         MUTANTS_IN_PLACE,
+        "--caught",
     ]
     .into_iter()
     .map(str::to_owned)
