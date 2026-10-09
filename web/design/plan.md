@@ -277,7 +277,7 @@ item above (C-3, C-9) are not repeated.
 - [ ] **Positions on a phone as two-line rows**, so the value and the P&L are on screen. (C-14)
 - [ ] **Shots without the scenario panel**, and each scenario captured on the agent it affects.
       Tooling. (C-27, C-28)
-- [ ] **The mode chip in the desktop agent header**, on every tab. (C-8)
+- [x] **The mode chip in the desktop agent header**, on every tab. (C-8) Done in #1166.
 - [x] **Owls in the Stop sheet's agent rows.** Safety lane. (C-10) Done in
       [#1103](https://github.com/kunwarshivam/mandate/pull/1103).
 - [ ] **The Allowed chip keeps its edge in dark mode**, with its fill in the contrast pairs. (C-18)

@@ -100,10 +100,10 @@ function PhoneSectionLinks({ agent }: { agent: Agent }) {
 /**
  * Every agent screen shares this frame: a title, the paper badge beside it, route tabs, and a Stop
  * scoped to this agent. Sections title it with the owner's label for the agent; a record passes its
- * own title and names the agent underneath. The document title stays generic either way. On a phone
- * the mode sits beside the title, since the mandate card that carries it on desktop does not, and
- * Stop this agent is a quiet "Stop" at the end of the title's row: the tab bar's Stop is always a
- * press away and opens on this agent too, so the page's own need not take a row (DEC-482).
+ * own title and names the agent underneath. The document title stays generic either way. The mode
+ * sits beside the title at every width and on every tab, the first thing the page says (DEC-512, C-8).
+ * On a phone Stop this agent is a quiet "Stop" at the end of the title's row: the tab bar's Stop is
+ * always a press away and opens on this agent too, so the page's own need not take a row (DEC-482).
  */
 export function AgentFrame({ agent, title, description, children }: { agent: Agent; title?: string; description?: ReactNode; children: ReactNode }) {
   const canStop = useCan("stop.open");
@@ -114,7 +114,7 @@ export function AgentFrame({ agent, title, description, children }: { agent: Age
         title={title ?? agent.label}
         icon={<AgentOwl agent={agent} className="size-12 sm:size-16" />}
         environment={ws.environment}
-        status={<ModeBadge mode={agent.mode} className="lg:hidden" />}
+        status={<ModeBadge mode={agent.mode} />}
         description={description ?? agent.mandate.name}
         tabs={TOP_SECTIONS.map((s) => ({ href: agentHref(agent.agent_id, s.key), label: s.label }))}
         tabsLabel="Agent sections"

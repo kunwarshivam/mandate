@@ -26,7 +26,7 @@ export interface PageHeaderProps {
   environment?: Environment;
   tabs?: readonly PageTab[];
   tabsLabel?: string;
-  /** Beside the title, after the environment badge, such as an agent's mode on a phone. */
+  /** Beside the title, after the environment badge, such as an agent's mode. */
   status?: ReactNode;
   /** Before the title, such as an agent's owl. */
   icon?: ReactNode;
