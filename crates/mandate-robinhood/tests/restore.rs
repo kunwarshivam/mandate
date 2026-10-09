@@ -5,7 +5,8 @@
 //! and a recording tool double. A key the stream names anywhere is never placed again
 //! (DEC-872). Part 3 adds the distinct-id property here, whose oracle counts ids from the
 //! generated choices, and the restart against `mandate-rh-sim` in that crate's
-//! `tests/robinhood.rs`.
+//! `tests/robinhood.rs`. Part 4 (DEC-874, pending E7-6) pins that an odd `broker_order_id` and
+//! the order in which the stream interleaves its keys' records never make a key placeable.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -598,4 +599,294 @@ fn a_successor_with_its_own_submit_keeps_its_own_instrument_and_side() {
     let expected = order(&new, "rh-new", "QQQ", Side::Sell);
     assert_eq!(cancel(&mut c, &new), Ok(BrokerOutcome::Order(expected)));
     assert_eq!(*calls.borrow(), [cancelled_by("rh-new")]);
+}
+
+/// DEC-874 item 1: a `broker_order_id` that is present and neither `null` nor non-empty text
+/// (§9.16) leaves its key in doubt, whatever readable id its other records carry, so no cancel goes
+/// out with `order_id: ""` or by an id the odd record may contradict. A key with one unshared
+/// non-empty text id and its own instrument and side still cancels by it (`AGENTS.md` rule 13).
+#[test]
+#[ignore = "pending E7-6"]
+fn a_key_with_a_broker_order_id_that_is_not_non_empty_text_is_in_doubt() {
+    let mut s = Stream::default();
+    beside_a_known_order(&mut s);
+    let empty = key("01JEMPTYID");
+    s.submitted(&empty, "SPY", "buy");
+    s.changed(&empty, "accepted", Some(Some("")), NONE);
+    let mut keys = vec![empty];
+    let odd = [
+        ("01JNUMBERID", json!(7)),
+        ("01JARRAYID", json!(["rh-array"])),
+        ("01JOBJECTID", json!({"id": "rh-object"})),
+        ("01JBOOLID", json!(true)),
+    ];
+    for (intent, value) in odd {
+        let k = key(intent);
+        s.submitted(&k, "SPY", "buy");
+        let id = format!("rh-{intent}");
+        s.changed(&k, "accepted", Some(Some(&id)), NONE);
+        s.changed(&k, "accepted", None, json!({ "broker_order_id": value }));
+        keys.push(k);
+    }
+    never_placed_again_nor_guessed(&s.0, &keys.iter().collect::<Vec<_>>());
+    let (mut c, calls) = restored(&s.0, "confirmed");
+    let known = key("01JKNOWN");
+    let expected = order(&known, "rh-known", "SPY", Side::Buy);
+    assert_eq!(cancel(&mut c, &known), Ok(BrokerOutcome::Order(expected)));
+    assert_eq!(*calls.borrow(), [cancelled_by("rh-known")]);
+}
+
+/// DEC-874 item 2: a successor's inherited instrument and side are those its origin has once the
+/// whole stream is read, so an `OrderSubmitted` of the origin that disagrees, arriving after the
+/// successor's record, leaves the successor in doubt too. One that agrees keeps it placed.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_late_disagreeing_submit_of_an_origin_leaves_its_successor_in_doubt() {
+    let replaced = |s: &mut Stream, old: &ClientOrderId, new: &ClientOrderId, ids: [&str; 2]| {
+        s.changed(old, "accepted", Some(Some(ids[0])), NONE);
+        let link = json!({"replaced_by": new.as_str(), "replaced_by_broker_order_id": ids[1]});
+        s.changed(old, "replaced", Some(Some(ids[0])), link);
+        let back = json!({"replaces": old.as_str()});
+        s.changed(new, "accepted", Some(Some(ids[1])), back);
+    };
+    let (old, new) = (key("01JLATEORIGIN"), successor("01JREPLACELATE"));
+    let (kept, heir) = (key("01JLATEAGREES"), successor("01JREPLACEAGREES"));
+    let mut s = Stream::default();
+    beside_a_known_order(&mut s);
+    s.submitted(&old, "SPY", "buy");
+    replaced(&mut s, &old, &new, ["rh-old", "rh-new"]);
+    s.submitted(&old, "SPY", "sell");
+    s.submitted(&kept, "QQQ", "sell");
+    replaced(&mut s, &kept, &heir, ["rh-kept", "rh-heir"]);
+    s.submitted(&kept, "QQQ", "sell");
+    never_placed_again_nor_guessed(&s.0, &[&new, &old]);
+    let (mut c, calls) = restored(&s.0, "confirmed");
+    let expected = order(&heir, "rh-heir", "QQQ", Side::Sell);
+    assert_eq!(cancel(&mut c, &heir), Ok(BrokerOutcome::Order(expected)));
+    assert_eq!(*calls.borrow(), [cancelled_by("rh-heir")]);
+}
+
+/// DEC-874 item 3: a key's own readable `OrderSubmitted` wins over the order it `replaces`
+/// wherever it falls in the stream, and a successor of that key inherits it; an unreadable own
+/// `OrderSubmitted` after the inheriting record still leaves the key in doubt, and so does a
+/// `replaces` cycle with no `OrderSubmitted`, which the rebuild must still finish.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_successors_own_submit_wins_wherever_it_falls_in_the_stream() {
+    let (old, new, next) = (
+        key("01JREVERSEOLD"),
+        successor("01JREPLACEREVERSE"),
+        successor("01JREPLACENEXT"),
+    );
+    let (bad_old, bad_new) = (key("01JREVERSEBAD"), successor("01JREPLACEBAD"));
+    let mut s = Stream::default();
+    s.submitted(&old, "SPY", "buy");
+    s.changed(&old, "accepted", Some(Some("rh-old")), NONE);
+    s.changed(
+        &new,
+        "accepted",
+        Some(Some("rh-new")),
+        json!({"replaces": old.as_str()}),
+    );
+    s.changed(
+        &next,
+        "accepted",
+        Some(Some("rh-next")),
+        json!({"replaces": new.as_str()}),
+    );
+    s.submitted(&new, "QQQ", "sell");
+    s.submitted(&bad_old, "SPY", "buy");
+    s.changed(
+        &bad_new,
+        "accepted",
+        Some(Some("rh-bad")),
+        json!({"replaces": bad_old.as_str()}),
+    );
+    let unreadable = json!({"client_order_id": bad_new.as_str(), "instrument_id": "SPY",
+        "side": "short", "qty": "2", "type": "limit", "tif": "day", "limit_price": "499",
+        "attempt": 1});
+    s.push("OrderSubmitted", unreadable);
+    let (ring_a, ring_b) = (successor("01JREPLACERINGA"), successor("01JREPLACERINGB"));
+    for (k, back, id) in [
+        (&ring_a, &ring_b, "rh-ring-a"),
+        (&ring_b, &ring_a, "rh-ring-b"),
+    ] {
+        let link = json!({"replaces": back.as_str()});
+        s.changed(k, "accepted", Some(Some(id)), link);
+    }
+    never_placed_again_nor_guessed(&s.0, &[&bad_new, &ring_a, &ring_b]);
+    let (mut c, calls) = restored(&s.0, "confirmed");
+    for (k, id, symbol, side) in [
+        (&new, "rh-new", "QQQ", Side::Sell),
+        (&next, "rh-next", "QQQ", Side::Sell),
+        (&old, "rh-old", "SPY", Side::Buy),
+    ] {
+        let expected = order(k, id, symbol, side);
+        assert_eq!(
+            cancel(&mut c, k),
+            Ok(BrokerOutcome::Order(expected)),
+            "{id}"
+        );
+    }
+    let expected = [
+        cancelled_by("rh-new"),
+        cancelled_by("rh-next"),
+        cancelled_by("rh-old"),
+    ];
+    assert_eq!(*calls.borrow(), expected);
+}
+
+/// What one generated record of a key in the shuffle property is, from its choice: an
+/// `OrderSubmitted` with one of four readable instrument-and-side pairs or an unreadable `side`,
+/// or an `OrderStateChanged` with one of the `broker_order_id` forms.
+const SUBMITS: [Option<(&str, &str)>; 5] = [
+    Some(("SPY", "buy")),
+    Some(("SPY", "sell")),
+    Some(("QQQ", "buy")),
+    Some(("QQQ", "sell")),
+    None,
+];
+
+/// The `broker_order_id` of a generated `OrderStateChanged` of key `n`, by choice: absent
+/// (version 1), `null`, the key's usual id (four choices in ten), a second id of its own, an id
+/// every key may carry, the empty string, or a number.
+fn generated_id(n: usize, choice: usize) -> Option<Value> {
+    match choice {
+        0 => None,
+        1 => Some(Value::Null),
+        2..=5 => Some(json!(format!("rh-{n}-a"))),
+        6 => Some(json!(format!("rh-{n}-b"))),
+        7 => Some(json!("rh-shared")),
+        8 => Some(json!("")),
+        _ => Some(json!(7)),
+    }
+}
+
+/// DEC-872 and DEC-874 as a property: over five keys, three originals and two successors (the
+/// second may replace the first), each key's records come in a generated order of their own and
+/// the keys' records are interleaved at random. Which keys are placed, by which id and with which
+/// instrument and side, never depends on the interleaving. The oracle reads only the generated
+/// choices, never the records or their order: a key's instrument and side are its own agreeing
+/// readable submits, or with none a successor's origin's; it is placed with one unshared non-empty
+/// text id and no odd one.
+#[test]
+#[ignore = "pending E7-6"]
+fn which_keys_are_placed_never_depends_on_how_the_stream_interleaves_its_keys() {
+    let keys = [
+        key("01JMIX0"),
+        key("01JMIX1"),
+        key("01JMIX2"),
+        successor("01JREPLACEMIX3"),
+        successor("01JREPLACEMIX4"),
+    ];
+    let own = proptest::collection::vec(0..15_usize, 0..5);
+    let strategy = (
+        proptest::collection::vec(own, keys.len()),
+        (0..3_usize, 0..4_usize),
+        proptest::collection::vec(0..keys.len(), 0..30),
+    );
+    let mut runner = TestRunner::new(Config::with_cases(256));
+    let verdict = runner.run(&strategy, |(records, (p3, p4), picks)| {
+        let parent = |n: usize| match n {
+            3 => Some(p3),
+            4 => Some(p4),
+            _ => None,
+        };
+        let mut queues: Vec<Vec<FoldedEvent>> = Vec::new();
+        for (n, choices) in records.iter().enumerate() {
+            let mut own = Stream::default();
+            for &choice in choices {
+                if let Some(pair) = SUBMITS.get(choice) {
+                    let (symbol, side) = pair.unwrap_or(("SPY", "short"));
+                    own.submitted(&keys[n], symbol, side);
+                    continue;
+                }
+                let mut links = json!({});
+                if let Some(p) = parent(n) {
+                    links["replaces"] = json!(keys[p].as_str());
+                }
+                if let Some(id) = generated_id(n, choice - SUBMITS.len()) {
+                    links["broker_order_id"] = id;
+                }
+                own.changed(&keys[n], "accepted", None, links);
+            }
+            own.0.reverse();
+            queues.push(own.0);
+        }
+        let mut stream = Vec::new();
+        for pick in picks
+            .into_iter()
+            .chain((0..keys.len()).rev().cycle().take(100))
+        {
+            if let Some(record) = queues[pick].pop() {
+                stream.push(record);
+            }
+        }
+        proptest::prop_assert!(queues.iter().all(Vec::is_empty));
+
+        let submits = |n: usize| records[n].iter().filter_map(|&c| SUBMITS.get(c).copied());
+        let changes = |n: usize| {
+            records[n]
+                .iter()
+                .filter(|&&c| c >= SUBMITS.len())
+                .map(move |&c| c - SUBMITS.len())
+        };
+        let own_pair = |n: usize| -> Option<Option<(&str, &str)>> {
+            let mut all = submits(n);
+            let first = all.next()?;
+            Some(first.filter(|_| all.all(|other| other == first)))
+        };
+        let mut pair: Vec<Option<(&str, &str)>> = Vec::new();
+        for n in 0..keys.len() {
+            let inherited = match parent(n) {
+                Some(p) if changes(n).next().is_some() => pair[p],
+                _ => None,
+            };
+            pair.push(own_pair(n).unwrap_or(inherited));
+        }
+        let ids = |n: usize| -> BTreeSet<String> {
+            changes(n)
+                .filter_map(|c| match c {
+                    2..=5 => Some(format!("rh-{n}-a")),
+                    6 => Some(format!("rh-{n}-b")),
+                    7 => Some("rh-shared".to_owned()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let odd = |n: usize| changes(n).any(|c| c >= 8);
+
+        let (mut c, calls) = restored(&stream, "confirmed");
+        let mut expected = Vec::new();
+        for (n, key) in keys.iter().enumerate() {
+            let mine = ids(n);
+            let one = mine
+                .first()
+                .filter(|_| mine.len() == 1 && !odd(n))
+                .filter(|id| (0..keys.len()).all(|m| m == n || !ids(m).contains(*id)));
+            let outcome = cancel(&mut c, key);
+            match (one, pair[n]) {
+                (Some(id), Some((symbol, side))) => {
+                    let side = if side == "buy" { Side::Buy } else { Side::Sell };
+                    let placed = order(key, id, symbol, side);
+                    proptest::prop_assert_eq!(outcome, Ok(BrokerOutcome::Order(placed)));
+                    expected.push(cancelled_by(id));
+                }
+                _ => proptest::prop_assert_eq!(outcome, Err(NO_ORDER_ID), "{}", key.as_str()),
+            }
+        }
+        proptest::prop_assert_eq!(&*calls.borrow(), &expected);
+        let in_doubt = ConnectorError::Unknown(BrokerUnknown::Ambiguous);
+        for (n, key) in keys.iter().enumerate() {
+            let named = !records[n].is_empty()
+                || (3..keys.len()).any(|m| parent(m) == Some(n) && changes(m).next().is_some());
+            if named {
+                let outcome = call(&mut c, &protective_stop(key));
+                proptest::prop_assert_eq!(outcome, Err(in_doubt), "{}", key.as_str());
+            }
+        }
+        proptest::prop_assert_eq!(&*calls.borrow(), &expected);
+        Ok(())
+    });
+    verdict.unwrap();
 }
