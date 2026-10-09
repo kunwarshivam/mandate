@@ -12,13 +12,14 @@ use super::support::at;
 use crate::ConnectError;
 use crate::manager::AccountRefFold::{CannotAnswer as RefUnknown, Unused, Used};
 use crate::manager::IdFold::{CannotAnswer as IdUnknown, Established, Free, RequestOpen};
+use crate::manager::StartRefusal as R;
 use crate::manager::{
-    ManagerEffect, RequestMembers, StartFacts, StartPlan, StartRefusal, StartRequest, StepUpCheck,
-    StepUpEvidence, connect_digest, plan_start,
+    AccountRefFold, IdFold, ManagerEffect, RequestMembers, StartFacts, StartPlan, StartRequest,
+    StepUpCheck, StepUpEvidence, connect_digest, plan_start,
 };
 use crate::record::Broker::{Alpaca, KrakenDerivativesUs, Robinhood};
 use crate::record::Environment::{Live, Paper};
-use crate::record::{AccountRef, Broker, ConnectionId};
+use crate::record::{AccountRef, Broker, ConnectionId, Environment};
 
 const CONNECT_BYTES: &[u8] =
     br#"{"action":"connect","broker":"alpaca","environment":"paper","workspace_id":"ws_01"}"#;
@@ -123,52 +124,45 @@ fn a_clear_start_plans_exactly_its_request() {
     assert_eq!(holds_no_secret(plan), expected);
 }
 
-/// Each start precondition alone refuses, with its own reason, and commits nothing.
+/// Each start precondition alone refuses, with its own reason, and commits nothing. The route
+/// serves Alpaca paper OAuth only (connections spec §5.2, DEC-821 item 7, DEC-883 item 2).
 #[test]
 #[ignore = "pending E10-13"]
 fn a_start_is_refused_for_each_reason_alone() {
     let cases = [
-        (Paper, false, Free, Unused, StartRefusal::StepUpNotVerified),
-        (Live, true, Free, Unused, StartRefusal::EnvironmentRefused),
-        (Paper, true, RequestOpen, Unused, StartRefusal::RequestOpen),
+        (Paper, Alpaca, false, Free, Unused, R::StepUpNotVerified),
+        (Live, Alpaca, true, Free, Unused, R::EnvironmentRefused),
+        (Paper, Robinhood, true, Free, Unused, R::BrokerRefused),
         (
             Paper,
+            KrakenDerivativesUs,
+            true,
+            Free,
+            Unused,
+            R::BrokerRefused,
+        ),
+        (Paper, Alpaca, true, IdUnknown, Unused, R::FoldCannotAnswer),
+        (Paper, Alpaca, true, Free, RefUnknown, R::FoldCannotAnswer),
+        (Paper, Alpaca, true, RequestOpen, Unused, R::RequestOpen),
+        (
+            Paper,
+            Alpaca,
             true,
             Established,
             Unused,
-            StartRefusal::AlreadyEstablished,
+            R::AlreadyEstablished,
         ),
-        (Paper, true, Free, Used, StartRefusal::AccountRefUsed),
-        (
-            Paper,
-            true,
-            IdUnknown,
-            Unused,
-            StartRefusal::FoldCannotAnswer,
-        ),
-        (
-            Paper,
-            true,
-            Free,
-            RefUnknown,
-            StartRefusal::FoldCannotAnswer,
-        ),
+        (Paper, Alpaca, true, Free, Used, R::AccountRefUsed),
     ];
-    for (environment, verified, id, account_ref, refusal) in cases {
+    for (environment, broker, verified, id, account_ref, refusal) in cases {
         let facts = StartFacts { id, account_ref };
-        let input = start_of(
-            &RequestMembers {
-                environment,
-                ..request()
-            },
-            verified,
-        );
-        let plan = plan_start(&input, &facts).unwrap();
-        assert_eq!(
-            plan,
-            StartPlan::Refused(refusal),
-            "{environment:?} {facts:?}"
-        );
+        let asked = RequestMembers {
+            environment,
+            broker,
+            ..request()
+        };
+        let plan = plan_start(&start_of(&asked, verified), &facts).unwrap();
+        assert_eq!(plan, StartPlan::Refused(refusal), "{asked:?} {facts:?}");
     }
 }
 
@@ -199,63 +193,70 @@ fn members() -> impl Strategy<Value = RequestMembers> {
         )
 }
 
-fn start_inputs() -> impl Strategy<Value = (RequestMembers, bool, StartFacts)> {
-    let id = prop::sample::select(vec![Free, RequestOpen, Established, IdUnknown]);
-    let account_ref = prop::sample::select(vec![Unused, Used, RefUnknown]);
-    let facts = (id, account_ref).prop_map(|(id, account_ref)| StartFacts { id, account_ref });
-    (members(), any::<bool>(), facts)
+/// DEC-883's order, by this test's own `if` chain: the first refusal that holds, or `None`.
+fn first_refusal(start: &StartRequest, facts: StartFacts) -> Option<R> {
+    if start.step_up == StepUpCheck::NotVerified {
+        Some(R::StepUpNotVerified)
+    } else if start.environment != Paper {
+        Some(R::EnvironmentRefused)
+    } else if start.broker != Alpaca {
+        Some(R::BrokerRefused)
+    } else if facts.id == IdUnknown || facts.account_ref == RefUnknown {
+        Some(R::FoldCannotAnswer)
+    } else if facts.id == RequestOpen {
+        Some(R::RequestOpen)
+    } else if facts.id == Established {
+        Some(R::AlreadyEstablished)
+    } else if facts.account_ref == Used {
+        Some(R::AccountRefUsed)
+    } else {
+        None
+    }
 }
 
-/// DEC-693 items 2 and 7, rule 131 (opening), DEC-697: for any start, the plan is exactly the
-/// request repeating every member when no precondition fails, and otherwise a refusal for a
-/// reason that holds; a fold that cannot answer, a live environment, or no step-up never commits.
-/// The same members started clear (paper, verified, fresh) always commit exactly their request.
+/// DEC-883 with DEC-693 items 2 and 7, rule 131 (opening) and DEC-697: for any members, over
+/// every step-up, environment, broker, and fold answer, a start refuses with the first reason
+/// that holds, in DEC-883's order, and otherwise commits exactly its request, every member
+/// repeated. Only a verified, paper, Alpaca start with both folds answering clear commits.
 #[test]
 #[ignore = "pending E10-13"]
-fn a_start_commits_only_its_request_and_only_when_clear() {
+fn a_start_refuses_with_the_first_reason_or_commits_only_its_request() {
     TestRunner::deterministic()
-        .run(&start_inputs(), |(members, verified, facts)| {
-            let input = start_of(&members, verified);
-            let mut reasons = Vec::new();
-            if !verified {
-                reasons.push(StartRefusal::StepUpNotVerified);
+        .run(&members(), |members| {
+            for (verified, environment, broker, id, account_ref) in every_combination() {
+                let asked = RequestMembers {
+                    environment,
+                    broker,
+                    ..members.clone()
+                };
+                let start = start_of(&asked, verified);
+                let facts = StartFacts { id, account_ref };
+                let expected = match first_refusal(&start, facts) {
+                    Some(refusal) => StartPlan::Refused(refusal),
+                    None => StartPlan::Commit(vec![ManagerEffect::Requested(asked)]),
+                };
+                let plan = plan_start(&start, &facts)
+                    .map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
+                prop_assert_eq!(plan, expected, "{:?}", facts);
             }
-            if input.environment != Paper {
-                reasons.push(StartRefusal::EnvironmentRefused);
-            }
-            reasons.extend(match facts.id {
-                Free => None,
-                RequestOpen => Some(StartRefusal::RequestOpen),
-                Established => Some(StartRefusal::AlreadyEstablished),
-                IdUnknown => Some(StartRefusal::FoldCannotAnswer),
-            });
-            reasons.extend(match facts.account_ref {
-                Unused => None,
-                Used => Some(StartRefusal::AccountRefUsed),
-                RefUnknown => Some(StartRefusal::FoldCannotAnswer),
-            });
-            let plan =
-                plan_start(&input, &facts).map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
-            match plan {
-                StartPlan::Commit(effects) => {
-                    prop_assert!(reasons.is_empty(), "committed despite {reasons:?}");
-                    prop_assert_eq!(effects, vec![ManagerEffect::Requested(members.clone())]);
-                }
-                StartPlan::Refused(refusal) => {
-                    prop_assert!(reasons.contains(&refusal), "{refusal:?} for {reasons:?}");
-                }
-            }
-            let paper = RequestMembers {
-                environment: Paper,
-                ..members
-            };
-            let clear = plan_start(&start_of(&paper, true), &CLEAR)
-                .map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
-            prop_assert_eq!(
-                clear,
-                StartPlan::Commit(vec![ManagerEffect::Requested(paper)])
-            );
             Ok(())
         })
         .unwrap();
+}
+
+/// Every combination of step-up, environment, broker, id fold, and `account_ref` fold.
+fn every_combination() -> Vec<(bool, Environment, Broker, IdFold, AccountRefFold)> {
+    let mut all = Vec::new();
+    for verified in [true, false] {
+        for environment in [Paper, Live] {
+            for broker in BROKERS {
+                for id in [Free, RequestOpen, Established, IdUnknown] {
+                    for account_ref in [Unused, Used, RefUnknown] {
+                        all.push((verified, environment, broker, id, account_ref));
+                    }
+                }
+            }
+        }
+    }
+    all
 }

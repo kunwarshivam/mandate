@@ -3,10 +3,8 @@
 //! `ConnectionRequested`, which commits with the step-up challenge marked used (identity spec §7.2
 //! step 5), or a refusal, never both (DEC-697). `mandate-api-server` maps each [`ManagerEffect`]
 //! to its event (DEC-694 item 2). [`connect_digest`] is the connect's step-up digest, paper only
-//! (DEC-693 items 1, 2). Closing the request is the next slice of E10-13.
-//!
-//! A stream fact the control-stream fold cannot answer is a value of its own that refuses (DEC-693
-//! item 7). No input, effect, or plan has a member a secret could sit in (DEC-699 I5, rule 7).
+//! (DEC-693 items 1, 2). A fold that cannot answer is a value of its own that refuses (DEC-693
+//! item 7). No type here has a member a secret could sit in (DEC-699 I5, `AGENTS.md` rule 7).
 
 use mandate_canon::Digest;
 use mandate_time::UtcNanos;
@@ -14,8 +12,7 @@ use mandate_time::UtcNanos;
 use crate::ConnectError;
 use crate::record::{AccountRef, Broker, ConnectionId, Environment};
 
-/// Journal spec §9.8's `step_up`: the evidence one connect spent (identity spec §7.2), written on
-/// its request and again, unchanged, on the record that closes it.
+/// Journal spec §9.8's `step_up`: the evidence one connect spent (identity spec §7.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepUpEvidence {
     pub assertion_id: String,
@@ -45,7 +42,8 @@ pub struct StartRequest {
 /// What the control stream holds of the assigned `connection_id` (rule 131, opening).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdFold {
-    /// No open request and no `ConnectionEstablished`; a refused or revoked attempt may retry.
+    /// No open request and no `ConnectionEstablished` of the id: a new id, or one whose attempts
+    /// were all refused or revoked while `connecting`.
     Free,
     RequestOpen,
     Established,
@@ -70,9 +68,8 @@ pub struct StartFacts {
     pub account_ref: AccountRefFold,
 }
 
-/// `ConnectionRequested`'s members, exactly rule 131's (journal spec §9.8). The record that closes
-/// the request repeats them: an establishment all of them, a `ConnectionRefused` all but
-/// `account_ref`.
+/// `ConnectionRequested`'s members, exactly rule 131's (journal spec §9.8), which the record that
+/// closes the request repeats (`ConnectionRefused` all but `account_ref`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestMembers {
     pub connection_id: ConnectionId,
@@ -96,6 +93,8 @@ pub enum StartRefusal {
     StepUpNotVerified,
     /// The start route connects paper only (connections spec §5.2, DEC-693 item 2).
     EnvironmentRefused,
+    /// The route serves Alpaca OAuth only (connections spec §5.2, DEC-821 item 7, DEC-883 item 2).
+    BrokerRefused,
     RequestOpen,
     AlreadyEstablished,
     AccountRefUsed,
@@ -121,9 +120,9 @@ pub fn connect_digest(
     Err(ConnectError::Unimplemented { story: "E10-13" })
 }
 
-/// Plans a connect's start: exactly `[Requested]` with the request's members, or a refusal when
-/// step-up is not verified, the environment is not paper, the id has an open request or an
-/// establishment, the `account_ref` was used, or a fold cannot answer.
+/// Plans a connect's start: exactly `[Requested]` with the request's members, or the first
+/// refusal that holds, in DEC-883's order: step-up not verified, environment not paper, broker
+/// not Alpaca, a fold that cannot answer, an open request, an establishment, a used `account_ref`.
 pub fn plan_start(start: &StartRequest, facts: &StartFacts) -> Result<StartPlan, ConnectError> {
     let _ = (start, facts);
     Err(ConnectError::Unimplemented { story: "E10-13" })
