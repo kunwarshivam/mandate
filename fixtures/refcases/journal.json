@@ -38155,7 +38155,7 @@
   ]
  },
  "membership_fold": {
-  "spec": "docs/specs/journal.md §9.8 the fold (DEC-437 item 9, DEC-648)",
+  "spec": "docs/specs/journal.md §9.12 the fold (DEC-437 item 9, DEC-648)",
   "histories": [
    {
     "name": "invited_cooling_then_active",
@@ -39030,7 +39030,7 @@
    },
    {
     "name": "reinvited_after_removal",
-    "clause": "§9.8: a removed member returns only by a new invitation, with none of the old roles",
+    "clause": "§9.12: a removed member returns only by a new invitation, with none of the old roles",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -39242,7 +39242,7 @@
    },
    {
     "name": "changed_and_deactivated_while_cooling_off",
-    "clause": "§9.8: a member in `cooling_off` may have roles changed and be deactivated",
+    "clause": "§9.12: a member in `cooling_off` may have roles changed and be deactivated",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -39425,7 +39425,7 @@
    },
    {
     "name": "activated_at_the_expiry",
-    "clause": "§9.8: `activated_at` < `expires_at`",
+    "clause": "§9.12: `activated_at` < `expires_at`",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -39514,7 +39514,7 @@
    },
    {
     "name": "a_revoked_invitation_accepted",
-    "clause": "§9.8: revoked is terminal",
+    "clause": "§9.12: revoked is terminal",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -39618,7 +39618,7 @@
    },
    {
     "name": "an_invitation_accepted_twice",
-    "clause": "§9.8: an invitation activates at most once",
+    "clause": "§9.12: an invitation activates at most once",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -39730,7 +39730,7 @@
    },
    {
     "name": "a_second_activation",
-    "clause": "§9.8: a member whose membership is not removed is not activated again",
+    "clause": "§9.12: a member whose membership is not removed is not activated again",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -39867,7 +39867,7 @@
    },
    {
     "name": "roles_other_than_the_invitation",
-    "clause": "§9.8",
+    "clause": "§9.12",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -39956,7 +39956,7 @@
    },
    {
     "name": "removed_while_active",
-    "clause": "§9.8: only a deactivated member is removed",
+    "clause": "§9.12: only a deactivated member is removed",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -40061,7 +40061,7 @@
    },
    {
     "name": "removed_then_reactivated",
-    "clause": "§9.8: removed is terminal",
+    "clause": "§9.12: removed is terminal",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -40208,7 +40208,7 @@
    },
    {
     "name": "reactivated_with_other_roles",
-    "clause": "§9.8: a reactivation restores exactly the kept roles",
+    "clause": "§9.12: a reactivation restores exactly the kept roles",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -40339,7 +40339,7 @@
    },
    {
     "name": "a_role_removed_that_is_not_held",
-    "clause": "§9.8",
+    "clause": "§9.12",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -40450,7 +40450,7 @@
    },
    {
     "name": "a_role_added_that_is_held",
-    "clause": "§9.8",
+    "clause": "§9.12",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -40568,7 +40568,7 @@
    },
    {
     "name": "a_role_change_while_deactivated",
-    "clause": "§9.8",
+    "clause": "§9.12",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -40702,7 +40702,7 @@
    },
    {
     "name": "deactivated_twice",
-    "clause": "§9.8",
+    "clause": "§9.12",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -40823,7 +40823,7 @@
    },
    {
     "name": "an_unknown_invitation_accepted",
-    "clause": "§9.8",
+    "clause": "§9.12",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -40887,7 +40887,7 @@
    },
    {
     "name": "an_invitation_issued_twice",
-    "clause": "§9.8: an invitation's ULID is issued once",
+    "clause": "§9.12: an invitation's ULID is issued once",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -40978,7 +40978,7 @@
    },
    {
     "name": "a_revocation_of_an_accepted_invitation",
-    "clause": "§9.8: only an `invited` invitation is revoked",
+    "clause": "§9.12: only an `invited` invitation is revoked",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -41082,7 +41082,7 @@
    },
    {
     "name": "a_revocation_of_an_expired_invitation",
-    "clause": "§9.8: an invitation is `expired` from its `expires_at`",
+    "clause": "§9.12: an invitation is `expired` from its `expires_at`",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -41163,7 +41163,7 @@
    },
    {
     "name": "a_revocation_of_an_unknown_invitation",
-    "clause": "§9.8",
+    "clause": "§9.12",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -41219,7 +41219,7 @@
    },
    {
     "name": "a_role_change_of_an_unknown_member",
-    "clause": "§9.8",
+    "clause": "§9.12",
     "records": [
      {
       "event_type": "MemberActivated",
@@ -41289,7 +41289,7 @@
    },
    {
     "name": "a_deactivation_of_an_unknown_member",
-    "clause": "§9.8",
+    "clause": "§9.12",
     "records": [
      {
       "event_type": "MemberActivated",

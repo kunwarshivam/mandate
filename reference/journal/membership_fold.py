@@ -1,9 +1,9 @@
-"""Journal spec §9.8's fold, as a reference implementation with history vectors (DEC-437 item 9,
+"""Journal spec §9.12's fold, as a reference implementation with history vectors (DEC-437 item 9,
 DEC-648): the membership state, the effective roles, and identity spec §5.3's `workspace_users` that
 the control stream's membership records fold to.
 
 The `membership_fold` section holds histories: control-stream records in `seq` order, each a
-membership record valid under §9.8's rules (checked with `control.violations`), or another record
+membership record valid under §9.12's rules (checked with `control.violations`), or another record
 by a client, an agent, or a service account, which the fold ignores. Each history states, at named
 instants, the expected per-member and per-invitation state, each member's effective roles, and the
 count. The expectations are written by hand from identity spec §5 and §8.3, not computed by this
@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 
 from control import STREAM, instant_nanos, violations
 
-SPEC = "docs/specs/journal.md §9.8 the fold (DEC-437 item 9, DEC-648)"
+SPEC = "docs/specs/journal.md §9.12 the fold (DEC-437 item 9, DEC-648)"
 COOLING = ("approver", "operator")
 LIVE = ("cooling_off", "active")
 T0 = datetime(2026, 10, 5, 14, 0, 0)
@@ -270,7 +270,7 @@ def histories() -> list[dict]:
         },
         {
             "name": "reinvited_after_removal",
-            "clause": "§9.8: a removed member returns only by a new invitation, with none of the old roles",
+            "clause": "§9.12: a removed member returns only by a new invitation, with none of the old roles",
             "records": [
                 founding(T0),
                 invited(h1, INV["A"], ["viewer"]),
@@ -288,7 +288,7 @@ def histories() -> list[dict]:
         },
         {
             "name": "changed_and_deactivated_while_cooling_off",
-            "clause": "§9.8: a member in `cooling_off` may have roles changed and be deactivated",
+            "clause": "§9.12: a member in `cooling_off` may have roles changed and be deactivated",
             "records": [
                 founding(T0),
                 invited(h1, INV["A"], ["approver", "viewer"]),
@@ -324,93 +324,93 @@ def unreadable_histories() -> list[tuple[str, str, list[dict]]]:
     return [
         (
             "activated_at_the_expiry",
-            "§9.8: `activated_at` < `expires_at`",
+            "§9.12: `activated_at` < `expires_at`",
             [founding(T0), invited(h1, INV["A"], ["viewer"]), accepted(h1 + timedelta(days=7), B, INV["A"], ["viewer"])],
         ),
         (
             "a_revoked_invitation_accepted",
-            "§9.8: revoked is terminal",
+            "§9.12: revoked is terminal",
             [founding(T0), invited(h1, INV["A"], ["viewer"]), revoked(h2, INV["A"]), accepted(hours(3), B, INV["A"], ["viewer"])],
         ),
         (
             "an_invitation_accepted_twice",
-            "§9.8: an invitation activates at most once",
+            "§9.12: an invitation activates at most once",
             [*two_users, accepted(hours(3), C, INV["A"], ["viewer"])],
         ),
         (
             "a_second_activation",
-            "§9.8: a member whose membership is not removed is not activated again",
+            "§9.12: a member whose membership is not removed is not activated again",
             [*two_users, invited(hours(3), INV["B"], ["auditor"]), accepted(hours(4), B, INV["B"], ["auditor"])],
         ),
         (
             "roles_other_than_the_invitation",
-            "§9.8",
+            "§9.12",
             [founding(T0), invited(h1, INV["A"], ["viewer"]), accepted(h2, B, INV["A"], ["auditor"])],
         ),
-        ("removed_while_active", "§9.8: only a deactivated member is removed", [*two_users, removed(hours(3), B)]),
+        ("removed_while_active", "§9.12: only a deactivated member is removed", [*two_users, removed(hours(3), B)]),
         (
             "removed_then_reactivated",
-            "§9.8: removed is terminal",
+            "§9.12: removed is terminal",
             [*two_users, deactivated(hours(3), B), removed(hours(4), B), reactivated(hours(5), B, ["viewer"])],
         ),
         (
             "reactivated_with_other_roles",
-            "§9.8: a reactivation restores exactly the kept roles",
+            "§9.12: a reactivation restores exactly the kept roles",
             [*two_users, deactivated(hours(3), B), reactivated(hours(4), B, ["auditor"])],
         ),
         (
             "a_role_removed_that_is_not_held",
-            "§9.8",
+            "§9.12",
             [*two_users, role_changed(hours(3), B, [], ["auditor"])],
         ),
         (
             "a_role_added_that_is_held",
-            "§9.8",
+            "§9.12",
             [*two_users, role_changed(hours(3), B, ["viewer"], [])],
         ),
         (
             "a_role_change_while_deactivated",
-            "§9.8",
+            "§9.12",
             [*two_users, deactivated(hours(3), B), role_changed(hours(4), B, ["auditor"], [])],
         ),
         (
             "deactivated_twice",
-            "§9.8",
+            "§9.12",
             [*two_users, deactivated(hours(3), B), deactivated(hours(4), B)],
         ),
         (
             "an_unknown_invitation_accepted",
-            "§9.8",
+            "§9.12",
             [founding(T0), accepted(h2, B, INV["C"], ["viewer"])],
         ),
         (
             "an_invitation_issued_twice",
-            "§9.8: an invitation's ULID is issued once",
+            "§9.12: an invitation's ULID is issued once",
             [founding(T0), invited(h1, INV["A"], ["viewer"]), invited(h2, INV["A"], ["auditor"])],
         ),
         (
             "a_revocation_of_an_accepted_invitation",
-            "§9.8: only an `invited` invitation is revoked",
+            "§9.12: only an `invited` invitation is revoked",
             [*two_users, revoked(hours(3), INV["A"])],
         ),
         (
             "a_revocation_of_an_expired_invitation",
-            "§9.8: an invitation is `expired` from its `expires_at`",
+            "§9.12: an invitation is `expired` from its `expires_at`",
             [founding(T0), invited(h1, INV["A"], ["viewer"]), revoked(h1 + timedelta(days=7), INV["A"])],
         ),
         (
             "a_revocation_of_an_unknown_invitation",
-            "§9.8",
+            "§9.12",
             [founding(T0), revoked(h1, INV["C"])],
         ),
         (
             "a_role_change_of_an_unknown_member",
-            "§9.8",
+            "§9.12",
             [founding(T0), role_changed(h1, C, ["auditor"], [])],
         ),
         (
             "a_deactivation_of_an_unknown_member",
-            "§9.8",
+            "§9.12",
             [founding(T0), deactivated(h1, C)],
         ),
     ]
@@ -505,7 +505,7 @@ class Fold:
         return None
 
     def open(self, inv: dict, at: int) -> bool:
-        """An invitation still `invited` at `at`: §9.8's `activated_at` < `expires_at`."""
+        """An invitation still `invited` at `at`: §9.12's `activated_at` < `expires_at`."""
         if inv["state"] != "invited":
             return False
         if "fold.expiry_inclusive" in self.skip:
@@ -617,7 +617,7 @@ def check_of(problem: str) -> str:
 
 
 def as_draft(rec: dict, seq: int) -> dict:
-    """The full control-stream draft a history record stands for, so §9.8's validator can judge it."""
+    """The full control-stream draft a history record stands for, so §9.12's validator can judge it."""
     return {
         "envelope_version": 1,
         "environment": "paper",
@@ -691,7 +691,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
 
     return [
         (
-            "a history record breaks rule 64",
+            "a history record breaks rule 106",
             "histories.records_valid",
             mutated(lambda s: history(s, "per_role_cool_off")["records"][3]["payload"].update(changed_at=ts(hours(9)))),
         ),

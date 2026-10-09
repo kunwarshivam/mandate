@@ -2458,7 +2458,7 @@ invitation that is not `invited`. Such a record is refused by workspace services
 membership as unreadable, and `workspace_users` as 1 (identity spec §5.3). The cross-record checks
 are the identity crate's (E9-7), not `append`'s.
 
-The state at an instant *t* folds the records whose `event_time` is at or before *t* (rule 64 makes
+The state at an instant *t* folds the records whose `event_time` is at or before *t* (rule 106 makes
 that each record's own instant), and reads each cool-off and expiry against *t*: `workspace_users`
 (identity spec §5.3) counts the members `active` at *t*. The test vectors' `membership_fold` section
 holds histories of membership records, valid under the rules above, mixed with records by clients,
