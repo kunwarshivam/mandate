@@ -311,16 +311,13 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
 }
 
 /// The lint job over the repository at `root` (ADR-0001 ES-12): ShellCheck over its
-/// `.github/scripts/` (DEC-329) and `deploy/` when present (the demo host's runbook, DEC-822), actionlint over its `.github/workflows/` (DEC-330), then
+/// `.github/scripts/` (DEC-329) and `deploy/` (the demo host's runbook, DEC-822), actionlint over its `.github/workflows/` (DEC-330), then
 /// `workspace_checks`, the checks that need the Cargo and uv workspaces, which `ci lint` passes as
 /// [`workspace_lint`]. The job takes the repository it runs in, so a fixture repository drives it
 /// and neither tool's result can be dropped without a test failing (DEC-331, the DEC-139 pattern).
 fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()> {
     shellcheck_scripts(&root.join(".github/scripts"))?;
-    let deploy = root.join("deploy");
-    if deploy.is_dir() {
-        shellcheck_scripts(&deploy)?;
-    }
+    shellcheck_scripts(&root.join("deploy"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
     live_feature_in(root)?;
     workspace_checks()
