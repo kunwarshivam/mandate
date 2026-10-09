@@ -6,7 +6,8 @@
 //! price, order type and time in force are the order's as sent, and it carries no client order id
 //! or ours. Exactly one match is adopted; zero or several leave the order `Unknown`, its
 //! instrument blocked, with nothing sent, cancelled or filled. Part 1 pins the listing and the
-//! cases that adopt nothing; part 2 pins the adoptions.
+//! cases that adopt nothing; part 2 pins the adoptions and DEC-863's exclusion of a record that
+//! looks like another journaled order of ours.
 
 mod common;
 
@@ -26,6 +27,9 @@ use mandate_executor::{
 };
 use mandate_num::{Price, Qty};
 use mandate_time::UtcNanos;
+use proptest::prelude::*;
+use proptest::test_runner::{Config, TestRunner};
+use std::cell::Cell as Tally;
 
 const AAPL: &str = "AAPL";
 const OTHER: &str = "FRAC";
@@ -33,6 +37,7 @@ const OTHER: &str = "FRAC";
 const MARGIN_S: i64 = 300;
 const INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ0";
 const AGAIN: &str = "01JABCDEFGHJKMNPQRSTVWXYZ2";
+const STALE: &str = "stale-1";
 const OTHER_INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ1";
 
 type Matched = (Side, Qty, Option<Price>, OrderType, TimeInForce);
@@ -86,14 +91,45 @@ fn profile(query_by_client_order_id: bool) -> CapabilityProfile {
     CapabilityProfile::new(1, vec![row], idempotency).expect("a valid profile")
 }
 
-/// A started shell on `profile`, with `OTHER_AGENT` holding one accepted order first when
-/// `shared`, and `AGENT`'s opening of 10 AAPL at 150 sent and its answer lost.
-fn lost(ports: &Ports<'_>, query: bool, shared: bool) -> (Shell, ClientOrderId, Ran) {
+/// What the account stream holds before the order whose answer is lost.
+#[derive(Clone, Copy, PartialEq)]
+enum Before {
+    Nothing,
+    /// `OTHER_AGENT`'s accepted order in another instrument.
+    OtherAgent,
+    /// `AGENT`'s own earlier order with the same matched members, accepted as broker order
+    /// `STALE` and then cancelled.
+    Lookalike,
+}
+
+/// A started shell on `profile` holding `before`, then `AGENT`'s opening of 10 AAPL at 150 sent
+/// and its answer lost.
+fn lost(ports: &Ports<'_>, query: bool, before: Before) -> (Shell, ClientOrderId, Ran) {
     let mut shell = Shell::new(1);
     shell.fold_one(&stream_opened()).expect("folds");
     let mut shell = shell.restart_ready(ports);
     shell.state = shell.state.clone().with_profile(profile(query));
-    if shared {
+    if before == Before::Lookalike {
+        let first = shell.run(
+            handoff(OTHER_INTENT, AGENT, opening(AAPL, "10", "150")),
+            ports,
+        );
+        let sent = first.submissions()[0].client_order_id.as_str().to_owned();
+        for status in ["accepted", "canceled"] {
+            let mut answer = exact(STALE, status).order;
+            answer.client_order_id = Some(sent.clone());
+            shell.run(Input::Broker(Ok(BrokerOutcome::Order(answer))), ports);
+        }
+        let ended = shell
+            .state
+            .order(&ClientOrderId::parse(&sent).expect("ours"));
+        assert_eq!(
+            ended.map(|o| o.state),
+            Some(OrderState::Canceled),
+            "the lookalike ended"
+        );
+    }
+    if before == Before::OtherAgent {
         let other = shell.run(
             handoff(OTHER_INTENT, OTHER_AGENT, opening(OTHER, "1", "20")),
             ports,
@@ -168,16 +204,13 @@ fn listed(id: &ClientOrderId, orders: Vec<ListedOrder>) -> Input {
     }))
 }
 
-/// Nothing in `ran` sends, cancels or re-queries an order (rule 13, LT-6).
+/// Nothing in `ran` reaches the broker: no submit, cancel, query, or second listing (rule 13,
+/// LT-6, DEC-862 item 5).
 fn sends_nothing(ran: &Ran, what: &str) {
-    let only = ran
-        .requests
-        .iter()
-        .all(|r| matches!(r, BrokerRequest::ListOrders(_)));
+    let sent = &ran.requests;
     assert!(
-        only,
-        "{what}: nothing sent, cancelled or queried: {:?}",
-        ran.requests
+        sent.is_empty(),
+        "{what}: nothing reaches the broker: {sent:?}"
     );
 }
 
@@ -219,7 +252,7 @@ fn stays_unknown_and_blocks(
 fn a_lost_answer_lists_by_instrument_origin_and_creation_time() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
-    let (shell, id, lost) = lost(&ports, false, false);
+    let (shell, id, lost) = lost(&ports, false, Before::Nothing);
     let since = RiskClock::from_secs(submitted_at(&shell, &id).secs() - MARGIN_S);
     let listing = OrderListing {
         client_order_id: id.clone(),
@@ -240,7 +273,7 @@ fn a_lost_answer_lists_by_instrument_origin_and_creation_time() {
 fn no_matching_record_leaves_the_order_unknown_and_its_instrument_blocked() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
-    let (mut shell, id, _) = lost(&ports, false, false);
+    let (mut shell, id, _) = lost(&ports, false, Before::Nothing);
     let empty = shell.run(listed(&id, Vec::new()), &ports);
     sends_nothing(&empty, "an empty listing");
     unknown(&shell, &id, "zero records");
@@ -252,7 +285,7 @@ fn no_matching_record_leaves_the_order_unknown_and_its_instrument_blocked() {
 fn an_account_another_agent_trades_on_is_never_listed() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
-    let (_, _, alone) = lost(&ports, false, false);
+    let (_, _, alone) = lost(&ports, false, Before::Nothing);
     let listings = alone
         .requests
         .iter()
@@ -262,7 +295,7 @@ fn an_account_another_agent_trades_on_is_never_listed() {
         1,
         "the control: a dedicated account lists"
     );
-    let (mut shell, id, lost) = lost(&ports, false, true);
+    let (mut shell, id, lost) = lost(&ports, false, Before::OtherAgent);
     assert!(
         lost.requests.is_empty(),
         "DEC-529 item 4: only on an account dedicated to one agent, got {:?}",
@@ -278,11 +311,120 @@ fn an_account_another_agent_trades_on_is_never_listed() {
 fn a_profile_that_queries_by_client_order_id_never_lists() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
-    let (shell, id, lost) = lost(&ports, true, false);
+    let (shell, id, lost) = lost(&ports, true, Before::Nothing);
     assert_eq!(
         lost.requests,
         vec![BrokerRequest::GetOrderByClientId(id.clone())],
         "§5.2: reconciliation queries by client order id when the profile can"
     );
     unknown(&shell, &id, "§5.7");
+}
+
+#[test]
+#[ignore = "pending E7-23"]
+fn exactly_one_matching_record_is_adopted() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (mut shell, id, _) = lost(&ports, false, Before::Nothing);
+    let mut records = near_misses();
+    records.insert(3, exact("the-one", "accepted"));
+    let ran = shell.run(listed(&id, records), &ports);
+    sends_nothing(&ran, "an adoption");
+    assert_state(
+        &shell,
+        &id,
+        OrderState::Accepted,
+        "§5.7: Unknown → Accepted, found",
+    );
+    let adopted = &ran.draft("OrderStateChanged").expect("journaled").payload;
+    let named = [adopted.get("client_order_id"), adopted.get("state")];
+    let expected = [id.as_str(), "accepted"].map(|v| Value::Str(v.into()));
+    assert_eq!(named, [Some(&expected[0]), Some(&expected[1])], "§5.7");
+}
+
+#[test]
+#[ignore = "pending E7-23"]
+fn two_matching_records_leave_the_order_unknown_and_its_instrument_blocked() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (mut shell, id, _) = lost(&ports, false, Before::Nothing);
+    let answer = vec![exact("first", "accepted"), exact("second", "filled")];
+    stays_unknown_and_blocks(&mut shell, &id, &ports, answer);
+}
+
+/// DEC-863: the broker still lists our cancelled order `STALE`, which carries no client order id
+/// and every matched member of the lost one. It cannot be told apart, so nothing is adopted.
+#[test]
+#[ignore = "pending E7-23"]
+fn a_stale_lookalike_of_a_journaled_order_is_never_adopted() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (mut shell, id, lost) = lost(&ports, false, Before::Lookalike);
+    let listings = lost
+        .requests
+        .iter()
+        .filter(|r| matches!(r, BrokerRequest::ListOrders(_)));
+    assert_eq!(
+        listings.count(),
+        1,
+        "the account is still dedicated to one agent"
+    );
+    stays_unknown_and_blocks(&mut shell, &id, &ports, vec![exact(STALE, "canceled")]);
+}
+
+/// Over generated listings of exact records (with no client order id or ours) and near misses in
+/// any order, the order is adopted exactly when one record is exact; the oracle counts what it
+/// generated, never the matcher's verdict.
+#[test]
+#[ignore = "pending E7-23"]
+fn over_generated_listings_exactly_one_exact_record_is_adopted() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let mut runner = TestRunner::new(Config {
+        cases: 64,
+        failure_persistence: None,
+        ..Config::default()
+    });
+    let record = prop_oneof![(0..8_usize).prop_map(Some), Just(None)];
+    let picks = prop::collection::vec((record, any::<bool>()), 0..5);
+    let counts = Tally::new([0_u32; 3]);
+    let outcome = runner.run(&picks, |picks| {
+        let (mut shell, id, _) = lost(&ports, false, Before::Nothing);
+        let misses = near_misses();
+        let records: Vec<ListedOrder> = picks
+            .iter()
+            .enumerate()
+            .map(|(n, (pick, carries_ours))| match pick {
+                Some(miss) => misses[*miss].clone(),
+                None => {
+                    let mut record = exact(&format!("exact-{n}"), "accepted");
+                    record.order.client_order_id = carries_ours.then(|| id.as_str().to_owned());
+                    record
+                }
+            })
+            .collect();
+        let exact_count = picks.iter().filter(|(pick, _)| pick.is_none()).count();
+        let ran = shell
+            .step(listed(&id, records), &ports)
+            .map_err(|e| TestCaseError::fail(format!("step refused with {}: {e}", e.code())))?;
+        prop_assert!(ran.requests.is_empty(), "nothing sent: {:?}", ran.requests);
+        let expected = if exact_count == 1 {
+            OrderState::Accepted
+        } else {
+            OrderState::Unknown
+        };
+        let order = shell.state.order(&id).map(|o| (o.state, o.filled_qty));
+        prop_assert_eq!(order, Some((expected, Qty::ZERO)));
+        let mut seen = counts.get();
+        seen[exact_count.min(2)] = seen[exact_count.min(2)].saturating_add(1);
+        counts.set(seen);
+        Ok(())
+    });
+    if let Err(failure) = outcome {
+        panic!("{failure}");
+    }
+    assert!(
+        counts.get().iter().all(|n| *n > 0),
+        "zero, one and several exact records each reached"
+    );
 }

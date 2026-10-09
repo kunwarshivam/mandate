@@ -18,6 +18,7 @@ mandate-domain = { path = "crates/mandate-domain", version = "0.0.0" }
 mandate-executor = { path = "crates/mandate-executor", version = "0.0.0" }
 mandate-identity = { path = "crates/mandate-identity", version = "0.0.0" }
 mandate-identity-seal = { path = "crates/mandate-identity-seal", version = "0.0.0" }
+mandate-identity-system = { path = "crates/mandate-identity-system", version = "0.0.0" }
 mandate-identity-testkit = { path = "crates/mandate-identity-testkit", version = "0.0.0" }
 mandate-journal = { path = "crates/mandate-journal", version = "0.0.0" }
 mandate-journal-cold = { path = "crates/mandate-journal-cold", version = "0.0.0" }
