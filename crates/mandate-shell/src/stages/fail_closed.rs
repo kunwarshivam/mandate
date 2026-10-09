@@ -345,8 +345,8 @@ fn flatten_poison_halts() -> Result<(), String> {
     }
     .admitted()
     .map_err(|e| e.to_string())?;
-    let mut session =
-        Session::open(&mut stages, &setup, &admitted.view).map_err(|e| e.to_string())?;
+    let mut session = Session::open_governed(&mut stages, &setup, &admitted.view, None)
+        .map_err(|e| e.to_string())?;
     session.start().map_err(|e| e.to_string())?;
     let before = world.ledger.borrow().bodies().len();
     let error = match session.feed(Input::Command(Command::KillSwitch {
@@ -391,8 +391,8 @@ fn an_intent_whose_draft_was_never_appended_never_reaches_the_sink() -> Result<(
         .first()
         .cloned()
         .ok_or("no instrument")?;
-    let mut session =
-        Session::open(&mut stages, &setup, &admitted.view).map_err(|e| e.to_string())?;
+    let mut session = Session::open_governed(&mut stages, &setup, &admitted.view, None)
+        .map_err(|e| e.to_string())?;
     session.start().map_err(|e| e.to_string())?;
     let unrecorded = Effect::Intent(IntentHandoff {
         intent_id: EventId("00000100000000000099000000".to_owned()),
