@@ -9,7 +9,6 @@ use std::ops::ControlFlow;
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_identity::demand::{Permitted, ReadRecords};
-use mandate_journal::StreamId;
 
 use crate::{AuditError, JournalEvent, JournalRead, MemoryRead, segment, served};
 
@@ -154,14 +153,51 @@ const EVIDENCE: &str = "payload.evidence[]";
 /// `IntentReceived`'s intent (§4.8.1's table, DEC-772 item 4).
 const INTENT: &str = "payload.intent_id";
 
+/// A fill's order (§4.8.1's table, DEC-772 item 4).
+const ORDER: &str = "payload.client_order_id";
+
+/// `ApprovalRevalidated`'s request (§4.8.1's table, DEC-772 item 4).
+const APPROVAL: &str = "payload.approval";
+
+/// The outputs an `ApprovalRequested`'s content cites (§4.8.1's table, DEC-772 item 4).
+const CITED: &str = "payload.content.evidence.outputs[].event_id";
+
+/// `DecisionMade`'s outputs (§4.8.1's table, DEC-772 item 4).
+const USED: &str = "payload.outputs_used[]";
+
+/// `ModelOutputRecorded`'s thesis (§4.8.1's table, DEC-772 item 4).
+const THESIS: &str = "payload.thesis_id";
+
 /// The types an `IntentProposed`'s `causation_id` names (journal spec §9.1 rule 10).
 const PROPOSED_CAUSES: &[&str] = &["DecisionMade", "ApprovalRevalidated", "OwnerExitRequested"];
+
+/// The type an `ApprovalResponded`'s `causation_id` names (journal spec rule 50).
+const RESPONSE_CAUSES: &[&str] = &["ApprovalResponseSubmitted"];
 
 /// The type the `intent_id` row looks up on the agent stream.
 const PROPOSED: &[&str] = &["IntentProposed"];
 
-/// The types the `intent_id` row looks up on the from event's own stream, in the row's order.
-const INTENT_RECORDS: [&str; 2] = ["IntentReceived", "GateDecided"];
+/// The type `payload.approval` names.
+const REQUESTED: &[&str] = &["ApprovalRequested"];
+
+/// The type an approval's cited outputs and a decision's `outputs_used` name.
+const OUTPUT: &[&str] = &["ModelOutputRecorded"];
+
+/// The types the `thesis_id` row looks up, one target (DEC-775 item 4).
+const THESES: &[&str] = &["ThesisProposed", "ThesisRevised"];
+
+/// The type the fill row looks up.
+const SUBMITTED: &[&str] = &["OrderSubmitted"];
+
+/// Where an `intent_id` row takes the `agent_id` that names the agent stream of its
+/// `IntentProposed` (§4.8.1's intent rows).
+enum Agent {
+    /// The from event's own `payload.agent_id`, `None` when it records none: then no agent stream
+    /// is read and there is no fallback (DEC-775 item 2).
+    Own(Option<String>),
+    /// A `GateDecided`'s: the `agent_id` of the `IntentReceived` the row finds.
+    OfReceipt,
+}
 
 /// One link member of an event, before its targets are looked up.
 enum Link {
@@ -172,17 +208,30 @@ enum Link {
         id: String,
         expected: Option<&'static [&'static str]>,
     },
-    /// An `intent_id`, with the `agent_id` that names the agent stream of its `IntentProposed`.
-    Intent { id: String, agent: Option<String> },
+    /// A member naming one event by id on the from event's own stream, of the `expected` types
+    /// (DEC-775 item 3).
+    OnStream {
+        name: &'static str,
+        id: String,
+        expected: &'static [&'static str],
+    },
+    /// An `intent_id`, with where the agent stream of its `IntentProposed` comes from.
+    Intent { id: String, agent: Agent },
+    /// A fill's `client_order_id`: every earlier `OrderSubmitted` of it on the fill's stream.
+    Submissions { order: String },
+    /// An output's `thesis_id`: its thesis records on the output's stream (DEC-775 item 4).
+    Thesis { id: String },
+    /// A target the record cannot name: a version-1 submission's intent (DEC-775 item 1).
+    Unrecorded(&'static str),
 }
 
 /// One target of a link: named by id and not yet resolved, found by a lookup on the stream the row
-/// names, an `intent_id`'s `IntentProposed` on the agent stream of `agent` not yet looked up, or a
-/// target the row names with no match there (DEC-772 item 5).
+/// names, an event named by id on `stream` not yet looked up (`None` when the record names no
+/// stream), or a target the row names with no match there (DEC-772 item 5).
 enum Target {
     Id(String),
     Found(JournalEvent),
-    Proposed { id: String, agent: Option<String> },
+    OnStream { id: String, stream: Option<String> },
     Missing,
 }
 
@@ -229,36 +278,81 @@ impl Walk<'_, '_, '_> {
             Link::ById { name, id, expected } => {
                 self.hop(&from.event_id, depth, name, Target::Id(id), expected)
             }
+            Link::OnStream { name, id, expected } => {
+                let stream = Some(from.stream_id.clone());
+                let target = Target::OnStream { id, stream };
+                self.hop(&from.event_id, depth, name, target, Some(expected))
+            }
             Link::Intent { id, agent } => {
-                let read = self.read;
-                let rows = read
-                    .rows(&self.segment, &from.stream_id)
-                    .unwrap_or_default();
-                for kind in INTENT_RECORDS {
-                    let found: Vec<JournalEvent> = rows
-                        .iter()
-                        .filter(|row| {
-                            row.event_type == kind && intent_of(&row.body).as_ref() == Some(&id)
-                        })
-                        .map(served)
-                        .collect();
-                    if found.is_empty() {
-                        self.hop(&from.event_id, depth, INTENT, Target::Missing, None)?;
-                    }
-                    for event in found {
-                        self.hop(&from.event_id, depth, INTENT, Target::Found(event), None)?;
-                    }
-                }
-                let proposed = Target::Proposed { id, agent };
+                let received = self.matching(from, &["IntentReceived"], "intent_id", &id, None);
+                let agent = match agent {
+                    Agent::Own(agent) => agent,
+                    Agent::OfReceipt => received
+                        .first()
+                        .and_then(|event| member_of(&event.body, "agent_id")),
+                };
+                self.targets(from, depth, INTENT, received)?;
+                let gates = self.matching(from, &["GateDecided"], "intent_id", &id, None);
+                self.targets(from, depth, INTENT, gates)?;
+                let stream = agent.map(|agent| format!("agent:{}:{agent}", self.segment));
+                let proposed = Target::OnStream { id, stream };
                 self.hop(&from.event_id, depth, INTENT, proposed, Some(PROPOSED))
             }
+            Link::Submissions { order } => {
+                let until = Some(from.event_id.as_str());
+                let found = self.matching(from, SUBMITTED, "client_order_id", &order, until);
+                self.targets(from, depth, ORDER, found)
+            }
+            Link::Thesis { id } => {
+                let found = self.matching(from, THESES, "thesis_id", &id, None);
+                self.targets(from, depth, THESIS, found)
+            }
+            Link::Unrecorded(name) => self.hop(&from.event_id, depth, name, Target::Missing, None),
         }
     }
 
-    /// The node that is the event `id` on `agent:{ws}:{agent}`, decided from the trace alone, so a
-    /// link a bound stops reads no stream and adds no watermark (DEC-772 items 2 and 6).
-    fn node_on_agent_stream(&self, agent: &str, id: &str) -> Option<&str> {
-        let stream = format!("agent:{}:{agent}", self.segment);
+    /// The events of `kinds` on `from`'s own stream, before the event `until` when one is named,
+    /// whose `payload.{member}` is `value`, in `seq` order.
+    fn matching(
+        &self,
+        from: &JournalEvent,
+        kinds: &[&str],
+        member: &str,
+        value: &str,
+        until: Option<&str>,
+    ) -> Vec<JournalEvent> {
+        let rows = self
+            .read
+            .rows(&self.segment, &from.stream_id)
+            .unwrap_or_default();
+        rows.iter()
+            .take_while(|row| Some(row.event_id.as_str()) != until)
+            .filter(|row| kinds.contains(&row.event_type.as_str()))
+            .filter(|row| member_of(&row.body, member).as_deref() == Some(value))
+            .map(served)
+            .collect()
+    }
+
+    /// One hop per event `found`, or one `not_recorded` when there is none (DEC-772 item 5).
+    fn targets(
+        &mut self,
+        from: &JournalEvent,
+        depth: u16,
+        link: &'static str,
+        found: Vec<JournalEvent>,
+    ) -> ControlFlow<()> {
+        if found.is_empty() {
+            return self.hop(&from.event_id, depth, link, Target::Missing, None);
+        }
+        for event in found {
+            self.hop(&from.event_id, depth, link, Target::Found(event), None)?;
+        }
+        ControlFlow::Continue(())
+    }
+
+    /// The node that is the event `id` on `stream`, decided from the trace alone, so a link a bound
+    /// stops reads no stream and adds no watermark (DEC-772 items 2 and 6).
+    fn node_on(&self, stream: &str, id: &str) -> Option<&str> {
         self.nodes
             .iter()
             .map(|walked| &walked.node.event)
@@ -267,13 +361,12 @@ impl Walk<'_, '_, '_> {
             .map(|event| event.event_id.as_str())
     }
 
-    /// The event `id` on `agent:{ws}:{agent}`, built with the path's workspace segment; a stream
-    /// that exists in the workspace is read, so it joins `as_of` (DEC-772 item 6). Called only for
-    /// a target no bound stopped and the trace does not hold.
-    fn on_agent_stream(&mut self, agent: &str, id: &str) -> Option<JournalEvent> {
-        let stream = StreamId::parse(&format!("agent:{}:{agent}", self.segment))?;
+    /// The event `id` on `stream`, built with the path's workspace segment; a stream that exists in
+    /// the workspace is read, so it joins `as_of` (DEC-772 item 6). Called only for a target no
+    /// bound stopped and the trace does not hold.
+    fn on_stream(&mut self, stream: &str, id: &str) -> Option<JournalEvent> {
         let read = self.read;
-        let rows = read.rows(&self.segment, stream.as_str()).ok()?;
+        let rows = read.rows(&self.segment, stream).ok()?;
         let last = rows.last()?;
         self.streams.insert(last.stream_id.clone());
         rows.iter().find(|row| row.event_id == id).map(served)
@@ -296,9 +389,9 @@ impl Walk<'_, '_, '_> {
         let named = match &target {
             Target::Id(id) => Some(id.as_str()),
             Target::Found(event) => Some(event.event_id.as_str()),
-            Target::Proposed { id, agent } => agent
+            Target::OnStream { id, stream } => stream
                 .as_deref()
-                .and_then(|agent| self.node_on_agent_stream(agent, id)),
+                .and_then(|stream| self.node_on(stream, id)),
             Target::Missing => None,
         };
         let (to, status) = if let Some(id) = named.filter(|id| self.shown(id)) {
@@ -310,8 +403,8 @@ impl Walk<'_, '_, '_> {
             let event = match target {
                 Target::Id(id) => self.read.event(self.tenant, &id).ok(),
                 Target::Found(event) => Some(event),
-                Target::Proposed { id, agent } => {
-                    agent.and_then(|agent| self.on_agent_stream(&agent, &id))
+                Target::OnStream { id, stream } => {
+                    stream.and_then(|stream| self.on_stream(&stream, &id))
                 }
                 Target::Missing => None,
             };
@@ -378,18 +471,30 @@ impl Walk<'_, '_, '_> {
 }
 
 /// The links of `event` in §4.8.1's order: its `causation_id`, then its row's payload members, a
-/// list in its own order. Only the rows slice A2 covers are read (`ModelOutputRecorded`'s
-/// `evidence`, `IntentReceived`'s `intent_id`); the others are slice A2b.
+/// list in its own order.
 fn links(event: &JournalEvent) -> Vec<Link> {
     let Ok(body) = parse(&event.body) else {
         return Vec::new();
     };
     let payload = body.get("payload");
-    let text = |name: &str| payload.and_then(|p| p.get(name)).and_then(Value::as_str);
-    let expected = (event.event_type == "IntentProposed").then_some(PROPOSED_CAUSES);
+    let member = |name: &str| payload.and_then(|p| p.get(name)).filter(|v| present(v));
+    let text = |name: &str| member(name).and_then(Value::as_str).map(str::to_owned);
+    let on_stream = |name: &'static str, expected: &'static [&'static str]| {
+        move |value: &Value| Link::OnStream {
+            name,
+            id: malformed_or_id(value).to_owned(),
+            expected,
+        }
+    };
+    let version = body.get("schema_version").and_then(Value::as_int);
+    let expected = match event.event_type.as_str() {
+        "IntentProposed" => Some(PROPOSED_CAUSES),
+        "ApprovalResponded" => Some(RESPONSE_CAUSES),
+        _ => None,
+    };
     let mut links: Vec<Link> = body
         .get(CAUSATION)
-        .filter(|v| **v != Value::Null)
+        .filter(|v| present(v))
         .map(malformed_or_id)
         .map(|id| Link::ById {
             name: CAUSATION,
@@ -398,11 +503,40 @@ fn links(event: &JournalEvent) -> Vec<Link> {
         })
         .into_iter()
         .collect();
+    let own_agent = || Agent::Own(text("agent_id"));
     match event.event_type.as_str() {
-        "ModelOutputRecorded" => {
-            let cited = payload
-                .and_then(|p| p.get("evidence"))
+        "FillApplied" | "LateFillApplied" => {
+            links.extend(text("client_order_id").map(|order| Link::Submissions { order }));
+        }
+        "OrderSubmitted" if version == Some(1) => links.push(Link::Unrecorded(INTENT)),
+        "OrderRequestRecorded" | "IntentReceived" | "ProtectionChanged" => {
+            links.extend(text("intent_id").map(|id| Link::Intent {
+                id,
+                agent: own_agent(),
+            }));
+        }
+        "GateDecided" => links.extend(text("intent_id").map(|id| Link::Intent {
+            id,
+            agent: Agent::OfReceipt,
+        })),
+        "ApprovalRevalidated" => {
+            links.extend(member("approval").map(on_stream(APPROVAL, REQUESTED)));
+        }
+        "ApprovalRequested" => {
+            let content = member("content").and_then(|c| c.get("evidence"));
+            let cited = content
+                .and_then(|e| e.get("outputs"))
                 .and_then(Value::as_array);
+            let ids = cited.unwrap_or_default().iter();
+            let ids = ids.map(|output| output.get("event_id").unwrap_or(&Value::Null));
+            links.extend(ids.map(on_stream(CITED, OUTPUT)));
+        }
+        "DecisionMade" => {
+            let used = member("outputs_used").and_then(Value::as_array);
+            links.extend(used.unwrap_or_default().iter().map(on_stream(USED, OUTPUT)));
+        }
+        "ModelOutputRecorded" => {
+            let cited = member("evidence").and_then(Value::as_array);
             links.extend(
                 cited
                     .unwrap_or_default()
@@ -414,14 +548,16 @@ fn links(event: &JournalEvent) -> Vec<Link> {
                         expected: None,
                     }),
             );
+            links.extend(text("thesis_id").map(|id| Link::Thesis { id }));
         }
-        "IntentReceived" => links.extend(text("intent_id").map(|id| Link::Intent {
-            id: id.to_owned(),
-            agent: text("agent_id").map(str::to_owned),
-        })),
         _ => {}
     }
     links
+}
+
+/// Whether a member holds a value: an absent or `null` member names no target (DEC-772 item 5).
+fn present(value: &Value) -> bool {
+    *value != Value::Null
 }
 
 /// A link member's id; a value that is not a string names no event, so it reads `not_recorded`
@@ -430,45 +566,61 @@ fn malformed_or_id(value: &Value) -> &str {
     value.as_str().unwrap_or_default()
 }
 
-/// The `payload.intent_id` of a stored body.
-fn intent_of(body: &[u8]) -> Option<String> {
+/// The `payload.{name}` text of a stored body.
+fn member_of(body: &[u8], name: &str) -> Option<String> {
     let body = parse(body).ok()?;
-    body.get("payload")?
-        .get("intent_id")?
-        .as_str()
-        .map(str::to_owned)
+    body.get("payload")?.get(name)?.as_str().map(str::to_owned)
 }
 
 /// The model-authored members of `event` in §4.8.1's order, each a `platform_authored` item
-/// (DEC-773, Proposed); an absent or `null` member gives none (DEC-772 item 7).
+/// (DEC-773, Proposed); an absent or `null` member gives none (DEC-772 item 7). A member is held
+/// inline, or as an artifact ref when its flag is set.
 fn quoted(event: &JournalEvent) -> Vec<Quoted> {
-    if event.event_type != "ModelOutputRecorded" {
-        return Vec::new();
-    }
     let Ok(body) = parse(&event.body) else {
         return Vec::new();
     };
     let payload = body.get("payload");
-    let member = |name: &str| {
-        payload
-            .and_then(|p| p.get(name))
-            .filter(|v| **v != Value::Null)
+    let (model, members): (Option<&Value>, &[(&str, bool)]) = match event.event_type.as_str() {
+        "ModelOutputRecorded" => (payload, &[("invalidation", false), ("thesis_ref", true)]),
+        "ThesisProposed" | "ThesisRevised" => (
+            payload,
+            &[
+                ("invalidation", false),
+                ("evidence_sources", false),
+                ("prompt_ref", true),
+                ("response_ref", true),
+                ("autopsy_ref", true),
+            ],
+        ),
+        "ModelInvocationRecorded" => (
+            payload.and_then(|p| p.get("model")),
+            &[("prompt_ref", true), ("response_ref", true)],
+        ),
+        _ => return Vec::new(),
     };
-    let item = |name: &str, text: String, artifact: Option<String>| Quoted {
+    let item = |name: &str, value: &Value, artifact: bool| Quoted {
         path: format!("/payload/{name}"),
         quoted: QuotedContent {
             author: Author::PlatformAuthored,
-            text,
-            model_id: text_of(payload, "model_id"),
-            model_version: text_of(payload, "model_version"),
+            text: if artifact {
+                String::new()
+            } else {
+                inline(value)
+            },
+            model_id: text_of(model, "model_id"),
+            model_version: text_of(model, "model_version"),
             produced_at: event.recorded_at.clone(),
             event_id: event.event_id.clone(),
-            artifact,
+            artifact: artifact.then(|| inline(value)),
         },
     };
-    let invalidation = member("invalidation").map(|v| item("invalidation", inline(v), None));
-    let thesis = member("thesis_ref").map(|v| item("thesis_ref", String::new(), Some(inline(v))));
-    invalidation.into_iter().chain(thesis).collect()
+    members
+        .iter()
+        .filter_map(|&(name, artifact)| {
+            let value = payload.and_then(|p| p.get(name)).filter(|v| present(v))?;
+            Some(item(name, value, artifact))
+        })
+        .collect()
 }
 
 fn text_of(payload: Option<&Value>, name: &str) -> String {
