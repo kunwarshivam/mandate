@@ -184,8 +184,8 @@ impl Case {
             Kind::CliConfirm => Proof::CliConfirm,
         };
         let presentation = Presentation {
-            workspace_id: &self.workspace,
-            principal_id: &self.principal,
+            workspace_id: self.workspace,
+            principal_id: self.principal,
             action: self.action,
             proof,
         };
