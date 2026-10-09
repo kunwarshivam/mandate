@@ -6,7 +6,8 @@ import { type Locator, type Page, expect, test } from "@playwright/test";
  * transparency, or in forced colours, the frame is the solid card.
  */
 
-const BLUR = "blur(22px) saturate(1.8)";
+/** The frame blurs what passes under it; by how much is look, and may change without a decision. */
+const BLUR = expect.stringMatching(/^blur\((?!0px\))\d+(\.\d+)?px\)/);
 
 async function tokenColor(page: Page, token: string): Promise<string> {
   return page.evaluate((token) => {

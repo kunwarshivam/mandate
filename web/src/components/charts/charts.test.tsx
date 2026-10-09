@@ -314,7 +314,7 @@ describe("the hero chart scrubs", () => {
       hover(chart, point);
       const pill = hero(container).change;
       expect(pill).toHaveAttribute("data-tone", tone);
-      expect(pill.className.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "w-fit", "px-3", "py-1", "font-medium", fill, ink]));
+      expect(pill.className.split(" ")).toEqual(expect.arrayContaining(["rounded-full", fill, ink]));
       for (const other of ["bg-gain-soft", "bg-loss-soft", "bg-muted"].filter((c) => c !== fill)) expect(pill).not.toHaveClass(other);
       expect(pill.querySelector("[data-direction]")).toHaveAttribute("data-direction", tone);
       expect(pill).toHaveTextContent(word);

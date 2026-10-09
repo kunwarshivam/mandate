@@ -26,7 +26,8 @@ for (const width of [1024, 1280, 1440]) {
     const header = (await page.getByRole("banner").boundingBox())!;
     const main = (await page.locator("#main").boundingBox())!;
     expect(main.y, "the page starts under the header").toBe(header.y + header.height);
-    expect(await page.evaluate(() => getComputedStyle(document.documentElement).scrollPaddingTop)).toBe("80px");
+    const scrollPadding = parseFloat(await page.evaluate(() => getComputedStyle(document.documentElement).scrollPaddingTop));
+    expect(scrollPadding, "an anchored or focused element lands clear of the header").toBeGreaterThanOrEqual(header.height);
 
     await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
     const tag = foot(page).getByText("Fixture data");
