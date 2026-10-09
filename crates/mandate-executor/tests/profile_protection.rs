@@ -153,6 +153,7 @@ fn an_alpaca_equity_with_a_take_profit_is_covered_by_a_gtc_oco() {
         Some(oco_of("100")),
         "the legs are the take-profit and the stop"
     );
+    assert_eq!((sent.limit_price, sent.stop_price), (None, None), "legs carry prices");
 }
 
 #[test]
