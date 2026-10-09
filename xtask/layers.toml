@@ -207,7 +207,7 @@ allowed_external = ["libtest-mimic", "serde_json", "toml"]
 layer = 10
 safety_critical = true
 pure = true
-allowed_external = ["thiserror"]
+allowed_external = ["serde_json", "thiserror"]
 
 [crates.mandate-builder]
 layer = 5

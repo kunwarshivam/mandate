@@ -38,10 +38,16 @@
 //!   `cancelled`, `voided` or `failed`; `partially_filled` to `cancelled` or `voided`; and fills
 //!   alone reach `partially_filled` and `filled`.
 //!
+//! [`SimServer`] serves the core over loopback MCP (S2), honest or as a hostile [`Variant`].
+//!
 //! [DEC-124]: ../../../docs/project/04-decision-log.md
 //! [DEC-441]: ../../../docs/project/decisions/DEC-441.md
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+mod server;
+
+pub use server::{CONTRACT, INJECTION, ServerError, SimServer, Variant};
 
 use mandate_num::{Price, Qty, ShareIncrement, Usd};
 
