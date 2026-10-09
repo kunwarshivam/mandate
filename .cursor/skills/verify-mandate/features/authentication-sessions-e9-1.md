@@ -10,6 +10,6 @@
   `crates/mandate-authn/tests/session.rs` (org-kind limits that may only shorten, the 5-minute
   access token, idle and absolute limits that end the session as `expired`, a clock behind the
   session, refresh rotation with reuse revoking the family) and
-  `crates/mandate-authn/tests/admit.rs` (the sealed identity session's kind and snapshot, and no
-  session on a refusal), pending.
+  `crates/mandate-authn/tests/admit.rs` (the sealed identity session's kind and snapshot, no session
+  on a refusal, and a clock behind refusing only `Other`), pending.
 - **Run:** `cargo nextest run -p mandate-authn`.

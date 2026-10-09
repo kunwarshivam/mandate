@@ -134,6 +134,38 @@ fn a_refused_record_builds_no_session() {
     assert_eq!(fresh.ended(), None, "an expired access token ends nothing");
 }
 
+#[test]
+#[ignore = "pending E9-1"]
+fn a_clock_behind_refuses_only_other_and_builds_no_session_for_it() {
+    let mut record = open();
+    let first = record.admit(Request::Other, at(200), REFERENCE, snapshot());
+    assert_eq!(first, Ok(expected(SessionKind::Full)));
+    let behind = record.admit(Request::Other, at(100), REFERENCE, snapshot());
+    assert_eq!(behind, Err(SessionRefusal::ClockBehind));
+    for request in [Request::Pause, Request::KillSwitch] {
+        let reduced = record.admit(request, at(100), REFERENCE, snapshot());
+        assert_eq!(
+            reduced,
+            Ok(expected(SessionKind::Full)),
+            "{request:?} is judged at the last activity"
+        );
+    }
+    assert_eq!(record.ended(), None, "a clock behind ends nothing");
+    let refreshed = record.refresh(
+        &RefreshSecret([1; 32]),
+        ProviderAnswer::Granted,
+        &RefreshSecret([2; 32]),
+        at(3_799),
+    );
+    assert_eq!(
+        refreshed,
+        Ok(Refreshed::Rotated {
+            access_expires_at: at(4_099)
+        }),
+        "the admits at 100 moved no timer, so the idle hour still runs from 200"
+    );
+}
+
 /// Four entries in the order the store read them: an org membership, two workspaces with
 /// different roles, one of them with a role still cooling off, and a third workspace.
 fn wide_snapshot() -> Vec<Membership> {
