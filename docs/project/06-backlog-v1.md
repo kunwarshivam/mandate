@@ -779,6 +779,8 @@ after U-A1 to U-A5 are recorded.
   list ([DEC-851](decisions/DEC-851.md) item 6) can be emptied. *Accepted when:* a tests
   correction pins each form on real-line shapes, the tokenizer reads them, the exact-line list in
   `xtask/src/main.rs` is empty, and `cargo xtask live-feature` still exits 0 on the repository.
+  Beside it, the stronger artifact-level check DEC-851 item 6's threat model names: assert from
+  `cargo metadata` and the build plan that no CI job resolves the `live` feature.
 
 ### E8 Escalation and approvals
 

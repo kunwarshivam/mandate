@@ -10487,16 +10487,6 @@ jq -r "$filter" "$src"
                 "steps:\n  - run: ${{ inputs.cmd }} build $F\n",
                 ":2",
             ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nbash <(cat <<EOF\n$C \"$A\"\nEOF\n)\n",
-                ":3",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nbash <(echo '\n$C \"$A\"\n')\n",
-                ":3",
-            ),
         ];
         for (path, text, line) in refused_through_an_executing_command {
             let files = [ci_file(path, text)];
@@ -11278,18 +11268,21 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
-    /// A pipeline whose line expands may feed only a filter, and a wrapper's options are read by
-    /// arity (DEC-851 item 6, the coordinator's thirteenth-round rulings; X1 tests correction 12e,
-    /// after #994's review). On a logical line holding `$` or a backtick, every pipeline sink after
-    /// its wrappers must be `sha256sum`, `tee`, `tr`, `sort`, `grep`, `cut`, `tail`, `paste`,
-    /// `cat`, `head`, `uniq`, `wc`, `read` (`while read`), `awk` or `sed` (whose executing forms
-    /// are refused anyway), or, in `deploy/` only, `put_file` or `sql`; any other sink, a compound command's
-    /// shell, a variable, and an empty sink (one a comment swallowed) are refused, unless the
-    /// line is on the interim exact-line list of parser-limited lines. Finding the command word
-    /// skips every unquoted word of a redirection (`2>&1`, `{fd}>&1`) wherever it stands before
-    /// it, and each wrapper's options by their arity, `/usr/bin/time -f FMT` and `--` included; an
-    /// option of unknown arity is refused. A `#` starts a comment only at a word's start, and a
-    /// backslash escapes nothing inside single quotes, so those lines still run on.
+    /// A pipeline whose line expands may feed only a simple filter, and a wrapper's options are
+    /// read by arity (DEC-851 item 6, the coordinator's thirteenth- and fourteenth-round rulings;
+    /// X1 tests correction 12e, after the reviews of #994 and #1015). On a logical line holding
+    /// `$` or a backtick, every pipeline sink after its wrappers must be one simple command:
+    /// `sha256sum`, `tee`, `tr`, `sort` (without `--compress-program`), `grep`, `cut`, `tail`,
+    /// `paste`, `cat`, `head`, `uniq`, `wc` or `read`, or, in `deploy/` only, `put_file` or `sql`.
+    /// Any other sink (a shell, `awk`, `sed`, a variable), a compound sink (`{ … }`, a loop) and
+    /// an empty one (a comment swallowed it) are refused, unless the line is on the interim
+    /// exact-line list, which names the repository's own `awk`, `sed`, `while read`,
+    /// `done < <( … )` and parser-limited lines by file and text. A process substitution (`<(`,
+    /// `>(`) is refused on a line that expands or runs a shell. Finding the command word skips
+    /// every unquoted word of a redirection (`2>&1`, `{fd}>&1`) wherever it stands before it, and
+    /// each wrapper's options by their arity, `/usr/bin/time -f FMT` and `--` included; an option
+    /// of unknown arity is refused. A `#` starts a comment only at a word's start, and a backslash
+    /// escapes nothing inside single quotes, so those lines still run on.
     #[test]
     #[ignore = "pending E7-26"]
     fn pipeline_sinks_and_wrapper_options_fail_closed() -> Result<()> {
@@ -11333,6 +11326,37 @@ jq -r "$filter" "$src"
             ("echo \"$X\" | env".to_owned(), 2),
             ("echo \"$X\" | put_file /tmp/f 0600 root:root".to_owned(), 2),
             ("echo \"$X\" | sql db".to_owned(), 2),
+            ("echo $X | { read x; sh; }".to_owned(), 2),
+            ("echo $X | { head -n 0; sh -s; }".to_owned(), 2),
+            (
+                "printf '%s\\n' \"$X\" | while read -r a; do echo \"$a\"; done".to_owned(),
+                2,
+            ),
+            ("echo \"$X\" | sed 's/a/b/'".to_owned(), 2),
+            ("echo \"$X\" | sed 1e".to_owned(), 2),
+            ("echo \"$X\" | sed \"/x/e\"".to_owned(), 2),
+            ("echo \"$X\" | sed \"e;\"".to_owned(), 2),
+            ("echo \"$X\" | sed -n \"p;e\"".to_owned(), 2),
+            ("echo \"$X\" | sed \"s/a/b/;s/y/z/e\"".to_owned(), 2),
+            ("echo \"$X\" | sed --expression=e".to_owned(), 2),
+            ("echo \"$X\" | sed -f /dev/stdin".to_owned(), 2),
+            ("echo \"$X\" | awk '{ print $1 }'".to_owned(), 2),
+            ("echo \"$X\" | awk '{ system ($0) }'".to_owned(), 2),
+            ("echo \"$X\" | awk -f /dev/stdin".to_owned(), 2),
+            (
+                "echo \"$X\" | awk '{ printf \"%s\", $0 | \"sh\" }'".to_owned(),
+                2,
+            ),
+            ("echo \"$X\" | awk '{ print |& \"sh\" }'".to_owned(), 2),
+            ("echo \"$X\" | tee >(sh)".to_owned(), 2),
+            ("echo \"$X\" > >(sh)".to_owned(), 2),
+            ("echo \"$X\" 3> >(sh)".to_owned(), 2),
+            ("echo \"$X\" | sort -o >(sh)".to_owned(), 2),
+            ("sh <(echo $X)".to_owned(), 2),
+            ("sh < <(echo $X)".to_owned(), 2),
+            ("exec 3< <(echo $X); sh <&3".to_owned(), 2),
+            ("sh <(echo hi)".to_owned(), 2),
+            ("echo \"$X\" | sort --compress-program=sh".to_owned(), 2),
         ];
         for (text, line) in refused_at {
             let files = [ci_file(
@@ -11359,10 +11383,7 @@ jq -r "$filter" "$src"
             "echo \"$X\" | head -1",
             "echo \"$X\" | uniq",
             "echo \"$X\" | wc -l",
-            "printf '%s\\n' \"$X\" | sort -u | while read -r a; do echo \"$a\"; done",
-            "getent ahosts \"$X\" | awk '{ print $1 }' | sort -u",
-            "gpg --show-keys --with-colons \"$X\" | awk -F: '$1 == \"fpr\" { print $10; exit }'",
-            "sed -n '2,/^set -euo/p' \"$0\" | sed '$d; s/^# \\{0,1\\}//'",
+            "diff <(echo a) <(echo b)",
             "\"2\">&1 $X",
             "2a>&1 $X",
             "export -n R=echo\n$R hi",
@@ -11412,6 +11433,73 @@ jq -r "$filter" "$src"
                 1,
                 "an exact line is allowed only in its own file: {text}"
             );
+        }
+        let exact = [
+            (
+                "deploy/allow-egress.sh",
+                "found=\"$(getent ahosts \"$host\" | awk '{ print $1 }' | sort -u)\"\n",
+            ),
+            (
+                "deploy/allow-egress.sh",
+                "printf '%s\\n' \"$allow\" | sort -u | while read -r address; do\n  echo \"$address\"\ndone\n",
+            ),
+            (
+                "deploy/backup.sh",
+                "free_kb=\"$(df -Pk \"$DEST\" | awk 'NR == 2 { print $4 }')\"\n",
+            ),
+            (
+                "deploy/bootstrap.sh",
+                "found=\"$(gpg --show-keys --with-colons \"$PGDG_KEY\" | awk -F: '$1 == \"fpr\" { print $10; exit }')\"\n",
+            ),
+            (
+                "deploy/install-cloudflared.sh",
+                "gpg --show-keys --with-colons \"$1\" 2>/dev/null | awk -F: '$1 == \"fpr\" { print $10; exit }'\n",
+            ),
+            (
+                "deploy/lib.sh",
+                "sed -n '2,/^set -euo/p' \"$0\" | sed '$d; s/^# \\{0,1\\}//'\n",
+            ),
+            (
+                ".github/scripts/docs-only.sh",
+                "while read -r f; do\n  echo \"$f\"\ndone < <(git diff --name-only \"$merge_base\" HEAD)\n",
+            ),
+            (
+                ".github/scripts/docs-checks.sh",
+                "while read -r c; do\n  echo \"$c\"\ndone < <(git log --format='%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)' \"$merge_base..HEAD\")\n",
+            ),
+            (
+                ".github/scripts/merge-approved.sh",
+                "approvals=$(awk '/^[[:space:]]*(```|~~~)/ { fenced = !fenced; next } !fenced' <<<\"$body\" | sed -nE 's/^[[:space:]]*([-*][[:space:]]+)?Coordinator-approved-head:[[:space:]]*([0-9a-fA-F]{40})[[:space:]]*$/\\2/p' | tr 'A-F' 'a-f')\n",
+            ),
+        ];
+        for (path, text) in exact {
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &[ci_file(path, text)])?,
+                Vec::<String>::new(),
+                "{path}'s exact line: {text}"
+            );
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &[ci_file("deploy/other.sh", text)])?.len(),
+                1,
+                "the same line in another file is judged: {text}"
+            );
+        }
+        for text_into_a_shell in [
+            "set -e\nbash <(cat <<EOF\n$C \"$A\"\nEOF\n)\n",
+            "set -e\nbash <(echo '\n$C \"$A\"\n')\n",
+        ] {
+            let problems = live_feature_problems(
+                &policy,
+                &meta(),
+                &[ci_file(".github/scripts/build.sh", text_into_a_shell)],
+            )?;
+            assert_eq!(problems.len(), 2, "{text_into_a_shell}: {problems:?}");
+            for (problem, line) in problems.iter().zip([":2:", ":3:"]) {
+                assert!(
+                    problem.starts_with(&format!(".github/scripts/build.sh{line}")),
+                    "the process substitution into a shell, and the line it runs: {problems:?}"
+                );
+            }
         }
         let edited = systemd_run.replace("--collect", "--collect sh");
         let files = [ci_file("deploy/set-secrets.sh", &edited)];
