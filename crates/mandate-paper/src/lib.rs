@@ -71,6 +71,8 @@ pub enum PaperError {
     /// The body of every stub in the tests PR (DEC-77).
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
+    #[error("{0}")]
+    Usage(String),
     #[error("the control stream could not be read")]
     Control,
     #[error("the paper credentials or client are unavailable")]
@@ -85,6 +87,18 @@ pub enum PaperError {
     Model(Refusal),
     #[error(transparent)]
     Shell(ShellError),
+}
+
+/// Parses the arguments after the program name: `--workspace`, `--agent`, `--account-ref`,
+/// `--journal`, `--store` and `--bars`, each with a value; the required `--confirm-paper`; and
+/// `--place-one-order`, which needs `--journal`. Any other argument is unknown, so none names a
+/// mandate, a configuration, a model output or a host.
+///
+/// # Errors
+/// [`PaperError::Usage`] for a missing acknowledgement, flag or value, or an unknown argument.
+pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, PaperError> {
+    let _ = args.into_iter();
+    Err(PaperError::Unimplemented { story: "E7-19" })
 }
 
 /// One run, in the crate documentation's order; `vars` is the process environment.
