@@ -6,7 +6,7 @@ DEC-77 tests PR stubs `loss_answer_fields` and `proposed_ladder` in `mandate-spe
 below is pending on them until the implementation PR replaces the stubs.
 
 - **Spec:** `docs/specs/mandate.md` §7 (the loss answer), §2.1 (provenance), V-010 to V-014 and V-020
-  (§4.1); DEC-182, DEC-695.
+  (§4.1); DEC-182, DEC-695, DEC-901.
 - **Code:** `crates/mandate-spec/src/draft.rs` (`loss_answer_fields`, `proposed_ladder`,
   `LossAnswer`, `LossFields`, `ProposedLadder`, `Drafted`, `Draft`, `AskAgain`).
 - **Tests:** `crates/mandate-spec/tests/loss_answer.rs`: two tables whose values
@@ -15,8 +15,8 @@ below is pending on them until the implementation PR replaces the stubs.
   property over random answers that checks each draft against an exact integer oracle and the
   drafted mandate against `validate`; and two tests the coordinator's condition on #1199 adds, for
   inputs §7 and DEC-695 give no outcome (a zero or negative allocation, a negative answer, a
-  drawdown of 0, below 0, or above 1): each is a typed error or asked again, never a draft or a
-  panic, and the stub's `Unimplemented` is neither.
+  drawdown of 0 or less, or of 1 or more; DEC-901): each is a typed error or asked again, never a
+  draft or a panic, and the stub's `Unimplemented` is neither.
 - **Reference model:** `reference/mandate/ref.py` (`loss_answer_fields`, `proposed_ladder`),
   `reference/mandate/fuzz.py` (`fuzz_loss_answer`), `reference/mandate/mutants.py`.
 - **Reference cases:** none; DEC-695 item 9 adds no reference case or fixture.
