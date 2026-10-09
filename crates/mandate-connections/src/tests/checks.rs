@@ -191,19 +191,6 @@ fn nothing_that_can_move_funds_out_is_accepted() {
         Some(Outcome::Failed(Reason::FundMovement)),
         "a fund-movement scope is named as one, not only as a mismatch (CN-2)"
     );
-    let empty_live = CheckInput {
-        broker: Broker::KrakenDerivativesUs,
-        environment: Environment::Live,
-        auth_kind: AuthKind::ApiKey,
-        granted: Granted::KeyPermissions(Some(BTreeSet::new())),
-        ..alpaca()
-    };
-    assert_eq!(
-        outcome(&run(&empty_live).unwrap(), Check::Scope),
-        Some(Outcome::Passed),
-        "an empty set was read and shows no fund movement: DEC-441 item 4 refuses only what \
-         cannot be shown absent"
-    );
 }
 
 /// Fund movement is judged by whole tokens (DEC-839 item 3, shared by check 1 under DEC-676 item
@@ -417,6 +404,41 @@ fn a_live_key_whose_permissions_cannot_be_read_is_refused() {
             "{broker:?}"
         );
     }
+}
+
+/// A key whose permissions were read and are empty (DEC-685): a live one cannot show fund
+/// movement absent, so it is refused as `permissions_unreadable` (CN-2, DEC-441 item 4); a paper
+/// one cannot move money and still passes. A live key whose read permissions are not empty and
+/// show no fund movement passes.
+#[test]
+#[ignore = "pending E7-12"]
+fn a_live_key_that_reports_no_permissions_is_refused() {
+    let empty_key = |environment| CheckInput {
+        broker: Broker::KrakenDerivativesUs,
+        environment,
+        auth_kind: AuthKind::ApiKey,
+        granted: Granted::KeyPermissions(Some(BTreeSet::new())),
+        ..alpaca()
+    };
+    assert_eq!(
+        outcome(&run(&empty_key(Environment::Live)).unwrap(), Check::Scope),
+        Some(Outcome::Failed(Reason::PermissionsUnreadable)),
+        "a live key that reports no permissions cannot show fund movement absent (DEC-685)"
+    );
+    assert_eq!(
+        outcome(&run(&empty_key(Environment::Paper)).unwrap(), Check::Scope),
+        Some(Outcome::Passed),
+        "a paper key that reports no permissions is recorded, not refused (DEC-685)"
+    );
+    let trade_only = CheckInput {
+        granted: Granted::KeyPermissions(Some(BTreeSet::from(["trade".to_owned()]))),
+        ..empty_key(Environment::Live)
+    };
+    assert_eq!(
+        outcome(&run(&trade_only).unwrap(), Check::Scope),
+        Some(Outcome::Passed),
+        "a live key whose read permissions show no fund movement passes check 1"
+    );
 }
 
 #[test]
