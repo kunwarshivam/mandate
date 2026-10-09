@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/end-delegation-already-ended.schema.json",
+  "description": "The 200 of ending a delegation that is already gone (\u00a75.3): nothing is committed.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "outcome"
+  ],
+  "properties": {
+    "outcome": {
+      "const": "already_ended"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false
+}

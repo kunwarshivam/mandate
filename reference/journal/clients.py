@@ -1,10 +1,10 @@
-"""Journal spec v0.20's reference vectors (DEC-671): the `client` actor of §3 (rules 66 to 68), and
-§9.9's `ConnectionRevoked` version 2 and client records (rules 69 to 74).
+"""Journal spec v0.22's reference vectors (DEC-671): the `client` actor of §3 (rules 81 to 83), and
+§9.10's `ConnectionRevoked` version 2 and client records (rules 84 to 89).
 
-The rules live in `control.py`, beside §9.2's to §9.8's, so one validator judges every closed
+The rules live in `control.py`, beside §9.2's to §9.9's, so one validator judges every closed
 schema. This module builds the `client_actor` section: a base draft of each record, an invalid draft
 for every member type and rule, and valid drafts for the cases a rule might be misread to refuse,
-including the client branches of §9.8's rules 55 and 64, which v0.19 could only refuse. It checks
+including the client branches of §9.9's rules 70 and 79, which v0.21 could only refuse. It checks
 the section with two oracles of its own: the human behind every accepted record, computed from
 identity spec ID-6 and ID-11 rather than from the rules, and the compromised revocation's link to
 its kill switch. Every seeded bug is shown caught.
@@ -34,7 +34,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.20 §3, §9.9 (DEC-671)"
+SPEC = "docs/specs/journal.md v0.22 §3, §9.10 (DEC-671)"
 AT = "2026-10-08T15:00:00.000000000Z"
 IDS = {
     "draft": "01J8Z5C0A000000000000000C1",
@@ -143,7 +143,7 @@ def valid(name, clause, base, changes):
 
 
 def as_client(event_type: str, version: int = 1) -> list[dict]:
-    """The base request turned into another record a client might try to write; rule 68 refuses it
+    """The base request turned into another record a client might try to write; rule 83 refuses it
     before its payload is read."""
     return [change("event_type", event_type), change("schema_version", version)]
 
@@ -169,7 +169,7 @@ MEMBER_CASES = {
         ("reason", 7, "expired"),
     ),
 }
-# A `null` `scopes` or `agents` is refused by rule 71, and a `null` `user` by rule 73 or 74, at the member's own path with the same reason,
+# A `null` `scopes` or `agents` is refused by rule 86, and a `null` `user` by rule 88 or 89, at the member's own path with the same reason,
 # so it is refused identically whether or not its type is checked first.
 RULE_TYPED = ("scopes", "agents", "user")
 NULLED = {
@@ -184,17 +184,17 @@ def member_drafts() -> list[dict]:
     for base, cases in MEMBER_CASES.items():
         for member, wrong_kind, wrong_form in cases:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.kind", "§9.9 types", base, [change(path, wrong_kind)], "schema", path))
+            out.append(invalid(f"{base}.{member}.kind", "§9.10 types", base, [change(path, wrong_kind)], "schema", path))
             if wrong_form is not None:
                 out.append(
-                    invalid(f"{base}.{member}.form", "§9.9 types", base, [change(path, wrong_form)], "non_canonical", path)
+                    invalid(f"{base}.{member}.form", "§9.10 types", base, [change(path, wrong_form)], "non_canonical", path)
                 )
         for member in NULLED[base]:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.null", "§9.9 types", base, [change(path, None)], "schema", path))
+            out.append(invalid(f"{base}.{member}.null", "§9.10 types", base, [change(path, None)], "schema", path))
         some = MEMBER_CASES[base][0][0]
-        out.append(invalid(f"{base}.missing", "§9.9 closed", base, [delete(f"payload.{some}")], "schema", f"payload.{some}"))
-        out.append(invalid(f"{base}.extra", "§9.9 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
+        out.append(invalid(f"{base}.missing", "§9.10 closed", base, [delete(f"payload.{some}")], "schema", f"payload.{some}"))
+        out.append(invalid(f"{base}.extra", "§9.10 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
     return out
 
 
@@ -207,7 +207,7 @@ def invalid_drafts() -> list[dict]:
         *member_drafts(),
         invalid(
             "client_scope_unknown",
-            "§9.9: the scopes are workspace API §3.8's closed list",
+            "§9.10: the scopes are workspace API §3.8's closed list",
             con,
             [change("payload.scopes", ["read", "trade"])],
             "non_canonical",
@@ -215,7 +215,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_agent_not_an_id",
-            "§9.9 types",
+            "§9.10 types",
             con,
             [change("payload.agents", [AGENT, "agent b"])],
             "non_canonical",
@@ -223,7 +223,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "revoked_v1_with_a_reason",
-            "§9.9: version 1 stays closed",
+            "§9.10: version 1 stays closed",
             rev,
             [change("schema_version", 1)],
             "schema",
@@ -232,7 +232,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "revoked_unknown_version",
-            "§9.9: versions 1 and 2 are registered",
+            "§9.10: versions 1 and 2 are registered",
             rev,
             [change("schema_version", 3)],
             "unknown_schema",
@@ -240,7 +240,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "user_acting_for_someone",
-            "rule 66: only a client acts on behalf of a user",
+            "rule 81: only a client acts on behalf of a user",
             "client_revoked",
             [change("actor.on_behalf_of", OWNER)],
             "schema",
@@ -248,7 +248,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_for_no_one",
-            "rule 66: a client names its user",
+            "rule 81: a client names its user",
             req,
             [delete("actor.on_behalf_of")],
             "schema",
@@ -256,7 +256,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_for_a_non_id",
-            "rule 66: the user is an opaque id",
+            "rule 81: the user is an opaque id",
             req,
             [change("actor.on_behalf_of", "user 01")],
             "non_canonical",
@@ -264,7 +264,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_for_a_number",
-            "rule 66",
+            "rule 81",
             req,
             [change("actor.on_behalf_of", 7)],
             "schema",
@@ -272,7 +272,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_with_a_build",
-            "rule 67: a client is external, so it has no build digest",
+            "rule 82: a client is external, so it has no build digest",
             req,
             [change("actor.build", "sha256:" + "d" * 64)],
             "schema",
@@ -280,7 +280,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_confirms",
-            "rule 68: a client never confirms a version (identity ID-11)",
+            "rule 83: a client never confirms a version (identity ID-11)",
             req,
             as_client("MandateConfirmed", 2),
             "schema",
@@ -288,7 +288,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_answers_an_approval",
-            "rule 68: refused at append; mandate spec §6.4 check 3 refuses it again",
+            "rule 83: refused at append; mandate spec §6.4 check 3 refuses it again",
             req,
             as_client("ApprovalResponseSubmitted"),
             "schema",
@@ -296,7 +296,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_revokes_a_connection",
-            "rule 68",
+            "rule 83",
             req,
             as_client("ConnectionRevoked", 2),
             "schema",
@@ -304,7 +304,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_connects_a_client",
-            "rule 68",
+            "rule 83",
             con,
             [change("actor", dict(CLIENT))],
             "schema",
@@ -312,7 +312,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_on_an_agent_stream",
-            "rule 68: a client writes only to the control stream",
+            "rule 83: a client writes only to the control stream",
             req,
             [*as_client("ApprovalResponded"), change("stream_id", AGENT_STREAM)],
             "schema",
@@ -320,7 +320,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_starts_a_draft_from_a_description",
-            "rule 55: a client's draft starts from a base version",
+            "rule 70: a client's draft starts from a base version",
             "client_draft",
             [change("payload.origin", "description"), change("payload.base_version", None)],
             "schema",
@@ -328,7 +328,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_edits_a_draft",
-            "rule 55",
+            "rule 70",
             "client_draft",
             [change("payload.origin", "edit"), change("payload.base_draft", DRAFT), change("payload.base_version", None)],
             "schema",
@@ -336,7 +336,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_request_claims_the_owner",
-            "rule 64: `requested_by` follows the actor",
+            "rule 79: `requested_by` follows the actor",
             req,
             [change("payload.requested_by", "owner"), change("payload.client_id", None)],
             "schema",
@@ -344,7 +344,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_request_names_another_client",
-            "rule 64: `client_id` is the actor's",
+            "rule 79: `client_id` is the actor's",
             req,
             [change("payload.client_id", "client_02")],
             "schema",
@@ -352,7 +352,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_request_names_no_client",
-            "rule 64",
+            "rule 79",
             req,
             [change("payload.client_id", None)],
             "schema",
@@ -360,7 +360,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "compromised_without_its_kill_switch",
-            "rule 69: the revocation follows its kill switch (workspace API §5.6)",
+            "rule 84: the revocation follows its kill switch (workspace API §5.6)",
             rev,
             [change("causation_id", None)],
             "schema",
@@ -368,7 +368,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "ordinary_revoke_with_a_cause",
-            "rule 69",
+            "rule 84",
             rev,
             [change("payload.reason", "owner")],
             "schema",
@@ -376,7 +376,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "revoked_by_the_system",
-            "rule 70: the owner revokes",
+            "rule 85: the owner revokes",
             rev,
             [change("actor", dict(SERVICES))],
             "schema",
@@ -384,7 +384,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_with_no_scope",
-            "rule 71",
+            "rule 86",
             con,
             [change("payload.scopes", [])],
             "schema",
@@ -392,7 +392,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_with_no_agent",
-            "rule 71",
+            "rule 86",
             con,
             [change("payload.agents", [])],
             "schema",
@@ -400,7 +400,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_scopes_unsorted",
-            "rule 72",
+            "rule 87",
             con,
             [change("payload.scopes", ["request", "read"])],
             "non_canonical",
@@ -408,7 +408,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_agents_repeated",
-            "rule 72",
+            "rule 87",
             con,
             [change("payload.agents", [AGENT, AGENT])],
             "non_canonical",
@@ -416,7 +416,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_connected_by_the_system",
-            "rule 73: a user connects a client",
+            "rule 88: a user connects a client",
             con,
             [change("actor", dict(SERVICES))],
             "schema",
@@ -424,7 +424,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_connected_for_another_user",
-            "rule 73: a user connects their own client",
+            "rule 88: a user connects their own client",
             con,
             [change("payload.user", "user_owner_02")],
             "schema",
@@ -432,7 +432,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_revoked_by_an_operator",
-            "rule 74",
+            "rule 89",
             "client_revoked",
             [change("actor", {"kind": "platform_operator", "id": "op_01", "version": "1", "build": None})],
             "schema",
@@ -440,7 +440,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "owner_revocation_by_another_user",
-            "rule 74: `owner` is the client's own user",
+            "rule 89: `owner` is the client's own user",
             "client_revoked",
             [change("actor.id", "user_admin_01")],
             "schema",
@@ -448,7 +448,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "admin_revocation_by_the_owner",
-            "rule 74: `admin` is another user",
+            "rule 89: `admin` is another user",
             "client_revoked",
             [change("payload.reason", "admin")],
             "schema",
@@ -456,15 +456,42 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "deprovisioning_by_a_user",
-            "rule 74: deactivation and deprovisioning are the system's",
+            "rule 89: deprovisioning is the system's",
             "client_revoked",
             [change("payload.reason", "deprovisioned")],
             "schema",
             "actor.kind",
         ),
         invalid(
+            "deactivation_revoked_by_an_agent",
+            "rule 89: only a user or the system revokes a deactivated member's clients",
+            "client_revoked",
+            [change("actor", {"kind": "agent", "id": "agent_01", "version": "1", "build": "sha256:" + "d" * 64}), change("payload.reason", "member_deactivated")],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "deactivation_revoked_by_a_broker",
+            "rule 89: only a user or the system revokes a deactivated member's clients",
+            "client_revoked",
+            [change("actor", {"kind": "broker", "id": "broker_01", "version": "1", "build": None}), change("payload.reason", "member_deactivated")],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
+            "deactivation_revoked_by_an_operator",
+            "rule 89: only a user or the system revokes a deactivated member's clients",
+            "client_revoked",
+            [
+                change("actor", {"kind": "platform_operator", "id": "op_01", "version": "1", "build": None}),
+                change("payload.reason", "member_deactivated"),
+            ],
+            "schema",
+            "actor.kind",
+        ),
+        invalid(
             "owner_revocation_by_the_system",
-            "rule 74",
+            "rule 89",
             "client_revoked",
             [change("actor", dict(SERVICES))],
             "schema",
@@ -479,58 +506,226 @@ def valid_drafts() -> list[dict]:
     return [
         valid(
             "client_request_sized_sell",
-            "rule 64: a client's request, any side and size",
+            "rule 79: a client's request, any side and size",
             "client_request",
             [change("payload.side", "sell"), change("payload.quantity", "3")],
         ),
         valid(
             "revoked_by_the_owner",
-            "rule 69: an ordinary revoke has no cause",
+            "rule 84: an ordinary revoke has no cause",
             rev,
             [change("payload.reason", "owner"), change("causation_id", None)],
         ),
         valid(
             "revoked_v1_unchanged",
-            "§9.9: version 1 stays registered",
+            "§9.10: version 1 stays registered",
             rev,
             [change("schema_version", 1), delete("payload.reason"), delete("payload.step_up"), change("causation_id", None)],
         ),
         valid(
             "client_one_scope_one_agent",
-            "rules 71 and 72",
+            "rules 86 and 87",
             "client_connected",
             [change("payload.scopes", ["hold"]), change("payload.agents", [AGENT])],
         ),
         valid(
             "client_revoked_on_deprovisioning",
-            "rule 74: the system revokes a deprovisioned user's clients (identity §11.1)",
+            "rule 89: the system revokes a deprovisioned user's clients (identity §11.1)",
             "client_revoked",
             [change("actor", dict(SERVICES)), change("payload.reason", "deprovisioned")],
         ),
         valid(
             "client_revoked_on_deactivation",
-            "rule 74: identity §5.2 step 2",
+            "rule 89: a scheduled deactivation is the system's",
             "client_revoked",
             [change("actor", dict(SERVICES)), change("payload.reason", "member_deactivated")],
         ),
         valid(
+            "client_revoked_on_deactivation_by_the_admin",
+            "rule 89: the deactivating admin revokes the member's clients (identity §5.2)",
+            "client_revoked",
+            [change("actor.id", "user_admin_01"), change("payload.reason", "member_deactivated")],
+        ),
+        valid(
             "client_revoked_by_an_admin",
-            "rule 74: an admin may revoke another member's client",
+            "rule 89: an admin may revoke another member's client",
             "client_revoked",
             [change("actor.id", "user_admin_01"), change("payload.reason", "admin")],
         ),
         valid(
             "client_revoked_as_compromised_by_the_system",
-            "rule 74: either a user or the system may revoke a compromised client",
+            "rule 89: either a user or the system may revoke a compromised client",
             "client_revoked",
             [change("actor", dict(SERVICES)), change("payload.reason", "compromised")],
         ),
     ]
 
 
+# --------------------------------------------------------------------------- rule 84's batches
+
+KILL_SWITCH_DRAFT = {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": KILL_SWITCH,
+    "stream_id": STREAM,
+    "event_type": "OwnerCommandIssued",
+    "schema_version": 1,
+    "event_time": AT,
+    "clock_source": "local",
+    "causation_id": None,
+    "correlation_id": None,
+    "actor": dict(USER),
+    "config_refs": {},
+    "payload": {
+        "agent": None,
+        "command": "kill_switch",
+        "scope": "connection",
+        "subject": "conn_01",
+        "release": None,
+        "warning_shown": None,
+        "bid": None,
+        "bid_size": None,
+        "floor": None,
+        "user": OWNER,
+        "submitted_at": 1791470000,
+        "step_up": None,
+    },
+    "artifact_refs": [],
+    "pii_refs": [],
+}
+OTHER_EVENT = "01J8Z5C2C000000000000000C7"
+
+
+def batch_case(name: str, clause: str, members: list[dict], expect: dict) -> dict:
+    return {"name": name, "clause": clause, "drafts": members, "expect": expect}
+
+
+def kill(*changes: dict) -> dict:
+    return {"kill_switch": True, "changes": list(changes)}
+
+
+def revoked(*changes: dict) -> dict:
+    return {"base_draft": "revoked_compromised", "changes": list(changes)}
+
+
+def valid_batches() -> list[dict]:
+    return [
+        batch_case(
+            "the_kill_switch_then_its_revocation",
+            "rule 84: one batch, the connection's kill switch first (workspace API §5.6)",
+            [kill(), revoked()],
+            {"outcome": "Committed"},
+        ),
+    ]
+
+
+def invalid_batches() -> list[dict]:
+    invalid_at = {"outcome": "Invalid", "draft_index": 1, "reason": "schema", "path": "causation_id"}
+    return [
+        batch_case(
+            "a_revocation_naming_another_event",
+            "rule 84: the cause is the kill switch, not any event",
+            [kill(), revoked(change("causation_id", OTHER_EVENT))],
+            invalid_at,
+        ),
+        batch_case(
+            "a_revocation_after_a_workspace_kill_switch",
+            "rule 84: the kill switch is at the connection's scope, not a wider one",
+            [kill(change("payload.scope", "workspace")), revoked()],
+            invalid_at,
+        ),
+        batch_case(
+            "a_revocation_after_another_connections_kill_switch",
+            "rule 84: the kill switch is this connection's",
+            [kill(change("payload.subject", "conn_02")), revoked()],
+            invalid_at,
+        ),
+        batch_case(
+            "a_revocation_after_a_pause",
+            "rule 84: the command is a kill switch",
+            [kill(change("payload.command", "pause")), revoked()],
+            invalid_at,
+        ),
+        batch_case(
+            "a_revocation_alone",
+            "rule 84: the kill switch is in the same batch",
+            [revoked()],
+            {"outcome": "Invalid", "draft_index": 0, "reason": "schema", "path": "causation_id"},
+        ),
+        batch_case(
+            "a_revocation_before_its_kill_switch",
+            "rule 84: the kill switch is earlier in the batch",
+            [revoked(), kill()],
+            {"outcome": "Invalid", "draft_index": 0, "reason": "schema", "path": "causation_id"},
+        ),
+    ]
+
+
+def batch_drafts(section: dict, case: dict) -> list[dict]:
+    out = []
+    for member in case["drafts"]:
+        if member.get("kill_switch"):
+            draft = copy.deepcopy(section["kill_switch"])
+        else:
+            draft = copy.deepcopy(section["drafts"][member["base_draft"]])
+        for item in member["changes"]:
+            draft_change(draft, item)
+        out.append(draft)
+    return out
+
+
+def rule84(drafts: list[dict], skip: frozenset[str] = frozenset()) -> list[tuple[str, str, int]]:
+    """Rule 84's batch clause: a compromised revocation names, as `causation_id`, an
+    `OwnerCommandIssued` earlier in its batch that is a kill switch at the scope of the connection
+    it revokes. Answers every failure as `(reason, path, draft_index)`."""
+    out = []
+    for i, draft in enumerate(drafts):
+        if draft["event_type"] != "ConnectionRevoked" or draft["schema_version"] != 2:
+            continue
+        if draft["payload"]["reason"] != "compromised":
+            continue
+        earlier = drafts if "rule.84.batch_order" in skip else drafts[:i]
+        cause = next((d for d in earlier if d["event_id"] == draft["causation_id"]), None)
+        ok = cause is not None or "rule.84.batch_present" in skip
+        if cause is not None:
+            p = cause["payload"]
+            checks = (
+                ("command", cause["event_type"] == "OwnerCommandIssued" and p.get("command") == "kill_switch"),
+                ("scope", p.get("scope") == "connection"),
+                ("subject", p.get("subject") == draft["payload"]["connection_id"]),
+            )
+            ok = all(holds or f"rule.84.batch_{name}" in skip for name, holds in checks)
+        if not ok:
+            out.append(("schema", "causation_id", i))
+    return out
+
+
+BATCH_MUTANTS = (
+    "rule.84.batch_present",
+    "rule.84.batch_order",
+    "rule.84.batch_command",
+    "rule.84.batch_scope",
+    "rule.84.batch_subject",
+)
+
+
+def batch_problems(section: dict, skip: frozenset[str] = frozenset()) -> list[str]:
+    problems = []
+    for case in section["valid_batches"]:
+        got = rule84(batch_drafts(section, case), skip)
+        if got:
+            problems.append(found("batches", f"{case['name']}: expected Committed, got {got}"))
+    for case in section["invalid_batches"]:
+        want = case["expect"]
+        got = rule84(batch_drafts(section, case), skip)
+        if got != [(want["reason"], want["path"], want["draft_index"])]:
+            problems.append(found("batches", f"{case['name']}: expected {want}, got {got}"))
+    return problems
+
+
 # --------------------------------------------------------------------------- independent oracles
 
-ORACLE_CHECKS = ("drafts.valid", "drafts.human", "drafts.kill_switch", "invalid_drafts", "valid_drafts")
+ORACLE_CHECKS = ("drafts.valid", "drafts.human", "drafts.kill_switch", "batches", "invalid_drafts", "valid_drafts")
 
 
 def found(check: str, message: str) -> str:
@@ -583,30 +778,33 @@ def check_section(section: dict) -> list[str]:
         accepted.append((case["name"], draft))
     for name, draft in accepted:
         problems += human_problems(name, draft)
+    problems += batch_problems(section)
     return problems
 
 
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = (
-    "rule.55",
-    "rule.64.requested_by",
-    "rule.64.client_id",
-    "rule.66.extra",
-    "rule.66.missing",
-    "loose.actor.on_behalf_of",
-    "rule.67",
-    "rule.68",
-    "rule.69",
     "rule.70",
-    "rule.71",
-    "rule.72.scopes",
-    "rule.72.agents",
-    "rule.73.actor",
-    "rule.73.user",
-    "rule.74",
-    "rule.74.owner",
-    "rule.74.admin",
+    "rule.70.client_origin",
+    "rule.79.requested_by",
+    "rule.79.client_id",
+    "rule.81.extra",
+    "rule.81.missing",
+    "loose.actor.on_behalf_of",
+    "rule.82",
+    "rule.83",
+    "rule.84",
+    "rule.85",
+    "rule.86",
+    "rule.87.scopes",
+    "rule.87.agents",
+    "rule.88.actor",
+    "rule.88.user",
+    "rule.89",
+    "rule.89.owner",
+    "rule.89.user_any",
+    "rule.89.admin",
     "record.extra",
     "record.missing",
     *sorted({f"loose.payload.{member}" for cases in MEMBER_CASES.values() for member, _, _ in cases}),
@@ -630,7 +828,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
 
     return [
         (
-            "a base draft breaks rule 69",
+            "a base draft breaks rule 84",
             "drafts.valid",
             mutated(lambda s: s["drafts"]["revoked_compromised"].update(causation_id=None)),
         ),
@@ -643,13 +841,18 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             ),
         ),
         (
-            "a valid client request is attributed to another user while rule 64 is read loosely",
+            "a valid client request is attributed to another user while rule 79 is read loosely",
             "drafts.human",
             mutated(
                 lambda s: case(s, "valid_drafts", "client_request_sized_sell")["changes"].append(
                     change("actor.on_behalf_of", "user_owner_02")
                 )
             ),
+        ),
+        (
+            "a valid batch's kill switch is an agent's",
+            "batches",
+            mutated(lambda s: s["kill_switch"]["payload"].update(scope="agent")),
         ),
         (
             "an invalid draft's expectation differs",
@@ -678,6 +881,9 @@ def run_mutants(section: dict) -> list[str]:
             caught |= bool(got) if want is None else not reported(got, want)
         if not caught:
             escaped.append(f"client validator mutant {mutant}")
+    for mutant in BATCH_MUTANTS:
+        if not batch_problems(section, frozenset([mutant])):
+            escaped.append(f"client batch mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if not any(c == check for _, c, _ in registered):
@@ -695,4 +901,7 @@ def build_section() -> dict:
         "drafts": base_drafts(),
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
+        "kill_switch": copy.deepcopy(KILL_SWITCH_DRAFT),
+        "valid_batches": valid_batches(),
+        "invalid_batches": invalid_batches(),
     }

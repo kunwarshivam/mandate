@@ -9,13 +9,15 @@
 //! of [`crate::approvals::message`]. A refusal prints nothing, and no message names the DSN.
 
 use std::io::Write;
+use std::time::Duration;
 
 use clap::{Args, Subcommand};
+use mandate_canon::{Digest, to_canonical};
 use mandate_time::UtcNanos;
 
-use crate::approvals::{Listed, Outcome, Shown};
-use crate::control::{ControlError, Now, Owner, Submitted};
-use crate::postgres::JournalArgs;
+use crate::approvals::{self, Ended, Listed, Outcome, Shown, State};
+use crate::control::{ControlError, ControlJournal, Ids, Now, Owner, Submitted};
+use crate::postgres::{JournalArgs, PgControlJournal};
 use crate::register::OwnerArgs;
 
 #[derive(Debug, Subcommand)]
@@ -84,20 +86,52 @@ pub struct SkipArgs {
 /// [`crate::approvals::list`]'s order, or the one line `no approvals`. Never the request's content.
 ///
 /// # Errors
-/// None once implemented; the stub's [`ControlError::Unimplemented`].
+/// None: every approval has a line. The `Result` is the stub API's shape.
 pub fn list_lines(listed: &[Listed]) -> Result<Vec<String>, ControlError> {
-    let _ = listed;
-    Err(ControlError::Unimplemented { story: "E8-3" })
+    if listed.is_empty() {
+        return Ok(vec!["no approvals".to_owned()]);
+    }
+    Ok(listed
+        .iter()
+        .map(|l| {
+            format!(
+                "{} {} {} deadline {} remaining {}",
+                l.approval,
+                l.agent,
+                state_word(l.state),
+                l.deadline_s,
+                l.remaining_s
+            )
+        })
+        .collect())
+}
+
+fn state_word(state: State) -> &'static str {
+    match state {
+        State::Pending => "pending",
+        State::Acted => "acted",
+        State::Skipped(Ended::ByOwner) => "skipped_by_owner",
+        State::Skipped(Ended::OnRevalidation) => "skipped_on_revalidation",
+        State::Skipped(Ended::TimedOut) => "timed_out",
+        State::Skipped(Ended::Canceled) => "canceled",
+    }
 }
 
 /// `show`'s lines: `approval <approval> deadline <s>`, the content object's canonical JSON exactly,
 /// `content_hash <hash>`, and `code <code>`.
 ///
 /// # Errors
-/// As [`list_lines`].
+/// [`ControlError::Journal`] for content whose canonical bytes are not UTF-8, which canonical JSON
+/// never is.
 pub fn show_lines(shown: &Shown) -> Result<Vec<String>, ControlError> {
-    let _ = shown;
-    Err(ControlError::Unimplemented { story: "E8-3" })
+    let canonical = String::from_utf8(to_canonical(&shown.content))
+        .map_err(|_| ControlError::Journal("the request's content is not UTF-8".to_owned()))?;
+    Ok(vec![
+        format!("approval {} deadline {}", shown.approval, shown.deadline_s),
+        canonical,
+        format!("content_hash {}", shown.content_hash),
+        format!("code {}", shown.code),
+    ])
 }
 
 /// `approve`'s lines: `granted <approval> as event <id> at seq <n> for <content_hash>`, then
@@ -112,8 +146,13 @@ pub fn granted_lines(
     outcome: &Outcome,
     now: Now,
 ) -> Result<Vec<String>, ControlError> {
-    let _ = (approval, content_hash, submitted, outcome, now);
-    Err(ControlError::Unimplemented { story: "E8-3" })
+    Ok(vec![
+        format!(
+            "granted {approval} as event {} at seq {} for {content_hash}",
+            submitted.event_id, submitted.seq
+        ),
+        approvals::message(outcome, now)?,
+    ])
 }
 
 /// `skip`'s line: `skipped <approval> as event <id> at seq <n>`.
@@ -121,8 +160,10 @@ pub fn granted_lines(
 /// # Errors
 /// As [`list_lines`].
 pub fn skipped_line(approval: &str, submitted: &Submitted) -> Result<String, ControlError> {
-    let _ = (approval, submitted);
-    Err(ControlError::Unimplemented { story: "E8-3" })
+    Ok(format!(
+        "skipped {approval} as event {} at seq {}",
+        submitted.event_id, submitted.seq
+    ))
 }
 
 /// The `count`th step-up assertion id a command run by `owner` at `at` mints, which the binary's
@@ -130,11 +171,46 @@ pub fn skipped_line(approval: &str, submitted: &Submitted) -> Result<String, Con
 /// a fresh id the workspace has not seen (mandate spec §6.1), since no two commands run at one
 /// nanosecond on one owner's clock.
 ///
+/// `cli-` and the first 32 hex digits of the SHA-256 of the workspace, the user, the instant and the
+/// count, one per line: user ids hold no newline (DEC-527 item 3), so no two inputs share a seed.
+///
 /// # Errors
-/// None once implemented; the stub's [`ControlError::Unimplemented`].
+/// None. The `Result` is the stub API's shape.
 pub fn assertion_id(owner: &Owner, at: UtcNanos, count: u32) -> Result<String, ControlError> {
-    let _ = (owner, at, count);
-    Err(ControlError::Unimplemented { story: "E8-3" })
+    let seed = format!("{}\n{}\n{at}\n{count}", owner.workspace, owner.user);
+    let hex = Digest::of(seed.as_bytes()).to_hex();
+    Ok(format!("cli-{}", &hex[..32]))
+}
+
+/// The binary's [`Ids`]: [`assertion_id`] for the command's owner and instant, counted from 1.
+pub(crate) struct InstantIds<'a> {
+    owner: &'a Owner,
+    at: UtcNanos,
+    count: u32,
+}
+
+impl<'a> InstantIds<'a> {
+    pub(crate) fn new(owner: &'a Owner, now: Now) -> Self {
+        Self {
+            owner,
+            at: now.at,
+            count: 0,
+        }
+    }
+}
+
+impl Ids for InstantIds<'_> {
+    fn assertion_id(&mut self) -> String {
+        self.count = self.count.saturating_add(1);
+        assertion_id(self.owner, self.at, self.count).unwrap_or_default()
+    }
+}
+
+fn print(report: &mut impl Write, lines: &[String]) -> anyhow::Result<()> {
+    for line in lines {
+        writeln!(report, "{line}")?;
+    }
+    Ok(())
 }
 
 /// Runs `approvals list` and prints [`list_lines`].
@@ -144,8 +220,12 @@ pub fn assertion_id(owner: &Owner, at: UtcNanos, count: u32) -> Result<String, C
 /// before the journal is opened or the store created, then the journal's error; no message names
 /// the DSN, and a refusal prints nothing.
 pub fn run_list(args: &ListArgs, now: Now, report: &mut impl Write) -> anyhow::Result<Vec<Listed>> {
-    let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: "E8-3" }.into())
+    let owner = args.owner.owner()?;
+    let journal = PgControlJournal::open(&args.target)?;
+    let agents: Vec<&str> = args.agents.iter().map(String::as_str).collect();
+    let listed = approvals::list(&journal, &owner, &agents, now)?;
+    print(report, &list_lines(&listed)?)?;
+    Ok(listed)
 }
 
 /// Runs `approvals show` and prints [`show_lines`].
@@ -153,8 +233,11 @@ pub fn run_list(args: &ListArgs, now: Now, report: &mut impl Write) -> anyhow::R
 /// # Errors
 /// As [`run_list`], then [`crate::approvals::show`]'s refusals.
 pub fn run_show(args: &ShowArgs, report: &mut impl Write) -> anyhow::Result<Shown> {
-    let _ = (args, report);
-    Err(ControlError::Unimplemented { story: "E8-3" }.into())
+    let owner = args.owner.owner()?;
+    let journal = PgControlJournal::open(&args.target)?;
+    let shown = approvals::show(&journal, &owner, &args.agent, &args.approval)?;
+    print(report, &show_lines(&shown)?)?;
+    Ok(shown)
 }
 
 /// Runs `approvals approve` with ids from [`assertion_id`], waits up to `--wait-s` for the runtime's record,
@@ -167,8 +250,31 @@ pub fn run_approve(
     now: Now,
     report: &mut impl Write,
 ) -> anyhow::Result<Submitted> {
-    let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: "E8-3" }.into())
+    let owner = args.owner.owner()?;
+    let mut journal = PgControlJournal::open(&args.target)?;
+    let (agent, approval) = (args.agent.as_str(), args.approval.as_str());
+    let shown = approvals::show(&journal, &owner, agent, approval)?;
+    let mut ids = InstantIds::new(&owner, now);
+    let submitted = approvals::approve(
+        &mut journal,
+        &mut ids,
+        &owner,
+        agent,
+        approval,
+        &args.code,
+        now,
+    )?;
+    let mut outcome = approvals::outcome(&journal, &owner, agent, &submitted)?;
+    for _ in 0..args.wait_s {
+        if outcome != Outcome::NotRecorded {
+            break;
+        }
+        journal.wait(Duration::from_secs(1));
+        outcome = approvals::outcome(&journal, &owner, agent, &submitted)?;
+    }
+    let lines = granted_lines(approval, &shown.content_hash, &submitted, &outcome, now)?;
+    print(report, &lines)?;
+    Ok(submitted)
 }
 
 /// Runs `approvals skip` and prints [`skipped_line`].
@@ -176,6 +282,11 @@ pub fn run_approve(
 /// # Errors
 /// As [`run_list`], then [`crate::approvals::skip`]'s refusals.
 pub fn run_skip(args: &SkipArgs, now: Now, report: &mut impl Write) -> anyhow::Result<Submitted> {
-    let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: "E8-3" }.into())
+    let owner = args.owner.owner()?;
+    let mut journal = PgControlJournal::open(&args.target)?;
+    let mut ids = InstantIds::new(&owner, now);
+    let (agent, approval) = (args.agent.as_str(), args.approval.as_str());
+    let submitted = approvals::skip(&mut journal, &mut ids, &owner, agent, approval, now)?;
+    print(report, &[skipped_line(approval, &submitted)?])?;
+    Ok(submitted)
 }

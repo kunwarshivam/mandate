@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/command-status.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "command_id",
+    "phase",
+    "steps"
+  ],
+  "properties": {
+    "command_id": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "phase": {
+      "enum": [
+        "recorded",
+        "taken",
+        "applied",
+        "refused",
+        "ended"
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Step"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "description": "GET /commands/{event_id} (\u00a75.5). unknown is not a phase: an ambiguous append has no event. as_of comes from the envelope.",
+  "if": {
+    "properties": {
+      "phase": {
+        "const": "recorded"
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "steps": {
+        "maxItems": 0
+      }
+    }
+  },
+  "else": {
+    "properties": {
+      "steps": {
+        "minItems": 1
+      }
+    }
+  },
+  "$defs": {
+    "Step": {
+      "type": "object",
+      "required": [
+        "stream_id",
+        "seq",
+        "event_type",
+        "recorded_at",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "stream_id": {
+          "type": "string",
+          "pattern": "^(acct|agent):[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$|^(ctl|clock):[A-Za-z0-9_-]+$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event_type": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z]+$"
+        },
+        "recorded_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "unevaluatedProperties": false
+}

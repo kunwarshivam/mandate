@@ -1,0 +1,147 @@
+[
+  {
+    "label": "verdict approve_all",
+    "set": {
+      "/verdict": "approve_all"
+    }
+  },
+  {
+    "label": "a missing content hash",
+    "remove": [
+      "/content_hash"
+    ]
+  },
+  {
+    "label": "a missing step_up member",
+    "remove": [
+      "/step_up"
+    ]
+  },
+  {
+    "label": "a null record",
+    "set": {
+      "/record": null
+    }
+  },
+  {
+    "label": "a Skip with a delegation",
+    "set": {
+      "/verdict": "skipped",
+      "/step_up": null,
+      "/delegation": {
+        "preview_id": "prv_1",
+        "mandate_version": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+      }
+    }
+  },
+  {
+    "label": "auto: no /verdict",
+    "remove": [
+      "/verdict"
+    ]
+  },
+  {
+    "label": "auto: no /content_hash",
+    "remove": [
+      "/content_hash"
+    ]
+  },
+  {
+    "label": "auto: no /record",
+    "remove": [
+      "/record"
+    ]
+  },
+  {
+    "label": "auto: no /step_up",
+    "remove": [
+      "/step_up"
+    ]
+  },
+  {
+    "label": "auto: no /delegation",
+    "remove": [
+      "/delegation"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /verdict outside its set",
+    "set": {
+      "/verdict": "mutant_value"
+    }
+  },
+  {
+    "label": "auto: no /record/artifact",
+    "remove": [
+      "/record/artifact"
+    ]
+  },
+  {
+    "label": "auto: no /record/ui_build",
+    "remove": [
+      "/record/ui_build"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /record",
+    "set": {
+      "/record/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: no /step_up/assertion_id",
+    "remove": [
+      "/step_up/assertion_id"
+    ]
+  },
+  {
+    "label": "auto: no /step_up/authenticated_at",
+    "remove": [
+      "/step_up/authenticated_at"
+    ]
+  },
+  {
+    "label": "auto: no /step_up/method",
+    "remove": [
+      "/step_up/method"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /step_up",
+    "set": {
+      "/step_up/mutant_member": 1
+    }
+  },
+  {
+    "label": "a delegation without preview_id",
+    "set": {
+      "/delegation": {
+        "mandate_version": "sha256:abababababababababababababababababababababababababababababababab"
+      }
+    }
+  },
+  {
+    "label": "a delegation without mandate_version",
+    "set": {
+      "/delegation": {
+        "preview_id": "prv_1"
+      }
+    }
+  },
+  {
+    "label": "a delegation with an extra member",
+    "set": {
+      "/delegation": {
+        "preview_id": "prv_1",
+        "mandate_version": "sha256:abababababababababababababababababababababababababababababababab",
+        "extra": 1
+      }
+    }
+  }
+]

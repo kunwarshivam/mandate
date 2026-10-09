@@ -14,10 +14,21 @@ pub(crate) struct Answer {
     pub headers: Vec<(&'static str, String)>,
     pub body: String,
     pub delay: Duration,
+    /// The body is the members after `"jsonrpc"` and an `"id"` copied from the request read.
+    pub reply: bool,
 }
 
 pub(crate) fn json(body: &str) -> Answer {
     with_type(200, "application/json", body)
+}
+
+/// A JSON answer carrying the `id` of the request it answers, so no test assumes how the
+/// transport numbers its requests: `members` follow `"jsonrpc"` and that `"id"`.
+pub(crate) fn reply(members: &str) -> Answer {
+    Answer {
+        reply: true,
+        ..json(members)
+    }
 }
 
 pub(crate) fn sse(body: &str) -> Answer {
@@ -30,6 +41,7 @@ pub(crate) fn with_type(status: u16, media_type: &str, body: &str) -> Answer {
         headers: vec![("content-type", media_type.to_owned())],
         body: body.to_owned(),
         delay: Duration::ZERO,
+        reply: false,
     }
 }
 
@@ -62,21 +74,36 @@ pub(crate) async fn serve(answers: Vec<Answer>) -> Loopback {
         for answer in answers {
             let (mut stream, _) = listener.accept().await.unwrap();
             let request = read_request(&mut stream).await;
+            let body = if answer.reply {
+                format!(
+                    r#"{{"jsonrpc":"2.0","id":{},{}}}"#,
+                    request_id(&request),
+                    answer.body
+                )
+            } else {
+                answer.body
+            };
             record.lock().unwrap().push(request);
             tokio::time::sleep(answer.delay).await;
             let mut head = format!("HTTP/1.1 {} X\r\nconnection: close\r\n", answer.status);
             for (name, value) in &answer.headers {
                 head.push_str(&format!("{name}: {value}\r\n"));
             }
-            head.push_str(&format!("content-length: {}\r\n\r\n", answer.body.len()));
-            let _ = stream.write_all((head + &answer.body).as_bytes()).await;
+            head.push_str(&format!("content-length: {}\r\n\r\n", body.len()));
+            let _ = stream.write_all((head + &body).as_bytes()).await;
             let _ = stream.shutdown().await;
         }
     });
     Loopback { url, seen }
 }
 
-async fn read_request(stream: &mut TcpStream) -> String {
+/// The `id` member of the JSON-RPC request in `request`, as JSON text.
+pub(crate) fn request_id(request: &str) -> String {
+    let (_, body) = request.split_once("\r\n\r\n").unwrap();
+    serde_json::from_str::<serde_json::Value>(body).unwrap()["id"].to_string()
+}
+
+pub(crate) async fn read_request(stream: &mut TcpStream) -> String {
     let mut bytes = Vec::new();
     let mut buf = [0u8; 4096];
     loop {

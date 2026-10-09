@@ -101,7 +101,6 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "MandateConfirmed"
         | "PolicyChanged"
         | "WorkspaceProfileAssigned"
-        | "ConnectionEstablished"
         | "ConnectionRevoked"
         | "DisclosureAccepted"
         | "OwnerAlertSent"
@@ -121,6 +120,11 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "ExportCreated"
         | "PersonalDataErased" => entry(CONTROL, NONE),
 
+        "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
+        "ConnectionRefused" => entry(CONTROL, NONE),
+        "ConnectionChecked" | "ConnectionStateChanged" | "ConnectionCredentialRefreshed" => {
+            entry(ACCOUNT, NONE)
+        }
         "ClockOffsetRecorded" | "ClockToleranceExceeded" => entry(&[Scheduler], NONE),
         _ => return None,
     };
