@@ -2455,7 +2455,15 @@ is not `deactivated`, or with roles other than those kept; a deactivation of one
 `active` or `cooling_off`; a removal of one who is not `deactivated`; and a revocation of an
 invitation that is not `invited`. Such a record is refused by workspace services before it is committed; a fold that meets one anyway reads the
 membership as unreadable, and `workspace_users` as 1 (identity spec §5.3). The cross-record checks
-are the identity crate's (E9-7), not `append`'s.
+are the identity crate's (E9-7), not `append`'s. Besides the state checks above, they are: the
+author of an admin's record is an `active` member whose `workspace_admin` role is effective at
+`event_time` ([DEC-654](../project/decisions/DEC-654.md) item 2); the last owner and last admin
+rules (identity spec §5.2); that a step-up assertion was never used before (rule 102); that a
+record's `independent_approval_required` equals the workspace's effective policy at `event_time`
+(rule 103); and that no record carries an entry that changes nothing: `change_roles` passes one
+(DEC-654 item 6), but the fold refuses granting a held role or removing one not held, and rule 100
+refuses a record left with no entry, so workspace services drop such entries before committing and
+commit nothing when none is left.
 
 ## 10. Anchoring
 
