@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 use super::contract::{NINE, OK, base, cat, connected, cursor, handshake, listing, page, roomy};
 use super::contract::{sent, sent_names, session, tool, without};
-use super::server::{Answer, reply, serve, with_type};
+use super::server::{Answer, StepClock, reply, serve, with_type};
 use crate::TransportConfig;
 use crate::{BucketConfig, BudgetConfig, CallClass, ContractHash, McpClient, McpError};
 
@@ -471,12 +471,15 @@ async fn a_throttled_health_check_halts_nothing() {
         ..TransportConfig::CONSERVATIVE
     };
     let tail = vec![listing(&base()), listing(&base()), reply(OK)];
-    let (server, client) = session(tail, Some(base_hash()), config).await;
+    let server = serve(cat(handshake(), tail)).await;
+    let clock = StepClock::default();
+    let transport = server.transport_with_clock(config, &clock);
+    let client = McpClient::connect(transport, Some(base_hash())).await;
     let mut client = client.unwrap();
     let spent = client.check_contract().await;
     assert!(matches!(spent, Err(McpError::Throttled)), "{spent:?}");
     assert!(!client.openings_halted().unwrap());
-    tokio::time::sleep(Duration::from_millis(2100)).await;
+    clock.set(Duration::from_secs(2));
     let good = client.check_contract().await;
     assert!(good.is_ok(), "{good:?}");
     let placed = client
