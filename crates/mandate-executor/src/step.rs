@@ -198,6 +198,9 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             initiator,
             confirmation,
         }) => kill_switch(batch, scope, initiator, confirmation),
+        Input::Command(Command::CancelOpenings { .. }) => {
+            Err(ExecutorError::Unimplemented { story: "E7-19" })
+        }
     }
 }
 
