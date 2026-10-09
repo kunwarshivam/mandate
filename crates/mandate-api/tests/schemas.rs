@@ -377,7 +377,6 @@ fn the_problem_and_its_violations_accept_their_examples_and_refuse_the_invalid()
 /// pattern, DEC-682 items 22 and 27): a space is one, `U+001F` is not, in a violation's `path`
 /// and in a `202`'s `dropped`.
 #[test]
-#[ignore = "pending E10-10"]
 fn a_pointer_may_hold_a_space_but_never_a_control_character() {
     let examples = file!("workspace-api/examples/envelope.json");
     let finding = examples.pointer("/Violation/0").expect("a schema finding");
@@ -423,7 +422,6 @@ fn request<T: DeserializeOwned + Serialize + Validate + PartialEq + Debug>(cases
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn command_accepted_matches_its_examples() {
     response::<CommandAccepted>([
         file!("workspace-api/examples/commands.command-accepted.json"),
@@ -433,7 +431,6 @@ fn command_accepted_matches_its_examples() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_plain_responses_match_their_examples() {
     response::<ApprovalResponseAccepted>(cases!("approval-response-accepted"));
     response::<ConfirmAccepted>(cases!("confirm-accepted"));
@@ -473,7 +470,6 @@ fn a_scope_takes_a_null_id_exactly_for_the_kind_its_schema_names() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_conditional_requests_match_their_examples() {
     request::<ConfirmRequest>(cases!("confirm-request"));
     request::<ApprovalResponseRequest>(cases!("approval-response-request"));
@@ -485,7 +481,6 @@ fn the_conditional_requests_match_their_examples() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_conditional_responses_match_their_examples() {
     response::<DelegationPreview>(cases!("delegation-preview"));
     response::<CommandStatus>(cases!("command-status"));
@@ -508,7 +503,6 @@ fn edges<T: DeserializeOwned + Validate + Debug>(base: &Value, pointer: &str, bo
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_integer_bounds_hold_at_their_schemas_edges() {
     let [request, ..] = cases!("delegation-preview-request");
     let bounds = &schema!("delegation-preview-request")["properties"]["max_orders"];
