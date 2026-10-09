@@ -211,7 +211,6 @@ fn orders(server: &SimServer, account: &str) -> Result<Vec<Order>, ServerError> 
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn the_server_listens_on_loopback_only_at_a_port_the_system_chose() -> Outcome {
     let first = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let second = SimServer::start(sim().unwrap(), Variant::Honest)?;
@@ -226,7 +225,6 @@ fn the_server_listens_on_loopback_only_at_a_port_the_system_chose() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn the_handshake_answers_the_transports_revision_and_a_session_later_requests_need() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let mut wire = Wire::connect(&server.url()?);
@@ -259,7 +257,6 @@ fn the_handshake_answers_the_transports_revision_and_a_session_later_requests_ne
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn the_honest_listing_is_the_pinned_contract_and_carries_no_instruction_text() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let tools = Wire::connect(&server.url()?).list();
@@ -301,7 +298,6 @@ fn the_honest_listing_is_the_pinned_contract_and_carries_no_instruction_text() -
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn the_extra_tool_variant_lists_one_more_tool_keeps_the_hash_and_reaches_nothing() -> Outcome {
     for extra in ["place_option_order", "transfer_funds"] {
         let (server, mut wire) = served(Variant::ExtraTool(extra.to_owned()))?;
@@ -323,7 +319,6 @@ fn the_extra_tool_variant_lists_one_more_tool_keeps_the_hash_and_reaches_nothing
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn the_injection_variant_carries_instruction_text_in_every_description_and_result() -> Outcome {
     assert!(
         instructs(INJECTION),
@@ -361,7 +356,6 @@ fn the_injection_variant_carries_instruction_text_in_every_description_and_resul
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn an_unlisted_tool_or_an_unknown_method_is_a_protocol_error_that_reaches_nothing() -> Outcome {
     let (server, mut wire) = served(Variant::Honest)?;
     let args = json!({"name": "get_equity_tax_lots", "arguments": {"account_number": AGENTIC}});
@@ -381,7 +375,6 @@ fn an_unlisted_tool_or_an_unknown_method_is_a_protocol_error_that_reaches_nothin
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_place_drives_the_core_as_the_core_driven_alone_would() -> Outcome {
     let (server, mut wire) = served(Variant::Honest)?;
     let mut direct = sim().unwrap();
@@ -460,7 +453,6 @@ fn a_place_drives_the_core_as_the_core_driven_alone_would() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn review_reads_and_cancel_drive_the_core_and_review_places_nothing() -> Outcome {
     let (server, mut wire) = served(Variant::Honest)?;
     let buy = |q: &str, at: &str, n| arguments(&limit("buy", q, at, n));
@@ -509,7 +501,6 @@ fn review_reads_and_cancel_drive_the_core_and_review_places_nothing() -> Outcome
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_lost_answer_leaves_one_order_the_client_finds_only_by_its_fields() -> Outcome {
     let (server, mut wire) = served(Variant::Honest)?;
     let mut direct = sim().unwrap();
@@ -549,7 +540,6 @@ fn a_lost_answer_leaves_one_order_the_client_finds_only_by_its_fields() -> Outco
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn two_lost_answers_for_one_body_leave_records_nothing_tells_apart() -> Outcome {
     let (server, mut wire) = served(Variant::Honest)?;
     for n in [1, 2] {
@@ -575,7 +565,6 @@ fn two_lost_answers_for_one_body_leave_records_nothing_tells_apart() -> Outcome 
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_garbled_answer_follows_an_order_the_core_placed_and_only_that_answer_is_bent() -> Outcome {
     let states: Vec<&str> = STATES.iter().map(|s| state_text(*s)).collect();
     let all = [
@@ -700,7 +689,6 @@ fn body_of(answer: &str) -> Value {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn dropping_the_server_closes_its_listener() -> Outcome {
     let addr = {
         let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
@@ -724,7 +712,6 @@ fn dropping_the_server_closes_its_listener() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn each_status_line_carries_its_standard_reason_phrase() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let addr = server.addr()?;
@@ -752,7 +739,6 @@ fn each_status_line_carries_its_standard_reason_phrase() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_body_that_is_not_json_is_a_parse_error_under_400() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let session = Wire::connect(&server.url()?).session.unwrap();
@@ -775,7 +761,6 @@ fn a_body_that_is_not_json_is_a_parse_error_under_400() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_session_the_server_never_gave_is_404_with_code_32001_and_reaches_nothing() -> Outcome {
     let (server, wire) = served(Variant::Honest)?;
     let stale = format!("{}x", wire.session.unwrap());
@@ -799,7 +784,6 @@ fn a_session_the_server_never_gave_is_404_with_code_32001_and_reaches_nothing() 
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn every_initialize_gets_a_session_of_its_own() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let url = server.url()?;
@@ -811,7 +795,6 @@ fn every_initialize_gets_a_session_of_its_own() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn get_equity_orders_refuses_every_filter_it_does_not_model() -> Outcome {
     let (_server, mut wire) = served(Variant::Honest)?;
     let placed = wire.call(
@@ -845,7 +828,6 @@ fn get_equity_orders_refuses_every_filter_it_does_not_model() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn anything_but_post_to_mcp_is_404_never_400() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let session = Wire::connect(&server.url()?).session.unwrap();
@@ -896,7 +878,6 @@ fn request_of(total: usize, addr: SocketAddr, session: &str) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_request_of_one_mib_is_answered_and_one_byte_more_is_closed_unanswered() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let session = Wire::connect(&server.url()?).session.unwrap();
@@ -949,7 +930,6 @@ fn invalid(status: u16, message: &Value) {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_wrong_path_is_404_with_invalid_request() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let session = Wire::connect(&server.url()?).session.unwrap();
@@ -966,7 +946,6 @@ fn a_wrong_path_is_404_with_invalid_request() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn an_initialize_at_another_revision_is_400_with_invalid_request() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let mut wire = Wire::new(&server.url()?);
@@ -981,7 +960,6 @@ fn an_initialize_at_another_revision_is_400_with_invalid_request() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_request_with_no_session_is_400_with_invalid_request() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let mut wire = Wire::connect(&server.url()?);
@@ -993,7 +971,6 @@ fn a_request_with_no_session_is_400_with_invalid_request() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_request_at_another_revision_after_initialize_is_400_with_invalid_request() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let mut wire = Wire::connect(&server.url()?);
@@ -1006,7 +983,6 @@ fn a_request_at_another_revision_after_initialize_is_400_with_invalid_request() 
 
 /// RFC 9110 §5.1: field names are case-insensitive.
 #[test]
-#[ignore = "pending E7-25"]
 fn header_names_are_read_without_regard_to_case() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let session = Wire::connect(&server.url()?).session.unwrap();
