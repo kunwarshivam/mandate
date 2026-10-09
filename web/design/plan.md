@@ -14,9 +14,9 @@ the owl, the rules and the record.
 
 - [x] DESIGN.md holds principles; the rendering and the history move to `web/design/` (DEC-511,
       #669).
-- [ ] **Test sort** (DEC-511 item 5). Loosen look-pinning tests to the invariant they protect,
+- [x] **Test sort** (DEC-511 item 5). Loosen look-pinning tests to the invariant they protect,
       remove the ones that only notice the look changed, keep every safety and compliance test
-      exactly as it is. Its own PR. (part 1, #882)
+      exactly as it is. Its own PR. (part 1, #882; part 2, #1005)
 - [ ] **A weekly critique.** Screenshots of every screen; one question: what is the worst thing on
       this screen; fix only that.
 - [ ] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:

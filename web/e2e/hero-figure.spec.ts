@@ -2,8 +2,8 @@ import { type Locator, type Page, expect, test } from "@playwright/test";
 import { AGENT_IDS } from "../src/fixtures/workspace";
 
 /**
- * The hero figure: the balance in the display size, in proportional lining figures, with its cents at
- * half size, muted and raised to the digits' cap height, read as one value; the change on a soft pill
+ * The hero figure: the balance in the display size, in proportional lining figures, with its cents
+ * smaller, muted and raised to the digits' cap height, read as one value; the change on a soft pill
  * toned by its sign, with the disclosure symbol beside it. Scrubbing the chart changes the figure's glyphs
  * and the pill's, and nothing else moves: not the figure's box, the pill's place or the chart.
  */
@@ -86,7 +86,7 @@ async function layout(page: Page, value: string) {
 }
 
 for (const { name, path, value } of HEROES) {
-  test(`${name}: the balance is set large and tight, with its cents half size, muted and raised`, async ({ page }) => {
+  test(`${name}: the balance is set large and tight, with its cents smaller, muted and raised`, async ({ page }) => {
     await open(page, path, 1440);
     const figure = page.locator(value);
     const type = await figure.evaluate((el) => {
@@ -113,7 +113,7 @@ for (const { name, path, value } of HEROES) {
     expect(type.numerals).toContain("proportional-nums");
     expect(type.numerals).toContain("lining-nums");
     expect(type.numerals).not.toContain("tabular-nums");
-    expect(type.centsSize).toBe(38);
+    expect(type.centsSize, "the cents are set smaller than the whole dollars").toBeLessThan(type.size);
     expect(type.centsText).toMatch(/^\d{2}$/);
     // Raised by the cents' own cap height, so their tops meet the digits' tops.
     expect(type.centsRaise / type.centsSize).toBeGreaterThan(0.6);
