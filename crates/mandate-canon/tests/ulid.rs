@@ -108,7 +108,6 @@ fn the_table_is_its_own_oracle() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn encode_spells_every_table_row() {
     for (value, text) in TABLE {
         assert_eq!(encode_ulid(*value), *text, "encode_ulid({value})");
@@ -116,7 +115,6 @@ fn encode_spells_every_table_row() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn decode_reads_every_table_row() {
     for (value, text) in TABLE {
         assert_eq!(decode_ulid(text), Ok(*value), "decode_ulid({text})");
@@ -124,7 +122,6 @@ fn decode_reads_every_table_row() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn decode_refuses_each_non_canonical_text_with_the_first_reason() {
     for (text, reason) in REFUSED {
         assert_eq!(decode_ulid(text), Err(*reason), "decode_ulid({text:?})");
@@ -136,7 +133,6 @@ fn decode_refuses_each_non_canonical_text_with_the_first_reason() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn is_ulid_is_true_exactly_for_the_accepted_texts() {
     for (_, text) in TABLE {
         assert!(is_ulid(text), "is_ulid({text})");
@@ -147,7 +143,6 @@ fn is_ulid_is_true_exactly_for_the_accepted_texts() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn every_value_round_trips_through_its_spelled_text() {
     run(any::<u128>(), |value| {
         let text = spelled(value);
@@ -159,7 +154,6 @@ fn every_value_round_trips_through_its_spelled_text() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn every_canonical_text_reads_as_its_value_and_spells_back() {
     run(canonical_text(), |text| {
         let value = read(&text);
@@ -170,7 +164,6 @@ fn every_canonical_text_reads_as_its_value_and_spells_back() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn one_foreign_character_anywhere_is_refused() {
     let foreign = prop::sample::select(vec![
         'I', 'L', 'O', 'U', 'a', 'z', ' ', '-', '\n', '\t', '+', '\u{e9}',
@@ -190,7 +183,6 @@ fn one_foreign_character_anywhere_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_first_digit_above_seven_overflows() {
     run((canonical_text(), 8_usize..32), |(text, first)| {
         let over = format!("{}{}", char::from(ALPHABET[first]), &text[1..]);
