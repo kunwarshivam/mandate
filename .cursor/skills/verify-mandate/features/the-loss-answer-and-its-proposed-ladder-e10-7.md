@@ -13,7 +13,10 @@ below is pending on them until the implementation PR replaces the stubs.
   `reference/mandate/ref.py`'s functions of the same names produced (refusals, F rounded down, the
   0.8 and 0.2 ratios, the rungs rounded down, flatten at exactly D, and the collapse refusal), and a
   property over random answers that checks each draft against an exact integer oracle and the
-  drafted mandate against `validate`.
+  drafted mandate against `validate`; and two tests the coordinator's condition on #1199 adds, for
+  inputs §7 and DEC-695 give no outcome (a zero or negative allocation, a negative answer, a
+  drawdown of 0, below 0, or above 1): each is a typed error or asked again, never a draft or a
+  panic, and the stub's `Unimplemented` is neither.
 - **Reference model:** `reference/mandate/ref.py` (`loss_answer_fields`, `proposed_ladder`),
   `reference/mandate/fuzz.py` (`fuzz_loss_answer`), `reference/mandate/mutants.py`.
 - **Reference cases:** none; DEC-695 item 9 adds no reference case or fixture.
