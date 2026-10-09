@@ -30,6 +30,12 @@
     }
   },
   {
+    "label": "no as_of watermark",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
     "label": "auto: no /preview_id",
     "remove": [
       "/preview_id"

@@ -9,6 +9,14 @@
     }
   },
   {
+    "label": "the whole document confirmed by the root pointer",
+    "set": {
+      "/confirmed_paths": [
+        ""
+      ]
+    }
+  },
+  {
     "label": "auto: /agent_id null",
     "set": {
       "/agent_id": null
