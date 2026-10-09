@@ -932,16 +932,75 @@ pub(crate) fn ask_cancel(
     Ok(live)
 }
 
-/// Journals one `ProtectionChanged` for `instrument` (journal spec §9).
+/// §9.5's members after `instrument_id` and `action`, each with the actions rules 41 to 44 let
+/// it be non-null or non-empty on.
+const CLOSED_MEMBERS: [(&str, &[&str]); 14] = [
+    (
+        "orders",
+        &["placed", "cancelled", "passive_start", "unprotected_start"],
+    ),
+    ("awaiting", &["interval_limit", "unprotected_end"]),
+    ("qty", &["placed", "cancelled"]),
+    ("stop", &["placed", "passive_start", "unprotected_start"]),
+    (
+        "take_profit",
+        &["placed", "passive_start", "unprotected_start"],
+    ),
+    (
+        "intent_id",
+        &["rung_short", "passive_start", "unprotected_start"],
+    ),
+    (
+        "bracket",
+        &[
+            "placed",
+            "passive_start",
+            "unprotected_start",
+            "unprotected_end",
+        ],
+    ),
+    ("entry", &["passive_start", "unprotected_start"]),
+    ("agent_id", &["passive_start", "unprotected_start"]),
+    ("replacing", &["passive_start", "unprotected_start"]),
+    ("created_on", &["placed"]),
+    ("sent", &["rung_short"]),
+    ("uncovered", &["interval_limit", "unprotected_end"]),
+    ("acknowledged", &["unprotected_end"]),
+];
+
+/// Journals one `ProtectionChanged` for `instrument` in §9.5's closed form (DEC-446 item 4,
+/// DEC-859): every member present, `orders` and `awaiting` as lists, the owner as `agent_id`.
 fn changed(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     action: &str,
-    mut pairs: Vec<(&'static str, Value)>,
+    pairs: Vec<(&'static str, Value)>,
 ) -> Result<EventId, ExecutorError> {
-    pairs.push(("instrument", text(instrument.as_str())));
-    pairs.push(("action", text(action)));
-    batch.journal("ProtectionChanged", None, pairs)
+    let mut closed = vec![
+        ("instrument_id", text(instrument.as_str())),
+        ("action", text(action)),
+    ];
+    for (member, actions) in CLOSED_MEMBERS {
+        let given = pairs
+            .iter()
+            .find(|(name, _)| *name == member || (member == "agent_id" && *name == "agent"))
+            .map(|(_, value)| value.clone())
+            .filter(|_| actions.contains(&action));
+        let value = match (member, given) {
+            ("orders" | "awaiting", Some(Value::Str(joined))) => Value::Array(
+                joined
+                    .split(' ')
+                    .filter(|id| !id.is_empty())
+                    .map(text)
+                    .collect(),
+            ),
+            ("orders" | "awaiting", None) => Value::Array(Vec::new()),
+            (_, Some(value)) => value,
+            (_, None) => Value::Null,
+        };
+        closed.push((member, value));
+    }
+    batch.journal("ProtectionChanged", None, closed)
 }
 
 /// A protective order's confirmed cancel (§5.4), recorded. Releasing the waiting exits is
@@ -1416,7 +1475,7 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                 if draft.payload.get("action").and_then(Value::as_str)
                     == Some("expiry_unreplaceable") =>
             {
-                draft.payload.get("instrument").and_then(Value::as_str)
+                draft.payload.get("instrument_id").and_then(Value::as_str)
             }
             _ => None,
         })
@@ -13010,7 +13069,6 @@ mod sequence_tests {
     /// names the OCO; the re-placement's `placed` names its new order, the quantity it covers and
     /// the prices, and the end awaits that order. Both are journaled before it is sent (rule 5).
     #[test]
-    #[ignore = "pending E7-19"]
     fn an_exit_sequences_records_are_closed() -> Result<(), ExecutorError> {
         with_ports!(ports);
         let mut executor = protected(&ports)?;
@@ -13037,7 +13095,6 @@ mod sequence_tests {
     /// each order, its quantity and the sequence's prices; the end of the interval its wait opened
     /// awaits both, journaled before either is sent (rule 5).
     #[test]
-    #[ignore = "pending E7-19"]
     fn a_passive_exits_records_are_closed() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = tiered_ports(&config, &fees);
@@ -13074,7 +13131,6 @@ mod sequence_tests {
     /// protection's orders are no members (rules 41, 42 and 44): the fold reads none of them, and
     /// the intent the watchdog hands in carries its agent and quantity.
     #[test]
-    #[ignore = "pending E7-19"]
     fn the_alerting_records_are_closed() -> Result<(), ExecutorError> {
         let fees = fees()?;
         let config = ExecutorConfig {
@@ -13123,7 +13179,6 @@ mod sequence_tests {
     /// one interval from the day's start (0) to the acknowledgment (9), nothing awaited and no
     /// re-placement left (§5.4, DEC-348 item 2).
     #[test]
-    #[ignore = "pending E7-19"]
     fn a_re_placement_before_expiry_journals_closed_and_replays() -> Result<(), ExecutorError> {
         with_ports!(ports);
         let mut executor = protected(&ports)?;
@@ -13159,7 +13214,6 @@ mod sequence_tests {
     /// whose prices are unknown ends `uncovered`, and §5.4's bound then reaches it closed and
     /// alerts the owner (rule 13: the interval stays open and bounded).
     #[test]
-    #[ignore = "pending E7-19"]
     fn the_ends_that_await_nothing_journal_closed_and_replay() -> Result<(), ExecutorError> {
         with_ports!(ports);
         let mut executor = protected(&ports)?;
@@ -13206,7 +13260,6 @@ mod sequence_tests {
     /// interval closed, naming nothing, and the new OCO for the 10 is journaled and sent in the
     /// same step, never delayed; its acknowledgment ends the interval (3 to 8).
     #[test]
-    #[ignore = "pending E7-19"]
     fn lost_protection_starts_closed_and_is_re_placed_at_once() -> Result<(), ExecutorError> {
         with_ports!(ports);
         let mut executor = protected(&ports)?;
@@ -13240,7 +13293,6 @@ mod sequence_tests {
     /// beside an exit still waiting hands its sequence on with a start naming the intent, entry,
     /// owner and prices and no order (rule 41), opening an interval at 0 that is still open.
     #[test]
-    #[ignore = "pending E7-19"]
     fn the_passive_starts_journal_closed_and_replay() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = tiered_ports(&config, &fees);
@@ -14093,7 +14145,6 @@ mod bracket_tests {
     /// its legs are `placed`, for its 10; filled 4 then cancelled, the OCO's `placed` and the end
     /// awaiting it are journaled before it is sent (rule 5). Each names the entry and the day.
     #[test]
-    #[ignore = "pending E7-19"]
     fn the_bracket_entry_placements_are_closed() -> Result<(), ExecutorError> {
         with_ports(|ports| {
             let entry = text(&entry_id());
@@ -14158,7 +14209,6 @@ mod bracket_tests {
     /// appends, and the replay of what the journal stored holds the one interval, 10 to 45,
     /// alerted, with the OCO resting for 4 and nothing awaited.
     #[test]
-    #[ignore = "pending E7-19"]
     fn a_partly_filled_bracket_entry_journals_one_oco_and_its_interval_closed()
     -> Result<(), ExecutorError> {
         with_ports(|ports| {
@@ -14208,7 +14258,6 @@ mod bracket_tests {
     /// interval its first fill opened with a closed end naming the entry and awaiting nothing,
     /// right after its legs' `placed`; the replay holds that interval, 10 to 20.
     #[test]
-    #[ignore = "pending E7-19"]
     fn a_bracket_filled_after_its_first_fill_ends_its_interval_closed() -> Result<(), ExecutorError>
     {
         with_ports(|ports| {
@@ -14721,7 +14770,6 @@ mod remainder_pins {
     /// E7-19 E1b-P (DEC-859), §9.5: a short rung's record is closed. It names the exit's intent
     /// and what the rung sent; what it did not send and why are no members (rules 42 and 44).
     #[test]
-    #[ignore = "pending E7-19"]
     fn a_short_rungs_record_is_closed() -> Result<(), ExecutorError> {
         let state = two_ladders("agent-b", false)?;
         ports_for(|ports| {
