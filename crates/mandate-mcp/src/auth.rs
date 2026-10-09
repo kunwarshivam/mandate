@@ -60,6 +60,10 @@ struct Registered {
     token_endpoint_auth_method: Option<Value>,
     #[serde(default, deserialize_with = "kept")]
     redirect_uris: Option<Value>,
+    #[serde(default, deserialize_with = "kept")]
+    grant_types: Option<Value>,
+    #[serde(default, deserialize_with = "kept")]
+    response_types: Option<Value>,
 }
 
 /// A member that is in the answer, whatever its value, which is skipped unread.
@@ -147,6 +151,9 @@ impl AuthServer {
             .first()
             .ok_or(McpError::Malformed)?;
         let issuer = on_auth_host(named, auth_hosts)?;
+        if issuer.query().is_some() {
+            return Err(McpError::EndpointShape);
+        }
         let metadata_url = well_known(&issuer, SERVER_WELL_KNOWN);
         let server: ServerMetadata = get_json(&client, metadata_url, max_bytes).await?;
         if server.issuer != *named {
@@ -183,9 +190,10 @@ impl AuthServer {
     /// header. Only `201 Created` is a registration. An answer carrying a `client_secret` member
     /// (even empty or `null`) or another auth method is [`McpError::ClientSecretIssued`], and the
     /// secret is never read; one whose `redirect_uris` is anything but the one-element list sent
-    /// is [`McpError::RedirectChanged`]; a `client_id` that is missing or not non-empty visible
-    /// ASCII is [`McpError::Malformed`]. No redirect is followed, and no server text reaches an
-    /// error (DEC-847 items 5 and 6).
+    /// is [`McpError::RedirectChanged`]; one without `token_endpoint_auth_method`, with
+    /// `grant_types` or `response_types` other than those sent, or with a `client_id` that is
+    /// missing or not non-empty visible ASCII is [`McpError::Malformed`]. No redirect is
+    /// followed, and no server text reaches an error (DEC-847 items 5, 6 and 8).
     pub async fn register(
         &self,
         redirect: LoopbackRedirect,
@@ -208,9 +216,8 @@ impl AuthServer {
         let response = send(request).await?;
         let registered: Registered =
             read_json(response, StatusCode::CREATED, config.max_answer_bytes).await?;
-        let other_method = registered
-            .token_endpoint_auth_method
-            .is_some_and(|method| method != "none");
+        let method = registered.token_endpoint_auth_method;
+        let other_method = method.as_ref().is_some_and(|method| method != "none");
         if registered.client_secret || other_method {
             return Err(McpError::ClientSecretIssued);
         }
@@ -219,6 +226,15 @@ impl AuthServer {
             .is_some_and(|listed| listed != redirect_uris)
         {
             return Err(McpError::RedirectChanged);
+        }
+        let other_grants = registered
+            .grant_types
+            .is_some_and(|grants| grants != json!(["authorization_code"]));
+        let other_types = registered
+            .response_types
+            .is_some_and(|types| types != json!(["code"]));
+        if method.is_none() || other_grants || other_types {
+            return Err(McpError::Malformed);
         }
         let client_id = registered
             .client_id
@@ -270,12 +286,28 @@ async fn challenge(client: &reqwest::Client, endpoint: &PinnedEndpoint) -> Resul
 }
 
 /// The `resource_metadata` parameter of a challenge, a quoted string since a URL is no token
-/// (RFC 9110 §11.2).
+/// (RFC 9110 §11.2), matched only where a parameter starts: at the start or after a space or a
+/// comma, and outside any quoted value. Quoted pairs are not read (DEC-847 item 8).
 fn resource_metadata(challenge: &str) -> Option<&str> {
     const PARAMETER: &str = "resource_metadata=\"";
-    let at = challenge.to_ascii_lowercase().find(PARAMETER)?;
-    let quoted = challenge.get(at.checked_add(PARAMETER.len())?..)?;
-    quoted.split('"').next()
+    let mut quoted = false;
+    let mut boundary = true;
+    for (at, byte) in challenge.bytes().enumerate() {
+        if !quoted && boundary {
+            let rest = challenge.get(at..)?;
+            let named = rest
+                .get(..PARAMETER.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(PARAMETER));
+            if named {
+                return rest.get(PARAMETER.len()..)?.split('"').next();
+            }
+        }
+        if byte == b'"' {
+            quoted = !quoted;
+        }
+        boundary = byte == b' ' || byte == b',';
+    }
+    None
 }
 
 /// The well-known URL inserted before the path, any terminating slash removed (RFC 9728 §3.1,

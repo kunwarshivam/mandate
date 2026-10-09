@@ -1208,9 +1208,6 @@ story buys a service, and none uses a real identity-provider account in tests (s
   *Accepted when:* `authorize` matches spec §4.2's matrix exactly, checked by an exhaustive test over
   every role set, permission, and scope against a table parsed from the spec, not from the code (ID-2);
   no principal changes its own roles (ID-13); and the last-owner and last-admin refusals hold (§5.2).
-  *Owed (tests-correction PR, from #938's review):* a case removing roles from, and one deactivating, a
-  member whose membership is `removed`, `expired`, or `revoked`, each refused `forbidden` (DEC-654
-  item 7); no test pins that exclusion yet.
 - **E9-3 (Must)** As an admin, I want org-level limits that workspaces and agents can only
   tighten.
 - **E9-4 (Must; SC)** As a security-conscious user, I want step-up authentication for sensitive
@@ -1235,6 +1232,12 @@ story buys a service, and none uses a real identity-provider account in tests (s
   removed members, clients, service accounts, and agents counting zero and an unreadable count reading
   as one (ID-7); and no request authorized after a deactivation commits succeeds, with open streams
   closed within 60 s (ID-3).
+  *Follow-ups* (#789's second review, minors backlogged under the freeze rule):
+  - Identity spec §5.1's state diagram has no edge for removing a role from a `deactivated` member,
+    which journal spec §9.12's fold accepts (DEC-654 item 7); add the self-edge.
+  - DEC-654 item 7 lets `change_roles` remove a role from an `invited` membership, but §9.12 has no
+    record for it: an invitation's roles are fixed by `MemberInvited`. Decide the writer-side
+    mapping (revoke the invitation and invite again, or a new record in a later journal change).
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
@@ -1541,6 +1544,13 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 ### E12 Audit explorer
 
 - **E12-1 (Must)** As an auditor, I want a causal trace from any fill back to its causes.
+  *Follow-ups (A2 review):* the quoted items' `author` reads `owner_selected` for an owner-selected
+  signal model's output through `config_refs.mandate_version`, with the founder's label, once
+  [DEC-773](decisions/DEC-773.md) is decided. Slice A2b tests: `payload.client_order_id` with its
+  lower-`seq` filter, `OrderRequestRecorded`, `payload.approval`, `payload.outputs_used[]`, the
+  approval's `outputs[]`, `payload.thesis_id`, `OrderSubmitted` version 1, the quoted members of
+  `ThesisProposed` and `ModelInvocationRecorded`, a missing singular `IntentReceived`, and
+  [DEC-772](decisions/DEC-772.md) items 8 and 9.
 - **E12-2 (Must)** As an auditor, I want per-agent timelines with filters and JSON/CSV export.
 - **E12-3 (Should)** As an auditor, I want to run chain verification from the UI.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
