@@ -18,7 +18,7 @@ the owl, the rules and the record.
       remove the ones that only notice the look changed, keep every safety and compliance test
       exactly as it is. Its own PR. (part 1, #882; part 2, #1005)
 - [ ] **A weekly critique.** Screenshots of every screen; one question: what is the worst thing on
-      this screen; fix only that. (first run: #PRNUM, [critique-2026-10-09.md](critique-2026-10-09.md),
+      this screen; fix only that. (first run: #1017, [critique-2026-10-09.md](critique-2026-10-09.md),
       fixes in section J)
 - [ ] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
       ten minutes that must be perfect on every release.
