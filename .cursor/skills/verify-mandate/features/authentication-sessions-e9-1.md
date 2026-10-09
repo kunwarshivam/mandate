@@ -15,7 +15,5 @@
   restore), `crates/mandate-authn/tests/admit.rs` (the sealed identity session's kind and
   snapshot, no session on a refusal, and a clock behind refusing only `Other`) and
   `crates/mandate-authn/tests/routes_properties.rs` (a property over random histories, a backwards
-  clock included, against a folded oracle in which a lapse ends the session), all live except
-  `session.rs`'s DEC-658 case (a deprovision or failed refresh ends the session even with a reused
-  `next`), pending.
+  clock included, against a folded oracle in which a lapse ends the session), all live.
 - **Run:** `cargo nextest run -p mandate-authn`.

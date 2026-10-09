@@ -1,9 +1,0 @@
-file = "crates/mandate-authn/tests/session.rs"
-test = "a_deprovision_or_failed_refresh_ends_the_session_even_with_a_reused_next"
-reason = """
-DEC-658's tests correction for E9-1 slice A2, whose implementation is on main: `refresh` refuses a
-reused `next` before it reads the provider's answer, so a deprovision or failed answer paired with
-one returns `RefreshSecretReused` instead of ending the session. The test fails on that answer, not
-at a stub; the implementation PR that moves the ending answers first deletes this file with the
-test's `#[ignore]` line.
-"""
