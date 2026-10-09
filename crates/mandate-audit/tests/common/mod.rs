@@ -188,4 +188,13 @@ impl Fixture {
         );
         record.event_ids.push(id);
     }
+
+    /// The streams of `workspace` that the fixture opened, sorted by `stream_id` bytes.
+    pub fn streams_of(&self, workspace: &str) -> Vec<String> {
+        self.appended
+            .keys()
+            .filter(|s| s.split(':').nth(1) == Some(workspace))
+            .cloned()
+            .collect()
+    }
 }
