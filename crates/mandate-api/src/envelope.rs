@@ -15,7 +15,7 @@ pub enum ApiVersion {
 /// The last event of one stream a response reflects (§6.1, `common.schema.json#/$defs/Watermark`).
 /// `stream_id` follows journal spec §2, and `seq` is 1 to 2^53 - 1.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct Watermark {
     pub stream_id: String,
     pub seq: u64,
@@ -25,7 +25,12 @@ pub struct Watermark {
 
 /// Who an event names (§3.3 item 4): a client is never a user, and names the user it acts for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    remote = "Self",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum Actor {
     User { id: Id },
     Client { id: Id, on_behalf_of: Id },
@@ -33,7 +38,7 @@ pub enum Actor {
 
 /// The rendered record screen and the build that rendered it (§5, mandate spec §10).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct Record {
     pub artifact: Ref,
     pub ui_build: Ref,
@@ -41,7 +46,7 @@ pub struct Record {
 
 /// Journal spec §9.2's step-up evidence: the challenge's ULID, when the user verified, and how.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct StepUpEvidence {
     pub assertion_id: EventId,
     pub authenticated_at: Timestamp,
@@ -76,3 +81,5 @@ impl Rules for Watermark {
 
 crate::wire::rules!(checked: Watermark);
 crate::wire::rules!(none: ApiVersion, Actor, Record, StepUpEvidence, StepUpStatus);
+
+crate::wire::object_only!(Watermark, Actor, Record, StepUpEvidence);

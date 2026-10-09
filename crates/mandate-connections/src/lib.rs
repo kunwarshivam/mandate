@@ -35,12 +35,15 @@
 //!   those, and its egress contains no live host (DEC-821 item 4).
 //! - [`revoke`] plans the platform-side revoke, ordinary or on a compromised credential, for the
 //!   **API process**, which maps each planned effect to its journal event (DEC-694).
+//! - [`manager`] plans the connection manager's start of a connect, in the **API process**: the
+//!   pending record `ConnectionRequested` and the connect's step-up digest (DEC-694, DEC-699).
 
 pub mod checks;
 pub mod error;
 pub mod exchange;
 pub mod grant;
 pub mod hosts;
+pub mod manager;
 pub mod record;
 pub mod revoke;
 pub mod start;

@@ -39,6 +39,8 @@ pub enum RelayError {
     TooLarge,
     #[error("the push service did not answer")]
     Unreachable,
+    #[error("the authorization is not one VAPID header of at most 1 024 octets")]
+    InvalidAuthorization,
 }
 
 impl RelayError {
@@ -51,6 +53,7 @@ impl RelayError {
             Self::InvalidEnvelope => "invalid_envelope",
             Self::TooLarge => "too_large",
             Self::Unreachable => "unreachable",
+            Self::InvalidAuthorization => "invalid_authorization",
         }
     }
 }
@@ -77,6 +80,8 @@ pub struct RelayRequest<'a> {
     pub endpoint: &'a str,
     pub urgency: &'a str,
     pub ttl_s: u32,
+    /// The deployment's own VAPID header, opaque to the relay (DEC-726 items 2 and 4).
+    pub authorization: &'a str,
     pub ciphertext: &'a [u8],
 }
 
@@ -86,6 +91,8 @@ pub struct Forward<'a> {
     pub endpoint: &'a str,
     pub urgency: Urgency,
     pub ttl_s: u32,
+    /// The request's `authorization`, byte for byte, as the `Authorization` header (DEC-726 item 3).
+    pub authorization: &'a str,
     pub body: &'a [u8],
 }
 
@@ -154,12 +161,22 @@ fn check_and_post(
         endpoint: request.endpoint,
         urgency,
         ttl_s: request.ttl_s,
+        authorization: request.authorization,
         body: request.ciphertext,
     };
     match push.post(&forward) {
         PushAnswer::Status(status) => Ok(status),
         PushAnswer::Unreachable => Err(RelayError::Unreachable),
     }
+}
+
+/// DEC-726 item 4's shape check, the last of the relay's checks (item 6): exactly
+/// `vapid t=<a>.<b>.<c>, k=<d>`, every segment unpadded base64url, `<a>` and `<b>` non-empty, `<c>`
+/// 86 characters and `<d>` 87, and at most 1 024 octets in all; anything else, the empty field
+/// included, is [`RelayError::InvalidAuthorization`]. It decodes nothing (item 2).
+pub fn check_authorization(field: &str) -> Result<(), RelayError> {
+    let _ = field;
+    Err(RelayError::Unimplemented { story: "E8-14" })
 }
 
 /// DEC-700 item 3's three fixed pairs, for `action`, `safety` and `info`; any other pair is
