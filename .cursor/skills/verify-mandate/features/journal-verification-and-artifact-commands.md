@@ -3,7 +3,8 @@
 - **Spec:** `docs/specs/journal.md` §6.2 (the segment format the command reads), §6.3, §10, §11,
   §12; backlog E5-4; DEC-115; `docs/project/tasks/E5-4-verification-cli.md`.
 - **Code:** `crates/mandate-cli/src/journal.rs` (`mandate journal verify`: reads a segment file back
-  into stored rows, runs `verify_events` then `verify_anchor`, reports the first failure with its
+  into stored rows, runs `verify_events`, then on a control stream `verify_anchor_self` and
+  `verify_break_glass_causes` (`stream_checks`, DEC-782), then `verify_anchor`, reports the first failure with its
   spec check code and a non-zero exit), `crates/mandate-cli/src/artifact.rs` (`mandate artifact put`
   and `get` over `FsArtifactStore`, the get re-hashed through `get_artifact`). The checks themselves
   are `mandate-journal`'s and `mandate-artifacts-fs`', unchanged by this story.
@@ -15,7 +16,7 @@
   `crates/mandate-cli/tests/journal_verify_ranges.rs` (E12-3, DEC-782: the control stream's
   `anchor_self_mismatch` and `break_glass_cause_mismatch`, wired into `verify` and `verify-cold`
   after checks 1 to 6 and before the anchor and token checks, from the `cold_records` and
-  `records_access` range-check vectors; pending until W1's implementation lands. The agent-stream
+  `records_access` range-check vectors; the control-stream checks are wired. The agent-stream
   checks follow in W2 under DEC-782).
   Planted bugs per test: the task brief.
 - **Reference cases:** `journal::tamper::*` and `journal::export_line_seq_1` in
