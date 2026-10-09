@@ -2148,7 +2148,8 @@ fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag 
 /// is not known non-executing; and, unless the command is the compile-only form or text (known
 /// non-executing, with every later stage known too and no consumer that executes), each quoted
 /// word holding a space, `cargo` or a `$` or backtick, and each here-string. An executing `awk`
-/// or `sed` builds a command no reading can follow, so it is refused.
+/// or `sed` builds a command no reading can follow, so it is refused, and so is a command that
+/// runs an expanding argument as a command line ([`runs_expanding_line`]).
 fn pipeline_live_flag(
     pipeline: &[PipelineCommand],
     (line, substitutions): (&str, &[(String, usize)]),
@@ -2165,7 +2166,8 @@ fn pipeline_live_flag(
             .collect();
         let flag = command_live_flag(&words, ctx);
         let named = command.command();
-        let builds = matches!(named.first(), Some(&"awk" | &"sed")) && executing_form(&named);
+        let builds = (matches!(named.first(), Some(&"awk" | &"sed")) && executing_form(&named))
+            || runs_expanding_line(&named, &command.here_strings);
         verdict = verdict.min(flag);
         if builds || (flag != LiveFlag::CompileOnly && feature_values_refused(&words, ctx)) {
             verdict = verdict.min(LiveFlag::Unreadable);
@@ -2204,6 +2206,25 @@ fn pipeline_live_flag(
         );
     }
     verdict
+}
+
+/// Whether a command runs an expanding argument as a command line: `eval` with an argument
+/// holding `$` or a backtick, or `sh`, `bash` or `zsh` (by any path) given `-c`, alone or in a
+/// short-flag cluster, and such an argument, or such a here-string (DEC-851 item 1).
+fn runs_expanding_line(named: &[&str], here_strings: &[String]) -> bool {
+    let expands = |word: &str| word.contains(['$', '`']);
+    let arguments = named.get(1..).unwrap_or_default();
+    match named.first().and_then(|word| word.rsplit('/').next()) {
+        Some("eval") => arguments.iter().any(|word| expands(word)),
+        Some("sh" | "bash" | "zsh") => {
+            let dash_c = arguments
+                .iter()
+                .any(|word| word.starts_with('-') && !word.starts_with("--") && word.contains('c'));
+            (dash_c && arguments.iter().any(|word| expands(word)))
+                || here_strings.iter().any(|text| expands(text))
+        }
+        _ => false,
+    }
 }
 
 /// Whether `word` names cargo: a word `cargo`, or a path ending `/cargo`.
@@ -9653,7 +9674,6 @@ jq -r "$filter" "$src"
     /// coordinator's ruling under DEC-176; X1 tests correction 9). A shell given a script file,
     /// and an `eval` or `-c` whose argument expands nothing, stay allowed.
     #[test]
-    #[ignore = "pending E7-26"]
     fn eval_and_shells_given_an_expanding_command_line_are_refused() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
