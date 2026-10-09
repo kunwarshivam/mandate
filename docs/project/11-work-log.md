@@ -27,18 +27,12 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
-- **2026-10-09, the coordinator handover.** The previous coordinator session and its lane leads
-  ended, and the founder asked session `01BFjCWYU2cDwPmFkR3RAHQK` to take the coordinator role. It
-  reviewed every open PR with Sonnet, merged `main` into the stalled branches and fixed their
-  findings, and landed about forty PRs across the five demo lanes (DEC-820), the journal spec to
-  v0.21, identity v0.3, and the passkey, authn, identity-kit, notify and workspace API crates. The
-  founder decided DEC-833 and DEC-834 (route 2 serves every key, and its limits never refuse a
-  valid one) and closed #174. Lessons: a PR stacked on another PR's branch is closed by GitHub when
-  that branch is deleted at merge, so stacked PRs are retargeted to `main` before their base lands;
-  a decision an agent accepts under DEC-176 must be a pure tightening, and a rate-limit exemption
-  that trades rule 13 against abuse control is the founder's (DEC-834's first draft). Next: the
-  paper path's J3, D2c and D4b implementations are dispatched (claims #850, #851), the live path's
-  backlog rows E7-23 to E7-26 are written, and the dispatch table is on the coordinator log (#165).
+- **2026-10-09, the coordinator handover.** The previous coordinator and its lane leads ended;
+  session `01BFjCWYU2cDwPmFkR3RAHQK` took the role, ran Sonnet reviews, merged `main` into stalled
+  branches and fixed findings across the five demo lanes (DEC-820). The founder decided DEC-833 and
+  DEC-834 and closed #174. Lessons: a PR stacked on another's branch is closed when that branch is
+  deleted, so retarget stacked PRs to `main` first; a DEC-176 acceptance must be a pure tightening
+  (DEC-834's first draft was not). The paper path is dispatched again (claims #850, #851).
 - **2026-10-08, after #669 merged: the faster process.** The founder asked for a process that is
   not the bottleneck. DEC-516 (proposed) draws two lanes, makes a PR one item, puts the pictures
   (`npm run shots`) at the centre of review, and limits what a session leaves behind to one tracker

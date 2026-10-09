@@ -731,15 +731,16 @@ after U-A1 to U-A5 are recorded.
   paper stage; the [first live trade](tasks/first-live-trade.md) rows S1, S2, R0). *Accepted
   when:* `mandate-rh-sim` is a `tool` crate no production crate depends on; it serves the nine
   allowlisted tools with the contract's shapes, its order states and its rules (no query by
-  `ref_id`, one GTC stop-limit as protection); its pure core is property-tested for its
-  invariants; and the rehearsal (R0) runs the live build against it on a journal separate from
+  `ref_id`, one GTC stop-limit as protection); its pure core carries the property tests
+  of S1's tests PRs; and the rehearsal (R0) runs the live build against it on a journal separate from
   the live one.
 - **E7-26 (Must, M6, the first live trade, DEC-529 item 3; SC)** As the founder, I want one
   deployment runner for any environment and broker, with live hosts only behind a `live` feature
   that only the runner may enable, so that no other build can reach a live broker (ES-23; the
   [first live trade](tasks/first-live-trade.md) rows X1, G1a, G1b). *Accepted when:*
-  `cargo xtask` refuses any crate other than the runner that enables or forwards the `live`
-  feature, and the default build contains no Robinhood host (LT-1); the runner built from the
+  `cargo xtask live-feature` lets only the runner declare a `live` feature, and no CI or release
+  build enables it except one compile-only job (ES-23 as DEC-529 item 3 narrows it), so the
+  default build contains no Robinhood host (LT-1); the runner built from the
   paper path's E1a takes any broker connector and environment through `ProductionCycle::run`
   (LT-4); and a restart after a run sends no second order (LT-6).
 - **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
