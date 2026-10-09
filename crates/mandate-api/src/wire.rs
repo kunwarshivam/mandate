@@ -6,7 +6,7 @@ use mandate_canon::DecStr;
 use mandate_domain::AssetId;
 use mandate_journal::ArtifactRef;
 use mandate_time::UtcNanos;
-use serde::de::DeserializeOwned;
+use serde::de::{DeserializeOwned, Error as _, IgnoredAny, Unexpected};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Unimplemented;
@@ -70,6 +70,21 @@ pub fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
 ) -> Result<Option<T>, D::Error> {
     T::deserialize(deserializer).map(Some)
+}
+
+/// A member the schema pins to `null`, as `()`: any value is refused, `{}` and `[]` among them,
+/// which a bare `()` inside a tagged enum would take.
+///
+/// # Errors
+/// The wrong type, for anything but `null`.
+pub fn null<'de, D: Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+    match Option::<IgnoredAny>::deserialize(deserializer)? {
+        None => Ok(()),
+        Some(IgnoredAny) => Err(D::Error::invalid_type(
+            Unexpected::Other("a value"),
+            &"null",
+        )),
+    }
 }
 
 /// The JSON bytes of a response member or body.
