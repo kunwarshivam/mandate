@@ -637,19 +637,9 @@ html:root[data-cvd="on"] {
   --owl-eye: var(--card);
   --owl-pupil: var(--foreground);
   --owl-line: var(--foreground);
-  --brand-owl: var(--series-1);
+  /* The brand owl wears the logo's colour, never an agent's (DEC-739 item 2): an owl is an agent. */
+  --brand-owl: var(--logo);
   --brand-owl-beak: var(--highlight);
-}
-/* The brand owl's colour for this page load, from `BRAND_OWL_SCRIPT` (DEC-452). A sun owl's beak is dark. */
-html[data-owl="2"] [data-slot="owl"] {
-  --brand-owl: var(--series-2);
-  --brand-owl-beak: var(--owl-pupil);
-}
-html[data-owl="3"] [data-slot="owl"] {
-  --brand-owl: var(--series-3);
-}
-html[data-owl="4"] [data-slot="owl"] {
-  --brand-owl: var(--series-4);
 }
 /* The outline stays dark at night, as a sprite's did, so the feathers carry the silhouette. */
 html:root[data-mode="dark"] [data-slot="owl"] {

@@ -36,6 +36,23 @@ async function labels(items: Locator) {
   return items.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? el.textContent?.trim() ?? ""));
 }
 
+/**
+ * How many pixels of a chart's plot differ from the plot's own background: the line, the fill and
+ * the labels. Zero until the client has drawn it. How tall the plot is is look (DEC-739 item 1).
+ */
+async function plotMarks(host: Locator): Promise<number> {
+  return host.evaluate((el) => {
+    const canvas = [...el.querySelectorAll("canvas")].find((c) => c.width > 0 && c.height > 0);
+    if (!canvas) return 0;
+    const d = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+    if (d[3] !== 255) return 0;
+    const near = (p: number) => [0, 1, 2].every((i) => Math.abs(d[p + i] - d[i]) <= 3);
+    let marks = 0;
+    for (let p = 0; p < d.length; p += 4) if (d[p + 3] === 255 && !near(p)) marks++;
+    return marks;
+  });
+}
+
 /** Every visible control inside a box that is smaller than a 44px touch target. */
 async function smallTargets(root: Locator) {
   return root.evaluate((el, min) => {
@@ -267,7 +284,7 @@ for (const width of PHONES) {
       expect(await smallTargets(page.locator("#main"))).toEqual([]);
     });
 
-    test("Stop this agent shares the title's row, one paper badge shows, and the chart is 200 px", async ({ page }) => {
+    test("Stop this agent shares the title's row, one paper badge shows, and the chart is on screen, drawn", async ({ page }) => {
       await open(page, AGENT, width);
       const head = page.locator("[data-slot=page-header]");
       const title = (await head.getByRole("heading", { level: 1 }).boundingBox())!;
@@ -279,7 +296,12 @@ for (const width of PHONES) {
       expect(s.x + s.width).toBeLessThanOrEqual(width);
       await expect(page.locator("[data-slot=environment-badge]").locator("visible=true")).toHaveCount(1);
       await expect(header(page).locator("[data-slot=environment-badge]")).toBeVisible();
-      expect((await page.locator("[data-slot=agent-equity] [data-slot=chart-canvas]").boundingBox())!.height).toBe(200);
+      const chart = page.locator("[data-slot=agent-equity] [data-slot=chart-canvas]");
+      await expect(chart).toBeVisible();
+      const plot = (await chart.boundingBox())!;
+      expect(plot.height, "the chart takes room on the page").toBeGreaterThan(0);
+      expect(plot.x + plot.width, "the chart fits the phone's width").toBeLessThanOrEqual(width);
+      await expect.poll(() => plotMarks(chart), { message: "the chart draws its line", timeout: 30_000 }).toBeGreaterThan(200);
       await stop.click();
       await expect(page.getByRole("dialog", { name: /^Stop/ })).toContainText("Agent 1");
     });

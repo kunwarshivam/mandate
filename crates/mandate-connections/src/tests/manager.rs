@@ -1,7 +1,10 @@
-//! The connection manager's start of a connect (connections spec §5.2 step 1, §9.1; journal spec
-//! §9.8 `ConnectionRequested`, rule 131; DEC-693, DEC-694, DEC-697, DEC-699). Expected plans are
-//! literal or built here from the inputs by hand; the digest's oracle is DEC-693 item 5's vector.
+//! The connection manager's start and finish of a connect (connections spec §5.2 steps 1, 5, and
+//! 6, §9.1; journal spec §9.8 `ConnectionRequested`, rule 131; DEC-693, DEC-694, DEC-697, DEC-699,
+//! DEC-884). Expected plans are literal or built here from the inputs by hand; the digest's oracle
+//! is DEC-693 item 5's vector, and the refusal's oracle is [`JOURNAL_REASONS`], copied from journal
+//! spec §9.8's reasons table.
 
+use std::collections::BTreeSet;
 use std::fmt::Debug;
 
 use mandate_canon::Digest;
@@ -10,12 +13,14 @@ use proptest::test_runner::TestRunner;
 
 use super::support::at;
 use crate::ConnectError;
+use crate::checks::Reason;
 use crate::manager::AccountRefFold::{CannotAnswer as RefUnknown, Unused, Used};
 use crate::manager::IdFold::{CannotAnswer as IdUnknown, Established, Free, RequestOpen};
 use crate::manager::StartRefusal as R;
 use crate::manager::{
-    AccountRefFold, IdFold, ManagerEffect, RequestMembers, StartFacts, StartPlan, StartRequest,
-    StepUpCheck, StepUpEvidence, connect_digest, plan_start,
+    AccountRefFold, ConnectOutcome, FinishPlan, FinishRefusal, IdFold, ManagerEffect, RefusalCause,
+    RefusedAs, RequestFold, RequestMembers, StartFacts, StartPlan, StartRequest, StepUpCheck,
+    StepUpEvidence, connect_digest, plan_finish, plan_start,
 };
 use crate::record::Broker::{Alpaca, KrakenDerivativesUs, Robinhood};
 use crate::record::Environment::{Live, Paper};
@@ -259,4 +264,291 @@ fn every_combination() -> Vec<(bool, Environment, Broker, IdFold, AccountRefFold
         }
     }
     all
+}
+
+/// Journal spec §9.8's reasons table, by hand: each executor reason with its check and code.
+const JOURNAL_REASONS: [(Reason, &str, &str); 9] = [
+    (Reason::ScopeMismatch, "scope", "scope_mismatch"),
+    (Reason::FundMovement, "scope", "fund_movement"),
+    (
+        Reason::PermissionsUnreadable,
+        "scope",
+        "permissions_unreadable",
+    ),
+    (Reason::WrongEnvironment, "environment", "wrong_environment"),
+    (Reason::ReachesBoth, "environment", "reaches_both"),
+    (Reason::AccountUnreadable, "account", "account_unreadable"),
+    (Reason::NotDedicated, "account", "not_dedicated"),
+    (Reason::ToolsMissing, "contract", "tools_missing"),
+    (Reason::ContractDrift, "contract", "contract_drift"),
+];
+
+/// Rule 54's teardowns: `check` is `null`, and the reason is one of these four.
+fn teardowns() -> [(RefusalCause, &'static str); 4] {
+    [
+        (RefusalCause::Timeout, "timeout"),
+        (RefusalCause::RestartPastDeadline, "restart_past_deadline"),
+        (RefusalCause::ExecutorStopped, "executor_stopped"),
+        (RefusalCause::StartFailed, "start_failed"),
+    ]
+}
+
+fn other() -> ConnectionId {
+    ConnectionId::new("conn_02").unwrap()
+}
+
+/// `ConnectionRefused`'s `check`, `reason`, and `existing_connection_id` for `cause`, read from
+/// this file's tables, never from the crate's codes.
+fn journal_as(cause: &RefusalCause) -> RefusedAs {
+    let (check, reason, existing) = match cause {
+        RefusalCause::Check(failed) => {
+            let row = JOURNAL_REASONS.iter().find(|row| row.0 == *failed).unwrap();
+            (Some(row.1), row.2, None)
+        }
+        RefusalCause::AccountMismatch => (Some("account"), "account_mismatch", None),
+        RefusalCause::AlreadyConnected(id) => {
+            (Some("uniqueness"), "already_connected", Some(id.clone()))
+        }
+        teardown => {
+            let rows = teardowns();
+            let row = rows.iter().find(|row| row.0 == *teardown).unwrap();
+            (None, row.1, None)
+        }
+    };
+    RefusedAs {
+        check,
+        reason,
+        existing_connection_id: existing,
+    }
+}
+
+/// Every refusal cause: the nine executor reasons, the manager's two, and the four teardowns.
+fn every_cause(existing: &ConnectionId) -> Vec<RefusalCause> {
+    let mut all: Vec<RefusalCause> = JOURNAL_REASONS
+        .iter()
+        .map(|row| RefusalCause::Check(row.0))
+        .collect();
+    all.push(RefusalCause::AccountMismatch);
+    all.push(RefusalCause::AlreadyConnected(existing.clone()));
+    all.extend(teardowns().into_iter().map(|row| row.0));
+    all
+}
+
+fn scopes() -> BTreeSet<String> {
+    BTreeSet::from(["data".to_owned(), "trading".to_owned()])
+}
+
+fn finish(fold: &RequestFold, outcome: &ConnectOutcome) -> FinishPlan {
+    holds_no_secret((fold.clone(), outcome.clone()));
+    holds_no_secret(plan_finish(fold, outcome).unwrap())
+}
+
+/// Connections spec §5.2 step 5 and rule 131 (closing): exactly one version-2
+/// `ConnectionEstablished` repeating every member of the request, `account_ref` among them.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_passed_connect_plans_exactly_its_establishment() {
+    let plan = finish(
+        &RequestFold::Open(request()),
+        &ConnectOutcome::Passed { scopes: scopes() },
+    );
+    let expected = FinishPlan::Commit(vec![ManagerEffect::Established {
+        request: request(),
+        scopes: scopes(),
+    }]);
+    assert_eq!(plan, expected);
+}
+
+/// Connections spec §5.2 steps 5 and 6, journal spec §9.8 rules 54, 55, and 131: each cause alone
+/// closes the request with exactly one `ConnectionRefused` and its own check and reason.
+#[test]
+#[ignore = "pending E10-13"]
+fn each_refusal_plans_exactly_its_connect_refused() {
+    let none = None;
+    let cases = [
+        (
+            RefusalCause::Check(Reason::ScopeMismatch),
+            Some("scope"),
+            "scope_mismatch",
+        ),
+        (
+            RefusalCause::Check(Reason::ReachesBoth),
+            Some("environment"),
+            "reaches_both",
+        ),
+        (
+            RefusalCause::Check(Reason::NotDedicated),
+            Some("account"),
+            "not_dedicated",
+        ),
+        (
+            RefusalCause::Check(Reason::ToolsMissing),
+            Some("contract"),
+            "tools_missing",
+        ),
+        (
+            RefusalCause::AccountMismatch,
+            Some("account"),
+            "account_mismatch",
+        ),
+        (RefusalCause::Timeout, none, "timeout"),
+        (
+            RefusalCause::RestartPastDeadline,
+            none,
+            "restart_past_deadline",
+        ),
+        (RefusalCause::ExecutorStopped, none, "executor_stopped"),
+        (RefusalCause::StartFailed, none, "start_failed"),
+    ];
+    for (cause, check, reason) in cases {
+        let plan = finish(
+            &RequestFold::Open(request()),
+            &ConnectOutcome::Refused(cause),
+        );
+        let refused = RefusedAs {
+            check,
+            reason,
+            existing_connection_id: None,
+        };
+        let expected = FinishPlan::Commit(vec![ManagerEffect::ConnectRefused {
+            request: request(),
+            refused,
+        }]);
+        assert_eq!(plan, expected, "{reason}");
+    }
+    let taken = RefusalCause::AlreadyConnected(other());
+    let plan = finish(
+        &RequestFold::Open(request()),
+        &ConnectOutcome::Refused(taken),
+    );
+    let refused = RefusedAs {
+        check: Some("uniqueness"),
+        reason: "already_connected",
+        existing_connection_id: Some(other()),
+    };
+    let expected = FinishPlan::Commit(vec![ManagerEffect::ConnectRefused {
+        request: request(),
+        refused,
+    }]);
+    assert_eq!(plan, expected);
+}
+
+/// DEC-699 item 5 and DEC-884: a request a revoke closed plans nothing for any outcome, and no
+/// open request, or a fold that cannot answer, refuses; neither ever carries an effect.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_request_that_is_not_open_plans_no_effect() {
+    let mut outcomes = vec![ConnectOutcome::Passed { scopes: scopes() }];
+    outcomes.extend(
+        every_cause(&other())
+            .into_iter()
+            .map(ConnectOutcome::Refused),
+    );
+    for outcome in outcomes {
+        let revoked = finish(&RequestFold::ClosedByRevoke, &outcome);
+        assert_eq!(revoked, FinishPlan::ClosedByRevoke, "{outcome:?}");
+        let closed = finish(&RequestFold::NotOpen, &outcome);
+        assert_eq!(closed, FinishPlan::Refused(FinishRefusal::NotOpen));
+        let unknown = finish(&RequestFold::CannotAnswer, &outcome);
+        assert_eq!(
+            unknown,
+            FinishPlan::Refused(FinishRefusal::FoldCannotAnswer)
+        );
+    }
+}
+
+/// DEC-884 item 2 (rule 64) and rule 55: a live request is not established here but is still
+/// refused and torn down, and `already_connected` naming the request itself is refused.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_live_establishment_and_a_self_conflict_are_refused() {
+    let live = RequestMembers {
+        environment: Live,
+        ..request()
+    };
+    let passed = ConnectOutcome::Passed { scopes: scopes() };
+    let plan = finish(&RequestFold::Open(live.clone()), &passed);
+    assert_eq!(plan, FinishPlan::Refused(FinishRefusal::LiveNotServed));
+    let plan = finish(
+        &RequestFold::Open(live.clone()),
+        &ConnectOutcome::Refused(RefusalCause::Timeout),
+    );
+    let refused = RefusedAs {
+        check: None,
+        reason: "timeout",
+        existing_connection_id: None,
+    };
+    let expected = ManagerEffect::ConnectRefused {
+        request: live,
+        refused,
+    };
+    assert_eq!(plan, FinishPlan::Commit(vec![expected]));
+    let itself = RefusalCause::AlreadyConnected(request().connection_id);
+    let plan = finish(
+        &RequestFold::Open(request()),
+        &ConnectOutcome::Refused(itself),
+    );
+    assert_eq!(plan, FinishPlan::Refused(FinishRefusal::ExistingIsSelf));
+}
+
+/// DEC-884's order, by this test's own `match`, with [`journal_as`] for the refusal.
+fn expected_finish(fold: &RequestFold, outcome: &ConnectOutcome) -> FinishPlan {
+    let request = match fold {
+        RequestFold::CannotAnswer => return FinishPlan::Refused(FinishRefusal::FoldCannotAnswer),
+        RequestFold::NotOpen => return FinishPlan::Refused(FinishRefusal::NotOpen),
+        RequestFold::ClosedByRevoke => return FinishPlan::ClosedByRevoke,
+        RequestFold::Open(request) => request.clone(),
+    };
+    let effect = match outcome {
+        ConnectOutcome::Passed { .. } if request.environment == Live => {
+            return FinishPlan::Refused(FinishRefusal::LiveNotServed);
+        }
+        ConnectOutcome::Refused(RefusalCause::AlreadyConnected(id))
+            if *id == request.connection_id =>
+        {
+            return FinishPlan::Refused(FinishRefusal::ExistingIsSelf);
+        }
+        ConnectOutcome::Passed { scopes } => ManagerEffect::Established {
+            request,
+            scopes: scopes.clone(),
+        },
+        ConnectOutcome::Refused(cause) => ManagerEffect::ConnectRefused {
+            request,
+            refused: journal_as(cause),
+        },
+    };
+    FinishPlan::Commit(vec![effect])
+}
+
+/// DEC-697, DEC-699 items 4 and 5, DEC-884, rule 131 (closing): for any members, scopes, and
+/// existing id, over every fold and every outcome, a finish is the oracle's plan: one effect
+/// repeating every member, or a plan with none.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_finish_closes_its_request_once_or_plans_no_effect() {
+    let scope_sets = prop::collection::btree_set("[a-z_]{1,12}", 0..4);
+    let inputs = (members(), scope_sets, "[A-Za-z0-9_-]{1,8}");
+    TestRunner::deterministic()
+        .run(&inputs, |(members, scopes, existing)| {
+            let folds = [
+                RequestFold::Open(members.clone()),
+                RequestFold::ClosedByRevoke,
+                RequestFold::NotOpen,
+                RequestFold::CannotAnswer,
+            ];
+            let mut outcomes = vec![ConnectOutcome::Passed { scopes }];
+            let causes = every_cause(&ConnectionId::new(&existing).unwrap());
+            outcomes.extend(causes.into_iter().map(ConnectOutcome::Refused));
+            let itself = RefusalCause::AlreadyConnected(members.connection_id.clone());
+            outcomes.push(ConnectOutcome::Refused(itself));
+            for fold in &folds {
+                for outcome in &outcomes {
+                    let plan = plan_finish(fold, outcome)
+                        .map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
+                    prop_assert_eq!(plan, expected_finish(fold, outcome), "{:?}", outcome);
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
 }
