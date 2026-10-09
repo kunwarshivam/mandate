@@ -23,6 +23,7 @@ use mandate_time::UtcNanos;
 mod agent;
 mod artifact;
 mod catalogue;
+mod connection_fold;
 mod connections;
 mod control;
 mod draft;
@@ -46,6 +47,10 @@ pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
 }
 pub use artifact::{
     ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, check_artifact, get_artifact,
+};
+pub use connection_fold::{
+    ConnectionCheck, ConnectionFailure, ConnectionStreamRule, ConnectionVerifyError,
+    verify_connection_causes, verify_connection_lifecycle,
 };
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
