@@ -305,14 +305,27 @@ impl ControlStream for Full {
     }
 }
 
-/// No `seq` follows `u64::MAX`: the writer answers `StreamFull` and never appends or wraps.
+/// No `seq` follows `u64::MAX`: the writer answers `StreamFull` before it reads the clock
+/// (DEC-647 item 1), and never appends or wraps.
 #[test]
 #[ignore = "pending E9-7"]
 fn a_full_stream_takes_no_record() {
     let mut stream = Full { appends: 0 };
-    let got = write_membership(&mut stream, || t(3_600), event(1));
+    let mut reads = 0_u32;
+    let got = write_membership(
+        &mut stream,
+        || {
+            reads += 1;
+            t(3_600)
+        },
+        event(1),
+    );
     assert_eq!(got, Err(WriteError::StreamFull));
-    assert_eq!(stream.appends, 0, "nothing was appended");
+    assert_eq!(
+        (stream.appends, reads),
+        (0, 0),
+        "nothing appended, the clock never read"
+    );
 }
 
 /// Over random writes, clocks, and concurrent records, an accumulator kept apart from the writer
