@@ -23,26 +23,34 @@ use mandate_time::UtcNanos;
 mod agent;
 mod artifact;
 mod catalogue;
+mod connection_fold;
 mod connections;
 mod control;
 mod draft;
 mod merkle;
 mod schema;
 mod verify;
+mod workspace;
 
 pub use agent::{
     AgentStreamCheck, AgentStreamFailure, HeldAnchor, verify_agent_stream,
     verify_agent_stream_anchored,
 };
 
-/// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, then §9.5's rule 45
-/// on the account stream (DEC-446 item 3). Each draft has already passed `Draft::parse`.
+/// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, §9.5's rule 45 on the
+/// account stream (DEC-446 item 3), then §9.10's rule 84 clause on the control stream (DEC-671).
+/// Each draft has already passed `Draft::parse`.
 pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     agent::check_batch(drafts)?;
-    control::check_batch(drafts)
+    control::check_batch(drafts)?;
+    workspace::check_batch(drafts)
 }
 pub use artifact::{
     ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, check_artifact, get_artifact,
+};
+pub use connection_fold::{
+    ConnectionCheck, ConnectionFailure, ConnectionStreamRule, ConnectionVerifyError,
+    verify_connection_causes, verify_connection_lifecycle,
 };
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
@@ -526,6 +534,15 @@ impl MemoryJournal {
             hash: last.map_or(Digest::ZERO, |r| r.hash),
             writer_epoch: state.map_or(0, |s| s.epoch),
         }
+    }
+
+    /// The id of every stream that holds at least one event, in `stream_id` byte order. A stream
+    /// whose ownership was taken but that holds no event is not listed.
+    pub fn stream_ids(&self) -> impl Iterator<Item = &str> {
+        self.streams
+            .iter()
+            .filter(|(_, state)| !state.rows.is_empty())
+            .map(|(id, _)| id.as_str())
     }
 
     pub fn rows(&self, stream: &StreamId) -> &[StoredEvent] {

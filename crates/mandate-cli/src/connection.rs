@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use std::io::Write;
 
 use clap::{Args, Subcommand};
-use mandate_canon::Value;
+use mandate_canon::{Value, is_ulid};
 use mandate_journal::{Environment, StreamId};
 
 use crate::control::{
@@ -106,7 +106,8 @@ pub enum Recorded {
 ///   is not `cash_account` or `margin_disabled`, and `attestation_not_live` for one on `paper`
 ///   (rule 64);
 /// - from the account stream `acct:{workspace}:{account_ref}`: `check_missing` unless `checked`
-///   names a `ConnectionChecked` there of occasion `connect`, or `reconnect` for a reconnect;
+///   names the latest `ConnectionChecked` there of occasion `connect`, or `reconnect` for a
+///   reconnect (journal spec §9.8 rule 68);
 ///   `check_other_connection` when it is for another `connection_id`; `check_failed` unless every
 ///   result passed, scope, environment and account (and contract, for Robinhood's MCP) are among
 ///   them, `account_pii_ref` is not `null`, and its environment is the owner's;
@@ -118,9 +119,15 @@ pub enum Recorded {
 ///   cannot tell its account from this one (DEC-176);
 /// - `code_mismatch` for a code that is not the one shown for exactly this record.
 ///
+/// The record is appended only at the control stream's head its rows were read at. When another
+/// writer moved the stream in between, it reads the rows again and decides again, so two records
+/// racing for one account or one connection id commit one, and the other is refused as it would
+/// have been after it (CN-5, rule 66; #907 review).
+///
 /// # Errors
-/// [`ControlError::Refused`] with one of [`CODES`], before any assertion is minted, anything is
-/// appended, or anything is printed; [`ControlError::Journal`] as the other control commands.
+/// [`ControlError::Refused`] with one of [`CODES`], before anything is appended or printed; a pass
+/// that loses a race may mint an assertion id that is discarded; [`ControlError::Journal`] as the
+/// other control commands.
 pub fn record(
     journal: &mut dyn ControlJournal,
     ids: &mut dyn Ids,
@@ -131,42 +138,53 @@ pub fn record(
     report: &mut dyn Write,
 ) -> Result<Recorded, ControlError> {
     let (broker, key) = requested(owner, request)?;
-    let rows = control_rows(journal, owner)?;
     let id = request.connection_id.as_str();
-    let (own, others): (Vec<_>, Vec<_>) = rows
-        .iter()
-        .filter(|r| matches!(r.1.as_str(), ESTABLISHED | REVOKED))
-        .partition(|r| member(&r.2, "connection_id") == Some(id));
-    let reconnect = own.iter().any(|r| r.1 == ESTABLISHED);
     let mut bound = key.clone();
     bound.push(("causation_id", text(&request.checked)));
     bound.push(("gesture", text("connection_record")));
     let expected = code_of(&object(bound)?);
-    if code == Some(expected.as_str())
-        && let Some(earlier) = rerun(&rows, request, &key)?
-    {
-        print(report, &committed_line(id, &earlier))?;
-        return Ok(Recorded::Committed(earlier));
+    for _ in 0..ATTEMPTS {
+        let rows = control_rows(journal, owner)?;
+        let (own, others): (Vec<_>, Vec<_>) = rows
+            .iter()
+            .filter(|r| matches!(r.1.as_str(), ESTABLISHED | REVOKED))
+            .partition(|r| member(&r.2, "connection_id") == Some(id));
+        let reconnect = own.iter().any(|r| r.1 == ESTABLISHED);
+        if code == Some(expected.as_str())
+            && let Some(earlier) = rerun(&rows, request, &key)?
+        {
+            print(report, &committed_line(id, &earlier))?;
+            return Ok(Recorded::Committed(earlier));
+        }
+        confirm_check(journal, owner, request, broker, reconnect)?;
+        bind(owner, request, &own, &others)?;
+        let Some(code) = code else {
+            print(report, &shown_lines(owner, request, &expected))?;
+            return Ok(Recorded::Shown { code: expected });
+        };
+        if code != expected {
+            return Err(refused("code_mismatch"));
+        }
+        let caused = Caused {
+            head: rows.last().map_or(0, |r| r.0.seq),
+            event_type: ESTABLISHED,
+            schema_version: 2,
+            causation_id: request.checked.clone(),
+            key: key.clone(),
+        };
+        if let Some(submitted) = commit_caused(journal, ids, owner, caused, now)? {
+            print(report, &committed_line(id, &submitted))?;
+            return Ok(Recorded::Committed(submitted));
+        }
     }
-    confirm_check(journal, owner, request, broker, reconnect)?;
-    bind(owner, request, &own, &others)?;
-    let Some(code) = code else {
-        print(report, &shown_lines(owner, request, &expected))?;
-        return Ok(Recorded::Shown { code: expected });
-    };
-    if code != expected {
-        return Err(refused("code_mismatch"));
-    }
-    let caused = Caused {
-        event_type: ESTABLISHED,
-        schema_version: 2,
-        causation_id: request.checked.clone(),
-        key,
-    };
-    let submitted = commit_caused(journal, ids, owner, caused, now)?;
-    print(report, &committed_line(id, &submitted))?;
-    Ok(Recorded::Committed(submitted))
+    Err(ControlError::Journal(format!(
+        "the control stream kept moving for {ATTEMPTS} reads; nothing was recorded"
+    )))
 }
+
+/// The reads of the control stream after which `record` gives up while other writers keep moving
+/// it between its read and its append.
+const ATTEMPTS: u32 = 8;
 
 /// The brokers this slice records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,15 +200,6 @@ fn needed(broker: Broker) -> &'static [&'static str] {
         Broker::Alpaca => &["account", "environment", "scope"],
         Broker::Robinhood => &["account", "contract", "environment", "scope"],
     }
-}
-
-/// Journal spec §2's ULID: 26 Crockford base-32 digits, the first at most `7`.
-fn is_ulid(s: &str) -> bool {
-    const ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-    let mut digits = s.bytes();
-    let first_fits = matches!(digits.next(), Some(b'0'..=b'7'));
-    let rest = digits.filter(|b| ALPHABET.contains(b)).count();
-    first_fits && rest == 25 && s.len() == 26
 }
 
 /// The refusals `record` makes from the request alone, in [`record`]'s order, and what the record's
@@ -286,6 +295,15 @@ fn confirm_check(
     let body = envelope(row)?;
     if member(&body, "occasion") != Some(occasion) {
         return Err(refused("check_missing"));
+    }
+    let later = rows
+        .iter()
+        .skip_while(|r| r.event_id != request.checked)
+        .skip(1);
+    for r in later.filter(|r| r.event_type == CHECKED) {
+        if member(&envelope(r)?, "occasion") == Some(occasion) {
+            return Err(refused("check_missing"));
+        }
     }
     if member(&body, "connection_id") != Some(request.connection_id.as_str()) {
         return Err(refused("check_other_connection"));
