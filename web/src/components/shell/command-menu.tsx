@@ -9,6 +9,7 @@ import { Search } from "pixelarticons/react/Search.js";
 import { useRuntime } from "@/lib/mock-runtime";
 import { can, useRole } from "@/lib/roles";
 import { GROUP_LABEL, listedScreens } from "@/lib/screens";
+import { STOP_SHEET_SLOT } from "@/components/stop/stop-sheet";
 import { OPEN_STOP_EVENT } from "./stop-control";
 
 /** Opens the palette from elsewhere: Search in the phone's More sheet. */
@@ -58,15 +59,28 @@ function focusOutsidePalette(): HTMLElement | null {
 }
 
 /**
+ * Whether focus may be given back as the palette closes. Only when nothing else has taken it: focus
+ * is nowhere, on the page itself, or still inside the palette. And never while the Stop sheet is open
+ * (its popup is in the page only while it is), even with focus on the page: a browser that does not
+ * focus a button on a press (Safari, Firefox on macOS) leaves `body` active until the sheet takes
+ * focus, and the opener must not take it first (rule 13). Both of the palette's focus returns ask
+ * this: ours (`returnFocus`) and the dialog's own (`finalFocus`), which gives focus to More when
+ * Search's sheet has gone.
+ */
+function mayReturnFocus() {
+  if (document.querySelector(`[data-slot=${STOP_SHEET_SLOT}]`)) return false;
+  const active = document.activeElement;
+  return active === null || active === document.body || active.closest(PALETTE) !== null;
+}
+
+/**
  * Once the palette has closed, focus goes back to the element that had it before it opened: the bar,
- * or wherever it was before ⌘K. Only when nothing else has taken focus meanwhile: a press on Stop, or
- * "Stop…", hands focus to the Stop sheet, and it stays there. An opener that has gone, like Search
- * with its More sheet, is left to its sheet.
+ * or wherever it was before ⌘K, when `mayReturnFocus` allows: a press on Stop, or "Stop…", hands
+ * focus to the Stop sheet, and it stays there. An opener that has gone, like Search with its More
+ * sheet, is left to the dialog's own focus return.
  */
 function returnFocus(to: HTMLElement | null) {
-  const active = document.activeElement;
-  const lost = active === null || active === document.body || active.closest(PALETTE) !== null;
-  if (lost && to?.isConnected) to.focus();
+  if (mayReturnFocus() && to?.isConnected) to.focus();
 }
 
 /**
@@ -185,7 +199,7 @@ export function CommandMenu({ container }: { container?: RefObject<HTMLElement |
             className="fixed inset-0 z-30 bg-kumo-overlay opacity-80 transition-all duration-150 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0"
           />
           <LayerCard
-            render={<Dialog.Popup data-slot="command-palette" aria-label="Command palette" />}
+            render={<Dialog.Popup data-slot="command-palette" aria-label="Command palette" finalFocus={mayReturnFocus} />}
             className="fixed top-[10vh] left-1/2 z-30 w-full max-w-2xl -translate-x-1/2 overflow-hidden rounded-lg duration-150 data-[ending-style]:scale-90 data-[ending-style]:opacity-0 data-[starting-style]:scale-90 data-[starting-style]:opacity-0"
             style={{ transitionProperty: "scale, opacity", transitionTimingFunction: "var(--default-transition-timing-function)" }}
             onKeyDown={keepTabInside}

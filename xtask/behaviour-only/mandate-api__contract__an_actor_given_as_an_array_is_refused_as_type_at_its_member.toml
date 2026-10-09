@@ -1,0 +1,9 @@
+file = "crates/mandate-api/tests/contract.rs"
+test = "an_actor_given_as_an_array_is_refused_as_type_at_its_member"
+reason = """
+E10-10, DEC-881: `decode` is already implemented, and accepts an `Actor` written as a JSON array
+(`["user", "a"]` decodes as the user `a`), refuses `[]` as `missing` and `["bogus", "a"]` as
+`enum` at `/who/0`, where `type` at `/who` is expected, so this test fails on that answer rather
+than at a stub. The change that reads a tagged object only from a JSON object deletes this file
+with the test's `#[ignore]` line.
+"""

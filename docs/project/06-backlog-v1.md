@@ -4672,6 +4672,11 @@ From the independent review of the E10-10 A1 implementation, part 1 ([#993](http
   and the problem's tagged violation, which the schema refuses. Leniency only: the array form
   decodes to the same value the object form does. Fix with a strict object-only deserializer;
   tests first.
+- **Refuse a plain object written as a JSON array** (the review of the tests for the tagged form,
+  [DEC-881](decisions/DEC-881.md) item 3). serde's derived structs also read a JSON array, their
+  members in order, so `decode` accepts a whole `KillSwitchRequest` written as
+  `[{"kind": "agent", "id": "a"}]` and a `record` written as an array, which the schemas refuse.
+  Leniency only, like the tagged form. Tests first, then its own decision and fix.
 
 From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
 

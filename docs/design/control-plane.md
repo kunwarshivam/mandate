@@ -57,7 +57,9 @@ or can request:
 - journal events, artifacts, positions, orders, fills, P&L, balances, or broker account numbers;
 - model prompts or outputs;
 - credentials of any kind: broker keys and tokens, sessions, passkeys, recovery codes, or
-  provider keys;
+  provider keys. The VAPID private key stays with the deployment; the relay forwards, and does not
+  keep, the deployment's signed VAPID header for one push (CP-1, §3.6,
+  [DEC-726](../project/decisions/DEC-726.md));
 - personal data: names, email addresses, phone numbers, or IdP subjects (identity spec §3.3, #556).
   The one exception is a web-push `endpoint` passing through the relay, forwarded and not kept
   (CP-1, §3.6).
@@ -95,7 +97,7 @@ staging exercise with the outbound link cut or altered, whose result is journale
 
 | ID | Invariant | Source | How it is checked |
 |---|---|---|---|
-| **CP-1** | **No content leaves a workspace deployment for the control plane.** Every message a deployment sends it is one of a closed set of types (§3.8) whose fields are opaque IDs, enumerations, counts, costs, versions, digests, and timestamps. No type has a free-text field or a field that can hold an instrument, quantity, price, mandate field, or personal datum. **Two stated exceptions**, both in `RelaySend` only: `endpoint`, a push-service URL unique to one browser, and `ciphertext`, at most 512 bytes of an end-to-end encrypted opaque notice. This design treats `endpoint` as personal data: the relay forwards both and keeps neither after the attempt (§3.6). Whether a push endpoint is personal data, and its retention, is owned by the notifications spec (NT-1, #558) and the threat model (#557) | HLD "Where data lives"; PRD §7 Privacy; rule 6 | Type test: every outbound field is an ID newtype, a closed enumeration, a number, a fixed-point decimal, a digest, a timestamp, a semantic version, or one of the two named relay exceptions (`PushEndpoint`, validated against the allowed push-service origins, and `Ciphertext`, at most 512 bytes); no other `String` field exists. Canary test: a workspace whose instruments, agent names, rule IDs, prices, and user names are unique canary strings runs a trading day; every byte sent on the outbound link, outside the relay's `ciphertext`, is captured and scanned for every canary |
+| **CP-1** | **No content leaves a workspace deployment for the control plane.** Every message a deployment sends it is one of a closed set of types (§3.8) whose fields are opaque IDs, enumerations, counts, costs, versions, digests, and timestamps. No type has a free-text field or a field that can hold an instrument, quantity, price, mandate field, or personal datum. **Three stated exceptions**, all in `RelaySend` only: `endpoint`, a push-service URL unique to one browser; `ciphertext`, at most 512 bytes of an end-to-end encrypted opaque notice; and `authorization`, the deployment's own RFC 8292 VAPID header (`vapid t=<JWT>, k=<public key>`, at most 1 024 octets of one fixed shape), opaque to the relay and forwarded byte for byte as the push's `Authorization` header (the founder, [DEC-726](../project/decisions/DEC-726.md), which allows this one field and no other). This design treats `endpoint` as personal data: the relay forwards all three and keeps none after the attempt, and logs none of them (§3.6). Whether a push endpoint is personal data, and its retention, is owned by the notifications spec (NT-1, #558) and the threat model (#557) | HLD "Where data lives"; PRD §7 Privacy; rule 6 | Type test: every outbound field is an ID newtype, a closed enumeration, a number, a fixed-point decimal, a digest, a timestamp, a semantic version, or one of the three named relay exceptions (`PushEndpoint`, validated against the allowed push-service origins; `Ciphertext`, at most 512 bytes; and the VAPID `authorization`, refused unless it has DEC-726 item 4's shape and is at most 1 024 octets); no other `String` field exists. Canary test: a workspace whose instruments, agent names, rule IDs, prices, and user names are unique canary strings runs a trading day; every byte sent on the outbound link, outside the relay's `ciphertext`, is captured and scanned for every canary, and so is the decoded claims segment of every `authorization` |
 | **CP-2** | **The control plane being down never stops trading.** With the outbound link cut, every agent keeps its decision cycle, openings within its mandate, exits, protection, reconciliation, approvals through customer channels, and owner commands | OPS-12; PRD §7 Availability | Drill: the paper suites and the kill-switch suite run with the link cut for a simulated week; outcomes equal those of a run with the link up, except relay push and queued reports |
 | **CP-3** | **Nothing from the control plane blocks risk reduction.** No exit, protective order, risk exit, owner exit, or kill switch waits on, is ordered after, or fails because of any control-plane message, license state, release state, or outage | Rules 3, 13; OPS-4 | Fault injection: the exit and kill-switch suites pass with the link cut, a hung link, an expired license, a withdrawn release, and a revoked enrollment certificate |
 | **CP-4** | **The control plane never changes a mandate or an agent.** No message from it can create, confirm, or apply a mandate version, change an envelope field or policy, deploy, resume, pause, or stop an agent, submit or cancel an order, engage a kill switch, or touch a credential | Rules 1, 11; HLD §8 | Layering: the planned `cp-agent` crate depends on no journal, runtime, executor, mandate registry, or vault crate (a crate-level rule in `xtask/layers.toml`, which checks crate dependencies, not types). Its only way into the site is a port: a trait the `cp-agent` crate declares (an instruction sink whose input type is §3.8's inbound messages) and workspace control services implement, the shape of `mandate-executor`'s `ports.rs`. The dependency therefore runs from workspace services to `cp-agent`, never the other way, so `cp-agent` gains no transitive journal dependency. The implementation's handlers can append only §3.8's listed events. A fuzz test feeds every inbound message type with random content and asserts no such event is appended |
@@ -112,7 +114,8 @@ staging exercise with the outbound link cut or altered, whose result is journale
 learns how many workspaces and agents an organization has, how much it used, when push notices are
 sent, and which release it runs. Activity levels and their timing are visible (§6). The relay's
 512-byte cap and the closed report schema bound what a compromised deployment could smuggle out
-through us, but a fully compromised deployment already holds its own data.
+through us, as do the 1 024-octet cap and fixed shape of the VAPID header (DEC-726 item 8), but a
+fully compromised deployment already holds its own data.
 
 ---
 
@@ -280,8 +283,11 @@ A usage report, one per deployment per period (Proposed: hourly), signed by the 
 ### 3.6 Relay, distribution, and the anchor witness
 
 - **Relay.** As notifications spec §4.6 (#558): it accepts `{relay_id, endpoint, urgency, ttl_s,
-  ciphertext}`, ciphertext at most 512 bytes, forwards, returns the push service's status, keeps
-  nothing after the attempt, and logs opaque IDs and counts. It has no route into any deployment.
+  authorization, ciphertext}`, ciphertext at most 512 bytes, forwards, returns the push service's
+  status, keeps nothing after the attempt, and logs opaque IDs and counts. `authorization` is the
+  deployment's VAPID header, the one field DEC-726 adds: the relay checks only its shape and its
+  1 024-octet cap, forwards it unchanged as the `Authorization` header, and never logs, stores, or
+  echoes it. The relay holds no VAPID key. It has no route into any deployment.
 - **Distribution.** Serves signed artifacts by digest. Each kind has its own signing key: release
   (binaries, connector packages), registry (model-registry entries, inference spec §4.1), and data
   (shared-data bundles, data plane spec §6.1). A site verifies the signature and digests before
@@ -419,7 +425,7 @@ needs a live link.
 | **Malicious tenant** | Sets the site clock back to extend a license | The site keeps the highest UTC time it has journaled and checks validity against that | A clock frozen from install; billing risk only |
 | **Network attacker** | Impersonates the control plane to a site | mTLS with a pinned server CA; every instruction is also signed by an offline key (CP-5), so a forged channel alone changes nothing | Denial of service, as an outage |
 | **Bad market tick** | — | The control plane carries no market data or marks | Not applicable |
-| **Compromised workspace deployment** | Smuggles content out through reports or the relay | Closed schemas and the 512-byte cap bound it | A compromised deployment holds its own data anyway; #557 owns it |
+| **Compromised workspace deployment** | Smuggles content out through reports or the relay | Closed schemas, the 512-byte ciphertext cap, and the VAPID header's fixed shape and 1 024-octet cap (DEC-726) bound it | A compromised deployment holds its own data anyway; #557 owns it |
 
 Implied advice: the control plane computes no ranking, signal, or view, and shared-data bundles
 carry no directional field (DP-12). It cannot imply platform advice.
@@ -453,6 +459,10 @@ per-kind signing keys (item 5), anti-rollback (item 6), no automatic install on 
 default (item 7), the managed global switch issued per cell, never from the control plane (item 8),
 usage reports as a signed chain (item 9), two-person license changes (item 10), the E20 epic
 (item 11), and routing by `user_id` with no personal data in the directory (item 12).
+
+**Decided by the founder:** CP-1's third relay exception, the deployment's VAPID header in
+`RelaySend` ([DEC-726](../project/decisions/DEC-726.md) item 1, 2026-10-09); DEC-726 items 2 to 8
+only tighten it (DEC-176).
 
 **Proposed for the founder** (license terms, spend, vendors; DEC-79). The most conservative option
 holds until each is decided.

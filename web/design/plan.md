@@ -63,6 +63,9 @@ the owl, the rules and the record.
       1280px, opened with ⌘K and with its button, and the palette's "Stop…" from the keyboard.
       (#1038) The review's follow-up names the dialog "Command palette", gives focus back to its
       opener when Escape closes it, and `e2e/command-bar.spec.ts` pins the Tab wrap both ways.
+      (#1089) Its review's minor 1: neither of the palette's focus returns runs while the Stop
+      sheet is open, so a press on Stop that leaves focus on the page (Safari, Firefox on macOS)
+      still ends with focus in the sheet; `e2e/command-bar.spec.ts` pins it at 390 and 1280px.
 
 ## C. The cutting pass (one PR, no new rules)
 
@@ -266,8 +269,9 @@ item above (C-3, C-9) are not repeated.
         all at 1440px and in both themes. `npm run shots` now waits for every chart on screen to
         show its line, and the spec covers the paused and reconciliation Homes.
         ([#1106](https://github.com/kunwarshivam/mandate/pull/1106))
-- [ ] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
-      and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6)
+- [x] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
+      and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6) Done
+      in [#1118](https://github.com/kunwarshivam/mandate/pull/1118).
 - [ ] **Positions on a phone as two-line rows**, so the value and the P&L are on screen. (C-14)
 - [ ] **Shots without the scenario panel**, and each scenario captured on the agent it affects.
       Tooling. (C-27, C-28)

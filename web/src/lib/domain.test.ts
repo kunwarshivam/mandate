@@ -123,6 +123,7 @@ describe("gate decisions render as rules", () => {
       event_id: "01JB00000000000000000000AA",
       at: ws.now,
       agent_id: swing.agent_id,
+      mandate_version: swing.mandate_version,
       verdict: "deny",
       reason_code: "unknown_order_in_flight",
       action: { side: "sell", qty: "5", symbol: "QRS", limit_price: "97.6", purpose: "discretionary_exit" },
