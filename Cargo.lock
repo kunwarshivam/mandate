@@ -1547,6 +1547,8 @@ name = "mandate-authn"
 version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
+ "mandate-identity",
+ "mandate-identity-seal",
  "mandate-time",
  "proptest",
  "ring",
@@ -1623,7 +1625,9 @@ dependencies = [
 name = "mandate-connections"
 version = "0.0.0"
 dependencies = [
+ "mandate-domain",
  "mandate-time",
+ "proptest",
  "secrecy",
  "thiserror",
 ]
@@ -1746,11 +1750,13 @@ dependencies = [
 name = "mandate-mcp"
 version = "0.0.0"
 dependencies = [
+ "mandate-canon",
  "proptest",
  "reqwest",
  "rustls",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror",
  "tokio",
 ]
@@ -1786,6 +1792,24 @@ dependencies = [
  "proptest",
  "ruint",
  "rust_decimal",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-paper"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-alpaca",
+ "mandate-artifacts-fs",
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-marketdata",
+ "mandate-modelhost",
+ "mandate-num",
+ "mandate-shell",
+ "mandate-spec",
+ "mandate-time",
  "thiserror",
 ]
 

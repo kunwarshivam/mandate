@@ -9,7 +9,7 @@ use super::server::{Answer, Loopback, reply, serve, with_type};
 use crate::{ALLOWLIST, BucketConfig, BudgetConfig, CallClass, ContractHash, McpClient, McpError};
 use crate::{McpTransport, TransportConfig};
 
-const NINE: [&str; 9] = [
+pub(super) const NINE: [&str; 9] = [
     "get_accounts",
     "get_portfolio",
     "get_equity_positions",
@@ -21,9 +21,9 @@ const NINE: [&str; 9] = [
     "cancel_equity_order",
 ];
 const INPUT: &str = r#"{"type":"object","properties":{"account_number":{"type":"string"}},"required":["account_number"]}"#;
-const OK: &str = r#""result":{"content":[]}"#;
+pub(super) const OK: &str = r#""result":{"content":[]}"#;
 
-fn tool(name: &str) -> Value {
+pub(super) fn tool(name: &str) -> Value {
     let mut tool = json!({"name": name, "description": "d", "inputSchema": serde_json::from_str::<Value>(INPUT).unwrap()});
     if name == "get_accounts" {
         tool["outputSchema"] =
@@ -32,26 +32,33 @@ fn tool(name: &str) -> Value {
     tool
 }
 
-fn base() -> Vec<Value> {
+pub(super) fn base() -> Vec<Value> {
     NINE.iter().map(|name| tool(name)).collect()
 }
 
-fn cat(first: Vec<Answer>, second: Vec<Answer>) -> Vec<Answer> {
+pub(super) fn cat(first: Vec<Answer>, second: Vec<Answer>) -> Vec<Answer> {
     first.into_iter().chain(second).collect()
 }
 
-fn listing(tools: &[Value]) -> Answer {
+pub(super) fn listing(tools: &[Value]) -> Answer {
     reply(&format!(r#""result":{}"#, json!({ "tools": tools })))
 }
 
-fn page(tools: &[Value], next: &str) -> Answer {
+pub(super) fn page(tools: &[Value], next: &str) -> Answer {
     reply(&format!(
         r#""result":{}"#,
         json!({"tools": tools, "nextCursor": next})
     ))
 }
 
-fn handshake() -> Vec<Answer> {
+pub(super) fn cursor(tools: &[Value], next: Value) -> Answer {
+    reply(&format!(
+        r#""result":{}"#,
+        json!({"tools": tools, "nextCursor": next})
+    ))
+}
+
+pub(super) fn handshake() -> Vec<Answer> {
     vec![
         reply(
             r#""result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"s","version":"1"}}"#,
@@ -60,7 +67,7 @@ fn handshake() -> Vec<Answer> {
     ]
 }
 
-fn roomy() -> TransportConfig {
+pub(super) fn roomy() -> TransportConfig {
     let bucket = BucketConfig {
         capacity: 100,
         refill_every: Duration::from_secs(1),
@@ -74,7 +81,7 @@ fn roomy() -> TransportConfig {
     }
 }
 
-async fn session(
+pub(super) async fn session(
     tail: Vec<Answer>,
     pin: Option<ContractHash>,
     config: TransportConfig,
@@ -85,7 +92,7 @@ async fn session(
     (server, client)
 }
 
-async fn connected(
+pub(super) async fn connected(
     tools: &[Value],
     pin: Option<ContractHash>,
     more: Vec<Answer>,
@@ -94,12 +101,12 @@ async fn connected(
     (server, client.unwrap())
 }
 
-fn sent(server: &Loopback, index: usize) -> Value {
+pub(super) fn sent(server: &Loopback, index: usize) -> Value {
     let request = &server.seen()[index];
     serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap()
 }
 
-fn sent_names(server: &Loopback) -> Vec<String> {
+pub(super) fn sent_names(server: &Loopback) -> Vec<String> {
     (3..server.seen().len())
         .map(|i| {
             sent(server, i)["params"]["name"]
@@ -110,7 +117,7 @@ fn sent_names(server: &Loopback) -> Vec<String> {
         .collect()
 }
 
-fn without(name: &str) -> Vec<Value> {
+pub(super) fn without(name: &str) -> Vec<Value> {
     base().into_iter().filter(|t| t["name"] != name).collect()
 }
 
@@ -120,7 +127,6 @@ fn the_allowlist_is_the_nine_tools_of_the_contract() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_tool_outside_the_allowlist_is_refused_before_anything_is_sent() {
     let (server, client) = connected(&base(), None, vec![]).await;
     let outside = [
@@ -149,7 +155,6 @@ async fn a_tool_outside_the_allowlist_is_refused_before_anything_is_sent() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_refused_call_draws_no_budget_and_a_throttled_class_spends_its_own() {
     let bucket = |capacity| BucketConfig {
         capacity,
@@ -183,7 +188,6 @@ async fn a_refused_call_draws_no_budget_and_a_throttled_class_spends_its_own() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn with_no_stored_pin_a_listed_fund_movement_tool_is_refused() {
     let names = [
         "transfer_funds",
@@ -223,7 +227,6 @@ async fn with_no_stored_pin_a_listed_fund_movement_tool_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn with_no_stored_pin_a_missing_allowlisted_tool_is_refused() {
     for name in NINE {
         let (_server, client) = session(vec![listing(&without(name))], None, roomy()).await;
@@ -235,7 +238,6 @@ async fn with_no_stored_pin_a_missing_allowlisted_tool_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn with_a_stored_pin_a_fund_tool_or_a_missing_tool_halts_openings_and_never_the_exit() {
     let extra = |name: &str| {
         let mut tools = base();
@@ -279,7 +281,6 @@ async fn with_a_stored_pin_a_fund_tool_or_a_missing_tool_halts_openings_and_neve
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_benign_extra_tool_connects_and_is_never_called() {
     let mut tools = base();
     tools.push(json!({"name": "get_watchlists", "inputSchema": {"type": "object"}}));
@@ -302,5 +303,91 @@ fn a_contract_hash_keeps_its_bytes_and_prints_them_as_hex() {
         assert_eq!(hash.as_bytes(), &bytes);
         let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(format!("{hash:?}"), format!("ContractHash({hex})"));
+    }
+}
+
+async fn connect_with(name: &str) -> Result<McpClient, McpError> {
+    let mut tools = base();
+    tools.push(json!({"name": name, "inputSchema": {"type": "object"}}));
+    session(vec![listing(&tools)], None, roomy()).await.1
+}
+
+/// DEC-839 item 2: a cursor is a string or absent; anything else is not a last page.
+#[tokio::test]
+async fn a_next_cursor_that_is_not_a_string_is_malformed() {
+    let hidden = [json!({"name": "transfer_funds", "inputSchema": {"type": "object"}})];
+    for next in [json!(5), Value::Null] {
+        let tail = vec![cursor(&base(), next.clone()), listing(&hidden)];
+        let (server, client) = session(tail, None, roomy()).await;
+        assert!(
+            matches!(client, Err(McpError::Malformed)),
+            "{next}: {client:?}"
+        );
+        assert_eq!(server.seen().len(), 3, "{next}");
+    }
+}
+
+/// DEC-839 item 1: an allowlisted tool needs an `inputSchema`, and `null` is none.
+#[tokio::test]
+async fn a_null_input_schema_on_an_allowlisted_tool_is_malformed() {
+    let mut tools = base();
+    tools[3]["inputSchema"] = Value::Null;
+    let (_server, client) = session(vec![listing(&tools)], None, roomy()).await;
+    assert!(matches!(client, Err(McpError::Malformed)), "{client:?}");
+}
+
+/// DEC-839 item 3: each token, in a name where it is the only match.
+#[tokio::test]
+async fn every_fund_token_alone_refuses_the_connect() {
+    let tokens = [
+        "transfer",
+        "transfers",
+        "withdraw",
+        "withdrawal",
+        "withdrawals",
+        "wire",
+        "ach",
+        "send",
+        "payout",
+        "disburse",
+        "deposit",
+        "deposits",
+        "fund",
+        "funds",
+        "funding",
+    ];
+    for token in tokens {
+        let name = format!("x_{token}");
+        let client = connect_with(&name).await;
+        assert!(
+            matches!(client, Err(McpError::FundMovementTool)),
+            "{name}: {client:?}"
+        );
+    }
+}
+
+/// DEC-839 item 3: the splits at a case change, a digit before a capital, a run of capitals,
+/// and every separator, then lower-casing.
+#[tokio::test]
+async fn adversarial_names_are_split_as_dec_839_defines() {
+    for name in ["getFundamentals", ""] {
+        let client = connect_with(name).await;
+        assert!(client.is_ok(), "{name:?}: {client:?}");
+    }
+    for name in [
+        "ACHTransfer",
+        "x2Wire",
+        "payoutV2",
+        "sendEmail",
+        "fund_s",
+        "WIRE",
+        "a.b.send",
+        "_wire",
+    ] {
+        let client = connect_with(name).await;
+        assert!(
+            matches!(client, Err(McpError::FundMovementTool)),
+            "{name}: {client:?}"
+        );
     }
 }
