@@ -7,7 +7,7 @@ use mandate_domain::AssetId;
 use mandate_journal::ArtifactRef;
 use mandate_time::UtcNanos;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Unimplemented;
 use crate::problem::Violation;
@@ -60,6 +60,17 @@ macro_rules! rules {
 }
 pub(crate) use rules;
 rules!(none: Decimal, Ref, Timestamp, Asset, Id, EventId);
+
+/// An optional member the schema lets be absent but never `null`: with `#[serde(default)]`, an
+/// absent member is `None` and a `null` one is refused as the wrong type.
+///
+/// # Errors
+/// `T`'s, including for `null`.
+pub fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
 
 /// The JSON bytes of a response member or body.
 ///
