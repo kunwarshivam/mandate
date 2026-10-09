@@ -1,9 +1,0 @@
-file = "xtask/src/main.rs"
-test = "tests::ci_files_reads_every_file_that_decides_a_build"
-reason = """
-X1's (E7-26; #738 review, finding 4). The test drives `ci_files` over a fixture repository, which
-the live-feature check's stub is not on the path of, so it fails on what today's code does:
-`ci_files` reads only `.github/workflows` and `.github/scripts`, not `.github/actions`, `deploy/`
-or `.cargo/config.toml`, and does not tolerate an absent directory. X1's step 3a deletes this row
-with the test's `#[ignore]` line (DEC-845).
-"""
