@@ -1677,6 +1677,11 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   and run logic in `mandate-audit`) goes first; its route waits for `mandate-api-server`, which the
   first route's story creates ([DEC-680](decisions/DEC-680.md) item 1, claim
   [#750](https://github.com/kunwarshivam/mandate/issues/750)).
+  *Follow-up (Should; [DEC-890](decisions/DEC-890.md)):* multi-stream export verification. `verify`
+  and `verify-cold` take a control stream and its account streams together, so they can run
+  journal spec §11's `connection_cause_mismatch`, which no single-stream export can (DEC-885 item
+  6). Its report then drops DEC-890's `not run: connection_cause_mismatch` line for the exports it
+  covers.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
