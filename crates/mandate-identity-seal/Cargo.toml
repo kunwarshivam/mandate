@@ -1,0 +1,10 @@
+[package]
+name = "mandate-identity-seal"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The seal token that builds a mandate-identity Session or Membership and implements its MembershipLookup, for the crates xtask/layers.toml allows only (DEC-642 item 7)"
+
+[lints]
+workspace = true

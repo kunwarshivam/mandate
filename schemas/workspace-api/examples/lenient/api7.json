@@ -1,0 +1,280 @@
+{
+  "description": "API-7 leniency (DEC-682 item 27): what the server does with each body of an API-7 operation. `accept` lists the members it drops; `refuse` names the problem code. These cases are the server's (A2's tests read them), not the strict schemas', which describe what a client should send. A body given as a string is the raw request body, not JSON. `principal` is `user` unless it says `client`.",
+  "cases": [
+    {
+      "operation": "pause",
+      "body": {},
+      "accept": []
+    },
+    {
+      "operation": "pause",
+      "body": {
+        "record": "garbage"
+      },
+      "accept": [
+        "/record"
+      ]
+    },
+    {
+      "operation": "pause",
+      "body": {
+        "requested_by": "owner"
+      },
+      "accept": [
+        "/requested_by"
+      ]
+    },
+    {
+      "operation": "hold",
+      "body": {
+        "record": {
+          "artifact": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      },
+      "accept": [
+        "/record"
+      ]
+    },
+    {
+      "operation": "end_delegation",
+      "body": {
+        "record": 5
+      },
+      "accept": [
+        "/record"
+      ]
+    },
+    {
+      "operation": "kill_switch",
+      "body": {
+        "scope": {
+          "kind": "agent",
+          "id": "agt_1"
+        }
+      },
+      "accept": []
+    },
+    {
+      "operation": "kill_switch",
+      "body": {
+        "scope": {
+          "kind": "connection",
+          "id": "con_1"
+        },
+        "step_up": {
+          "assertion_id": 1
+        }
+      },
+      "accept": [
+        "/step_up"
+      ]
+    },
+    {
+      "operation": "kill_switch",
+      "body": {
+        "scope": {
+          "kind": "workspace",
+          "id": null
+        },
+        "environment_shown": "mars",
+        "record": "x"
+      },
+      "accept": [
+        "/environment_shown",
+        "/record"
+      ]
+    },
+    {
+      "operation": "kill_switch",
+      "body": {
+        "scope": {
+          "kind": "agent",
+          "id": "agt_1"
+        },
+        "owner_exit": [
+          {
+            "asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+            "bid": 101.5,
+            "bid_size": "10",
+            "quoted_at": "2026-10-08T14:30:00.000000000Z",
+            "floor": "99.5"
+          }
+        ]
+      },
+      "accept": [
+        "/owner_exit"
+      ]
+    },
+    {
+      "operation": "kill_switch",
+      "body": {},
+      "refuse": "invalid"
+    },
+    {
+      "operation": "kill_switch",
+      "body": {
+        "scope": {
+          "kind": "organization",
+          "id": null
+        }
+      },
+      "refuse": "invalid"
+    },
+    {
+      "operation": "owner_exit",
+      "body": {
+        "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001"
+      },
+      "accept": []
+    },
+    {
+      "operation": "owner_exit",
+      "body": {
+        "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+        "bid": "101.5"
+      },
+      "accept": [
+        "/bid"
+      ]
+    },
+    {
+      "operation": "owner_exit",
+      "body": {
+        "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+        "bid": "101.5",
+        "bid_size": "10",
+        "quoted_at": "2026-10-08T14:30:00.000000000Z",
+        "floor": 99.5
+      },
+      "accept": [
+        "/bid",
+        "/bid_size",
+        "/quoted_at",
+        "/floor"
+      ]
+    },
+    {
+      "operation": "owner_exit",
+      "body": {
+        "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+        "step_up": "none"
+      },
+      "accept": [
+        "/step_up"
+      ]
+    },
+    {
+      "operation": "owner_exit",
+      "body": {
+        "bid": "101.5"
+      },
+      "refuse": "invalid"
+    },
+    {
+      "operation": "respond_approval",
+      "body": {
+        "verdict": "skipped",
+        "content_hash": "sha256:abababababababababababababababababababababababababababababababab"
+      },
+      "accept": []
+    },
+    {
+      "operation": "respond_approval",
+      "body": {
+        "verdict": "skipped",
+        "content_hash": "sha256:abababababababababababababababababababababababababababababababab",
+        "record": "x",
+        "step_up": 7,
+        "delegation": {
+          "preview_id": "prv_1",
+          "mandate_version": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      },
+      "accept": [
+        "/record",
+        "/step_up",
+        "/delegation"
+      ]
+    },
+    {
+      "operation": "respond_approval",
+      "body": {
+        "verdict": "skipped"
+      },
+      "refuse": "invalid"
+    },
+    {
+      "operation": "respond_approval",
+      "body": {
+        "verdict": "skip",
+        "content_hash": "sha256:abababababababababababababababababababababababababababababababab"
+      },
+      "refuse": "invalid"
+    },
+    {
+      "operation": "respond_approval",
+      "body": {
+        "verdict": "approved",
+        "content_hash": "sha256:abababababababababababababababababababababababababababababababab",
+        "record": "x",
+        "step_up": null,
+        "delegation": null
+      },
+      "refuse": "invalid"
+    },
+    {
+      "operation": "pause",
+      "body": "not json",
+      "accept": [
+        ""
+      ]
+    },
+    {
+      "operation": "hold",
+      "body": "",
+      "accept": [
+        ""
+      ]
+    },
+    {
+      "operation": "hold",
+      "principal": "client",
+      "body": {
+        "requested_by": "owner"
+      },
+      "accept": [
+        "/requested_by"
+      ]
+    },
+    {
+      "operation": "kill_switch",
+      "body": {
+        "scope": {
+          "kind": "workspace",
+          "id": "ws_1"
+        }
+      },
+      "accept": [
+        "/scope/id"
+      ]
+    },
+    {
+      "operation": "kill_switch",
+      "body": "not json",
+      "refuse": "invalid"
+    },
+    {
+      "operation": "owner_exit",
+      "body": "not json",
+      "refuse": "invalid"
+    },
+    {
+      "operation": "respond_approval",
+      "body": {
+        "verdict": "skipped",
+        "content_hash": "not a hash"
+      },
+      "refuse": "invalid"
+    }
+  ]
+}

@@ -8,26 +8,26 @@ function issue<T>(result: Decoded<T>): DecodeIssue {
 }
 
 describe("decimal members (spec §3.1, journal spec §4.6)", () => {
-  it.skip("pending E11-9: keeps a canonical decimal string exactly as sent", () => {
+  it("pending E11-9: keeps a canonical decimal string exactly as sent", () => {
     for (const text of ["0", "-1.5", "123.000001", "78999999999999999999999999999.9999999999999999999999999999", "0.0000000000000000000000000001"]) {
       expect(decimal(text, "/v")).toEqual({ ok: true, value: text });
     }
   });
 
-  it.skip("pending E11-9: refuses a JSON number in a decimal member, never rounding it", () => {
+  it("pending E11-9: refuses a JSON number in a decimal member, never rounding it", () => {
     for (const number of [1.5, 1, 0, -2, 1e21, 0.1 + 0.2]) {
       expect(issue(decimal(number, "/equity"))).toMatchObject({ path: "/equity", problem: "decimal_number" });
     }
   });
 
-  it.skip("pending E11-9: refuses a string that is not in canonical form", () => {
+  it("pending E11-9: refuses a string that is not in canonical form", () => {
     const bad = ["1.50", "+1", "-0", "1e3", " 1", "1 ", "NaN", "Infinity", ".5", "5.", "01", "1_000", "", "0.00000000000000000000000000001", "79000000000000000000000000000", "-79000000000000000000000000000"];
     for (const text of bad) {
       expect(issue(decimal(text, "/v")), text).toMatchObject({ path: "/v", problem: "not_canonical", value: text });
     }
   });
 
-  it.skip("pending E11-9: calls anything else in a decimal member the wrong type", () => {
+  it("pending E11-9: calls anything else in a decimal member the wrong type", () => {
     for (const value of [null, true, {}, ["1"]]) {
       expect(issue(decimal(value, "/v")).problem).toBe("wrong_type");
     }
@@ -35,7 +35,7 @@ describe("decimal members (spec §3.1, journal spec §4.6)", () => {
 });
 
 describe("timestamps, refs and integers", () => {
-  it.skip("pending E11-9: accepts only journal spec §4.7 timestamps", () => {
+  it("pending E11-9: accepts only journal spec §4.7 timestamps", () => {
     expect(timestamp("2026-09-28T18:05:20.123456789Z", "/t")).toEqual({ ok: true, value: "2026-09-28T18:05:20.123456789Z" });
     for (const text of ["2026-09-28T14:05:20-04:00", "2026-09-28T18:05:20.123Z", "2026-09-28T18:05:20Z", "2026-09-28 18:05:20.123456789Z"]) {
       expect(issue(timestamp(text, "/t")), text).toMatchObject({ problem: "not_canonical" });
@@ -43,7 +43,7 @@ describe("timestamps, refs and integers", () => {
     expect(issue(timestamp(1759082720, "/t")).problem).toBe("wrong_type");
   });
 
-  it.skip("pending E11-9: refuses timestamps outside journal spec §4.7's calendar range", () => {
+  it("pending E11-9: refuses timestamps outside journal spec §4.7's calendar range", () => {
     for (const text of ["1970-01-01T00:00:00.000000000Z", "9999-12-31T23:59:59.999999999Z", "2028-02-29T12:00:00.000000000Z"]) {
       expect(timestamp(text, "/t"), text).toEqual({ ok: true, value: text });
     }
@@ -64,7 +64,7 @@ describe("timestamps, refs and integers", () => {
     }
   });
 
-  it.skip("pending E11-9: accepts only sha256 content refs", () => {
+  it("pending E11-9: accepts only sha256 content refs", () => {
     const ref = `sha256:${"ab".repeat(32)}`;
     expect(contentRef(ref, "/h")).toEqual({ ok: true, value: ref });
     for (const text of ["ab".repeat(32), `sha256:${"AB".repeat(32)}`, `sha256:${"ab".repeat(31)}`]) {
@@ -72,7 +72,7 @@ describe("timestamps, refs and integers", () => {
     }
   });
 
-  it.skip("pending E11-9: reads integers from 0 to 2^53 - 1 only", () => {
+  it("pending E11-9: reads integers from 0 to 2^53 - 1 only", () => {
     expect(integer(0, "/n")).toEqual({ ok: true, value: 0 });
     expect(integer(2 ** 53 - 1, "/n")).toEqual({ ok: true, value: 2 ** 53 - 1 });
     for (const value of [1.5, -1, 2 ** 53, "3"]) {
@@ -84,11 +84,11 @@ describe("timestamps, refs and integers", () => {
 describe("closed safety enums (spec §3.2)", () => {
   const effect = closedEnum(["none", "recorded", "unknown"]);
 
-  it.skip("pending E11-9: reads a listed value", () => {
+  it("pending E11-9: reads a listed value", () => {
     expect(effect("recorded", "/effect")).toEqual({ ok: true, value: "recorded" });
   });
 
-  it.skip("pending E11-9: makes an unlisted value a typed issue naming the value and the allowed set", () => {
+  it("pending E11-9: makes an unlisted value a typed issue naming the value and the allowed set", () => {
     expect(issue(effect("probably", "/effect"))).toEqual({
       path: "/effect",
       problem: "unknown_enum_value",
@@ -97,7 +97,7 @@ describe("closed safety enums (spec §3.2)", () => {
     });
   });
 
-  it.skip("pending E11-9: calls a non-string the wrong type", () => {
+  it("pending E11-9: calls a non-string the wrong type", () => {
     expect(issue(effect(1, "/effect")).problem).toBe("wrong_type");
   });
 });
@@ -109,23 +109,23 @@ describe("objects and arrays", () => {
     tags: array(string),
   });
 
-  it.skip("pending E11-9: ignores members it does not know (spec §3.2)", () => {
+  it("pending E11-9: ignores members it does not know (spec §3.2)", () => {
     expect(point({ name: "a", size: "1.5", tags: ["x"], added_in_v1_1: { anything: 1 } }, "")).toEqual({
       ok: true,
       value: { name: "a", size: "1.5", tags: ["x"] },
     });
   });
 
-  it.skip("pending E11-9: reports a missing member at its pointer", () => {
+  it("pending E11-9: reports a missing member at its pointer", () => {
     expect(issue(point({ name: "a", tags: [] }, "/agents/0"))).toMatchObject({ path: "/agents/0/size", problem: "missing" });
   });
 
-  it.skip("pending E11-9: reports an issue inside an array at its index", () => {
+  it("pending E11-9: reports an issue inside an array at its index", () => {
     expect(issue(point({ name: "a", size: 2, tags: [] }, ""))).toMatchObject({ path: "/size", problem: "decimal_number" });
     expect(issue(point({ name: "a", size: null, tags: ["x", 3] }, ""))).toMatchObject({ path: "/tags/1", problem: "wrong_type" });
   });
 
-  it.skip("pending E11-9: refuses a non-object body", () => {
+  it("pending E11-9: refuses a non-object body", () => {
     for (const value of [null, [], "x", 1]) {
       expect(issue(point(value, "")).problem).toBe("wrong_type");
     }
@@ -133,7 +133,7 @@ describe("objects and arrays", () => {
 });
 
 describe("watermarks (spec §6.1)", () => {
-  it.skip("pending E11-9: reads a stream's seq, hash and recorded_at", () => {
+  it("pending E11-9: reads a stream's seq, hash and recorded_at", () => {
     const mark = { stream_id: "control", seq: 42, hash: `sha256:${"0f".repeat(32)}`, recorded_at: "2026-09-28T18:05:20.000000000Z" };
     expect(watermark({ ...mark, extra: true }, "/as_of/0")).toEqual({ ok: true, value: mark });
     expect(issue(watermark({ ...mark, seq: "42" }, "/as_of/0"))).toMatchObject({ path: "/as_of/0/seq" });

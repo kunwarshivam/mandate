@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/mandate/1",
   "title": "Mandate",
-  "description": "Binding agent specification, schema version 1 (spec v0.6, envelope fields only; DEC-97). See docs/specs/mandate.md. The working universe and its theses are runtime state outside this document. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
+  "description": "Binding agent specification, schema versions 1 and 2 (spec v0.7; version 2 renames protection.crypto_stop_limit_offset to stop_limit_offset, DEC-539; new documents are version 2 and V-031 refuses a move back to 1; $id keeps /mandate/1 deliberately, since this one document admits both versions; envelope fields only; DEC-97). See docs/specs/mandate.md. The working universe and its theses are runtime state outside this document. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,7 +22,10 @@
   ],
   "properties": {
     "mandate_schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "name": {
       "type": "string",
@@ -238,63 +241,7 @@
       }
     },
     "protection": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "enabled",
-        "stop_distance",
-        "take_profit_distance",
-        "crypto_stop_limit_offset"
-      ],
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "stop_distance": {
-          "oneOf": [
-            {
-              "$ref": "#/$defs/open_fraction"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "take_profit_distance": {
-          "oneOf": [
-            {
-              "$ref": "#/$defs/positive_decimal"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "crypto_stop_limit_offset": {
-          "oneOf": [
-            {
-              "$ref": "#/$defs/open_fraction"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "if": {
-        "properties": {
-          "enabled": {
-            "const": true
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "stop_distance": {
-            "$ref": "#/$defs/open_fraction"
-          }
-        }
-      }
+      "type": "object"
     },
     "risk": {
       "type": "object",
@@ -1046,6 +993,145 @@
           }
         }
       ]
+    },
+    "protection_v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "stop_distance",
+        "take_profit_distance",
+        "crypto_stop_limit_offset"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "stop_distance": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/open_fraction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "take_profit_distance": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/positive_decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "crypto_stop_limit_offset": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/open_fraction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stop_distance": {
+            "$ref": "#/$defs/open_fraction"
+          }
+        }
+      }
+    },
+    "protection_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "stop_distance",
+        "take_profit_distance",
+        "stop_limit_offset"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "stop_distance": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/open_fraction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "take_profit_distance": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/positive_decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stop_limit_offset": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/open_fraction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stop_distance": {
+            "$ref": "#/$defs/open_fraction"
+          }
+        }
+      }
+    }
+  },
+  "if": {
+    "properties": {
+      "mandate_schema_version": {
+        "const": 1
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "protection": {
+        "$ref": "#/$defs/protection_v1"
+      }
+    }
+  },
+  "else": {
+    "properties": {
+      "protection": {
+        "$ref": "#/$defs/protection_v2"
+      }
     }
   }
 }

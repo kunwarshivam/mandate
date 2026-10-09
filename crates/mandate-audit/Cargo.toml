@@ -11,9 +11,11 @@ workspace = true
 
 [dependencies]
 mandate-canon.workspace = true
+mandate-identity.workspace = true
 mandate-journal.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+mandate-identity-testkit.workspace = true
 mandate-time.workspace = true
 proptest.workspace = true

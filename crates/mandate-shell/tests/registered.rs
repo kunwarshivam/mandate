@@ -3,6 +3,10 @@
 //! version and the effective registrations, and the liquidity facts read the instrument those
 //! artifacts bind. The stream deploys the E7-7 paper mandate re-pinned to SPY, with the reviewed
 //! fee schedule, calendar, rule set and model content registered beside SPY's DEC-523 snapshot.
+//!
+//! The gate's account rules come from the connector and the broker, not the shell (slice Q2, X-9,
+//! DEC-840): the account type and day-trading regime are the connector's declaration, and the
+//! maintenance excess and prior-close equity are the broker's account answer (A1, DEC-524).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,15 +15,15 @@ use std::path::{Path, PathBuf};
 use mandate_accounting::AssetClass as TradedClass;
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    Asset, AssetSnapshot, Exchange as BrokerExchange, Feed as QuoteFeed, LatestQuote, MinuteBar,
-    MinuteBars, wire,
+    AccountRules, Asset, AssetSnapshot, DeclaredRegime, Exchange as BrokerExchange,
+    Feed as QuoteFeed, LatestQuote, MinuteBar, MinuteBars, alpaca_account_rules, wire,
 };
 use mandate_canon::{DecStr, Digest, Value, to_canonical};
 use mandate_executor::BindingGateConfigRefs;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_num::{Price, Qty, Usd};
-use mandate_risk::Exchange as GateExchange;
+use mandate_risk::{AccountSnapshot, AccountType, DayTradeRegime, Exchange as GateExchange};
 use mandate_shell::Cause;
 use mandate_shell::control::{
     Configuration, ConfirmedVersion, ControlRecord, Pinned, RunFacts, configuration,
@@ -361,6 +365,7 @@ fn spy_facts(asset_id: &str, symbol: &str, exchange: BrokerExchange) -> PaperFac
     };
     let broker = BrokerFacts {
         account: wire::account(account).unwrap(),
+        account_rules: alpaca_account_rules(),
         positions: Vec::new(),
         open_orders: Vec::new(),
         asset: AssetSnapshot {
@@ -413,4 +418,105 @@ fn the_preflight_judges_the_registered_instruments_asset_record() {
     let at_the_classification =
         refused.contains("Absent") && refused.contains("ETP classification");
     assert!(at_the_classification, "{refused}");
+}
+
+/// The gate's account snapshot for SPY's registered run, with the broker's account answer edited
+/// to `equity`, `maintenance_margin` and `last_equity` and the connector's declaration replaced by
+/// `rules`.
+fn gate_account(rules: AccountRules, figures: [&str; 3]) -> Result<AccountSnapshot, Cause> {
+    let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
+    let mut facts = spy_facts(SPY, "SPY", BrokerExchange::Arca);
+    let [equity, maintenance_margin, last_equity] = figures.map(|text| Usd::parse(text).unwrap());
+    facts.broker.account.equity = equity;
+    facts.broker.account.maintenance_margin = maintenance_margin;
+    facts.broker.account.last_equity = last_equity;
+    facts.broker.account_rules = rules;
+    let agent = mandate_runtime::AgentId("agent_spy".to_owned());
+    let contexts = load_contexts(&artifacts, &facts, now(), &agent)?;
+    let decision = contexts.run.decision.expect("a decision context");
+    Ok(decision.gate.expect("an advisory gate context").account)
+}
+
+/// Alpaca's declared rules (§7.2: always margin, `intraday_margin`) reach the gate with the
+/// broker's own figures: the maintenance excess is equity less `maintenance_margin`, and the
+/// prior-close equity is `last_equity` (§9.2, DEC-524 items 2 and 4). Each expected excess is
+/// worked by hand, and the accounts differ in every figure, so no constant passes.
+#[test]
+fn the_gate_takes_the_brokers_maintenance_excess_and_prior_close_equity() {
+    let cases = [
+        (["1000000", "0", "1000000"], "1000000"),
+        (["250000.5", "40000.25", "248000"], "210000.25"),
+        (["30000", "29999.99", "31000"], "0.01"),
+        (["25000", "25000", "24000.01"], "0"),
+    ];
+    for (figures, excess) in cases {
+        let account = gate_account(alpaca_account_rules(), figures).unwrap();
+        assert_eq!(account.account_type, AccountType::Margin, "{figures:?}");
+        let regime = DayTradeRegime::IntradayMargin {
+            maintenance_excess: Usd::parse(excess).unwrap(),
+        };
+        assert_eq!(account.regime, regime, "{figures:?}");
+        assert_eq!(account.equity, Usd::parse(figures[0]).unwrap());
+        let prior_close = Usd::parse(figures[2]).unwrap();
+        assert_eq!(account.prior_close_equity, prior_close, "{figures:?}");
+    }
+}
+
+/// Another declaration flows through as it was declared: the gate's account type and regime are
+/// the connector's, never the shell's, whichever of §7.2's types and §9.2's regimes it names.
+#[test]
+fn another_declared_account_type_or_regime_reaches_the_gate() {
+    let figures = ["250000.5", "40000.25", "248000"];
+    let intraday = DayTradeRegime::IntradayMargin {
+        maintenance_excess: Usd::parse("210000.25").unwrap(),
+    };
+    let cases = [
+        (
+            AccountType::Margin,
+            DeclaredRegime::LegacyPdt,
+            DayTradeRegime::LegacyPdt,
+        ),
+        (AccountType::Cash, DeclaredRegime::IntradayMargin, intraday),
+        (
+            AccountType::Cash,
+            DeclaredRegime::LegacyPdt,
+            DayTradeRegime::LegacyPdt,
+        ),
+    ];
+    for (account_type, regime, expected) in cases {
+        let rules = AccountRules {
+            account_type,
+            regime,
+        };
+        let account = gate_account(rules, figures).unwrap();
+        assert_eq!(account.account_type, account_type, "{rules:?}");
+        assert_eq!(account.regime, expected, "{rules:?}");
+        assert_eq!(account.prior_close_equity, Usd::parse("248000").unwrap());
+    }
+}
+
+/// Under `intraday_margin`, a maintenance figure no broker states (a negative requirement,
+/// DEC-524 item 2) refuses the run rather than reading as no requirement, and a reported deficit
+/// refuses its opening, since nothing yet turns it into §9.2's `exits_only` (DEC-840; `AGENTS.md`
+/// rule 3). Each has its own reason.
+#[test]
+fn an_unreadable_maintenance_figure_or_a_deficit_refuses_the_run() {
+    let cases = [
+        (
+            ["1000000", "-1", "1000000"],
+            "the broker's maintenance excess",
+        ),
+        (
+            ["30000", "30000.01", "31000"],
+            "an account with no maintenance deficit",
+        ),
+    ];
+    for (figures, reason) in cases {
+        let refused = gate_account(alpaca_account_rules(), figures);
+        let what = match refused {
+            Err(Cause::Absent { what }) => Some(what),
+            _ => None,
+        };
+        assert_eq!(what, Some(reason), "{figures:?}: {refused:?}");
+    }
 }

@@ -12,8 +12,15 @@
 # `MANDATE_BASE_REF` stays an override for local runs and is not set here.
 name: ci
 
+# A draft runs nothing (DEC-610): every job is skipped while the pull request is a draft, so the
+# runs a builder's draft pushes start no runner and cannot crowd out a ready pull request's. The
+# run that judges a pull request is the one marking it ready starts (`ready_for_review`) or a later
+# push to it. `fast` and `full` are skipped too, not failed, and `merge-approved.sh` accepts only a
+# run in which both actually ran and passed, so a skipped run on a draft never counts as green.
+# `workflow_dispatch` has no pull request, so it always runs.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions: {}
@@ -33,6 +40,7 @@ env:
 
 jobs:
   fast:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -87,6 +95,7 @@ jobs:
         if: steps.change.outputs.docs_only != 'true'
 
   full-checks:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -137,6 +146,7 @@ jobs:
   # the count and `min(192, count)` shard indices. A diff with no mutants, a documentation-only one
   # included (DEC-112), launches no shard at all.
   mutants-plan:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -227,7 +237,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
-    if: always()
+    if: ${{ always() && !github.event.pull_request.draft }}
     needs: [full-checks, mutants-plan, mutants]
     # DEC-538. A plan of zero mutants launches no shard, so `mutants` is skipped, and that skip
     # passes only beside a plan that succeeded and reported zero. A failed or cancelled plan, a

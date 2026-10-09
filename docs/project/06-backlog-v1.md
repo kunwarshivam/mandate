@@ -706,6 +706,51 @@ after U-A1 to U-A5 are recorded.
   `max_order_usd` exceeds §5.2's 200,000 USD is refused; every existing equity test still passes;
   and no crypto rule is relaxed (DEC-450 item 3). A gate check of the 200,000 USD cap is a later
   row.
+- **E7-23 (Must, M6, the first live trade, DEC-529; SC)** As the founder, I want each broker to
+  declare what it supports as a capability profile, so that shared code never branches on a broker
+  and a new broker is one profile, not new rules ([DEC-531](decisions/DEC-531.md),
+  [DEC-630](decisions/DEC-630.md), [ADR-0004](../adr/0004-broker-capability-profiles.md), trading spec §5.2; the
+  [first live trade](tasks/first-live-trade.md) rows SP1, B1, B2a, B2b, B3). *Accepted when:*
+  `CapabilityProfile` and its canonical hash live in `mandate-domain`; `BrokerConnector::profile`
+  hands each connector's profile to the executor; Alpaca declares trading spec §5.2's table as its
+  profile with no Alpaca outcome changed (LT-14); protection, reconciliation and the builder's
+  quantity form read the profile, and the executor's `asset_class == Crypto` protection branch is
+  gone (LT-2); policy and profile intersect, never override (LT-3); and a property test over
+  generated profiles checks every order sent is one the profile allows.
+- **E7-24 (Must, M6, the first live trade, DEC-529; SC)** As the founder, I want to log in to
+  Robinhood with OAuth for one run, holding the token only in the connector process's memory, so
+  that no credential reaches a disk, a log, the journal or an agent (CN-1, `AGENTS.md` rule 7; the
+  [first live trade](tasks/first-live-trade.md) rows O1a, O1b). *Accepted when:* the PKCE login
+  runs in the founder's browser through a loopback redirect; the token is a `SecretString` in the
+  connector process only and is gone at exit (a restart logs out); a canary-token test scans every
+  output, error and artifact (LT-9); expiry mid-run leaves the deployment `closing_only` and the
+  resting stop untouched; and no test or CI job reaches a Robinhood host (LT-1).
+- **E7-25 (Must, M6, the first live trade, DEC-124; SC)** As the founder, I want a simulated
+  Robinhood server that speaks the published contract over loopback MCP with Robinhood's rules, so
+  that every Robinhood test and the founder's rehearsal run without touching Robinhood (DEC-124's
+  paper stage; the [first live trade](tasks/first-live-trade.md) rows S1, S2, R0). *Accepted
+  when:* `mandate-rh-sim` is a `tool` crate no production crate depends on; it serves the nine
+  allowlisted tools with the contract's shapes, its order states and its rules (no query by
+  `ref_id`, one GTC stop-limit as protection); its pure core carries the property tests
+  of S1's tests PRs; and the rehearsal (R0) runs the live build against it on a journal separate from
+  the live one.
+- **E7-26 (Must, M6, the first live trade, DEC-529 item 3; SC)** As the founder, I want one
+  deployment runner for any environment and broker, with live hosts only behind a `live` feature
+  that only the runner may enable, so that no other build can reach a live broker (ES-23; the
+  [first live trade](tasks/first-live-trade.md) rows X1, G1a, G1b). *Accepted when:*
+  `cargo xtask live-feature` lets only the runner declare a `live` feature, and no CI or release
+  build enables it except one compile-only job (ES-23 as DEC-529 item 3 narrows it), so the
+  default build contains no Robinhood host (LT-1); the runner built from the
+  paper path's E1a takes any broker connector and environment through `ProductionCycle::run`
+  (LT-4); and a restart after a run sends no second order (LT-6).
+- **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
+  want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
+  so that a token that may reach both environments is on the record before it is used
+  ([DEC-821](decisions/DEC-821.md) item 4, DEC-441 item 22, spec §5.3; follows E7-17,
+  [DEC-800](decisions/DEC-800.md) item 14). *Accepted when:* a journal spec change after v0.20
+  defines the event that records, with the connection, whether the token may reach the other
+  environment, and the disclosure the owner confirmed, with vectors, tests first; and no Alpaca
+  OAuth connect appends `ConnectionEstablished` before that event.
 
 ### E8 Escalation and approvals
 
@@ -1392,6 +1437,14 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - every notification carries only an opaque ID and generic text (rule 6);
   - turning a monitor agent into one that trades is a new mandate the owner confirms, never an
     in-place change.
+- **E10-20 (Must, M6, blocker for starting an agent on the L2 host; SC)** As the founder, I want
+  `mandate agent pause` and `mandate agent kill` reachable from the CLI, so that the SSH
+  kill-switch fallback of [DEC-822](decisions/DEC-822.md) item 7 works and the rehearsal in
+  FOUNDER-STEPS step 16 (`deploy/README.md`) can pass. The code exists in
+  `crates/mandate-cli/src/agent.rs` and `control.rs`; `AgentCommand` in `gestures.rs` does not name
+  them. *Accepted when:* `AgentCommand` carries `pause` and `kill`, wired to that code; an agent
+  kill touches only its own scope (rule 13); and a test runs each command through the binary
+  against the journal. No agent starts on the L2 host before this lands.
 
 ### E11 Web app: dashboard and controls
 
@@ -2605,12 +2658,14 @@ From E10-1's slice-V implementation (DEC-161):
     This follow-up row needs its own story id: its pins and stub cite E8-3, which
     `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
-    (HLD §8), as a new `schema_version` with its own vectors.
+    (HLD §8), as a new `schema_version` with its own vectors. Specified as version 2 in journal
+    §9.8 ([DEC-800](decisions/DEC-800.md) item 3); E7-1 writes it.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,
     which must name each action's members: the operator stop's subject, the global kill switch's
     scope, the acceptable-use action, and the row's "approval".
-  - **Proposed, item 10:** a clause binds an account stream to its connection, so that
-    `AccountSnapshotRecorded`'s fact needs no argument.
+  - **Item 10, closed by [DEC-800](decisions/DEC-800.md):** `ConnectionEstablished` version 2's
+    `account_ref` binds an account stream to its connection (journal §9.8); the mapping reads its
+    argument from that binding.
   - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** journal spec v0.8
     §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
     vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
@@ -3182,7 +3237,15 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `BEHAVIOUR_ONLY_TESTS` row and `#[ignore]` line. Minors from the same review, for the same PR or
   the backlog: `interval_limit` marks the first open interval alerted, which can re-alert a later
   one each tick; the fold's doc for these arms; and `awaiting.insert` replaces an instrument's
-  awaited set rather than adding to it.
+  awaited set rather than adding to it. #771's review added two tests before the fix: a hand case
+  with the awaited interval between two others (`a_new_start_ends_the_awaited_middle_interval_only`)
+  and a property lead where the awaited interval is the first open one and another is the latest
+  (`AWAITED_FIRST_LEAD`), so a fix that ends the latest open interval fails both. Done by E4b's
+  fix: that arm ends the open interval of a bracket whose OCO's acknowledgment was awaited (or an
+  unbracketed one), never another bracket's; `no_interval_exceeds_the_limit_without_an_alert` and
+  both hand cases are live again. The three minors stay open, with a fourth from that review: the
+  fix's match lets an unbracketed open interval (an exit's or a re-placement's) be ended for any
+  awaited bracket OCO; no script here has reached it yet, so pin it with a case if one does.
 - **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
   ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
   while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on
@@ -4488,3 +4551,39 @@ From the round-6 review of the flatten adapter's implementation PR ([#596](https
   `StoredEvent::draft()` that also checks the columns) is private, so the flatten adapter holds a
   second copy of the three assigned-field names, the digest form, and the re-seal, the exact
   things that must not drift from `seal`.
+
+From the workspace API contract's drift rule (DEC-683, E10-10):
+
+- **A `cargo xtask` check for stale planned markers.** List every `(planned: <story>)` in a spec
+  table and every `x-planned` value in `schemas/`, with its story's state, and fail on a marker
+  whose story is done. Until it exists, removing a story's markers is part of its done-definition.
+- **Rust JSON-pointer checks refuse control characters**, as the schemas' pointer pattern does
+  (`[^/~\u0000-\u001f]`), wherever `mandate-api` checks a path (E10-10 implementation).
+- **Journal the members an API-7 operation dropped** (DEC-682 item 27): the command event names the
+  JSON pointers its `202` listed in `dropped`, so the record shows what the server ignored. A
+  journal spec change first.
+- **Run `schemas/workspace-api/`'s checkers in CI** (`check_examples.py`, `check_planned.py`, and
+  the mutation sweep) from a `cargo xtask` job; until then reviewers run them.
+
+From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
+
+- **The mutation plan's tests** (#768).
+  - `the_planned_shards_test_the_gates_mutants_and_no_more_per_shard` seeds a diff whose mutants
+    are all in one package. Add a second mutated crate to its fixture, so the plan's sum across
+    packages is pinned as well as its listing.
+  - `ci_sizes_the_mutation_matrix_from_the_plan` pins exact `ci.yml` lines, so rewording one
+    fails the test even when the wiring still holds. It fails safe; parse the jobs' keys instead
+    when it next gets in the way.
+- **The behaviour-only rows** (#770, `xtask/behaviour-only/`).
+  - Pin the exact refusal message for a non-`.toml` file in `a_malformed_or_misnamed_row_is_refused`,
+    as the other refusals' messages are pinned.
+  - Read the rows through `git ls-files` rather than `read_dir`, as `ci pending` reads test files, so
+    an untracked or ignored file in the directory cannot change the gate's verdict.
+  - Say in the README that two tests whose paths differ only by `::` against `__` derive the same
+    file name, so the second row cannot be added until one is renamed.
+- **The feature map's directory** (#773, `.cursor/skills/verify-mandate/features/`).
+  - Check or refuse what else sits in the directory: today the README and any non-`.md` file are
+    skipped without a word.
+  - Refuse two feature files with the same `# ` title, which `--index` would list twice.
+  - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
+    the README is never read as a feature.

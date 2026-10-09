@@ -1,0 +1,47 @@
+[
+  {
+    "label": "recorded with no steps",
+    "set": {
+      "/phase": "recorded",
+      "/steps": []
+    }
+  },
+  {
+    "label": "refused with its reason",
+    "set": {
+      "/phase": "refused",
+      "/steps/0/reason": "step_up_stale",
+      "/steps/0/event_type": "OwnerCommandRefused"
+    }
+  },
+  {
+    "label": "auto: /phase = \"taken\"",
+    "set": {
+      "/phase": "taken"
+    }
+  },
+  {
+    "label": "auto: /phase = \"applied\"",
+    "set": {
+      "/phase": "applied"
+    }
+  },
+  {
+    "label": "auto: /phase = \"refused\"",
+    "set": {
+      "/phase": "refused"
+    }
+  },
+  {
+    "label": "auto: /phase = \"ended\"",
+    "set": {
+      "/phase": "ended"
+    }
+  },
+  {
+    "label": "auto: /steps/0/reason null",
+    "set": {
+      "/steps/0/reason": null
+    }
+  }
+]

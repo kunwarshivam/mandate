@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use mandate_alpaca::{
     BarsRequest, DataTransport, HttpRequest, Method, Pause, QuoteRequest, Response,
-    TradingTransport, TransportError,
+    TradingTransport, TransportError, alpaca_account_rules,
 };
 use mandate_canon::{DecStr, Value};
 use mandate_journal::{AppendOutcome, StoredEvent};
@@ -369,6 +369,11 @@ fn assemble(
             cause,
         }
     })?;
+    assert_eq!(
+        facts.account_rules,
+        alpaca_account_rules(),
+        "the preflight carries the connector's declared account rules (DEC-840)"
+    );
     let liquidity = liquidity_facts(
         artifacts.production_identity().symbol,
         daily,
