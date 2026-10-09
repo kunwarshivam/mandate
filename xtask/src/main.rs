@@ -1733,7 +1733,7 @@ fn logical_lines(path: &str, text: &str) -> Vec<(usize, String)> {
             let folds = fold_below.is_some_and(|column| indent > column) && !next.trim().is_empty();
             if let Some(head) = command.trim_end().strip_suffix('\\') {
                 command = head.to_owned();
-            } else if !folds && !double_quote_open(&command) {
+            } else if !folds && !runs_on(&command) {
                 break;
             }
             command.push(' ');
@@ -1745,23 +1745,28 @@ fn logical_lines(path: &str, text: &str) -> Vec<(usize, String)> {
     logical
 }
 
-/// Whether `command` ends inside a double-quoted string, which the shell runs on into the next
-/// line: quotes are read as the shell reads them, a backslash escaping the next character outside
-/// single quotes, and a `#` that starts a word outside quotes beginning a comment.
-fn double_quote_open(command: &str) -> bool {
+/// Whether the shell runs `command` on into the next line: it ends inside a double-quoted string,
+/// or its code, before any comment, ends with `|`, `|&` or `||` (an `&&` ends a command, so the
+/// next line is judged on its own either way). Quotes are read as the shell reads them, a
+/// backslash escaping the next character outside single quotes, and a `#` that starts a word
+/// outside quotes begins a comment.
+fn runs_on(command: &str) -> bool {
     let (mut quote, mut escaped, mut word_start) = (None, false, true);
+    let mut code = String::new();
     for c in command.chars() {
         match (quote, c) {
             _ if escaped => escaped = false,
             (q, '\\') if q != Some('\'') => escaped = true,
-            (None, '#') if word_start => return false,
+            (None, '#') if word_start => break,
             (None, '"' | '\'') => quote = Some(c),
             (Some(open), _) if c == open => quote = None,
             _ => {}
         }
+        code.push(c);
         word_start = quote.is_none() && c.is_whitespace();
     }
-    quote == Some('"')
+    let code = code.trim_end();
+    quote == Some('"') || (quote.is_none() && (code.ends_with('|') || code.ends_with("|&")))
 }
 
 /// A workflow line `key: value` or `- key: value`: the column its key starts at, and its value.
@@ -2442,17 +2447,27 @@ impl PipelineCommand {
     fn command(&self) -> Vec<&str> {
         self.words
             .iter()
+            .skip(self.command_index())
             .map(|(word, _, _)| word.as_str())
-            .skip_while(|word| is_skipped_word(word))
             .collect()
     }
 
     /// The token position of the command word, or none for a bare assignment.
     fn command_position(&self) -> Option<usize> {
+        self.words.get(self.command_index()).map(|(_, _, at)| *at)
+    }
+
+    /// The index of the command word: past the [`is_skipped_word`]s and a `-p` after `time`.
+    fn command_index(&self) -> usize {
+        let mut after_time = false;
         self.words
             .iter()
-            .find(|(word, _, _)| !is_skipped_word(word))
-            .map(|(_, _, at)| *at)
+            .position(|(word, _, _)| {
+                let skipped = is_skipped_word(word) || (after_time && word == "-p");
+                after_time = word == "time";
+                !skipped
+            })
+            .unwrap_or(self.words.len())
     }
 }
 
@@ -2484,7 +2499,21 @@ fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag 
                 command.here_strings.push(text);
             }
             ShellToken::Word(text, quoted) => command.words.push((text, quoted, at)),
-            ShellToken::Redirect => target_next = true,
+            ShellToken::Redirect => {
+                let descriptor = command.words.last().is_some_and(|(word, quoted, _)| {
+                    !quoted && !word.is_empty() && word.chars().all(|c| c.is_ascii_digit())
+                });
+                let before_command = command
+                    .words
+                    .iter()
+                    .rev()
+                    .skip(1)
+                    .all(|(word, _, _)| is_skipped_word(word));
+                if descriptor && before_command {
+                    command.words.pop();
+                }
+                target_next = true;
+            }
             ShellToken::HereString => here_string_next = true,
             ShellToken::Pipe | ShellToken::End => {
                 command.end = at;
@@ -2588,13 +2617,11 @@ fn pipeline_live_flag(
                         ctx,
                     )
             });
-        let fed_to_shell = index > 0
-            && unwrapped_named
-                .first()
-                .and_then(|word| word.rsplit('/').next())
-                .is_some_and(|word| {
-                    matches!(word, "sh" | "bash" | "dash" | "ksh" | "zsh" | "mksh")
-                })
+        let sink = unwrapped_named.first().filter(|_| index > 0);
+        let variable_sink = sink.is_some_and(|word| word.starts_with(['$', '`']));
+        let fed_to_shell = sink
+            .and_then(|word| word.rsplit('/').next())
+            .is_some_and(|word| matches!(word, "sh" | "bash" | "dash" | "ksh" | "zsh" | "mksh"))
             && pipeline
                 .get(..index)
                 .unwrap_or_default()
@@ -2603,7 +2630,9 @@ fn pipeline_live_flag(
                     earlier
                         .words
                         .iter()
-                        .any(|(word, _, _)| word.contains(['$', '`']))
+                        .map(|(word, _, _)| word)
+                        .chain(&earlier.here_strings)
+                        .any(|word| word.contains(['$', '`']))
                 });
         let sets_positional = ctx.runs_positional
             && unwrapped_named.first() == Some(&"set")
@@ -2611,7 +2640,7 @@ fn pipeline_live_flag(
                 .iter()
                 .skip(1)
                 .any(|word| word.contains(['$', '`']));
-        if expanding_command_word || fed_to_shell || sets_positional {
+        if expanding_command_word || variable_sink || fed_to_shell || sets_positional {
             verdict = verdict.min(LiveFlag::Unreadable);
         }
         let builds = (matches!(named.first(), Some(&"awk" | &"sed")) && executing_form(&named))
@@ -2693,7 +2722,10 @@ fn runs_expanding_line(named: &[&str], here_strings: &[String], sourced_expands:
 /// values), `builtin`, and `timeout` (its options and its duration).
 fn unwrapped<'w>(mut named: &'w [&'w str]) -> &'w [&'w str] {
     loop {
-        let (with_value, takes_word): (&[&str], bool) = match named.first().copied() {
+        let wrapper = named
+            .first()
+            .map(|word| word.rsplit('/').next().unwrap_or(word));
+        let (with_value, takes_word): (&[&str], bool) = match wrapper {
             Some("env") => (&["-u", "-C", "-S"], false),
             Some("command" | "exec" | "nohup") => (&["-a"], false),
             Some("xargs") => (&["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"], false),
@@ -2711,8 +2743,7 @@ fn unwrapped<'w>(mut named: &'w [&'w str]) -> &'w [&'w str] {
         while let Some(word) = rest.first() {
             let skip = if with_value.contains(word) {
                 2
-            } else if word.starts_with('-') || (named.first() == Some(&"env") && word.contains('='))
-            {
+            } else if word.starts_with('-') || (wrapper == Some("env") && word.contains('=')) {
                 1
             } else {
                 break;
