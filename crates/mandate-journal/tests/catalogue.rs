@@ -1478,8 +1478,32 @@ fn the_anchor_and_segment_records_are_catalogued_and_closed_on_the_control_strea
     closed_on_the_control_stream(&CLOSED_BY_SECTION_9_14);
 }
 
+/// `VerificationRun` version 2 (journal spec v0.36 §9.13, DEC-788, DEC-789) is closed on the
+/// control stream as version 1 is: an unlisted member is refused `schema`, never `unknown_schema`.
+#[test]
+#[ignore = "pending E12-3"]
+fn verification_run_version_2_is_closed_on_the_control_stream() {
+    let version_2 = edit(&draft(VERIFICATION, CTL, &[]), "schema_version", Some("2"));
+    let e = Draft::parse(&version_2).unwrap_err();
+    let want = (InvalidReason::Schema, "payload.unregistered");
+    assert_eq!((e.reason, e.path.as_str()), want);
+}
+
+/// `VerificationRun` has versions 1 and 2 only (journal spec v0.36 §9.13): version 3 has no
+/// schema.
+#[test]
+fn verification_run_has_no_version_3() {
+    let version_3 = edit(&draft(VERIFICATION, CTL, &[]), "schema_version", Some("3"));
+    let e = Draft::parse(&version_3).unwrap_err();
+    let want = (InvalidReason::UnknownSchema, "payload");
+    assert_eq!((e.reason, e.path.as_str()), want);
+}
+
+/// §9.13's `VerificationRun`, the one record of these five with a version 2 (journal spec v0.36).
+const VERIFICATION: &str = "VerificationRun";
+
 /// Each of `event_types` is refused `schema` at an unlisted member on the control stream and
-/// `wrong_stream` on every other, and has no schema at version 2.
+/// `wrong_stream` on every other, and, but for `VerificationRun`, has no schema at version 2.
 fn closed_on_the_control_stream(event_types: &[&str]) {
     for event_type in event_types {
         for kind in [ACCT, AGENT, CTL, CLOCK] {
@@ -1492,6 +1516,9 @@ fn closed_on_the_control_stream(event_types: &[&str]) {
                 want,
                 "{event_type} in {kind}"
             );
+        }
+        if *event_type == VERIFICATION {
+            continue;
         }
         let version_2 = edit(&draft(event_type, CTL, &[]), "schema_version", Some("2"));
         let e = Draft::parse(&version_2).unwrap_err();
