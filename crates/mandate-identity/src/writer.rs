@@ -78,6 +78,8 @@ pub enum WriteError<E> {
     Contended,
     /// The store failed.
     Store(E),
+    /// The head is already `u64::MAX`, so no record has a `seq` after it, and nothing was written.
+    StreamFull,
 }
 
 /// Commits `event` as the next membership record of `stream`, at `seq` head + 1 and `event_time`
