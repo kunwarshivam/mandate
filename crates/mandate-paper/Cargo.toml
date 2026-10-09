@@ -1,0 +1,26 @@
+[package]
+name = "mandate-paper"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The paper adapter: the confirmed deployment, the GET-only preflight, the model host's output and its stored closes, through the production cycle (E7-19 slice 5, the first paper trade brief's E1a)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-alpaca.workspace = true
+mandate-modelhost.workspace = true
+mandate-shell.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+mandate-accounting.workspace = true
+mandate-artifacts-fs.workspace = true
+mandate-canon.workspace = true
+mandate-journal.workspace = true
+mandate-marketdata.workspace = true
+mandate-num.workspace = true
+mandate-spec.workspace = true
+mandate-time.workspace = true

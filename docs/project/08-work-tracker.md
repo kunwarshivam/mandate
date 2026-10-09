@@ -69,6 +69,10 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   the plan prefers one era of type); the short set-up summary (counsel, DEC-477 question 23);
   the phone chart's axis (a canvas option against the no-script-media-query rule).
 - **Robinhood:** whether a paper or test path exists for agentic accounts.
+- **Contract drift's "released connector version"** (connections spec §8.2 and §9.1): what a
+  released version is, who confirms its new pin, and how it clears a drifted connection. Until
+  then drift clears only by a new connection with a new pin; openings stay halted, exits open
+  ([DEC-687](decisions/DEC-687.md) item 3).
 - **Decided 2026-10-09:** DEC-833 (route 2 serves both key kinds) and DEC-834 item 2 (route 2's
   limits never refuse a valid key).
 - **GitHub Support:** purge the closed PRs' `refs/pull/*/head` refs from before the 2026-10-03

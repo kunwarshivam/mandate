@@ -8487,6 +8487,13 @@ jq -r "$filter" "$src"
     /// The backstop's match ignores case, so a bare `LIVE` or `Live` word is refused in a command
     /// without `cargo`, and an empty feature value (`--features ""`, `--features=` with nothing
     /// after it) is no complete literal, so it is refused (X1 tests correction 6, #923 review).
+    ///
+    /// A command is compile-only only when its subcommand, the word right after its cargo word
+    /// and before any `--`, is `check` (X1 tests correction 8, #923 review): a `cargo check` or a
+    /// `check` after `--`, which go to the program `run` or `test` builds, and a `check` that is
+    /// the value of an option before the subcommand (`cargo --config check run`) leave the command
+    /// a build, so its `live` is refused, once, at its line. The compile-only form CI runs stays
+    /// allowed.
     #[test]
     fn the_backstop_and_the_feature_value_rules_refuse_ci_bypasses() -> Result<()> {
         let policy = live_policy();
@@ -8504,6 +8511,8 @@ jq -r "$filter" "$src"
             "bash -c \"cargo test -p x\"",
             "cargo build --features paper,sim",
             "echo \"cargo test -p x\"",
+            "      - run: cargo check -p the-runner --features live",
+            "      - run: cargo check --locked -p the-runner --features=live",
         ];
         for line in allowed {
             let files = [ci_file(".github/workflows/ci.yml", line)];
@@ -8712,10 +8721,22 @@ jq -r "$filter" "$src"
             "cmd=\"cargo build --features $A$B\"; $cmd",
             "read -r cmd <<< \"cargo build --features $A$B\"; $cmd",
         ];
+        let refused_where_check_is_not_the_subcommand = [
+            "cargo run -p the-runner --features live -- cargo check",
+            "cargo test -p the-runner --features live -- cargo check",
+            "cargo build -p the-runner --features live -- check",
+            "cargo +nightly run -p the-runner --features live -- cargo check",
+            "cargo --locked run -p the-runner --features live -- check",
+            "cargo --locked run -p the-runner --features live -- cargo check",
+            "cargo run --features live -- cargo check -p the-runner",
+            "/usr/bin/cargo run -p the-runner --features live -- /usr/bin/cargo check",
+            "cargo --config check run -p the-runner --features live",
+        ];
         let refused_at_line_two = refused_with_no_cargo_word
             .iter()
             .chain(&refused_through_a_command_word_that_may_be_cargo)
-            .chain(&refused_by_the_cargo_word_rule);
+            .chain(&refused_by_the_cargo_word_rule)
+            .chain(&refused_where_check_is_not_the_subcommand);
         for line in refused_at_line_two {
             let files = [ci_file(
                 ".github/scripts/build.sh",
@@ -8906,6 +8927,10 @@ jq -r "$filter" "$src"
     /// alias make that command executing, so its words are re-read; an executing `awk` or `sed`
     /// program builds a command no static reading can follow, so it is refused outright (round
     /// eleven).
+    ///
+    /// The pins of `refused_only_by_reading_fail_closed` hold no `cargo` token, no `live` and no
+    /// feature flag, so only this reading refuses them, never the backstop or the cargo-word rule
+    /// (X1 tests correction 7, step 3b's planted bugs).
     #[test]
     #[ignore = "pending E7-26"]
     fn commands_are_read_fail_closed_where_a_word_may_execute() -> Result<()> {
@@ -8930,7 +8955,24 @@ jq -r "$filter" "$src"
             "make build FEATURES=$A$B",
             "$C build -F \"$A$B\"",
         ];
-        for line in refused_through_an_executing_command_at_line_two {
+        let refused_only_by_reading_fail_closed = [
+            "awk 'BEGIN{system(c)}' c=\"$RUN\"",
+            "echo \"$X\" | sed e",
+            "sed 's/^/x/e' \"$F\"",
+            "sh <(echo \"$C $A\")",
+            "\"$(printf %s \"$C $A\")\" x",
+            "while $C \"$A\"; do :; done",
+            "until $C \"$A\"; do :; done",
+            "! $C \"$A\"",
+            "time $C \"$A\"",
+            "for i in 1; do $C \"$A\"; done",
+            "echo \"$C $A\" | xargs sh",
+            "echo \"$C $A\" | env sh",
+        ];
+        for line in refused_through_an_executing_command_at_line_two
+            .iter()
+            .chain(&refused_only_by_reading_fail_closed)
+        {
             let files = [ci_file(
                 ".github/scripts/build.sh",
                 &format!("set -e\n{line}\n"),
