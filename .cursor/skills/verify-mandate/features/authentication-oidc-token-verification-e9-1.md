@@ -14,5 +14,10 @@
   claim read before the signature; the issuer byte for byte against another tenant signing with
   the same keys; each refusal's stable code and `TokenKind`'s nonce-free `Debug`, live), pending,
   with the
-  in-memory issuer in `tests/common/mod.rs` (keys made in the test, one fixed RS256 test key).
+  in-memory issuer in `tests/common/mod.rs` (keys made in the test, one fixed RS256 test key);
+  `crates/mandate-authn/tests/claims.rs` (audience and `azp`, `exp` and `nbf` with the skew, the
+  nonce, `email_verified` for invitations, and the validity window against its own oracle) and
+  `crates/mandate-authn/tests/shape.rs` (malformed and oversized tokens, strict base64url from
+  hand-written text, the key set's rules and weak or foreign keys, the issuer configuration, any
+  single-byte change, and the ID-9 canary over every printed type), pending.
 - **Run:** `cargo nextest run -p mandate-authn --run-ignored all`; `cargo xtask ci pending`.
