@@ -16,20 +16,44 @@
 //! caller fetched and handed in, at a time ([`UtcNanos`]) the caller read. No clock, no network,
 //! no randomness: the same inputs always give the same answer (ES-21).
 //!
-//! **Only an allowed algorithm reaches a key.** The header's `alg` must be one of [`Algorithm`]'s
-//! three (ES256, RS256, EdDSA), its `kid` must name a key in the set, and that key must be of the
-//! algorithm's type; `none`, every HMAC algorithm, and anything else are refused before a key is
-//! looked up, so a public key is never used as an HMAC secret.
+//! **Only an allowed algorithm reaches a key.** The header's `alg` must be one of the issuer's
+//! configured algorithms, drawn from ES256, RS256 and EdDSA ([`Algorithm`]), its `kid` must name a
+//! key in the set, and that key must be of the algorithm's type; `none`, every HMAC algorithm, and
+//! anything else are refused before a key is looked up, so a public key is never used as an HMAC
+//! secret.
+//!
+//! **A session is a record, not a token** ([`SessionRecord`], §6.2 and §6.4 routes 1 and 2). Access
+//! tokens last five minutes; the idle and absolute limits come from the org kind and an org may
+//! only shorten them; a refresh token rotates on use and a rotated one presented again revokes the
+//! family. An unreachable provider leaves pause and the kill switch only; a provider that answers
+//! and refuses ends the session with every permission. A reduction-only session opened by a local
+//! passkey reaches pause and the kill switch for 15 minutes, and is refused to a subject the
+//! provider refused since its last sign-in.
 //!
 //! **A refusal names the check, never the value** (ID-9). [`Refusal`] and [`SetupError`] carry
 //! static text only: no token, nonce, claim, or key appears in their `Display` or `Debug`.
+//!
+//! **Route 2 refuses with one answer.** [`ReductionGate`] issues the reduction-only session's
+//! challenges and admits an assertion only over an outstanding one, consumed on first use; every
+//! refusal is the one [`Unauthenticated`], and a verified assertion is never refused for a limit
+//! (identity spec §6.4 route 2, DEC-834).
 
 mod jwks;
 mod oidc;
+mod reduction;
+mod session;
 
 pub use jwks::{Algorithm, Jwks};
 pub use mandate_time::UtcNanos;
 pub use oidc::{CLOCK_SKEW_S, IssuerConfig, MAX_TOKEN_BYTES, TokenKind, VerifiedSubject, verify};
+pub use reduction::{
+    CHALLENGE_LIFETIME_S, Challenge, ClientKey, ReductionGate, ReductionLimits, Unauthenticated,
+};
+pub use session::{
+    ACCESS_TOKEN_LIFETIME_S, EndReason, OrgKind, ProviderAnswer, REDUCTION_ONLY_LIFETIME_S, Reach,
+    RefreshDigest, RefreshSecret, Refreshed, Request, SessionLimits, SessionPolicy, SessionRecord,
+    SessionRefusal, SubjectStanding,
+};
 
 /// The part of a compact JWS a [`Refusal::Malformed`] points at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

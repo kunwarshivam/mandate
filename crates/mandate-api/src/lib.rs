@@ -14,13 +14,16 @@
 //! [DEC-680](../../../docs/project/decisions/DEC-680.md)'s; the readings this crate takes of the spec
 //! are [DEC-681](../../../docs/project/decisions/DEC-681.md)'s.
 //!
+//! - [`envelope`] and [`responses`]: the envelope's shapes, and §5's command responses, closed.
 //! - [`problem`]: the RFC 9457 problem document of §3.5, with closed `code` and `effect`.
 //! - [`wire`]: the scalar members (decimals as canonical strings, never JSON numbers, §3.1) and the
 //!   one decoder every request body goes through.
 //! - [`idempotency`]: the `Idempotency-Key` grammar and the event id derived from it (§3.4).
 
+pub mod envelope;
 pub mod idempotency;
 pub mod problem;
+pub mod responses;
 pub mod wire;
 
 /// The story every stub in this crate belongs to.

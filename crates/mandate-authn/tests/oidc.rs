@@ -10,7 +10,6 @@ use mandate_authn::{Jwks, Refusal, TokenKind, TokenPart, verify};
 use serde_json::{Value, json};
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_token_from_the_configured_issuer_verifies_under_each_allowed_algorithm() {
     let issuer = TestIssuer::new();
     for signer in [
@@ -28,7 +27,6 @@ fn a_token_from_the_configured_issuer_verifies_under_each_allowed_algorithm() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn none_hmac_and_every_other_algorithm_are_refused_before_a_key_is_used() {
     let issuer = TestIssuer::new();
     let payload = claims().to_string();
@@ -64,7 +62,6 @@ fn none_hmac_and_every_other_algorithm_are_refused_before_a_key_is_used() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_issuer_configured_for_es256_only_refuses_its_other_algorithms() {
     let issuer = TestIssuer::new();
     let es = issuer.token(Signer::Es256, &claims());
@@ -81,7 +78,6 @@ fn an_issuer_configured_for_es256_only_refuses_its_other_algorithms() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_header_that_names_its_own_key_or_a_critical_extension_is_refused() {
     let issuer = TestIssuer::new();
     let payload = claims().to_string();
@@ -113,7 +109,6 @@ fn a_header_that_names_its_own_key_or_a_critical_extension_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_key_must_be_named_found_and_of_the_algorithms_type() {
     let issuer = TestIssuer::new();
     let payload = claims().to_string();
@@ -151,7 +146,6 @@ fn a_key_must_be_named_found_and_of_the_algorithms_type() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_signature_from_another_key_or_over_other_bytes_is_refused() {
     let issuer = TestIssuer::new();
     let impostor = issuer.token(Signer::ImpostorEs256, &claims());
@@ -166,6 +160,7 @@ fn a_signature_from_another_key_or_over_other_bytes_is_refused() {
     );
     for signer in Signer::ALLOWED {
         let token = issuer.token(signer, &claims());
+        assert!(check(&issuer, &token).is_ok(), "{signer:?}");
         let (input, sig) = token.rsplit_once('.').unwrap();
         let (header, _) = input.split_once('.').unwrap();
         let admin = b64(with("sub", json!("admin")).to_string().as_bytes());
@@ -185,7 +180,6 @@ fn a_signature_from_another_key_or_over_other_bytes_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_es256_signature_is_the_raw_64_bytes_and_no_other_form() {
     let issuer = TestIssuer::new();
     let header = json!({"alg": "ES256", "kid": "es256-1"}).to_string();
@@ -193,6 +187,7 @@ fn an_es256_signature_is_the_raw_64_bytes_and_no_other_form() {
     let der = issuer.sign_es256_der(&header, &payload);
     assert_eq!(refused(&issuer, &der), Refusal::BadSignature, "DER");
     let token = issuer.sign_raw(Signer::Es256, &header, &payload);
+    assert!(check(&issuer, &token).is_ok(), "the raw 64 bytes verify");
     let (input, sig) = token.rsplit_once('.').unwrap();
     let raw = unb64(sig);
     assert_eq!(raw.len(), 64);
@@ -203,7 +198,6 @@ fn an_es256_signature_is_the_raw_64_bytes_and_no_other_form() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn no_claim_is_read_before_the_signature_verifies() {
     let issuer = TestIssuer::new();
     for (key, value) in [
@@ -213,6 +207,12 @@ fn no_claim_is_read_before_the_signature_verifies() {
         ("nonce", json!("other")),
         ("iss", json!(7)),
     ] {
+        let genuine = issuer.token(Signer::Es256, &with(key, value.clone()));
+        assert_ne!(
+            refused(&issuer, &genuine),
+            Refusal::BadSignature,
+            "the claim alone is refused, {key} {value}"
+        );
         let token = issuer.token(Signer::ImpostorEs256, &with(key, value.clone()));
         assert_eq!(
             refused(&issuer, &token),
@@ -223,7 +223,6 @@ fn no_claim_is_read_before_the_signature_verifies() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn only_the_configured_issuer_is_accepted_even_under_the_same_keys() {
     let issuer = TestIssuer::new();
     for iss in [

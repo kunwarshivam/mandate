@@ -499,8 +499,9 @@ sequenceDiagram
 4. The **approval service**, which runs in the workspace deployment, sends notifications
    to every configured push channel at once, plus one reminder when a quarter of the time remains
    ([DEC-438](project/decisions/DEC-438.md) item 6), respecting quiet hours; an ordered push → SMS
-   → phone chain waits for SMS and phone (E8-7) and a mandate schema field. **Notifications carry only an opaque ID and generic text** ("An agent in your
-   workspace needs your approval"), never the trade itself or the agent's name
+   → phone chain waits for E8-7 (SMS and phone) and a mandate schema field. **Notifications carry
+   only an opaque ID and generic text** ("An agent in your workspace needs your approval"), never
+   the trade itself or the agent's name
    ([notifications spec](specs/notifications.md)). Push goes through our relay; SMS,
    email, and chat can go through the customer's own gateways. Large actions can require
    **two approvers**.

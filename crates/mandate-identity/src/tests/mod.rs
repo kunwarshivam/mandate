@@ -1,7 +1,9 @@
 //! The crate's tests (E9-2). They sit in the crate because `Session`, `Membership`, and
 //! `MembershipLookup` are sealed to it (DEC-642), so the test doubles below are `cfg(test)` only.
 
+mod demand;
 mod matrix;
+mod roles;
 mod rows;
 mod ulid;
 mod wire;

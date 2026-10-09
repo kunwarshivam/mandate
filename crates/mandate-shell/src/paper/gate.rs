@@ -5,9 +5,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{
-    AccountType, AccountingError, AssetClass, InstrumentId, ProspectiveOrder, Side, fee_reservation,
+    AccountingError, AssetClass, InstrumentId, ProspectiveOrder, Side, fee_reservation,
 };
-use mandate_executor::BindingGateInput;
+use mandate_alpaca::{AccountRules, DeclaredRegime};
+use mandate_executor::{BindingGateInput, BrokerAccount};
 use mandate_num::{Fraction, Price, Qty, Ratio, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAction};
 use mandate_risk::{
@@ -67,14 +68,12 @@ pub(super) fn gate_template(
             agent_mode: AgentMode::Normal,
         },
         account: AccountSnapshot {
-            account_type: AccountType::Margin,
+            account_type: facts.broker.account_rules.account_type,
             state: AccountState::Active,
             crypto_active: account.crypto_status == "ACTIVE",
-            regime: DayTradeRegime::IntradayMargin {
-                maintenance_excess: Usd::ZERO,
-            },
+            regime: opening_regime(facts.broker.account_rules, account)?,
             equity: account.equity,
-            prior_close_equity: Usd::ZERO,
+            prior_close_equity: account.last_equity,
             model_buying_power: account.one_x_buying_power(),
             broker_buying_power: account.buying_power,
             broker_non_marginable_buying_power: account.non_marginable_buying_power,
@@ -139,6 +138,28 @@ pub(super) fn gate_template(
         data_profile: "tracer-paper".to_owned(),
         feed: "iex".to_owned(),
     })
+}
+
+/// The gate's day-trading regime for an opening run, from the connector's declared regime and the
+/// broker's account answer (DEC-840 item 5). Under `intraday_margin` the excess is the executor's
+/// [`BrokerAccount::maintenance_excess`]; a maintenance figure it refuses is refused here, never read
+/// as no requirement, and a reported deficit refuses the opening, since nothing yet turns it into
+/// §9.2's `exits_only` (DEC-840 item 4). A zero excess is no deficit. Only the assembly of an opening
+/// run may call this: no exit, protective-order or recovery path is gated by it (`AGENTS.md` rule
+/// 13).
+fn opening_regime(rules: AccountRules, account: &BrokerAccount) -> Result<DayTradeRegime, Cause> {
+    match rules.regime {
+        DeclaredRegime::LegacyPdt => Ok(DayTradeRegime::LegacyPdt),
+        DeclaredRegime::IntradayMargin => {
+            let maintenance_excess = account
+                .maintenance_excess()
+                .map_err(|_| absent("the broker's maintenance excess"))?;
+            if maintenance_excess.is_negative() {
+                return Err(absent("an account with no maintenance deficit"));
+            }
+            Ok(DayTradeRegime::IntradayMargin { maintenance_excess })
+        }
+    }
 }
 
 /// `mandate-accounting`'s fee reservation for one equity order on the reviewed instrument.

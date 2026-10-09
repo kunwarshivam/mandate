@@ -24,16 +24,18 @@
 #      allowed_dependents list is the only thing that may build an identity session or membership)
 #   1  mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
-#      mandate-authn (E9-1, DEC-650): token verification and sessions as pure functions, with the
-#      issuer's keys and the clock handed in, so it never fetches a key or reads a clock, and
 #      mandate-notify, the closed notice (E8-9, DEC-710): below the journal, so it can never reach
 #      the control-stream writer (notifications spec NT-3)
-#   2  mandate-journal, mandate-accounting, and mandate-passkey, the WebAuthn relying party
-#      (E9-1, DEC-660), which verifies and never signs
-#   3  mandate-spec
+#   2  mandate-journal, mandate-accounting, mandate-passkey, the WebAuthn relying party
+#      (E9-1, DEC-660), which verifies and never signs, and mandate-authn (E9-1, DEC-650, DEC-652):
+#      token verification and sessions as pure functions, with the issuer's keys and the clock
+#      handed in, so it never fetches a key or reads a clock; above mandate-identity, whose sealed
+#      session it builds
+#   3  mandate-spec, mandate-audit (read-only audit reads over the journal, scoped to one
+#      workspace; E12-6)
 #   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
-#      mandate-spec; it holds L5's audit wire types, and mandate-audit sits above it and converts
-#      into them; its server sits higher (DEC-680)
+#      mandate-spec; it holds L5's audit wire types, and mandate-audit (layer 3) sits below it, so
+#      the conversion into them sits above both; its server sits higher (DEC-680)
 #   5  mandate-builder
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
 #      mandate-runtime, mandate-mcp
@@ -46,8 +48,8 @@
 #      quant model host (E15-13, DEC-503 item 2), beside the shell so that neither can depend on
 #      the other: the shell cannot run a model, and the host cannot reach sizing, the gate, the
 #      journal, the executor or the connector
-#   9  mandate-paper (planned: the paper adapter, the only crate that sees both the host and the
-#      shell), and mandate-cli (DEC-525): above the model host, so `model register` takes the content object and
+#   9  mandate-paper, the paper adapter (E7-19 slice 5, DEC-503 item 2): the only crate that sees
+#      both the host and the shell, and mandate-cli (DEC-525): above the model host, so `model register` takes the content object and
 #      its hash from `mandate_modelhost::content()` and no caller supplies a hash; its
 #      `forbidden_internal` list keeps it from ever reaching mandate-alpaca, mandate-shell or
 #      mandate-paper, so the founder's CLI cannot place an order
@@ -62,7 +64,6 @@ impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
 planned = [
-    "mandate-paper",
     "mandate-identity-system",
     "mandate-tenant",
     "mandate-identity-seal",
@@ -115,7 +116,7 @@ pure = true
 allowed_external = ["thiserror"]
 
 [crates.mandate-authn]
-layer = 1
+layer = 2
 safety_critical = true
 pure = true
 allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
@@ -137,7 +138,7 @@ layer = 0
 safety_critical = true
 pure = true
 allowed_external = []
-allowed_dependents = ["mandate-identity", "mandate-identity-testkit"]
+allowed_dependents = ["mandate-authn", "mandate-identity", "mandate-identity-testkit"]
 
 [crates.mandate-identity-testkit]
 layer = 11
@@ -175,6 +176,12 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+[crates.mandate-audit]
+layer = 3
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-spec]
 layer = 3
 safety_critical = true
@@ -200,7 +207,7 @@ allowed_external = ["libtest-mimic", "serde_json", "toml"]
 layer = 10
 safety_critical = true
 pure = true
-allowed_external = ["thiserror"]
+allowed_external = ["serde_json", "thiserror"]
 
 [crates.mandate-builder]
 layer = 5
@@ -243,7 +250,7 @@ allowed_external = ["reqwest", "rustls", "serde", "serde_json", "thiserror"]
 layer = 6
 safety_critical = true
 pure = true
-allowed_external = ["thiserror"]
+allowed_external = ["secrecy", "thiserror"]
 
 [crates.mandate-journal-pg]
 layer = 6
@@ -306,4 +313,12 @@ allowed_external = ["clap", "thiserror", "tokio"]
 layer = 8
 safety_critical = true
 pure = true
+allowed_external = ["thiserror"]
+
+# The paper adapter (E7-19 slice 5, the first paper trade brief's E1a): it hands the model host's
+# output to the shell's production cycle and decides nothing itself.
+[crates.mandate-paper]
+layer = 9
+safety_critical = true
+pure = false
 allowed_external = ["thiserror"]
