@@ -280,7 +280,7 @@ item above (C-3, C-9) are not repeated.
 - [x] **The mode chip in the desktop agent header**, on every tab. (C-8) Done in #1166.
 - [x] **Owls in the Stop sheet's agent rows.** Safety lane. (C-10) Done in
       [#1103](https://github.com/kunwarshivam/mandate/pull/1103).
-- [ ] **The Allowed chip keeps its edge in dark mode**, with its fill in the contrast pairs. (C-18)
+- [x] **The Allowed chip keeps its edge in dark mode**, with its fill in the contrast pairs. (C-18) Done in #1230.
 - [x] **A labelled composer in set-up**, with a flat send button; still no placeholder or example.
       (C-4) Done in [#1239](https://github.com/kunwarshivam/mandate/pull/1239).
 - [x] **Alerts says all clear** when every feed answers and no agent is restricted. (C-13) Done in [#1167](https://github.com/kunwarshivam/mandate/pull/1167).

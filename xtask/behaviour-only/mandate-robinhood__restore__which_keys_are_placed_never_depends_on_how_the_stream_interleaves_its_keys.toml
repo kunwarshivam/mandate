@@ -1,9 +1,0 @@
-file = "crates/mandate-robinhood/tests/restore.rs"
-test = "which_keys_are_placed_never_depends_on_how_the_stream_interleaves_its_keys"
-reason = """
-DEC-872 and DEC-874 as a property: on main which keys are placed depends on how the stream
-interleaves different keys' records, and odd ids are read, so the order-free oracle disagrees.
-`RobinhoodConnector::restore` is implemented on main (E7-6, #1200), so there is no stub to stop at:
-the test fails on the answer the implementation gives. The E7-6 change that adopts DEC-874 deletes
-the marker and this file.
-"""
