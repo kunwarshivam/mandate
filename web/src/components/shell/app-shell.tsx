@@ -64,7 +64,7 @@ function Frame({ children }: { children: ReactNode }) {
         Skip to content
       </a>
       <div className={cn("flex min-h-dvh min-w-0 flex-1 flex-col bg-card", bleed && "h-dvh max-lg:pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom))]")}>
-        <AppHeader className="max-lg:group-has-[[data-slot=thread-pane]]/frame:hidden" />
+        <AppHeader className="max-lg:group-has-[[data-slot=thread-pane]]/frame:hidden" sheetLayer={sheetLayer} />
         {strip ? (
           <div className={record ? undefined : "max-lg:hidden"}>
             <StatusStrip ws={ws} now={now} className="px-(--page-x)" />
