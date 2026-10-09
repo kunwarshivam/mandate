@@ -13,7 +13,8 @@
   `tests/consume.rs` (the record, its canonical form, each refusal, the order with two failures,
   re-verification), `tests/consume_properties.rs` (the refusal is the first injected failure
   in DEC-662's order), with the fixture in `tests/stepup/mod.rs`; `tests/issue.rs` (issuance
-  against `authorize` and an oracle parsed from §4.2); and the `compile_fail` doctests on
+  against `authorize` and an oracle parsed from §4.2, and no context for a service account or the
+  host CLI); and the `compile_fail` doctests on
   `ChallengeRecord`, `Used`, `Consumed` (no caller builds one), and `issue_challenge` (no call
   without a context).
 - **Run:** `cargo nextest run -p mandate-passkey` and `cargo test -p mandate-passkey --doc`.
