@@ -43,7 +43,7 @@ use mandate_builder::{
     ModelOutput as BuilderModelOutput, RiskContext as BuilderRiskContext,
 };
 use mandate_canon::{Digest, Key, Object, Value};
-use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
+use mandate_domain::{AutonomyDecision, CapabilityProfile, Purpose as BuilderPurpose};
 use mandate_executor::{
     AccountRef, AccountScope, AgentId as ExecutorAgentId, BindingGateSource, BrokerConnector,
     BrokerOutcome, BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState,
@@ -1873,6 +1873,12 @@ impl Executor for CoreExecutor {
         let scope = self.state.borrow().scope().clone();
         *self.state.borrow_mut() = ExecutorState::new(scope);
         Ok(())
+    }
+
+    /// A stub until E7-23 B2a: the profile replaces the transitional one in the folded state.
+    fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
+        let _ = profile;
+        Err(Cause::Unimplemented { story: "E7-23" })
     }
 
     fn step(

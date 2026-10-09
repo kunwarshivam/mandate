@@ -903,6 +903,11 @@ impl Executor for PaperExecutor {
         Ok(())
     }
 
+    fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
+        let _ = profile;
+        Ok(())
+    }
+
     fn step(
         &mut self,
         input: mandate_executor::Input,
@@ -1211,6 +1216,11 @@ impl Sink for Stubbed {
 
 impl Executor for Stubbed {
     fn reset(&mut self) -> Result<(), Cause> {
+        Ok(())
+    }
+
+    fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
+        let _ = profile;
         Ok(())
     }
 
