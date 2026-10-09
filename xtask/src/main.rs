@@ -9512,6 +9512,11 @@ jq -r "$filter" "$src"
     /// The pins of `refused_only_by_reading_fail_closed` hold no `cargo` token, no `live` and no
     /// feature flag, so only this reading refuses them, never the backstop or the cargo-word rule
     /// (X1 tests correction 7, step 3b's planted bugs).
+    ///
+    /// A here-doc's body, or the lines of a single-quoted string that spans lines, inside a
+    /// `<( … )` or `$( … )` is text only when that substitution's consumer is known non-executing
+    /// or a bare assignment: fed to `bash <( … )` its lines are commands, captured by `x=$( … )`
+    /// they are text (X1 tests correction 9, `read_as_text`'s consumer branch).
     #[test]
     fn commands_are_read_fail_closed_where_a_word_may_execute() -> Result<()> {
         let policy = live_policy();
@@ -9581,6 +9586,14 @@ jq -r "$filter" "$src"
                 "set -e\ncat <<EOF\ncargo build $F\nEOF\n",
             ),
             (".github/scripts/build.sh", "set -e\njq -n '\n$a $b\n'\n"),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nx=$(cat <<EOF\n$C \"$A\"\nEOF\n)\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nx=$(echo '\n$C \"$A\"\n')\n",
+            ),
         ];
         for (path, text) in allowed_in_a_script {
             let files = [ci_file(path, text)];
@@ -9611,6 +9624,16 @@ jq -r "$filter" "$src"
                 "steps:\n  - run: ${{ inputs.cmd }} build $F\n",
                 ":2",
             ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nbash <(cat <<EOF\n$C \"$A\"\nEOF\n)\n",
+                ":3",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nbash <(echo '\n$C \"$A\"\n')\n",
+                ":3",
+            ),
         ];
         for (path, text, line) in refused_through_an_executing_command {
             let files = [ci_file(path, text)];
@@ -9619,6 +9642,61 @@ jq -r "$filter" "$src"
             assert!(
                 problems[0].contains(&format!("{path}{line}")),
                 "names the file and line: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// `eval`, and `sh`, `bash` or `zsh` given `-c` (alone or in a short-flag cluster) or a
+    /// here-string, run their argument as a command line, so one that expands (`$` or a backtick)
+    /// is refused, by any path, after a keyword, and inside a re-read word (DEC-851 item 1, the
+    /// coordinator's ruling under DEC-176; X1 tests correction 9). A shell given a script file,
+    /// and an `eval` or `-c` whose argument expands nothing, stay allowed.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn eval_and_shells_given_an_expanding_command_line_are_refused() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let refused = [
+            "eval \"$C\"",
+            "eval \"$(cat x)\"",
+            "sh -c \"$C\"",
+            "bash <<< \"$C\"",
+            "zsh -c \"$X $Y\"",
+            "sh <<<\"$C\"",
+            "/bin/bash -c \"$C\"",
+            "bash -ec \"$C\"",
+            "bash -e -c `cat x`",
+            "if eval \"$C\"; then :; fi",
+            "echo 'eval \"$C\"' | sh",
+        ];
+        for line in refused {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let allowed = [
+            "bash .github/scripts/docs-only.sh \"$A\"",
+            "sh -c 'exit 0'",
+            "eval 'set -e'",
+            "bash -e .github/scripts/x.sh",
+        ];
+        for line in allowed {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{line}"
             );
         }
         Ok(())
