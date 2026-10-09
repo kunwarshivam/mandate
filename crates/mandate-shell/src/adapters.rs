@@ -43,7 +43,7 @@ use mandate_builder::{
     ModelOutput as BuilderModelOutput, RiskContext as BuilderRiskContext,
 };
 use mandate_canon::{Digest, Key, Object, Value};
-use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
+use mandate_domain::{AutonomyDecision, CapabilityProfile, Purpose as BuilderPurpose};
 use mandate_executor::{
     AccountRef, AccountScope, AgentId as ExecutorAgentId, BindingGateSource, BrokerConnector,
     BrokerOutcome, BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState,
@@ -1884,6 +1884,12 @@ impl Executor for CoreExecutor {
         Ok(())
     }
 
+    /// A stub until E7-23 B2a: the profile replaces the transitional one in the folded state.
+    fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
+        let _ = profile;
+        Err(Cause::Unimplemented { story: "E7-23" })
+    }
+
     fn step(
         &mut self,
         input: mandate_executor::Input,
@@ -2414,6 +2420,45 @@ mod tests {
             core.state().head("acct:tracer:tracer-paper"),
             Some(mandate_executor::Seq(1))
         );
+        Ok(())
+    }
+
+    /// DEC-838 item 5: the profile handed to the core executor replaces its transitional one in
+    /// the state it has folded, which it keeps.
+    #[test]
+    #[ignore = "pending E7-23"]
+    fn core_executor_keeps_its_fold_and_takes_the_profile_it_is_handed() -> Result<(), String> {
+        let (mut core, _) = CoreExecutor::pair(account_scope(), Some(test_executor_context()?));
+        let opened = stream_opened()?;
+        core.committed(&opened).map_err(|e| e.to_string())?;
+        let cell = mandate_domain::Cell {
+            order_type: mandate_domain::OrderType::Limit,
+            quantity_form: mandate_domain::QuantityForm::Whole,
+            times_in_force: [mandate_domain::TimeInForce::Gtc].into(),
+            protection_forms: [mandate_domain::ProtectionForm::Oco].into(),
+        };
+        let row = mandate_domain::Row {
+            asset_class: mandate_accounting::AssetClass::UsEquity,
+            session: mandate_domain::MarketSession::Regular,
+            cells: vec![cell],
+        };
+        let idempotency = mandate_domain::Idempotency {
+            client_order_id: true,
+            retry: mandate_domain::Retry::Idempotent,
+            query_by_client_order_id: true,
+        };
+        let profile = mandate_domain::CapabilityProfile::new(1, vec![row], idempotency)
+            .map_err(|e| e.to_string())?;
+        core.use_profile(profile.clone())
+            .map_err(|e| e.to_string())?;
+        let mut folded = mandate_executor::ExecutorState::new(account_scope());
+        mandate_executor::fold(&mut folded, &opened).map_err(|e| e.to_string())?;
+        assert_ne!(
+            *core.state(),
+            folded,
+            "the transitional profile is replaced"
+        );
+        assert_eq!(*core.state(), folded.with_profile(profile));
         Ok(())
     }
 
