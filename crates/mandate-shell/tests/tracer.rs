@@ -2207,7 +2207,6 @@ fn nonconforming_deny_fixture() -> Governance {
 /// An increase, which `routine` makes `auto`, is the overlay's own deny, so the same fixture
 /// shows the label follows the step that decided.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_deny_the_rules_decided_under_a_nonconforming_mandate_keeps_the_rule_label() {
     let governed = nonconforming_deny_fixture();
     let by_rule = Classified {
