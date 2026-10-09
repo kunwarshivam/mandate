@@ -55,9 +55,9 @@ pub use artifact::{
 };
 pub use connection_fold::{
     ConnectionAnchor, ConnectionCheck, ConnectionCheckError, ConnectionFailure, ConnectionStart,
-    ConnectionStreamRule, ConnectionVerifyError, LocatedConnectionFailure,
-    verify_connection_causes, verify_connection_causes_from_genesis, verify_connection_lifecycle,
-    verify_connection_lifecycle_from,
+    ConnectionStreamRule, ConnectionVerifyError, JUDGED_ON_ACCOUNT, JUDGED_ON_CONTROL,
+    LocatedConnectionFailure, verify_connection_causes, verify_connection_causes_from_genesis,
+    verify_connection_lifecycle, verify_connection_lifecycle_from,
 };
 pub use control_verify::{
     ControlStreamCheck, ControlStreamFailure, ControlVerifyError, verify_anchor_self,
