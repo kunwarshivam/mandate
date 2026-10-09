@@ -24,6 +24,7 @@ mandate-time.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+mandate-executor.workspace = true
 mandate-journal-pg.workspace = true
 mandate-marketdata.workspace = true
 proptest.workspace = true

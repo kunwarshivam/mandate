@@ -1803,6 +1803,7 @@ dependencies = [
  "mandate-alpaca",
  "mandate-artifacts-fs",
  "mandate-canon",
+ "mandate-executor",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-marketdata",

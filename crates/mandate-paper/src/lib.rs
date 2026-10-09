@@ -19,6 +19,7 @@
 //! and output handed to [`mandate_shell::ProductionCycle::run_observed`], the one door (FT-1,
 //! FT-6). No product value is a constant here (FT-2).
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use std::rc::Rc;
@@ -388,13 +389,30 @@ impl Pause for SystemClock {
 /// each submitted order, or the model's `Flat` or `Undecided`. The binary prints an error's message
 /// alone on stderr and exits non-zero; no line or message names a DSN or a key (rule 7).
 ///
+/// The environment is the process's own, as `std::env::vars_os` gives it, so a variable that is
+/// not Unicode never panics the binary: each name and value is read lossily, so one the run does
+/// not read changes nothing, and an Alpaca variable holding a URL is still refused by the host
+/// check, naming the variable only.
+///
 /// # Errors
 /// Every [`PaperError`] of [`parse`] and [`run`].
 pub fn process<A, V>(args: A, vars: V) -> Result<Vec<String>, PaperError>
 where
     A: IntoIterator<Item = String>,
-    V: IntoIterator<Item = (String, String)>,
+    V: IntoIterator<Item = (OsString, OsString)>,
 {
     let _ = (args.into_iter(), vars.into_iter());
+    Err(PaperError::Unimplemented { story: "E7-19" })
+}
+
+/// What a run that refused nothing prints, one line each: the order a dry run would place
+/// (`would place <client_order_id> (nothing sent; pass --place-one-order)`), each submitted order
+/// (`submitted <client_order_id>`), or the model's `Flat` or `Undecided` (`the model output
+/// <signal>; nothing sent`). Ids and the signal only, never a value (rule 7).
+///
+/// # Errors
+/// None once implemented; the stub answers [`PaperError::Unimplemented`].
+pub fn lines(outcome: &Outcome) -> Result<Vec<String>, PaperError> {
+    let _ = outcome;
     Err(PaperError::Unimplemented { story: "E7-19" })
 }
