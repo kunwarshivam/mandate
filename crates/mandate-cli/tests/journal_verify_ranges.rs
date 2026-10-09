@@ -13,7 +13,7 @@
 //! answer from how it was built.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use clap::Parser;
@@ -38,29 +38,18 @@ const TOKEN_BYTES: &[u8] = b"a timestamp token, stored so check 6 passes";
 /// The two commands: `journal verify` over one segment file, `verify-cold` over a directory.
 const BOTH: [&str; 2] = ["verify", "verify-cold"];
 
-/// A scratch directory, removed when dropped.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new() -> Self {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("mandate-ranges-{}-{n}", std::process::id()));
-        fs::create_dir_all(dir.join("export")).unwrap();
-        Self(dir)
-    }
-
-    fn put(&self, name: &str, bytes: &[u8]) -> String {
-        let path = self.0.join(name);
-        fs::write(&path, bytes).unwrap();
-        path.to_str().unwrap().to_owned()
-    }
+/// A new scratch directory holding an empty `export/`; [`run`] removes it.
+fn scratch() -> PathBuf {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("mandate-ranges-{}-{n}", std::process::id()));
+    fs::create_dir_all(dir.join("export")).unwrap();
+    dir
 }
 
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
+fn put(dir: &Path, name: &str, bytes: &[u8]) -> String {
+    fs::write(dir.join(name), bytes).unwrap();
+    dir.join(name).to_str().unwrap().to_owned()
 }
 
 /// The `range_checks` cases of `section`.
@@ -73,12 +62,8 @@ fn cases(section: &str) -> Vec<Json> {
 
 /// The range of the `section` case named `name`.
 fn range(section: &str, name: &str) -> Range {
-    Range::of(
-        &cases(section)
-            .into_iter()
-            .find(|c| c["name"] == name)
-            .unwrap(),
-    )
+    let case = cases(section).into_iter().find(|c| c["name"] == name);
+    Range::of(&case.unwrap())
 }
 
 /// The failing cases of `section`, each with the `(seq, check)` it expects; each section holds
@@ -96,25 +81,23 @@ fn failing(section: &str) -> Vec<(Json, u64, String)> {
     found
 }
 
-/// A range: its trusted start and its bodies in `seq` order.
+/// A range: its trusted start, its bodies in `seq` order, and a `seq` whose stored hash is stale.
 #[derive(Debug, Clone)]
 struct Range {
     from_seq: u64,
     prev_hash: String,
     bodies: Vec<Json>,
+    stale_hash_at: Option<u64>,
 }
 
 impl Range {
     fn of(case: &Json) -> Self {
+        let chain = case["chain"].as_array().unwrap();
         Self {
             from_seq: case["from_seq"].as_u64().unwrap_or(1),
             prev_hash: case["prev_hash"].as_str().unwrap_or(ZERO_HASH).to_owned(),
-            bodies: case["chain"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|e| e["body"].clone())
-                .collect(),
+            bodies: chain.iter().map(|e| e["body"].clone()).collect(),
+            stale_hash_at: None,
         }
     }
 
@@ -138,7 +121,12 @@ impl Range {
             let bytes = to_canonical(&parse(&serde_json::to_vec(&body).unwrap()).unwrap());
             let hash = Digest::of(&bytes);
             prev = hash.to_hex();
-            out.push((String::from_utf8(bytes).unwrap(), hash));
+            let stored = if self.stale_hash_at == Some(seq) {
+                Digest::of(b"stale")
+            } else {
+                hash
+            };
+            out.push((String::from_utf8(bytes).unwrap(), stored));
         }
         out
     }
@@ -167,43 +155,46 @@ impl Range {
 /// What a run answered: its report's `result:` text, its code, and whether it exits non-zero.
 type Ran = (String, Option<&'static str>, bool);
 
-/// Runs `command` over `range` written as one segment, with `--anchor` bytes when given. The
-/// scratch paths hold no whitespace, so the command line is split on it.
-fn run(command: &str, range: &Range, anchor: Option<&[u8]>) -> Ran {
-    let scratch = Scratch::new();
-    let store = scratch.0.join("store");
-    let token = FsArtifactStore::open(&store)
+/// Runs `command` over `range` written as one segment, with each `(flag, bytes)` of `files` given
+/// as a file. The scratch paths hold no whitespace, so the command line is split on it.
+fn run(command: &str, range: &Range, files: &[(&str, &[u8])]) -> Ran {
+    let scratch = scratch();
+    let store = scratch.join("store");
+    FsArtifactStore::open(&store)
         .unwrap()
         .put_artifact(TOKEN_BYTES)
         .unwrap();
-    let events = range.chained(&token.to_string());
+    let events = range.chained(&token());
     let file: String = events
         .iter()
         .map(|(b, h)| format!("{{\"body\":{b},\"hash\":\"{h}\"}}\n"))
         .collect();
     let input = match command {
-        "verify" => scratch.put("segment.jsonl", file.as_bytes()),
+        "verify" => put(&scratch, "segment.jsonl", file.as_bytes()),
         _ => {
-            scratch.put(
+            put(
+                &scratch,
                 "export/seg.manifest.json",
                 &manifest(range, &events, file.as_bytes()),
             );
-            scratch.put("export/seg.jsonl", file.as_bytes());
-            scratch.0.join("export").to_str().unwrap().to_owned()
+            put(&scratch, "export/seg.jsonl", file.as_bytes());
+            scratch.join("export").to_str().unwrap().to_owned()
         }
     };
     let (from, prev, store) = (range.from_seq, &range.prev_hash, store.display());
-    let anchor = anchor.map(|bytes| format!("--anchor {}", scratch.put("anchor.json", bytes)));
+    let files: String = files
+        .iter()
+        .map(|(flag, bytes)| format!("{flag} {} ", put(&scratch, flag, bytes)))
+        .collect();
     let line = format!(
         "mandate journal {command} {input} --store {store} --from-seq {from} \
-         --trusted-prev-hash {prev} {}",
-        anchor.unwrap_or_default()
+         --trusted-prev-hash {prev} {files}"
     );
     let mut report = Vec::new();
-    let (code, failed) = match Cli::try_parse_from(line.split_whitespace())
+    let command = Cli::try_parse_from(line.split_whitespace())
         .unwrap()
-        .command
-    {
+        .command;
+    let (code, failed) = match command {
         Command::Journal(JournalCommand::Verify(args)) => {
             let outcome = journal::verify(&args, &mut report).unwrap();
             (outcome.code(), outcome.failed())
@@ -214,6 +205,7 @@ fn run(command: &str, range: &Range, anchor: Option<&[u8]>) -> Ran {
         }
         other => unreachable!("{other:?}"),
     };
+    let _ = fs::remove_dir_all(&scratch);
     let report = String::from_utf8(report).unwrap();
     let result = report
         .lines()
@@ -240,16 +232,21 @@ fn manifest(range: &Range, events: &[(String, Digest)], file: &[u8]) -> Vec<u8> 
     to_canonical(&Value::Object(object))
 }
 
-/// An anchor file with one leaf, for the control stream at `seq`, naming `hash`.
-fn anchor_file(seq: u64, hash: Digest) -> Vec<u8> {
+fn token() -> String {
+    ArtifactRef::of(TOKEN_BYTES).to_string()
+}
+
+/// An anchor file with one leaf, for the control stream at `seq`, naming `hash`, and its root.
+fn anchor_file(seq: u64, hash: Digest) -> (Vec<u8>, Digest) {
     let leaf = AnchorLeaf {
         stream_id: CTL.to_owned(),
         seq,
         hash,
     };
     let root = Anchor::compute(vec![leaf]).unwrap().root;
-    format!("{{\"leaves\":[{{\"hash\":\"{hash}\",\"seq\":{seq},\"stream_id\":\"{CTL}\"}}],\"root\":\"{root}\"}}")
-        .into_bytes()
+    let leaves = format!("[{{\"hash\":\"{hash}\",\"seq\":{seq},\"stream_id\":\"{CTL}\"}}]");
+    let bytes = format!("{{\"leaves\":{leaves},\"root\":\"{root}\"}}").into_bytes();
+    (bytes, root)
 }
 
 #[track_caller]
@@ -260,11 +257,7 @@ fn assert_fails(ran: Ran, seq: u64, check: &str, what: &str) {
 
 #[track_caller]
 fn assert_verified(ran: Ran, range: &Range, what: &str) {
-    let last = range
-        .chained(&ArtifactRef::of(TOKEN_BYTES).to_string())
-        .pop()
-        .unwrap()
-        .1;
+    let last = range.chained(&token()).pop().unwrap().1;
     let (stream, first, end) = (range.stream(), range.from_seq, range.last_seq());
     let expected = format!("verified, stream {stream}, seq {first} to {end}, last hash {last}");
     assert_eq!(ran, (expected, None, false), "{what}");
@@ -293,7 +286,7 @@ fn the_vector_ranges_that_pass_verify_on_both_commands() {
         let range = Range::of(case);
         for command in BOTH {
             let what = format!("{command} {}", case["name"]);
-            assert_verified(run(command, &range, None), &range, &what);
+            assert_verified(run(command, &range, &[]), &range, &what);
         }
     }
 }
@@ -305,7 +298,7 @@ fn the_control_checks_run_on_no_other_stream_type() {
             let range = Range::of(&case).on_stream(stream);
             for command in BOTH {
                 let what = format!("{command} {} on {stream}", case["name"]);
-                assert_verified(run(command, &range, None), &range, &what);
+                assert_verified(run(command, &range, &[]), &range, &what);
             }
         }
     }
@@ -313,22 +306,11 @@ fn the_control_checks_run_on_no_other_stream_type() {
 
 #[test]
 #[ignore = "pending E12-3"]
-fn anchor_self_mismatch_vectors_fail_at_the_anchor() {
-    for (case, seq, check) in failing("cold_records") {
+fn the_failing_vectors_fail_at_their_seq_with_their_check() {
+    for (case, seq, check) in SECTIONS.into_iter().flat_map(failing) {
         for command in BOTH {
             let what = format!("{command} {}", case["name"]);
-            assert_fails(run(command, &Range::of(&case), None), seq, &check, &what);
-        }
-    }
-}
-
-#[test]
-#[ignore = "pending E12-3"]
-fn break_glass_cause_mismatch_vectors_fail_at_the_read() {
-    for (case, seq, check) in failing("records_access") {
-        for command in BOTH {
-            let what = format!("{command} {}", case["name"]);
-            assert_fails(run(command, &Range::of(&case), None), seq, &check, &what);
+            assert_fails(run(command, &Range::of(&case), &[]), seq, &check, &what);
         }
     }
 }
@@ -350,9 +332,9 @@ fn the_lowest_seq_wins_between_the_two_control_checks() {
     let anchor_first = anchor.then(&read);
     for command in BOTH {
         let what = format!("{command}: a bad read at 2, then a bad anchor at 4");
-        assert_fails(run(command, &read_first, None), 2, BAD_READ, &what);
+        assert_fails(run(command, &read_first, &[]), 2, BAD_READ, &what);
         let what = format!("{command}: a bad anchor at 4, then an uncaused read at 5");
-        assert_fails(run(command, &anchor_first, None), 4, BAD_ANCHOR, &what);
+        assert_fails(run(command, &anchor_first, &[]), 4, BAD_ANCHOR, &what);
     }
 }
 
@@ -362,20 +344,54 @@ fn a_control_check_is_reported_before_a_later_anchor_failure() {
     let honest = range("cold_records", "anchor_names_the_head_before_it");
     let not_the_head = Digest::of(b"not the head");
     for command in BOTH {
-        let ran = run(
-            command,
-            &honest,
-            Some(&anchor_file(honest.last_seq(), not_the_head)),
-        );
+        let (anchor, _) = anchor_file(honest.last_seq(), not_the_head);
+        let ran = run(command, &honest, &[("--anchor", &anchor)]).0;
         assert_eq!(
-            ran.0, "failed, anchor_head_mismatch",
-            "{command}: the anchor file fails"
+            ran, "failed, anchor_head_mismatch",
+            "{command}: the anchor fails"
         );
         for (case, seq, check) in SECTIONS.into_iter().flat_map(failing) {
             let range = Range::of(&case);
-            let anchor = anchor_file(range.last_seq(), not_the_head);
+            let (anchor, _) = anchor_file(range.last_seq(), not_the_head);
+            let ran = run(command, &range, &[("--anchor", &anchor)]);
             let what = format!("{command} {} under a failing anchor", case["name"]);
-            assert_fails(run(command, &range, Some(&anchor)), seq, &check, &what);
+            assert_fails(ran, seq, &check, &what);
         }
+    }
+}
+
+#[test]
+#[ignore = "pending E12-3"]
+fn a_control_check_is_reported_before_the_token() {
+    let honest = range("cold_records", "anchor_names_the_head_before_it");
+    let failing = SECTIONS.into_iter().flat_map(failing);
+    let ranges = failing.map(|(case, seq, check)| (Range::of(&case), Some((seq, check))));
+    for (range, expect) in std::iter::once((honest, None)).chain(ranges) {
+        let head = range.chained(&token()).pop().unwrap().1;
+        let (anchor, root) = anchor_file(range.last_seq(), head);
+        let imprint = Digest::of(root.as_bytes());
+        let claims = [b"TSTInfo ", imprint.as_bytes().as_slice()].concat();
+        let tokens = [
+            (b"no imprint".to_vec(), "tsa_token_invalid"),
+            (claims, "tsa_verification_incomplete"),
+        ];
+        for (token, alone) in tokens {
+            let files = [("--anchor", anchor.as_slice()), ("--token", &token)];
+            let ran = run("verify-cold", &range, &files);
+            match &expect {
+                None => assert_eq!(ran.0, format!("failed, {alone}"), "the honest range"),
+                Some((seq, check)) => assert_fails(ran, *seq, check, &format!("token: {alone}")),
+            }
+        }
+    }
+}
+
+#[test]
+fn a_check_one_to_six_is_reported_before_a_later_control_check() {
+    let mut range = range("cold_records", "anchor_names_an_earlier_seq");
+    range.stale_hash_at = Some(2);
+    for command in BOTH {
+        let what = format!("{command}: a stale hash at 2, then a bad anchor at 4");
+        assert_fails(run(command, &range, &[]), 2, "rehash_mismatch", &what);
     }
 }

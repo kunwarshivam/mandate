@@ -1,5 +1,5 @@
 file = "crates/mandate-cli/tests/journal_verify_ranges.rs"
-test = "anchor_self_mismatch_vectors_fail_at_the_anchor"
+test = "a_control_check_is_reported_before_the_token"
 reason = """
 E12-3 (DEC-782): both verifiers already run and answer verified or an anchor code, so there is no
 stub to stop at; the control-stream checks are library functions the CLI does not call yet. The
