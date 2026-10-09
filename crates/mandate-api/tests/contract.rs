@@ -591,16 +591,46 @@ impl Validate for Acted {
     }
 }
 
+/// [`Actor`]s as an array's items, beside a closed enum.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Crowd {
+    crowd: Vec<Actor>,
+    effect: Effect,
+}
+
+impl Validate for Crowd {
+    fn validate(&self) -> Result<(), Refused> {
+        Ok(())
+    }
+}
+
 /// serde reads an internally tagged object whole before it decodes its members, so it cannot name
 /// the member inside it that it refuses: the refusal is located at the tagged object itself
 /// (DEC-681 item 10), whether that object is its parent's last member or not, and never at the
 /// parent or at a sibling inside it. Every code that serde reports after reading the object is
-/// covered: `type`, `unknown_member`, `non_canonical`, and `missing`. The tagged object as a first
-/// member, and an unknown `kind`, which serde names, are the controls.
+/// covered: `type`, `unknown_member`, `non_canonical`, and `missing`. In an array, the tagged object
+/// is its item, `/crowd/<index>`, never the array nor another item. The controls are what serde
+/// names already: the tagged object as a first member, an unknown `kind` or one of the wrong JSON
+/// type at `/who/kind`, and a `who` that is not an object, `type` at `/who`.
 #[test]
 #[ignore = "pending E10-10"]
 fn a_refusal_inside_a_tagged_object_is_located_at_that_object() {
-    let cases: [(&[u8], &str, &str); 9] = [
+    let cases: [(&[u8], &str, &str); 15] = [
+        (
+            br#"{"effect": "none", "who": {"kind": 5, "id": "a"}}"#,
+            "/who/kind",
+            "type",
+        ),
+        (
+            br#"{"who": {"id": "a", "kind": null}, "effect": "none"}"#,
+            "/who/kind",
+            "type",
+        ),
+        (br#"{"effect": "none", "who": 5}"#, "/who", "type"),
+        (br#"{"effect": "none", "who": "user"}"#, "/who", "type"),
+        (br#"{"who": 5, "effect": "none"}"#, "/who", "type"),
+        (br#"{"who": null, "effect": "none"}"#, "/who", "type"),
         (
             br#"{"effect": "none", "who": {"kind": "user", "id": 5}}"#,
             "/who",
@@ -647,7 +677,52 @@ fn a_refusal_inside_a_tagged_object_is_located_at_that_object() {
             "missing",
         ),
     ];
-    let wrong = mislocated::<Acted>(&cases);
+    let user = r#"{"kind": "user", "id": "a"}"#;
+    let crowd = [
+        (
+            format!(r#"{{"effect": "none", "crowd": [{user}, {{"kind": "user", "id": 5}}]}}"#),
+            "/crowd/1",
+            "type",
+        ),
+        (
+            format!(r#"{{"effect": "none", "crowd": [{{"id": "a b", "kind": "user"}}, {user}]}}"#),
+            "/crowd/0",
+            "non_canonical",
+        ),
+        (
+            format!(
+                r#"{{"crowd": [{user}, {{"kind": "user", "id": "a", "x": 1}}, {user}], "effect": "none"}}"#
+            ),
+            "/crowd/1",
+            "unknown_member",
+        ),
+        (
+            format!(r#"{{"effect": "none", "crowd": [{user}, {{"kind": "client", "id": "a"}}]}}"#),
+            "/crowd/1",
+            "missing",
+        ),
+        (
+            format!(r#"{{"effect": "none", "crowd": [{{"kind": "bogus", "id": "a"}}, {user}]}}"#),
+            "/crowd/0/kind",
+            "enum",
+        ),
+        (
+            format!(r#"{{"effect": "none", "crowd": [{{"kind": 5, "id": "a"}}, {user}]}}"#),
+            "/crowd/0/kind",
+            "type",
+        ),
+        (
+            format!(r#"{{"effect": "none", "crowd": [{user}, 5]}}"#),
+            "/crowd/1",
+            "type",
+        ),
+    ];
+    let crowd: Vec<(&[u8], &str, &str)> = crowd
+        .iter()
+        .map(|(body, path, code)| (body.as_bytes(), *path, *code))
+        .collect();
+    let mut wrong = mislocated::<Acted>(&cases);
+    wrong.extend(mislocated::<Crowd>(&crowd));
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
