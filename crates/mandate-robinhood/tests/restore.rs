@@ -177,7 +177,6 @@ fn cancelled_by(id: &str) -> (CallClass, &'static str, Value) {
 const NONE: Value = Value::Null;
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_restored_key_cancels_by_its_one_journaled_id_with_its_own_instrument_and_side() {
     let (spy, qqq) = (key("01JSPY"), key("01JQQQ"));
     let mut s = Stream::default();
@@ -225,7 +224,6 @@ fn refused_with_nothing_called(records: &[FoldedEvent], keys: &[&ClientOrderId])
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_whose_records_carry_no_id_is_not_sent_and_nothing_is_called() {
     let lone = key("01JLONE");
     let mut s = Stream::default();
@@ -237,7 +235,6 @@ fn a_key_whose_records_carry_no_id_is_not_sent_and_nothing_is_called() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn two_different_ids_under_one_key_are_not_sent_and_nothing_is_called() {
     let torn = key("01JTORN");
     let mut s = Stream::default();
@@ -251,7 +248,6 @@ fn two_different_ids_under_one_key_are_not_sent_and_nothing_is_called() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn an_in_doubt_place_is_not_sent_neither_placed_again_nor_guessed() {
     let (silent, lost) = (key("01JSILENT"), key("01JLOST"));
     let mut s = Stream::default();
@@ -265,7 +261,6 @@ fn an_in_doubt_place_is_not_sent_neither_placed_again_nor_guessed() {
 /// DEC-870: a replacement successor's own record carries its own id, and its instrument and side
 /// are those of the order it replaces, through every link of the chain.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_replacement_successor_is_found_by_its_own_id() {
     let (first, second, third) = (
         key("01JFIRST"),
@@ -320,7 +315,6 @@ fn a_replacement_successor_is_found_by_its_own_id() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn version_1_records_give_no_recoverable_id() {
     let (old, new) = (key("01JOLD"), successor("01JREPLACEV1"));
     let mut s = Stream::default();
@@ -335,7 +329,6 @@ fn version_1_records_give_no_recoverable_id() {
 /// DEC-860 item 4 across a restart: a key the stream submitted, whether its place is in doubt
 /// or answered, is never placed again; a `Submit` of it is `Unknown` with nothing called.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_the_journal_submitted_is_never_placed_again() {
     let (silent, lost, placed, fresh) = (key("01JA"), key("01JB"), key("01JC"), key("01JNEW"));
     let mut s = Stream::default();
@@ -378,7 +371,6 @@ fn a_key_the_journal_submitted_is_never_placed_again() {
 /// generated choices, never from the records: one id that no other key carries cancels by it;
 /// none, two, or one shared with another key is `NotSent` (DEC-872 item 2).
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_cancels_exactly_when_its_records_carry_one_distinct_id() {
     let keys: Vec<ClientOrderId> = (0..4).map(|n| key(&format!("01JPROP{n}"))).collect();
     let choice = (0..keys.len(), 0..6_usize);
@@ -472,7 +464,6 @@ fn never_placed_again_nor_guessed(records: &[FoldedEvent], keys: &[&ClientOrderI
 /// DEC-872 item 1: an `OrderSubmitted` whose `side` or `instrument_id` is missing or cannot be
 /// read still names its key, and so does a successor that `replaces` it, each with its own id.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_submitted_key_whose_record_cannot_be_read_is_never_placed_again() {
     let mut s = Stream::default();
     beside_a_known_order(&mut s);
@@ -516,7 +507,6 @@ fn a_submitted_key_whose_record_cannot_be_read_is_never_placed_again() {
 /// DEC-872 item 1: a key named only by an `OrderStateChanged` has no instrument or side to
 /// cancel against, whatever id it carries.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_named_only_by_a_state_change_is_never_placed_again_nor_guessed() {
     let stray = key("01JSTRAY");
     let mut s = Stream::default();
@@ -528,7 +518,6 @@ fn a_key_named_only_by_a_state_change_is_never_placed_again_nor_guessed() {
 /// DEC-872 item 1: a successor whose `replaces` names a key the stream never submitted, so its
 /// chain reaches no instrument or side; the missing key is named too.
 #[test]
-#[ignore = "pending E7-6"]
 fn an_orphan_successor_is_never_placed_again_nor_guessed() {
     let (orphan, missing) = (successor("01JREPLACEORPHAN"), key("01JNEVERSUBMITTED"));
     let mut s = Stream::default();
@@ -541,7 +530,6 @@ fn an_orphan_successor_is_never_placed_again_nor_guessed() {
 /// DEC-872 item 1: a successor named only by the old order's `replaced_by`, with no record of
 /// its own.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_successor_named_only_by_replaced_by_is_never_placed_again() {
     let (old, new) = (key("01JOLDORDER"), successor("01JREPLACEUNSEEN"));
     let mut s = Stream::default();
@@ -555,7 +543,6 @@ fn a_successor_named_only_by_replaced_by_is_never_placed_again() {
 /// DEC-872 item 2: one broker id under two keys is a corruption, and a cancel by it could cancel
 /// an order the other key owns, so neither key cancels by it.
 #[test]
-#[ignore = "pending E7-6"]
 fn two_keys_carrying_one_id_are_both_in_doubt() {
     let (first, second) = (key("01JSHAREA"), key("01JSHAREB"));
     let mut s = Stream::default();
@@ -570,7 +557,6 @@ fn two_keys_carrying_one_id_are_both_in_doubt() {
 /// DEC-872 item 3: two `OrderSubmitted` records under one key that disagree on instrument or
 /// side leave it in doubt; two that agree exactly keep it placed by its one id.
 #[test]
-#[ignore = "pending E7-6"]
 fn two_submits_of_one_key_that_disagree_are_in_doubt() {
     let (sides, symbols, same) = (key("01JTWOSIDES"), key("01JTWOSYMBOLS"), key("01JSAME"));
     let mut s = Stream::default();
@@ -597,7 +583,6 @@ fn two_submits_of_one_key_that_disagree_are_in_doubt() {
 /// DEC-872 item 3: a successor with its own `OrderSubmitted` keeps its own instrument and side,
 /// never those of the order it `replaces`.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_successor_with_its_own_submit_keeps_its_own_instrument_and_side() {
     let (old, new) = (key("01JOLDSPY"), successor("01JREPLACEOWN"));
     let mut s = Stream::default();
