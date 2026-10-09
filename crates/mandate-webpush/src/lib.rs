@@ -17,8 +17,9 @@
 //! adapter or the relay (S8b) does the I/O.
 //!
 //! **Only the closed payload is encrypted** (NT-1, `AGENTS.md` rule 6). [`PushPlaintext`] is
-//! `{"notice","text"}` and nothing else, and its constructor is private to this crate. The
-//! dispatcher's `Notification` (slice S1, `mandate-notify`) is the one way in once it merges.
+//! `{"notice","text"}` and nothing else, and its byte-level constructor is private to this crate.
+//! [`PushPlaintext::of`], from the closed `mandate_notify::Notification`, is the one way in
+//! (DEC-790 item 7, DEC-713).
 //!
 //! **Every body is the same size.** The plaintext is padded to [`PADDED_RECORD_LEN`] octets, so a
 //! push service learns not even which text key a notice carries (DEC-790 item 2), and no body can
@@ -26,8 +27,8 @@
 //!
 //! **No key, clock, or randomness of its own.** The application server's key stays behind
 //! [`VapidSigner`], the ephemeral key and salt come from [`SecureRandom`], and the time is an
-//! argument. It depends on no workspace crate, so it cannot reach the journal or the control
-//! stream (NT-3).
+//! argument. Its one workspace dependency is `mandate-notify`, the pure closed notice below the
+//! journal, so it cannot reach the journal or the control stream (NT-3, DEC-713).
 
 mod payload;
 
@@ -71,6 +72,8 @@ pub enum WebPushError {
     TooLarge,
     #[error("the time is out of range")]
     Clock,
+    #[error("the notice id could not be written")]
+    InvalidNotice,
 }
 
 impl WebPushError {
@@ -86,6 +89,7 @@ impl WebPushError {
             Self::Signer => "signer",
             Self::TooLarge => "too_large",
             Self::Clock => "clock",
+            Self::InvalidNotice => "invalid_notice",
         }
     }
 }

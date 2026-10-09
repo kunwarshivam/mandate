@@ -43,14 +43,26 @@ const ESTABLISHMENT_REPEATS: [&str; 5] =
 /// What a connect's refusal repeats of the request it closes (rule 131).
 const REFUSAL_REPEATS: [&str; 4] = ["broker", "environment", "user", "step_up"];
 
-/// The connection records on an account stream, which its executor folds.
-const ACCOUNT_RECORDS: [&str; 5] = [
+/// The connection records on an account stream, which its executor folds: a `ConnectionRevoked`
+/// among them only so rule 68 refuses it there (journal spec v0.37, DEC-888).
+const ACCOUNT_RECORDS: [&str; 6] = [
     CHECKED,
     "ConnectionStateChanged",
     "ConnectionCredentialRefreshed",
     ESTABLISHED,
     ROTATED,
+    REVOKED,
 ];
+
+/// The control-stream records the range rules judge (rules 66, 67, and 131): the set an unanchored
+/// range fails closed at there (journal spec v0.35 §11, DEC-885 item 4). A `ConnectionRevoked` on a
+/// control stream is never judged (DEC-885 I6).
+pub const JUDGED_ON_CONTROL: &[&str] = &[REQUESTED, ESTABLISHED, ROTATED, REFUSED];
+
+/// The connection records on an account stream, every one of which rule 68 judges and an
+/// unanchored range fails closed at (journal spec v0.37 §11, DEC-888): the records the executor's
+/// fold reads, since a type it skips is judged by nothing, a `ConnectionRevoked` included.
+pub const JUDGED_ON_ACCOUNT: &[&str] = &ACCOUNT_RECORDS;
 
 /// The occasions an account stream's checks may have before its first binding (rule 68).
 const UNBOUND_OCCASIONS: [&str; 3] = ["connect", "reconnect", "reauthorize"];
@@ -234,8 +246,9 @@ impl LocatedConnectionFailure {
 /// chain; anchored, it judges every row as the full chain would, rule 131's closing existence
 /// included; unanchored, it fails closed with [`ConnectionCheck::Unanchored`] at the first
 /// `ConnectionRequested`, `ConnectionEstablished`, `ConnectionCredentialRotated`, or
-/// `ConnectionRefused` on a control stream or connection record on an account stream, and a
-/// `ConnectionRevoked` never fails (DEC-885 items 3 and 4).
+/// `ConnectionRefused` on a control stream or connection record on an account stream, a
+/// `ConnectionRevoked` there included; a control-stream `ConnectionRevoked` never fails (DEC-885
+/// items 3 and 4, I6; DEC-888).
 pub fn verify_connection_lifecycle_from(
     start: ConnectionStart,
     rows: &[StoredEvent],
@@ -246,7 +259,10 @@ pub fn verify_connection_lifecycle_from(
         ConnectionStart::Anchored(ConnectionAnchor(mut folds)) => folds.run(&rows),
         ConnectionStart::Unanchored => rows
             .iter()
-            .find(|row| row.stream != StreamType::Control || row.stored.event_type != REVOKED)
+            .find(|row| {
+                row.stream != StreamType::Control
+                    || JUDGED_ON_CONTROL.contains(&row.stored.event_type.as_str())
+            })
             .map(|row| row.failing(ConnectionCheck::Unanchored)),
     };
     failing.map_or(Ok(()), |failing| Err(failing.located()))
@@ -592,6 +608,7 @@ struct AccountFold {
 }
 
 impl AccountFold {
+    /// Whether rule 68 admits `row` on this stream; a `ConnectionRevoked` never, bound or not.
     fn admits(&mut self, row: &Row<'_>) -> bool {
         let p = row.payload();
         let id = text(p, "connection_id");
@@ -628,6 +645,7 @@ impl AccountFold {
                         check.passed && (check.contract || !MCP_BROKERS.contains(&broker))
                     })
             }
+            REVOKED => false,
             _ if self.broker.is_none() => false,
             ROTATED => match self.checks.get("reauthorize") {
                 Some(check) if check.passed && (check.contract || !mcp) => {

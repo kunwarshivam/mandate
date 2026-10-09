@@ -105,7 +105,6 @@ fn sent_bodies() -> Vec<&'static str> {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn every_server_case_is_kept_and_listed_or_refused_as_it_says() -> Result<(), String> {
     let cases: Value = serde_json::from_str(CASES).map_err(|e| e.to_string())?;
     let cases = cases["cases"].as_array().ok_or("cases is an array")?;
@@ -150,7 +149,6 @@ const NOT_OBJECTS: [&[u8]; 10] = [
 ];
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_pause_or_hold_body_that_is_not_an_object_is_read_as_empty() -> Result<(), String> {
     for operation in ["pause", "hold"] {
         for body in NOT_OBJECTS {
@@ -162,7 +160,6 @@ fn a_pause_or_hold_body_that_is_not_an_object_is_read_as_empty() -> Result<(), S
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_other_four_refuse_a_body_that_is_not_an_object() {
     for operation in [
         "end_delegation",
@@ -193,7 +190,6 @@ const NOT_OBJECT_CODES: [&str; 10] = [
 ];
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_other_four_refuse_a_non_object_at_the_root_as_the_strict_decoder_does() {
     for operation in [
         "end_delegation",
@@ -255,7 +251,6 @@ fn idempotency_cases() -> Vec<(&'static str, Value, Value)> {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn bodies_differing_only_in_dropped_members_keep_equal_values() -> Result<(), String> {
     for (operation, base, extra) in idempotency_cases() {
         let (want, none) = lenient(operation, base.to_string().as_bytes())
@@ -279,7 +274,6 @@ fn bodies_differing_only_in_dropped_members_keep_equal_values() -> Result<(), St
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_valid_value_for_a_member_once_dropped_is_a_different_call() -> Result<(), String> {
     let record = json!({"artifact": HASH, "ui_build": BUILD});
     for operation in ["pause", "hold", "end_delegation"] {
@@ -357,7 +351,6 @@ fn dropped_for(operation: &str, body: &Value, member: &str) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_corrupt_non_hard_member_is_dropped_and_listed_and_the_rest_kept() -> Result<(), String> {
     for (operation, example) in examples() {
         let label = format!("{operation} example");
@@ -392,7 +385,6 @@ fn a_corrupt_non_hard_member_is_dropped_and_listed_and_the_rest_kept() -> Result
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_corrupt_or_missing_hard_member_is_refused() {
     for (operation, example) in examples() {
         for member in hard(operation) {
@@ -420,7 +412,6 @@ fn a_corrupt_or_missing_hard_member_is_refused() {
 const WORKSPACE_MEMBERS: [&str; 3] = ["workspace", "workspace_id", "ws"];
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_workspace_member_is_dropped_and_listed_and_never_applied() -> Result<(), String> {
     for (operation, example) in examples() {
         for name in WORKSPACE_MEMBERS {
@@ -472,7 +463,6 @@ fn scope_member_is_dropped_and_the_scope_kept(name: &str) -> Result<(), String> 
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn any_unknown_member_inside_the_scope_is_dropped_and_the_scope_kept() -> Result<(), String> {
     for name in ["zz", "label", "org"] {
         scope_member_is_dropped_and_the_scope_kept(name)?;
@@ -505,7 +495,6 @@ fn assert_text_kept(operation: &str, text: &str, dropped: &[&str]) -> Result<(),
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_duplicate_inside_the_scope_is_refused_and_a_duplicate_bid_drops_the_group()
 -> Result<(), String> {
     for scope in [
@@ -539,7 +528,6 @@ fn first_code(outcome: Outcome) -> String {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_duplicate_non_hard_member_is_dropped_once_and_a_hard_one_refused() -> Result<(), String> {
     let record = json!({"artifact": HASH, "ui_build": BUILD}).to_string();
     let twice = format!(r#"{{"record": {record}, "x": 1, "record": {record}, "x": 2}}"#);
@@ -588,7 +576,6 @@ fn a_duplicate_non_hard_member_is_dropped_once_and_a_hard_one_refused() -> Resul
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_open_bodies_are_read_as_dec_886_says() -> Result<(), String> {
     let at = "2026-10-08T14:30:00.000000000Z";
     let workspace = json!({"scope": {"kind": "workspace"}});
@@ -622,7 +609,6 @@ fn the_open_bodies_are_read_as_dec_886_says() -> Result<(), String> {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn bid_members_sent_only_as_null_or_left_out_are_no_confirmation() -> Result<(), String> {
     let lone = json!({"instrument": ASSET, "bid": null});
     let three = json!({"instrument": ASSET, "bid": null, "bid_size": null, "quoted_at": null});
@@ -637,4 +623,137 @@ fn bid_members_sent_only_as_null_or_left_out_are_no_confirmation() -> Result<(),
         );
     }
     Ok(())
+}
+
+/// Values an unknown scope member may hold that the strict scan refuses or a target could be read
+/// from: duplicates at any depth, wrong types, and objects naming `kind`, `id` or a workspace.
+const INSIDE_UNKNOWN: [&str; 10] = [
+    r#"{"a": 1, "a": 2}"#,
+    r#"{"b": {"c": [{"d": 1, "d": 1}]}}"#,
+    r#"[{"id": "agt_9", "id": "con_9"}]"#,
+    r#"{"kind": "workspace", "id": null}"#,
+    r#"{"id": "agt_9", "kind": "agent", "id": "con_9"}"#,
+    r#"{"workspace": "ws_other", "workspace": "ws_x"}"#,
+    r#""bad id!""#,
+    "5",
+    "null",
+    "[[], {}, true]",
+];
+
+/// The scope's members as sent: `kind`, then `id`, a workspace's `null`.
+fn scope_members(kind: &str, id: &Value) -> Vec<String> {
+    vec![format!(r#""kind": "{kind}""#), format!(r#""id": {id}"#)]
+}
+
+/// The kill switch's full example with `scope` as the text `scope` gives it, the rest as sent.
+fn kill_switch_text(scope: &[String]) -> String {
+    let example = examples()
+        .into_iter()
+        .find_map(|(op, body)| (op == "kill_switch").then_some(body))
+        .and_then(|mut body| {
+            body.as_object_mut()?.remove("scope");
+            Some(body.to_string())
+        })
+        .unwrap_or_default();
+    let rest = example.get(1..example.len() - 1).unwrap_or_default();
+    format!(r#"{{"scope": {{{}}}, {rest}}}"#, scope.join(", "))
+}
+
+/// `dirty` must keep exactly what `clean`, the same body without its unknown scope members, keeps,
+/// list exactly `dropped`, and keep the target `kind` and `id` name (DEC-900 items 1 and 3).
+fn assert_target_kept(
+    dirty: &str,
+    clean: &str,
+    dropped: &[String],
+    target: &Value,
+) -> Result<(), String> {
+    let (want, none) = lenient("kill_switch", clean.as_bytes()).map_err(|e| format!("{e:?}"))?;
+    assert!(none.is_empty(), "{clean}: drops nothing");
+    let (kept, listed) =
+        lenient("kill_switch", dirty.as_bytes()).map_err(|e| format!("{dirty}: {e:?}"))?;
+    assert_eq!(listed, dropped, "{dirty}: dropped");
+    assert_eq!(kept, want, "{dirty}: kept as the body without it");
+    assert_eq!(
+        without_nulls(kept)["scope"],
+        *target,
+        "{dirty}: the target never moves"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn an_unknown_scope_member_malformed_inside_is_dropped_whole_and_the_target_kept()
+-> Result<(), String> {
+    for (kind, id) in scopes() {
+        let target = without_nulls(json!({"kind": kind, "id": id}));
+        let clean = kill_switch_text(&scope_members(kind, &id));
+        for name in ["zz", "ID", "workspace"] {
+            for inside in INSIDE_UNKNOWN {
+                for at in 0..=2 {
+                    let mut scope = scope_members(kind, &id);
+                    scope.insert(at, format!(r#""{name}": {inside}"#));
+                    let dirty = kill_switch_text(&scope);
+                    let dropped = [format!("/scope/{name}")];
+                    assert_target_kept(&dirty, &clean, &dropped, &target)?;
+                }
+            }
+        }
+        let mut scope = scope_members(kind, &id);
+        scope.insert(0, format!(r#""zz": {}"#, INSIDE_UNKNOWN[0]));
+        scope.insert(2, format!(r#""yy": {}"#, INSIDE_UNKNOWN[1]));
+        scope.push(format!(r#""zz": {}"#, INSIDE_UNKNOWN[4]));
+        let dropped = ["/scope/zz".to_owned(), "/scope/yy".to_owned()];
+        assert_target_kept(&kill_switch_text(&scope), &clean, &dropped, &target)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_duplicate_kind_or_id_in_the_scope_is_refused_beside_any_unknown_member() {
+    for (kind, id) in scopes() {
+        let other = if id.is_null() {
+            id.clone()
+        } else {
+            json!("agt_2")
+        };
+        let twice = [format!(r#""kind": "{kind}""#), format!(r#""id": {other}"#)];
+        for again in twice {
+            for unknown in [None, Some(INSIDE_UNKNOWN[0]), Some(INSIDE_UNKNOWN[4])] {
+                for at in 0..=3 {
+                    let mut scope = scope_members(kind, &id);
+                    scope.push(again.clone());
+                    if let Some(inside) = unknown {
+                        scope.insert(at, format!(r#""zz": {inside}"#));
+                    }
+                    let body = kill_switch_text(&scope);
+                    let code = first_code(lenient("kill_switch", body.as_bytes()));
+                    assert_eq!(code, "duplicate_member", "{body}: never a guessed target");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_duplicate_inside_an_unknown_member_outside_the_scope_is_read_as_before() -> Result<(), String>
+{
+    let unknown = INSIDE_UNKNOWN[1];
+    for (operation, example) in examples() {
+        let text = example.to_string();
+        let rest = text.get(1..text.len() - 1).unwrap_or_default();
+        let body = format!(r#"{{"zz": {unknown}, {rest}}}"#);
+        let mut sent = example.clone();
+        sent["zz"] = json!(0);
+        assert_kept(&body, sent, &["/zz"], lenient(operation, body.as_bytes()))?;
+    }
+    let scope = scope_members("agent", &json!("agt_1")).join(", ");
+    let body = format!(r#"{{"scope": {{{scope}}}, "record": {unknown}}}"#);
+    let sent = json!({"scope": {"kind": "agent", "id": "agt_1"}, "record": 0});
+    assert_kept(
+        &body,
+        sent,
+        &["/record"],
+        lenient("kill_switch", body.as_bytes()),
+    )
 }

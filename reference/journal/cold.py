@@ -18,9 +18,10 @@ import hashlib
 import json
 import re
 
-from common import apply_change, change, delete, digest_strings, hash_chain
+from common import apply_change, canon, change, delete, digest_strings, hash_chain, sha256_hex
 from control import (
     AGENT_STREAM,
+    ROW_COLUMNS,
     SERVICES,
     STREAM,
     USER,
@@ -31,6 +32,7 @@ from control import (
     manifest_hash,
     merkle_root,
     reported,
+    start_from_rows,
     trusted_start,
     violations,
 )
@@ -419,6 +421,7 @@ def trusted_starts() -> dict:
     unstamped = {"kind": "anchor", "anchor_event_id": ANCHOR_IDS["unstamped"]}
     genesis = {"kind": "genesis"}
     acct = ACCOUNT_STREAM
+    rows = start_rows()
     return {
         "records": start_records(),
         "cases": [
@@ -434,7 +437,152 @@ def trusted_starts() -> dict:
             start_case("anchor_without_the_stream", "§9.14: the anchor has no leaf for the stream", AGENT_STREAM, 10, stamped, None),
             start_case("another_workspaces_segment", "§9.14, DEC-767: only the workspace's own records", acct, 20, {"kind": "manifest", "manifest_hash": FOREIGN_SEGMENT["manifest_hash"]}, None),
         ],
+        "rows": rows,
+        "row_cases": row_cases(rows),
     }
+
+
+FOREIGN_CTL = "ctl:ws_01J8Z9"
+ROW_IDS = tuple(f"01J8Z3C6A000000000000000R{i}" for i in range(1, 6))
+OPENED, FROM_GENESIS, SEGMENT, ANCHOR, FOREIGN = range(5)
+COLD = {s: {"state": s} for s in ("absent", "unreadable")}
+FORGED_PREV = "e" * 64
+
+
+def row_of(body: dict) -> dict:
+    """A stored row as the hot store holds it: §11 check 2's columns, the hash, and the body bytes."""
+    text = canon(body)
+    return {**{c: body[c] for c in ROW_COLUMNS}, "hash": sha256_hex(text.encode()), "body": text}
+
+
+def start_rows() -> list[dict]:
+    """The workspace's control stream (`StreamOpened`, two `SegmentExported`, a stamped anchor), then a
+    row of another workspace's control stream whose segment names this workspace's account stream."""
+
+    def at(i: int, event_type: str, seq: int, payload: dict) -> dict:
+        body = chained(event_type, seq, payload)
+        body["event_id"] = ROW_IDS[i]
+        return body
+
+    head = [
+        at(OPENED, "StreamOpened", 1, {"stream_type": "control", "workspace_id": WORKSPACE}),
+        at(FROM_GENESIS, "SegmentExported", 2, segment(ACCOUNT_STREAM, 1, 3, GENESIS)),
+        at(SEGMENT, "SegmentExported", 3, SEGMENT_START),
+    ]
+    leaves = [
+        {"hash": "1" * 64, "seq": 9, "stream_id": ACCOUNT_STREAM},
+        {"hash": hash_chain(copy.deepcopy(head), GENESIS)[2]["hash"], "seq": 3, "stream_id": STREAM},
+    ]
+    anchor = at(ANCHOR, "AnchorComputed", 4, {"leaves": leaves, "root": merkle_root(leaves), "token": TOKEN})
+    foreign = at(FOREIGN, "SegmentExported", 1, FOREIGN_SEGMENT)
+    foreign["stream_id"] = FOREIGN_CTL
+    own = hash_chain([*head, anchor], GENESIS) + hash_chain([foreign], GENESIS)
+    return [row_of(e["body"]) for e in own]
+
+
+def cold_read(p: dict, suffix: str = "") -> dict:
+    six = ("stream_id", "first_seq", "last_seq", "first_prev_hash", "last_hash", "file_sha256")
+    return {"state": "read", "bytes": canon({("stream" if k == "stream_id" else k): p[k] for k in six}) + suffix}
+
+
+def edited(row: dict, edit, rehash: bool) -> dict:
+    """The row's body edited: stored again (re-hashed, its columns from the new body) or forged in
+    place (its stored hash and columns kept)."""
+    body = json.loads(row["body"])
+    edit(body)
+    return row_of(body) if rehash else {**row, "body": canon(body)}
+
+
+def retyped(row: dict, text: str) -> dict:
+    """The row stored with other bytes for the same body, re-hashed over them."""
+    return {**row, "body": text, "hash": sha256_hex(text.encode())}
+
+
+def new_prev(manifest: bool):
+    def edit(body: dict) -> None:
+        p, kept = body["payload"], body["payload"]["manifest_hash"]
+        p["first_prev_hash"] = FORGED_PREV
+        p["manifest_hash"] = manifest_hash(p) if manifest else kept
+    return edit
+
+
+def forged_leaf(body: dict) -> None:
+    body["payload"]["leaves"][0]["hash"] = FORGED_PREV
+    body["payload"]["root"] = merkle_root(body["payload"]["leaves"])
+
+
+def row_cases(rows: list[dict]) -> list[dict]:
+    """Each case's `replace` swaps one row of `rows` before the resolver reads them, and its `cold` is
+    what the cold store gives for the start's segment. The reference's answer is recorded, once it
+    agrees with the outcome the case was built for."""
+    acct, seg, foreign = ACCOUNT_STREAM, json.loads(rows[SEGMENT]["body"])["payload"], FOREIGN_SEGMENT
+    genesis_seg = json.loads(rows[FROM_GENESIS]["body"])["payload"]
+    by_hash = {"kind": "manifest", "manifest_hash": seg["manifest_hash"]}
+    by_anchor = {"kind": "anchor", "anchor_event_id": ROW_IDS[ANCHOR]}
+    moved = json.loads(edited(rows[SEGMENT], new_prev(True), True)["body"])["payload"]
+    loose = json.loads(rows[ANCHOR]["body"])
+    lost = segment(acct, 10, 12, "1" * 64)
+    stray = row_of({**json.loads(rows[SEGMENT]["body"]), "stream_id": acct, "event_id": "01J8Z3C6A000000000000000R7", "payload": lost})
+    twice = row_of({**json.loads(rows[SEGMENT]["body"]), "event_id": "01J8Z3C6A000000000000000R6", "seq": 5, "prev_hash": rows[ANCHOR]["hash"]})
+    specs = [
+        ("genesis_start_reads_no_record", "§11: the genesis start", acct, 1, {"kind": "genesis"}, None, COLD["unreadable"], "start"),
+        ("manifest_start_from_genesis", "DEC-787 items 3, 5: a checked row, the cold manifest read", acct, 1,
+         {"kind": "manifest", "manifest_hash": genesis_seg["manifest_hash"]}, None, cold_read(genesis_seg), "start"),
+        ("manifest_start_cold_confirmed", "DEC-787 items 3, 5: a checked row, the cold manifest read", acct, 4, by_hash, None, cold_read(seg), "start"),
+        ("anchor_start_needs_no_cold_store", "DEC-787 item 3: a checked stamped anchor", acct, 10, by_anchor, None, COLD["unreadable"], "start"),
+        ("another_workspaces_row", "§9.14, DEC-767: its own columns name another workspace", acct, 20,
+         {"kind": "manifest", "manifest_hash": foreign["manifest_hash"]}, None, cold_read(foreign), "no_start"),
+        ("manifest_cold_object_absent", "DEC-787 item 5: only the hot store vouches", acct, 4, by_hash, None, COLD["absent"], "cold_unreadable"),
+        ("manifest_cold_store_unreadable", "DEC-787 item 5: only the hot store vouches", acct, 4, by_hash, None, COLD["unreadable"], "cold_unreadable"),
+        ("manifest_rewritten_in_the_hot_store", "DEC-894 item 1: the cold manifest disagrees", acct, 4,
+         {"kind": "manifest", "manifest_hash": moved["manifest_hash"]}, (SEGMENT, edited(rows[SEGMENT], new_prev(True), True)),
+         cold_read(seg), "cold_manifest_mismatch"),
+        ("cold_bytes_not_the_manifest", "DEC-894 item 1: the cold bytes hash to another digest", acct, 4, by_hash, None, cold_read(seg, "\n"), "cold_manifest_mismatch"),
+        ("manifest_row_not_canonical", "§11 check 1: a space inserted, re-hashed", acct, 4, by_hash,
+         (SEGMENT, retyped(rows[SEGMENT], "{ " + rows[SEGMENT]["body"][1:])), cold_read(seg), "non_canonical"),
+        ("anchor_row_keys_unsorted", "§11 check 1: keys out of order, re-hashed", acct, 10, by_anchor,
+         (ANCHOR, retyped(rows[ANCHOR], json.dumps(dict(sorted(loose.items(), reverse=True)), separators=(",", ":")))),
+         COLD["unreadable"], "non_canonical"),
+        ("workspace_column_claims_this_workspace", "§11 check 2: another workspace's body under this workspace's column", acct, 20,
+         {"kind": "manifest", "manifest_hash": foreign["manifest_hash"]}, (FOREIGN, {**rows[FOREIGN], "stream_id": STREAM}),
+         cold_read(foreign), "column_mismatch"),
+        ("workspace_column_names_another", "§11 check 2: this workspace's body under another's column", acct, 4, by_hash,
+         (SEGMENT, {**rows[SEGMENT], "stream_id": FOREIGN_CTL}), cold_read(seg), "no_start"),
+        ("anchor_event_id_column_differs", "§11 check 2: the event_id column", acct, 10,
+         {"kind": "anchor", "anchor_event_id": ROW_IDS[OPENED]}, (ANCHOR, {**rows[ANCHOR], "event_id": ROW_IDS[OPENED]}),
+         COLD["unreadable"], "column_mismatch"),
+        ("manifest_seq_column_differs", "§11 check 2: the seq column", acct, 4, by_hash, (SEGMENT, {**rows[SEGMENT], "seq": 7}), cold_read(seg), "column_mismatch"),
+        ("anchor_leaf_forged_under_its_old_hash", "§11 check 4: the body forged, the stored hash kept", acct, 10, by_anchor,
+         (ANCHOR, edited(rows[ANCHOR], forged_leaf, False)), COLD["unreadable"], "rehash_mismatch"),
+        ("manifest_forged_under_its_old_hash", "§11 check 4: the body forged, the stored hash kept", acct, 4,
+         {"kind": "manifest", "manifest_hash": moved["manifest_hash"]}, (SEGMENT, edited(rows[SEGMENT], new_prev(True), False)),
+         cold_read(seg), "rehash_mismatch"),
+        ("segment_on_an_account_stream", "§9.14: the workspace's control-stream records only", acct, 10, {"kind": "manifest", "manifest_hash": lost["manifest_hash"]}, (FOREIGN, stray), cold_read(lost), "no_start"),
+        ("segment_exported_twice", "DEC-893 item 7: the segment recorded again at seq 5, chained, in the foreign row's place", acct, 4, by_hash, (FOREIGN, twice), cold_read(seg), "ambiguous_start"),
+        ("manifest_row_breaks_rule_117", "rule 117: the manifest hash is not its fields'", acct, 4, by_hash,
+         (SEGMENT, edited(rows[SEGMENT], new_prev(False), True)), cold_read(seg), "rule_117"),
+    ]
+    out = []
+    for name, clause, stream, n, request, replace, cold, intended in specs:
+        case = copy.deepcopy({"name": name, "clause": clause, "stream_id": stream, "from_seq": n, "request": request,
+                              "replace": None if replace is None else {"index": replace[0], "row": replace[1]}, "cold": cold})
+        expect = start_from_rows(case_rows(rows, case), stream, n, request, cold)
+        got = expect["outcome"] if expect["outcome"] != "refused" else expect["cause"]
+        if got != intended:
+            raise AssertionError(f"{name}: built for {intended}, the reference answers {expect}")
+        out.append({**case, "expect": expect})
+    return out
+
+
+def row_answer(starts: dict, c: dict, skip: frozenset[str] = frozenset()) -> dict:
+    return start_from_rows(case_rows(starts["rows"], c), c["stream_id"], c["from_seq"], c["request"], c["cold"], skip)
+
+
+def case_rows(rows: list[dict], case: dict) -> list[dict]:
+    out = copy.deepcopy(rows)
+    if case["replace"] is not None:
+        out[case["replace"]["index"]] = copy.deepcopy(case["replace"]["row"])
+    return out
 
 
 # --------------------------------------------------------------------------- independent oracles
@@ -452,6 +600,8 @@ ORACLE_CHECKS = (
     "ranges.walk",
     "starts.reference",
     "starts.resolve",
+    "starts.rows_reference",
+    "starts.rows_oracle",
 )
 
 
@@ -550,6 +700,44 @@ def resolve_start(records: list[dict], case: dict) -> dict | None:
     return {"from_seq": n, "prev_hash": leaves[0]["hash"]} if leaves else None
 
 
+def row_start_by_oracle(rows: list[dict], case: dict) -> dict:
+    """The oracle's own DEC-787 items 3 and 5, written from the decision rather than from the
+    reference: find the record as §9.14 does, then judge its row with `json` and `hashlib` directly,
+    the manifest hash by `manifest_by_json`, and the cold bytes by their own digest."""
+    stream, n, request, cold = case["stream_id"], case["from_seq"], case["request"], case["cold"]
+    if request["kind"] == "genesis":
+        return {"outcome": "start", "from_seq": 1, "prev_hash": GENESIS} if n == 1 else {"outcome": "refused", "cause": "no_start"}
+    hits = []
+    for row in rows:
+        if row["stream_id"].split(":")[0] != "ctl" or workspace_of(row["stream_id"]) != workspace_of(stream):
+            continue
+        p = json.loads(row["body"])["payload"]
+        fits = (p.get("manifest_hash"), p.get("stream_id"), p.get("first_seq")) == (request.get("manifest_hash"), stream, n)
+        if request["kind"] == "manifest" and row["event_type"] == "SegmentExported" and fits:
+            hits.append((row, p["first_prev_hash"]))
+        if request["kind"] == "anchor" and row["event_type"] == "AnchorComputed" and row["event_id"] == request["anchor_event_id"]:
+            leaves = [leaf["hash"] for leaf in p["leaves"] if (leaf["stream_id"], leaf["seq"]) == (stream, n - 1)]
+            hits += [(row, leaves[0])] if p["token"] and leaves else []
+    if len(hits) != 1:
+        return {"outcome": "refused", "cause": "ambiguous_start" if hits else "no_start"}
+    (row, prev), body = hits[0], json.loads(hits[0][0]["body"])
+    columns = ("event_id", "event_type", "environment", "prev_hash", "recorded_at", "schema_version", "seq", "stream_id")
+    failures = (
+        ("non_canonical", json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False) != row["body"]),
+        ("column_mismatch", any(row[c] != body[c] for c in columns)),
+        ("rehash_mismatch", hashlib.sha256(row["body"].encode()).hexdigest() != row["hash"]),
+        ("rule_117", row["event_type"] == "SegmentExported" and body["payload"]["manifest_hash"] != manifest_by_json(body["payload"])),
+    )
+    if any(failed for _, failed in failures):
+        return {"outcome": "refused", "cause": next(cause for cause, failed in failures if failed)}
+    if request["kind"] == "manifest":
+        if cold["state"] != "read":
+            return {"outcome": "cold_unreadable"}
+        if hashlib.sha256(cold["bytes"].encode()).hexdigest() != body["payload"]["manifest_hash"]:
+            return {"outcome": "refused", "cause": "cold_manifest_mismatch"}
+    return {"outcome": "start", "from_seq": n, "prev_hash": prev}
+
+
 def entries_of(chain: list[dict]) -> list[dict]:
     return [{"seq": e["body"]["seq"], "hash": e["hash"], "body": e["body"]} for e in chain]
 
@@ -571,6 +759,16 @@ def check_ranges_and_starts(section: dict) -> list[str]:
             problems.append(found("starts.reference", f"{case['name']}: expected {case['expect']}, got {got}"))
         if resolve_start(starts["records"], case) != case["expect"]:
             problems.append(found("starts.resolve", f"{case['name']}: expected {case['expect']}"))
+    rows = starts["rows"]
+    own = [{"body": json.loads(r["body"]), "hash": r["hash"]} for r in rows if r["stream_id"] == STREAM]
+    if chain_breaks(own) or len(own) != len(rows) - 1:
+        problems.append(found("starts.rows_oracle", f"the workspace's rows do not chain: {chain_breaks(own)}"))
+    for case in starts["row_cases"]:
+        got = row_answer(starts, case)
+        if got != case["expect"]:
+            problems.append(found("starts.rows_reference", f"{case['name']}: expected {case['expect']}, got {got}"))
+        if row_start_by_oracle(case_rows(rows, case), case) != case["expect"]:
+            problems.append(found("starts.rows_oracle", f"{case['name']}: expected {case['expect']}"))
     return problems
 
 
@@ -704,6 +902,11 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: case(s["trusted_starts"], "cases", "segment_at_its_first_seq").update(
                 expect={"from_seq": 4, "prev_hash": "6" * 64})),
         ),
+        ("a leaf forged under its row's old hash is expected to start", "starts.rows_reference", mutated(
+            lambda s: case(s["trusted_starts"], "row_cases", "anchor_leaf_forged_under_its_old_hash").update(
+                expect={"outcome": "start", "from_seq": 10, "prev_hash": FORGED_PREV}))),
+        ("the workspace's StreamOpened row is altered after it was hashed", "starts.rows_oracle", mutated(
+            lambda s: s["trusted_starts"]["rows"][OPENED].update(body=s["trusted_starts"]["rows"][OPENED]["body"].replace('"control"', '"account"')))),
         (
             "an invalid draft's expectation differs",
             "invalid_drafts",
@@ -719,6 +922,14 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
 
 RANGE_MUTANTS = ("self.missing", "self.seq", "self.hash")
 START_MUTANTS = ("start.genesis_seq", "start.first_seq", "start.anchor_seq", "start.null_token", "start.workspace")
+ROW_MUTANTS = ("row.non_canonical", "row.column_mismatch", "row.column_workspace", "row.rehash_mismatch", "row.rule_117",
+               "row.anchor_unchecked", "row.first_match", "row.non_ctl_stream", "cold.confirm", "cold.absent_ok", "cold.digest")
+
+
+def row_mutant_killers(section: dict, mutant: str) -> list[str]:
+    """The row cases whose answer the seeded bug `mutant` changes."""
+    starts = section["trusted_starts"]
+    return [c["name"] for c in starts["row_cases"] if row_answer(starts, c, frozenset([mutant])) != c["expect"]]
 
 
 def run_mutants(section: dict, v3: dict) -> list[str]:
@@ -747,6 +958,9 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
             for c in starts["cases"]
         ):
             escaped.append(f"cold-records start mutant {mutant}")
+    for mutant in ROW_MUTANTS:
+        if not row_mutant_killers(section, mutant):
+            escaped.append(f"cold-records row-start mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if not any(c == check for _, c, _ in registered):

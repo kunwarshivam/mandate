@@ -101,6 +101,51 @@ pub fn verify_events(
     })
 }
 
+/// The stored rows `seq` 1 to `from_seq − 1` of a range's stream, verified by §11's checks 1 to 6
+/// from genesis and bound to the range's trusted start (DEC-892). Every anchor fold takes one, so
+/// none can read history a hot-store rewrite forged; [`VerifiedPrefix::bind`] is its only
+/// constructor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerifiedPrefix<'a> {
+    rows: &'a [StoredEvent],
+}
+
+/// Why rows were not bound as a range's prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrefixError {
+    /// The first row that fails §11's checks 1 to 6 from genesis.
+    Unverified(EventFailure),
+    /// The rows do not end just before the trusted start: not empty for `from_seq` 1, or else a
+    /// last `seq` that is not `from_seq − 1` or a last `hash` that is not `start.prev_hash`.
+    Unbound,
+    /// Never returned now that E12-3 built `bind`; kept, as `RangeWalkError` keeps its own, so a
+    /// caller's match stays the same across the crate's stubs (DEC-77).
+    Unimplemented { story: &'static str },
+}
+
+impl<'a> VerifiedPrefix<'a> {
+    /// `rows` as the prefix of a range entered at `start`: they pass checks 1 to 6 from genesis
+    /// with no gap, and are empty when `start.from_seq` is 1, else end at `seq` `from_seq − 1`
+    /// with `hash` `start.prev_hash`. A refusal gives the caller no anchor, so its range fails
+    /// closed (DEC-892 item 3).
+    pub fn bind(
+        rows: &'a [StoredEvent],
+        start: TrustedStart,
+        artifacts: &dyn ArtifactSource,
+    ) -> Result<Self, PrefixError> {
+        let verified = verify_events(rows, TrustedStart::GENESIS, artifacts)
+            .map_err(PrefixError::Unverified)?;
+        if verified.next_seq != start.from_seq || verified.last_hash != start.prev_hash {
+            return Err(PrefixError::Unbound);
+        }
+        Ok(Self { rows })
+    }
+
+    pub fn rows(&self) -> &'a [StoredEvent] {
+        self.rows
+    }
+}
+
 /// §11's per-event checks 1 to 6 on `row`, expected at `expected_seq` after `prev_hash`.
 fn check_row(
     row: &StoredEvent,
@@ -264,4 +309,38 @@ pub fn verify_anchor(
         return Err(RangeCheck::AnchorRootMismatch);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_canon::Digest;
+
+    use super::VerifiedPrefix;
+    use crate::StoredEvent;
+
+    fn row(seq: u64) -> StoredEvent {
+        StoredEvent {
+            stream_id: "agent:ws_01:ag_01".to_owned(),
+            seq,
+            event_id: format!("ev_{seq}"),
+            event_type: "AgentModeChanged".to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: "2026-10-09T00:00:00.000000000Z".to_owned(),
+            prev_hash: Digest::ZERO,
+            hash: Digest::ZERO,
+            body: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_verified_prefix_hands_its_folds_exactly_the_rows_it_bound() {
+        let rows = vec![row(1), row(2)];
+        let prefix = VerifiedPrefix { rows: &rows };
+        assert_eq!(
+            prefix.rows(),
+            rows.as_slice(),
+            "a fold reads the bound rows, never fewer or others (DEC-892 item 2)"
+        );
+    }
 }

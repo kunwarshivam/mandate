@@ -29,9 +29,8 @@
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
 #      mandate-notify, the closed notice (E8-9, DEC-710): below the journal, so it can never reach
 #      the control-stream writer (notifications spec NT-3)
-#   2  mandate-push-relay, the web-push relay's pure core (E8-14 S8b, DEC-724): above mandate-notify,
-#      whose canary scan its tests use, and kept off the journal and every trading crate (NT-3, NT-9);
-#      mandate-journal, mandate-accounting, mandate-passkey, the WebAuthn relying party
+#   2  mandate-webpush, web push for opaque notices (E8-14, DEC-790): above mandate-notify, whose
+#      `Notification` is its plaintext's only public source (DEC-713); mandate-journal, mandate-accounting, mandate-passkey, the WebAuthn relying party
 #      (E9-1, DEC-660), which verifies and never signs, and mandate-authn (E9-1, DEC-650, DEC-652):
 #      token verification and sessions as pure functions, with the issuer's keys and the clock
 #      handed in, so it never fetches a key or reads a clock; above mandate-identity, whose sealed
@@ -39,11 +38,15 @@
 #      background processes' SystemContext, above mandate-identity, whose permissions and witness it
 #      uses; its allowed_dependents list names only the bootstrap crates of the agent runtime, the
 #      executor and the scheduler, and is empty until E9-8 creates them
-#   3  mandate-spec, and mandate-dispatcher, the notification process (E8-10, E8-14,
-#      DEC-701 item 2): above mandate-journal, whose notice stream it alone appends to, and above
-#      mandate-push-relay, whose request it builds; its forbidden_internal list names every crate
-#      that writes an agent, account, or control stream (NT-3 at rung 1, DEC-701 item 3)
-#   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
+#   3  mandate-spec, and mandate-push-relay, the web-push relay's pure core (E8-14 S8b, DEC-724):
+#      above mandate-webpush, whose endpoint parser it shares, and mandate-notify, whose canary scan
+#      its tests use, and kept off the journal and every trading crate (NT-3, NT-9; raised from
+#      layer 2 by DEC-713)
+#   4  mandate-dispatcher, the notification process (E8-10, E8-14, DEC-701 item 2): above
+#      mandate-journal, whose notice stream it alone appends to, and above mandate-push-relay, whose
+#      request it builds (raised from layer 3 by DEC-713); its forbidden_internal list names every
+#      crate that writes an agent, account, or control stream (NT-3 at rung 1, DEC-701 item 3);
+#      mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
 #      mandate-spec; it holds L5's audit wire types, and mandate-audit sits beside it, so the
 #      conversion into them sits above both; its server sits higher (DEC-680); and mandate-audit
 #      (read-only audit reads over the journal, scoped to one workspace; E12-6), raised from layer
@@ -105,10 +108,12 @@ pure = true
 allowed_external = ["sha2", "thiserror"]
 
 # Web push for opaque notices (E8-14, notifications spec §4.6): RFC 8291 encryption and RFC 8292
-# VAPID over a closed payload. It depends on no workspace crate, and may never reach the journal,
-# the control stream's writers, or the order path, so no push can approve or act (NT-3).
+# VAPID over a closed payload. Its one workspace dependency is mandate-notify, whose closed
+# `Notification` is the only public source of a plaintext (DEC-790 item 7, DEC-713), so it sits at
+# layer 2, one above it. It may never reach the journal, the control stream's writers, or the order
+# path, so no push can approve or act (NT-3).
 [crates.mandate-webpush]
-layer = 0
+layer = 2
 safety_critical = true
 pure = true
 allowed_external = ["aes-gcm", "base64ct", "hkdf", "p256", "sha2", "thiserror"]
@@ -145,7 +150,7 @@ pure = true
 allowed_external = ["thiserror"]
 
 [crates.mandate-push-relay]
-layer = 2
+layer = 3
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
@@ -156,7 +161,7 @@ forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-journal-
 # executor, the MCP server, the shell, the CLI, the paper binary, and the broker connectors
 # (DEC-701 item 3, NT-3). `pure` until the change that gives it I/O.
 [crates.mandate-dispatcher]
-layer = 3
+layer = 4
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
