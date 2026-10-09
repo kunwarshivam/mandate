@@ -4,7 +4,7 @@
 //! these tests cannot use it (DEC-849 item 2). It reads `application/json` answers only, the one
 //! form the simulator writes.
 
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
@@ -23,11 +23,16 @@ impl Reply {
         found.map(|(_, value)| value.as_str())
     }
 
+    /// The JSON-RPC message the answer carries.
+    pub fn message(&self) -> Value {
+        assert_eq!(self.header("content-type"), Some("application/json"));
+        serde_json::from_str(&self.body).unwrap()
+    }
+
     /// The `result` of a successful exchange; a JSON-RPC error fails the test.
     pub fn result(&self) -> Value {
         assert_eq!(self.status, 200, "{}", self.body);
-        assert_eq!(self.header("content-type"), Some("application/json"));
-        let message: Value = serde_json::from_str(&self.body).unwrap();
+        let message = self.message();
         assert_eq!(message.get("error"), None, "{message}");
         message["result"].clone()
     }
@@ -36,6 +41,8 @@ impl Reply {
 pub struct Wire {
     authority: String,
     pub session: Option<String>,
+    /// The `mcp-protocol-version` header, which a test may set to another revision.
+    pub protocol: String,
     next_id: u64,
 }
 
@@ -46,6 +53,7 @@ impl Wire {
         Self {
             authority,
             session: None,
+            protocol: PROTOCOL_VERSION.to_owned(),
             next_id: 1,
         }
     }
@@ -69,6 +77,12 @@ impl Wire {
         self.post(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
     }
 
+    /// `tools/call`'s result; the core's refusal is in it, as `isError`.
+    pub fn call(&mut self, tool: &str, arguments: Value) -> Value {
+        let params = json!({"name": tool, "arguments": arguments});
+        self.request("tools/call", params).result()
+    }
+
     /// `tools/list` followed through every `nextCursor`.
     pub fn list(&mut self) -> Vec<Value> {
         let mut tools = Vec::new();
@@ -84,12 +98,30 @@ impl Wire {
     }
 
     pub fn post(&mut self, body: &Value) -> Reply {
+        self.try_post(body)
+            .expect("the server closed the connection without an answer")
+    }
+
+    /// `tools/call` as sent, and the answer as it came, or `None` if none came.
+    pub fn call_raw(&mut self, tool: &str, arguments: Value) -> Option<Reply> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let params = json!({"name": tool, "arguments": arguments});
+        self.try_post(
+            &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": params}),
+        )
+    }
+
+    /// One exchange; `None` when the connection closes or resets with no byte of an answer. A
+    /// server that holds the connection open past the read timeout fails the test instead.
+    pub fn try_post(&mut self, body: &Value) -> Option<Reply> {
         let body = body.to_string();
         let mut head = format!(
-            "POST /mcp HTTP/1.1\r\nhost: {}\r\nconnection: close\r\n\
+            "POST /mcp HTTP/1.1\r\nhost: {}\r\nconnection: close\r\nuser-agent: mandate-mcp/0.0.0\r\n\
              accept: application/json, text/event-stream\r\ncontent-type: application/json\r\n\
-             mcp-protocol-version: {PROTOCOL_VERSION}\r\ncontent-length: {}\r\n",
+             mcp-protocol-version: {}\r\ncontent-length: {}\r\n",
             self.authority,
+            self.protocol,
             body.len()
         );
         if let Some(session) = &self.session {
@@ -103,7 +135,14 @@ impl Wire {
             .write_all(format!("{head}\r\n{body}").as_bytes())
             .unwrap();
         let mut answer = String::new();
-        stream.read_to_string(&mut answer).unwrap();
+        match stream.read_to_string(&mut answer) {
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                panic!("neither an answer nor a close within the read timeout")
+            }
+            Err(_) => return None,
+            Ok(_) if answer.is_empty() => return None,
+            Ok(_) => {}
+        }
         let (head, body) = answer.split_once("\r\n\r\n").unwrap();
         let mut lines = head.lines();
         let status = lines.next().unwrap().split(' ').nth(1).unwrap();
@@ -111,10 +150,10 @@ impl Wire {
             .filter_map(|l| l.split_once(':'))
             .map(|(n, v)| (n.trim().to_ascii_lowercase(), v.trim().to_owned()))
             .collect();
-        Reply {
+        Some(Reply {
             status: status.parse().unwrap(),
             headers,
             body: body.to_owned(),
-        }
+        })
     }
 }
