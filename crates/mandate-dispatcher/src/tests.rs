@@ -109,7 +109,6 @@ fn plus(at: u64, secs: u64) -> Result<u64, Box<dyn Error>> {
 /// #1121 (a), DEC-726 item 3: two attempts at t1 and t2 sign two headers, each with its own time,
 /// so their `exp` claims differ by t2 − t1 and neither is the other's.
 #[test]
-#[ignore = "pending E8-14"]
 fn each_attempt_signs_its_own_header_with_its_own_time() -> Checked {
     let (t1, t2) = (NOW, plus(NOW, 15)?);
     for route in [Route::Direct, RELAYED] {
@@ -129,7 +128,6 @@ fn each_attempt_signs_its_own_header_with_its_own_time() -> Checked {
 /// hours after that attempt, so none has lapsed at its own send time, though a header reused from
 /// the first attempt would have lapsed long before the window ends.
 #[test]
-#[ignore = "pending E8-14"]
 fn no_header_lapses_inside_the_safety_retry_window() -> Checked {
     let mut sends = vec![NOW];
     for gap in [15, 60, 300].into_iter().chain(std::iter::repeat(900)) {
@@ -161,7 +159,6 @@ fn no_header_lapses_inside_the_safety_retry_window() -> Checked {
 /// so it signs nothing, and is refused `permanent { provider_error }` (DEC-728 item 2); a direct
 /// send keeps DEC-790 item 4's rule, and a role mailbox goes through the relay.
 #[test]
-#[ignore = "pending E8-14"]
 fn a_relayed_send_checks_the_subject_before_any_header() -> Checked {
     #[rustfmt::skip]
     let refused = [
@@ -215,7 +212,6 @@ fn expected(refusal: RelayError) -> Outcome {
 /// `safety` window; and every deployment-side fault, `invalid_authorization` included, is a
 /// permanent `provider_error`, never `auth_failed`, that marks nothing and stops.
 #[test]
-#[ignore = "pending E8-14"]
 fn each_relay_refusal_maps_to_its_section_5_2_outcome() -> Checked {
     let at = UtcNanos::from_parts(1_791_000_000, 0)?;
     let retry = Retry::At(UtcNanos::from_parts(1_791_000_015, 0)?);
@@ -242,7 +238,6 @@ fn each_relay_refusal_maps_to_its_section_5_2_outcome() -> Checked {
 /// refusal's outcome and its reason key, a failed signature's error, and every relay refusal's
 /// outcome.
 #[test]
-#[ignore = "pending E8-14"]
 fn nothing_journaled_or_logged_carries_the_subject() -> Checked {
     let person = format!("mailto:{}@example.invalid", CANARIES.join("."));
     let role = format!("mailto:push@{}.invalid", CANARIES.join("."));
