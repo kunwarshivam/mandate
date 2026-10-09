@@ -273,3 +273,27 @@ fn nothing_journaled_or_logged_carries_the_subject() -> Checked {
     assert_eq!(scan(captured.as_bytes())?, Vec::<&str>::new());
     Ok(())
 }
+
+/// A live test, true before and after the adapter is built, so the mutation gate has a test to
+/// judge this crate by (DEC-139): what an attempt prepares holds the signed header and the sealed
+/// body, so neither `Prepared` nor `Relayed` derives or implements `Debug` (NT-2, DEC-726 item 3).
+#[test]
+fn a_prepared_attempt_has_no_debug() -> std::io::Result<()> {
+    let lib = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))?;
+    for declared in ["pub enum Prepared {", "pub struct Relayed {"] {
+        let above = lib.split(declared).next().unwrap_or_default().lines().rev();
+        let attributes: String = above
+            .take_while(|l| l.starts_with("///") || l.starts_with("#["))
+            .filter(|l| l.starts_with("#["))
+            .collect();
+        assert!(lib.contains(declared), "{declared} is declared");
+        assert!(!attributes.contains("Debug"), "{declared} derives no Debug");
+    }
+    for name in ["Prepared", "Relayed"] {
+        assert!(
+            !lib.contains(&format!("Debug for {name}")),
+            "{name} implements no Debug"
+        );
+    }
+    Ok(())
+}
