@@ -25,6 +25,7 @@
   and `crates/mandate-journal/tests/anchor_record.rs` (anchors read back as recorded; E12-3).
 - **Reference cases:** `journal::tamper::*`, `journal::merkle`, `journal::export_line_seq_1`, and
   the `cold_records.range_checks`, `cold_records.trusted_starts`, and
-  `records_access.range_checks`, `verification_runs`, `connections`, `connection_requests`, and
-  `connection_ranges` vectors of `fixtures/refcases/journal.json`.
+  `records_access.range_checks`, `verification_runs`, `connections`, `connection_requests`,
+  `connection_ranges`, and `connection_revocations` (DEC-888; no Rust test reads it until E7-17's
+  tests PR) vectors of `fixtures/refcases/journal.json`.
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-refcases`.

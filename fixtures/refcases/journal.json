@@ -25914,6 +25914,754 @@
      "index": 5,
      "rule": "68"
     }
+   },
+   {
+    "name": "suspended_twice_cleared_after_the_second_entry",
+    "clause": "rule 68: a reauthorize after the latest entry into suspended, and its rotation, clear it (#1174)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "authorization_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S05A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S06A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S05A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S07A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "active"
+       },
+       {
+        "path": "payload.reason",
+        "value": "acknowledged"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C0A000000000000000K9"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S08A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "credential_expired"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S09A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S10A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S11A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S10A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S12A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "active"
+       },
+       {
+        "path": "payload.reason",
+        "value": "acknowledged"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C0A000000000000000K9"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "suspended_twice_cleared_by_the_first_rotation",
+    "clause": "rule 68: the first suspension's rotation does not clear the second (#1174)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "authorization_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S05A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S06A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S05A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S07A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "active"
+       },
+       {
+        "path": "payload.reason",
+        "value": "acknowledged"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C0A000000000000000K9"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S08A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "credential_expired"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S09A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S05A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 8,
+     "rule": "68"
+    }
+   },
+   {
+    "name": "suspended_twice_cleared_on_the_first_check",
+    "clause": "rule 68: a rotation after the second entry that rests on the first suspension's check (#1174)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "authorization_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S05A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S06A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S05A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S07A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "active"
+       },
+       {
+        "path": "payload.reason",
+        "value": "acknowledged"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C0A000000000000000K9"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S08A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "credential_expired"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S09A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S10A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S09A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 9,
+     "rule": "68"
+    }
    }
   ],
   "chains": [
@@ -32377,6 +33125,707 @@
       ]
      }
     ]
+   }
+  ],
+  "chains": []
+ },
+ "connection_revocations": {
+  "spec": "docs/specs/journal.md v0.37 §9.8 rule 68 and §11 (DEC-888)",
+  "drafts": {
+   "established_v2": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C1A000000000000000C1",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConnectionEstablished",
+    "schema_version": 2,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4C4A000000000000000C4",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "broker": "alpaca",
+     "environment": "paper",
+     "scopes": [
+      "data",
+      "trading"
+     ],
+     "account_ref": "01J8Z2ACCT00000000000000A1",
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     },
+     "margin_attestation": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "established_copy": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C7A000000000000000C7",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ConnectionEstablished",
+    "schema_version": 2,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4C1A000000000000000C1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "broker": "alpaca",
+     "environment": "paper",
+     "scopes": [
+      "data",
+      "trading"
+     ],
+     "account_ref": "01J8Z2ACCT00000000000000A1",
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     },
+     "margin_attestation": null,
+     "risk_clock": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "rotated_copy": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C8A000000000000000C8",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ConnectionCredentialRotated",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4C3A000000000000000C3",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "scopes": [
+      "data",
+      "trading"
+     ],
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     },
+     "risk_clock": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "refused_scope": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C2A000000000000000C2",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConnectionRefused",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper_2",
+     "broker": "alpaca",
+     "environment": "paper",
+     "occasion": "connect",
+     "check": "scope",
+     "reason": "fund_movement",
+     "existing_connection_id": null,
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     }
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "rotated": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C3A000000000000000C3",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConnectionCredentialRotated",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4C4A000000000000000C4",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "scopes": [
+      "data",
+      "trading"
+     ],
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     }
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "checked_start": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C4A000000000000000C4",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ConnectionChecked",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "occasion": "connect",
+     "results": [
+      {
+       "check": "account",
+       "result": "passed",
+       "reason": null
+      },
+      {
+       "check": "environment",
+       "result": "passed",
+       "reason": null
+      },
+      {
+       "check": "scope",
+       "result": "passed",
+       "reason": null
+      }
+     ],
+     "account_pii_ref": "pii_01J8Z2PR0000000000000000A1",
+     "risk_clock": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": [
+     "pii_01J8Z2PR0000000000000000A1"
+    ]
+   },
+   "state_degraded": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C5A000000000000000C5",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ConnectionStateChanged",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "from": "active",
+     "to": "degraded",
+     "reason": "network_errors",
+     "risk_clock": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "refreshed": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C6A000000000000000C6",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ConnectionCredentialRefreshed",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "scopes": [
+      "data",
+      "trading"
+     ],
+     "risk_clock": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [],
+  "valid_drafts": [],
+  "sequences": [
+   {
+    "name": "account_stream_revocation",
+    "clause": "rule 68: a ConnectionRevoked belongs to the control stream (DEC-888)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "daily"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 2,
+     "rule": "68"
+    }
+   },
+   {
+    "name": "account_stream_revocation_unbound",
+    "clause": "rule 68 (DEC-888)",
+    "records": [
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0,
+     "rule": "68"
+    }
+   },
+   {
+    "name": "control_stream_revocation_beside_a_bound_stream",
+    "clause": "§9.8: no rule refuses a control-stream ConnectionRevoked",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "daily"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "anchored_account_stream_revocation",
+    "clause": "rule 68: an anchored range judges it as the full chain does (DEC-888)",
+    "records": [
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0,
+     "rule": "68"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "unanchored_account_stream_revocation",
+    "clause": "§11: an account-stream connection record fails closed (DEC-888)",
+    "records": [
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Unanchored",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0
+    },
+    "scope": "range",
+    "before": null
+   },
+   {
+    "name": "unanchored_control_stream_revocation",
+    "clause": "§11, §9.8: a control-stream revocation never fails closed",
+    "records": [
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range",
+    "before": null
    }
   ],
   "chains": []
