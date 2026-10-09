@@ -98,6 +98,22 @@ impl Wire {
     }
 
     pub fn post(&mut self, body: &Value) -> Reply {
+        self.try_post(body)
+            .expect("the server closed the connection without an answer")
+    }
+
+    /// `tools/call` as sent, and the answer as it came, or `None` if none came.
+    pub fn call_raw(&mut self, tool: &str, arguments: Value) -> Option<Reply> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let params = json!({"name": tool, "arguments": arguments});
+        self.try_post(
+            &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": params}),
+        )
+    }
+
+    /// One exchange; `None` when the connection closes or resets with no byte of an answer.
+    pub fn try_post(&mut self, body: &Value) -> Option<Reply> {
         let body = body.to_string();
         let mut head = format!(
             "POST /mcp HTTP/1.1\r\nhost: {}\r\nconnection: close\r\nuser-agent: mandate-mcp/0.0.0\r\n\
@@ -118,7 +134,9 @@ impl Wire {
             .write_all(format!("{head}\r\n{body}").as_bytes())
             .unwrap();
         let mut answer = String::new();
-        stream.read_to_string(&mut answer).unwrap();
+        if stream.read_to_string(&mut answer).is_err() || answer.is_empty() {
+            return None;
+        }
         let (head, body) = answer.split_once("\r\n\r\n").unwrap();
         let mut lines = head.lines();
         let status = lines.next().unwrap().split(' ').nth(1).unwrap();
@@ -126,10 +144,10 @@ impl Wire {
             .filter_map(|l| l.split_once(':'))
             .map(|(n, v)| (n.trim().to_ascii_lowercase(), v.trim().to_owned()))
             .collect();
-        Reply {
+        Some(Reply {
             status: status.parse().unwrap(),
             headers,
             body: body.to_owned(),
-        }
+        })
     }
 }

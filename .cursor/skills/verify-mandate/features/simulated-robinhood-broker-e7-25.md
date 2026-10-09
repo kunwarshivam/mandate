@@ -22,7 +22,8 @@
   test's own oracle), and `crates/mandate-rh-sim/tests/server.rs` (S2: loopback only on a port the system chooses,
   the session and revision every later request needs, the listing as the pinned contract and its
   hash, a tool call driving the core as the core alone would, review, cancel and reads, unlisted
-  tools, and the extra-tool and injection variants; pending), with fixtures in
+  tools, the extra-tool and injection variants, and the lost-answer and garbled-answer
+  faults with the records list-and-match reads; pending), with fixtures in
   `tests/common/mod.rs`, the wire client in `tests/common/wire.rs`, and its live guard against
   `mandate-mcp`'s handshake in `crates/mandate-rh-sim/tests/wire.rs`.
 - **Run:** `cargo nextest run -p mandate-rh-sim`.
