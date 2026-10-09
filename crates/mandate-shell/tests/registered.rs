@@ -8,177 +8,33 @@
 //! DEC-840): the account type and day-trading regime are the connector's declaration, and the
 //! maintenance excess and prior-close equity are the broker's account answer (A1, DEC-524).
 
-use std::collections::BTreeMap;
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use mandate_accounting::AssetClass as TradedClass;
-use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    AccountRules, Asset, AssetSnapshot, DeclaredRegime, Exchange as BrokerExchange,
-    Feed as QuoteFeed, LatestQuote, MinuteBar, MinuteBars, alpaca_account_rules, wire,
+    AccountRules, DeclaredRegime, Exchange as BrokerExchange, alpaca_account_rules,
 };
-use mandate_canon::{DecStr, Digest, Value, to_canonical};
+use mandate_canon::{DecStr, Digest, to_canonical};
 use mandate_executor::BindingGateConfigRefs;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
-use mandate_num::{Price, Qty, Usd};
+use mandate_num::Usd;
 use mandate_risk::{AccountSnapshot, AccountType, DayTradeRegime, Exchange as GateExchange};
 use mandate_shell::Cause;
-use mandate_shell::control::{
-    Configuration, ConfirmedVersion, ControlRecord, Pinned, RunFacts, configuration,
-    confirmed_version,
-};
-use mandate_shell::paper::{
-    Artifacts, BrokerFacts, LiquidityFacts, PaperFacts, liquidity_facts, load_contexts,
-};
-use mandate_spec::context::{AgentId, Membership};
+use mandate_shell::paper::{Artifacts, PaperFacts, liquidity_facts, load_contexts};
 use mandate_time::{Date, UtcNanos};
 
-const MANDATE: &str = include_str!("fixtures/tracer/mandate.json");
-const FEE: &str = include_str!("fixtures/tracer/config/fee-config.json");
-const CALENDAR: &str = include_str!("fixtures/tracer/config/trading-calendar.json");
-const RULES: &str = include_str!("fixtures/tracer/config/rule-set.json");
-const E7_7_MODEL: &[u8] = include_bytes!("fixtures/tracer/config/model-artifact.json");
-const AAPL: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
-const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
-const SNAPSHOT: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-09-21T00:00:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}"#;
-const ENVELOPE: &str = "autonomy behavior capital connection_id environment goal name notifications protection risk universe";
+use common::{
+    AAPL, CALENDAR, E7_7_MODEL, FEE, RULES, SNAPSHOT, SPY, Stream, json, minute_bars, model,
+    reference, spy_facts, spy_mandate,
+};
+
 const NOW: &str = "2026-09-28T17:00:00Z";
-
-fn json(text: &str) -> Value {
-    mandate_canon::parse(text.as_bytes()).unwrap()
-}
-
-fn reference(bytes: &[u8]) -> String {
-    format!("sha256:{}", Digest::of(bytes))
-}
-
-/// The content object `mandate model register` stores for the pinned model (DEC-504 item 1), as
-/// production registers it.
-fn model() -> String {
-    let content = mandate_modelhost::content("quant.ma_crossover", "1.0.0").unwrap();
-    String::from_utf8(content.canonical).unwrap()
-}
-
-/// The E7-7 paper mandate re-pinned to SPY and to `content`'s hash.
-fn spy_mandate(content: &str) -> String {
-    let pinned = Digest::of(content.as_bytes()).to_hex();
-    let mandate = MANDATE.replace(AAPL, SPY).replace(r#""AAPL""#, r#""SPY""#);
-    mandate.replace(&Digest::of(E7_7_MODEL).to_hex(), &pinned)
-}
 
 fn now() -> UtcNanos {
     UtcNanos::parse_rfc3339(NOW).unwrap()
-}
-
-/// The control stream of a deployed SPY version, and the store of every object it names, each
-/// stored as written so its reference is the hash of those bytes.
-#[derive(Default)]
-struct Stream {
-    records: Vec<ControlRecord>,
-    store: BTreeMap<Digest, Vec<u8>>,
-}
-
-impl Stream {
-    fn deployed(snapshot: &str, rules: &str, fee: &str) -> Self {
-        Self::with_model(snapshot, rules, fee, &model())
-    }
-
-    /// The deployment with `content` registered as the pinned model `quant.ma_crossover` 1.0.0, and
-    /// the mandate re-pinned to its hash.
-    fn with_model(snapshot: &str, rules: &str, fee: &str, content: &str) -> Self {
-        let mandate = spy_mandate(content);
-        let document = to_canonical(&json(&mandate));
-        let version = reference(&document);
-        let paths: Vec<String> = ENVELOPE.split(' ').map(|p| format!("/{p}")).collect();
-        let provenance: Vec<String> = paths
-            .iter()
-            .map(|path| format!(r#"{{"path":"{path}","source":"user_entered"}}"#))
-            .collect();
-        let confirmed: Vec<String> = paths.iter().map(|path| format!(r#""{path}""#)).collect();
-        let mut stream = Self::default();
-        stream.store.insert(Digest::of(&document), document);
-        let model = format!(
-            r#"{{"admits_instruments":false,"content_hash":"{}","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}}"#,
-            stream.put(content)
-        );
-        let created = format!(
-            r#"{{"mandate_version":"{version}","provenance":[{}],"record_ref":"sha256:{}"}}"#,
-            provenance.join(","),
-            "7".repeat(64)
-        );
-        let confirmation = format!(
-            r#"{{"confirmed_paths":[{}],"mandate_version":"{version}"}}"#,
-            confirmed.join(",")
-        );
-        let deployed = format!(
-            r#"{{"agent_id":"agent_spy","mandate_version":"{version}","record_ref":"sha256:{}"}}"#,
-            "6".repeat(64)
-        );
-        stream.record("ConfigSnapshotRegistered", &model);
-        for (kind, object) in [
-            ("fee_config", fee),
-            ("trading_calendar", CALENDAR),
-            ("rule_set", rules),
-            ("instrument_snapshot", snapshot),
-        ] {
-            let hash = stream.put(object);
-            let payload = format!(
-                r#"{{"admits_instruments":null,"content_hash":"{hash}","kind":"{kind}","model_id":null,"model_version":null,"params":[]}}"#
-            );
-            stream.record("ConfigSnapshotRegistered", &payload);
-        }
-        stream.record("MandateVersionCreated", &created);
-        stream.record("MandateConfirmed", &confirmation);
-        stream.record("AgentDeployed", &deployed);
-        stream
-    }
-
-    /// Stores `object`'s bytes as written and returns their reference.
-    fn put(&mut self, object: &str) -> String {
-        self.store
-            .insert(Digest::of(object.as_bytes()), object.as_bytes().to_vec());
-        reference(object.as_bytes())
-    }
-
-    fn record(&mut self, event_type: &str, payload: &str) {
-        self.records.push(ControlRecord {
-            seq: u64::try_from(self.records.len()).unwrap() + 1,
-            event_type: event_type.to_owned(),
-            payload: json(payload),
-        });
-    }
-
-    fn artifacts(&self) -> Result<Artifacts, Cause> {
-        let (confirmed, config) = self.inputs();
-        Artifacts::from_registered(&confirmed, &config)
-    }
-
-    /// The phase-1 confirmed version and the effective configuration this stream deploys.
-    fn inputs(&self) -> (ConfirmedVersion, Configuration) {
-        let run = RunFacts {
-            agent: AgentId::new("agent_spy"),
-            validation_date: Date::parse("2026-09-28").unwrap(),
-            membership: Membership {
-                workspace_users: 1,
-                approver_users: 1,
-            },
-        };
-        let confirmed = confirmed_version(&self.records, &self.store, &run).unwrap();
-        let mandate = confirmed.mandate();
-        let model = &mandate.behavior.signal_models[0];
-        let pinned = Pinned {
-            asset_id: SPY.to_owned(),
-            symbol: "SPY".to_owned(),
-            model_id: model.id.as_str().to_owned(),
-            model_version: model.version.clone(),
-            content_hash: model.content_hash,
-        };
-        let trade_date = Date::parse("2026-09-28").unwrap();
-        let config = configuration(&self.records, &self.store, &pinned, trade_date).unwrap();
-        (confirmed, config)
-    }
 }
 
 /// The artifacts bind the registered SPY instrument on the exchange its snapshot names, and the
@@ -296,19 +152,6 @@ fn daily(root: &Path, symbol: &str) -> PathBuf {
     store.dataset_dir(&id)
 }
 
-fn minute_bars(symbol: &str) -> MinuteBars {
-    let bars = (55..60)
-        .map(|minute| MinuteBar {
-            start: UtcNanos::parse_rfc3339(&format!("2026-09-28T16:{minute}:00Z")).unwrap(),
-            volume: Qty::parse("100").unwrap(),
-        })
-        .collect();
-    MinuteBars {
-        instrument: InstrumentId::new(symbol).unwrap(),
-        bars,
-    }
-}
-
 /// The liquidity facts read the instrument the registered artifacts bind: SPY's daily and minute
 /// bars give SPY's figures, and AAPL's minute bars are refused for it.
 #[test]
@@ -318,70 +161,17 @@ fn the_liquidity_facts_read_the_registered_instrument() {
     let root = std::env::temp_dir().join(format!("mandate-shell-q1-{}", std::process::id()));
     let aapl = daily(&root.join("aapl"), "AAPL");
     let daily = daily(&root, "SPY");
-    let wrong_daily = liquidity_facts(symbol, &aapl, &minute_bars("SPY"), now());
+    let wrong_daily = liquidity_facts(symbol, &aapl, &minute_bars("SPY", now()), now());
     assert!(wrong_daily.is_err(), "AAPL's bars: {wrong_daily:?}");
-    let facts = liquidity_facts(symbol, &daily, &minute_bars("SPY"), now()).unwrap();
+    let facts = liquidity_facts(symbol, &daily, &minute_bars("SPY", now()), now()).unwrap();
     let figures = (
         facts.prior_close.to_string(),
         facts.trailing_5m_volume.to_string(),
     );
     assert_eq!(figures, ("655.2".to_owned(), "500".to_owned()));
-    let other = liquidity_facts(symbol, &daily, &minute_bars("AAPL"), now());
+    let other = liquidity_facts(symbol, &daily, &minute_bars("AAPL", now()), now());
     assert_eq!(other.err().map(|cause| cause.code()), Some("absent"));
     fs::remove_dir_all(&root).unwrap();
-}
-
-/// The recorded empty, active paper account, a fresh SPY quote and SPY's minute bars, beside the
-/// broker's asset record for `asset_id` and `symbol` listed on `exchange`.
-fn spy_facts(asset_id: &str, symbol: &str, exchange: BrokerExchange) -> PaperFacts {
-    let at = |text| UtcNanos::parse_rfc3339(text).unwrap();
-    let (price, qty) = (
-        |text| Price::parse(text).unwrap(),
-        |text| Qty::parse(text).unwrap(),
-    );
-    let account = include_bytes!("fixtures/tracer/alpaca/account.json");
-    let asset = Asset {
-        asset_id: asset_id.to_owned(),
-        instrument: InstrumentId::new(symbol).unwrap(),
-        class: TradedClass::UsEquity,
-        exchange,
-        active: true,
-        tradable: true,
-        fractionable: true,
-        ipo: false,
-        ptp_no_exception: false,
-        min_order_size: None,
-        min_trade_increment: None,
-        price_increment: None,
-    };
-    let quote = LatestQuote {
-        instrument: InstrumentId::new("SPY").unwrap(),
-        at: at("2026-09-28T16:59:59.5Z"),
-        bid: price("655.1"),
-        bid_size: qty("2"),
-        ask: price("655.2"),
-        ask_size: qty("1"),
-        feed: QuoteFeed::Iex,
-    };
-    let broker = BrokerFacts {
-        account: wire::account(account).unwrap(),
-        account_rules: alpaca_account_rules(),
-        positions: Vec::new(),
-        open_orders: Vec::new(),
-        asset: AssetSnapshot {
-            asset,
-            loaded_at: at("2026-09-28T16:59:59Z"),
-        },
-        quote,
-        minute_bars: minute_bars("SPY"),
-    };
-    let liquidity = LiquidityFacts {
-        prior_close: price("655.2"),
-        median_dollar_volume_20d: Usd::parse("45864000000").unwrap(),
-        adv_20d: qty("70000000"),
-        trailing_5m_volume: qty("500"),
-    };
-    PaperFacts { broker, liquidity }
 }
 
 /// The preflight judges the broker's asset record against the instrument the registered artifacts
@@ -393,7 +183,7 @@ fn the_preflight_judges_the_registered_instruments_asset_record() {
     let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
     let agent = mandate_runtime::AgentId("agent_spy".to_owned());
     let judged = |facts: PaperFacts| load_contexts(&artifacts, &facts, now(), &agent).map(|_| ());
-    let spy = judged(spy_facts(SPY, "SPY", BrokerExchange::Arca));
+    let spy = judged(spy_facts(SPY, "SPY", BrokerExchange::Arca, now()));
     assert!(spy.is_ok(), "{spy:?}");
     let others = [
         (AAPL, "SPY", BrokerExchange::Arca),
@@ -401,7 +191,7 @@ fn the_preflight_judges_the_registered_instruments_asset_record() {
         (SPY, "QQQ", BrokerExchange::Arca),
     ];
     for (asset_id, symbol, exchange) in others {
-        let refused = format!("{:?}", judged(spy_facts(asset_id, symbol, exchange)));
+        let refused = format!("{:?}", judged(spy_facts(asset_id, symbol, exchange, now())));
         let at_the_record = refused.contains("Absent") && refused.contains("asset record");
         assert!(at_the_record, "{asset_id} {symbol} {exchange:?}: {refused}");
     }
@@ -410,7 +200,7 @@ fn the_preflight_judges_the_registered_instruments_asset_record() {
     let later = Stream::deployed(&classified_later, RULES, FEE)
         .artifacts()
         .unwrap();
-    let facts = spy_facts(SPY, "SPY", BrokerExchange::Arca);
+    let facts = spy_facts(SPY, "SPY", BrokerExchange::Arca, now());
     let refused = format!(
         "{:?}",
         load_contexts(&later, &facts, now(), &agent).map(|_| ())
@@ -425,7 +215,7 @@ fn the_preflight_judges_the_registered_instruments_asset_record() {
 /// `rules`.
 fn gate_account(rules: AccountRules, figures: [&str; 3]) -> Result<AccountSnapshot, Cause> {
     let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
-    let mut facts = spy_facts(SPY, "SPY", BrokerExchange::Arca);
+    let mut facts = spy_facts(SPY, "SPY", BrokerExchange::Arca, now());
     let [equity, maintenance_margin, last_equity] = figures.map(|text| Usd::parse(text).unwrap());
     facts.broker.account.equity = equity;
     facts.broker.account.maintenance_margin = maintenance_margin;

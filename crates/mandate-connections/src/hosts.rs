@@ -123,6 +123,6 @@ fn is_plain_segment(segment: &str) -> bool {
 }
 
 /// RFC 3986 unreserved: ASCII letters, digits, `-`, `.`, `_`, and `~`.
-fn is_unreserved(c: char) -> bool {
+pub(crate) fn is_unreserved(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~')
 }
