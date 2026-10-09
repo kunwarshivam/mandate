@@ -22,11 +22,12 @@ builder, versioning, change classification, and the records kept.
 
 - **v0.7, amended ([DEC-695](../project/decisions/DEC-695.md), Proposed, waiting for the
   founder):** §4.2 states the unasked-dollars figure of [DEC-189](../project/04-decision-log.md#decisions)
-  as a formula: its inputs, an unknown that is never shown as 0, its zero cases, each `auto` path's
-  slices under the order count, the gross headroom, and rounding up to the cent; `unasked_usd` in
-  the reference model computes it, and its fuzz checks it against the decisions §6.2 actually makes.
-  §7 states how the loss answer of goal-first onboarding (DEC-182) maps to the three loss fields.
-  No reference case, decision, or limit changes.
+  as a formula: its inputs, an unknown that is never shown as 0, its zero cases, and each `auto`
+  path's slices under the daily order count, rounded up to the cent. It has no gross-exposure cap,
+  because headroom can grow within the day. `unasked_usd` in the reference model computes it, and
+  its fuzz checks it against the decisions §6.2 actually makes. §7 states how the loss answer of
+  goal-first onboarding (DEC-182) maps to the three loss fields, and the ladder the drafter proposes
+  beneath them. No reference case, decision, or limit changes.
 - **v0.7 ([DEC-539](../project/decisions/DEC-539.md), the founder's decision of 2026-10-08):** mandate
   schema version 2 renames `protection.crypto_stop_limit_offset` to `protection.stop_limit_offset`,
   one offset for every protective stop-limit the platform places, whatever the asset class. V-008
@@ -556,16 +557,15 @@ agent's own confidence is self-reported and uncalibrated (DEC-126).
 [DEC-695](../project/decisions/DEC-695.md), Proposed). One figure, shown on this screen, the
 contract card, D6's delegation variant, the daily brief (D13), and D15: an upper bound on the order
 value of opening and increasing orders the agent could have decided `auto` (§6.2) from the risk
-clock *t* to the end of its risk day (§5.4), before any exit, new risk day, or version raises it.
-It is display only, changes no decision, and is computed by `unasked_usd` in the reference model
-from these inputs and nothing else:
+clock *t* to the end of its risk day (§5.4). Within that day only a new version or a policy change
+can raise it; the next risk day starts a new count. It is display only, changes no decision, and is
+computed by `unasked_usd` in the reference model from these inputs and nothing else:
 
 | Input | From |
 |---|---|
 | The mandate *m* | The version in force; for a confirmation screen or a delegation preview, the version being confirmed |
 | The risk clock *t* | The journaled risk clock (§5.2); for an agent not yet deployed, the validation instant |
-| Agent equity E, gross exposure G | §5.1 and §5.3: G is Σ \|MV\| of the agent's positions plus the max cost of its working opening orders; an agent not yet deployed has E = A and G = 0 |
-| `orders_today` | §5.3's count of opening and increasing orders submitted in the risk day |
+| `orders_today` | §5.3's count of opening and increasing orders submitted in the risk day; 0 for an agent not yet deployed |
 | Usage per delegation | §6.5 condition 4's journaled count and total; a delegation with no entry has used nothing |
 | Effective policy | §4.3's `auto_allowed` and whether the version is `policy_nonconforming`; not known reads as allowed and conforming, the larger figure |
 
@@ -585,19 +585,21 @@ from these inputs and nothing else:
    `max_total_usd` − total used): q = min(k, ⌊R ÷ c⌋) slices of size c, and one more of size
    R − q × c when q < k and that is above 0. A bound that is absent is left out of the minimum, and
    a slice of size 0 or less is dropped.
-5. **Count.** n = max(0, `max_orders_per_day` − `orders_today`). P is the sum of the n largest
-   slices, the unlimited slice counting as many times as it is taken.
-6. **Headroom.** H = max(0, min(`max_gross_exposure_usd`, E) − G).
-7. **The figure** is min(P, H), rounded **up** to the cent. Every step is exact decimal arithmetic,
-   never floating point.
+5. **Count.** n = max(0, `max_orders_per_day` − `orders_today`). `max_orders_per_day` is required
+   (1 to 10,000, the schema), so n is always finite and so is the figure, even with an unlimited
+   slice.
+6. **The figure** is the sum of the n largest slices, the unlimited slice counting as many times as
+   it is taken, rounded **up** to the cent. Every step is exact decimal arithmetic, never floating
+   point.
 
-It is an upper bound by construction: it leaves out which rule matches first, the admission and
-client ceilings, every condition but an order bound, the position cap, cooldowns, sessions, marks,
-the agent's mode, and delegation suspension (§6.5 condition 5), each of which can only lower what
-runs unasked; the agent's state is shown beside it. It is reached exactly by the agent's own
-orders when every condition is an order bound or a catch-all, no `ask` rule comes before an `auto`
-one, every delegation it counts is already live, and the position cap does not bind. A drafted mandate holds no
-`auto` and no delegation (V-022), so the contract card shows 0 until the owner enters one.
+It is a bound, not an estimate. Everything it leaves out can only stop an order from running
+unasked, never let one run, so leaving it out can only make the figure larger: which rule matches
+first, `ask` and `deny` rules, the admission and client ceilings, every condition but an order
+bound, the position cap, the gross exposure limit, cooldowns, sessions, the agent's mode, and
+delegation suspension (§6.5 condition 5). The gross exposure limit in particular is left out because
+its headroom grows within the day as marks fall, working orders are cancelled, and exits fill, so a
+cap taken at *t* could understate. The agent's state is shown beside the figure. A drafted mandate
+holds no `auto` and no delegation (V-022), so the contract card shows 0 until the owner enters one.
 Workspace API §5.3's `unasked_usd_after` is this figure for the preview's version at the agent's
 current state.
 
@@ -1416,13 +1418,17 @@ until the owner confirms them, §7), because they only reduce risk.
   `universe.max_instruments` 5 (DEC-117) and `behavior.research.max_revisions_per_lineage` 3
   (DEC-111). Both are shown as proposed and both need confirmation.
 - **The loss answer** of goal-first onboarding ([DEC-182](../project/04-decision-log.md#decisions);
-  [DEC-695](../project/decisions/DEC-695.md) item 6, Proposed) maps to three fields and no others.
-  A fraction, or a dollar amount divided by `capital.allocation_usd`, is rounded **down** to whole
-  basis points to give F; F of 0, or of 1 or more, is asked again. `capital.max_loss_from_allocation`
-  is F (`user_stated`, with the quoted span); `risk.max_drawdown` is 0.8 × F and
-  `risk.max_daily_loss` is 0.2 × F (`platform_proposed`, the base mandates' ratios), so V-014 holds
-  and the flatten rung's `at` follows `max_drawdown` (V-011). `loss_answer_fields` in the reference
-  model computes them.
+  [DEC-695](../project/decisions/DEC-695.md) items 6 and 7, Proposed) maps to three fields and no
+  others. A fraction, or a dollar amount divided by `capital.allocation_usd`, is rounded **down** to
+  whole basis points to give F. `capital.max_loss_from_allocation` is F (`user_stated`, with the
+  quoted span); `risk.max_drawdown` D is 0.8 × F and `risk.max_daily_loss` is 0.2 × F
+  (`platform_proposed`, the base mandates' ratios), so V-014 holds. Separately, the drafter proposes
+  the ladder beneath D (`platform_proposed`, confirmed like any other field): `scale_sizes` with
+  factor 0.5 at 0.375 × D, `exits_only` at 0.75 × D, `flatten_and_pause` at exactly D (V-011), and
+  `risk.hysteresis` 0.125 × D, each but the last rounded down to whole basis points. If rounding
+  leaves any of them at 0 or breaks the strict order hysteresis < the two lower rungs < D (V-010,
+  V-012), nothing is dropped: the answer is refused and asked again, as is an F of 0 or of 1 or more.
+  `loss_answer_fields` and `proposed_ladder` in the reference model compute them.
 - **Unenforced constraints:** if the description contains a constraint the mandate cannot express
   (for example, "avoid trading around macro releases"), the compiler flags it on the review screen
   as **not enforced**. It reaches LLM models only as description text.

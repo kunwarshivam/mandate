@@ -409,18 +409,25 @@ UNASKED_MUTANTS = {
         '    if "all" in c:\n        bs = [b for b', '    if "not" in c:\n        return order_usd_bound(c["not"])\n    if "all" in c:\n        bs = [b for b'),
     "unasked: the smallest slices are taken first": (
         'key=lambda s: s[0], reverse=True)', 'key=lambda s: s[0])'),
-    "unasked: headroom ignores agent equity": (
-        '    headroom = max(D(0), min(D(r["max_gross_exposure_usd"]), D(st["agent_equity"])) - D(st["gross_usd"]))',
-        '    headroom = max(D(0), D(r["max_gross_exposure_usd"]) - D(st["gross_usd"]))'),
-    "unasked: headroom ignores gross exposure": (
-        ' - D(st["gross_usd"]))\n    return norm', ')\n    return norm'),
+    "unasked: the old cap at the gross headroom at t (#1062 review B1)": (
+        '    return norm(total.quantize(D("0.01"), rounding=ROUND_CEILING))',
+        '    return norm(min(total, max(D(0), min(D(r["max_gross_exposure_usd"]), D(st["agent_equity"])) - D(st["gross_usd"])))'
+        '.quantize(D("0.01"), rounding=ROUND_CEILING))'),
     "unasked: the figure rounds down": (
-        '    return norm(min(total, headroom).quantize(D("0.01"), rounding=ROUND_CEILING))',
-        '    return norm(min(total, headroom).quantize(D("0.01"), rounding=ROUND_DOWN))'),
+        '    return norm(total.quantize(D("0.01"), rounding=ROUND_CEILING))',
+        '    return norm(total.quantize(D("0.01"), rounding=ROUND_DOWN))'),
     "loss answer: rounds up": (
         '    f = f.quantize(D("0.0001"), rounding=ROUND_DOWN)', '    f = f.quantize(D("0.0001"), rounding=ROUND_UP)'),
-    "loss answer: the whole allocation maps": ('    if not D(0) < f < D(1):', '    if not D(0) < f <= D(1):'),
+    "loss answer: the whole allocation maps": (
+        '    if not D(0) < f < D(1) or proposed_ladder', '    if not D(0) < f <= D(1) or proposed_ladder'),
     "loss answer: the drawdown is the floor": ('norm(f * D("0.8"))', 'norm(f)'),
+    "loss answer: the old mapping, the base ladder kept (#1062 review M1)": (
+        '    dd = D(max_drawdown)\n', '    dd = D("0.08")\n'),
+    "loss answer: the ladder rounds up": (
+        '    bp = lambda x: (x * dd).quantize(D("0.0001"), rounding=ROUND_DOWN)',
+        '    bp = lambda x: (x * dd).quantize(D("0.0001"), rounding=ROUND_UP)'),
+    "loss answer: collapsed rungs are proposed": (
+        '    if not D(0) < hyst < halve < exits < dd:', '    if not D(0) < dd:'),
 }
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "

@@ -1172,7 +1172,7 @@ def autonomy(m, a, st=None):
     return res
 
 # ------------------------------------------------------------------ unasked dollars (§4.2; DEC-189, DEC-695)
-UNASKED_STATE = ("now", "agent_equity", "gross_usd", "orders_today", "usage")
+UNASKED_STATE = ("now", "orders_today", "usage")
 
 def order_usd_bound(c):
     """The largest `order_usd` an order matching condition `c` can have, or None when `c` does not bound it (§4.2).
@@ -1193,8 +1193,9 @@ def capped(*xs):
 
 def unasked_usd(m, st, policy=None):
     """§4.2's unasked dollars (DEC-189, DEC-695): an upper bound, rounded up to the cent, on the order value the
-    agent could submit without an ask from the risk clock `st["now"]` to the end of its risk day, before any exit,
-    new risk day, or version raises it. None when a journal input is missing: unknown is never shown as 0."""
+    agent could have decided `auto` from the risk clock `st["now"]` to the end of its risk day, before a new risk day,
+    version, or policy raises it. No gross-exposure cap: marks, cancels, and exits free headroom within the day
+    (DEC-695 item 4). None when a journal input is missing: unknown is never shown as 0."""
     if st is None or any(k not in st for k in UNASKED_STATE):
         return None
     policy = policy or {}
@@ -1230,22 +1231,39 @@ def unasked_usd(m, st, policy=None):
         take = n if count is None else min(n, count)
         total += size * take
         n -= take
-    headroom = max(D(0), min(D(r["max_gross_exposure_usd"]), D(st["agent_equity"])) - D(st["gross_usd"]))
-    return norm(min(total, headroom).quantize(D("0.01"), rounding=ROUND_CEILING))
+    return norm(total.quantize(D("0.01"), rounding=ROUND_CEILING))
 
 def loss_answer_fields(answer, allocation_usd):
     """DEC-695 item 6, a proposal: the onboarding loss answer (DEC-182), `("fraction" | "usd", value)`, as the three
     fields it alone maps to. Dollars become a fraction of the allocation; either is rounded down to whole basis points,
     so the limit is never looser than the words. No loss, or the whole allocation or more, is refused (None) and asked
-    again. `max_drawdown` and `max_daily_loss` are `platform_proposed`, at the base mandates' ratios to the floor."""
+    again. `max_drawdown` and `max_daily_loss` are `platform_proposed`, at the base mandates' ratios to the floor. An
+    answer too small for `proposed_ladder` to fit a ladder beneath it is refused too."""
     kind, value = answer
     f = D(value) if kind == "fraction" else D(value) / D(allocation_usd)
     f = f.quantize(D("0.0001"), rounding=ROUND_DOWN)
-    if not D(0) < f < D(1):
+    if not D(0) < f < D(1) or proposed_ladder(f * D("0.8")) is None:
         return None
     return {"/capital/max_loss_from_allocation": ("user_stated", norm(f)),
             "/risk/max_drawdown": ("platform_proposed", norm(f * D("0.8"))),
             "/risk/max_daily_loss": ("platform_proposed", norm(f * D("0.2")))}
+
+def proposed_ladder(max_drawdown):
+    """DEC-695 item 7, a proposal: the drawdown ladder and hysteresis the drafter proposes (`platform_proposed`)
+    beneath a proposed `max_drawdown` D, at the base mandates' fractions of it: a halving at 0.375 D, exits only at
+    0.75 D, the flatten rung at exactly D (V-011), and hysteresis 0.125 D, each but the last rounded down to whole
+    basis points. None, and the answer is asked again, when rounding leaves a value at 0 or breaks V-010's strict
+    order or V-012."""
+    dd = D(max_drawdown)
+    bp = lambda x: (x * dd).quantize(D("0.0001"), rounding=ROUND_DOWN)
+    halve, exits, hyst = bp(D("0.375")), bp(D("0.75")), bp(D("0.125"))
+    if not D(0) < hyst < halve < exits < dd:
+        return None
+    return {"/risk/drawdown_ladder": ("platform_proposed", [
+                {"at": norm(halve), "action": "scale_sizes", "factor": "0.5"},
+                {"at": norm(exits), "action": "exits_only", "factor": None},
+                {"at": norm(dd), "action": "flatten_and_pause", "factor": None}]),
+            "/risk/hysteresis": ("platform_proposed", norm(hyst))}
 
 # ------------------------------------------------------------------ tripwires (§6.7; MI-31; DEC-187, DEC-350, DEC-351)
 TRIPWIRE_ALERT_TEXT = "tripwire_fired"
