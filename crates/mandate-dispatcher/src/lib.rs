@@ -18,10 +18,8 @@
 //! turns one attempt into a direct [`PushRequest`] or a [`Relayed`] send. Its VAPID header is
 //! built for that attempt with that attempt's time, so its `exp`, a fixed 12 hours on (DEC-790
 //! item 4), never lapses inside the 24-hour `safety` retry window, and no header outlives its
-//! attempt. A relayed send checks the configured subject with
-//! [`VapidSubject::check_relayed`] before it builds any header and is refused when the subject is
-//! not a role mailbox. [`relay_refusal`] maps every relay refusal to spec §5.2's permanent
-//! `provider_error`, which marks no address and is not retried (DEC-728).
+//! attempt. A relayed send checks the configured subject with [`VapidSubject::check_relayed`]
+//! before it builds any header. [`relay_refusal`] gives each relay refusal its §5.2 outcome.
 //!
 //! Nothing here keeps, journals, or logs a header: [`PushRequest`] and [`Relayed`] have no
 //! `Debug`, and an [`Outcome`] or a [`DispatchError`] holds no input (NT-2).
@@ -110,9 +108,11 @@ pub fn prepare(attempt: &Attempt<'_>) -> Result<Prepared, DispatchError> {
     Err(DispatchError::Unimplemented { story: "E8-14" })
 }
 
-/// The outcome a relay refusal is journaled as: `permanent { provider_error }` for every one,
-/// never `auth_failed` or `address_rejected`, so no address is marked `unreachable` and nothing is
-/// retried (DEC-728 item 1).
+/// The outcome a relay refusal is journaled as (spec §5.2, §5.3): `address_rejected` is
+/// `permanent { address_rejected }`, which marks the address (DEC-724 item 4); `unreachable`, a push
+/// service that did not answer, is `retryable { timeout }`; and every other refusal, a fault of the
+/// deployment's own request that no retry heals, is `permanent { provider_error }`, never
+/// `auth_failed` (DEC-728 item 1).
 ///
 /// # Errors
 /// Never once implemented: every refusal has its outcome.

@@ -50,11 +50,9 @@ impl VapidSigner for Counting {
     }
     fn sign_es256(&self, _: &[u8]) -> Result<[u8; 64], WebPushError> {
         self.signed.set(self.signed.get().saturating_add(1));
-        if self.fails {
-            Err(WebPushError::Signer)
-        } else {
-            Ok([0xfb; 64])
-        }
+        (!self.fails)
+            .then_some([0xfb; 64])
+            .ok_or(WebPushError::Signer)
     }
 }
 
@@ -83,9 +81,7 @@ fn attempt(
 fn header(prepared: Prepared, route: Route<'_>) -> Result<String, Box<dyn Error>> {
     match (prepared, route) {
         (Prepared::Direct(push), Route::Direct) => Ok(push.authorization),
-        (Prepared::Relayed(relayed), Route::Relayed { .. }) => {
-            Ok(relayed.request()?.authorization.to_owned())
-        }
+        (Prepared::Relayed(r), Route::Relayed { .. }) => Ok(r.request()?.authorization.to_owned()),
         _ => Err("the attempt was refused or took the other route".into()),
     }
 }
@@ -188,7 +184,7 @@ fn a_relayed_send_checks_the_subject_before_any_header() -> Checked {
     Ok(())
 }
 
-/// Every refusal the relay can answer, kept whole by [`exhaustive`].
+/// Every refusal the relay can answer, kept whole by [`expected`].
 #[rustfmt::skip]
 const REFUSALS: [RelayError; 7] = [
     RelayError::Unimplemented { story: "E8-14" }, RelayError::InvalidRelayId,
@@ -196,35 +192,47 @@ const REFUSALS: [RelayError; 7] = [
     RelayError::Unreachable, RelayError::InvalidAuthorization,
 ];
 
-/// Fails to compile when `RelayError` gains a variant that [`REFUSALS`] does not list.
-fn exhaustive(refusal: RelayError) -> RelayError {
+/// Each refusal's outcome, written here from spec §5.2, §5.3, DEC-724 item 4 and DEC-728 item 1;
+/// it fails to compile when `RelayError` gains a variant.
+fn expected(refusal: RelayError) -> Outcome {
     match refusal {
+        RelayError::AddressRejected => Outcome::Permanent {
+            reason: Reason::AddressRejected,
+        },
+        RelayError::Unreachable => Outcome::Retryable {
+            reason: Reason::Timeout,
+        },
         RelayError::Unimplemented { .. }
         | RelayError::InvalidRelayId
-        | RelayError::AddressRejected
         | RelayError::InvalidEnvelope
         | RelayError::TooLarge
-        | RelayError::Unreachable
-        | RelayError::InvalidAuthorization => refusal,
+        | RelayError::InvalidAuthorization => PROVIDER_ERROR,
     }
 }
 
-/// #1121 (c), DEC-728 item 1: every relay refusal, `invalid_authorization` included, is a
-/// permanent `provider_error`: never `auth_failed`, `address_rejected`, or any reason that marks
-/// the address `unreachable`, and §5.3's schedule stops rather than retrying it.
+/// #1121 (c), DEC-724 item 4, DEC-728 item 1, spec §5.2 and §5.3: the relay's `address_rejected`
+/// marks the address and stops; its `unreachable` is a timeout retried 15 s later, inside the
+/// `safety` window; and every deployment-side fault, `invalid_authorization` included, is a
+/// permanent `provider_error`, never `auth_failed`, that marks nothing and stops.
 #[test]
 #[ignore = "pending E8-14"]
-fn every_relay_refusal_is_a_permanent_provider_error() -> Checked {
+fn each_relay_refusal_maps_to_its_section_5_2_outcome() -> Checked {
     let at = UtcNanos::from_parts(1_791_000_000, 0)?;
-    for (n, refusal) in REFUSALS.into_iter().map(exhaustive).enumerate() {
+    let retry = Retry::At(UtcNanos::from_parts(1_791_000_015, 0)?);
+    for (n, refusal) in REFUSALS.into_iter().enumerate() {
         let outcome = relay_refusal(refusal)?;
-        assert_eq!(outcome, PROVIDER_ERROR, "refusal {n}");
-        let Outcome::Permanent { reason } = outcome else {
-            return Err("not permanent".into());
-        };
-        assert!(!MARKS.contains(&reason), "refusal {n} marks the address");
+        assert_eq!(outcome, expected(refusal), "refusal {n}");
         let after = next_attempt(Class::Safety, at, at, 1, &outcome)?;
-        assert_eq!(after, Retry::Failed(Reason::ProviderError), "refusal {n}");
+        match outcome {
+            Outcome::Permanent { reason } => {
+                let marks = refusal == RelayError::AddressRejected;
+                assert_eq!(MARKS.contains(&reason), marks, "refusal {n}");
+                assert_ne!(reason, Reason::AuthFailed, "refusal {n}");
+                assert_eq!(after, Retry::Failed(reason), "refusal {n}");
+            }
+            Outcome::Retryable { .. } => assert_eq!(after, retry, "refusal {n}"),
+            Outcome::Accepted { .. } => return Err("a refusal was accepted".into()),
+        }
     }
     Ok(())
 }
@@ -247,13 +255,10 @@ fn nothing_journaled_or_logged_carries_the_subject() -> Checked {
     let Prepared::Refused(outcome) = attempt(&Counting::default(), &person, RELAYED, NOW)? else {
         return Err("a person's subject went through the relay".into());
     };
-    if let Outcome::Permanent { reason } | Outcome::Retryable { reason } = &outcome {
-        captured.push_str(reason.key()?);
-    }
     captured.push_str(&format!("{outcome:?}"));
     let failing = Counting {
+        signed: Cell::new(0),
         fails: true,
-        ..Counting::default()
     };
     for route in [Route::Direct, RELAYED] {
         let Err(error) = attempt(&failing, &role, route, NOW) else {
