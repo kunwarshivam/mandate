@@ -386,12 +386,6 @@ pub enum RecordRefusal {
     /// is before that record's (DEC-659), so the fold would read it as out of order (DEC-657 item 4).
     #[error("the record is out of order with the stream's last membership record")]
     OutOfOrder,
-    /// The stub of a story not yet implemented.
-    #[error("{story} has not been implemented yet")]
-    Unimplemented {
-        /// The story.
-        story: &'static str,
-    },
 }
 
 /// The writer's check that a record's `independent_approval_required` equals `effective`, the
@@ -429,8 +423,11 @@ pub fn check_independence(record: &MembershipRecord, effective: bool) -> Result<
 /// record type is checked alike. A writer that calls it never commits a record the fold reads as
 /// out of order (DEC-657 item 4), which stays the fold's backstop.
 pub fn check_order(
-    _last: Option<&MembershipRecord>,
-    _next: &MembershipRecord,
+    last: Option<&MembershipRecord>,
+    next: &MembershipRecord,
 ) -> Result<(), RecordRefusal> {
-    Err(RecordRefusal::Unimplemented { story: "E9-7" })
+    match last {
+        Some(before) if !follows(before, next) => Err(RecordRefusal::OutOfOrder),
+        Some(_) | None => Ok(()),
+    }
 }
