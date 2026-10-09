@@ -314,15 +314,24 @@ pub enum Proof<'a> {
 /// A step-up as the caller presents it with the action it wants to commit.
 ///
 /// Its workspace and principal are the request's, read from the [`TenantContext`] `authorize`
-/// returned ([DEC-649], ID-8): [`Presentation::new`] is the request path. The public ID fields
-/// stay only until the test fixture moves to `new`; DEC-649 item 4 then makes them private, so
-/// no caller can name a workspace or principal it was not authorized for.
+/// returned ([DEC-649], ID-8): [`Presentation::new`] is the only way to build one. The ID fields
+/// are private (DEC-649 item 4), so no caller can name a workspace or principal it was not
+/// authorized for:
+///
+/// ```compile_fail,E0451
+/// use mandate_identity::{PrincipalId, WorkspaceId};
+/// use mandate_passkey::stepup::{Action, Presentation, Proof};
+///
+/// fn named(w: WorkspaceId, p: PrincipalId, action: Action) -> Presentation<'static> {
+///     Presentation { workspace_id: w, principal_id: p, action, proof: Proof::CliConfirm }
+/// }
+/// ```
 ///
 /// [DEC-649]: ../../../docs/project/decisions/DEC-649.md
 #[derive(Debug, Clone, Copy)]
 pub struct Presentation<'a> {
-    pub workspace_id: WorkspaceId,
-    pub principal_id: PrincipalId,
+    workspace_id: WorkspaceId,
+    principal_id: PrincipalId,
     pub action: Action,
     pub proof: Proof<'a>,
 }
