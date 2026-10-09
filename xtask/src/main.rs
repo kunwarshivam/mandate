@@ -1548,17 +1548,19 @@ fn build_files(root: &Path) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-/// [`live_feature_problems`] over the repository at `root`, as `cargo xtask live-feature` and
-/// the lint job run it.
+/// [`live_feature_problems`] and [`resolved_live_problems`] over the repository at `root`, as
+/// `cargo xtask live-feature` and the lint job run it.
 fn live_feature_in(root: &Path) -> Result<()> {
     eprintln!("    live-feature: checking that only the runner may build `live` (ES-23, DEC-529)");
     let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)
         .context("parsing xtask/layers.toml")?;
     let files = ci_files(root)?;
-    report(
-        live_feature_problems(&policy, &metadata_in(root)?, &files)?,
-        "live-feature",
-    )
+    let meta = metadata_in(root)?;
+    let mut problems = live_feature_problems(&policy, &meta, &files)?;
+    problems.extend(resolved_live_problems(&policy, &meta, &files, &|words| {
+        cargo_resolve(root, words)
+    })?);
+    report(problems, "live-feature")
 }
 
 /// Every way the workspace and its CI break ES-23's ban on a `live` build, as DEC-529 item 3
@@ -1694,19 +1696,23 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
 /// `cargo metadata`'s `resolve`: the packages one build resolves (E7-28).
 #[derive(Deserialize)]
 struct Resolve {
-    #[cfg_attr(not(test), expect(dead_code, reason = "E7-28 reads it"))]
     nodes: Vec<ResolvedNode>,
 }
 
 /// A [`Resolve`]'s package by id, its features turned on, and the ids it depends on, of any kind.
 #[derive(Deserialize)]
-#[expect(dead_code, reason = "E7-28's implementation reads it")]
 struct ResolvedNode {
     id: String,
     #[serde(default)]
     features: Vec<String>,
     #[serde(default)]
     dependencies: Vec<String>,
+}
+
+/// `cargo metadata`'s output with its resolve, which `--no-deps` leaves out.
+#[derive(Deserialize)]
+struct ResolvedMetadata {
+    resolve: Option<Resolve>,
 }
 
 /// Every CI build that resolves `live`, from what cargo resolves: DEC-851 item 6's artifact-level
@@ -1716,29 +1722,299 @@ struct ResolvedNode {
 /// pass `--all-features`, but one `cargo check -p <runner>` with only `live` may turn it on in the
 /// runner. Problems name the file and job, the package with each package turning `live` on or
 /// depending on it; a failed resolve or an expanding word is a problem, not an abort.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "E7-28 wires it into live-feature")
-)]
 fn resolved_live_problems(
     policy: &Layers,
     meta: &Metadata,
     workflows: &[CiFile],
     resolve_for: &dyn Fn(&[String]) -> Result<Resolve>,
 ) -> Result<Vec<String>> {
-    let _ = (policy, meta, workflows, resolve_for);
-    bail!("resolved_live_problems is not yet implemented (E7-28)")
+    let runner = live_runner(policy, meta);
+    let live_only: BTreeSet<&str> = meta
+        .packages
+        .iter()
+        .filter(|pkg| runner == Some(pkg.name.as_str()))
+        .filter_map(|pkg| pkg.features.get(LIVE))
+        .flatten()
+        .filter_map(|enabled| enabled.strip_prefix("dep:"))
+        .collect();
+    let mut builds = vec![("the default build".to_owned(), Vec::new())];
+    for file in workflows
+        .iter()
+        .filter(|file| file.path.starts_with(".github/workflows/"))
+    {
+        for (job, words) in workflow_cargo_invocations(file) {
+            let at = format!("{}: job `{job}`, `cargo {}`", file.path, words.join(" "));
+            builds.push((at, words));
+        }
+    }
+    let mut problems = Vec::new();
+    let mut compile_only_seen = false;
+    for (at, words) in builds {
+        if words.iter().any(|word| word.contains(['$', '`'])) {
+            problems.push(format!("{at}: words the shell expands cannot be resolved"));
+            continue;
+        }
+        if words.iter().any(|word| word == "--all-features") {
+            problems.push(format!(
+                "{at}: `--all-features` would resolve the `{LIVE}` feature"
+            ));
+        }
+        let resolve = match resolve_for(&words) {
+            Ok(resolve) => resolve,
+            Err(err) => {
+                problems.push(format!(
+                    "{at}: cannot be resolved, so the check cannot judge it: {err:#}"
+                ));
+                continue;
+            }
+        };
+        let compile_only_form = runner.is_some_and(|runner| is_compile_only(&words, runner));
+        let compile_only = compile_only_form && !compile_only_seen;
+        if compile_only_form && compile_only_seen {
+            problems.push(format!(
+                "{at}: a second compile-only `{LIVE}` job; CI may compile it once"
+            ));
+        }
+        compile_only_seen |= compile_only;
+        for node in &resolve.nodes {
+            let name = node_name(meta, &node.id);
+            let runner_allowed = compile_only && runner == Some(name);
+            if node.features.iter().any(|feature| feature == LIVE) && !runner_allowed {
+                let by = turned_on_by(meta, &resolve, name);
+                problems.push(format!(
+                    "{at}: resolves `{LIVE}` in `{name}`{}",
+                    listed(", turned on by", &by)
+                ));
+            }
+            if live_only.contains(name) && !compile_only {
+                let by: BTreeSet<&str> = resolve
+                    .nodes
+                    .iter()
+                    .filter(|other| other.dependencies.contains(&node.id))
+                    .map(|other| node_name(meta, &other.id))
+                    .collect();
+                problems.push(format!(
+                    "{at}: holds the live-only `{name}`{}",
+                    listed(", depended on by", &by)
+                ));
+            }
+        }
+    }
+    Ok(problems)
 }
 
-/// The [`Resolve`] `cargo metadata --format-version 1 --locked` gives at `root` for the feature
-/// flags among a cargo invocation's `words`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "E7-28 wires it into live-feature")
-)]
+/// The workspace member marked `live_feature` in `policy`, when exactly one is.
+fn live_runner<'a>(policy: &'a Layers, meta: &Metadata) -> Option<&'a str> {
+    let mut marked = policy
+        .crates
+        .iter()
+        .filter(|(_, crate_policy)| crate_policy.live_feature)
+        .map(|(name, _)| name.as_str());
+    let only = marked.next().filter(|_| marked.next().is_none())?;
+    workspace_packages(meta)
+        .iter()
+        .any(|pkg| pkg.name == only)
+        .then_some(only)
+}
+
+/// The name of the package whose id is `id`: the workspace's, or else the one the id spells
+/// (`registry+…#name@1.0.0`, `path+file:///…/name#1.0.0`, or `name 1.0.0 (…)`).
+fn node_name<'a>(meta: &'a Metadata, id: &'a str) -> &'a str {
+    if let Some(pkg) = meta.packages.iter().find(|pkg| pkg.id == id) {
+        return &pkg.name;
+    }
+    match id.split_once('#') {
+        Some((_, fragment)) if fragment.contains('@') => {
+            fragment.split('@').next().unwrap_or(fragment)
+        }
+        Some((url, _)) => url.rsplit('/').next().unwrap_or(url),
+        None => id.split(' ').next().unwrap_or(id),
+    }
+}
+
+/// The packages of `resolve` that turn `live` on in `target`: through a dependency on it listing
+/// `live`, or a feature the build turns on in them that names `<target>/live` or `<target>?/live`.
+fn turned_on_by<'a>(meta: &'a Metadata, resolve: &'a Resolve, target: &str) -> BTreeSet<&'a str> {
+    let names_live = |enabled: &String| {
+        enabled
+            .split_once('/')
+            .is_some_and(|(dep, feature)| dep.trim_end_matches('?') == target && feature == LIVE)
+    };
+    resolve
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let name = node_name(meta, &node.id);
+            let pkg = meta.packages.iter().find(|pkg| pkg.name == name)?;
+            let by_dependency = pkg
+                .dependencies
+                .iter()
+                .any(|dep| dep.name == target && dep.features.iter().any(|f| f == LIVE));
+            let by_feature = node
+                .features
+                .iter()
+                .filter_map(|feature| pkg.features.get(feature))
+                .flatten()
+                .any(names_live);
+            (name != target && (by_dependency || by_feature)).then_some(name)
+        })
+        .collect()
+}
+
+/// `label` and each of `names` in backticks, or nothing when there are none.
+fn listed(label: &str, names: &BTreeSet<&str>) -> String {
+    if names.is_empty() {
+        return String::new();
+    }
+    let quoted: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
+    format!("{label} {}", quoted.join(", "))
+}
+
+/// Whether a cargo invocation's `words` are the one compile-only form (DEC-529 item 3): `check`,
+/// one package selected and it the `runner`, no whole-workspace selection, and `live` (or
+/// `<runner>/live`) the only feature it passes.
+fn is_compile_only(words: &[String], runner: &str) -> bool {
+    let mut packages = Vec::new();
+    let mut features = Vec::new();
+    let mut rest = words.iter().map(String::as_str);
+    while let Some(word) = rest.next() {
+        match word {
+            "--workspace" | "--all" | "--exclude" | "--all-features" => return false,
+            "-p" | "--package" => packages.extend(rest.next()),
+            "--features" | "-F" => features.extend(rest.next()),
+            _ => {
+                if let Some(package) = word.strip_prefix("--package=") {
+                    packages.push(package);
+                } else if let Some(list) = word
+                    .strip_prefix("--features=")
+                    .or_else(|| cluster_rest(word))
+                {
+                    features.push(list);
+                } else if word.starts_with("-p") {
+                    return false;
+                }
+            }
+        }
+    }
+    let items: Vec<&str> = features
+        .iter()
+        .flat_map(|list| list.split([',', ' ']))
+        .filter(|item| !item.is_empty())
+        .collect();
+    let runner_live = format!("{runner}/{LIVE}");
+    words
+        .first()
+        .is_some_and(|subcommand| subcommand == "check")
+        && packages == [runner]
+        && !items.is_empty()
+        && items
+            .iter()
+            .all(|item| *item == LIVE || *item == runner_live)
+}
+
+/// The numbers of a workflow's job keys, each with its job: the keys one level inside the
+/// top-level `jobs:`.
+fn workflow_jobs(text: &str) -> BTreeMap<usize, String> {
+    let mut jobs = BTreeMap::new();
+    let (mut inside, mut column) = (false, None);
+    for (number, line) in (1_usize..).zip(text.lines()) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len().saturating_sub(trimmed.len());
+        if indent == 0 {
+            inside = trimmed.trim_end() == "jobs:";
+            column = None;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let at = *column.get_or_insert(indent);
+        if indent == at
+            && let Some((key, _)) = trimmed.split_once(':')
+        {
+            jobs.insert(number, key.trim().to_owned());
+        }
+    }
+    jobs
+}
+
+/// Each cargo invocation of `file`'s `run:` steps, with its job and its words after `cargo`, each
+/// command read up to a shell operator or redirection, its command word found after its
+/// assignments and [`WRAPPERS`].
+fn workflow_cargo_invocations(file: &CiFile) -> Vec<(String, Vec<String>)> {
+    let run_lines = block_lines(&file.text, "run");
+    let jobs = workflow_jobs(&file.text);
+    let mut invocations = Vec::new();
+    for (number, line) in logical_lines(&file.path, &file.text) {
+        if !run_lines.contains(&number) {
+            continue;
+        }
+        let job = jobs
+            .range(..=number)
+            .next_back()
+            .map_or_else(|| format!("line {number}"), |(_, job)| job.clone());
+        let mut commands = vec![Vec::new()];
+        let mut open = true;
+        for token in shell_tokens(&line, &mut Vec::new()) {
+            match token {
+                ShellToken::Word(word, _) if open => {
+                    if let Some(command) = commands.last_mut() {
+                        command.push(word);
+                    }
+                }
+                ShellToken::Word(..) => {}
+                ShellToken::Redirect | ShellToken::HereString => open = false,
+                ShellToken::Pipe | ShellToken::End => {
+                    commands.push(Vec::new());
+                    open = true;
+                }
+            }
+        }
+        for command in commands {
+            let named: Vec<&str> = command
+                .iter()
+                .map(String::as_str)
+                .skip_while(|word| is_skipped_word(word))
+                .collect();
+            if let Some((cargo, args)) = unwrapped(&named).split_first()
+                && is_cargo(cargo)
+            {
+                let words = args.iter().map(|word| (*word).to_owned()).collect();
+                invocations.push((job.clone(), words));
+            }
+        }
+    }
+    invocations
+}
+
+/// The [`Resolve`] `cargo metadata --format-version 1 --locked --offline` gives at `root` for the
+/// feature flags among a cargo invocation's `words` (`--features`, `-F`, a short-flag cluster,
+/// `--all-features`, `--no-default-features`), read up to a `--`.
 fn cargo_resolve(root: &Path, words: &[String]) -> Result<Resolve> {
-    let _ = (root, words);
-    bail!("cargo_resolve is not yet implemented (E7-28)")
+    let mut args = vec!["metadata", "--format-version", "1", "--locked", "--offline"];
+    let mut rest = words.iter().map(String::as_str);
+    while let Some(word) = rest.next() {
+        match word {
+            "--" => break,
+            "--all-features" | "--no-default-features" => args.push(word),
+            "--features" | "-F" => {
+                args.push("--features");
+                args.extend(rest.next());
+            }
+            _ if word.starts_with("--features=") => args.push(word),
+            _ => {
+                if let Some(list) = cluster_rest(word) {
+                    args.extend(["--features", list]);
+                }
+            }
+        }
+    }
+    let json = output_in(root, "cargo", &args)?;
+    let parsed: ResolvedMetadata = serde_json::from_str(&json).context("parsing cargo metadata")?;
+    parsed.resolve.context("cargo metadata gave no resolve")
 }
 
 /// The cargo feature that holds the live hosts (ES-23, DEC-529 item 3).
@@ -10349,7 +10625,6 @@ jq -r "$filter" "$src"
     /// A workspace whose builds resolve no `live` passes, and the check asks cargo for the default
     /// build and for each job's invocation, up to a shell operator.
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_workspace_that_resolves_no_live_passes() -> Result<()> {
         let crates = with_runner(vec![member("a-lib", &[(RUNNER, None)])]);
         let flows = [workflow(&[
@@ -10372,7 +10647,6 @@ jq -r "$filter" "$src"
     /// A package whose default build resolves `live` is named, whether its `default` turns it on
     /// or only the resolve shows it; a package that resolves no `live` is not.
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_default_feature_that_resolves_live_fails_naming_the_package() -> Result<()> {
         let default_on =
             |name| with_features(member(name, &[]), &[("live", &[]), ("default", &["live"])]);
@@ -10394,7 +10668,6 @@ jq -r "$filter" "$src"
     /// A dependency on the runner listing `live`, or a feature naming `<runner>/live`, is named
     /// beside the runner it turns `live` on in; a plain dependency on the runner is not.
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_dependency_edge_that_turns_on_live_fails() -> Result<()> {
         let resolve = |tool_on: &'static [&'static str]| {
             move |_: &[String]| {
@@ -10424,7 +10697,6 @@ jq -r "$filter" "$src"
     /// one-line or block `run:`) or `--all-features` is named with its file, `--all-features` even
     /// when nothing declares `live` (DEC-868 item 1); a job that resolves no `live` is not.
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_job_passing_live_or_all_features_fails_naming_the_job() -> Result<()> {
         let flows = [
             workflow(&[
@@ -10456,7 +10728,6 @@ jq -r "$filter" "$src"
     /// in the runner alone; a second such job, a check of the workspace or of another crate, a
     /// resolve that turns `live` on elsewhere too, and the form with no crate marked are named.
     #[test]
-    #[ignore = "pending E7-28"]
     fn only_the_one_compile_only_job_may_resolve_live() -> Result<()> {
         let run = |jobs: &[(&str, &str)]| {
             check(
@@ -10496,7 +10767,6 @@ jq -r "$filter" "$src"
     /// not the compile-only job is named with each crate depending on it, a dev-dependency
     /// included (DEC-868 item 2), and the runner is not; the compile-only job may resolve it.
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_live_only_crate_in_a_non_live_build_fails() -> Result<()> {
         let crates = |lib: Package| {
             let runner = member(RUNNER, &[("rh-host", None)]);
@@ -10534,7 +10804,6 @@ jq -r "$filter" "$src"
     /// A resolve that fails, or an invocation word the shell expands, is a problem naming the job
     /// rather than an abort, and so is a default build that cannot be resolved (DEC-868 item 3).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_job_that_cannot_be_resolved_fails_closed() -> Result<()> {
         let flows = [workflow(&[
             ("broken", "cargo test --features broken"),
@@ -10557,7 +10826,6 @@ jq -r "$filter" "$src"
     /// The repository as it stands: cargo's resolve of the default build holds every workspace
     /// member, the check asks it for `ci.yml`'s `cargo xtask ci fast`, and nothing resolves `live`.
     #[test]
-    #[ignore = "pending E7-28"]
     fn the_repository_resolves_no_live_build() -> Result<()> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let meta = metadata_in(&root)?;
