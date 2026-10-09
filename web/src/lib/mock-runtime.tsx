@@ -247,6 +247,17 @@ export function approvalAt(approval: Approval, now: Iso): Approval {
   return { ...approval, status: "expired", resolution: { at: approval.deadline, text: "Skipped at the deadline. Nothing was sent." } };
 }
 
+/**
+ * The requests waiting for the owner at `now`, soonest deadline first: what Home's Needs you lists, and
+ * one half of what keeps Home and Alerts from saying all clear (`nothingNeedsYou`).
+ */
+export function openRequests(ws: Workspace, now: Iso): Approval[] {
+  return ws.approvals
+    .map((a) => approvalAt(a, now))
+    .filter((a) => a.status === "delivered")
+    .sort((a, b) => Date.parse(a.deadline) - Date.parse(b.deadline));
+}
+
 export function RuntimeProvider({
   initial,
   children,

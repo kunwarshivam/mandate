@@ -47,7 +47,8 @@ export function PositionsTable({
   if (positions.length === 0) return <p className="text-sm text-muted-foreground">No positions. The agent is flat.</p>;
   return (
     <div className="relative -mx-(--page-x) overflow-x-auto px-(--page-x) lg:mx-0 lg:px-0">
-      <table className="w-full min-w-[34rem] text-sm">
+      <PositionRows positions={positions} now={now} staleSymbols={staleSymbols} hrefFor={hrefFor} />
+      <table className="w-full min-w-[34rem] text-sm max-lg:hidden">
         <caption className="sr-only">Positions</caption>
         <thead>
           <tr className="border-b border-border text-left">
@@ -96,6 +97,74 @@ export function PositionsTable({
         Unrealized paper P&amp;L, simulated. <Placeholder name="performance" />
       </p>
     </div>
+  );
+}
+
+/**
+ * Below 64rem each position is a two-line row (DEC-207, critique C-14), so a phone shows what it is
+ * worth without scrolling sideways: the instrument and its value, then the quantity, the mark and the
+ * protection, with the unrealized P&L at the end of the second line and its disclosure symbol beside
+ * it (DEC-210). From 64rem CSS hides these rows and the table shows instead, so a screen reader meets
+ * one of the two. Each figure carries its label for assistive technology.
+ */
+function PositionRows({
+  positions,
+  now,
+  staleSymbols,
+  hrefFor,
+}: {
+  positions: Position[];
+  now: string;
+  staleSymbols: ReadonlySet<string>;
+  hrefFor?: (p: Position) => string;
+}) {
+  return (
+    <ul aria-label="Positions" data-slot="position-rows" className="grid lg:hidden">
+      {positions.map((p) => (
+        <li
+          key={p.instrument.asset_id}
+          data-slot="position-row"
+          className={cn(
+            "grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1 border-b border-border/70 py-3 text-sm last:border-b-0",
+            hrefFor && "group relative transition-colors duration-(--duration-hover) hover:bg-background",
+          )}
+        >
+          <p className="font-medium">
+            {hrefFor ? (
+              <Link href={hrefFor(p)} className={cn("underline-offset-4 group-hover:underline", STRETCHED_LINK)}>
+                {p.instrument.symbol}
+              </Link>
+            ) : (
+              p.instrument.symbol
+            )}
+          </p>
+          <p className="text-right font-mono font-medium tabular">
+            <span className="sr-only">Value </span>
+            {usd(p.market_value)}
+          </p>
+          <p className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-caption text-muted-foreground">
+            <span className="whitespace-nowrap">
+              <span className="sr-only">Quantity </span>
+              <span className="font-mono text-foreground tabular">{quantity(p.qty)}</span> at <span className="sr-only">a mark of </span>
+              <span className="font-mono text-foreground tabular">{price(p.mark)}</span>
+            </span>
+            <AsOf at={p.mark_as_of} now={now} stale={staleSymbols.has(p.instrument.symbol)} />
+          </p>
+          <p className="flex items-center justify-end gap-1 text-right">
+            <span className="sr-only">Unrealized </span>
+            <SignedMoney value={p.unrealized_pnl} showWord={false} />
+            <Placeholder name="performance" />
+          </p>
+          <p className="col-span-2 flex items-start gap-1 text-caption text-pretty text-muted-foreground">
+            <Shield className="size-6 shrink-0" aria-hidden />
+            <span>
+              <span className="sr-only">Protection: </span>
+              {protectionText(p)}
+            </span>
+          </p>
+        </li>
+      ))}
+    </ul>
   );
 }
 

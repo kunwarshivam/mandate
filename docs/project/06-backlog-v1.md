@@ -1287,7 +1287,12 @@ story buys a service, and none uses a real identity-provider account in tests (s
   `mandate_passkey::stepup::Presentation` reads its workspace and principal from the request's
   context and its ID fields are private (DEC-649; #1134, #1144, #1150, #1154). Still owed, each by
   its own lane:
-  - *Workspace API* (L2, `mandate-api`): a request body naming another workspace is refused.
+  - ~~*Workspace API* (L2, `mandate-api`): a request body naming another workspace is refused.~~
+    Done for the strict decoder: pinned by `crates/mandate-api/tests/body_workspace.rs` (E10-10,
+    tests only; every request shape was already closed, and a kill switch's workspace scope takes
+    `id: null`). Lenient API-7 operations (DEC-682 item 27) drop and list a workspace member and
+    never apply it, which the lenient decoder's tests (`crates/mandate-api/tests/lenient.rs`,
+    DEC-886) pin as pending E10-10.
   - *Row-level security* (the workspace store): rows keyed on `workspace_id` under a per-transaction
     setting only the context sets, and `no_principal_reads_the_membership_index_of_another`.
   - *Own-credential API* (the workspace store): `own_credential_api_takes_no_principal_id`, a
@@ -1323,6 +1328,26 @@ story buys a service, and none uses a real identity-provider account in tests (s
   a property test with an independent oracle. *Accepted when:* each oracle is shown to fail on a
   seeded bug (for example, a cached membership read, a role inherited from the org, a challenge not
   bound to its digest, a client counted as a second user, an unprefixed cache key) before it is trusted.
+  *Who owes each invariant* (lead L1, 2026-10-09). The identity crates' part is done: ID-2 and ID-5
+  (#1165), ID-3 (#1172, #1173), ID-4 and ID-7 (#1161), and ID-13 (#1181) each have an independent
+  oracle shown to fail on planted bugs, including a cached membership read, a role inherited from
+  the org, and a challenge not bound to its digest. Still owed, each by its own lane:
+  - *ID-1, ID-16* (L2, `mandate-api` and the journal): the fuzz of forged `actor` and
+    `workspace_id` fields against committed events; the org fan-out's attribution, retry through
+    append failures, and all-or-nothing writes.
+  - *ID-3's stream close, and ID-4's per-command table* (L2 with the workspace store): each S
+    command refused for every failure mode with nothing else committed; the identity crates cover
+    only `consume`'s own refusals.
+  - *ID-6 and ID-11* (`mandate-approval` with E9-9): mapping a client or service account to its
+    human, so a client counted as a second user is caught.
+  - *ID-8's other layers* (the store's row-level security, `mandate-journal-pg`, NATS, the cache
+    wrapper, the vault), as E9-8's note lists them; the unprefixed cache key's planted bug waits
+    for the cache wrapper.
+  - *ID-9* (L2, the HTTP layer): the canary log scan; recovery codes wait for E9-10.
+  - *ID-10* (infrastructure, the kill-switch drill with the identity provider, the control
+    plane and the model gateway unreachable), *ID-12* (E9-10, break-glass), *ID-14* (L3,
+    notifications), and *ID-15* (infrastructure, the global directory's schema test and the
+    drill with the outbound link cut).
 - **E9-12 (Should, M8)** Round-1 minors of the identity spec's review ([#556](https://github.com/kunwarshivam/mandate/pull/556),
   freeze rule). *Accepted when the spec settles each:* (1) the workspace admin holds the kill switch's
   privileges beyond the stop (mandate §6.1, selling equities outside the session) but not the owner
@@ -1652,6 +1677,11 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   and run logic in `mandate-audit`) goes first; its route waits for `mandate-api-server`, which the
   first route's story creates ([DEC-680](decisions/DEC-680.md) item 1, claim
   [#750](https://github.com/kunwarshivam/mandate/issues/750)).
+  *Follow-up (Should; [DEC-890](decisions/DEC-890.md)):* multi-stream export verification. `verify`
+  and `verify-cold` take a control stream and its account streams together, so they can run
+  journal spec §11's `connection_cause_mismatch`, which no single-stream export can (DEC-885 item
+  6). Its report then drops DEC-890's `not run: connection_cause_mismatch` line for the exports it
+  covers.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
@@ -2487,7 +2517,7 @@ v0.2 fixes ([DEC-434](decisions/DEC-434.md) items 21 to 24).
   failover, and evacuation drills recorded as journal events, so that OPS-8's "journaled" has
   somewhere to go (design §6.4, DEC-434 item 24). *Accepted when:* a journal spec change adds the
   backup and drill events to §9's catalogue on the control stream, each naming what was restored or
-  exercised, the `VerificationRun` it relied on, and pass or fail, with test vectors; the
+  exercised, the `VerificationRun` it relied on, and pass, fail, or token-only incomplete ([DEC-789](decisions/DEC-789.md) item 9), with test vectors; the
   registration lands tests first (DEC-77); and an unregistered drill event is still rejected at
   append. Blocks E21-5.
 - **E21-26 (Proposed, M6; SC)** As an owner, I want the journal-outage hold tested for exactly what
@@ -4656,8 +4686,9 @@ From the round-1 review of the workspace services API spec ([#560](https://githu
   client issues workspace-scope calls. Name the principal and route.
 - **Cite the notice payload, do not restate it** (minor 5). Spec §3.9 should point at the
   notifications spec §4.2 for the payload's members.
-- **API-2's test reads the workspace from the path only** (minor 6). Assert no route reads the
-  workspace from a body member.
+- ~~**API-2's test reads the workspace from the path only** (minor 6). Assert no route reads the
+  workspace from a body member.~~ Done at the body layer: `crates/mandate-api/tests/body_workspace.rs`
+  refuses a workspace member in every request body; the route half is the server crate's (DEC-680).
 - **One wording for a client's reads** (minor 7). §3.7's client column and §3.8's `read` scope say
   the same rule two ways; keep one.
 
@@ -4717,6 +4748,46 @@ From the independent review of the E10-10 A1 implementation, part 1 ([#993](http
   Leniency only, like the tagged form. Tests first, then its own decision and fix.~~ Done
   ([#1132](https://github.com/kunwarshivam/mandate/pull/1132), tests,
   [DEC-882](decisions/DEC-882.md); [#1143](https://github.com/kunwarshivam/mandate/pull/1143), the fix, the same macro on every derived struct).
+
+From the independent reviews of L2's E10-10 and E7-17 slices, 2026-10-09 (minors; [#1143](https://github.com/kunwarshivam/mandate/pull/1143), [#1155](https://github.com/kunwarshivam/mandate/pull/1155), [#1175](https://github.com/kunwarshivam/mandate/pull/1175), [#1178](https://github.com/kunwarshivam/mandate/pull/1178), [#1151](https://github.com/kunwarshivam/mandate/pull/1151)):
+
+- **Restrict the lenient inherent `deserialize` that `#[serde(remote = "Self")]` leaves** (#1143).
+  Every derived wire shape in `mandate-api` keeps a public inherent `Self::deserialize` that reads
+  an array in an object's place; only the `Deserialize` impl `object_only!` writes is strict. No
+  caller outside that macro uses the inherent one today (the macro's `visit_map` and `Serialize`
+  impl do). Make it unreachable from outside the crate, or add a test that no code outside the
+  macro calls it; tests first.
+- **`crates/mandate-api/tests/body_workspace.rs`** (#1155, round 2).
+  - The module header's sixth line is wrapped wrongly and over 100 columns.
+  - The schema walk follows `properties`, `items`, `oneOf`, `anyOf`, and `$ref` into the
+    envelope's `$defs`, not `allOf`, `if`/`then`/`else`, or a schema's local `$defs`. No request
+    schema describes an object that way today; extend the walk when one does.
+- **`crates/mandate-api/tests/lenient.rs`** (#1175, #1178).
+  - API-4's test asserts `dropped` in body order with members whose body order is also
+    alphabetical, so it cannot tell the two apart; the server-case test pins body order. Give the
+    API-4 bodies a non-alphabetical order.
+  - [DEC-886](decisions/DEC-886.md) item 10 says the server's cases cover non-JSON refusal for
+    ending a delegation and for Skip; `api7.json` covers only the kill switch and an owner exit,
+    and the other two come from `check_lenient.py`'s `UNPARSABLE_OK` and the spec. The tests cover
+    all four. Correct the citation where the reading is next restated (DEC-886 is Accepted).
+- **A duplicated bid member drops the whole confirmation** (#1178). The tests read DEC-886 items 6
+  and 3/4 together: a duplicated non-hard member is dropped, and a partial bid confirmation is
+  never applied, so every bid member present is dropped and listed once. It only drops more.
+  State it in one sentence in workspace API spec §5, or as its own decision from L2's range, at
+  L2's next workspace API spec change.
+- **Journal spec v0.37** (L2, after v0.36), each item tightening or risk-neutral:
+  - §9.8 and §11: a `ConnectionRevoked` belongs to the control stream; one on an account stream
+    is judged and refused under rule 68, the fail-closed reading the coordinator ruled under
+    DEC-176, as `reference/journal/connections.py`'s `judged()` already reads it (#1159's
+    review). `mandate-journal`'s fold ignores one today (#1183), so a tests PR pinning the
+    refusal, then its implementation, follow the spec change;
+  - a `connections` vector that enters `suspended` twice on one account stream, so the reference
+    vectors kill a fold that confuses two suspensions ([#1174](https://github.com/kunwarshivam/mandate/pull/1174));
+  - [DEC-885](decisions/DEC-885.md)'s "refuses more and admits nothing new" is to read "admits
+    nothing the full chain refuses" where v0.35's change history restates it (#1151, minor 1);
+  - the status table's "Test vectors" row lists `connection_ranges` (#1151, minor 3);
+  - §9.16: a replacement successor's own record carries `replaced_by_broker_order_id` as its
+    `broker_order_id`, or `null` (DEC-870, pending in [#1182](https://github.com/kunwarshivam/mandate/pull/1182)).
 
 From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
 

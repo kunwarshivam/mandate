@@ -378,6 +378,58 @@ TRIM_MUTANTS = {
         '            sell = ceil_inc(unsold, inc)'),
 }
 
+UNASKED_MUTANTS = {
+    "unasked: unknown reads as 0": (
+        '    if st is None or any(k not in st for k in UNASKED_STATE):\n        return None',
+        '    if st is None or any(k not in st for k in UNASKED_STATE):\n        return "0"'),
+    "unasked: the review date is ignored": (
+        '    if review_passed(m, st) or policy.get', '    if policy.get'),
+    "unasked: a policy forbidding auto is ignored": (
+        ' or not policy.get("auto_allowed", True):', ':'),
+    "unasked: today's orders are not counted": (
+        '    n = max(0, r["max_orders_per_day"] - st["orders_today"])', '    n = r["max_orders_per_day"]'),
+    "unasked: delegation usage is not counted": (
+        '        k = max(0, d["max_orders"] - used["orders"])', '        k = d["max_orders"]'),
+    "unasked: a delegation's spent total is not counted": (
+        '        rest = max(D(0), D(d["max_total_usd"]) - D(used["total_usd"]))', '        rest = D(d["max_total_usd"])'),
+    "unasked: a delegation's last partial order is dropped": (
+        '        if full < k and rest - full * c > 0:', '        if False:'),
+    "unasked: an expired delegation still counts": (
+        '        if not (T(d["starts_at"]) < day_end and T(st["now"]) < T(d["expires_at"])):', '        if False:'),
+    "unasked: a delegation's condition bound is ignored": (
+        '        c = capped(per_order, D(d["max_order_usd"]), order_usd_bound(d["when"]),',
+        '        c = capped(per_order, D(d["max_order_usd"]), None,'),
+    "unasked: the lifted rule's bound is ignored": (
+        '                   order_usd_bound(rules[d["lifts"]]) if d["lifts"] in rules else None)', '                   None)'),
+    "unasked: a rule's condition bound is ignored": (
+        '    auto_caps = [capped(per_order, order_usd_bound(x["when"]))', '    auto_caps = [capped(per_order, None)'),
+    "unasked: an any-condition takes its tightest member": (
+        '        return max(bs) if bs and None not in bs else None', '        return min(bs) if bs and None not in bs else None'),
+    "unasked: a not-condition bounds order_usd": (
+        '    if "all" in c:\n        bs = [b for b', '    if "not" in c:\n        return order_usd_bound(c["not"])\n    if "all" in c:\n        bs = [b for b'),
+    "unasked: the smallest slices are taken first": (
+        'key=lambda s: s[0], reverse=True)', 'key=lambda s: s[0])'),
+    "unasked: the old cap at the gross headroom at t (#1062 review B1)": (
+        '    return norm(total.quantize(D("0.01"), rounding=ROUND_CEILING))',
+        '    return norm(min(total, max(D(0), min(D(r["max_gross_exposure_usd"]), D(st["agent_equity"])) - D(st["gross_usd"])))'
+        '.quantize(D("0.01"), rounding=ROUND_CEILING))'),
+    "unasked: the figure rounds down": (
+        '    return norm(total.quantize(D("0.01"), rounding=ROUND_CEILING))',
+        '    return norm(total.quantize(D("0.01"), rounding=ROUND_DOWN))'),
+    "loss answer: rounds up": (
+        '    f = f.quantize(D("0.0001"), rounding=ROUND_DOWN)', '    f = f.quantize(D("0.0001"), rounding=ROUND_UP)'),
+    "loss answer: the whole allocation maps": (
+        '    if not D(0) < f < D(1) or proposed_ladder', '    if not D(0) < f <= D(1) or proposed_ladder'),
+    "loss answer: the drawdown is the floor": ('norm(f * D("0.8"))', 'norm(f)'),
+    "loss answer: the old mapping, the base ladder kept (#1062 review M1)": (
+        '    dd = D(max_drawdown)\n', '    dd = D("0.08")\n'),
+    "loss answer: the ladder rounds up": (
+        '    bp = lambda x: (x * dd).quantize(D("0.0001"), rounding=ROUND_DOWN)',
+        '    bp = lambda x: (x * dd).quantize(D("0.0001"), rounding=ROUND_UP)'),
+    "loss answer: collapsed rungs are proposed": (
+        '    if not D(0) < hyst < halve < exits < dd:', '    if not D(0) < dd:'),
+}
+
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
@@ -385,6 +437,9 @@ PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if 
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
          "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_independence_floor(300); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); fuzz_stop_limit_offset(300); "
          "print(len(FAIL))")
+
+UNASKED_PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
+                 "fuzz_unasked(600); fuzz_loss_answer(400); print(len(FAIL))")
 
 TW_PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
             "fuzz_tripwires(300); fuzz_tripwire_changes(400); fuzz_tripwire_rules(300); fuzz_tripwire_latch(200); print(len(FAIL))")
@@ -420,20 +475,23 @@ def main():
         work = root / "reference" / "mandate"
         shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
         source = (HERE / "ref.py").read_text()
-        missing = [name for name, (old, _) in (MUTANTS | TRIPWIRE_MUTANTS | TRIM_MUTANTS).items() if old not in source]
+        missing = [name for name, (old, _) in (MUTANTS | TRIPWIRE_MUTANTS | TRIM_MUTANTS | UNASKED_MUTANTS).items() if old not in source]
         assert not missing, f"mutation anchors missing, checked before any run: {missing}"
         assert verdict(run(work, PROBE), "0") == "missed", "the shared fuzz fails on the unmutated model"
         assert verdict(run(work, TW_PROBE), "0") == "missed", "the tripwire fuzz fails on the unmutated model"
+        assert verdict(run(work, UNASKED_PROBE), "0") == "missed", "the unasked-dollars fuzz fails on the unmutated model"
         assert verdict(run(work, CASE_PROBE), "same") == "missed", "the MC-W cases differ from the unmutated model's"
         assert verdict(run(work, B_CASE_PROBE), "same") == "missed", "the MC-B cases differ from the unmutated model's"
-        for name, (old, new) in (MUTANTS | TRIPWIRE_MUTANTS | TRIM_MUTANTS).items():
+        for name, (old, new) in (MUTANTS | TRIPWIRE_MUTANTS | TRIM_MUTANTS | UNASKED_MUTANTS).items():
             shutil.rmtree(work, ignore_errors=True)
             shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
             ref = work / "ref.py"
             text = ref.read_text()
             assert old in text, f"mutation anchor missing: {name}"
             ref.write_text(text.replace(old, new, 1))
-            if name in TRIM_MUTANTS:
+            if name in UNASKED_MUTANTS:
+                status = {"caught": "caught", "missed": "SURVIVED", "ERROR": "ERROR"}[verdict(run(work, UNASKED_PROBE), "0")]
+            elif name in TRIM_MUTANTS:
                 status = {"caught": "caught", "missed": "SURVIVED", "ERROR": "ERROR"}[verdict(run(work, B_CASE_PROBE), "same")]
                 name = f"{name} (MC-B cases)"
             elif name in TRIPWIRE_MUTANTS:
@@ -445,7 +503,7 @@ def main():
             print(f"{status:8} {name}", flush=True)
             if status != "caught":
                 bad.append(name)
-    print(f"{len(MUTANTS) + len(TRIPWIRE_MUTANTS) + len(TRIM_MUTANTS)} mutants, {len(bad)} not caught", flush=True)
+    print(f"{len(MUTANTS) + len(TRIPWIRE_MUTANTS) + len(TRIM_MUTANTS) + len(UNASKED_MUTANTS)} mutants, {len(bad)} not caught", flush=True)
     sys.exit(1 if bad else 0)
 
 if __name__ == "__main__":

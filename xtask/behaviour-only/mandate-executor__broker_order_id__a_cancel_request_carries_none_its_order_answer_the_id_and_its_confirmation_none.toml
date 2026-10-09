@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/broker_order_id.rs"
+test = "a_cancel_request_carries_none_its_order_answer_the_id_and_its_confirmation_none"
+reason = """
+E7-6 (journal spec v0.34 §9.16, DEC-869 item 3): the executor's `OrderStateChanged` writer is
+already implemented at version 1, with no `broker_order_id` member, so this test fails on the
+record it writes rather than at a stub. The code PR that writes version 2 deletes this file with
+the test's `#[ignore]` line.
+"""

@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { type CSSProperties, Fragment } from "react";
 import Link from "next/link";
 import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
 import { Inbox as InboxIcon } from "pixelarticons/react/Inbox.js";
@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { Deadline } from "@/components/approvals/deadline";
 import type { Agent, Approval, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
-import { clock, dateLabel, price, quantity, seconds } from "@/lib/format";
+import { andList, clock, dateLabel, price, quantity, seconds } from "@/lib/format";
 import { APPROVAL_STATUS_LABEL, ruleSentence } from "@/lib/labels";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { agentHref } from "@/lib/screens";
@@ -60,19 +60,66 @@ function Row({ approval, now, label, index }: { approval: Approval; now: string;
 
 /**
  * Which of an agent's rules send the owner a request, each by its sentence and never its id (critique
- * C-6), and how long a request waits, in words.
+ * C-6), and whether anything no rule covers asks too.
  */
-export function askSentence(agent: Agent): string {
-  const { rules, default: otherwise, approval } = agent.mandate.autonomy;
+function askRules(agent: Agent): string {
+  const { rules, default: otherwise } = agent.mandate.autonomy;
   const asks = rules.filter((r) => r.then === "ask").map(ruleSentence);
   const which = asks.length === 0 ? "No rule of yours asks you." : `${asks.length === 1 ? "Your rule" : "Your rules"}: ${asks.join("; ")}.`;
   const rest = otherwise === "ask" ? ` Anything no rule covers asks you${asks.length === 0 ? "" : " too"}.` : "";
-  return `${which}${rest} A request waits ${seconds(approval.timeout_s)}, then is skipped.`;
+  return `${which}${rest}`;
+}
+
+/** An agent's rules that ask the owner, and how long a request waits, in words. */
+export function askSentence(agent: Agent): string {
+  return `${askRules(agent)} A request waits ${seconds(agent.mandate.autonomy.approval.timeout_s)}, then is skipped.`;
 }
 
 /**
- * Beside the requests: why they come. Each agent's rules that ask the owner, and the window a request
- * waits, with a way to the mandate that holds them. The rules change only in a new mandate version.
+ * Everything that decides when an agent asks, without the rules' ids: every rule in order, since the
+ * first that matches decides (mandate spec §6.2), what no rule covers, and what a timeout does. Two
+ * agents share their rules only when this is equal, so the same ids with another threshold,
+ * comparison or order never read as one set (critique C-12). Each rule's whole condition is keyed,
+ * not only a leaf's field, comparison and value, so a compound condition (the schema's `all`, `any`
+ * and `not`) or any later condition field can only split sets, never merge them.
+ */
+function askKey(agent: Agent): string {
+  const { rules, default: otherwise, approval } = agent.mandate.autonomy;
+  return JSON.stringify([rules.map((r) => [r.when, r.then]), otherwise, approval.on_timeout]);
+}
+
+/** How long a request waits for a set of agents: once when they all wait the same, else each wait against its agents. */
+function waitSentence(agents: readonly Agent[]): string {
+  const byWait = new Map<number, string[]>();
+  for (const agent of agents) {
+    const timeout = agent.mandate.autonomy.approval.timeout_s;
+    byWait.set(timeout, [...(byWait.get(timeout) ?? []), agent.label]);
+  }
+  const each = [...byWait].map(([timeout, labels]) => (byWait.size === 1 ? seconds(timeout) : `${seconds(timeout)} for ${andList(labels)}`));
+  const waits = each.length === 1 ? each[0] : `${each.slice(0, -1).join(", ")}, and ${each.at(-1)}`;
+  return `A request waits ${waits}, then is skipped.`;
+}
+
+/**
+ * The agents grouped by the rules they share, in the workspace's order, each set with one sentence
+ * for its rules and its waits, so the same rules never read as different ones (critique C-12).
+ */
+export function sharedAsks(agents: readonly Agent[]): Array<{ agents: Agent[]; sentence: string }> {
+  const sets = new Map<string, Agent[]>();
+  for (const agent of agents) {
+    const key = askKey(agent);
+    sets.set(key, [...(sets.get(key) ?? []), agent]);
+  }
+  return [...sets.values()].map((set) => ({ agents: set, sentence: `${askRules(set[0])} ${waitSentence(set)}` }));
+}
+
+/** Between names in a natural list, as `andList` puts them: nothing before the first, "and" before the last, a comma otherwise. */
+const listGap = (i: number, n: number) => (i === 0 ? "" : i === n - 1 ? " and " : ", ");
+
+/**
+ * Beside the requests: why they come. One paragraph per set of agents that share their rules, naming
+ * each with a way to the mandate that holds them, and the window a request waits. The rules change
+ * only in a new mandate version.
  */
 function WhyAsked({ ws }: { ws: Workspace }) {
   return (
@@ -81,12 +128,19 @@ function WhyAsked({ ws }: { ws: Workspace }) {
         What sends you a request
       </h2>
       <ul className="grid">
-        {ws.agents.map((agent) => (
-          <li key={agent.agent_id} className="grid gap-1 border-b border-border/70 py-3 last:border-b-0">
-            <Link href={agentHref(agent.agent_id, "mandate")} className="w-fit font-semibold underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring">
-              {agent.label}
-            </Link>
-            <p className="text-sm text-pretty text-muted-foreground">{askSentence(agent)}</p>
+        {sharedAsks(ws.agents).map(({ agents, sentence }) => (
+          <li key={agents[0].agent_id} className="grid gap-1 border-b border-border/70 py-3 last:border-b-0">
+            <p className="font-semibold">
+              {agents.map((agent, i) => (
+                <Fragment key={agent.agent_id}>
+                  {listGap(i, agents.length)}
+                  <Link href={agentHref(agent.agent_id, "mandate")} className="underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring">
+                    {agent.label}
+                  </Link>
+                </Fragment>
+              ))}
+            </p>
+            <p className="text-sm text-pretty text-muted-foreground">{sentence}</p>
           </li>
         ))}
       </ul>

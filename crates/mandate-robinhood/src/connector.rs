@@ -9,7 +9,7 @@ use mandate_domain::{
 };
 use mandate_executor::{
     BrokerConnector, BrokerOrder, BrokerOutcome, BrokerReject, BrokerRequest, BrokerUnknown,
-    ClientOrderId, ConnectorError, OrderType, SubmitOrder, TimeInForce,
+    ClientOrderId, ConnectorError, FoldedEvent, OrderType, SubmitOrder, TimeInForce,
 };
 use mandate_mcp::{CallClass, McpError};
 use mandate_num::{Fraction, Price, Qty, ShareIncrement};
@@ -45,8 +45,8 @@ pub struct RobinhoodConnector<T> {
     tools: T,
     account_number: String,
     /// The order each place answered, by our key: its broker `order_id` is what a `Cancel` goes
-    /// by, and its instrument and side are what a cancel's answer is read against. Held in memory only: its rebuild from the journal at start is C3's
-    /// (DEC-860 item 7).
+    /// by, and its instrument and side are what a cancel's answer is read against. After a restart
+    /// it is rebuilt from the journal by [`Self::restore`] (DEC-860 item 7).
     placed: BTreeMap<ClientOrderId, BrokerOrder>,
     /// The keys whose place went out without a readable answer. One is never placed again, and a
     /// second `Submit` of it is `Unknown` with nothing called (DEC-860 item 4).
@@ -62,6 +62,24 @@ impl<T: Tools> RobinhoodConnector<T> {
             placed: BTreeMap::new(),
             in_doubt: BTreeSet::new(),
         }
+    }
+
+    /// The connector after a restart: [`Self::new`] with its `ClientOrderId` → `order_id` map
+    /// rebuilt from the account stream's `records`, in journal order (journal spec §9.16,
+    /// DEC-860 item 7, DEC-870). A key maps to the one distinct `broker_order_id` its version-2
+    /// `OrderStateChanged` records carry, with the instrument and side of its `OrderSubmitted`,
+    /// or of the order it `replaces`. A key with no id, or with two different ids, maps to
+    /// nothing, so its cancel is `NotSent` (`no_order_id`) with nothing called. Every key the
+    /// stream submitted is never placed again: a `Submit` of it is `Unknown` (DEC-860 item 4).
+    pub fn restore(
+        tools: T,
+        account_number: String,
+        records: &[FoldedEvent],
+    ) -> Result<Self, crate::RobinhoodError> {
+        let _ = tools;
+        let _ = account_number;
+        let _ = records;
+        Err(crate::RobinhoodError::Unimplemented { story: "E7-6" })
     }
 
     /// Review, then place with the [`crate::ref_id`]. An opening or an increase draws on the

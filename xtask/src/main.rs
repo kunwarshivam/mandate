@@ -19,7 +19,10 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | refcases | reference | schemas | supply-chain | postgres |
-                        mutants | schema-mutants
+                        mutants | schema-mutants; or one part of test: test-nextest |
+                        test-doc | test-python
+  ci test-nextest       run the workspace's nextest run, only partition K/N of it when
+                        MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
   ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
   ci schema-mutants K/N run shard K of N of the schema mutation sweep, after its baseline (CI
                         passes it as MANDATE_SCHEMA_SHARD)
@@ -37,7 +40,13 @@ commands:
 /// its required `full` verdict depend on every shard (DEC-464); the local `check` command still
 /// runs every entry in [`PR_JOBS`] once, unsharded. `schema-mutants` is CI's own job beside them,
 /// which the required `full` verdict also needs, so `full-checks` stays under ten minutes (DEC-688).
+/// CI runs `fast`'s parts in parallel jobs, `test` split into [`TEST_PARTS`] and its nextest run
+/// partitioned, and its required `fast` verdict is an aggregate over them (DEC-871); `cargo xtask
+/// ci fast` still runs this whole group unsharded.
 const FAST_JOB: [&str; 4] = ["lint", "test", "pending", "spec-guard"];
+/// The parts of `test`, in the order `cargo xtask ci test` runs them: the workspace's nextest run,
+/// its doctests, and the Python tests. CI runs them in separate jobs (DEC-871).
+const TEST_PARTS: [&str; 3] = ["test-nextest", "test-doc", "test-python"];
 const FULL_JOB: [&str; 5] = [
     "refcases",
     "reference",
@@ -72,6 +81,10 @@ const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
 /// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
 /// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
 const SCHEMA_SHARD_ENV: &str = "MANDATE_SCHEMA_SHARD";
+/// The `K/N` partition, counted from 1, CI's `fast-test` matrix passes to `cargo xtask ci
+/// test-nextest`, through the environment for the same reason as [`SCHEMA_SHARD_ENV`] (DEC-871).
+/// `cargo xtask ci test` ignores it and runs every test.
+const TEST_PARTITION_ENV: &str = "MANDATE_TEST_PARTITION";
 
 /// Lint header every safety-critical crate's `src/lib.rs` must carry (ADR-0001 ES-09, ES-21).
 const REQUIRED_HEADER: &str = "#![deny(
@@ -178,21 +191,17 @@ fn ci(job: &str) -> Result<()> {
     match job {
         "lint" => lint(Path::new("."), workspace_lint),
         "test" => {
-            sh(
-                "cargo",
-                &[
-                    "nextest",
-                    "run",
-                    "--workspace",
-                    "--locked",
-                    "--no-tests=pass",
-                ],
-            )?;
-            if workspace_has_library()? {
-                sh("cargo", &["test", "--workspace", "--locked", "--doc"])?;
+            for part in TEST_PARTS {
+                eprintln!("==> ci {part}");
+                test_part(part, None)?;
             }
-            uv_tools(&["pytest", "-q"])
+            Ok(())
         }
+        "test-nextest" => {
+            let partition = env::var(TEST_PARTITION_ENV).ok().filter(|s| !s.is_empty());
+            test_part(job, partition.as_deref())
+        }
+        "test-doc" | "test-python" => test_part(job, None),
         "pending" => pending(),
         "refcases" => refcases(false),
         "reference" => {
@@ -270,6 +279,59 @@ fn ci(job: &str) -> Result<()> {
         }
         other => bail!("unknown CI job: {other}"),
     }
+}
+
+/// One of [`TEST_PARTS`]; `partition`, a `K/N` counted from 1, runs only the nextest run's `K`th
+/// of `N` slices (DEC-871).
+fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
+    match part {
+        "test-nextest" => {
+            let args = nextest_args(partition)?;
+            sh(
+                "cargo",
+                &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            )
+        }
+        "test-doc" => {
+            if workspace_has_library()? {
+                sh("cargo", &["test", "--workspace", "--locked", "--doc"])?;
+            }
+            Ok(())
+        }
+        "test-python" => uv_tools(&["pytest", "-q"]),
+        other => bail!("unknown test part: {other}"),
+    }
+}
+
+/// The arguments of the workspace's nextest run, every test or, with `partition` (`K/N`, `1 <= K
+/// <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every test
+/// once (DEC-871).
+fn nextest_args(partition: Option<&str>) -> Result<Vec<String>> {
+    let mut args: Vec<String> = [
+        "nextest",
+        "run",
+        "--workspace",
+        "--locked",
+        "--no-tests=pass",
+    ]
+    .map(String::from)
+    .to_vec();
+    if let Some(partition) = partition {
+        let parsed = partition.split_once('/').and_then(|(k, n)| {
+            let plain = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+            if !plain(k) || !plain(n) || k.starts_with('0') || n.starts_with('0') {
+                return None;
+            }
+            Some((k.parse::<u32>().ok()?, n.parse::<u32>().ok()?))
+        });
+        match parsed {
+            Some((k, n)) if k <= n => args.push(format!("--partition=count:{k}/{n}")),
+            _ => bail!(
+                "{TEST_PARTITION_ENV} must be K/N with 1 <= K <= N, counted from 1; got {partition:?}"
+            ),
+        }
+    }
+    Ok(args)
 }
 
 /// The Postgres journal tests against a real database (ADR-0001 ES-08), `mandate-journal-pg`'s and
@@ -6106,22 +6168,22 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency,
-        FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
-        MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS,
-        Package, PendingTest, PendingTestRun, REFCASES, SCHEMA_CHECKERS, SCHEMA_DIR,
-        SCHEMA_SHARD_ENV, TestOrder, TestOutcome, UnmutatedSource, actionlint_workflows,
-        backticked_paths, base_ref_in, behaviour_only_rows, check_schedule, ci, ci_files, classify,
-        contains_dec_id, contains_word, external_oracles, failure_cause, feature_files,
-        feature_map_problems, files_by_extension, first_panic_line, forbidden_reached,
-        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
-        layer_problems, lint, listed_mutant_counts, live_feature_problems, live_test_counts,
-        metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
-        mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
-        pending_tests, plain_comment_lines, preflight_args, proptest_seeds_in, repo_root,
-        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_order_config, test_outcomes, unjudged_mutants, verdicts, workspace_closure,
-        workspace_packages,
+        FAST_JOB, FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS,
+        MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard,
+        MutatedCrate, PR_JOBS, Package, PendingTest, PendingTestRun, REFCASES, SCHEMA_CHECKERS,
+        SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome,
+        UnmutatedSource, actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows,
+        check_schedule, ci, ci_files, classify, contains_dec_id, contains_word, external_oracles,
+        failure_cause, feature_files, feature_map_problems, files_by_extension, first_panic_line,
+        forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
+        is_stub_function, layer_problems, lint, listed_mutant_counts, live_feature_problems,
+        live_test_counts, metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo,
+        mutants_outcome, mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in,
+        pending_problems, pending_tests, plain_comment_lines, preflight_args, proptest_seeds_in,
+        repo_root, schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses,
+        simulator_oracles, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
+        test_binary, test_order_config, test_outcomes, unjudged_mutants, verdicts,
+        workspace_closure, workspace_packages,
     };
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
 
@@ -9540,11 +9602,17 @@ mod tests {
 
     /// The `run:` script of the `full` job, as GitHub runs it.
     fn full_verdict_script(workflow: &str) -> Result<String> {
-        let lines = workflow_job(workflow, "full").context("ci.yml has a `full` job")?;
+        verdict_script(workflow, "full")
+    }
+
+    /// The `run:` script of the aggregate `job`, `fast` or `full`, as GitHub runs it.
+    fn verdict_script(workflow: &str, job: &str) -> Result<String> {
+        let lines =
+            workflow_job(workflow, job).with_context(|| format!("ci.yml has a `{job}` job"))?;
         let start = lines
             .iter()
             .position(|line| line.trim() == "run: |")
-            .context("`full` has a `run: |` script")?;
+            .with_context(|| format!("`{job}` has a `run: |` script"))?;
         let script: Vec<&str> = lines
             .iter()
             .skip(start.saturating_add(1))
@@ -9715,8 +9783,22 @@ mod tests {
             "a newer run of the same ref cancels the older one"
         );
         for (job, guard) in [
-            ("fast", "if: ${{ !github.event.pull_request.draft }}"),
+            ("fast-lint", "if: ${{ !github.event.pull_request.draft }}"),
+            ("fast-test", "if: ${{ !github.event.pull_request.draft }}"),
+            (
+                "fast-pending",
+                "if: ${{ !github.event.pull_request.draft }}",
+            ),
+            ("fast-python", "if: ${{ !github.event.pull_request.draft }}"),
+            (
+                "fast",
+                "if: ${{ always() && !github.event.pull_request.draft }}",
+            ),
             ("full-checks", "if: ${{ !github.event.pull_request.draft }}"),
+            (
+                "schema-mutants",
+                "if: ${{ !github.event.pull_request.draft }}",
+            ),
             (
                 "mutants-plan",
                 "if: ${{ !github.event.pull_request.draft }}",
@@ -9732,6 +9814,258 @@ mod tests {
             assert!(
                 lines.iter().any(|line| line.trim() == guard),
                 "`{job}` has `{guard}`, so a draft runs it not at all"
+            );
+        }
+        let guards = [
+            "if: ${{ !github.event.pull_request.draft }}",
+            "if: ${{ always() && !github.event.pull_request.draft }}",
+            "needs: mutants-plan",
+        ];
+        for job in workflow_jobs(&workflow) {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            assert!(
+                lines.iter().any(|line| guards.contains(&line.trim())),
+                "`{job}` carries the draft guard or follows a job that does (DEC-610)"
+            );
+        }
+        Ok(())
+    }
+
+    /// The keys of `workflow`'s jobs, two spaces in under `jobs:`, in file order.
+    fn workflow_jobs(workflow: &str) -> Vec<&str> {
+        workflow
+            .lines()
+            .skip_while(|line| *line != "jobs:")
+            .skip(1)
+            .filter(|line| {
+                line.starts_with("  ") && !line.starts_with("   ") && !line.trim().starts_with('#')
+            })
+            .filter_map(|line| line.trim().strip_suffix(':'))
+            .collect()
+    }
+
+    /// CI's fast jobs and the `cargo xtask ci` parts each runs, in order (DEC-871). The required
+    /// `fast` verdict needs every one of them.
+    const FAST_CI_JOBS: [(&str, &[&str]); 4] = [
+        ("fast-lint", &["lint", "spec-guard"]),
+        ("fast-test", &["test-nextest"]),
+        ("fast-pending", &["pending", "test-doc"]),
+        ("fast-python", &["test-python"]),
+    ];
+
+    /// The `cargo xtask ci <part>` parts a job's steps run, in order.
+    fn xtask_parts(lines: &[&str]) -> Vec<String> {
+        lines
+            .iter()
+            .filter_map(|line| {
+                line.trim()
+                    .trim_start_matches("- ")
+                    .strip_prefix("run: cargo xtask ci ")
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// DEC-871: CI's fast jobs together run exactly what `cargo xtask ci fast` runs, each part once:
+    /// `test` is its three parts, and the nextest part runs in a matrix whose partitions are `1/N`
+    /// to `N/N`, each once, so every test runs in exactly one shard. No other job runs a fast part.
+    #[test]
+    fn the_fast_jobs_run_exactly_the_fast_group() -> Result<()> {
+        let expanded: Vec<&str> = FAST_JOB
+            .iter()
+            .flat_map(|part| {
+                if *part == "test" {
+                    TEST_PARTS.to_vec()
+                } else {
+                    vec![*part]
+                }
+            })
+            .collect();
+        let sharded: Vec<&str> = FAST_CI_JOBS
+            .iter()
+            .flat_map(|(_, parts)| parts.iter().copied())
+            .collect();
+        assert_eq!(
+            sharded.iter().copied().collect::<BTreeSet<_>>(),
+            expanded.iter().copied().collect::<BTreeSet<_>>(),
+            "the fast jobs' parts are `cargo xtask ci fast`'s, `test` split into its parts"
+        );
+        assert_eq!(
+            sharded.len(),
+            expanded.len(),
+            "each fast part runs in exactly one job: {sharded:?}"
+        );
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let mut elsewhere = Vec::new();
+        for job in workflow_jobs(&workflow) {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            let parts = xtask_parts(&lines);
+            match FAST_CI_JOBS.iter().find(|(name, _)| *name == job) {
+                Some((_, expected)) => {
+                    assert_eq!(&parts, expected, "`{job}` runs {expected:?}, in that order");
+                    let trimmed: Vec<&str> = lines.iter().map(|l| l.trim()).collect();
+                    assert!(
+                        trimmed.contains(&"timeout-minutes: 10"),
+                        "`{job}` is capped at ten minutes (DEC-464)"
+                    );
+                    for (index, line) in trimmed.iter().enumerate() {
+                        if line.starts_with("- run: cargo xtask ci ") {
+                            assert_eq!(
+                                trimmed.get(index.saturating_add(1)),
+                                Some(&"if: steps.change.outputs.docs_only != 'true'"),
+                                "`{job}`'s `{line}` is skipped on the documentation-only path \
+                                 (DEC-112)"
+                            );
+                        }
+                    }
+                }
+                None => elsewhere.extend(
+                    parts
+                        .into_iter()
+                        .filter(|part| expanded.contains(&part.as_str()) || part == "fast")
+                        .map(|part| format!("{job}: {part}")),
+                ),
+            }
+        }
+        assert_eq!(
+            elsewhere,
+            Vec::<String>::new(),
+            "no other job runs a fast part"
+        );
+        let lint = workflow_job(&workflow, "fast-lint").context("ci.yml has `fast-lint`")?;
+        for line in [
+            "run: .github/scripts/docs-checks.sh",
+            "MANDATE_PR_BODY: ${{ github.event.pull_request.body }}",
+            "MANDATE_PR_NUMBER: ${{ github.event.pull_request.number }}",
+        ] {
+            assert!(
+                lint.iter().any(|l| l.trim() == line),
+                "`fast-lint` has `{line}`: the documentation-only path and the spec guard's inputs"
+            );
+        }
+        let test: Vec<&str> = workflow_job(&workflow, "fast-test")
+            .context("ci.yml has `fast-test`")?
+            .iter()
+            .map(|l| l.trim())
+            .collect();
+        let shards = test
+            .iter()
+            .find_map(|l| l.strip_prefix("shard: "))
+            .context("`fast-test` has a shard matrix")?;
+        let shards: Vec<String> = serde_json::from_str(shards)?;
+        let total = shards.len();
+        assert!(total > 1, "the nextest run is split: {shards:?}");
+        let expected: Vec<String> = (1..=total).map(|k| format!("{k}/{total}")).collect();
+        assert_eq!(shards, expected, "the partitions are 1/N to N/N, each once");
+        for shard in &shards {
+            assert!(
+                super::nextest_args(Some(shard))?.contains(&format!("--partition=count:{shard}")),
+                "{shard} is a partition nextest takes"
+            );
+        }
+        let partition_env = format!("{TEST_PARTITION_ENV}: ${{{{ matrix.shard }}}}");
+        for line in [
+            "fail-fast: false",
+            partition_env.as_str(),
+            "shared-key: fast-test",
+            "save-if: ${{ matrix.shard == '1/3' }}",
+        ] {
+            assert!(test.contains(&line), "`fast-test` has `{line}`");
+        }
+        let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
+        let names: Vec<&str> = FAST_CI_JOBS.iter().map(|(name, _)| *name).collect();
+        let needs = format!("needs: [{}]", names.join(", "));
+        assert!(
+            fast.iter().any(|l| l.trim() == needs),
+            "`fast` has `{needs}`"
+        );
+        assert!(
+            xtask_parts(&fast).is_empty(),
+            "`fast` runs no check itself; it judges its parts"
+        );
+        Ok(())
+    }
+
+    /// DEC-871's `fast` verdict, run as GitHub runs it (`bash -e`) over every combination of its
+    /// four parts' results: it passes only when every part succeeded, and a skipped part fails it.
+    #[test]
+    fn fast_passes_only_when_every_part_succeeded() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let script = verdict_script(&workflow, "fast")?;
+        let results = ["success", "failure", "cancelled", "skipped", ""];
+        let vars = [
+            "LINT_RESULT",
+            "TEST_RESULT",
+            "PENDING_RESULT",
+            "PYTHON_RESULT",
+        ];
+        let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
+        for ((job, _), var) in FAST_CI_JOBS.iter().zip(vars) {
+            let line = format!("{var}: ${{{{ needs.{job}.result }}}}");
+            assert!(
+                fast.iter().any(|l| l.trim() == line),
+                "`fast` reads `{line}`"
+            );
+        }
+        let mut checked = 0usize;
+        for combination in 0..results.len().pow(4) {
+            let mut command = Command::new("bash");
+            command.args(["-e", "-c", &script]);
+            let mut rest = combination;
+            let mut all = true;
+            for var in vars {
+                let result = results.get(rest % results.len()).copied().unwrap_or("");
+                rest /= results.len();
+                all &= result == "success";
+                command.env(var, result);
+            }
+            assert_eq!(
+                command.status()?.success(),
+                all,
+                "`fast` over combination {combination}"
+            );
+            checked = checked.saturating_add(1);
+        }
+        assert_eq!(checked, 625, "every combination of four results is judged");
+        Ok(())
+    }
+
+    /// DEC-871: a partition is `K/N` with `1 <= K <= N` in plain decimal, and runs nextest's counted
+    /// shard; none runs every test; anything else fails rather than running some other set.
+    #[test]
+    fn the_nextest_partition_is_checked() -> Result<()> {
+        let plain = super::nextest_args(None)?;
+        assert_eq!(
+            plain,
+            [
+                "nextest",
+                "run",
+                "--workspace",
+                "--locked",
+                "--no-tests=pass"
+            ]
+        );
+        for (partition, shard) in [
+            ("1/3", "count:1/3"),
+            ("3/3", "count:3/3"),
+            ("2/10", "count:2/10"),
+        ] {
+            let args = super::nextest_args(Some(partition))?;
+            assert_eq!(args.get(..plain.len()), Some(plain.as_slice()));
+            assert_eq!(
+                args.get(plain.len()..),
+                Some([format!("--partition={shard}")].as_slice())
+            );
+        }
+        for bad in [
+            "", "3", "0/3", "4/3", "1/0", "01/3", "1/03", "a/3", "1/b", "-1/3", "1/3/4", " 1/3",
+            "+1/3",
+        ] {
+            assert!(
+                super::nextest_args(Some(bad)).is_err(),
+                "{bad:?} is refused"
             );
         }
         Ok(())
@@ -9766,9 +10100,10 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            5,
-            "one checkout in each source-reading job: `fast`, `full-checks`, the mutation plan, \
-             the mutants matrix, and `schema-mutants`"
+            8,
+            "one checkout in each source-reading job: `fast-lint`, `fast-test`, `fast-pending`, \
+             `fast-python`, `full-checks`, the mutation plan, the mutants matrix, and \
+             `schema-mutants`"
         );
         for checkout in checkouts {
             assert!(
