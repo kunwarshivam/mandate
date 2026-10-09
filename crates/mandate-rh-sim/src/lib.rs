@@ -47,7 +47,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 mod server;
 
-pub use server::{CONTRACT, INJECTION, ServerError, SimServer, Variant};
+pub use server::{CONTRACT, Garble, INJECTION, ServerError, SimServer, Variant};
 
 use mandate_num::{Price, Qty, ShareIncrement, Usd};
 

@@ -81,7 +81,6 @@ fn the_error_texts_name_nothing_they_were_asked_for() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn a_page_serves_the_events_after_the_cursor_in_seq_order_with_the_head() {
     let fx = Fixture::new(5);
     let stream = acct(&text(WS_A), "ACCT1");
@@ -114,7 +113,6 @@ fn a_page_serves_the_events_after_the_cursor_in_seq_order_with_the_head() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn the_default_limit_is_one_hundred_within_one_to_one_thousand() {
     let mut fx = Fixture::new(0);
     let stream = acct(&text(WS_A), "ACCT1");
@@ -140,7 +138,6 @@ fn the_default_limit_is_one_hundred_within_one_to_one_thousand() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn a_cursor_at_or_past_the_head_gives_an_empty_page_at_the_head() {
     let fx = Fixture::new(3);
     let stream = acct(&text(WS_A), "ACCT2");
@@ -193,7 +190,6 @@ proptest! {
     /// pages are the stream's appended events exactly once in `seq` order, and the chain check
     /// passes across page boundaries from 64 zeros.
     #[test]
-    #[ignore = "pending E12-6"]
     fn paging_under_concurrent_appends_serves_the_stream_once_in_order_and_chains(
         initial in 0..12u64,
         ops in prop::collection::vec(op(), 1..40),

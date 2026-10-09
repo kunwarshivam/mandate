@@ -12,7 +12,7 @@ use proptest::test_runner::{Config, TestCaseError, TestRunner};
 use mandate_identity_seal::LookupSeal;
 use mandate_time::UtcNanos;
 
-use crate::MembershipState::{Active, CoolingOff, Deactivated, Invited, Removed};
+use crate::MembershipState::{Active, CoolingOff, Deactivated, Expired, Invited, Removed, Revoked};
 use crate::Role::{
     Approver, Auditor, BillingAdmin, Operator as Op, OrgAdmin, OrgOwner, Viewer,
     WorkspaceAdmin as Wa,
@@ -419,6 +419,34 @@ fn a_grant_to_a_non_member_or_a_change_naming_no_member_is_forbidden() {
             ch(&[(WA1, Approver), (STRANGER, Viewer)], &[], &[]),
             forbidden,
         ),
+    ]);
+}
+
+/// DEC-654 item 7: a membership `removed`, `expired`, or `revoked` counts as no membership in the
+/// scope, so removing a role it still lists, or deactivating it, is `forbidden`, as for a stranger.
+/// The same member `deactivated` is reached, and the same removal and deactivation pass, so the
+/// refusal comes from the departed state alone.
+#[test]
+fn a_removal_or_deactivation_naming_a_departed_member_is_forbidden() {
+    let forbidden = Err(Refusal::Forbidden);
+    for state in [Removed, Expired, Revoked] {
+        let s = store(&[m(GONE, WS, state, &[Viewer])]);
+        check(&[
+            (&s, WA1, WS, ch(&[], &[(GONE, Viewer)], &[]), forbidden),
+            (&s, WA1, WS, ch(&[], &[], &[GONE]), forbidden),
+            (&s, WA1, WS, ch(&[], &[(GONE, Viewer)], &[GONE]), forbidden),
+        ]);
+    }
+    let suspended = store(&[m(GONE, WS, Deactivated, &[Viewer])]);
+    check(&[
+        (
+            &suspended,
+            WA1,
+            WS,
+            ch(&[], &[(GONE, Viewer)], &[]),
+            NOT_REQUIRED,
+        ),
+        (&suspended, WA1, WS, ch(&[], &[], &[GONE]), NOT_REQUIRED),
     ]);
 }
 
