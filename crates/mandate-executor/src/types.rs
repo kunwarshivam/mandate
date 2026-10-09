@@ -856,6 +856,19 @@ pub enum Command {
         confirmation: Option<OwnerConfirmation>,
     },
     Reconcile(ReconcileReason),
+    /// Cancels `agent`'s working **opening** orders in `instrument`, and nothing else
+    /// ([DEC-853](../../../docs/project/decisions/DEC-853.md)): the paper adapter's bounded watch
+    /// sends it at the close-window bound so no entry is left working (first paper trade FT-11).
+    /// It goes through the cancel path an exit and a stricter mode already take, so each cancel is
+    /// journaled as `OrderStateChanged` (`pending_cancel`, `cancel_requested`) before it leaves
+    /// (`AGENTS.md` rule 5). It only reduces risk, so no gate, conduct, budget, session or mode rule
+    /// denies it (rule 13); protective orders, exits, other agents and other instruments are never
+    /// touched, an `Unknown` opening is left to its query, and with nothing working it changes
+    /// nothing.
+    CancelOpenings {
+        agent: AgentId,
+        instrument: InstrumentId,
+    },
 }
 
 /// Everything that can reach the core.
