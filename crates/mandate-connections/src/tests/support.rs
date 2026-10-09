@@ -1,6 +1,7 @@
 //! A fixture vault and a fixture token endpoint standing in for Alpaca. No network.
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use mandate_time::UtcNanos;
 use secrecy::{ExposeSecret, SecretString};
@@ -120,8 +121,9 @@ impl Vault for FixtureVault {
     }
 }
 
-/// What the fixture endpoint saw: the request and the form, secrets exposed for comparison.
-#[derive(Debug, PartialEq, Eq)]
+/// What the fixture endpoint saw: the request and the form, secrets exposed for comparison
+/// but never printed.
+#[derive(PartialEq, Eq)]
 pub struct Call {
     pub request: LiveTokenRequest,
     pub code: String,
@@ -131,6 +133,13 @@ pub struct Call {
     pub redirect_uri: String,
 }
 
+impl fmt::Debug for Call {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Call({:?}, {})", self.request, self.redirect_uri)
+    }
+}
+
+/// Alpaca stand-in: a code is single-use, so a second exchange of one fails (connections spec §5.2 step 4).
 pub struct FixtureProvider {
     pub answer: Result<(&'static str, &'static str), ConnectError>,
     pub calls: Vec<Call>,
@@ -151,14 +160,19 @@ impl TokenEndpoint for FixtureProvider {
         request: LiveTokenRequest,
         form: &ExchangeForm<'_>,
     ) -> Result<TokenResponse, ConnectError> {
+        let code = form.code.0.expose_secret().to_owned();
+        let reused = self.calls.iter().any(|call| call.code == code);
         self.calls.push(Call {
             request,
-            code: form.code.0.expose_secret().to_owned(),
+            code,
             code_verifier: form.code_verifier.0.expose_secret().to_owned(),
             client_id: form.client_id.0.clone(),
             client_secret: form.client_secret.0.expose_secret().to_owned(),
             redirect_uri: form.redirect_uri.to_owned(),
         });
+        if reused {
+            return Err(ConnectError::EndpointFailed);
+        }
         let (token_type, scope) = self.answer.clone()?;
         Ok(TokenResponse {
             access_token: AccessToken(SecretString::from(TOKEN)),

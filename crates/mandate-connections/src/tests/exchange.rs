@@ -137,6 +137,8 @@ fn a_refused_grant_stores_no_token_and_deletes_the_entry() {
             Err(refusal.clone())
         );
         assert_eq!(vault.token(), None, "{refusal:?}");
+        assert_eq!(provider.calls.len(), 1, "never retried: {refusal:?}");
+        assert_eq!(vault.ops, ["read_code", "delete"], "{refusal:?}");
         assert_eq!(vault.writes(), Vec::<&str>::new(), "{refusal:?}");
         assert!(!vault.has_code(), "{refusal:?}");
         assert_eq!(vault.ops.last(), Some(&"delete"), "{refusal:?}");
