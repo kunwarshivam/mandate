@@ -2,7 +2,8 @@
 //! correction): loopback only, the session, the pinned contract, tool calls driving the core,
 //! unlisted tools, the extra-tool and injection variants (LT-1, LT-8, CN-9), and the transport's
 //! edges: the listener closing on drop, the status lines, a parse error, an unknown session, a
-//! wrong path, and filters the core does not model. Oracles: the contract file, `mandate-mcp`'s
+//! wrong path, filters the core does not model, the code of each invalid request, and header names
+//! read without regard to case. Oracles: the contract file, `mandate-mcp`'s
 //! allowlist and revision, a hash computed outside Rust, imperatives written here, the core
 //! driven directly, the contract's own state and alert names, and HTTP's and JSON-RPC's own
 //! reason phrases and codes.
@@ -910,5 +911,103 @@ fn a_request_of_one_mib_is_answered_and_one_byte_more_is_closed_unanswered() -> 
     }
     let after = exchange(addr, POST, Some(&session), &list_body()).unwrap();
     assert!(after.starts_with("HTTP/1.1 200 "), "it serves on: {after}");
+    Ok(())
+}
+
+/// JSON-RPC 2.0 §5.1's "Invalid Request".
+const INVALID_REQUEST: i64 = -32600;
+
+/// Another MCP transport revision than `mandate-mcp`'s.
+const OTHER_REVISION: &str = "2025-03-26";
+
+fn invalid(status: u16, message: &Value) {
+    assert_eq!(
+        message["error"]["code"],
+        json!(INVALID_REQUEST),
+        "{status}: {message}"
+    );
+    assert_eq!(message.get("result"), None, "{message}");
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_wrong_path_is_404_with_invalid_request() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let session = Wire::connect(&server.url()?).session.unwrap();
+    let answer = exchange(
+        server.addr()?,
+        "GET /mcp HTTP/1.1",
+        Some(&session),
+        &list_body(),
+    );
+    let answer = answer.unwrap();
+    assert!(answer.starts_with("HTTP/1.1 404 "), "{answer}");
+    invalid(404, &body_of(&answer));
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn an_initialize_at_another_revision_is_400_with_invalid_request() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let mut wire = Wire::new(&server.url()?);
+    wire.protocol = OTHER_REVISION.to_owned();
+    let params = json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
+        "clientInfo": {"name": "mandate-mcp", "version": "0.0.0"}});
+    let reply = wire.request("initialize", params);
+    assert_eq!(reply.status, 400, "{}", reply.body);
+    assert_eq!(reply.header("mcp-session-id"), None, "no session is given");
+    invalid(400, &reply.message());
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_request_with_no_session_is_400_with_invalid_request() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let mut wire = Wire::connect(&server.url()?);
+    wire.session = None;
+    let reply = wire.request("tools/list", json!({}));
+    assert_eq!(reply.status, 400, "{}", reply.body);
+    invalid(400, &reply.message());
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_request_at_another_revision_after_initialize_is_400_with_invalid_request() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let mut wire = Wire::connect(&server.url()?);
+    wire.protocol = OTHER_REVISION.to_owned();
+    let reply = wire.request("tools/list", json!({}));
+    assert_eq!(reply.status, 400, "{}", reply.body);
+    invalid(400, &reply.message());
+    Ok(())
+}
+
+/// RFC 9110 §5.1: field names are case-insensitive.
+#[test]
+#[ignore = "pending E7-25"]
+fn header_names_are_read_without_regard_to_case() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let session = Wire::connect(&server.url()?).session.unwrap();
+    let addr = server.addr()?;
+    let body = list_body();
+    let head = format!(
+        "{POST}\r\nHost: {addr}\r\nConnection: close\r\nContent-Type: application/json\r\n\
+         Accept: application/json, text/event-stream\r\nMcp-Protocol-Version: {PROTOCOL_VERSION}\r\n\
+         Mcp-Session-Id: {session}\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    );
+    let mut bytes = head.into_bytes();
+    bytes.extend_from_slice(&body);
+    let answer = send(addr, &bytes, &[]).unwrap_or_default();
+    assert!(answer.starts_with("HTTP/1.1 200 "), "{answer}");
+    let tools = body_of(&answer)["result"]["tools"].as_array().map(Vec::len);
+    assert_eq!(
+        tools,
+        Some(9),
+        "the session and length were honoured: {answer}"
+    );
     Ok(())
 }

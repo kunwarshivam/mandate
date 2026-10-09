@@ -1,9 +1,10 @@
 //! The RFC 9457 problem document every error is (workspace API spec §3.5).
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
-use crate::Unimplemented;
-use crate::wire::{Decimal, EventId, Id, Ref, rules};
+use crate::wire::{Check, Decimal, EventId, Id, Ref, Rules, is_pointer, is_word, rules};
 
 /// One error response. `title` is generic text fixed by `code`, never content (rule 6, API-10);
 /// `event_id` is always a member, null exactly when `effect` is [`Effect::None`], so a body that
@@ -57,8 +58,89 @@ impl Problem {
         event_id: Option<EventId>,
         current_base: Option<CurrentBase>,
     ) -> Result<Self, ProblemError> {
-        let _ = (code, effect, event_id, current_base);
-        Err(ProblemError::Unimplemented(Unimplemented))
+        if !code.carries(effect) {
+            return Err(ProblemError::EffectNotAllowed);
+        }
+        if event_id.is_some() == (effect == Effect::None) {
+            return Err(ProblemError::EventIdMismatch);
+        }
+        if current_base.is_some() != (code == ProblemCode::StaleBase) {
+            return Err(ProblemError::CurrentBaseMismatch);
+        }
+        let (name, status, title) = code.pinned();
+        Ok(Self {
+            type_uri: format!("https://mandate.dev/problems/{name}"),
+            status,
+            code,
+            title: title.to_owned(),
+            effect,
+            event_id,
+            retryable: matches!(
+                code,
+                ProblemCode::JournalUnavailable
+                    | ProblemCode::RateLimited
+                    | ProblemCode::MembershipUnavailable
+            ),
+            violations: Vec::new(),
+            current_base,
+        })
+    }
+}
+
+impl ProblemCode {
+    /// The code's wire name, §3.5's status, and its fixed title (`envelope.schema.json`, DEC-681
+    /// item 14).
+    fn pinned(self) -> (&'static str, u16, &'static str) {
+        match self {
+            Self::Unauthenticated => ("unauthenticated", 401, "Sign in required"),
+            Self::Forbidden => ("forbidden", 403, "Not allowed"),
+            Self::NotFound => ("not_found", 404, "Not found"),
+            Self::Invalid => ("invalid", 422, "Invalid request"),
+            Self::IdempotencyConflict => ("idempotency_conflict", 409, "Key already used"),
+            Self::StaleBase => ("stale_base", 409, "Changed since loaded"),
+            Self::ClassificationChanged => {
+                ("classification_changed", 409, "Classification changed")
+            }
+            Self::StepUpRequired => ("step_up_required", 401, "Confirmation required"),
+            Self::StepUpMissing => ("step_up_missing", 401, "Confirmation not valid"),
+            Self::StepUpStale => ("step_up_stale", 401, "Confirmation expired"),
+            Self::StepUpReused => ("step_up_reused", 401, "Confirmation already used"),
+            Self::StepUpMethod => ("step_up_method", 401, "Confirmation method not allowed"),
+            Self::StepUpMismatch => ("step_up_mismatch", 401, "Confirmation does not match"),
+            Self::LiveUnavailable => ("live_unavailable", 409, "Live trading unavailable"),
+            Self::ControlStreamFrozen => ("control_stream_frozen", 503, "Changes are frozen"),
+            Self::JournalUnavailable => ("journal_unavailable", 503, "Temporarily unavailable"),
+            Self::RateLimited => ("rate_limited", 429, "Too many requests"),
+            Self::OwnRoles => ("own_roles", 403, "Cannot change own roles"),
+            Self::OwnerRoleReserved => ("owner_role_reserved", 403, "Owner role reserved"),
+            Self::LastOwner => ("last_owner", 409, "Owner must remain"),
+            Self::LastAdmin => ("last_admin", 409, "Admin must remain"),
+            Self::ReductionOnly => ("reduction_only", 403, "Risk reduction only"),
+            Self::MembershipUnavailable => {
+                ("membership_unavailable", 503, "Membership unavailable")
+            }
+            Self::OutcomeUnknown => ("outcome_unknown", 503, "Result unknown"),
+        }
+    }
+
+    /// Whether a refusal with this code may report `effect`: `none` for all but
+    /// `outcome_unknown`, `recorded` for the step-up codes and `control_stream_frozen` (§5.6's
+    /// batch), and `unknown` for `outcome_unknown` alone (DEC-681 item 11, DEC-686 item 3).
+    fn carries(self, effect: Effect) -> bool {
+        match effect {
+            Effect::None => self != Self::OutcomeUnknown,
+            Effect::Recorded => matches!(
+                self,
+                Self::StepUpRequired
+                    | Self::StepUpMissing
+                    | Self::StepUpStale
+                    | Self::StepUpReused
+                    | Self::StepUpMethod
+                    | Self::StepUpMismatch
+                    | Self::ControlStreamFrozen
+            ),
+            Effect::Unknown => self == Self::OutcomeUnknown,
+        }
     }
 }
 
@@ -163,14 +245,74 @@ pub enum PolicyValue {
     Set(Vec<String>),
 }
 
-rules!(pending: Problem, Violation);
+/// Each code's pinned members, `event_id` by `effect`, `current_base` by `code`, and each
+/// violation's own rules (`envelope.schema.json#/$defs/Problem`).
+impl Rules for Problem {
+    fn rules(&self, at: &str, check: &mut Check) {
+        let pinned = Self::of(
+            self.code,
+            self.effect,
+            self.event_id.clone(),
+            self.current_base.clone(),
+        );
+        let pinned = pinned.map(|pinned| Self {
+            violations: self.violations.clone(),
+            ..pinned
+        });
+        check.rule(pinned.as_ref() == Ok(self), at, "pinned");
+        for (index, violation) in self.violations.iter().enumerate() {
+            violation.rules(&format!("{at}/violations/{index}"), check);
+        }
+    }
+}
+
+/// A pointer for `path`, a lowercase code for a schema finding, `V-` and three digits for a rule,
+/// and a lowercase key and unique lowercase set members for a policy finding.
+impl Rules for Violation {
+    fn rules(&self, at: &str, check: &mut Check) {
+        let (path, named, holds) = match self {
+            Self::Schema { path, code, .. } => (path, "code", is_word(code)),
+            Self::Rule { path, code, .. } => (path, "code", is_rule(code)),
+            Self::Policy {
+                path,
+                key,
+                value,
+                ancestor_value,
+                ..
+            } => {
+                value.rules(&format!("{at}/value"), check);
+                ancestor_value.rules(&format!("{at}/ancestor_value"), check);
+                (path, "key", is_word(key))
+            }
+        };
+        check.rule(is_pointer(path), &format!("{at}/path"), "pattern");
+        check.rule(holds, &format!("{at}/{named}"), "pattern");
+    }
+}
+
+/// `^V-[0-9]{3}$`, a mandate V-rule's id.
+fn is_rule(code: &str) -> bool {
+    let digits = code.strip_prefix("V-").unwrap_or_default();
+    digits.len() == 3 && digits.chars().all(|c| c.is_ascii_digit())
+}
+
+/// A set's members are unique lowercase words.
+impl Rules for PolicyValue {
+    fn rules(&self, at: &str, check: &mut Check) {
+        if let Self::Set(members) = self {
+            let unique: BTreeSet<&String> = members.iter().collect();
+            check.rule(unique.len() == members.len(), at, "unique");
+            check.rule(members.iter().all(|m| is_word(m)), at, "pattern");
+        }
+    }
+}
+
+rules!(checked: Problem, Violation);
 rules!(none: ProblemCode, Effect);
 
 /// Why [`Problem::of`] refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ProblemError {
-    #[error(transparent)]
-    Unimplemented(Unimplemented),
     #[error("event_id must be present exactly when effect is recorded or unknown")]
     EventIdMismatch,
     #[error("this code cannot carry this effect")]

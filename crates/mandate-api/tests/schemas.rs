@@ -334,7 +334,6 @@ fn of(def: &str, files: &[Value]) -> Vec<Value> {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_envelope_shapes_accept_their_examples_and_refuse_the_invalid() {
     let good = [file!("workspace-api/examples/envelope.json")];
     let bad = [file!("workspace-api/examples/envelope.invalid.json")];
@@ -362,7 +361,6 @@ fn planned_elsewhere() -> BTreeSet<String> {
 /// valid one decodes and encodes back, and each invalid one is refused, but a problem whose code
 /// waits for a story not in flight.
 #[test]
-#[ignore = "pending E10-10"]
 fn the_problem_and_its_violations_accept_their_examples_and_refuse_the_invalid() {
     let good = [file!("workspace-api/examples/envelope.json")];
     let bad = [file!("workspace-api/examples/envelope.invalid.json")];

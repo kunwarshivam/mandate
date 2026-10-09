@@ -761,7 +761,9 @@ after U-A1 to U-A5 are recorded.
   shell reading still has limits: a here-doc body fed to a command other than a shell is read as
   commands, `case` arm patterns and `[[ =~ ]]` regex parentheses split a command, and a
   single-quoted string outside the here-doc and text reading is not joined. None hides a refusal
-  rule 1′ makes today; fix each with a pin when a real line needs it.
+  rule 1′ makes today; fix each with a pin when a real line needs it. Rule 2 judges pipelines
+  only, so a shell fed from a file (`sh < <(echo $C)`, `echo $C > f; sh f`) is a disclosed
+  residual (DEC-851 item 5, #985's review); pin and refuse it the same way.
 - **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
   want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
   so that a token that may reach both environments is on the record before it is used
@@ -4609,6 +4611,15 @@ From the workspace API contract's drift rule (DEC-683, E10-10):
   journal spec change first.
 - **Run `schemas/workspace-api/`'s checkers in CI** (`check_examples.py`, `check_planned.py`, and
   the mutation sweep) from a `cargo xtask` job; until then reviewers run them.
+
+From the independent review of the E10-10 A1 implementation, part 1 ([#993](https://github.com/kunwarshivam/mandate/pull/993), minors; [DEC-681](decisions/DEC-681.md) item 10):
+
+- **Locate a custom refusal on an object's last member by its name.** serde_json reports a custom
+  error such as `non_canonical` after the object's closing brace when the bad member is the last
+  one, so `decode` points at the parent. Locate custom errors by member name, as DEC-681 item 10
+  says ("where serde can name it"). The body is still refused, and no sibling is ever named.
+- **Refuse invalid UTF-8 inside a string value as `malformed` at `""`.** Today it is refused as
+  `type` at the member. It is still refused either way.
 
 From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
 
