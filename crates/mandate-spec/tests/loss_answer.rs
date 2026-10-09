@@ -373,7 +373,7 @@ fn a_loss_answer_without_a_positive_allocation_or_amount_is_never_drafted() {
 #[test]
 #[ignore = "pending E10-7"]
 fn a_drawdown_outside_zero_to_one_proposes_no_ladder() {
-    let failures = ["0", "-0.08", "-1", "1.5", "2"]
+    let failures = ["0", "-0.08", "-1", "1", "1.5", "2"]
         .into_iter()
         .filter_map(|drawdown| {
             let d = SchemaDec::parse(drawdown, DecGrammar::Decimal).expect("a signed decimal");
