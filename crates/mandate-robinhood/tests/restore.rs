@@ -3,9 +3,11 @@
 //! with one distinct id cancels by it; no id, two ids, an in-doubt place, or version-1 records give
 //! `NotSent` (`no_order_id`) with nothing called. Oracles: records typed from §9.16's member list
 //! and a recording tool double. A key the stream submitted is never placed again. Part 3 adds the
-//! restart against `mandate-rh-sim` and the distinct-id property.
+//! distinct-id property here, whose oracle counts ids from the generated choices, and the restart
+//! against `mandate-rh-sim` in that crate's `tests/robinhood.rs`.
 
 use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::pin::pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
@@ -20,6 +22,7 @@ use mandate_executor::{
 use mandate_mcp::{CallClass, McpError};
 use mandate_num::{Price, Qty};
 use mandate_robinhood::{RobinhoodConnector, Tools};
+use proptest::test_runner::{Config, TestRunner};
 use serde_json::{Value, json};
 
 const ACCOUNT: &str = "5QR00001";
@@ -368,4 +371,58 @@ fn a_key_the_journal_submitted_is_never_placed_again() {
     );
     let tools: Vec<&str> = calls.borrow().iter().map(|(_, tool, _)| *tool).collect();
     assert_eq!(tools, ["review_equity_order", "place_equity_order"]);
+}
+
+/// Random streams over four keys. The oracle counts each key's distinct non-null ids from the
+/// generated choices, never from the records: one id cancels by it, none or two is `NotSent`.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_key_cancels_exactly_when_its_records_carry_one_distinct_id() {
+    let keys: Vec<ClientOrderId> = (0..4).map(|n| key(&format!("01JPROP{n}"))).collect();
+    let choice = (0..keys.len(), 0..6_usize);
+    let mut runner = TestRunner::new(Config::with_cases(256));
+    let verdict = runner.run(&proptest::collection::vec(choice, 0..14), |picks| {
+        let mut s = Stream::default();
+        let mut ids: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
+        for key in &keys {
+            s.submitted(key, "SPY", "buy");
+        }
+        for (n, pick) in picks {
+            let id = format!("rh-{pick}");
+            match pick {
+                0 => s.changed(&keys[n], "accepted", None, NONE),
+                1 => s.changed(&keys[n], "partially_filled", Some(None), NONE),
+                2 => s.push(
+                    "ClockAdvanced",
+                    json!({"risk_clock": "2026-10-09T14:31:00Z"}),
+                ),
+                _ => {
+                    s.changed(&keys[n], "accepted", Some(Some(&id)), NONE);
+                    ids.entry(n).or_default().insert(id);
+                }
+            }
+        }
+        let (mut c, calls) = restored(&s.0, "cancelled");
+        let mut expected = Vec::new();
+        for (n, key) in keys.iter().enumerate() {
+            let one = ids
+                .get(&n)
+                .filter(|set| set.len() == 1)
+                .and_then(|set| set.first());
+            let outcome = cancel(&mut c, key);
+            match one {
+                Some(id) => {
+                    let accepted = BrokerOutcome::CancelAccepted {
+                        client_order_id: key.as_str().to_owned(),
+                    };
+                    proptest::prop_assert_eq!(outcome, Ok(accepted));
+                    expected.push(cancelled_by(id));
+                }
+                None => proptest::prop_assert_eq!(outcome, Err(NO_ORDER_ID)),
+            }
+        }
+        proptest::prop_assert_eq!(&*calls.borrow(), &expected);
+        Ok(())
+    });
+    verdict.unwrap();
 }
