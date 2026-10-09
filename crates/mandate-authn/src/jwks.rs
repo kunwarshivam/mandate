@@ -103,9 +103,10 @@ impl Key {
 
 /// The usable signing keys of one issuer, by `kid`.
 ///
-/// Parsing keeps a key only when it has a `kid`, its `use` (if any) is `sig`, and its type is EC
-/// on P-256, RSA, or OKP on Ed25519; any other key, a symmetric `oct` key included, is left out and
-/// can never verify a token, and so is an RSA key whose modulus is under 2048 or over 8192 bits.
+/// Parsing keeps a key only when it has a non-empty `kid`, its `use` (if any) is `sig`, and its
+/// type is EC on P-256, RSA, or OKP on Ed25519; any other key, a symmetric `oct` key included, is
+/// left out and can never verify a token, and so is an RSA key whose modulus is under 2048 or over
+/// 8192 bits.
 /// A kept key with a missing or wrongly sized member fails the whole set, and so do two kept keys
 /// with one `kid`, and a member the document or a key repeats. Its `Debug` lists the key ids only.
 #[derive(Clone, PartialEq, Eq)]
@@ -225,7 +226,7 @@ fn sized(jwk: &Jwk, member: &str, len: usize) -> Result<Vec<u8>, SetupError> {
 
 /// The key `jwk` describes with its `kid`, or `None` for a key no token may use.
 fn usable(jwk: &Jwk) -> Result<Option<(String, Key)>, SetupError> {
-    let Some(kid) = text(jwk, "kid") else {
+    let Some(kid) = text(jwk, "kid").filter(|kid| !kid.is_empty()) else {
         return Ok(None);
     };
     if jwk.get("use").is_some_and(|u| u.as_str() != Some("sig")) {

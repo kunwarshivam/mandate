@@ -187,8 +187,9 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   local end-to-end runs need; `install.sh` installs no Node.js and fetches from none of them.
 - **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint
   (shellcheck over `.github/scripts/`, actionlint over `.github/workflows/`, fmt, clippy
-  `-D warnings`, crate layering, markers, saved proptest seeds, the feature map, typos, ruff), test
-  (nextest, doctests, pytest), pending tests, reference-case fixture drift, the reference
+  `-D warnings`, crate layering, the `live` feature (only the crate `xtask/layers.toml` marks
+  `live_feature` may declare one, and CI only compiles it; DEC-529), markers, saved proptest
+  seeds, the feature map, typos, ruff), test (nextest, doctests, pytest), pending tests, reference-case fixture drift, the reference
   implementation checks, supply chain (cargo-deny, the dependency registry, gitleaks), the spec
   guard, the Postgres journal tests (skipped unless `MANDATE_PG_URL` is set), and mutants on the
   diff of safety-critical crates. CI runs them as two required checks: `cargo xtask ci fast` (lint,

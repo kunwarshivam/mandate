@@ -104,6 +104,15 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   runner is slower; the same 691 tests run, so the saving comes from the harness and not from
   running fewer cases; and DEC-498's 180-second cap and its 192 shards are re-derived from a
   fresh `ubuntu-24.04` measurement, or a successor decision records that they stand.
+- **E1-7 (Should)** As an engineer, I want `xtask`'s own checks under the mutants gate, so that a
+  safety check written in `xtask`, such as X1's live-feature check (E7-26, DEC-529 item 3), cannot
+  lose a rule without a test failing. `xtask/layers.toml` marks `xtask` `safety_critical = false`,
+  so `cargo xtask ci mutants` never mutates it today; X1's mutants were run by hand on its diff
+  (#738 review, finding 3).
+  *Accepted when:* CI runs `cargo mutants -p xtask` on the diff of every PR that changes
+  `xtask/src`, as a shard within DEC-464's ten-minute budget, and fails on any missed mutant; the
+  mutants of `xtask` code that predates the job are either caught or listed, each with its reason,
+  in a follow-up story, so the job starts green.
 
 ### E2 Market data
 
@@ -1199,6 +1208,9 @@ story buys a service, and none uses a real identity-provider account in tests (s
   *Accepted when:* `authorize` matches spec §4.2's matrix exactly, checked by an exhaustive test over
   every role set, permission, and scope against a table parsed from the spec, not from the code (ID-2);
   no principal changes its own roles (ID-13); and the last-owner and last-admin refusals hold (§5.2).
+  *Owed (tests-correction PR, from #938's review):* a case removing roles from, and one deactivating, a
+  member whose membership is `removed`, `expired`, or `revoked`, each refused `forbidden` (DEC-654
+  item 7); no test pins that exclusion yet.
 - **E9-3 (Must)** As an admin, I want org-level limits that workspaces and agents can only
   tighten.
 - **E9-4 (Must; SC)** As a security-conscious user, I want step-up authentication for sensitive
@@ -4594,3 +4606,10 @@ From the independent reviews of three CI and xtask conflict-and-queue fixes ([#7
   - Refuse two feature files with the same `# ` title, which `--index` would list twice.
   - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
     the README is never read as a feature.
+
+From E7-16's M2 implementation (`mandate-mcp`, claim #859; the shared check is lane L2's):
+
+- **E7-16: switch `mandate-mcp`'s private fund-movement tokenizer to `mandate_domain::fund_movement`**
+  once lane L2 lands it (E7-12, DEC-839 item 3). `client.rs`'s `moves_funds`, `words` and
+  `FUND_TOKENS` then go, and the crate gains its `mandate-domain` dependency, so the connector and
+  the scope check cannot disagree on a name.
