@@ -238,7 +238,7 @@ existing ones. So:
 - **The compiler's record is on the control stream** (DEC-432 item 19, answered by
   [DEC-670](../project/decisions/DEC-670.md)). The compiler has no agent, so the workspace services
   that call the gateway for it append its `ModelInvocationRecorded` to the workspace's control
-  stream, closed there with this section's members ([journal spec §9.8](journal.md#98-workspace-api-records-dec-670)).
+  stream, closed there with this section's members ([journal spec §9.9](journal.md#99-workspace-api-records-dec-670)).
   Until `mandate-journal` registers that record, the compiler makes no call through the gateway,
   because INF-10 could not hold for it.
 - A call with `outcome: ok` is followed by its output event (`ModelOutputRecorded` or
@@ -617,7 +617,7 @@ the date only; it does not suggest a replacement.
 
 ## 13. Open questions
 
-1. **Answered** ([DEC-670](../project/decisions/DEC-670.md), journal spec v0.19 §9.8): the
+1. **Answered** ([DEC-670](../project/decisions/DEC-670.md), journal spec v0.21 §9.9): the
    compiler's call record is on the workspace's control stream (§3.6). The meter stream's shape
    stays E15-8's.
 2. The policy key that lists allowed endpoints and regions does not exist in `policy.schema.json`.

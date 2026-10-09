@@ -5,7 +5,6 @@
 use mandate_mcp::{McpError, PinnedEndpoint};
 
 #[test]
-#[ignore = "pending E7-16"]
 fn the_production_build_refuses_plain_http_even_to_loopback() {
     for (host, endpoint) in [
         ("127.0.0.1", "http://127.0.0.1:1/mcp"),

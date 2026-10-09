@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/confirm-request.schema.json",
+  "type": "object",
+  "required": [
+    "agent_id",
+    "base_version",
+    "confirmed_paths",
+    "warnings_acknowledged",
+    "classification_shown",
+    "screen_digest",
+    "record",
+    "step_up"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "agent_id": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "base_version": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "confirmed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)*$"
+      }
+    },
+    "warnings_acknowledged": {
+      "type": "array",
+      "items": {
+        "$ref": "../common.schema.json#/$defs/Id"
+      }
+    },
+    "classification_shown": {
+      "enum": [
+        "risk_increasing",
+        "risk_reducing",
+        "neutral"
+      ]
+    },
+    "screen_digest": {
+      "$ref": "../common.schema.json#/$defs/ContentRef"
+    },
+    "record": {
+      "$ref": "../envelope.schema.json#/$defs/Record"
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /mandate-versions/{mandate_version}/confirm (\u00a75.1). Users only. step_up is bound to SHA-256 of {mandate_version, agent_id, base_version}; missing for risk_increasing is 401 step_up_required, not 422."
+}

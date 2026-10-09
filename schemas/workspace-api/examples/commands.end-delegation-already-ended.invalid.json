@@ -1,0 +1,68 @@
+[
+  {
+    "label": "another outcome",
+    "set": {
+      "/outcome": "ended"
+    }
+  },
+  {
+    "label": "a command id",
+    "set": {
+      "/command_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6"
+    }
+  },
+  {
+    "label": "no outcome",
+    "remove": [
+      "/outcome"
+    ]
+  },
+  {
+    "label": "auto: no /outcome",
+    "remove": [
+      "/outcome"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /outcome outside its set",
+    "set": {
+      "/outcome": "mutant_value"
+    }
+  },
+  {
+    "label": "auto: no /as_of/0/stream_id",
+    "remove": [
+      "/as_of/0/stream_id"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/seq",
+    "remove": [
+      "/as_of/0/seq"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/hash",
+    "remove": [
+      "/as_of/0/hash"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/recorded_at",
+    "remove": [
+      "/as_of/0/recorded_at"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /as_of/0",
+    "set": {
+      "/as_of/0/mutant_member": 1
+    }
+  }
+]

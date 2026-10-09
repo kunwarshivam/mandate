@@ -1,0 +1,49 @@
+[
+  {
+    "label": "no step-up status",
+    "remove": [
+      "/step_up_status"
+    ]
+  },
+  {
+    "label": "members the server dropped",
+    "set": {
+      "/dropped": [
+        "/step_up",
+        "/owner_exit"
+      ]
+    }
+  },
+  {
+    "label": "a pause or hold body that is not JSON drops the root",
+    "set": {
+      "/dropped": [
+        ""
+      ]
+    }
+  },
+  {
+    "label": "auto: /phase = \"recorded\"",
+    "set": {
+      "/phase": "recorded"
+    }
+  },
+  {
+    "label": "auto: /step_up_status = \"bound\"",
+    "set": {
+      "/step_up_status": "bound"
+    }
+  },
+  {
+    "label": "auto: /step_up_status = \"missing\"",
+    "set": {
+      "/step_up_status": "missing"
+    }
+  },
+  {
+    "label": "auto: /step_up_status = \"unbound\"",
+    "set": {
+      "/step_up_status": "unbound"
+    }
+  }
+]

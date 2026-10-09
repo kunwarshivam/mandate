@@ -23,6 +23,7 @@ use mandate_time::UtcNanos;
 mod agent;
 mod artifact;
 mod catalogue;
+mod connections;
 mod control;
 mod draft;
 mod merkle;
@@ -75,13 +76,17 @@ impl Environment {
     }
 }
 
-/// The four stream types of journal spec §2.
+/// The five stream types of journal spec §2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StreamType {
     Account,
     Agent,
     Control,
     Scheduler,
+    /// `ntf:{workspace_id}`, whose single writer is the workspace's notification dispatcher
+    /// (journal spec v0.12 §2, DEC-720). [`StreamId::parse`] reads it once E8-9's
+    /// slice S2 is implemented.
+    Notice,
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,

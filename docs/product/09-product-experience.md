@@ -716,7 +716,7 @@ Auditors see these screens and nothing that acts.
 **X1 Policies** ⚠: the organization and workspace policy editors. A value looser than its parent is
 rejected with a message naming the parent limit (FR-1.5; the nearest ancestor per mandate §4.3); a change shows the agents it makes
 nonconforming (mandate §4.3). **X2 Members and roles**, with separation of duties (FR-1.3, FR-1.6).
-**X3 Notifications**: channels, escalation chain, quiet hours; the screen states that quiet hours
+**X3 Notifications**: channels (every configured push channel is notified at once, DEC-438 item 6), quiet hours; the screen states that quiet hours
 hold back push notifications of approval requests, which stay listed in the inbox and can still be
 answered before their deadline, while risk-limit alerts ignore quiet hours (mandate §6.4, DEC-173). **X4 Deployment health** (hybrid and on-prem, where the customer is the deployment's
 operator; journey J4): versions, heartbeats, reachability, and the DEC-100 operator surface, which
@@ -911,8 +911,8 @@ persona examples follows.
 
 **PX-7. How the approval deadline and step-up work on a phone.**
 (a) The deadline goes in the notification. (b) The notification is generic; the detail screen shows
-the absolute deadline and the time remaining, the escalation chain re-notifies on the next channel as
-the deadline nears, and step-up is asked at the moment of approving, per approval, for live.
+the absolute deadline and the time remaining, one reminder goes to every configured channel as the
+deadline nears (DEC-438 item 6), and step-up is asked at the moment of approving, per approval, for live.
 (c) As (b), but one step-up covers every approval in its 5-minute window.
 *Recommendation: (b).* A deadline in the payload is not generic text. Asking at the moment of approval
 binds each passkey gesture to one decision, and a passkey is one gesture, so the cost is small;
