@@ -1,0 +1,9 @@
+file = "crates/mandate-journal/tests/workspace_records.rs"
+test = "an_open_owner_command_is_registered_at_version_1_only"
+reason = """
+E10-15's (DEC-672, journal spec §8, §9.11, and §9.10 rule 84; #837 review). It checks
+`Draft::parse` and `check_batch`, the journal's existing checks, so there is no stub to stop at:
+until E10-15's implementation, the journal answers `unknown_event_type` for `OwnerCommandIssued`
+at every version, version 1 included, which is the behaviour it fails on. E10-15's
+implementation deletes this file with the test's `#[ignore]` line.
+"""
