@@ -196,8 +196,12 @@ impl Issued {
 
     /// The context's [`TenantContext::membership_unverified`]: true only for a risk-reducing row
     /// (an owner exit) authorized from the session's roles snapshot during a membership outage.
+    #[expect(
+        clippy::todo,
+        reason = "a getter's stub is todo!(), the form DEC-137 names"
+    )]
     pub fn membership_unverified(&self) -> bool {
-        self.membership_unverified
+        todo!()
     }
 }
 
