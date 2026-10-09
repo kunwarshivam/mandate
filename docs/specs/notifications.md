@@ -155,17 +155,18 @@ address `unreachable` (§3.4, §5.6), so no other stream is written for it.
 | `integrity_incident` | `IntegrityIncidentRecorded` (journal spec §11) | safety | `attention_needed` | Owners and workspace admins |
 | `credential_added` | `CredentialEnrolled` (identity spec §12.1): a new passkey or device | safety | `account_changed` | The member, on every push channel |
 | `new_device` | `SessionOpened` with the first-seen-device flag (identity spec §6.2, §12.1): a sign-in from a device the member has not used, which a synced passkey makes possible with no enrolment | safety | `account_changed` | The member, on every push channel |
+| `notification_address_changed` | `NotificationAddressChanged`, `added` or `removed` (workspace API spec §4.11, §5.7): a member set or removed one of their own push addresses, with step-up ([DEC-795](../project/decisions/DEC-795.md)) | safety | `account_changed` | The member, on every push channel they hold after the change (an address just added included), once more on an address the member removed (never on one a replacement retired), and in the pull channels |
 | `recovery_used` | A sign-in by OIDC or a recovery code that starts an enrolment cool-off (identity spec §10.1) | safety | `account_changed` | The member, on every push channel |
-| `role_granted` | `MemberActivated` or `MemberRoleChanged` adding a role (identity spec §8.3) | safety | `account_changed` | Every other workspace admin and org owner, and the member |
+| `role_granted` | `MemberActivated` or `MemberRoleChanged` adding a role (identity spec §8.3) | safety | `account_changed` | Every other workspace admin and org owner, and the member. An org owner with no workspace membership receives none in identity spec v0.3 (§4.5, DEC-816 item 2); the identity E9-11 tests owe `every_org_owner_notice_has_a_deliverable_channel` |
 | `member_deactivated` | `MemberDeactivated` or `MemberRemoved` (identity spec §5.2) | safety | `account_changed` | The remaining workspace admins |
 | `deprovisioned` | `SessionRevoked` with reason `deprovisioned` (identity spec §11.1, §12.1): the customer's identity provider ended the member's access | safety | `account_changed` | The remaining workspace admins |
-| `break_glass` | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` (identity spec §10.3) | safety | `account_changed` | Every workspace admin and org owner |
+| `break_glass` | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` (identity spec §10.3) | safety | `account_changed` | Every workspace admin and org owner. An org owner with no workspace membership receives none in identity spec v0.3 (§4.5, DEC-816 item 2); the identity E9-11 tests owe `every_org_owner_notice_has_a_deliverable_channel` |
 | `version_risk_increasing` | `MandateConfirmed` whose classification is risk-increasing ([mandate spec §9.2](mandate.md#92-classification)), a delegation's included | safety | `account_changed` | Owners and workspace admins |
 | `delegation_added` | `MandateConfirmed` that adds a delegation (mandate spec §6.5) and is not already `version_risk_increasing` | safety | `account_changed` | Owners |
 | `connection_added` | `ConnectionEstablished` | safety | `account_changed` | Owners and workspace admins |
 | `went_live` | `AgentDeployed` in a live environment | safety | `account_changed` | Owners and workspace admins |
 | `client_connected` | `ClientConnected` (identity spec §12.1, DEC-141) | safety | `account_changed` | The member and workspace admins |
-| `channel_lost` | A `NoticeAttempted` that marks the member's address `unreachable` (§5.6); the dispatcher's own record, so no other stream is written | safety | `account_changed` | The member, on their other channels |
+| `channel_lost` | A `NoticeAttempted` that marks the member's address `unreachable` or fails it as `address_missing` (§5.1, §5.6); the dispatcher's own record, so no other stream is written | safety | `account_changed` | The member, on their other channels |
 | `daily_brief` | The brief for the risk day is built (D13, DEC-184) | info | `brief_ready` | Owners |
 | `delegation_ended` | A delegation expires, is spent, or is suspended (mandate spec §6.5) | info | none (pull and brief only) | Owners |
 | `model_status` | A pinned model deprecated or withdrawn (inference spec; mandate spec §8.1) | info | none | Owners |
@@ -199,7 +200,7 @@ user with no address on any push channel still has the pull channels.
 
 - A notice answers exactly one cause, and the dispatcher's key for it is the cause's event id. The
   causes are `ApprovalRequested`, `OwnerAlertSent`, and the dispatcher's own `NoticeAttempted`
-  that loses an address (`channel_lost`).
+  that marks an address `unreachable` or fails it as `address_missing` (`channel_lost`).
 - **A user's kill switch is one cause.** Journal spec §2 makes it a command that each stream owner
   journals as `KillSwitchActivated` in its own stream. The command's `OwnerCommandIssued` is the
   cause: the API writes `OwnerAlertSent` (`kill_switch`) with it on the control stream, and the
@@ -341,6 +342,17 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 - **Encryption.** The workspace deployment encrypts the payload to the subscribing browser with Web
   Push message encryption (RFC 8291) and signs with its own application server key (RFC 8292). The
   browser's push service and the relay see only ciphertext, of a payload that is opaque anyway.
+- **Only the browsers' push services** ([DEC-792](../project/decisions/DEC-792.md)).
+  A subscription's endpoint is accepted, stored, and sent to only if it parses as `https`, port 443
+  (none written, or `:443`), with no user information, and a host that is a lowercase ASCII name:
+  an IP literal, a trailing dot, a non-ASCII or `xn--` (IDN) label, or a percent-encoded character
+  is refused, never normalized into a match. The host must then match the deployment's allowlist,
+  whose entries are an exact host or `*.` and a domain; `*.domain` matches a proper subdomain at any
+  depth and never the domain itself. The default list is `fcm.googleapis.com`,
+  `updates.push.services.mozilla.com`, `*.push.apple.com`, and `*.notify.windows.com`. A send follows
+  no redirect: a `3xx` answer is a permanent failure, `address_rejected`. One parser
+  (`mandate_webpush::PushEndpoint`) serves the workspace API, the dispatcher, and the relay, with one
+  shared table test; the web client checks the same table before it hands a subscription over.
 - **Direct or relayed.** A managed workspace deployment sends to the push service directly. A hybrid
   deployment whose egress allows only the global control plane sends through the relay over its
   existing outbound mutual-TLS link ([HLD §4](../HLD.md#workspace-deployment)).
@@ -394,6 +406,19 @@ The dispatcher **tails the journal**, which is its outbox:
    `NoticeIssued` before any send.
 3. For each recipient and push channel it reads the address from the vault and sends through the
    channel's adapter (§5.2), then journals the outcome as `NoticeAttempted`.
+   **It reads an address only while it is active**, that is, while its last
+   `NotificationAddressChanged` is `added` (workspace API spec §4.11), and only while its host is on
+   the allowlist (§4.6). The single exception is the one last send of a
+   `notification_address_changed` notice to the very address its `removed` event names: opaque like
+   every notice, subject to the allowlist, retried within the safety window (NT-6), and never
+   repeated for a later notice. If the vault entry is already gone when that last send is made, the
+   attempt is `abandoned` with reason `retry_window_ended` (the safety window's reason, from
+   [#763](https://github.com/kunwarshivam/mandate/pull/763)): it is not `address_missing`, marks
+   nothing, and raises no `channel_lost`; once the entry is swept, no exception remains. **An active
+   address whose vault entry is missing** (repaired by the member removing the address and setting it
+   again, workspace API spec §5.7; removing needs no entry) is a terminal `failed` with reason
+   `address_missing`: it does not mark the address `unreachable`, and it raises `channel_lost` once
+   (§5.6).
 4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
    issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
    while the approval is still pending.
@@ -420,12 +445,15 @@ Every channel is one adapter behind one interface:
 - Adapters take no string from the caller except the address handle, which they dereference
   through the vault client. They cannot read the journal or write the control stream (NT-3).
 - `reason` is a closed enum (`timeout`, `rate_limited`, `provider_error`, `address_rejected`,
-  `auth_failed`, `too_large`, `recipient_not_permitted`, `bounced`, `complained`, `unsubscribed`);
+  `auth_failed`, `too_large`, `recipient_not_permitted`, `address_missing`, `bounced`, `complained`, `unsubscribed`);
   provider error text is never journaled or logged, since a provider may echo the message. The
   last three come from a provider `receipt`. `address_rejected`, `auth_failed`, `bounced`,
   `complained`, and `unsubscribed` are `permanent`, mark the address `unreachable`, and raise
   `channel_lost` (§5.6) (DEC-700 item 8). The brief's own opt-out is not a receipt and never one of
   these reasons (§5.7).
+- `address_missing` is the dispatcher's own finding (§5.1), not a provider verdict: the address is
+  active but its vault entry is gone. It is `permanent`, marks no address `unreachable`, and raises
+  `channel_lost` once (§5.6).
 - `recipient_not_permitted` is the platform's own refusal (§4.4: a recipient the founder-only mail
   transport may not address), not the provider's verdict on the address. It is `permanent` for that
   notice and channel, is not retried, marks no address `unreachable`, and raises no `channel_lost`
@@ -438,11 +466,11 @@ Every channel is one adapter behind one interface:
 | Class | Attempts | Stops when |
 |---|---|---|
 | `action` | At once; then after 15 s, 60 s, 5 min; then every 15 min | The approval is no longer pending (terminal event, deadline passed, or cancellation), recorded as `abandoned` with reason `not_pending` |
-| `safety` | Same schedule | Accepted, a permanent failure, or 24 hours, recorded as `abandoned` with reason `retry_window_ended` |
+| `safety` | Same schedule | Accepted, a permanent failure, or 24 hours; or at once, for the one last send to a removed address whose vault entry is already gone (§5.1), recorded as `abandoned` with reason `retry_window_ended` |
 | `info` | Same schedule | Accepted, a permanent failure, or 6 hours, recorded as `abandoned` with reason `retry_window_ended` |
 
 A `retryable` result, a timeout, and a provider 429 all retry. `permanent` stops that channel for
-that notice and, for `address_rejected` or `auth_failed`, marks the address (§5.6); `recipient_not_permitted` marks nothing (§5.2).
+that notice and, for `address_rejected` or `auth_failed`, marks the address (§5.6); `recipient_not_permitted` and `address_missing` mark nothing (§5.2).
 `not_pending` is for `action` only and `retry_window_ended` for `safety` and `info` only.
 
 ### 5.4 Coalescing and rate limits
@@ -506,10 +534,25 @@ The reference cases and the code change to `kind` in E8-9 (slice S4); until then
   `NoticeAttempted`: `address_rejected`, `auth_failed`, `bounced` (a hard bounce), `complained`,
   and `unsubscribed` (a provider-level unsubscribe or suppression, from a provider receipt). The dispatcher stops sending to the address and issues a `channel_lost` notice, whose
   cause is that record on its own stream, to the user's other channels and the pull channels. No
-  other reason marks an address; `recipient_not_permitted` in particular marks nothing (§5.2).
+  other reason marks an address; `recipient_not_permitted` and `address_missing` in particular mark nothing (§5.2).
 - `auth_failed` (a revoked Slack webhook, a removed Telegram bot) also raises an operator alert
   when the credential is the platform's (the Telegram bot token).
 - An address comes back only when the signed-in user re-verifies it in the workspace.
+- **An allowlist change.** An address whose host leaves the allowlist is no longer sent to: its next
+  attempt is journaled `failed` with `address_rejected`, which marks it `unreachable` and raises
+  `channel_lost` to the member's other channels, as for any rejected address. It stays unreachable,
+  still counts toward the member's limit, and shows its status in the workspace until the member
+  removes it or sets the same endpoint again, which replaces it with a new address in one batch
+  (workspace API spec §4.11, §5.7).
+- **A missing entry is reported once.** The first `address_missing` attempt on an address raises
+  `channel_lost`; later attempts on it are `failed` `address_missing` with no new `channel_lost`.
+  The report resets on the next `delivered` attempt on that address, and a new `address_ref` (the
+  member removing the address and setting it again) starts afresh.
+- **A member's own change is not a loss.** Adding or removing a push address through the workspace
+  API (workspace API spec §4.11) is journaled as `NotificationAddressChanged` on the control
+  stream and raises a `notification_address_changed` notice, not `channel_lost`. Its one last send
+  to a removed address is the only send to that address after the removal, so a member whose address
+  was removed by someone else learns of it there (DEC-795).
 - An owner whose every push address is `unreachable` still has the pull channels. No trading state
   changes (NT-5); whether a live agent should hold openings in that case is Proposed (DEC-438 item
   25).

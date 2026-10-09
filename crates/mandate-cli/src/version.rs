@@ -8,7 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::{
-    ArtifactError, ArtifactRef, ArtifactStore, Environment, StoredEvent, get_artifact,
+    ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, Environment, StoredEvent,
+    get_artifact,
 };
 use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
 use mandate_spec::validate::validate;
@@ -91,7 +92,7 @@ pub(crate) fn latest<'a>(rows: &'a [Row], event_type: &str, version: &str) -> Op
 }
 
 /// The document's envelope paths: its top-level members but the system fields, ascending.
-fn envelope_paths(document: &Value) -> Vec<String> {
+pub(crate) fn envelope_paths(document: &Value) -> Vec<String> {
     let members = document.as_object().into_iter().flat_map(|o| o.keys());
     members
         .map(|k| k.as_str())
@@ -195,7 +196,7 @@ pub fn create(
 
 /// The stored document `version` names, parsed, and the mandate it is.
 pub(crate) fn stored(
-    store: &dyn ArtifactStore,
+    store: &dyn ArtifactSource,
     version: &str,
 ) -> Result<(Value, Mandate), ControlError> {
     let reference = ArtifactRef::parse(version).ok_or_else(|| refused("version_unknown"))?;
@@ -211,7 +212,7 @@ pub(crate) fn stored(
 
 /// Every control-stream record as the fact the spec's fold reads (DEC-505 item 1), or
 /// `control_stream_invalid` for one that cannot be mapped.
-fn facts(rows: &[Row], store: &dyn ArtifactStore) -> Result<Vec<JournaledFact>, ControlError> {
+fn facts(rows: &[Row], store: &dyn ArtifactSource) -> Result<Vec<JournaledFact>, ControlError> {
     let documents = |d: &Digest| {
         let bytes = get_artifact(store, &ArtifactRef::from_digest(*d)).ok()?;
         parse(&bytes).ok()
@@ -230,7 +231,7 @@ fn facts(rows: &[Row], store: &dyn ArtifactStore) -> Result<Vec<JournaledFact>, 
 /// stream folds to (DEC-530 items 5 and 9); the warnings, by code.
 pub(crate) fn check_rules(
     rows: &[Row],
-    store: &dyn ArtifactStore,
+    store: &dyn ArtifactSource,
     (mandate, agent): (&Mandate, &str),
     confirming: Option<(Digest, &[String])>,
     now: Now,
@@ -278,7 +279,7 @@ pub(crate) fn check_rules(
 /// names its asset id, with its symbol (DEC-505 item 1, DEC-523 item 5).
 pub(crate) fn check_instruments(
     rows: &[Row],
-    store: &dyn ArtifactStore,
+    store: &dyn ArtifactSource,
     document: &Value,
 ) -> Result<(), ControlError> {
     let mut snapshots: BTreeMap<String, String> = BTreeMap::new();

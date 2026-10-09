@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mandate_accounting::InstrumentId;
-use mandate_canon::{Key, Object, Value};
+use mandate_canon::{Digest, Key, Object, Value};
 use mandate_executor::BrokerRequest;
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_runtime::{
@@ -25,7 +25,9 @@ use crate::envelope::{
 };
 use crate::error::{Cause, ShellError, refused};
 use crate::map;
-use crate::stages::{Admitted, Classifier, ExitPath, Gate, JournalWriter, Sizing, Stage, Stages};
+use crate::stages::{
+    Admitted, Classifier, ExitPath, Gate, GovernedRefs, JournalWriter, Sizing, Stage, Stages,
+};
 
 /// What a run is for, besides its stages. Nothing here is secret: every id is opaque (TI-8).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,7 +101,7 @@ fn execute_cycle(
     output: mandate_runtime::ModelOutput,
 ) -> Result<Report, ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
-    let mut session = Session::open(stages, setup, &admitted.view)?;
+    let mut session = Session::open_governed(stages, setup, &admitted.view, admitted.governed)?;
     session.start()?;
     if session.cycle_open && !setup.new_cycle {
         return Err(ShellError::CycleAlreadyOpen);
@@ -145,6 +147,8 @@ pub(crate) struct Session<'s> {
     stages: &'s mut Stages,
     setup: &'s Setup,
     view: &'s MandateView,
+    /// The registered objects a governed run's version-2 agent records reference (DEC-484).
+    governed: Option<GovernedRefs>,
     state: RuntimeState,
     agent_stream: String,
     account_stream: String,
@@ -160,11 +164,14 @@ pub(crate) struct Session<'s> {
 }
 
 impl<'s> Session<'s> {
-    /// Takes both streams and replays them, the agent stream first (journal spec §8).
-    pub(crate) fn open(
+    /// Takes both streams and replays them, the agent stream first (journal spec §8). A run that
+    /// `governed` governs writes its `ModelOutputRecorded` and `DecisionMade` at schema version 2
+    /// with their registered references.
+    pub(crate) fn open_governed(
         stages: &'s mut Stages,
         setup: &'s Setup,
         view: &'s MandateView,
+        governed: Option<GovernedRefs>,
     ) -> Result<Self, ShellError> {
         let deployment = &setup.deployment;
         let agent = agent_stream(&deployment.workspace.0, &deployment.agent.0);
@@ -174,6 +181,7 @@ impl<'s> Session<'s> {
             stages,
             setup,
             view,
+            governed,
             agent_stream: agent,
             account_stream: account,
             epochs: BTreeMap::new(),
@@ -504,18 +512,40 @@ impl<'s> Session<'s> {
             .map_err(refused(Stage::Connector))
     }
 
+    /// A governed run writes `ModelOutputRecorded` with `model_registry` and `DecisionMade` with
+    /// `model_registry` and `policy_set` beside `mandate_version`, at schema version 2 (journal
+    /// spec v0.16, DEC-484 item 4). Every other record, and every record of an ungoverned run,
+    /// stays at version 1 with `mandate_version` alone.
+    fn agent_refs(&self, event_type: &str) -> Result<(u64, Object), ShellError> {
+        let mut refs = vec![("mandate_version", Value::Str(self.view.version.clone()))];
+        let reference = |digest: Digest| Value::Str(format!("sha256:{digest}"));
+        let mut version = 1;
+        if let Some(governed) = self.governed {
+            let decision = event_type == "DecisionMade";
+            if decision || event_type == "ModelOutputRecorded" {
+                refs.push(("model_registry", reference(governed.model_registry)));
+                version = 2;
+            }
+            if decision {
+                refs.push(("policy_set", reference(governed.policy_set)));
+            }
+        }
+        let mut config_refs = Object::new();
+        for (name, value) in refs {
+            config_refs.insert(
+                Key::new(name).map_err(|_| ShellError::Envelope { field: name })?,
+                value,
+            );
+        }
+        Ok((version, config_refs))
+    }
+
     fn append_agent(&mut self, drafts: &[EventDraft]) -> Result<(), ShellError> {
         let stream = self.agent_stream.clone();
-        let mut config_refs = Object::new();
-        config_refs.insert(
-            Key::new("mandate_version").map_err(|_| ShellError::Envelope {
-                field: "mandate_version",
-            })?,
-            Value::Str(self.view.version.clone()),
-        );
         let bytes = drafts
             .iter()
             .map(|draft| {
+                let (schema_version, config_refs) = self.agent_refs(&draft.event_type)?;
                 draft_bytes(
                     &Envelope {
                         stream: &stream,
@@ -526,7 +556,7 @@ impl<'s> Session<'s> {
                     &DraftFields {
                         event_id: &draft.event_id.0,
                         event_type: &draft.event_type,
-                        schema_version: 1,
+                        schema_version,
                         causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
                         config_refs: &config_refs,
                         payload: &draft.payload,

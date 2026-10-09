@@ -24,8 +24,8 @@ So this path builds only things the product keeps:
 
 [DEC-529](../decisions/DEC-529.md) holds only what is the founder's: the live order itself and
 the few narrowings it needs. The coordinator reports the founder accepted every recommendation
-on 2026-10-08; the status reads Accepted once the founder confirms on #706 or the coordinator
-records it at merge. The founder's answers, as relayed:
+on 2026-10-08, and DEC-529 now reads Accepted, so nothing below waits on its status. The founder's
+answers, as relayed:
 
 - **Instrument and cap:** `max_order_usd` 100 USD, on a cheap broad ETF priced under about
   90 USD a share. The founder chose the cap and the class of instrument; the ticker is the
@@ -34,8 +34,8 @@ records it at merge. The founder's answers, as relayed:
   gates any customer use. The founder's call, not a legal conclusion.
 - **SP1:** approved as DEC-529 states it.
 
-Every slice is product work and is built either way; implementations that DEC-529 item 4
-governs (B2b, C1) and the live run wait until it reads Accepted.
+Every slice is product work. DEC-529 reads Accepted, so the implementations that its item 4
+governs (B2b, C1) and the live run are no longer held by its status.
 
 This path needs the [first paper trade](first-paper-trade.md)'s runner (E1a, E1b, built
 generic) and its manual run (E2).
@@ -143,7 +143,7 @@ Robinhood code.
 
 | State | Entered | Blocks | Ends | Who | Session close, midnight, restart, version change |
 |---|---|---|---|---|---|
-| DEC-529 not yet recorded Accepted | Now | B2b's and C1's implementations, and the live run | The founder confirms, or the coordinator records it at merge | Founder, coordinator | — |
+| DEC-529 not yet recorded Accepted (ended: it reads Accepted) | — | Nothing now | The founder accepted it on 2026-10-08 | Founder, coordinator | — |
 | Logged out | Run start | Every Robinhood call | OAuth login in the founder's browser | Founder | Restart logs out (no token on disk) |
 | Logged in | Token in memory | Nothing | Expiry, revocation, exit | Robinhood, founder | Expiry mid-run: `closing_only`; the resting stop is unaffected |
 | Contract or profile drift | Hash differs at login | Every opening | A released connector version | Agents, founder | Checked at every login |
@@ -327,7 +327,7 @@ Relayed as accepted on 2026-10-08; each reads Accepted once DEC-529's status doe
 |---|---|---|
 | F-1 | The live order and its narrowings of rule 8, ES-23, DEC-155 item 4, V-001, FR-2.6, trading §4.2 and the tracker's counsel line | Accepted as recommended. Nothing live runs before the status reads Accepted |
 | F-2 | The cap and the instrument class (whole shares, so one share must fit) | The founder chose them: `max_order_usd` 100 USD, a cheap broad ETF under about 90 USD a share; the ticker in the mandate |
-| F-3 | Recovery without a query by `ref_id` (DEC-529 item 4), resolving DEC-441 item 10 for this order only | Accepted as recommended. B2b's and C1's implementations wait for the status |
+| F-3 | Recovery without a query by `ref_id` (DEC-529 item 4), resolving DEC-441 item 10 for this order only | Accepted as recommended; DEC-529 reads Accepted, so B2b's and C1's implementations may land |
 | F-4 | DEC-441 items 15, 16, 17 and 20 as DEC-529 reads them; counsel | Accepted as recommended; counsel not required for this own-account order and still required for any customer use |
 | F-5 | The live quote source (DEC-529 item 12) | Accepted as recommended |
 | F-6 | Founder-owned files (new crates' entries, the `getrandom` row) and SP1 | SP1 approved as DEC-529 states it; each PR names its founder-owned files |

@@ -183,14 +183,14 @@ pub fn assertion_id(owner: &Owner, at: UtcNanos, count: u32) -> Result<String, C
 }
 
 /// The binary's [`Ids`]: [`assertion_id`] for the command's owner and instant, counted from 1.
-struct InstantIds<'a> {
+pub(crate) struct InstantIds<'a> {
     owner: &'a Owner,
     at: UtcNanos,
     count: u32,
 }
 
 impl<'a> InstantIds<'a> {
-    fn new(owner: &'a Owner, now: Now) -> Self {
+    pub(crate) fn new(owner: &'a Owner, now: Now) -> Self {
         Self {
             owner,
             at: now.at,

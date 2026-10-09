@@ -2,7 +2,9 @@
 //! loopback server is accepted only in this crate's own test build.
 
 mod answers;
+mod bounds;
 mod budget;
+mod contract;
 mod endpoint;
 mod errors;
 mod server;

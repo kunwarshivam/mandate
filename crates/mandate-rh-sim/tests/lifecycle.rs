@@ -5,12 +5,11 @@
 mod common;
 
 use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, limit, price, qty, ref_id, sim};
-use mandate_rh_sim::{Event, Fault, OrderRequest, Session, SimError, State};
+use mandate_rh_sim::{Event, Fault, OrderRequest, Session, Sim, SimError, State};
 
 type Outcome = Result<(), SimError>;
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_limit_buy_is_confirmed_fills_in_parts_and_builds_the_position() -> Outcome {
     let mut sim = sim()?;
     let order = sim.place(&limit("buy", "2", "501", 1))?;
@@ -30,7 +29,6 @@ fn a_limit_buy_is_confirmed_fills_in_parts_and_builds_the_position() -> Outcome 
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_lost_answer_leaves_one_order_and_its_ref_id_returns_it() -> Outcome {
     let mut sim = sim()?;
     sim.apply(Event::Script(Fault::LoseAnswer))?;
@@ -65,7 +63,6 @@ fn a_lost_answer_leaves_one_order_and_its_ref_id_returns_it() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn gfd_expires_at_the_close_and_gtc_rests() -> Outcome {
     let mut sim = sim()?;
     let day = sim.place(&limit("buy", "2", "501", 1))?;
@@ -90,7 +87,6 @@ fn gfd_expires_at_the_close_and_gtc_rests() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn an_order_fills_only_in_a_session_its_market_hours_admit() -> Outcome {
     let mut sim = sim()?;
     sim.apply(Event::Session(Session::Extended))?;
@@ -144,7 +140,6 @@ fn an_order_fills_only_in_a_session_its_market_hours_admit() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn cancels_fills_and_sells_are_refused_where_the_contract_refuses() -> Outcome {
     let mut sim = sim()?;
     let order = sim.place(&limit("buy", "2", "501", 1))?;
@@ -212,7 +207,6 @@ fn cancels_fills_and_sells_are_refused_where_the_contract_refuses() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn scripted_answers_and_broker_changes_follow_the_lifecycle() -> Outcome {
     let mut sim = sim()?;
     sim.apply(Event::Script(Fault::Answer(State::Rejected)))?;
@@ -243,11 +237,10 @@ fn scripted_answers_and_broker_changes_follow_the_lifecycle() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_ref_id_is_echoed_and_a_changed_resend_refused_only_when_switched_on() -> Outcome {
     let mut sim = sim()?;
     let order = sim.place(&limit("buy", "1", "501", 1))?;
-    let echoed = |sim: &mandate_rh_sim::Sim| -> Result<Option<String>, SimError> {
+    let echoed = |sim: &Sim| -> Result<Option<String>, SimError> {
         Ok(sim.orders(AGENTIC)?.first().and_then(|o| o.ref_id.clone()))
     };
     assert_eq!(
@@ -275,7 +268,6 @@ fn a_ref_id_is_echoed_and_a_changed_resend_refused_only_when_switched_on() -> Ou
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_working_sell_reserves_only_its_unfilled_remainder() -> Outcome {
     let mut sim = sim()?;
     let bought = sim.place(&limit("buy", "3", "501", 1))?;

@@ -54,7 +54,7 @@ const equity = object<{ equity: string; mode: "normal" | "exits_only" | "paused"
 const workspaceKill: KillSwitchRequest = { scope: { kind: "workspace", id: null }, environment_shown: "paper", owner_exit: null, record: null, step_up: null };
 
 describe("paths (spec §4)", () => {
-  it.skip("pending E11-9: puts every route under /v1/workspaces/{ws}", async () => {
+  it("pending E11-9: puts every route under /v1/workspaces/{ws}", async () => {
     const { api, calls } = client(() => json(200, { api_version: "1", as_of: [MARK], equity: "1", mode: "normal" }));
     expect(api.path("/health")).toBe(`/v1/workspaces/${WS}/health`);
     await api.read("/dashboard", equity);
@@ -64,7 +64,7 @@ describe("paths (spec §4)", () => {
     }
   });
 
-  it.skip("pending E11-9: fills route parameters, encoded, and refuses a missing one", () => {
+  it("pending E11-9: fills route parameters, encoded, and refuses a missing one", () => {
     const { api } = client(accepted);
     expect(api.prepare("pause", { agent: "agt/../x" }, {}).path).toBe(`/v1/workspaces/${WS}/agents/agt%2F..%2Fx/pause`);
     expect(() => api.prepare("pause", {}, {})).toThrow();
@@ -76,7 +76,7 @@ describe("paths (spec §4)", () => {
 });
 
 describe("idempotency (spec §3.4, API-4)", () => {
-  it.skip("pending E11-9: accepts keys of 16 to 64 characters from [A-Za-z0-9_-] only", () => {
+  it("pending E11-9: accepts keys of 16 to 64 characters from [A-Za-z0-9_-] only", () => {
     expect(isIdempotencyKey("a".repeat(16))).toBe(true);
     expect(isIdempotencyKey("A-z_9".repeat(12) + "abcd")).toBe(true);
     expect(isIdempotencyKey("a".repeat(15))).toBe(false);
@@ -85,13 +85,13 @@ describe("idempotency (spec §3.4, API-4)", () => {
     expect(isIdempotencyKey("a".repeat(15) + "é")).toBe(false);
   });
 
-  it.skip("pending E11-9: makes a fresh valid key per gesture", () => {
+  it("pending E11-9: makes a fresh valid key per gesture", () => {
     const made = Array.from({ length: 200 }, newIdempotencyKey);
     expect(made.every(isIdempotencyKey)).toBe(true);
     expect(new Set(made).size).toBe(made.length);
   });
 
-  it.skip("pending E11-9: sends an Idempotency-Key on every mutating call", async () => {
+  it("pending E11-9: sends an Idempotency-Key on every mutating call", async () => {
     const { api, calls } = client(accepted);
     for (const operation of ALL) await api.send(api.prepare(operation, PARAMS, {}));
     await api.send(api.prepareKillSwitch(workspaceKill));
@@ -104,7 +104,7 @@ describe("idempotency (spec §3.4, API-4)", () => {
     expect(new Set(calls.map((c) => c.headers.get("Idempotency-Key"))).size).toBe(calls.length);
   });
 
-  it.skip("pending E11-9: keeps the key, path and body of one gesture across retries", async () => {
+  it("pending E11-9: keeps the key, path and body of one gesture across retries", async () => {
     let first = true;
     const { api, calls } = client(() => {
       if (first) {
@@ -124,7 +124,7 @@ describe("idempotency (spec §3.4, API-4)", () => {
     expect(calls[1].body).toBe(calls[0].body);
   });
 
-  it.skip("pending E11-9: freezes a prepared command so a retry cannot change it", () => {
+  it("pending E11-9: freezes a prepared command so a retry cannot change it", () => {
     const { api } = client(accepted);
     const command = api.prepare("pause", PARAMS, { record: null });
     expect(Object.isFrozen(command)).toBe(true);
@@ -132,7 +132,7 @@ describe("idempotency (spec §3.4, API-4)", () => {
 });
 
 describe("command outcomes (spec §3.5, §5, API-13)", () => {
-  it.skip("pending E11-9: reports recorded only with the event that recorded it", async () => {
+  it("pending E11-9: reports recorded only with the event that recorded it", async () => {
     const { api } = client(accepted);
     expect(await api.send(api.prepare("pause", PARAMS, {}))).toEqual({
       ok: true,
@@ -144,7 +144,7 @@ describe("command outcomes (spec §3.5, §5, API-13)", () => {
     expect(answered).toMatchObject({ ok: true, accepted: { event_id: EVENT, step_up_status: null } });
   });
 
-  it.skip("pending E11-9: surfaces a network failure as result unknown, never success and never nothing happened", async () => {
+  it("pending E11-9: surfaces a network failure as result unknown, never success and never nothing happened", async () => {
     const { api } = client(() => {
       throw new TypeError("Failed to fetch");
     });
@@ -152,13 +152,13 @@ describe("command outcomes (spec §3.5, §5, API-13)", () => {
     expect(outcome).toMatchObject({ ok: false, error: { code: "network", effect: "unknown", status: null, event_id: null, retryable: true } });
   });
 
-  it.skip("pending E11-9: keeps the event id of an ambiguous append", async () => {
+  it("pending E11-9: keeps the event id of an ambiguous append", async () => {
     const { api } = client(() => problem(503, { code: "append_ambiguous", effect: "unknown", event_id: EVENT, retryable: true }));
     const outcome = await api.send(api.prepare("pause", PARAMS, {}));
     expect(outcome).toMatchObject({ ok: false, error: { code: "append_ambiguous", effect: "unknown", event_id: EVENT, status: 503 } });
   });
 
-  it.skip("pending E11-9: decodes a problem document to code and effect, keeping an unknown code", async () => {
+  it("pending E11-9: decodes a problem document to code and effect, keeping an unknown code", async () => {
     const violations = [{ path: "/scope/id", code: "invalid", message: "Not an id" }];
     const cases = [
       { status: 409, code: "idempotency_conflict", effect: "none", retryable: false, event_id: null as string | null },
@@ -177,7 +177,7 @@ describe("command outcomes (spec §3.5, §5, API-13)", () => {
     }
   });
 
-  it.skip("pending E11-9: never reads nothing happened into an answer that does not say so", async () => {
+  it("pending E11-9: never reads nothing happened into an answer that does not say so", async () => {
     const answers = [
       () => problem(500, { code: "internal" }),
       () => problem(500, { code: "internal", effect: "maybe" }),
@@ -194,7 +194,7 @@ describe("command outcomes (spec §3.5, §5, API-13)", () => {
     }
   });
 
-  it.skip("pending E11-9: makes an unknown closed-enum value in an answer a typed error", async () => {
+  it("pending E11-9: makes an unknown closed-enum value in an answer a typed error", async () => {
     const { api } = client(() => json(202, { command_id: EVENT, phase: "recorded", step_up_status: "half_bound" }));
     const outcome = await api.send(api.prepare("pause", PARAMS, {}));
     expect(outcome).toMatchObject({
@@ -205,30 +205,30 @@ describe("command outcomes (spec §3.5, §5, API-13)", () => {
 });
 
 describe("reads (spec §3.2, §6.1, API-14)", () => {
-  it.skip("pending E11-9: keeps the as_of watermarks and api_version of every response", async () => {
+  it("pending E11-9: keeps the as_of watermarks and api_version of every response", async () => {
     const second = { ...MARK, stream_id: "agent:agt_01", seq: 900 };
     const { api } = client(() => json(200, { api_version: "1.0", build: HASH, as_of: [MARK, second], equity: "100.25", mode: "paused" }));
     expect(await api.read("/agents/agt_01", equity)).toEqual({ ok: true, value: { equity: "100.25", mode: "paused" }, as_of: [MARK, second], api_version: "1.0" });
   });
 
-  it.skip("pending E11-9: ignores response members it does not know", async () => {
+  it("pending E11-9: ignores response members it does not know", async () => {
     const { api } = client(() => json(200, { api_version: "1", as_of: [MARK], equity: "1", mode: "normal", added_later: [1, 2], nested: { x: 1 } }));
     expect(await api.read("/dashboard", equity)).toMatchObject({ ok: true, value: { equity: "1", mode: "normal" } });
   });
 
-  it.skip("pending E11-9: refuses a response without valid watermarks", async () => {
+  it("pending E11-9: refuses a response without valid watermarks", async () => {
     for (const body of [{ api_version: "1", equity: "1", mode: "normal" }, { api_version: "1", as_of: [{ ...MARK, seq: -1 }], equity: "1", mode: "normal" }]) {
       const { api } = client(() => json(200, body));
       expect(await api.read("/dashboard", equity)).toMatchObject({ ok: false, error: { code: "invalid_response", effect: "none" } });
     }
   });
 
-  it.skip("pending E11-9: refuses a JSON number in a decimal member of a response", async () => {
+  it("pending E11-9: refuses a JSON number in a decimal member of a response", async () => {
     const { api } = client(() => json(200, { api_version: "1", as_of: [MARK], equity: 100.25, mode: "normal" }));
     expect(await api.read("/dashboard", equity)).toMatchObject({ ok: false, error: { code: "invalid_response", decode: { path: "/equity", problem: "decimal_number" } } });
   });
 
-  it.skip("pending E11-9: makes an unknown closed-enum value a typed error the screen can render", async () => {
+  it("pending E11-9: makes an unknown closed-enum value a typed error the screen can render", async () => {
     const { api } = client(() => json(200, { api_version: "1", as_of: [MARK], equity: "1", mode: "halted" }));
     expect(await api.read("/dashboard", equity)).toMatchObject({
       ok: false,
@@ -236,14 +236,14 @@ describe("reads (spec §3.2, §6.1, API-14)", () => {
     });
   });
 
-  it.skip("pending E11-9: says a read that got no answer changed nothing", async () => {
+  it("pending E11-9: says a read that got no answer changed nothing", async () => {
     const { api } = client(() => {
       throw new TypeError("Failed to fetch");
     });
     expect(await api.read("/dashboard", equity)).toMatchObject({ ok: false, error: { code: "network", effect: "none", status: null } });
   });
 
-  it.skip("pending E11-9: decodes command status with its steps and watermarks (spec §5.5)", async () => {
+  it("pending E11-9: decodes command status with its steps and watermarks (spec §5.5)", async () => {
     const step = { stream_id: "agent:agt_01", seq: 12, event_type: "AgentModeChanged", recorded_at: MARK.recorded_at, reason: null };
     const { api, calls } = client(() => json(200, { api_version: "1", as_of: [MARK], phase: "applied", steps: [step] }));
     expect(await api.commandStatus(EVENT)).toEqual({ ok: true, value: { phase: "applied", steps: [step] }, as_of: [MARK], api_version: "1" });
@@ -254,35 +254,35 @@ describe("reads (spec §3.2, §6.1, API-14)", () => {
 });
 
 describe("authentication (spec §3.3, §3.5)", () => {
-  it.skip("pending E11-9: decodes a 401 to unauthenticated and tells the app once", async () => {
+  it("pending E11-9: decodes a 401 to unauthenticated and tells the app once", async () => {
     const onUnauthenticated = vi.fn();
     const { api } = client(() => problem(401, { code: "unauthenticated", effect: "none", retryable: false }), { onUnauthenticated });
     expect(await api.read("/dashboard", equity)).toMatchObject({ ok: false, error: { code: "unauthenticated", effect: "none", status: 401 } });
     expect(onUnauthenticated).toHaveBeenCalledTimes(1);
   });
 
-  it.skip("pending E11-9: treats a bare 401 as unauthenticated", async () => {
+  it("pending E11-9: treats a bare 401 as unauthenticated", async () => {
     const onUnauthenticated = vi.fn();
     const { api } = client(() => new Response(null, { status: 401 }), { onUnauthenticated });
     expect(await api.read("/dashboard", equity)).toMatchObject({ ok: false, error: { code: "unauthenticated", status: 401 } });
     expect(onUnauthenticated).toHaveBeenCalledTimes(1);
   });
 
-  it.skip("pending E11-9: decodes a 401 on a command to unauthenticated with effect none and tells the app once", async () => {
+  it("pending E11-9: decodes a 401 on a command to unauthenticated with effect none and tells the app once", async () => {
     const onUnauthenticated = vi.fn();
     const { api } = client(() => problem(401, { code: "unauthenticated", effect: "none", retryable: false }), { onUnauthenticated });
     expect(await api.send(api.prepareKillSwitch(workspaceKill))).toMatchObject({ ok: false, error: { code: "unauthenticated", effect: "none", status: 401 } });
     expect(onUnauthenticated).toHaveBeenCalledTimes(1);
   });
 
-  it.skip("pending E11-9: never signs the owner out for step_up_required", async () => {
+  it("pending E11-9: never signs the owner out for step_up_required", async () => {
     const onUnauthenticated = vi.fn();
     const { api } = client(() => problem(401, { code: "step_up_required", effect: "none", retryable: false }), { onUnauthenticated });
     expect(await api.send(api.prepare("resume", PARAMS, {}))).toMatchObject({ ok: false, error: { code: "step_up_required", effect: "none" } });
     expect(onUnauthenticated).not.toHaveBeenCalled();
   });
 
-  it.skip("pending E11-9: sends the session cookie and no bearer token", async () => {
+  it("pending E11-9: sends the session cookie and no bearer token", async () => {
     const { api, calls } = client(accepted);
     await api.send(api.prepare("pause", PARAMS, {}));
     await api.read("/dashboard", equity);
@@ -290,7 +290,7 @@ describe("authentication (spec §3.3, §3.5)", () => {
     expect(calls.map((c) => `${c.method} ${c.credentials}`)).toEqual(["POST same-origin", "GET same-origin"]);
   });
 
-  it.skip("pending E11-9: sends X-Mandate-Request: 1 on every command, the kill switch included (spec §3.3, DEC-681)", async () => {
+  it("pending E11-9: sends X-Mandate-Request: 1 on every command, the kill switch included (spec §3.3, DEC-681)", async () => {
     const { api, calls } = client(accepted);
     for (const operation of ALL) await api.send(api.prepare(operation, PARAMS, {}));
     await api.send(api.prepareKillSwitch(workspaceKill));
@@ -298,7 +298,7 @@ describe("authentication (spec §3.3, §3.5)", () => {
     expect(calls.map((c) => c.headers.get("X-Mandate-Request"))).toEqual(calls.map(() => "1"));
   });
 
-  it.skip("pending E11-9: decodes 403 forbidden with effect none as nothing recorded, never unknown", async () => {
+  it("pending E11-9: decodes 403 forbidden with effect none as nothing recorded, never unknown", async () => {
     const { api } = client(() => problem(403, { code: "forbidden", effect: "none", retryable: false }));
     expect(await api.send(api.prepareKillSwitch(workspaceKill))).toMatchObject({ ok: false, error: { code: "forbidden", effect: "none", status: 403, retryable: false } });
   });
@@ -315,7 +315,6 @@ describe("no order ticket (DEC-528)", () => {
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
     "mock-server": ["createMockServer"],
     types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
-    unimplemented: ["UNIMPLEMENTED"],
   };
   const MODULES = Object.fromEntries(
     Object.entries(import.meta.glob(["./*.ts", "!./*.test.ts"], { eager: true }) as Record<string, Record<string, unknown>>).map(([path, module]) => [path.replace(/^\.\/(.*)\.ts$/, "$1"), module]),
@@ -330,7 +329,7 @@ describe("no order ticket (DEC-528)", () => {
     }
   });
 
-  it.skip("pending E11-9: exposes no order-placing method or operation", () => {
+  it("pending E11-9: exposes no order-placing method or operation", () => {
     const { api } = client(accepted);
     const members = new Set<string>();
     for (let o: object | null = api; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
@@ -341,21 +340,21 @@ describe("no order ticket (DEC-528)", () => {
     expect(Object.values(OPERATIONS).filter((route) => /\/(orders|requests|positions|fills|trades)\b/.test(route))).toEqual([]);
   });
 
-  it.skip("pending E11-9: refuses an operation outside its table at runtime", () => {
+  it("pending E11-9: refuses an operation outside its table at runtime", () => {
     const { api } = client(accepted);
     expect(() => api.prepare("place_order" as Operation, PARAMS, {})).toThrow();
   });
 });
 
 describe("the kill switch (spec §5.4, rule 13)", () => {
-  it.skip("pending E11-9: sends exactly the request it was given, live and with a record", async () => {
+  it("pending E11-9: sends exactly the request it was given, live and with a record", async () => {
     const { api, calls } = client(accepted);
     const record = { artifact: `sha256:${"aa".repeat(32)}`, ui_build: `sha256:${"bb".repeat(32)}` } as const;
     await api.send(api.prepareKillSwitch({ scope: { kind: "connection", id: "con_01" }, environment_shown: "live", owner_exit: null, record, step_up: null }));
     expect(calls[0].body).toBe(JSON.stringify({ scope: { kind: "connection", id: "con_01" }, environment_shown: "live", owner_exit: null, record, step_up: null }));
   });
 
-  it.skip("pending E11-9: sends with record null before any read has loaded", async () => {
+  it("pending E11-9: sends with record null before any read has loaded", async () => {
     const { api, calls } = client((call) => {
       if (call.method !== "POST") throw new TypeError("reads are down");
       return accepted();
@@ -367,7 +366,7 @@ describe("the kill switch (spec §5.4, rule 13)", () => {
     expect(JSON.parse(calls[0].body ?? "")).toEqual({ scope: { kind: "workspace", id: null }, environment_shown: "paper", owner_exit: null, record: null, step_up: null });
   });
 
-  it.skip("pending E11-9: names an agent scope and keeps its key across a retry", async () => {
+  it("pending E11-9: names an agent scope and keeps its key across a retry", async () => {
     let n = 0;
     const { api, calls } = client(() => {
       n += 1;
@@ -389,7 +388,7 @@ describe("idempotency keys come from the CSPRNG (spec §3.4)", () => {
     vi.restoreAllMocks();
   });
 
-  it.skip("pending E11-9: draws every key from crypto.getRandomValues", () => {
+  it("pending E11-9: draws every key from crypto.getRandomValues", () => {
     const random = vi.spyOn(globalThis.crypto, "getRandomValues").mockImplementation((array) => {
       if (array instanceof Uint8Array) array.fill(0);
       return array;
@@ -405,7 +404,7 @@ describe("idempotency keys come from the CSPRNG (spec §3.4)", () => {
 });
 
 describe("problem defaults (spec §3.5)", () => {
-  it.skip("pending E11-9: defaults retryable from the effect when the problem omits it", async () => {
+  it("pending E11-9: defaults retryable from the effect when the problem omits it", async () => {
     const cases = [
       { effect: "none", retryable: false },
       { effect: "recorded", retryable: false },
@@ -422,12 +421,12 @@ describe("the common-schema seam", () => {
   const conflict = () => problem(409, { code: "idempotency_conflict", effect: "none", retryable: false });
   const stated = (fields: Partial<ProblemFields>): ProblemFields => ({ code: null, effect: null, event_id: null, retryable: null, violations: [], ...fields });
 
-  it.skip("pending E11-9: makes a command unknown when a custom problem decoder states no effect", async () => {
+  it("pending E11-9: makes a command unknown when a custom problem decoder states no effect", async () => {
     const { api } = client(conflict, { schema: { problem: () => stated({ code: "idempotency_conflict" }) } });
     expect(await api.send(api.prepare("pause", PARAMS, {}))).toMatchObject({ ok: false, error: { code: "idempotency_conflict", effect: "unknown" } });
   });
 
-  it.skip("pending E11-9: makes a command unknown, never a rejection, when a custom decoder throws", async () => {
+  it("pending E11-9: makes a command unknown, never a rejection, when a custom decoder throws", async () => {
     const throwing = () => {
       throw new Error("generated decoder failed");
     };
@@ -437,7 +436,7 @@ describe("the common-schema seam", () => {
     await expect(reads.api.read("/dashboard", equity)).resolves.toMatchObject({ ok: false, error: { code: "invalid_response", effect: "none" } });
   });
 
-  it.skip("pending E11-9: keeps a default when the schema leaves a member undefined", async () => {
+  it("pending E11-9: keeps a default when the schema leaves a member undefined", async () => {
     const { api } = client(conflict, { schema: { problem: undefined, envelope: undefined } });
     expect(await api.send(api.prepare("pause", PARAMS, {}))).toMatchObject({ ok: false, error: { code: "idempotency_conflict", effect: "none" } });
   });

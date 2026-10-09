@@ -1,0 +1,9 @@
+file = "crates/mandate-executor/tests/properties.rs"
+test = "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding"
+reason = """
+Went back to pending in #668's round 2, failing on an executor defect at random seeds the pinned
+one missed; the property's scripts now lead with its defect's shape (`STEP_BESIDE_LEAD`), so it
+fails at every seed until the fix lands. Defect E5b: the exit ladder steps a rung the broker has
+not yet acknowledged, asking its cancel, and another exit goes beside that cancel (backlog:
+"E7-4 (stream K), E5b from #668's round-2 review").
+"""
