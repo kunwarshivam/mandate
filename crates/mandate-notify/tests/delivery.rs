@@ -44,7 +44,6 @@ const T: i64 = 1_790_000_000;
 /// which ends at the earlier of its opening plus 60 s and its earliest joined commit plus 60 s; a
 /// stale cause goes alone; `action` and `info` are never coalesced.
 #[test]
-#[ignore = "pending E8-10"]
 fn safety_causes_coalesce_per_window_and_none_waits_past_its_bound() {
     #[rustfmt::skip]
     let passes = [
@@ -72,7 +71,6 @@ fn safety_causes_coalesce_per_window_and_none_waits_past_its_bound() {
 /// none; a window nothing joins sends nothing at its end, its openers having gone at its opening;
 /// a stale cause read with fresh ones goes alone, beside a window (T + 70) or an opening (T + 200).
 #[test]
-#[ignore = "pending E8-10"]
 fn stale_causes_and_empty_windows_are_never_held() {
     #[rustfmt::skip]
     let passes = [
@@ -95,7 +93,6 @@ proptest! {
     /// message, none before its pass, a `safety` one by its commit plus 60 s or at its pass if
     /// read later, and an `action` or `info` one alone at its pass.
     #[test]
-    #[ignore = "pending E8-10"]
     fn no_safety_cause_is_dropped_or_held_past_its_bound(
         passes in prop::collection::vec(
             (0i64..90, prop::collection::vec((0u8..4, 0i64..120), 0..6)), 1..12),
@@ -151,7 +148,6 @@ fn retry(class: Class, first: i64, last: i64, attempts: u32, outcome: Outcome) -
 /// due at its end and none after; the verdict, never the reason, decides, so `retryable` retries
 /// whatever its reason (`too_large` included) and `permanent` stops even past the window's end.
 #[test]
-#[ignore = "pending E8-10"]
 fn retries_follow_the_schedule_until_the_window_ends() {
     let at = |s| Retry::At(UtcNanos::from_parts(s, 0).unwrap());
     for (n, last, due) in [
@@ -210,7 +206,6 @@ proptest! {
     /// only a class with a window ever runs out of one, and a later attempt number never brings the
     /// next attempt earlier, nor ends a window the earlier number left open.
     #[test]
-    #[ignore = "pending E8-10"]
     fn retries_are_monotonic(
         class in prop::sample::select(vec![Action, Safety, Info]),
         reason in prop::sample::select(Reason::ALL.to_vec()),
@@ -242,7 +237,6 @@ proptest! {
 /// §3.4, DEC-725 item 7: one user kill switch is one notice, however many stream owners name its
 /// command; every other alert is its own cause, and a replayed one is not issued again.
 #[test]
-#[ignore = "pending E8-10"]
 fn one_cause_is_one_notice() {
     let alert = |event: &'static str, command| Alert {
         event,

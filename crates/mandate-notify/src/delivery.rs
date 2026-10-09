@@ -38,8 +38,79 @@ pub struct Message<C> {
 /// # Errors
 /// [`NotifyError::Unrepresentable`] for a pass whose `at` is before the previous pass's.
 pub fn coalesce<C: Clone>(passes: &[Pass<C>]) -> Result<Vec<Message<C>>, NotifyError> {
-    let _ = passes;
-    Err(NotifyError::Unimplemented { story: "E8-10" })
+    let mut messages = Vec::new();
+    let mut open: Option<Window<C>> = None;
+    let mut previous: Option<UtcNanos> = None;
+    for pass in passes {
+        if previous.is_some_and(|previous| pass.at < previous) {
+            return Err(NotifyError::Unrepresentable {
+                what: "pass before the previous pass",
+            });
+        }
+        previous = Some(pass.at);
+        if let Some(window) = open.take_if(|window| window.ends <= pass.at)
+            && !window.joined.is_empty()
+        {
+            messages.push(Message {
+                send_at: window.ends,
+                causes: window.joined,
+            });
+        }
+        let mut own: Vec<Message<C>> = Vec::new();
+        let mut opening: Option<usize> = None;
+        for read in &pass.reads {
+            let bound = after(read.committed, COALESCING_WINDOW_SECS)?;
+            let fresh_safety = read.class == Class::Safety && pass.at < bound;
+            if let (true, Some(at)) = (fresh_safety, opening)
+                && let Some(message) = own.get_mut(at)
+            {
+                message.causes.push(read.cause.clone());
+            } else if let (true, Some(window)) = (fresh_safety, open.as_mut()) {
+                window.ends = window.ends.min(bound);
+                window.joined.push(read.cause.clone());
+            } else {
+                if fresh_safety {
+                    opening = Some(own.len());
+                    open = Some(Window {
+                        ends: after(pass.at, COALESCING_WINDOW_SECS)?,
+                        joined: Vec::new(),
+                    });
+                }
+                own.push(Message {
+                    send_at: pass.at,
+                    causes: vec![read.cause.clone()],
+                });
+            }
+        }
+        messages.append(&mut own);
+    }
+    if let Some(window) = open.filter(|window| !window.joined.is_empty()) {
+        messages.push(Message {
+            send_at: window.ends,
+            causes: window.joined,
+        });
+    }
+    Ok(messages)
+}
+
+/// §5.4's bound: a window's message is sent by 60 seconds after its opening and after its earliest
+/// joined commit, and a cause read 60 seconds or more after its commit is stale (DEC-725 item 5).
+const COALESCING_WINDOW_SECS: i64 = 60;
+
+/// An open window: the instant it ends, and the causes that joined it after its opening message.
+struct Window<C> {
+    ends: UtcNanos,
+    joined: Vec<C>,
+}
+
+/// `secs` seconds after `at`.
+fn after(at: UtcNanos, secs: i64) -> Result<UtcNanos, NotifyError> {
+    at.secs()
+        .checked_add(secs)
+        .and_then(|later| UtcNanos::from_parts(later, at.nanos()).ok())
+        .ok_or(NotifyError::Unrepresentable {
+            what: "instant after the latest UtcNanos",
+        })
 }
 
 /// What follows a failed attempt (§5.3).
@@ -68,8 +139,38 @@ pub fn next_attempt(
     attempts: u32,
     outcome: &Outcome,
 ) -> Result<Retry, NotifyError> {
-    let _ = (class, first, last, attempts, outcome);
-    Err(NotifyError::Unimplemented { story: "E8-10" })
+    if attempts == 0 {
+        return Err(NotifyError::Unrepresentable {
+            what: "retry after no attempt",
+        });
+    }
+    match outcome {
+        Outcome::Accepted { .. } => {
+            return Err(NotifyError::Unrepresentable {
+                what: "retry after an accepted attempt",
+            });
+        }
+        Outcome::Permanent { reason } => return Ok(Retry::Failed(*reason)),
+        Outcome::Retryable { .. } => {}
+    }
+    let gap = match attempts {
+        1 => 15,
+        2 => 60,
+        3 => 300,
+        _ => 900,
+    };
+    let due = after(last, gap)?;
+    let window = match class {
+        Class::Safety => Some(86_400),
+        Class::Info => Some(21_600),
+        Class::Action => None,
+    };
+    if let Some(window) = window
+        && due > after(first, window)?
+    {
+        return Ok(Retry::RetryWindowEnded);
+    }
+    Ok(Retry::At(due))
 }
 
 /// A committed `OwnerAlertSent` as the dispatcher reads it: its event id, and for a user's kill
@@ -83,8 +184,14 @@ pub struct Alert<C> {
 /// The notice keys `alerts` issue, one per cause in first-read order (§3.4, DEC-725 item 7).
 ///
 /// # Errors
-/// Never, once implemented.
+/// Never.
 pub fn notice_keys<C: Clone + Eq>(alerts: &[Alert<C>]) -> Result<Vec<C>, NotifyError> {
-    let _ = alerts;
-    Err(NotifyError::Unimplemented { story: "E8-10" })
+    let mut keys: Vec<C> = Vec::new();
+    for alert in alerts {
+        let key = alert.owner_command.as_ref().unwrap_or(&alert.event);
+        if !keys.contains(key) {
+            keys.push(key.clone());
+        }
+    }
+    Ok(keys)
 }
