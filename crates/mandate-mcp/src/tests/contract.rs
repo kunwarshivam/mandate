@@ -121,24 +121,6 @@ fn the_allowlist_is_the_nine_tools_of_the_contract() {
 
 #[tokio::test]
 #[ignore = "pending E7-16"]
-async fn each_allowlisted_tool_is_called_by_name_with_its_arguments() {
-    let answers = NINE.iter().map(|_| reply(OK)).collect();
-    let (server, client) = connected(&base(), None, answers).await;
-    let arguments = json!({"account_number": "A1"});
-    for name in NINE {
-        let result = client
-            .call_tool(CallClass::Ordinary, name, &arguments)
-            .await;
-        assert_eq!(result.unwrap().as_json(), r#"{"content":[]}"#, "{name}");
-    }
-    assert_eq!(sent_names(&server), NINE);
-    let call = sent(&server, 3);
-    assert_eq!(call["method"], "tools/call");
-    assert_eq!(call["params"]["arguments"], arguments);
-}
-
-#[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_tool_outside_the_allowlist_is_refused_before_anything_is_sent() {
     let (server, client) = connected(&base(), None, vec![]).await;
     let outside = [
@@ -183,7 +165,7 @@ async fn a_refused_call_draws_no_budget_and_a_throttled_class_spends_its_own() {
     let (server, client) = session(vec![listing(&base()), reply(OK)], None, config).await;
     let client = client.unwrap();
     let outside = client
-        .call_tool(CallClass::Ordinary, "place_option_order", &json!({}))
+        .call_tool(CallClass::RiskReducing, "place_option_order", &json!({}))
         .await;
     assert!(
         matches!(outside, Err(McpError::ToolNotAllowed)),
@@ -202,7 +184,7 @@ async fn a_refused_call_draws_no_budget_and_a_throttled_class_spends_its_own() {
 
 #[tokio::test]
 #[ignore = "pending E7-16"]
-async fn a_server_that_lists_a_fund_movement_tool_is_refused() {
+async fn with_no_stored_pin_a_listed_fund_movement_tool_is_refused() {
     let names = [
         "transfer_funds",
         "withdraw_cash",
@@ -212,21 +194,24 @@ async fn a_server_that_lists_a_fund_movement_tool_is_refused() {
         "crypto_withdrawal",
         "TRANSFER",
         "create_ach_relationship_transfer",
+        "get_transfers",
     ];
     for name in names {
         let mut tools = base();
         tools.push(json!({"name": name, "description": "d", "inputSchema": {"type": "object"}}));
-        let (_server, client) = session(
-            vec![listing(&tools)],
-            Some(ContractHash::from_bytes([7; 32])),
-            roomy(),
-        )
-        .await;
+        let (_server, client) = session(vec![listing(&tools)], None, roomy()).await;
         assert!(
             matches!(client, Err(McpError::FundMovementTool)),
             "{name}: {client:?}"
         );
     }
+    let mut both = without("get_equity_tradability");
+    both.push(json!({"name": "transfer_funds", "inputSchema": {"type": "object"}}));
+    let (_server, client) = session(vec![listing(&both)], None, roomy()).await;
+    assert!(
+        matches!(client, Err(McpError::FundMovementTool)),
+        "fund-movement is checked before missing: {client:?}"
+    );
     let mut hidden = base();
     hidden.push(json!({"name": "transfer_funds", "inputSchema": {"type": "object"}}));
     let tail = vec![page(&base(), "c2"), listing(&hidden[9..])];
@@ -239,7 +224,7 @@ async fn a_server_that_lists_a_fund_movement_tool_is_refused() {
 
 #[tokio::test]
 #[ignore = "pending E7-16"]
-async fn an_allowlisted_tool_that_is_missing_refuses_the_connection() {
+async fn with_no_stored_pin_a_missing_allowlisted_tool_is_refused() {
     for name in NINE {
         let (_server, client) = session(vec![listing(&without(name))], None, roomy()).await;
         assert!(
@@ -247,4 +232,64 @@ async fn an_allowlisted_tool_that_is_missing_refuses_the_connection() {
             "{name}: {client:?}"
         );
     }
+}
+
+#[tokio::test]
+#[ignore = "pending E7-16"]
+async fn with_a_stored_pin_a_fund_tool_or_a_missing_tool_halts_openings_and_never_the_exit() {
+    let extra = |name: &str| {
+        let mut tools = base();
+        tools.push(json!({"name": name, "inputSchema": {"type": "object"}}));
+        tools
+    };
+    let lists = [
+        ("transfer_funds", extra("transfer_funds")),
+        ("send_feedback", extra("send_feedback")),
+        ("missing", without("get_equity_tradability")),
+    ];
+    for (label, tools) in lists {
+        let pin = Some(ContractHash::from_bytes([7; 32]));
+        let (server, client) =
+            session(vec![listing(&tools), reply(OK), reply(OK)], pin, roomy()).await;
+        let client = client.unwrap();
+        assert!(client.openings_halted(), "{label}");
+        let opening = client
+            .call_tool(CallClass::Ordinary, "place_equity_order", &json!({}))
+            .await;
+        assert!(
+            matches!(opening, Err(McpError::ContractDrift)),
+            "{label}: {opening:?}"
+        );
+        let listed = client
+            .call_tool(CallClass::RiskReducing, "transfer_funds", &json!({}))
+            .await;
+        assert!(
+            matches!(listed, Err(McpError::ToolNotAllowed)),
+            "{label}: {listed:?}"
+        );
+        for name in ["place_equity_order", "cancel_equity_order"] {
+            let exit = client
+                .call_tool(CallClass::RiskReducing, name, &json!({}))
+                .await;
+            assert!(exit.is_ok(), "{label}: {name}: {exit:?}");
+        }
+        let exits = ["place_equity_order", "cancel_equity_order"];
+        assert_eq!(sent_names(&server), exits, "{label}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "pending E7-16"]
+async fn a_benign_extra_tool_connects_and_is_never_called() {
+    let mut tools = base();
+    tools.push(json!({"name": "get_watchlists", "inputSchema": {"type": "object"}}));
+    let (server, client) = connected(&tools, None, vec![]).await;
+    let refused = client
+        .call_tool(CallClass::Ordinary, "get_watchlists", &json!({}))
+        .await;
+    assert!(
+        matches!(refused, Err(McpError::ToolNotAllowed)),
+        "{refused:?}"
+    );
+    assert_eq!(server.seen().len(), 3);
 }

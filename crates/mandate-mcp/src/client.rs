@@ -52,10 +52,12 @@ pub struct McpClient {
 
 impl McpClient {
     /// `initialize`, `notifications/initialized`, then `tools/list` to the last page, all as
-    /// [`CallClass::Ordinary`]. A fund-movement tool is [`McpError::FundMovementTool`] and an
-    /// allowlisted tool missing is [`McpError::ContractMissingTool`]: no client is returned. A
-    /// `pinned` hash that differs does not refuse the connection, since exits still need it: the
-    /// client starts with [`McpClient::openings_halted`] true.
+    /// [`CallClass::Ordinary`]. With no `pinned` hash (the first connection), a fund-movement tool
+    /// is [`McpError::FundMovementTool`] and an allowlisted tool missing is
+    /// [`McpError::ContractMissingTool`]: no client is returned. With a `pinned` hash (every later
+    /// session start) no such cause returns no client, since exits need the connection: a hash that
+    /// differs, a fund-movement tool, or a missing tool each give a client with
+    /// [`McpClient::openings_halted`] true (DEC-839, `AGENTS.md` rule 13).
     pub async fn connect(
         transport: McpTransport,
         pinned: Option<ContractHash>,
