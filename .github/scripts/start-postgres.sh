@@ -14,11 +14,7 @@ image="postgres:18.6@$digest"
 # receives, so a mirror can only serve the pinned image and cannot substitute another. A transient
 # registry error would redden a required check DEC-464 forbids retrying automatically, as a release
 # download's 500 did before DEC-498 gave every download a retry, so each registry is tried again.
-sources=(
-  "mirror.gcr.io/library/$image"
-  "public.ecr.aws/docker/library/$image"
-  "$image"
-)
+sources=("mirror.gcr.io/library/$image" "public.ecr.aws/docker/library/$image" "$image")
 pulled=""
 for delay in 2 4 8 0; do
   for source in "${sources[@]}"; do
