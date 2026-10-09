@@ -999,6 +999,62 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "address_limit"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Too many notification addresses"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/address_limit"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "busy"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": true
+              },
+              "title": {
+                "const": "Try again"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/busy"
+              }
+            }
+          }
         }
       ]
     },
