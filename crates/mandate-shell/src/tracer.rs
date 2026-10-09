@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::Pause;
 use mandate_canon::{Digest, Key, Object, Value};
-use mandate_executor::BrokerRequest;
+use mandate_executor::{BrokerOutcome, BrokerRequest};
 use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, get_artifact};
 use mandate_runtime::{
     ActorKind, Autonomy, Classified, Deployment, DryRunVerdict, Effect, EventDraft, FlattenPlan,
@@ -114,11 +114,11 @@ pub fn run_observed_watched<P: Pause>(
     output: mandate_runtime::ModelOutput,
     watch: &Watch<P>,
 ) -> Result<Report, ShellError> {
-    let _ = (stages, setup, observation, output, watch);
-    Err(ShellError::Refused {
-        stage: Stage::Executor,
-        cause: Cause::Unimplemented { story: "E7-19" },
-    })
+    let admitted = admit(stages)?;
+    let instrument = pinned(&admitted.view)?;
+    let mut session = open_cycle(stages, setup, &admitted, Some(observation), output)?;
+    session.watch(&instrument, watch)?;
+    Ok(session.report)
 }
 
 fn admit(stages: &mut Stages) -> Result<Admitted, ShellError> {
@@ -149,6 +149,17 @@ fn execute_cycle(
     observation: Option<Observation>,
     output: mandate_runtime::ModelOutput,
 ) -> Result<Report, ShellError> {
+    open_cycle(stages, setup, admitted, observation, output).map(|session| session.report)
+}
+
+/// [`execute_cycle`]'s cycle, handing back the session so a watch can keep it (DEC-858 item 3).
+fn open_cycle<'s>(
+    stages: &'s mut Stages,
+    setup: &'s Setup,
+    admitted: &'s Admitted,
+    observation: Option<Observation>,
+    output: mandate_runtime::ModelOutput,
+) -> Result<Session<'s>, ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
     let mut session = Session::open_governed(stages, setup, &admitted.view, admitted.governed)?;
     session.start()?;
@@ -160,7 +171,7 @@ fn execute_cycle(
     }
     session.feed(Input::ModelOutput(output))?;
     session.feed(Input::Tick(clock))?;
-    Ok(session.report)
+    Ok(session)
 }
 
 /// One production deployment cycle. Its assembled stages and setup are private, so callers can
@@ -194,11 +205,7 @@ impl ProductionCycle {
         output: mandate_runtime::ModelOutput,
         watch: &Watch<P>,
     ) -> Result<Report, ShellError> {
-        let _ = (observation, output, watch);
-        Err(ShellError::Refused {
-            stage: Stage::Executor,
-            cause: Cause::Unimplemented { story: "E7-19" },
-        })
+        run_observed_watched(&mut self.stages, &self.setup, observation, output, watch)
     }
 
     /// Runs one cycle from the model host's observation and its output, as [`run_observed`] does
@@ -221,6 +228,9 @@ impl ProductionCycle {
         )
     }
 }
+
+/// The broker statuses after which an entry can neither fill nor be cancelled (DEC-858 item 4).
+const TERMINAL_STATUSES: [&str; 4] = ["filled", "canceled", "expired", "rejected"];
 
 /// The one instrument the mandate pins. The tracer trades exactly one (DEC-138).
 fn pinned(view: &MandateView) -> Result<InstrumentId, ShellError> {
@@ -250,6 +260,9 @@ pub(crate) struct Session<'s> {
     /// Whether the replayed agent stream already carries an intent (TI-12).
     pub(crate) cycle_open: bool,
     pub(crate) report: Report,
+    /// The time every record this session appends carries: the run's clock, then each wake's
+    /// during a watch (DEC-858 item 3).
+    event_time: UtcNanos,
 }
 
 impl<'s> Session<'s> {
@@ -279,6 +292,7 @@ impl<'s> Session<'s> {
             submitted_drafts: BTreeSet::new(),
             cycle_open: false,
             report: Report::default(),
+            event_time: setup.now,
         };
         session
             .stages
@@ -374,7 +388,7 @@ impl<'s> Session<'s> {
                 stream,
                 writer,
                 actor_id,
-                event_time: self.setup.now,
+                event_time: self.event_time,
             },
             &DraftFields {
                 event_id: &event_id,
@@ -449,6 +463,95 @@ impl<'s> Session<'s> {
                 Err(ShellError::ReconciliationMismatch)
             }
         }
+    }
+
+    /// E1b's watch over the run's one submission (DEC-858 items 3 and 4). Each wake pauses, moves
+    /// the event time to the clock, and reads the entry back by its client order id, then ticks the
+    /// executor; the first wake at or past the bound hands the executor `CancelOpenings` in place
+    /// of the read. It ends once the broker reports the entry terminal. A run that submitted
+    /// nothing watches nothing.
+    fn watch<P: Pause>(
+        &mut self,
+        instrument: &InstrumentId,
+        watch: &Watch<P>,
+    ) -> Result<(), ShellError> {
+        let Some(entry) = self.report.submitted.first() else {
+            return Ok(());
+        };
+        let entry = mandate_executor::ClientOrderId::parse(entry)
+            .map_err(|error| refused(Stage::Executor)(Cause::Executor(error)))?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .map_err(|_| {
+                refused(Stage::Executor)(Cause::Absent {
+                    what: "a runtime for the watch",
+                })
+            })?;
+        let agent = mandate_executor::AgentId(self.setup.deployment.agent.0.clone());
+        let mut cancel_handed = false;
+        loop {
+            runtime.block_on(watch.pause.pause(watch.interval));
+            let now = watch.pause.now();
+            self.event_time = now;
+            if !cancel_handed && now >= watch.bound {
+                cancel_handed = true;
+                self.step_watched(mandate_executor::Input::Command(
+                    mandate_executor::Command::CancelOpenings {
+                        agent: agent.clone(),
+                        instrument: instrument.clone(),
+                    },
+                ))?;
+                continue;
+            }
+            let answer = self
+                .stages
+                .connector
+                .call(&BrokerRequest::GetOrderByClientId(entry.clone()));
+            let terminal = matches!(&answer, Ok(BrokerOutcome::Order(order))
+                if TERMINAL_STATUSES.contains(&order.status.as_str()));
+            self.step_watched(map::broker_input(answer).map_err(refused(Stage::Connector))?)?;
+            self.step_watched(mandate_executor::Input::Tick(
+                mandate_executor::RiskClock::from_secs(now.secs()),
+            ))?;
+            if terminal {
+                return Ok(());
+            }
+        }
+    }
+
+    /// One executor step during the watch and everything it asks for. A reconciliation it asks
+    /// for is gathered and run through the reconciler, as at the start, never stepped answer by
+    /// answer (DEC-858 item 3).
+    fn step_watched(&mut self, input: mandate_executor::Input) -> Result<(), ShellError> {
+        let effects = self
+            .stages
+            .executor
+            .step(input)
+            .map_err(refused(Stage::Executor))?;
+        let requests = self.prepare_reconciliation(effects)?;
+        if requests.is_empty() {
+            return Ok(());
+        }
+        let snapshot = self
+            .stages
+            .reconciler
+            .snapshot(&mut *self.stages.connector, &requests)
+            .map_err(refused(Stage::Reconcile))?;
+        let account = self
+            .stages
+            .executor
+            .step(mandate_executor::Input::BrokerUpdate(
+                mandate_executor::BrokerUpdate::Account(snapshot.account.clone()),
+            ))
+            .map_err(refused(Stage::Executor))?;
+        self.perform_executor(account)?;
+        let reconciled = self
+            .stages
+            .reconciler
+            .reconcile(&snapshot)
+            .map_err(refused(Stage::Reconcile))?;
+        self.perform_executor(reconciled.effects)
     }
 
     fn prepare_reconciliation(
@@ -674,7 +777,7 @@ impl<'s> Session<'s> {
                         stream: &stream,
                         writer: Writer::Agent,
                         actor_id: &self.setup.deployment.agent.0,
-                        event_time: self.setup.now,
+                        event_time: self.event_time,
                     },
                     &DraftFields {
                         event_id: &draft.event_id.0,
@@ -703,7 +806,7 @@ impl<'s> Session<'s> {
                         stream: &stream,
                         writer: Writer::Executor,
                         actor_id: "executor",
-                        event_time: self.setup.now,
+                        event_time: self.event_time,
                     },
                     &DraftFields {
                         event_id: &draft.event_id.0,

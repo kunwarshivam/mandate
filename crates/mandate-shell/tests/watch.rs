@@ -308,7 +308,6 @@ fn gate() -> mandate_risk::GateConfig {
 /// full day, 12:50 on the day after Thanksgiving (an early close at 13:00), and 15:45 with a
 /// fifteen-minute window.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_bound_is_the_close_window_start_of_the_runs_session() {
     let gate = gate();
     assert_eq!(gate.close_window_minutes, 10, "the reviewed rule set");
@@ -328,7 +327,6 @@ fn the_bound_is_the_close_window_start_of_the_runs_session() {
 /// DEC-853 item 5, FT-8: no bound outside a regular session or inside its close window: pre-market,
 /// 15:50 itself, 15:55, and a Saturday are each refused as absent.
 #[test]
-#[ignore = "pending E7-19"]
 fn there_is_no_bound_outside_a_session_before_its_close_window() {
     let gate = gate();
     for now in [
@@ -349,7 +347,6 @@ fn there_is_no_bound_outside_a_session_before_its_close_window() {
 /// rounded down and at least 1, `bracket_partial_fill_timeout_s` and `max_unprotected_s`; each term
 /// is made the least in turn. A zero member is refused rather than skipped (FT-8).
 #[test]
-#[ignore = "pending E7-19"]
 fn the_poll_interval_is_the_least_of_its_four_terms() {
     let config = |[exit, window, lookups, bracket, unprotected]: [i64; 5]| ExecutorConfig {
         exit_step_s: exit,
@@ -383,7 +380,6 @@ fn the_poll_interval_is_the_least_of_its_four_terms() {
 
 /// DEC-858 item 2, FT-8 (#1023 review): a zero in any other member is refused, never skipped.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_zero_window_timeout_or_bound_is_refused() {
     let base = ExecutorConfig::PROPOSED;
     let zeroed = [
@@ -414,7 +410,6 @@ fn a_zero_window_timeout_or_bound_is_refused() {
 /// `pending_cancel`, the one `DELETE` is at 15:50, the watch then reads the entry canceled and
 /// ends, and nothing but reads and that cancel reaches the broker after the submission.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_working_entry_is_cancelled_at_the_bound_through_the_executor() {
     let run = watched(LATE, true);
     assert_eq!(run.outcome.as_ref().unwrap().submitted.len(), 1);
@@ -439,7 +434,6 @@ fn a_working_entry_is_cancelled_at_the_bound_through_the_executor() {
 /// FT-11, DEC-853 item 1: a run that submitted nothing watches nothing: a dry run reports the
 /// order it would place, pauses never and reads nothing back.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_dry_run_watches_nothing() {
     let run = watched(TUESDAY, false);
     let report = run.outcome.as_ref().unwrap();
