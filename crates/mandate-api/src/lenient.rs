@@ -305,13 +305,30 @@ struct WorkspaceId {
     _id: (),
 }
 
-/// The hard `scope`: an unknown member inside it, and a workspace scope's non-null `id`, are
-/// dropped and listed under it; `kind` and `id` apply in the route's workspace only (DEC-886
-/// items 1 and 2). A member named twice inside it is refused.
+/// The scope's `kind` and `id` members, as an object of only those, in the order sent. An unknown
+/// member is never read, so nothing inside it can refuse the stop or move its target (DEC-900).
+fn read_in_scope(raw: &[u8]) -> Result<Vec<u8>, Refused> {
+    let Some(inside) = members(raw) else {
+        member::<BTreeMap<String, IgnoredAny>>("scope", raw)?;
+        return Err(refuse(pointer("scope"), "malformed"));
+    };
+    let mut read = Vec::new();
+    for (name, value) in inside.into_iter().filter(|(n, _)| n == "kind" || n == "id") {
+        let key = serde_json::to_vec(&name).map_err(|_| refuse(pointer("scope"), "malformed"))?;
+        read.push([key.as_slice(), b":", value].concat());
+    }
+    Ok([b"{".as_slice(), &read.join(b",".as_slice()), b"}"].concat())
+}
+
+/// The hard `scope`: an unknown member inside it, whatever it holds, and a workspace scope's
+/// non-null `id`, are dropped and listed under it; `kind` and `id` apply in the route's workspace
+/// only (DEC-886 items 1 and 2, DEC-900). `kind` or `id` named twice inside it is refused.
 fn scope(body: &mut Body<'_>) -> Result<Scope, Refused> {
-    let raw = body
+    let sent = body
         .get("scope")
         .ok_or_else(|| refuse(pointer("scope"), "missing"))?;
+    let read = read_in_scope(sent)?;
+    let raw = read.as_slice();
     member::<BTreeMap<String, IgnoredAny>>("scope", raw)?;
     let ScopeKind { kind } = member("scope", raw)?;
     let (scope, id_kept) = match kind {
@@ -332,7 +349,7 @@ fn scope(body: &mut Body<'_>) -> Result<Scope, Refused> {
             (Scope::Workspace { id: () }, null)
         }
     };
-    let inside = members(raw).unwrap_or_default().into_iter();
+    let inside = members(sent).unwrap_or_default().into_iter();
     let listed = inside.filter(|(name, _)| name != "kind" && (name != "id" || !id_kept));
     body.inside = listed
         .map(|(name, _)| ("scope".to_owned(), format!("/scope{}", pointer(&name))))
