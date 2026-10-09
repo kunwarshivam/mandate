@@ -39,8 +39,9 @@
   kept; each member of each operation's full example corrupted (wrong type, garbage, an unknown
   nested member), dropped and listed when not hard and refused when hard, against a hard-member
   list typed from §5; a `workspace`, `workspace_id` or `ws` member at the root, in a record, or in
-  the hard `scope`, dropped and listed and never moving the stop (#1155); duplicates; and DEC-886's
-  items 2, 4 and 9.
+  the hard `scope`, dropped and listed and never moving the stop (#1155); duplicates; DEC-886's
+  items 2, 4 and 9; a non-object root refused `malformed` or `type` at `""`; and DEC-887's bid
+  members sent only as `null` or left out.
 - **Schemas:** `crates/mandate-api/tests/schemas.rs`: live enum and member drift against
   `schemas/workspace-api/` (DEC-683), each member `null`-able and optional exactly as its schema
   says, a kill switch scope's `null` id exactly for `workspace`, and no `serde(flatten)`; pending,
