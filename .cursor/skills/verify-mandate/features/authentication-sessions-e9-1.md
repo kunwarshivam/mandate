@@ -12,5 +12,6 @@
   session, refresh rotation with reuse revoking the family) and
   `crates/mandate-authn/tests/routes.rs` (an unreachable provider, a failed refresh, a deprovision
   closing route 2, the reduction-only session, and an idle lapse that a granted refresh does not
-  restore), pending.
+  restore) and `crates/mandate-authn/tests/routes_properties.rs` (a property over random histories,
+  a backwards clock included, against a folded oracle in which a lapse ends the session), pending.
 - **Run:** `cargo nextest run -p mandate-authn`.
