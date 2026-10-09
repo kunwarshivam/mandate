@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Value, parse};
 
-use crate::{StoredEvent, StreamId, StreamType};
+use crate::{StoredEvent, StreamId, StreamType, VerifiedPrefix};
 
 const ESTABLISHED: &str = "ConnectionEstablished";
 const REVOKED: &str = "ConnectionRevoked";
@@ -181,7 +181,8 @@ impl Failing<'_> {
 pub enum ConnectionStart {
     /// The rows start at each stream's `seq` 1: the full chain, anchored on nothing.
     Genesis,
-    /// The rows continue the stored chain whose fold [`ConnectionAnchor::fold`] gave.
+    /// The rows continue the stored chain whose fold [`ConnectionAnchor::from_verified`] gave, one
+    /// stream's (DEC-889).
     Anchored(ConnectionAnchor),
     /// The caller cannot read the chain before the range, or that chain breaks a rule: the run
     /// fails closed at the first record a rule judges.
@@ -197,7 +198,10 @@ pub struct ConnectionAnchor(Folds);
 impl ConnectionAnchor {
     /// The anchor after `prefix`, the stored rows of the range's streams from `seq` 1 up to its
     /// trusted start, in commit order; `None` when the prefix breaks rule 66, 67, 68, or 131, since
-    /// a broken chain anchors nothing (DEC-885 item 2, I5).
+    /// a broken chain anchors nothing (DEC-885 item 2, I5). It trusts the rows unverified, so no
+    /// caller may use it: [`ConnectionAnchor::from_verified`] replaces it (DEC-892), and it is
+    /// deleted once that lands.
+    #[deprecated(note = "unverified prefix; use from_verified (DEC-892)")]
     pub fn fold(prefix: &[StoredEvent]) -> Option<ConnectionAnchor> {
         let mut folds = Folds::default();
         folds
@@ -205,6 +209,27 @@ impl ConnectionAnchor {
             .is_none()
             .then_some(ConnectionAnchor(folds))
     }
+
+    /// The anchor of one stream after `prefix`, its rows `seq` 1 to `from_seq − 1` that
+    /// [`VerifiedPrefix::bind`] verified from genesis and bound to the range's trusted start
+    /// (DEC-892, DEC-889). `Broken` when the prefix breaks rule 66, 67, 68, or 131, since a broken
+    /// chain anchors nothing (DEC-885 I5); the caller then runs the range
+    /// [`ConnectionStart::Unanchored`], as it does when `bind` refuses the rows.
+    pub fn from_verified(
+        prefix: &VerifiedPrefix<'_>,
+    ) -> Result<ConnectionAnchor, ConnectionAnchorError> {
+        let _ = prefix;
+        Err(ConnectionAnchorError::Unimplemented { story: "E7-17" })
+    }
+}
+
+/// Why [`ConnectionAnchor::from_verified`] gave no anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionAnchorError {
+    /// The prefix breaks rule 66, 67, 68, or 131 (DEC-885 item 2, I5).
+    Broken,
+    /// The fold is a DEC-77 stub until `story` lands.
+    Unimplemented { story: &'static str },
 }
 
 /// Why a located connection check did not pass.

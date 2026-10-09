@@ -9,14 +9,16 @@
   genesis, a `SegmentExported`, or a stamped `AnchorComputed` on the workspace's own control
   stream only, and a malformed `stream_id` refused, DEC-784; E12-3),
   `crates/mandate-journal/src/connection_fold.rs` (§11's connection checks; a range's lifecycle
-  run from its connection anchor or failing closed without one, DEC-885; E7-17).
+  run from its connection anchor or failing closed without one, DEC-885; one stream's anchor
+  folded by `ConnectionAnchor::from_verified` from a `VerifiedPrefix` only, DEC-889, DEC-892; E7-17).
 - **Tests:** `crates/mandate-journal/tests/verify.rs`, `crates/mandate-journal/tests/properties.rs`
   (any tampering detected; rewrites caught only by the anchor; independent Merkle construction),
   `crates/mandate-journal/tests/control_verify.rs` (the two control-stream range checks against
   their vectors and independent random walks), `crates/mandate-journal/tests/trusted_start.rs`
   (the trusted-start resolver against its vectors, each §9.14 clause, and a random oracle),
   `crates/mandate-journal/tests/connection_fold.rs` (the connection checks against their vectors,
-  and every split of every full chain against the full-chain run and an independent scan),
+  and every split of every full chain against the full-chain run and an independent scan; the
+  pending E7-17 tests bind each prefix first, and a forged, short, or unbound prefix fails closed),
   `crates/mandate-journal/tests/records_access.rs` (`VerificationRun` version 2 against its
   vectors, rules 132 and 133 swept by their own oracle, and version 1 kept with rule 112; E12-3).
 - **Reference cases:** `journal::tamper::*`, `journal::merkle`, `journal::export_line_seq_1`, and
