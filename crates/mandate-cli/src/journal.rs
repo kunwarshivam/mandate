@@ -18,8 +18,9 @@ use clap::{Args, Subcommand};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
 use mandate_journal::{
-    Anchor, AnchorLeaf, ArtifactError, ArtifactRef, ArtifactSource, EventCheck, EventFailure,
-    RangeCheck, StoredEvent, StreamId, TrustedStart, verify_anchor, verify_events,
+    Anchor, AnchorLeaf, ArtifactError, ArtifactRef, ArtifactSource, ControlVerifyError, EventCheck,
+    EventFailure, RangeCheck, StoredEvent, StreamId, StreamType, TrustedStart, verify_anchor,
+    verify_anchor_self, verify_break_glass_causes, verify_events,
 };
 
 pub mod cold;
@@ -81,6 +82,51 @@ pub enum Outcome {
     Event(EventFailure),
     /// A per-range check failed although every per-event check passed (spec §11, anchors).
     Range(RangeCheck),
+    /// A range check of the stream's type failed, at an event (spec §11, DEC-782).
+    Stream(StreamFailure),
+}
+
+/// A §11 range check of a stream type that failed at the event `seq` (DEC-782 item 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamFailure {
+    /// The event the check reports at (journal spec rule 111).
+    pub seq: u64,
+    /// The §11 code of the check that failed.
+    pub code: &'static str,
+}
+
+/// §11's range checks of `stream`'s type over `rows`, entered at `start`: the failure at the lowest
+/// `seq`, ties going to §11's listing order (DEC-782 items 1 and 2). Other types run none. The CLI
+/// cannot read the chain before the range, so the checks get no hold anchor (DEC-782 item 4). A
+/// check the library has not built is an error, never a pass (DEC-77).
+pub(crate) fn stream_checks(
+    stream: &StreamId,
+    rows: &[StoredEvent],
+    start: TrustedStart,
+) -> anyhow::Result<Option<StreamFailure>> {
+    if stream.stream_type() != StreamType::Control {
+        return Ok(None);
+    }
+    let mut failures = Vec::new();
+    for answer in [
+        verify_anchor_self(rows),
+        verify_break_glass_causes(rows, start),
+    ] {
+        match answer {
+            Ok(()) => {}
+            Err(ControlVerifyError::Mismatch(f)) => failures.push(StreamFailure {
+                seq: f.seq,
+                code: f.check.code(),
+            }),
+            Err(ControlVerifyError::Unimplemented { story }) => {
+                return Err(anyhow!(
+                    "{story}: a control-stream range check of journal spec §11 is not built, so \
+                     the range cannot be verified"
+                ));
+            }
+        }
+    }
+    Ok(failures.into_iter().min_by_key(|f| f.seq))
 }
 
 impl Outcome {
@@ -90,6 +136,7 @@ impl Outcome {
             Self::Verified(_) => None,
             Self::Event(failure) => Some(failure.check.code()),
             Self::Range(check) => Some(check.code()),
+            Self::Stream(failure) => Some(failure.code),
         }
     }
 
@@ -112,6 +159,7 @@ impl fmt::Display for Outcome {
                 write!(f, "failed, seq {}, {}", failure.seq, failure.check.code())
             }
             Self::Range(check) => write!(f, "failed, {}", check.code()),
+            Self::Stream(failure) => write!(f, "failed, seq {}, {}", failure.seq, failure.code),
         }
     }
 }
@@ -207,8 +255,9 @@ fn line_count(export: &[u8]) -> usize {
     }
 }
 
-/// Runs spec §11 in its order: the per-event checks over the whole range first, then the per-range
-/// anchor checks. Reading the export is part of check 1, so an unreadable line fails there.
+/// Runs spec §11 in DEC-782's order: the per-event checks over the whole range first, then the
+/// range checks of the stream's type, then the per-range anchor checks. Reading the export is part
+/// of check 1, so an unreadable line fails there.
 fn check(
     export: &[u8],
     start: TrustedStart,
@@ -247,6 +296,9 @@ fn check(
             ),
         )
     })?;
+    if let Some(failure) = stream_checks(&stream, &rows, start)? {
+        return Ok(Outcome::Stream(failure));
+    }
     if let Some(anchor) = anchor {
         if !anchor
             .leaves
