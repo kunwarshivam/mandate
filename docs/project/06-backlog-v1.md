@@ -4775,7 +4775,9 @@ From the independent reviews of L2's E10-10 and E7-17 slices, 2026-10-09 (minors
   never applied, so every bid member present is dropped and listed once. It only drops more.
   State it in one sentence in workspace API spec §5, or as its own decision from L2's range, at
   L2's next workspace API spec change.
-- **Journal spec v0.37** (L2, after v0.36), each item tightening or risk-neutral:
+- **Journal spec v0.37** (L2, after v0.36), each item tightening or risk-neutral. The spec and
+  vectors land in v0.37 ([DEC-888](decisions/DEC-888.md)); what remains is the tests PR that reads
+  the `connection_revocations` section, then the fold's change that refuses the record:
   - §9.8 and §11: a `ConnectionRevoked` belongs to the control stream; one on an account stream
     is judged and refused under rule 68, the fail-closed reading the coordinator ruled under
     DEC-176, as `reference/journal/connections.py`'s `judged()` already reads it (#1159's
