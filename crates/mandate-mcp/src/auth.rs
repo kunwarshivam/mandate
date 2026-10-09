@@ -10,9 +10,8 @@
 //!   was read for, character for character (RFC 9728 §3.3, RFC 8414 §3.3).
 //! - **A public client only.** `S256` must be offered and a registration endpoint must exist; a
 //!   registration answer that issues a secret or changes the redirect is refused.
-//! - **One callback per login** (O1b, DEC-855): a fresh PKCE verifier and `state`; the callback
-//!   spends the login, and its `state` must be the login's own exactly. Secrets are
-//!   [`SecretString`]s only, never printed or in an error (LT-9).
+//! - **One callback per login** (O1b, DEC-855): fresh PKCE and an exact single-use `state`;
+//!   secrets are [`SecretString`]s only, never printed or in an error (LT-9).
 
 use reqwest::header::{ACCEPT, CONTENT_TYPE, WWW_AUTHENTICATE};
 use reqwest::{RequestBuilder, Response, StatusCode, Url};
