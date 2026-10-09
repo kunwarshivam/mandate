@@ -1314,3 +1314,26 @@ fn an_anchored_run_passes_another_streams_revocation() {
         assert_eq!(verify_connection_lifecycle_from(start, range), want);
     }
 }
+
+/// DEC-889 item 2: an empty prefix's anchor takes the stream of the range's first judged record,
+/// not of a leading revocation on another control stream, so that stream is judged as the full
+/// chain judges it, and a later judged record of the revoking stream fails closed.
+#[test]
+#[ignore = "pending E7-17"]
+fn an_empty_anchor_takes_the_stream_of_the_first_judged_record() {
+    let own = ["revoke Y ws=ws_01J8Z3", "request X A1", "establish X A1"];
+    let rotated = ConnectionCheck::LifecycleMismatch(ConnectionStreamRule::Rotated);
+    for (last, check) in [
+        ("refuse X reconnect", rotated),
+        ("establish Z A2 ws=ws_01J8Z3", ConnectionCheck::Unanchored),
+    ] {
+        let chain = sealed(&control(&[&own[..], &[last]].concat()));
+        let start = verified_start(&[], TrustedStart::GENESIS);
+        let got = verify_connection_lifecycle_from(start, &chain);
+        assert_eq!(got, at(&chain[3], check), "{last}");
+        if check == rotated {
+            let full = located(&chain, verify_connection_lifecycle(&chain));
+            assert_eq!(got, full, "as the full chain judges it");
+        }
+    }
+}
