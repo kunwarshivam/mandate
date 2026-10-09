@@ -76,10 +76,8 @@ fn refused(result: Result<AuthServer, McpError>) -> &'static str {
 }
 
 fn first_lines(server: &Loopback) -> Vec<String> {
-    let seen = server.seen();
-    seen.iter()
-        .map(|r| r.lines().next().unwrap().to_owned())
-        .collect()
+    let line = |r: &String| r.lines().next().unwrap().to_owned();
+    server.seen().iter().map(line).collect()
 }
 
 fn at(server: &Loopback, path: &str) -> Url {
@@ -98,11 +96,8 @@ async fn discovery_follows_the_challenge_to_the_pinned_servers_metadata() {
         registration_endpoint: at(&server, "/register"),
     };
     assert_eq!(found.unwrap(), expected);
-    let wanted = [
-        "post /mcp http/1.1",
-        "get /meta/rs http/1.1",
-        "get /.well-known/oauth-authorization-server/as http/1.1",
-    ];
+    let metadata_line = "get /.well-known/oauth-authorization-server/as http/1.1";
+    let wanted = ["post /mcp http/1.1", "get /meta/rs http/1.1", metadata_line];
     assert_eq!(first_lines(&server), wanted);
     let probe = &server.seen()[0];
     assert!(!probe.contains("\r\nauthorization:"), "{probe}");
@@ -117,11 +112,8 @@ async fn without_a_challenge_url_discovery_reads_the_endpoints_well_known_path()
     let prm = resource("@BASE@/mcp", &["@BASE@/as"]);
     let (found, server) = discover(vec![challenge(None), prm, doc(&metadata())], PINS).await;
     assert_eq!(found.unwrap().issuer, at(&server, "/as"));
-    let lines = first_lines(&server);
-    assert_eq!(
-        lines[1],
-        "get /.well-known/oauth-protected-resource/mcp http/1.1"
-    );
+    let wanted = "get /.well-known/oauth-protected-resource/mcp http/1.1";
+    assert_eq!(first_lines(&server)[1], wanted);
 }
 
 #[tokio::test]
