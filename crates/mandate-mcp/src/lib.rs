@@ -27,8 +27,10 @@
 //!   are ever called; the hash of their names and schemas is pinned, a drift halts openings, and
 //!   a server that lists a fund-movement tool is refused (CN-2, CN-9, DEC-441 item 8).
 //!
-//! No credential passes through this slice; the OAuth token is E7-24's.
+//! - **The founder's OAuth login** ([`AuthServer`], E7-24): discovery of the authorization server
+//!   from the MCP server's published metadata, on pinned hosts only (DEC-847). The token is O1b's.
 
+mod auth;
 mod budget;
 mod client;
 mod endpoint;
@@ -36,6 +38,7 @@ mod error;
 mod frame;
 mod transport;
 
+pub use auth::AuthServer;
 pub use budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
 pub use client::{ALLOWLIST, ContractHash, McpClient};
 pub use endpoint::PinnedEndpoint;

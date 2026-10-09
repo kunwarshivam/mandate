@@ -35,6 +35,14 @@ fn every_error_has_its_stable_code() {
         (McpError::FundMovementTool, "fund_movement_tool"),
         (McpError::ContractMissingTool, "contract_missing_tool"),
         (McpError::ContractDrift, "contract_drift"),
+        (McpError::AuthHostNotPinned, "auth_host_not_pinned"),
+        (McpError::ResourceMismatch, "resource_mismatch"),
+        (McpError::IssuerMismatch, "issuer_mismatch"),
+        (McpError::PkceUnsupported, "pkce_unsupported"),
+        (
+            McpError::RegistrationUnavailable,
+            "registration_unavailable",
+        ),
         (McpError::Unimplemented { story: "E7-16" }, "unimplemented"),
     ];
     for (error, code) in cases {
