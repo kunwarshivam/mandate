@@ -49,6 +49,7 @@
 
 mod autonomy;
 mod builder;
+mod opening;
 
 pub use autonomy::{
     ActionContext, ApprovalRequest, Classification, DecidedBy, GateVerdict, Outcome, RequestedBy,
@@ -59,6 +60,7 @@ pub use builder::{
     HoldReason, Limits, Market, ModelOutput, ModelVersion, OrderShape, Proposal, RiskContext,
     SignalModel, Sizes, Sizing, autonomy_policy, buy_action, combine, propose,
 };
+pub use opening::{Venue, deployable, opening_form, propose_on};
 
 use mandate_domain::DomainError;
 use mandate_num::NumError;
@@ -157,6 +159,13 @@ pub enum BuilderError {
     /// and says which input was not interpreted (DEC-85).
     #[error("a model output names another instrument than the market")]
     OutputInstrumentMismatch,
+    /// The platform's opening policy and the broker's capability profile leave no form for an
+    /// opening: no `limit` cell in a quantity (never notional) that lists the opening's time in
+    /// force, or a US equity outside the regular session (trading spec §5.2, LT-3, DEC-854). A
+    /// refusal before the intent, never a fallback to another order type. Reached on the buy path
+    /// and at deployment only, so it never stops an exit (`AGENTS.md` rule 13).
+    #[error("the opening policy and the broker's profile leave no order form for an opening")]
+    NoOpeningForm,
     #[error(transparent)]
     Num(#[from] NumError),
     #[error(transparent)]
@@ -186,6 +195,7 @@ impl BuilderError {
             Self::MislabelledBuy => "mislabelled_buy",
             Self::UntradableSession => "untradable_session",
             Self::OutputInstrumentMismatch => "output_instrument_mismatch",
+            Self::NoOpeningForm => "no_opening_form",
             Self::Num(e) => e.code(),
             Self::Time(e) => e.code(),
             Self::Domain(e) => e.code(),
