@@ -17,6 +17,10 @@ use std::rc::Rc;
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_backtest::Signal;
 use mandate_canon::{Digest, Int, Key, Object, Value};
+use mandate_domain::{
+    CapabilityProfile, Cell, Idempotency, MarketSession, OrderType as ProfileOrderType,
+    ProtectionForm, QuantityForm, Retry, Row, TimeInForce as ProfileTif,
+};
 use mandate_executor::{
     ActivityCursor, BrokerAccount, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerSnapshot,
     BrokerUnknown, ClientOrderId, ConnectorError, IntentId, OrderType, ReconcileReason, Seq,
@@ -237,6 +241,28 @@ pub fn agent_stream() -> String {
 
 pub fn account_stream() -> String {
     crate::envelope::account_stream("tracer", "tracer-paper")
+}
+
+/// A profile unlike Alpaca's: one row, equities' whole-share limit order with its OCO, and no
+/// crypto row, so a crypto position it is read for has no protective shape (DEC-838).
+pub fn equities_only() -> Result<CapabilityProfile, String> {
+    let cell = Cell {
+        order_type: ProfileOrderType::Limit,
+        quantity_form: QuantityForm::Whole,
+        times_in_force: [ProfileTif::Day, ProfileTif::Gtc].into(),
+        protection_forms: [ProtectionForm::Oco].into(),
+    };
+    let row = Row {
+        asset_class: AssetClass::UsEquity,
+        session: MarketSession::Regular,
+        cells: vec![cell],
+    };
+    let idempotency = Idempotency {
+        client_order_id: true,
+        retry: Retry::Idempotent,
+        query_by_client_order_id: true,
+    };
+    CapabilityProfile::new(1, vec![row], idempotency).map_err(|e| e.to_string())
 }
 
 pub fn instrument() -> Result<InstrumentId, Cause> {
