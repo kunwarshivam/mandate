@@ -86,7 +86,6 @@ it up.
 | Issue | Owner |
 |---|---|
 | CI minutes: 3,000 Actions minutes a month (DEC-256); Playwright runs weekly and on dispatch (`web-e2e.yml`); the coordinator dispatches it before merging a web change that moves layout, tokens or the specs | Coordinator |
-| The Azure and Sun palette (#363) has no recorded decision: `palette.ts` cites DEC-217, which was never written, and `web/COLOR.md` still describes Ink and Volt | W4 |
 | A local e2e run against a server already on the port tests the production build with the scenario switch off; let Playwright build `.next-e2e` itself | Next e2e touch |
 | A stale or absent ETP classification denies every US-equity opening (DEC-129 item 33); RC-16's harness and the AAPL tracer need a fresh `etp_classified_at` | RC-16 with E6-7; the tracer with E7-7 |
 | The pending gate reads a failure's text, not its cause (DEC-137, partly closed) | xtask |

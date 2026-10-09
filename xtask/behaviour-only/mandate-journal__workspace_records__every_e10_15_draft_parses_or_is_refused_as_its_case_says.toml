@@ -1,0 +1,9 @@
+file = "crates/mandate-journal/tests/workspace_records.rs"
+test = "every_e10_15_draft_parses_or_is_refused_as_its_case_says"
+reason = """
+E10-15's (DEC-670 to DEC-672, journal spec v0.21 to v0.23, §9.9 to §9.11). It checks
+`Draft::parse`, the journal's existing check, so there is no stub to stop at: until E10-15's
+implementation, the journal answers `unknown_event_type` or `unknown_schema` for the new
+records and refuses the `client` actor kind, which is the behaviour it fails on. E10-15's
+implementation deletes this file with the test's `#[ignore]` line.
+"""

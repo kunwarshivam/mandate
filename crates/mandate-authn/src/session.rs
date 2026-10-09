@@ -150,6 +150,9 @@ pub enum EndReason {
     RefreshFailed,
     /// A rotated refresh token was presented again: the whole family is revoked.
     RefreshReuse,
+    /// The idle timeout or the absolute lifetime passed, or a granted refresh found an outage
+    /// session's idle timeout lapsed (DEC-816 item 8).
+    Expired,
     Admin,
 }
 
@@ -162,6 +165,7 @@ impl EndReason {
             Self::Deprovisioned => "deprovisioned",
             Self::RefreshFailed => "refresh_failed",
             Self::RefreshReuse => "refresh_reuse",
+            Self::Expired => "expired",
             Self::Admin => "admin",
         }
     }
@@ -212,7 +216,9 @@ pub enum SessionRefusal {
     #[error("the idle timeout is longer than the absolute lifetime")]
     IdleLongerThanAbsolute,
     /// `now` is earlier than the session's opening or its last admitted activity: the clock
-    /// went backwards, and the session refuses rather than guess.
+    /// went backwards, and the session refuses rather than guess. Only [`Request::Other`] and a
+    /// refresh are refused this way; a pause or a kill switch is judged at the last activity
+    /// instead, so a backwards clock never refuses risk reduction (rule 13, DEC-652 item 5).
     #[error("the clock is behind the session")]
     ClockBehind,
     /// The refresh secret to rotate to is the presented one or one already rotated away.
@@ -221,15 +227,10 @@ pub enum SessionRefusal {
     /// A time this transition would compute is outside the clock's range.
     #[error("the session's times cannot be represented")]
     Unrepresentable,
-    /// The session ended.
+    /// The session ended. The call that ends it returns this too, and so does every later one;
+    /// the caller journals the reason once, when [`SessionRecord::ended`] first turns `Some`.
     #[error("the session has ended")]
     Ended { reason: EndReason },
-    /// The idle timeout passed since the last request.
-    #[error("the session timed out")]
-    IdleExpired,
-    /// The absolute lifetime passed.
-    #[error("the session reached its absolute lifetime")]
-    AbsoluteExpired,
     /// The access token expired; a refresh is needed.
     #[error("the access token has expired")]
     AccessExpired,
@@ -243,7 +244,8 @@ pub enum SessionRefusal {
     #[error("the refresh token is not this session's")]
     UnknownRefreshToken,
     /// The provider sent a deprovision signal for this subject since its last successful sign-in,
-    /// so the local passkey route is closed to it.
+    /// so the local passkey route is closed to it. Route 2 answers it, like every refusal, with
+    /// the one [`crate::Unauthenticated`] (DEC-816 item 6).
     #[error("the identity provider deprovisioned this subject since its last sign-in")]
     DeprovisionSeen,
 }
@@ -257,7 +259,7 @@ fn digest_of(secret: &RefreshSecret) -> Digest {
 }
 
 /// `now` plus `secs` seconds, but never past `cap`: a deadline inside a session's absolute
-/// lifetime, so the end of the clock's range never refuses a request (rule 13).
+/// lifetime, so the end of the clock's range never overflows it (rule 13).
 fn capped(now: UtcNanos, secs: i64, cap: UtcNanos) -> UtcNanos {
     plus(now, secs).map_or(cap, |t| t.min(cap))
 }
@@ -268,6 +270,12 @@ fn plus(t: UtcNanos, secs: i64) -> Result<UtcNanos, SessionRefusal> {
         .checked_add(secs)
         .and_then(|s| UtcNanos::from_parts(s, t.nanos()).ok())
         .ok_or(SessionRefusal::Unrepresentable)
+}
+
+/// An access token's deadline from `now`; past the clock's range, the absolute lifetime `cap`,
+/// which ends the session first anyway.
+fn access_deadline(now: UtcNanos, cap: UtcNanos) -> UtcNanos {
+    plus(now, ACCESS_TOKEN_LIFETIME_S).unwrap_or(cap)
 }
 
 /// One session's server-side record.
@@ -304,7 +312,7 @@ impl SessionRecord {
             last_activity: now,
             absolute_until,
             idle_until: capped(now, limits.idle_s, absolute_until),
-            access_until: plus(now, ACCESS_TOKEN_LIFETIME_S)?,
+            access_until: access_deadline(now, absolute_until),
             current: Some(digest_of(refresh)),
             rotated: BTreeSet::new(),
         })
@@ -359,40 +367,38 @@ impl SessionRecord {
         self.ended
     }
 
-    /// Whether a step-up may be presented through this session: only a full one (§7.3).
+    /// Whether a step-up may be presented through this session: only a full one (§7.3), and an
+    /// ended session presents none.
     pub fn can_present_step_up(&self) -> bool {
         self.reach == Reach::Full && self.ended.is_none()
     }
 
-    /// The refusals every transition shares: an ended session, a clock behind the session, then
-    /// the absolute lifetime.
-    fn live(&self, now: UtcNanos) -> Result<(), SessionRefusal> {
-        if let Some(reason) = self.ended {
-            return Err(SessionRefusal::Ended { reason });
-        }
-        if now < self.last_activity {
-            return Err(SessionRefusal::ClockBehind);
-        }
-        if now >= self.absolute_until {
-            return Err(SessionRefusal::AbsoluteExpired);
-        }
-        Ok(())
+    /// Ends the session for `reason` and returns the refusal that call and every later one gets.
+    fn revoke(&mut self, reason: EndReason) -> SessionRefusal {
+        self.ended = Some(reason);
+        SessionRefusal::Ended { reason }
     }
 
-    /// Admits `request` at `now`, and on success counts it as activity for the idle timeout.
-    pub fn authorize(&mut self, request: Request, now: UtcNanos) -> Result<(), SessionRefusal> {
-        self.live(now)?;
-        if self.reach == Reach::Full {
-            if now >= self.idle_until {
-                return Err(SessionRefusal::IdleExpired);
-            }
-            if now >= self.access_until {
-                return Err(SessionRefusal::AccessExpired);
-            }
-        } else if request == Request::Other {
-            return Err(SessionRefusal::RiskReductionOnly);
+    /// Ends the session as [`EndReason::Expired`] (DEC-816 item 8).
+    fn expire(&mut self) -> SessionRefusal {
+        self.revoke(EndReason::Expired)
+    }
+
+    /// The refusal an ended session gives every call.
+    fn still_open(&self) -> Result<(), SessionRefusal> {
+        match self.ended {
+            Some(reason) => Err(SessionRefusal::Ended { reason }),
+            None => Ok(()),
         }
-        self.active_at(now);
+    }
+
+    /// Ends the session at `at` if any session's absolute lifetime, or a full session's idle
+    /// timeout, has passed.
+    fn lapse(&mut self, at: UtcNanos) -> Result<(), SessionRefusal> {
+        let idle_lapsed = self.reach == Reach::Full && at >= self.idle_until;
+        if at >= self.absolute_until || idle_lapsed {
+            return Err(self.expire());
+        }
         Ok(())
     }
 
@@ -403,11 +409,42 @@ impl SessionRecord {
         self.idle_until = capped(now, self.idle_s, self.absolute_until);
     }
 
+    /// Admits `request` at `now`, and on success counts it as activity for the idle timeout. A
+    /// request at or after the absolute lifetime, or a full session's idle timeout, ends the
+    /// session with [`EndReason::Expired`] (DEC-816 item 8). A [`Request::Pause`] or
+    /// [`Request::KillSwitch`] at a `now` earlier than the last activity is judged at the last
+    /// activity instead of `now`, never [`SessionRefusal::ClockBehind`], and moves no timer; every
+    /// other rule still applies at that instant. A live session refuses any other request at such
+    /// a `now` with [`SessionRefusal::ClockBehind`], whatever its reach (DEC-652 item 5).
+    pub fn authorize(&mut self, request: Request, now: UtcNanos) -> Result<(), SessionRefusal> {
+        self.still_open()?;
+        let judged_at = if now >= self.last_activity {
+            now
+        } else if request == Request::Other {
+            return Err(SessionRefusal::ClockBehind);
+        } else {
+            self.last_activity
+        };
+        self.lapse(judged_at)?;
+        if self.reach == Reach::Full {
+            if judged_at >= self.access_until {
+                return Err(SessionRefusal::AccessExpired);
+            }
+        } else if request == Request::Other {
+            return Err(SessionRefusal::RiskReductionOnly);
+        }
+        self.active_at(judged_at);
+        Ok(())
+    }
+
     /// Refreshes with the `presented` refresh token, given the provider's `answer`, rotating to
     /// `next` when it grants. A rotated token presented again ends the session with
     /// [`EndReason::RefreshReuse`]; a deprovision signal ends it with
     /// [`EndReason::Deprovisioned`], and any other answer that is not an outage with
-    /// [`EndReason::RefreshFailed`].
+    /// [`EndReason::RefreshFailed`]. A refresh at or after the absolute lifetime or a full
+    /// session's idle timeout, or a grant to an outage session whose idle timeout lapsed, ends it
+    /// with [`EndReason::Expired`] (DEC-816 item 8). A `now` earlier than the last activity is
+    /// refused [`SessionRefusal::ClockBehind`] and changes nothing.
     pub fn refresh(
         &mut self,
         presented: &RefreshSecret,
@@ -415,19 +452,18 @@ impl SessionRecord {
         next: &RefreshSecret,
         now: UtcNanos,
     ) -> Result<Refreshed, SessionRefusal> {
-        self.live(now)?;
+        self.still_open()?;
+        if now < self.last_activity {
+            return Err(SessionRefusal::ClockBehind);
+        }
+        self.lapse(now)?;
         let Some(current) = self.current else {
             return Err(SessionRefusal::NotRefreshable);
         };
-        if self.reach == Reach::Full && now >= self.idle_until {
-            return Err(SessionRefusal::IdleExpired);
-        }
         let presented = digest_of(presented);
         if presented != current {
             if self.rotated.contains(&presented) {
-                let reason = EndReason::RefreshReuse;
-                self.ended = Some(reason);
-                return Err(SessionRefusal::Ended { reason });
+                return Err(self.revoke(EndReason::RefreshReuse));
             }
             return Err(SessionRefusal::UnknownRefreshToken);
         }
@@ -436,11 +472,9 @@ impl SessionRecord {
             return Err(SessionRefusal::RefreshSecretReused);
         }
         match answer {
+            ProviderAnswer::Granted if now >= self.idle_until => Err(self.expire()),
             ProviderAnswer::Granted => {
-                if now >= self.idle_until {
-                    return Err(SessionRefusal::IdleExpired);
-                }
-                let access_until = plus(now, ACCESS_TOKEN_LIFETIME_S)?;
+                let access_until = access_deadline(now, self.absolute_until);
                 self.access_until = access_until;
                 self.rotated.insert(current);
                 self.current = Some(next);
@@ -454,16 +488,8 @@ impl SessionRecord {
                 self.reach = Reach::Outage;
                 Ok(Refreshed::Outage)
             }
-            ProviderAnswer::Status(_) => {
-                let reason = EndReason::RefreshFailed;
-                self.ended = Some(reason);
-                Err(SessionRefusal::Ended { reason })
-            }
-            ProviderAnswer::Deprovision => {
-                let reason = EndReason::Deprovisioned;
-                self.ended = Some(reason);
-                Err(SessionRefusal::Ended { reason })
-            }
+            ProviderAnswer::Status(_) => Err(self.revoke(EndReason::RefreshFailed)),
+            ProviderAnswer::Deprovision => Err(self.revoke(EndReason::Deprovisioned)),
         }
     }
 
