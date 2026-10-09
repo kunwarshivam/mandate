@@ -15,7 +15,7 @@
 //! are [DEC-681](../../../docs/project/decisions/DEC-681.md)'s.
 //!
 //! - [`envelope`] and [`responses`]: the envelope's shapes, and §5's command responses, closed.
-//! - [`requests`]: the plain request bodies of §4.2, §4.6, §5.3, and §5.4, closed.
+//! - [`requests`]: the request bodies of §4.2, §4.5, §4.6, and §5.1 to §5.4, closed.
 //! - [`problem`]: the RFC 9457 problem document of §3.5, with closed `code` and `effect`.
 //! - [`wire`]: the scalar members (decimals as canonical strings, never JSON numbers, §3.1) and the
 //!   one decoder every request body goes through.

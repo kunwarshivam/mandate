@@ -6,7 +6,8 @@
   id, and event-id scalars as canonical strings; `decode` and `encode`),
   `crates/mandate-api/src/idempotency.rs` (the key and the derived event id),
   `crates/mandate-api/src/envelope.rs`, `requests.rs`, and `responses.rs` (the envelope's shapes,
-  the plain closed requests, and the closed responses, `Validate` stubbed). Stubbed.
+  the closed requests, plain and conditional, and the closed responses, `Validate` stubbed; the
+  kill switch's scope a tagged enum). Stubbed.
 - **Tests:** `crates/mandate-api/tests/contract.rs`, pending E10-10: §3.5's statuses parsed from the
   spec; §3.4's ids against a `sha2` and Crockford oracle; scalars as canonical strings, a JSON
   number in a decimal refused; the problem's closed enums spelled as the spec spells them, its
@@ -15,6 +16,7 @@
   member, the two policy levels).
 - **Schemas:** `crates/mandate-api/tests/schemas.rs`: live enum and member drift against
   `schemas/workspace-api/` (DEC-683), each member `null`-able and optional exactly as its schema
-  says, and no `serde(flatten)`; pending, every example round-trips and every `.invalid` case is
-  refused.
+  says, a kill switch scope's `null` id exactly for `workspace`, and no `serde(flatten)`; pending,
+  every example round-trips, every `.invalid` case is refused, and the integer bounds hold at their
+  edges.
 - **Run:** `cargo nextest run -p mandate-api --run-ignored all` (fails at the stubs until E10-10).

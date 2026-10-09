@@ -85,7 +85,7 @@ for (const width of PHONES) {
       await expect(header(page).getByRole("button", { name: /sidebar|menu|Go to/i })).toHaveCount(0);
     });
 
-    test("More reaches every screen, with the account at the top and Search", async ({ page }) => {
+    test("More reaches every built screen and no screen still to come, with the account and Search (DEC-513)", async ({ page }) => {
       await open(page, "/", width);
       const reached = new Set(await tabBar(page).locator(":scope > a").evaluateAll((els) => els.map((el) => el.getAttribute("href"))));
       const sheet = await openMore(page);
@@ -94,7 +94,8 @@ for (const width of PHONES) {
       await expect(account).toBeVisible();
       await expect(account.getByRole("button", { name: /^Workspace: / })).toBeVisible();
       for (const href of await sheet.getByRole("link").evaluateAll((els) => els.map((el) => el.getAttribute("href")))) if (href) reached.add(href);
-      for (const href of [...SCREENS.map((s) => s.href), SECTION_INDEX.audit.href, SECTION_INDEX.workspace.href]) expect(reached, href).toContain(href);
+      for (const s of SCREENS) expect(reached.has(s.href), s.href).toBe(s.built);
+      for (const href of [SECTION_INDEX.audit.href, SECTION_INDEX.workspace.href]) expect(reached, href).toContain(href);
       await expect(sheet.getByRole("button", { name: /^Search/ })).toBeVisible();
       expect(await smallTargets(sheet)).toEqual([]);
       expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -184,7 +185,7 @@ for (const width of PHONES) {
       const headings = await page.locator("#main h2").locator("visible=true").evaluateAll((els) => els.map((el) => el.textContent?.replace(/\d+ items?$/, "").trim()));
       expect(headings).toEqual(["Needs you", "Account equity", "Agents", "Decisions"]);
       const rows = page.locator("[data-slot=needs-you] li");
-      expect(await rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-kind")))).toEqual(["request", "alert", "alert", "alert", "alert"]);
+      expect(await rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-kind"))), "the request, then one line per agent and condition, and no feed (DEC-513 item 9)").toEqual(["request", "alert"]);
       await expect(rows.first()).toContainText(/Skipped at \d\d:\d\d:\d\d [A-Z]+ if you do nothing$/);
       await expect(rows.first()).not.toContainText("left");
       expect(await smallTargets(page.locator("[data-slot=needs-you]"))).toEqual([]);
@@ -192,10 +193,10 @@ for (const width of PHONES) {
     });
 
     test("Needs you is one row of cards that scrolls sideways, however many wait, with each price in full", async ({ page }) => {
-      await open(page, "/?scenario=stale", width);
+      await open(page, "/?scenario=approvals", width);
       const list = page.locator("[data-slot=needs-you] ul");
       const items = list.locator(":scope > li");
-      expect(await items.count()).toBeGreaterThan(3);
+      expect(await items.count(), "the three open requests: more cards than a phone's width holds").toBeGreaterThan(2);
       const tops = await items.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
       expect(new Set(tops).size, "every card sits on the same row").toBe(1);
       const box = (await list.boundingBox())!;
