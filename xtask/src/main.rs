@@ -11871,7 +11871,8 @@ jq -r "$filter" "$src"
     }
 
     /// The repository as it stands: cargo's resolve of the default build holds every workspace
-    /// member, the check asks it for `ci.yml`'s `cargo xtask ci fast`, and nothing resolves `live`.
+    /// member, the check asks it for `ci.yml`'s `cargo xtask ci lint` (one of the jobs DEC-871 split
+    /// `ci fast` into), and nothing resolves `live`.
     #[test]
     fn the_repository_resolves_no_live_build() -> Result<()> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -11889,7 +11890,7 @@ jq -r "$filter" "$src"
             cargo_resolve(&root, w)
         })?;
         assert_eq!(problems, Vec::<String>::new());
-        assert!(asked.into_inner().contains(&words("xtask ci fast")));
+        assert!(asked.into_inner().contains(&words("xtask ci lint")));
         Ok(())
     }
 
