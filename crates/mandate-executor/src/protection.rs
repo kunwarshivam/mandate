@@ -13281,6 +13281,7 @@ mod sequence_tests {
 #[cfg(test)]
 mod closed_form {
     use std::collections::BTreeSet;
+    use std::panic::catch_unwind;
 
     use mandate_canon::{Key, Object, Value, parse, to_canonical};
     use mandate_journal::{AppendOutcome, Draft, Invalid, InvalidReason, MemoryJournal, StreamId};
@@ -13290,7 +13291,7 @@ mod closed_form {
     use crate::fold::fold;
     use crate::reconcile::tests::{Executor, missing};
     use crate::state::ExecutorState;
-    use crate::types::{BrokerRequest, Effect, EventDraft};
+    use crate::types::{BrokerRequest, Effect, EventDraft, EventId};
 
     /// §9.5's members in its table's order, typed from the spec, never read from a writer.
     const MEMBERS: &str = "instrument_id action orders awaiting qty stop take_profit intent_id \
@@ -13564,6 +13565,52 @@ mod closed_form {
                 (interval.started_at.secs(), ended, flags.0, flags.1, bracket)
             })
             .collect()
+    }
+
+    fn text(raw: &str) -> Value {
+        Value::Str(raw.to_owned())
+    }
+
+    /// [`assert_witnessed`]'s own check, apart from any interval: it passes an end that awaits
+    /// its placement and a bare end with nothing open, and refuses #1123's two shapes.
+    #[test]
+    fn the_witness_walk_refuses_an_end_without_its_witness() -> Result<(), ExecutorError> {
+        let draft = |pairs: &[(&str, Value)]| -> Result<EventDraft, ExecutorError> {
+            let mut payload = Object::new();
+            for (name, value) in pairs {
+                payload.insert(Key::new(name).map_err(|_| missing(name))?, value.clone());
+            }
+            Ok(EventDraft {
+                event_id: EventId("e".to_owned()),
+                event_type: "ProtectionChanged".to_owned(),
+                schema_version: 1,
+                config_refs: Object::new(),
+                causation_id: None,
+                payload: Value::Object(payload),
+            })
+        };
+        let start = draft(&[
+            ("action", text("unprotected_start")),
+            ("bracket", text("md-b")),
+        ])?;
+        let placed = draft(&[("action", text("placed")), ("orders", ids(&["md-b-p1"]))])?;
+        let bare = draft(&[("action", text("unprotected_end"))])?;
+        let awaits = draft(&[
+            ("action", text("unprotected_end")),
+            ("awaiting", ids(&["md-b-p1"])),
+        ])?;
+        let refused = |walked: &[&EventDraft]| catch_unwind(|| assert_witnessed(walked)).is_err();
+        assert!(!refused(&[&placed, &awaits]), "a placement's end awaits it");
+        assert!(!refused(&[&bare]), "a bare end with nothing open");
+        assert!(
+            refused(&[&placed, &bare]),
+            "minor 1: a bare end right after a placement"
+        );
+        assert!(
+            refused(&[&start, &bare]),
+            "minor 2: a bare end with a bracket open"
+        );
+        Ok(())
     }
 
     /// #1123's review minors, judged from the records alone. An `unprotected_end` that awaits
@@ -14092,6 +14139,17 @@ mod bracket_tests {
         })
     }
 
+    /// Every order `effects` sends.
+    fn submissions(effects: &[Effect]) -> Vec<&SubmitOrder> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Broker(BrokerRequest::Submit(order)) => Some(order),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// E7-19 E1b-P writers (DEC-859 item 1), the first paper trade's case (E2): a bracket entry
     /// filled 4 of 10 starts its interval closed, naming only the entry; at the bound (second 40,
     /// the shorter of 60 and 30 from its start at 10) its remainder is cancelled and the bound
@@ -14108,13 +14166,7 @@ mod bracket_tests {
             let first = executor.run(report("partially_filled", "4")?, ports)?;
             let due = executor.run(Input::Tick(RiskClock::from_secs(40)), ports)?;
             let cancelled = executor.run(report("canceled", "4")?, ports)?;
-            let sent: Vec<&SubmitOrder> = cancelled
-                .iter()
-                .filter_map(|effect| match effect {
-                    Effect::Broker(BrokerRequest::Submit(order)) => Some(order),
-                    _ => None,
-                })
-                .collect();
+            let sent = submissions(&cancelled);
             let [oco] = sent[..] else {
                 return Err(missing("one OCO"));
             };
@@ -14125,6 +14177,8 @@ mod bracket_tests {
             let entry = text(&entry_id());
             let start = record(&first, "unprotected_start")?;
             assert_closed(start, "unprotected_start", &[("bracket", entry.clone())])?;
+            let every = submissions(&steps);
+            assert_eq!(every, vec![oco], "one order in all four steps: the OCO");
             assert_eq!(cancels(&due), 1, "the remainder is cancelled at the bound");
             assert_closed(record(&due, "interval_limit")?, "interval_limit", &[])?;
             let legs = oco.oco.as_ref().map(|legs| legs.qty);
