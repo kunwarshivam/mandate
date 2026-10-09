@@ -134,7 +134,7 @@ for (const width of WIDTHS) {
       });
     });
 
-    test('3. See it ask, once: unbuilt, plan J "A request once on Home" (C-5); Home\'s Decisions rail still repeats the request', async ({ page }) => {
+    test('3. See it ask, once: the open request appears once on Home (C-5)', async ({ page }) => {
       await signIn(page, width);
       await setUpAgent(page, width);
       await goHome(page, width);
