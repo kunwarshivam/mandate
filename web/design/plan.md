@@ -243,8 +243,8 @@ item above (C-3, C-9) are not repeated.
       reconciliation conditions do. (C-25)
 - [ ] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
       leaves out its "Asked you" row. (C-5)
-- [ ] **"At the limit:" on the overview card**, so a limit's action never reads as the current
-      mode. (C-7)
+- [x] **"At the limit:" on the overview card**, so a limit's action never reads as the current
+      mode. (C-7) Done in [#1067](https://github.com/kunwarshivam/mandate/pull/1067).
 - [ ] **A time from another day carries its date**, through one formatter shared with the
       timeline. (C-23)
 - [ ] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
