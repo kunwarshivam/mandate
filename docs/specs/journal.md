@@ -13,7 +13,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 ## Change history
 
 - **v0.29 ([DEC-774](../project/decisions/DEC-774.md)):** two readings that only tighten
-  (DEC-176), and one of the text alone.
+  (DEC-176), one of the text alone, and a carve-out that keeps the freeze off risk reduction.
   - **§9.13's codes.** `VerificationRun`'s `failure.check` listed every §11 code except
     `held_mismatch` (v0.23), `connection_lifecycle_mismatch`, and `connection_cause_mismatch`
     (v0.20), so a run could not record those failures: the reference validator refused them as
@@ -29,6 +29,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
     range as a whole (`anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`,
     `segment_gap`) or at an event (`anchor_head_mismatch` and every check §11 lists by stream), as
     rule 111 and the reference validator already read them. Rule 111's behaviour does not change.
+  - **The freeze never holds risk reduction.** §11's control-stream freeze, which an operator read
+    can now reach, says what the account- and agent-stream case already says of the kill switch:
+    risk exits, protective orders, owner exits, and the kill switch at any scope still work
+    (`AGENTS.md` rule 13), citing workspace API API-7, which already keeps its risk-reducing
+    operations recorded while the control stream is frozen. Nothing else the freeze covers changes.
   - **Vectors.** The `records_access` section gains a valid run failing on each of the four codes
     with its `seq`, an invalid run naming none for each, and `range_checks`, control-stream chains
     the reference verifier and an oracle of its own judge, the first of them failing the operator
@@ -2838,7 +2843,10 @@ for each for `mode_event`, and `records_access.range_checks` for the operator re
 weekly; results journaled as `VerificationRun`.
 
 **On failure:** SEV-1. Account- or agent-stream failures pause the affected agents (the kill switch
-still works); control-stream failures freeze mandate and deployment changes. Affected segments are
+still works); control-stream failures freeze mandate and deployment changes, and the freeze never
+holds risk reduction: risk exits, protective orders, owner exits, and the kill switch at any scope
+still work (`AGENTS.md` rule 13), and the workspace API still records its risk-reducing operations
+([workspace API spec](workspace-api.md#2-invariants) API-7). Affected segments are
 put on legal hold. **Nothing is repaired in place:** a new writer epoch continues from an
 `IntegrityIncidentRecorded` event that references the last good hash and anchor. The customer (for
 advisers, their chief compliance officer) is notified within the configured deadline, and the
