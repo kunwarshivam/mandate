@@ -1474,7 +1474,6 @@ fn the_records_access_records_are_catalogued_and_closed_on_the_control_stream() 
 /// §9.14's records, as §9.13's: on the control stream alone, with no configuration, closed there at
 /// schema version 1.
 #[test]
-#[ignore = "pending E12-3"]
 fn the_anchor_and_segment_records_are_catalogued_and_closed_on_the_control_stream() {
     closed_on_the_control_stream(&CLOSED_BY_SECTION_9_14);
 }
