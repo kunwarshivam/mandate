@@ -1324,7 +1324,9 @@ def membership_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
         rule(f"103.{event_type}", cool_off_exact(draft["event_time"], end, cooling, skip), path)
     if event_type == "MemberInvited":
         days = gap_nanos(p["invited_at"], p["expires_at"])
-        rule("104", days == INVITATION_DAYS * 86400 * 10**9, "payload.expires_at")
+        week = INVITATION_DAYS * 86400 * 10**9
+        lasts = days is not None and days >= week if "boundary.rule_104_at_least" in skip else days == week
+        rule("104", lasts, "payload.expires_at")
     rule("105", (p["session_ref"] is not None) == (actor["kind"] == "user"), "payload.session_ref")
     instant = OWN_INSTANT.get(event_type)
     if instant:
@@ -1394,6 +1396,8 @@ def cool_off_exact(start: str, end, cooling: bool, skip: frozenset[str]) -> bool
         return False
     if "boundary.rule_103_either" in skip:
         return gap in (0, COOL_OFF_SECONDS * 10**9)
+    if "boundary.rule_103_at_least" in skip and cooling:
+        return gap >= COOL_OFF_SECONDS * 10**9
     return gap == (COOL_OFF_SECONDS * 10**9 if cooling else 0)
 
 
