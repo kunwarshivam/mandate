@@ -1,6 +1,6 @@
 {
  "version": 4,
- "spec": "docs/specs/mandate.md (v0.6)",
+ "spec": "docs/specs/mandate.md (v0.7)",
  "schemas": [
   "schemas/mandate.schema.json",
   "schemas/policy.schema.json"
@@ -1762,6 +1762,178 @@
    "canonical_sha256": "sha256:84b886cf2fa1ada7cd236d9005fa01eaadfc7d5c5f58b4b04c6aa0da12064503",
    "derived_from": "research_equity",
    "note": "adds crypto to the allowed asset classes"
+  },
+  "btc_accumulator_v2": {
+   "mandate": {
+    "mandate_schema_version": 2,
+    "name": "btc-accumulator",
+    "source_text_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "environment": "paper",
+    "connection_id": "conn_alpaca_paper_01",
+    "capital": {
+     "allocation_usd": "10000",
+     "max_loss_from_allocation": "0.1"
+    },
+    "goal": {
+     "type": "accumulate",
+     "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+     "target_qty": "0.15",
+     "max_avg_price": "58000",
+     "max_spend_usd": "9000",
+     "end_date": "2026-12-31",
+     "on_complete": "hold_protected"
+    },
+    "universe": {
+     "pinned": true,
+     "pinned_instruments": [
+      {
+       "asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+       "symbol": "BTC/USD",
+       "asset_class": "crypto"
+      }
+     ],
+     "max_instruments": 1,
+     "asset_classes": [
+      "crypto"
+     ],
+     "leveraged_etps_enabled": false,
+     "leveraged_etp_disclosure_version": null
+    },
+    "behavior": {
+     "description": "Buy dips; avoid trading 30 minutes around major macro releases.",
+     "signal_models": [
+      {
+       "id": "quant.mean_reversion",
+       "version": "1.0.0",
+       "content_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "params": [
+        {
+         "key": "lookback_bars",
+         "value": "20"
+        },
+        {
+         "key": "z_entry",
+         "value": "1.5"
+        }
+       ],
+       "weight": "1",
+       "max_output_age_s": 1800,
+       "admits_instruments": false
+      }
+     ],
+     "research": null,
+     "cadence": {
+      "interval_s": 900,
+      "event_sources": [
+       "news",
+       "price"
+      ]
+     },
+     "sizing": {
+      "method": "conviction_linear",
+      "entry_threshold": "0.3",
+      "exit_threshold": "0.3",
+      "rebalance_band": "0.05"
+     }
+    },
+    "protection": {
+     "enabled": true,
+     "stop_distance": "0.08",
+     "take_profit_distance": null,
+     "stop_limit_offset": "0.005"
+    },
+    "risk": {
+     "max_position_usd": "10000",
+     "max_position_fraction": "1",
+     "max_gross_exposure_usd": "10000",
+     "max_order_usd": "1000",
+     "max_orders_per_day": 50,
+     "max_daily_loss": "0.02",
+     "daily_loss_action": "exits_only",
+     "max_drawdown": "0.08",
+     "drawdown_ladder": [
+      {
+       "at": "0.03",
+       "action": "scale_sizes",
+       "factor": "0.5"
+      },
+      {
+       "at": "0.06",
+       "action": "exits_only",
+       "factor": null
+      },
+      {
+       "at": "0.08",
+       "action": "flatten_and_pause",
+       "factor": null
+      }
+     ],
+     "hysteresis": "0.01",
+     "scale_action": "limit_buys",
+     "breach_confirm_s": 60,
+     "daily_breach_min_s": 3600,
+     "scale_lift_after_s": 600,
+     "reentry_cooldown_s": 3600
+    },
+    "autonomy": {
+     "rules": [
+      {
+       "id": "large_orders",
+       "when": {
+        "field": "order_usd",
+        "op": "gt",
+        "value": "900"
+       },
+       "then": "ask"
+      },
+      {
+       "id": "low_score",
+       "when": {
+        "field": "combined_score",
+        "op": "lt",
+        "value": "0.65"
+       },
+       "then": "ask"
+      },
+      {
+       "id": "routine",
+       "when": {
+        "field": "purpose",
+        "op": "in",
+        "value": [
+         "increase",
+         "open"
+        ]
+       },
+       "then": "auto"
+      }
+     ],
+     "default": "ask",
+     "admission": "ask",
+     "approval": {
+      "timeout_s": 600,
+      "on_timeout": "skip",
+      "approvers": [
+       "role:approver"
+      ],
+      "two_approver_above_usd": null
+     }
+    },
+    "notifications": {
+     "channels": [
+      "email",
+      "web_push"
+     ],
+     "quiet_hours": {
+      "start": "23:00",
+      "end": "07:00",
+      "timezone": "America/New_York"
+     }
+    }
+   },
+   "canonical_sha256": "sha256:b2813595f340ab8a29c6c992829f55f885b67d366af7e54f6f6f93c395cfded4",
+   "derived_from": "btc_accumulator",
+   "note": "schema version 2 (DEC-539)"
   },
   "btc_accumulator_with_deny": {
    "mandate": {
@@ -4104,7 +4276,10 @@
    }
   },
   "approver_users": 1,
-  "workspace_users": 1
+  "workspace_users": 1,
+  "stop_limit_asset_classes": [
+   "crypto"
+  ]
  },
  "cases": [
   {
@@ -19219,6 +19394,636 @@
     "old_version": "sha256:3dae668f300e76a142c3ba6d30d02ff1b87fcbfaddb655021e77046400fc8632",
     "new_version": "sha256:117d19277264ea9588e29b73ea35ae720b68b11ee42d14419637e7bf94bc4526",
     "step_up_required": true
+   }
+  },
+  {
+   "id": "MC-K01",
+   "kind": "schema",
+   "title": "Version 2 names the offset stop_limit_offset",
+   "base": "btc_accumulator",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    },
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": "0.005"
+    }
+   ],
+   "expect": {
+    "schema_valid": true
+   }
+  },
+  {
+   "id": "MC-K02",
+   "kind": "schema",
+   "title": "Version 2 with version 1's field name",
+   "base": "btc_accumulator",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    }
+   ],
+   "expect": {
+    "schema_valid": false
+   }
+  },
+  {
+   "id": "MC-K03",
+   "kind": "schema",
+   "title": "Version 1 with version 2's field name",
+   "base": "btc_accumulator",
+   "patch": [
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": "0.005"
+    }
+   ],
+   "expect": {
+    "schema_valid": false
+   }
+  },
+  {
+   "id": "MC-K04",
+   "kind": "semantic",
+   "title": "Version 2: crypto with protection but no stop-limit offset",
+   "base": "btc_accumulator",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    },
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": null
+    }
+   ],
+   "context": {},
+   "expect": {
+    "violations": [
+     "V-008"
+    ],
+    "warnings": [
+     "W-002"
+    ],
+    "worst_case": {
+     "one_position_at_stop_usd": "800",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-K05",
+   "kind": "semantic",
+   "title": "Equities on a profile that protects them with a stop-limit need the offset",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    },
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": null
+    }
+   ],
+   "context": {
+    "stop_limit_asset_classes": [
+     "crypto",
+     "us_equity"
+    ]
+   },
+   "expect": {
+    "violations": [
+     "V-008"
+    ],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-K06",
+   "kind": "semantic",
+   "title": "With the offset set, it passes and the worst case adds it",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    },
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": "0.01"
+    }
+   ],
+   "context": {
+    "stop_limit_asset_classes": [
+     "crypto",
+     "us_equity"
+    ]
+   },
+   "expect": {
+    "violations": [],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "90",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-K07",
+   "kind": "semantic",
+   "title": "An equity mandate on a profile with OCO and bracket passes without an offset",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    },
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": null
+    }
+   ],
+   "context": {
+    "stop_limit_asset_classes": [
+     "crypto"
+    ]
+   },
+   "expect": {
+    "violations": [],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-K08",
+   "kind": "semantic",
+   "title": "Version 1's crypto_stop_limit_offset is read as the offset, so it passes",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/protection/crypto_stop_limit_offset",
+     "value": "0.01"
+    }
+   ],
+   "context": {
+    "stop_limit_asset_classes": [
+     "crypto",
+     "us_equity"
+    ]
+   },
+   "expect": {
+    "violations": [],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "90",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-K09",
+   "kind": "change",
+   "title": "Raise the stop-limit offset",
+   "base": "btc_accumulator_v2",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/protection/stop_limit_offset",
+     "value": "0.01"
+    }
+   ],
+   "expect": {
+    "classification": "risk_increasing",
+    "changed_paths": [
+     "/protection/stop_limit_offset"
+    ],
+    "old_version": "sha256:b2813595f340ab8a29c6c992829f55f885b67d366af7e54f6f6f93c395cfded4",
+    "new_version": "sha256:9e18e8a98bbd20239ce8114b03d6c77050ea1c90fc3c388c9f44a55e0e5e4106",
+    "step_up_required": true
+   }
+  },
+  {
+   "id": "MC-K10",
+   "kind": "change",
+   "title": "Move to version 2 with a smaller offset (version 1 reads as version 2)",
+   "base": "btc_accumulator",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    },
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": "0.004"
+    }
+   ],
+   "expect": {
+    "classification": "risk_reducing",
+    "changed_paths": [
+     "/protection/stop_limit_offset"
+    ],
+    "old_version": "sha256:9fb03f7ebea3976370394bfab907d99869f50196f7623c3a63d69ef0e8bf3cda",
+    "new_version": "sha256:147afddf016ae4d4df78bd94faaee7dadb3698b6d0f2f7c0efe1333c0da55cc8",
+    "step_up_required": false
+   }
+  },
+  {
+   "id": "MC-K11",
+   "kind": "change",
+   "title": "Move to version 2 with the same offset",
+   "base": "btc_accumulator",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    },
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": "0.005"
+    }
+   ],
+   "expect": {
+    "classification": "neutral",
+    "changed_paths": [],
+    "old_version": "sha256:9fb03f7ebea3976370394bfab907d99869f50196f7623c3a63d69ef0e8bf3cda",
+    "new_version": "sha256:b2813595f340ab8a29c6c992829f55f885b67d366af7e54f6f6f93c395cfded4",
+    "step_up_required": false
+   }
+  },
+  {
+   "id": "MC-K12",
+   "kind": "semantic",
+   "title": "Profile absent: an equity mandate without an offset fails V-008 (fails closed)",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    },
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": null
+    }
+   ],
+   "context": {
+    "stop_limit_asset_classes": null
+   },
+   "expect": {
+    "violations": [
+     "V-008"
+    ],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-K13",
+   "kind": "semantic",
+   "title": "Profile absent: an equity mandate with the offset passes, but the worst case adds it and W-002 fires",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    },
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": "0.09"
+    }
+   ],
+   "context": {
+    "stop_limit_asset_classes": null
+   },
+   "expect": {
+    "violations": [],
+    "warnings": [
+     "W-002"
+    ],
+    "worst_case": {
+     "one_position_at_stop_usd": "210",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-K14",
+   "kind": "semantic",
+   "title": "On the Alpaca profile the same equity mandate passes, its offset out of the worst case, with no W-002",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/mandate_schema_version",
+     "value": 2
+    },
+    {
+     "op": "remove",
+     "path": "/protection/crypto_stop_limit_offset"
+    },
+    {
+     "op": "add",
+     "path": "/protection/stop_limit_offset",
+     "value": "0.09"
+    }
+   ],
+   "context": {
+    "stop_limit_asset_classes": [
+     "crypto"
+    ]
+   },
+   "expect": {
+    "violations": [],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-K15",
+   "kind": "semantic",
+   "title": "A version-1 document after a version-2 previous version is refused (V-031)",
+   "base": "two_stock_swing",
+   "patch": [],
+   "context": {
+    "previous_version": {
+     "mandate_schema_version": 2,
+     "name": "two-stock-swing",
+     "source_text_ref": null,
+     "environment": "paper",
+     "connection_id": "conn_alpaca_paper_01",
+     "capital": {
+      "allocation_usd": "10000",
+      "max_loss_from_allocation": "0.1"
+     },
+     "goal": {
+      "type": "profit_stop",
+      "profit_level": "0.1",
+      "end_date": null
+     },
+     "universe": {
+      "pinned": true,
+      "pinned_instruments": [
+       {
+        "asset_id": "7b4a1c2e-2222-4a2b-9c3d-000000000002",
+        "symbol": "XYZ",
+        "asset_class": "us_equity"
+       },
+       {
+        "asset_id": "7b4a1c2e-3333-4a2b-9c3d-000000000003",
+        "symbol": "QRS",
+        "asset_class": "us_equity"
+       }
+      ],
+      "max_instruments": 2,
+      "asset_classes": [
+       "us_equity"
+      ],
+      "leveraged_etps_enabled": false,
+      "leveraged_etp_disclosure_version": null
+     },
+     "behavior": {
+      "description": "Swing trade two stocks on momentum and news.",
+      "signal_models": [
+       {
+        "id": "llm.news_research",
+        "version": "0.3.0",
+        "content_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "params": [],
+        "weight": "0.4",
+        "max_output_age_s": 3600,
+        "admits_instruments": false
+       },
+       {
+        "id": "quant.momentum",
+        "version": "1.0.0",
+        "content_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "params": [
+         {
+          "key": "lookback_bars",
+          "value": "50"
+         }
+        ],
+        "weight": "0.6",
+        "max_output_age_s": 900,
+        "admits_instruments": false
+       }
+      ],
+      "research": null,
+      "cadence": {
+       "interval_s": 300,
+       "event_sources": [
+        "fills",
+        "news",
+        "price"
+       ]
+      },
+      "sizing": {
+       "method": "conviction_linear",
+       "entry_threshold": "0.3",
+       "exit_threshold": "0.3",
+       "rebalance_band": "0.05"
+      }
+     },
+     "protection": {
+      "enabled": true,
+      "stop_distance": "0.05",
+      "take_profit_distance": "0.1",
+      "stop_limit_offset": null
+     },
+     "risk": {
+      "max_position_usd": "1500",
+      "max_position_fraction": "0.2",
+      "max_gross_exposure_usd": "2000",
+      "max_order_usd": "1000",
+      "max_orders_per_day": 50,
+      "max_daily_loss": "0.02",
+      "daily_loss_action": "exits_only",
+      "max_drawdown": "0.08",
+      "drawdown_ladder": [
+       {
+        "at": "0.03",
+        "action": "scale_sizes",
+        "factor": "0.5"
+       },
+       {
+        "at": "0.06",
+        "action": "exits_only",
+        "factor": null
+       },
+       {
+        "at": "0.08",
+        "action": "flatten_and_pause",
+        "factor": null
+       }
+      ],
+      "hysteresis": "0.01",
+      "scale_action": "limit_buys",
+      "breach_confirm_s": 60,
+      "daily_breach_min_s": 3600,
+      "scale_lift_after_s": 600,
+      "reentry_cooldown_s": 3600
+     },
+     "autonomy": {
+      "rules": [
+       {
+        "id": "large_orders",
+        "when": {
+         "field": "order_usd",
+         "op": "gt",
+         "value": "900"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "low_score",
+        "when": {
+         "field": "combined_score",
+         "op": "lt",
+         "value": "0.65"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "routine",
+        "when": {
+         "field": "purpose",
+         "op": "in",
+         "value": [
+          "increase",
+          "open"
+         ]
+        },
+        "then": "auto"
+       }
+      ],
+      "default": "ask",
+      "admission": "ask",
+      "approval": {
+       "timeout_s": 600,
+       "on_timeout": "skip",
+       "approvers": [
+        "role:approver"
+       ],
+       "two_approver_above_usd": null
+      }
+     },
+     "notifications": {
+      "channels": [
+       "email",
+       "web_push"
+      ],
+      "quiet_hours": {
+       "start": "23:00",
+       "end": "07:00",
+       "timezone": "America/New_York"
+      }
+     }
+    }
+   },
+   "expect": {
+    "violations": [
+     "V-031"
+    ],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
    }
   },
   {

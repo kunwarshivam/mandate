@@ -1,9 +1,9 @@
-"""Journal spec v0.19 §9.8's reference vectors (DEC-670): the control-stream records the workspace API
+"""Journal spec v0.21 §9.9's reference vectors (DEC-670): the control-stream records the workspace API
 commits. They are a saved mandate draft (`MandateDraftSaved`), the compiler's model call
 (`ModelInvocationRecorded` on the control stream), a confirmation that names the agent it is for
 (`MandateConfirmed` version 2), and an owner's request (`OwnerRequestSubmitted`).
 
-The schemas and rules 54 to 65 live in `control.py`, beside §9.2's to §9.7's, so one validator
+The schemas and rules 69 to 80 live in `control.py`, beside §9.2's to §9.7's, so one validator
 judges every closed schema. This module builds the `workspace_api` section: a base draft of each
 record, an invalid draft for every member type and rule, and valid drafts for the cases a rule might
 be misread to refuse. It checks the section with three oracles of its own: the drafts' lineage (a
@@ -37,7 +37,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.19 §9.8 (DEC-670)"
+SPEC = "docs/specs/journal.md v0.21 §9.9 (DEC-670)"
 AT = "2026-10-08T14:00:00.000000000Z"
 IDS = {
     "created": "01J8Z4W0A000000000000000W1",
@@ -67,10 +67,10 @@ OPERATOR = {"kind": "platform_operator", "id": "op_01", "version": "1", "build":
 OTHER_ACTORS = {"agent": AGENT_ACTOR, "broker": BROKER, "platform_operator": OPERATOR}
 # Each actor rule, the base it is judged on, and the kinds besides those its own cases already cover.
 ACTOR_RULES = (
-    ("55", "draft_created", ("agent", "broker", "platform_operator")),
-    ("61", "compile_ok", ("agent", "broker", "platform_operator")),
-    ("63", "confirmed_v2", ("agent", "broker", "platform_operator")),
-    ("64", "request_owner", ("agent", "broker", "platform_operator")),
+    ("70", "draft_created", ("agent", "broker", "platform_operator")),
+    ("76", "compile_ok", ("agent", "broker", "platform_operator")),
+    ("78", "confirmed_v2", ("agent", "broker", "platform_operator")),
+    ("79", "request_owner", ("agent", "broker", "platform_operator")),
 )
 NOTHING_SENT = {
     "response_ref": None,
@@ -243,7 +243,7 @@ NESTED_CASES = (
     ("compile_ok", "tokens.input", "1200", "schema"),
     ("compile_ok", "tokens.cached", None, "schema"),
 )
-# `requested_by`'s value is rule 64's, at the member's own path with the same reason, so a `null` is
+# `requested_by`'s value is rule 79's, at the member's own path with the same reason, so a `null` is
 # refused identically whether or not its type is checked first.
 RULE_TYPED = ("requested_by",)
 # Non-nullable members a `null` must not satisfy, each its own case.
@@ -274,19 +274,19 @@ def member_drafts() -> list[dict]:
     for base, cases in MEMBER_CASES.items():
         for member, wrong_kind, wrong_form in cases:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.kind", "§9.8 types", base, [change(path, wrong_kind)], "schema", path))
+            out.append(invalid(f"{base}.{member}.kind", "§9.9 types", base, [change(path, wrong_kind)], "schema", path))
             if wrong_form is not None:
                 form = [change(path, wrong_form)]
-                out.append(invalid(f"{base}.{member}.form", "§9.8 types", base, form, "non_canonical", path))
+                out.append(invalid(f"{base}.{member}.form", "§9.9 types", base, form, "non_canonical", path))
         for member in NULLED[base]:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.null", "§9.8 types", base, [change(path, None)], "schema", path))
+            out.append(invalid(f"{base}.{member}.null", "§9.9 types", base, [change(path, None)], "schema", path))
         some = MEMBER_CASES[base][0][0]
-        out.append(invalid(f"{base}.missing", "§9.8 closed", base, [delete(f"payload.{some}")], "schema", f"payload.{some}"))
-        out.append(invalid(f"{base}.extra", "§9.8 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
+        out.append(invalid(f"{base}.missing", "§9.9 closed", base, [delete(f"payload.{some}")], "schema", f"payload.{some}"))
+        out.append(invalid(f"{base}.extra", "§9.9 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
     for base, member, value, reason in NESTED_CASES:
         path = f"payload.{member}"
-        out.append(invalid(f"{base}.{member}", "§9.8 types", base, [change(path, value)], reason, path))
+        out.append(invalid(f"{base}.{member}", "§9.9 types", base, [change(path, value)], reason, path))
     return out
 
 
@@ -309,7 +309,7 @@ def actor_drafts() -> list[dict]:
 
 def invalid_drafts() -> list[dict]:
     """Each draft breaks exactly one rule, or the rules its `also` lists; together they cover every
-    §9.8 member type and rule."""
+    §9.9 member type and rule."""
     call = "compile_ok"
     save = "draft_created"
     conf = "confirmed_v2"
@@ -319,7 +319,7 @@ def invalid_drafts() -> list[dict]:
         *actor_drafts(),
         invalid(
             "draft_wrong_stream",
-            "§9.8: a draft is a control-stream record",
+            "§9.9: a draft is a control-stream record",
             save,
             [change("stream_id", AGENT_STREAM)],
             "wrong_stream",
@@ -344,7 +344,7 @@ def invalid_drafts() -> list[dict]:
         | {"changes": [change("artifact_refs", [])]},
         invalid(
             "confirmed_v1_with_the_agent_link",
-            "§9.8: version 1 stays closed; the agent link is version 2's",
+            "§9.9: version 1 stays closed; the agent link is version 2's",
             conf,
             [change("schema_version", 1)],
             "schema",
@@ -353,7 +353,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "confirmed_unknown_version",
-            "§9.8: versions 1 and 2 are registered",
+            "§9.9: versions 1 and 2 are registered",
             conf,
             [change("schema_version", 3)],
             "unknown_schema",
@@ -361,7 +361,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "new_draft_with_a_base",
-            "rule 54: a new draft replaces no save",
+            "rule 69: a new draft replaces no save",
             save,
             [change("payload.base_draft", DRAFT_V2)],
             "schema",
@@ -369,7 +369,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "edit_without_its_base",
-            "rule 54: an edit names the save it replaces",
+            "rule 69: an edit names the save it replaces",
             save,
             [change("payload.origin", "edit")],
             "schema",
@@ -377,7 +377,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "draft_from_a_version_without_it",
-            "rule 54: origin `version` names the version",
+            "rule 69: origin `version` names the version",
             save,
             [change("payload.origin", "version")],
             "schema",
@@ -385,7 +385,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "draft_from_a_description_with_a_version",
-            "rule 54",
+            "rule 69",
             save,
             [change("payload.base_version", BASE_VERSION)],
             "schema",
@@ -393,7 +393,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "compiled_draft_without_its_call",
-            "rule 54: a compiled save names the call it came from",
+            "rule 69: a compiled save names the call it came from",
             "draft_compiled",
             [change("causation_id", None)],
             "schema",
@@ -401,7 +401,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "draft_reports_its_first_failure",
-            "rule 54: in order, the base draft before the version",
+            "rule 69: in order, the base draft before the version",
             save,
             [change("payload.origin", "edit"), change("payload.base_version", BASE_VERSION)],
             "schema",
@@ -409,7 +409,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "draft_saved_by_the_system",
-            "rule 55: a draft is a person's",
+            "rule 70: a draft is a person's",
             save,
             [change("actor", dict(SERVICES))],
             "schema",
@@ -417,7 +417,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "compile_names_another_model",
-            "rule 56: the call binds the registered model it names",
+            "rule 71: the call binds the registered model it names",
             call,
             [change("payload.model.content_hash", BASE_VERSION)],
             "schema",
@@ -425,7 +425,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "ok_without_a_response",
-            "rule 57",
+            "rule 72",
             call,
             [change("payload.response_ref", None)],
             "schema",
@@ -433,7 +433,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "ok_without_its_identity",
-            "rule 57",
+            "rule 72",
             call,
             [change("payload.reported_identity", None)],
             "schema",
@@ -441,7 +441,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "refusal_with_an_attempt",
-            "rule 58: a refusal sends nothing",
+            "rule 73: a refusal sends nothing",
             call,
             [*refused("budget_exhausted"), change("payload.attempts", 1)],
             "schema",
@@ -449,7 +449,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "refusal_with_a_cost",
-            "rule 58",
+            "rule 73",
             call,
             [*refused("meter_unavailable"), change("payload.cost_usd", "0.001")],
             "schema",
@@ -457,7 +457,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "refusal_with_tokens",
-            "rule 58",
+            "rule 73",
             call,
             [*refused("input_rejected"), change("payload.tokens.input", 10)],
             "schema",
@@ -465,7 +465,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "refusal_with_a_provider_request",
-            "rule 58",
+            "rule 73",
             call,
             [*refused("policy_denied"), change("payload.provider_request_id", "req_01")],
             "schema",
@@ -473,7 +473,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "refusal_reports_its_first_failure",
-            "rule 58: in order, the response before the cost",
+            "rule 73: in order, the response before the cost",
             call,
             [*refused("model_withdrawn"), change("payload.response_ref", RESPONSE), change("payload.cost_usd", "1")],
             "schema",
@@ -481,7 +481,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "cache_hit_on_a_failure",
-            "rule 59: only a complete, valid response is cached",
+            "rule 74: only a complete, valid response is cached",
             call,
             [change("payload.outcome", "schema_invalid"), change("payload.cache_hit", True)],
             "schema",
@@ -489,7 +489,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "cache_hit_on_a_refusal",
-            "rule 59: a refusal served nothing, from the cache either",
+            "rule 74: a refusal served nothing, from the cache either",
             call,
             [*refused("budget_exhausted"), change("payload.cache_hit", True)],
             "schema",
@@ -497,7 +497,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "cache_hit_with_an_attempt",
-            "rule 59: a hit sends nothing",
+            "rule 74: a hit sends nothing",
             call,
             [change("payload.cache_hit", True), change("payload.provider_request_id", None), change("payload.cost_usd", "0")],
             "schema",
@@ -505,7 +505,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "cache_hit_with_a_cost",
-            "rule 59: a hit costs nothing",
+            "rule 74: a hit costs nothing",
             call,
             [change("payload.cache_hit", True), change("payload.attempts", 0), change("payload.provider_request_id", None)],
             "schema",
@@ -513,7 +513,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "cache_hit_with_a_provider_request",
-            "rule 59: a hit makes no provider request",
+            "rule 74: a hit makes no provider request",
             call,
             [change("payload.cache_hit", True), change("payload.attempts", 0), change("payload.cost_usd", "0")],
             "schema",
@@ -521,7 +521,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "sent_without_an_attempt",
-            "rule 59: a call that reached the provider made an attempt",
+            "rule 74: a call that reached the provider made an attempt",
             call,
             [change("payload.outcome", "provider_unavailable"), change("payload.attempts", 0)],
             "schema",
@@ -529,7 +529,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "negative_cost",
-            "rule 60",
+            "rule 75",
             call,
             [change("payload.outcome", "schema_invalid"), change("payload.cost_usd", "-0.01")],
             "schema",
@@ -537,7 +537,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "ok_after_its_deadline",
-            "rule 60: one nanosecond late is late (INF-3)",
+            "rule 75: one nanosecond late is late (INF-3)",
             call,
             [change("payload.completed_at", "2026-10-08T14:00:30.000000001Z")],
             "schema",
@@ -545,7 +545,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "compile_by_a_user",
-            "rule 61: the services that called the gateway write it",
+            "rule 76: the services that called the gateway write it",
             call,
             [change("actor", dict(USER))],
             "schema",
@@ -553,7 +553,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "confirm_agent_without_its_base",
-            "rule 62: a version for a deployed agent names its base",
+            "rule 77: a version for a deployed agent names its base",
             conf,
             [change("payload.base_version", None)],
             "schema",
@@ -561,7 +561,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "confirm_base_without_an_agent",
-            "rule 62",
+            "rule 77",
             conf,
             [change("payload.agent_id", None)],
             "schema",
@@ -569,7 +569,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "confirm_the_version_in_force",
-            "rule 62: a confirmation moves the agent off its base",
+            "rule 77: a confirmation moves the agent off its base",
             conf,
             [change("payload.base_version", NEW_VERSION)],
             "schema",
@@ -577,7 +577,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "confirm_by_the_system",
-            "rule 63: only a user confirms",
+            "rule 78: only a user confirms",
             conf,
             [change("actor", dict(SERVICES))],
             "schema",
@@ -585,7 +585,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "request_by_the_system",
-            "rule 64: a request is a person's",
+            "rule 79: a request is a person's",
             req,
             [change("actor", dict(SERVICES))],
             "schema",
@@ -593,7 +593,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "request_claims_a_client",
-            "rule 64: `requested_by` comes from the actor, never the body",
+            "rule 79: `requested_by` comes from the actor, never the body",
             req,
             [change("payload.requested_by", "client"), change("payload.client_id", "client_01")],
             "schema",
@@ -601,14 +601,14 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "owner_request_names_a_client",
-            "rule 64",
+            "rule 79",
             req,
             [change("payload.client_id", "client_01")],
             "schema",
             "payload.client_id",
         ),
-        invalid("request_zero_size", "rule 65", req, [change("payload.quantity", "0")], "schema", "payload.quantity"),
-        invalid("request_negative_size", "rule 65", req, [change("payload.quantity", "-5")], "schema", "payload.quantity"),
+        invalid("request_zero_size", "rule 80", req, [change("payload.quantity", "0")], "schema", "payload.quantity"),
+        invalid("request_negative_size", "rule 80", req, [change("payload.quantity", "-5")], "schema", "payload.quantity"),
     ]
 
 
@@ -618,24 +618,24 @@ def valid_drafts() -> list[dict]:
     call = "compile_ok"
     conf = "confirmed_v2"
     return [
-        valid("draft_from_goal_answers", "rule 54: a new draft", save, [change("payload.origin", "goal_answers")]),
-        valid("draft_from_a_template", "rule 54", save, [change("payload.origin", "template")]),
+        valid("draft_from_goal_answers", "rule 69: a new draft", save, [change("payload.origin", "goal_answers")]),
+        valid("draft_from_a_template", "rule 69", save, [change("payload.origin", "template")]),
         valid(
             "draft_from_a_version",
-            "rule 54: the version it started from",
+            "rule 69: the version it started from",
             save,
             [change("payload.origin", "version"), change("payload.base_version", BASE_VERSION)],
         ),
         valid(
             "draft_edited",
-            "rule 54: an edit names its base and needs no cause",
+            "rule 69: an edit names its base and needs no cause",
             save,
             [change("payload.origin", "edit"), change("payload.base_draft", DRAFT_V2)],
         ),
-        valid("call_refused", "rules 58 and 59: a refusal sent and spent nothing", call, refused("budget_exhausted")),
+        valid("call_refused", "rules 73 and 74: a refusal sent and spent nothing", call, refused("budget_exhausted")),
         valid(
             "call_cache_hit",
-            "rule 59: a hit has its response, no attempt, and no cost",
+            "rule 74: a hit has its response, no attempt, and no cost",
             call,
             [
                 change("payload.cache_hit", True),
@@ -646,13 +646,13 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "call_schema_invalid",
-            "rules 57 and 59: the `compile_failed` call keeps its response and its cost",
+            "rules 72 and 74: the `compile_failed` call keeps its response and its cost",
             call,
             [change("payload.outcome", "schema_invalid")],
         ),
         valid(
             "call_late",
-            "rule 60: a late response is `deadline_exceeded`, not `ok`, and may complete after the deadline",
+            "rule 75: a late response is `deadline_exceeded`, not `ok`, and may complete after the deadline",
             call,
             [
                 change("payload.outcome", "deadline_exceeded"),
@@ -664,26 +664,26 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "call_at_its_deadline",
-            "rule 60: completing at the deadline is in time",
+            "rule 75: completing at the deadline is in time",
             call,
             [change("payload.completed_at", DEADLINE)],
         ),
-        valid("call_without_a_seed", "§9.8: a provider without seeds", call, [change("payload.sampling.seed", None)]),
+        valid("call_without_a_seed", "§9.9: a provider without seeds", call, [change("payload.sampling.seed", None)]),
         valid(
             "confirm_new_mandate",
-            "rule 62: a new mandate names no agent and no base",
+            "rule 77: a new mandate names no agent and no base",
             conf,
             [change("payload.agent_id", None), change("payload.base_version", None)],
         ),
         valid(
             "confirmed_v1_unchanged",
-            "§9.8: version 1 stays registered",
+            "§9.9: version 1 stays registered",
             conf,
             [change("schema_version", 1), delete("payload.agent_id"), delete("payload.base_version")],
         ),
         valid(
             "request_sell_unsized",
-            "rule 65: no size lets the builder size it",
+            "rule 80: no size lets the builder size it",
             "request_owner",
             [change("payload.side", "sell"), change("payload.quantity", None)],
         ),
@@ -708,7 +708,7 @@ def instant(text: str) -> tuple[datetime, int]:
 def sent_problems(name: str, draft: dict) -> list[str]:
     """What a call that made no attempt can show: no provider request, no tokens or cost unless
     served from cache, and an `ok` only in time. Computed from inference spec §3.2 to §3.5, not from
-    rules 57 to 60's outcome lists."""
+    rules 72 to 75's outcome lists."""
     p = draft["payload"]
     out = []
     if p["attempts"] == 0:
@@ -773,34 +773,34 @@ def check_section(section: dict) -> list[str]:
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = (
-    "rule.54.base_draft",
-    "rule.54.base_version",
-    "rule.54.compile",
-    "rule.55",
-    "rule.56",
-    "rule.57",
-    "rule.58",
-    "rule.58.tokens",
-    "rule.59.hit",
-    "rule.59.free",
-    "rule.59.attempts",
-    "boundary.rule_59_attempts",
-    "rule.60.cost",
-    "rule.60.late",
-    "boundary.rule_60_strict",
-    "rule.61",
-    "rule.62.paired",
-    "rule.62.moved",
-    "rule.63",
-    "rule.64.actor",
-    "rule.55.not_system_only",
-    "rule.61.not_user_only",
-    "rule.63.not_system_only",
-    "rule.64.not_system_only",
-    "rule.64.requested_by",
-    "rule.64.client_id",
-    "rule.65",
-    "boundary.rule_65_zero",
+    "rule.69.base_draft",
+    "rule.69.base_version",
+    "rule.69.compile",
+    "rule.70",
+    "rule.71",
+    "rule.72",
+    "rule.73",
+    "rule.73.tokens",
+    "rule.74.hit",
+    "rule.74.free",
+    "rule.74.attempts",
+    "boundary.rule_74_attempts",
+    "rule.75.cost",
+    "rule.75.late",
+    "boundary.rule_75_strict",
+    "rule.76",
+    "rule.77.paired",
+    "rule.77.moved",
+    "rule.78",
+    "rule.79.actor",
+    "rule.70.not_system_only",
+    "rule.76.not_user_only",
+    "rule.78.not_system_only",
+    "rule.79.not_system_only",
+    "rule.79.requested_by",
+    "rule.79.client_id",
+    "rule.80",
+    "boundary.rule_80_zero",
     "record.extra",
     "record.missing",
     "config_refs.required",
@@ -827,7 +827,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
 
     return [
         (
-            "a base draft breaks rule 54",
+            "a base draft breaks rule 69",
             "drafts.valid",
             mutated(lambda s: s["drafts"]["draft_created"]["payload"].update(base_draft=DRAFT_V2)),
         ),
@@ -837,7 +837,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: s["drafts"]["draft_compiled"]["payload"].update(base_draft=DRAFT_V2)),
         ),
         (
-            "a valid hit is written as sent by a provider while rule 58 reads only refusals",
+            "a valid hit is written as sent by a provider while rule 73 reads only refusals",
             "drafts.sent",
             mutated(
                 lambda s: case(s, "valid_drafts", "call_cache_hit")["changes"].append(
@@ -846,7 +846,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             ),
         ),
         (
-            "the base confirmation is the services' while rule 63 is read loosely",
+            "the base confirmation is the services' while rule 78 is read loosely",
             "drafts.human",
             mutated(lambda s: s["drafts"]["confirmed_v2"].update(actor=dict(SERVICES))),
         ),
