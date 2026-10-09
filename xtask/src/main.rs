@@ -10903,6 +10903,11 @@ jq -r "$filter" "$src"
     /// refused as a command word like any other expansion; an escaped `\$` expands nothing, a double-quoted string
     /// runs on across lines, and a job's `outputs:` is not a `run:` step, so the real lines those
     /// read stay allowed, as do `x+=( … )` and `x[i]=…`, which do not start with an expansion.
+    /// X1 tests correction 12c (after #994's surviving mutants) adds: a `..` segment takes the
+    /// `dirname` path off the allowlist; a wrapped `exec "$@"` runs `"$@"` too; a nameref in a
+    /// cluster (`-rn`) is one; a key at the `outputs:` key's indent ends its block; a `#` that
+    /// starts a comment ends a line however many quotes the comment holds, while one inside a
+    /// double quote does not; and an escaped `\"` neither opens nor closes a quote.
     #[test]
     #[ignore = "pending E7-26"]
     fn command_words_that_start_with_an_expansion_fail_closed() -> Result<()> {
@@ -10931,6 +10936,10 @@ jq -r "$filter" "$src"
             "ARR=(cargo build)\n\"${ARR[1]}\" x".to_owned(),
             "\"$*\"".to_owned(),
             "n=$(( $(cargo build --features \"$F\") ))".to_owned(),
+            "\"$(dirname \"$0\")/../x.sh\"".to_owned(),
+            format!("{built_across_lines}\nset -- $C; exec \"$@\""),
+            format!("{built_across_lines}\ndeclare -rn R=C\n$R"),
+            "echo hi # see \"docs\ncargo build --features live".to_owned(),
             "\"$((1 + 2))\"".to_owned(),
             "ARR=(echo hi)\n\"${ARR[$i]}\" x".to_owned(),
         ];
@@ -10967,6 +10976,8 @@ jq -r "$filter" "$src"
             "psql <<SQL\nDO \\$\\$\nBEGIN\nEND\n\\$\\$;\nSQL",
             "case \"$a\" in\n  -*) flags+=(\"$arg\") ;;\n  *) args+=(\"$arg\") ;;\nesac",
             "values[$1]=\"$2\"",
+            "m=\"say \\\"hi\n$(git log --format=%B)\"",
+            "m=\"a # b\n$(git log --format=%B)\"",
         ];
         for text in allowed.iter().skip(1) {
             let files = [ci_file(allowed[0], &format!("set -e\n{text}\n"))];
@@ -10989,12 +11000,27 @@ jq -r "$filter" "$src"
             Vec::<String>::new(),
             "a job's `outputs: run:` is not a `run:` step"
         );
+        let after_outputs = ci_file(
+            ".github/workflows/x.yml",
+            concat!(
+                "jobs:\n  a:\n    runs-on: ubuntu-latest\n    outputs:\n",
+                "      run: ${{ steps.check.outputs.run }}\n",
+                "    steps:\n      - run: ${{ inputs.cmd }}\n",
+            ),
+        );
+        let problems = live_feature_problems(&policy, &meta(), &[after_outputs])?;
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].starts_with(".github/workflows/x.yml:7:"),
+            "a key at the `outputs:` key's own indent ends its block, so the step's `run:` is read: {problems:?}"
+        );
         Ok(())
     }
 
     /// A build file the check cannot read as text, a dangling symlink or a file that is not
     /// UTF-8, is reported as a problem naming its path, not an error that aborts the check (X1
-    /// tests correction 12b, after #979's review; DEC-851 item 6).
+    /// tests correction 12b, after #979's review; DEC-851 item 6), and so is one holding a NUL
+    /// byte (X1 tests correction 12c, after #994's planted NUL).
     #[test]
     #[ignore = "pending E7-26"]
     fn an_unreadable_build_file_is_refused_by_path() -> Result<()> {
@@ -11004,11 +11030,12 @@ jq -r "$filter" "$src"
         )?;
         std::os::unix::fs::symlink(root.join("missing"), root.join("Makefile"))?;
         fs::write(root.join("justfile"), [0xff_u8, 0xfe, b'\n'])?;
+        fs::write(root.join("Dockerfile"), "RUN echo hi\0\n")?;
         let read = ci_files(&root);
         fs::remove_dir_all(&root).ok();
         let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read?)?;
-        assert_eq!(problems.len(), 2, "{problems:?}");
-        for path in ["Makefile", "justfile"] {
+        assert_eq!(problems.len(), 3, "{problems:?}");
+        for path in ["Makefile", "justfile", "Dockerfile"] {
             assert!(
                 problems
                     .iter()
