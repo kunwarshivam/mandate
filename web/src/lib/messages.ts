@@ -1,5 +1,5 @@
 import type { Agent, Approval, GateDecision, Iso, ModelOutput, RiskFigure, TimelineEvent, Workspace } from "@/fixtures/types";
-import { gateRule, verdictLabel } from "./gate-reasons";
+import { verdictLabel, verdictLine } from "./gate-reasons";
 import { clock, clockShort, dateLabel, price, quantity, usd } from "./format";
 import { APPROVAL_STATUS_LABEL, PURPOSE_LABEL, RISK_CAP_LABEL, RISK_FIGURE_LABEL } from "./labels";
 import { approvalAt } from "./mock-runtime";
@@ -152,7 +152,7 @@ function requestDesk(ws: Workspace, agent: Agent, approval: Approval): Desk {
             role: "risk",
             title: "Risk gate",
             at: decision.at,
-            lines: [`${verdictLabel(decision)}${decision.reason_code ? `: ${gateRule(decision.reason_code, agent.mandate)}` : "."}`],
+            lines: [verdictLine(decision, agent)],
             quotes: [],
             figures: approval.risk_impact,
             href: `/agents/${agent.agent_id}/decisions/${decision.event_id}`,
@@ -177,7 +177,7 @@ function decisionDesk(agent: Agent, decision: GateDecision): Desk {
         role: "risk",
         title: "Risk gate",
         at: decision.at,
-        lines: [`${verdictLabel(decision)}${decision.reason_code ? `: ${gateRule(decision.reason_code, agent.mandate)}` : "."}`, ...(decision.then ? [decision.then] : [])],
+        lines: [verdictLine(decision, agent), ...(decision.then ? [decision.then] : [])],
         quotes: [],
         figures: [],
         href: `/agents/${agent.agent_id}/decisions/${decision.event_id}`,
