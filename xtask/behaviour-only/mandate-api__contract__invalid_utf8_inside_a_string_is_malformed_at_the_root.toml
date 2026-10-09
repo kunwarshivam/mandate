@@ -1,9 +1,0 @@
-file = "crates/mandate-api/tests/contract.rs"
-test = "invalid_utf8_inside_a_string_is_malformed_at_the_root"
-reason = """
-E10-10's decode minors from #993's review (DEC-681 item 10, workspace API spec §3.1): `decode` is
-already implemented, and refuses bytes that are not UTF-8 inside a string as `type` at a member
-(and inside a member's name at a sibling or the parent) instead of `malformed` at `""`, so this
-test fails on that answer rather than at a stub. The change that refuses such a body as `malformed`
-deletes this file with the test's `#[ignore]` line.
-"""
