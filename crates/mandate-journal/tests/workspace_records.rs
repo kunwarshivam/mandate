@@ -224,7 +224,6 @@ fn at_version(draft: &Value, version: u64) -> Vec<u8> {
 /// (§5.1: each draft parsed, then the batch), that batch fails at the kill switch, draft 0, where
 /// the version-1 batch passes.
 #[test]
-#[ignore = "pending E10-15"]
 fn an_open_owner_command_is_registered_at_version_1_only() {
     let client = section("client_actor");
     let hold = section("hold");

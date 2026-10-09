@@ -117,6 +117,7 @@ pub(crate) fn payload(
         pii_refs,
     } = envelope;
     if event_type == "OwnerCommandIssued"
+        && schema_version == 1
         && let Some(open) = crate::workspace::open_command(payload, actor)
     {
         return open;
