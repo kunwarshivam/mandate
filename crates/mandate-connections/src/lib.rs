@@ -25,19 +25,21 @@
 //!   returns carries no secret and is what the permission checks (E7-12) take.
 //! - [`grant::check_scope`] checks the granted scopes in the token-exchange process, on the token
 //!   response and before the vault write.
+//! - [`record`] is the connection record and the account-fingerprint uniqueness check, kept by the
+//!   **connection manager, in the API process** (E7-11).
 //! - [`hosts`] is the guard every outbound Alpaca request passes. The only request to the live
 //!   host that can exist is [`hosts::LiveTokenRequest`], `POST /oauth/token` (DEC-821 item 2),
 //!   and only the token-exchange process sends it. Every other request is a
 //!   [`hosts::PaperRequest`], which can address only the paper host; the executor sends only
 //!   those, and its egress contains no live host (DEC-821 item 4).
 //!
-//! Modules for the connection record and fingerprint (E7-11) and the permission checks (E7-12)
-//! are added beside these.
+//! The permission checks (E7-12) are added beside these.
 
 pub mod error;
 pub mod exchange;
 pub mod grant;
 pub mod hosts;
+pub mod record;
 pub mod start;
 pub mod vault;
 
