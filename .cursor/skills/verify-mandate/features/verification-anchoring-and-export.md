@@ -9,7 +9,7 @@
   genesis, a `SegmentExported`, or a stamped `AnchorComputed` on the workspace's own control
   stream only, and a malformed `stream_id` refused, DEC-784; and `anchor_record`, an
   `AnchorComputed` row read as recorded; E12-3; and `resolve_start_from_rows`, the start row
-  checked and a `ManifestStart` confirmed against the cold manifest, DEC-893, DEC-894, pending), `walk_range` in `verify.rs` (a range walked
+  checked and a `ManifestStart` confirmed against the cold manifest, DEC-893, DEC-894, DEC-895), `walk_range` in `verify.rs` (a range walked
   position by position with its count, AU-8; E12-3),
   `crates/mandate-journal/src/connection_fold.rs` (§11's connection checks; a range's lifecycle
   run from its connection anchor or failing closed without one, DEC-885; E7-17).
@@ -18,7 +18,7 @@
   `crates/mandate-journal/tests/control_verify.rs` (the two control-stream range checks against
   their vectors and independent random walks), `crates/mandate-journal/tests/trusted_start.rs`
   (the trusted-start resolver against its vectors, each §9.14 clause, and a random oracle),
-  `crates/mandate-journal/tests/trusted_start_rows.rs` (pending E12-3: the resolver over stored
+  `crates/mandate-journal/tests/trusted_start_rows.rs` (the resolver over stored
   rows and `ManifestStart::confirm` against `row_cases`, and random row variants by an oracle),
   `crates/mandate-journal/tests/connection_fold.rs` (the connection checks against their vectors,
   and every split of every full chain against the full-chain run and an independent scan; and
