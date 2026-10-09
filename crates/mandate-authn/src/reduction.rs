@@ -13,7 +13,8 @@ use crate::UtcNanos;
 /// a constant, not a setting (identity spec §6.4 route 2).
 pub const CHALLENGE_LIFETIME_S: i64 = 300;
 
-/// The one answer every refusal of either route gives (DEC-816 item 6): no variant, no field, and
+/// The one answer every refusal of either route gives (DEC-816 item 6 for the assertion route,
+/// DEC-653 item 3 for the challenge route): no variant, no field, and
 /// one fixed `Debug`, `Display` and code, so no refusal says whether a credential exists, its row
 /// was removed or suspended, its member was refused, or a limit was reached.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -39,7 +40,7 @@ impl fmt::Display for Unauthenticated {
 }
 
 /// Who is asking, as the HTTP layer sees it: the client's address and its device, each limited on
-/// its own. Both are opaque to the gate.
+/// its own. Both are opaque to the gate. Its `Debug` prints both, so H1 never logs one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClientKey {
     pub address: String,
@@ -58,7 +59,8 @@ pub struct ReductionLimits {
 }
 
 /// What the challenge route returns, and all it returns: the bytes the caller drew and when they
-/// stop being accepted, `issued + CHALLENGE_LIFETIME_S`.
+/// stop being accepted, `issued + CHALLENGE_LIFETIME_S`. Its `Debug` prints the bytes, so H1 never
+/// logs one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Challenge {
     pub bytes: [u8; 32],
