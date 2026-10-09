@@ -8,6 +8,7 @@ use mandate_time::UtcNanos;
 use secrecy::SecretString;
 
 use crate::ConnectError;
+use crate::hosts::is_unreserved;
 
 /// The registered redirect URI (connections spec §5.2, DEC-820's domain). It is fixed because
 /// a registered URI cannot carry a workspace id; the workspace travels in the `state` binding.
@@ -18,6 +19,9 @@ pub const AUTHORIZE_URL: &str = "https://app.alpaca.markets/oauth/authorize";
 pub const REQUESTED_SCOPES: &str = "trading data";
 /// How long a `state` may be redeemed after it is issued (Proposed default, §5.2 step 1).
 pub const STATE_LIFETIME_SECS: i64 = 600;
+/// The `env` value of every authorization URL: only a paper binding is ever issued (DEC-821
+/// item 3).
+const PAPER_ENV: &str = "paper";
 
 /// A connection's environment, fixed for its life (CN-3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,10 +65,6 @@ pub struct Redeemed {
 }
 
 #[derive(Debug)]
-#[expect(
-    dead_code,
-    reason = "begin and redeem read it once E10-13 is implemented"
-)]
 struct Issued {
     binding: Binding,
     verifier: PkceVerifier,
@@ -94,16 +94,38 @@ impl PendingStates {
         challenge: &str,
         now: UtcNanos,
     ) -> Result<AuthorizeRedirect, ConnectError> {
-        let _ = (
-            &self.issued,
-            client_id,
-            binding,
-            state,
-            verifier,
-            challenge,
-            now,
+        if binding.environment != Environment::Paper {
+            return Err(ConnectError::EnvironmentRefused);
+        }
+        if self.issued.contains_key(state) {
+            return Err(ConnectError::StateReused);
+        }
+        let parameters = [
+            ("response_type", "code"),
+            ("client_id", client_id.0.as_str()),
+            ("redirect_uri", REDIRECT_URI),
+            ("state", state),
+            ("code_challenge", challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", REQUESTED_SCOPES),
+            ("env", PAPER_ENV),
+        ];
+        let query: Vec<String> = parameters
+            .iter()
+            .map(|(name, value)| format!("{name}={}", percent_encode(value)))
+            .collect();
+        self.issued.insert(
+            state.to_owned(),
+            Issued {
+                binding,
+                verifier,
+                issued_at: now,
+            },
         );
-        Err(ConnectError::Unimplemented { story: "E10-13" })
+        Ok(AuthorizeRedirect(format!(
+            "{AUTHORIZE_URL}?{}",
+            query.join("&")
+        )))
     }
 
     /// Redeems `state` once, returning the binding and the verifier issued with it. Unknown,
@@ -115,7 +137,45 @@ impl PendingStates {
         user_id: &str,
         now: UtcNanos,
     ) -> Result<Redeemed, ConnectError> {
-        let _ = (&self.issued, state, user_id, now);
-        Err(ConnectError::Unimplemented { story: "E10-13" })
+        let issued = self
+            .issued
+            .remove(state)
+            .ok_or(ConnectError::StateUnknown)?;
+        if now >= expiry(issued.issued_at) {
+            return Err(ConnectError::StateExpired);
+        }
+        if issued.binding.user_id != user_id {
+            return Err(ConnectError::StateUserMismatch);
+        }
+        Ok(Redeemed {
+            binding: issued.binding,
+            verifier: issued.verifier,
+        })
     }
+}
+
+/// The first instant at which a `state` issued at `issued_at` is expired. Past the last
+/// representable instant every `state` counts as expired, the reading that admits nothing.
+fn expiry(issued_at: UtcNanos) -> UtcNanos {
+    UtcNanos::from_parts(
+        issued_at.secs().saturating_add(STATE_LIFETIME_SECS),
+        issued_at.nanos(),
+    )
+    .unwrap_or(UtcNanos::EPOCH)
+}
+
+/// Percent-encodes every byte of `value` but RFC 3986 unreserved characters, so a space is
+/// `%20` and no value can add or split a query parameter.
+fn percent_encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| {
+            let c = char::from(byte);
+            if is_unreserved(c) {
+                c.to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
 }
