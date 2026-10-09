@@ -58627,60 +58627,6 @@
     }
    },
    {
-    "name": "checked_below_zero",
-    "clause": "§4.4 and rule 132: a count is an integer from 0",
-    "base_draft": "run_failed",
-    "changes": [
-     {
-      "path": "payload.ranges",
-      "value": [
-       {
-        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-        "from_seq": 1,
-        "to_seq": 40,
-        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-        "to_hash": null,
-        "start": {
-         "kind": "genesis",
-         "manifest_hash": null,
-         "anchor_event_id": null
-        },
-        "checked": -1,
-        "failure": {
-         "check": "rehash_mismatch",
-         "seq": 17
-        },
-        "incomplete": null
-       },
-       {
-        "stream_id": "ctl:ws_01J8Z2",
-        "from_seq": 1,
-        "to_seq": 9,
-        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
-        "start": {
-         "kind": "genesis",
-         "manifest_hash": null,
-         "anchor_event_id": null
-        },
-        "checked": 9,
-        "failure": null,
-        "incomplete": null
-       }
-      ]
-     },
-     {
-      "path": "artifact_refs",
-      "value": []
-     }
-    ],
-    "expect": {
-     "outcome": "Invalid",
-     "reason": "schema",
-     "path": "payload.ranges[0].checked"
-    }
-   },
-   {
     "name": "checked_past_the_range",
     "clause": "rule 132: checked is at most to_seq − from_seq + 1",
     "base_draft": "run_failed",

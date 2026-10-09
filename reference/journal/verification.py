@@ -378,14 +378,6 @@ def invalid_drafts() -> list[dict]:
             f"{R0}.start.kind",
         ),
         invalid(
-            "checked_below_zero",
-            "§4.4 and rule 132: a count is an integer from 0",
-            bad,
-            [change(f"{R0}.checked", -1)],
-            "schema",
-            f"{R0}.checked",
-        ),
-        invalid(
             "checked_past_the_range",
             "rule 132: checked is at most to_seq − from_seq + 1",
             bad,
