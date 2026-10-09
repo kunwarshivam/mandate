@@ -1,0 +1,9 @@
+file = "crates/mandate-executor/tests/properties.rs"
+test = "every_unprotected_interval_has_a_journaled_start_and_end"
+reason = """
+E7-4's. Since slice 2 places brackets, its minimal failure is a script that ends while the
+protected lead's partly filled entry is still inside its interval, which no implementation can
+close before the script stops; it waits on a tests correction (DEC-346 item 7). Slice 2 deleted
+the other two `properties` rows, whose minimal failure is now the kill switch's stub (DEC-164;
+#196 review, round 1, finding 5; #199 review, round 1, finding 4).
+"""

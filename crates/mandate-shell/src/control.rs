@@ -15,7 +15,7 @@ use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, get_artifact};
 use mandate_num::Usd;
 use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
 use mandate_spec::document::ModelId;
-use mandate_spec::policy::{PolicyOverlay, PolicyViolation};
+use mandate_spec::policy::{self, PolicyOverlay, PolicyViolation};
 use mandate_spec::validate::{RegisteredModel, Violation, validate};
 use mandate_spec::{Mandate, ValidationContext};
 use mandate_time::{Date, UtcNanos};
@@ -558,6 +558,140 @@ pub fn governance(
     pinned: &Pinned,
     mandate: &Mandate,
 ) -> Result<Governance, ConfigRefusal> {
-    let _ = (records, store, pinned, mandate);
-    Err(ConfigRefusal::Unimplemented { story: "E7-19" })
+    let registration = latest(records, "model_version", |payload| {
+        let text = |member: &str| payload.get(member).and_then(Value::as_str);
+        text("model_id") == Some(pinned.model_id.as_str())
+            && text("model_version") == Some(pinned.model_version.as_str())
+            && text("content_hash")
+                .and_then(ArtifactRef::parse)
+                .is_some_and(|reference| reference.digest() == pinned.content_hash)
+    })
+    .ok_or(ConfigRefusal::Unregistered {
+        kind: "model_version",
+    })?;
+    let (policy_set, policy_object) = effective(records, store, "policy_set")?;
+    let (model_registry, registry_object) = effective(records, store, "model_registry")?;
+    let malformed = ConfigRefusal::Malformed { kind: "policy_set" };
+    let levels = policy::parse_policy_set(&policy_object).map_err(|_| malformed.clone())?;
+    let checked = policy::check(mandate, &levels).map_err(|_| malformed)?;
+    check_registry(&registry_object, &registration.payload, pinned)?;
+    Ok(Governance {
+        policy_set,
+        model_registry,
+        overlay: checked.overlay,
+        violations: checked.violations,
+    })
+}
+
+/// The latest record by `seq` of type `ConfigSnapshotRegistered` whose payload names `kind` and
+/// satisfies `admits`.
+fn latest<'a>(
+    records: &'a [ControlRecord],
+    kind: &str,
+    admits: impl Fn(&Value) -> bool,
+) -> Option<&'a ControlRecord> {
+    records
+        .iter()
+        .filter(|record| {
+            record.event_type == "ConfigSnapshotRegistered"
+                && record.payload.get("kind").and_then(Value::as_str) == Some(kind)
+                && admits(&record.payload)
+        })
+        .max_by_key(|record| record.seq)
+}
+
+/// The effective registration of `kind` and its parsed object. Only the latest registration is
+/// read, so a later one that cannot be used refuses and an earlier one never stands in (DEC-505
+/// item 1).
+fn effective(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    kind: &'static str,
+) -> Result<(Registered, Value), ConfigRefusal> {
+    let record = latest(records, kind, |_| true).ok_or(ConfigRefusal::Unregistered { kind })?;
+    let malformed = ConfigRefusal::Malformed { kind };
+    let reference = record
+        .payload
+        .get("content_hash")
+        .and_then(Value::as_str)
+        .and_then(ArtifactRef::parse)
+        .ok_or(malformed.clone())?;
+    let bytes = get_artifact(store, &reference).map_err(|error| match error {
+        ArtifactError::Missing => ConfigRefusal::ObjectMissing { kind },
+        ArtifactError::Corrupt => ConfigRefusal::ObjectCorrupt { kind },
+        ArtifactError::Unavailable => ConfigRefusal::StoreUnavailable,
+    })?;
+    let object = mandate_canon::parse(&bytes).map_err(|_| malformed)?;
+    let registered = Registered {
+        seq: record.seq,
+        content_hash: reference.digest(),
+        bytes,
+    };
+    Ok((registered, object))
+}
+
+const ENTRY_MEMBERS: [&str; 5] = [
+    "admits_instruments",
+    "content_hash",
+    "model_id",
+    "model_version",
+    "params",
+];
+
+/// Journal spec §9's `model_registry` shape, then DEC-484 item 5: the entry for the pinned model
+/// equals the effective `model_version` registration's `payload` in every member.
+fn check_registry(
+    registry: &Value,
+    registration: &Value,
+    pinned: &Pinned,
+) -> Result<(), ConfigRefusal> {
+    let malformed = ConfigRefusal::Malformed {
+        kind: "model_registry",
+    };
+    let object = registry.as_object().ok_or(malformed.clone())?;
+    let models = registry.get("models").and_then(Value::as_array);
+    let shaped = object.len() == 3
+        && registry.get("kind").and_then(Value::as_str) == Some("model_registry")
+        && registry
+            .get("model_registry_version")
+            .and_then(Value::as_int)
+            == Some(1);
+    let models = models.filter(|_| shaped).ok_or(malformed.clone())?;
+    let mut ids: Vec<&str> = Vec::new();
+    for entry in models {
+        let members = entry.as_object().ok_or(malformed.clone())?;
+        let text = |member: &str| entry.get(member).and_then(Value::as_str);
+        let params = entry
+            .get("params")
+            .and_then(Value::as_array)
+            .map(|items| items.iter().map(Value::as_str).collect::<Option<Vec<_>>>());
+        let sorted = |items: &[&str]| items.iter().zip(items.iter().skip(1)).all(|(a, b)| a < b);
+        let id = text("model_id").ok_or(malformed.clone())?;
+        let in_shape = members.len() == ENTRY_MEMBERS.len()
+            && ENTRY_MEMBERS
+                .iter()
+                .all(|member| members.contains_key(*member))
+            && text("model_version").is_some()
+            && text("content_hash").and_then(ArtifactRef::parse).is_some()
+            && matches!(entry.get("admits_instruments"), Some(Value::Bool(_)))
+            && params.flatten().is_some_and(|items| sorted(&items))
+            && ids.last().is_none_or(|last| *last < id);
+        if !in_shape {
+            return Err(malformed);
+        }
+        ids.push(id);
+    }
+    let pinned_entry = models
+        .iter()
+        .find(|entry| entry.get("model_id").and_then(Value::as_str) == Some(&pinned.model_id));
+    let equal = pinned_entry.is_some_and(|entry| {
+        ENTRY_MEMBERS
+            .iter()
+            .all(|member| entry.get(member) == registration.get(member))
+    });
+    if equal {
+        Ok(())
+    } else {
+        Err(ConfigRefusal::RegistryMismatch)
+    }
 }

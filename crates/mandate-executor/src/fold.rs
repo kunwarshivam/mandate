@@ -1271,11 +1271,22 @@ fn protection_changed(
                 );
             }
             if !passive {
-                let awaited = state.awaiting.remove(&instrument).is_some();
+                let awaited: Option<BTreeSet<ClientOrderId>> =
+                    state.awaiting.remove(&instrument).map(|ids| {
+                        ids.into_iter()
+                            .filter_map(|id| id.protected_entry())
+                            .collect()
+                    });
                 if let Some(waiting) = state.unprotected.iter_mut().find(|interval| {
                     interval.instrument == instrument
                         && interval.ended_at.is_none()
-                        && (awaited || interval.uncovered)
+                        && (interval.uncovered
+                            || awaited.as_ref().is_some_and(|entries| {
+                                interval
+                                    .bracket
+                                    .as_ref()
+                                    .is_none_or(|entry| entries.contains(entry))
+                            }))
                 }) {
                     waiting.ended_at = Some(at);
                 }
