@@ -1,8 +1,8 @@
-//! The API-7 operations' lenient decoder (workspace API spec §5, DEC-682 item 27, DEC-886), pending
-//! E10-10: every server case of `schemas/workspace-api/examples/lenient/api7.json`, a body that is
-//! not a JSON object, API-4's comparison over the members kept, each member of each operation
-//! corrupted against a hard-member list typed from the spec, workspace members (#1155), duplicates,
-//! and the bodies DEC-886 reads. The kept value's oracle is the test's own: the body with each
+//! The API-7 operations' lenient decoder (workspace API spec §5, DEC-682 item 27, DEC-886, DEC-887):
+//! every server case of `schemas/workspace-api/examples/lenient/api7.json`, a body that is not a
+//! JSON object, API-4's comparison over the members kept, each member of each operation corrupted
+//! against a hard-member list typed from the spec, workspace members (#1155), duplicates, and the
+//! bodies DEC-886 and DEC-887 read. The kept value's oracle is the test's own: the body with each
 //! listed pointer removed, `null` members read as absent.
 
 use mandate_api::lenient::{Api7, ApprovalAnswer, decode_lenient};
@@ -170,6 +170,48 @@ fn the_other_four_refuse_a_body_that_is_not_an_object() {
         for body in NOT_OBJECTS {
             let label = format!("{operation} {}", String::from_utf8_lossy(body));
             assert_refused(&label, lenient(operation, body));
+        }
+    }
+}
+
+/// Where and how the strict decoder refuses each of [`NOT_OBJECTS`] (DEC-681 item 10): not UTF-8
+/// JSON, or bytes after the value, is `malformed`, and any other JSON type is `type`, both at `""`.
+const NOT_OBJECT_CODES: [&str; 10] = [
+    "malformed",
+    "malformed",
+    "malformed",
+    "malformed",
+    "malformed",
+    "type",
+    "type",
+    "type",
+    "type",
+    "type",
+];
+
+#[test]
+#[ignore = "pending E10-10"]
+fn the_other_four_refuse_a_non_object_at_the_root_as_the_strict_decoder_does() {
+    for operation in [
+        "end_delegation",
+        "kill_switch",
+        "owner_exit",
+        "respond_approval",
+    ] {
+        for (body, code) in NOT_OBJECTS.into_iter().zip(NOT_OBJECT_CODES) {
+            let label = format!("{operation} {}", String::from_utf8_lossy(body));
+            let found = match lenient(operation, body) {
+                Err(Refused::Invalid { violations }) => violations,
+                other => panic!("{label}: want invalid, got {other:?}"),
+            };
+            let found: Vec<(String, String)> = found
+                .into_iter()
+                .filter_map(|v| match v {
+                    Violation::Schema { path, code, .. } => Some((path, code)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(found, [(String::new(), code.to_owned())], "{label}");
         }
     }
 }
@@ -564,5 +606,23 @@ fn the_open_bodies_are_read_as_dec_886_says() -> Result<(), String> {
         &[],
         lenient("kill_switch", empty.to_string().as_bytes()),
     )?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn bid_members_sent_only_as_null_or_left_out_are_no_confirmation() -> Result<(), String> {
+    let lone = json!({"instrument": ASSET, "bid": null});
+    let three = json!({"instrument": ASSET, "bid": null, "bid_size": null, "quoted_at": null});
+    for body in [lone, three] {
+        let outcome = lenient("owner_exit", body.to_string().as_bytes());
+        let (kept, _) = outcome.clone().map_err(|e| format!("{body}: {e:?}"))?;
+        assert_kept(&body.to_string(), body.clone(), &[], outcome)?;
+        assert_eq!(
+            without_nulls(kept),
+            json!({"instrument": ASSET}),
+            "{body}: DEC-887"
+        );
+    }
     Ok(())
 }

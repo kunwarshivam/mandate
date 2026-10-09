@@ -51,7 +51,7 @@ export function gateRule(code: ReasonCode, mandate: Mandate | null): string {
     case "price_outside_collar":
       return "The limit price is too far from the current price.";
     case "max_orders_per_day":
-      return risk ? `At most ${risk.max_orders_per_day} orders a day.` : `Orders a day are held to the daily limit of ${DECIDED_UNDER}.`;
+      return risk ? `At most ${risk.max_orders_per_day} orders a day.` : `The number of orders a day is held to the daily limit of ${DECIDED_UNDER}.`;
     case "close_window":
       return "No opening orders in the last 10 minutes of the regular session.";
     case "discretionary_exit_regular_session_only":
