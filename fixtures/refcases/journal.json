@@ -39522,6 +39522,190 @@
     ]
    },
    {
+    "name": "roles_removed_while_deactivated",
+    "clause": "§9.12, DEC-654 item 7: a removal-only change offboards a deactivated member's kept roles",
+    "records": [
+     {
+      "event_type": "MemberActivated",
+      "event_time": "2026-10-05T14:00:00.000000000Z",
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "payload": {
+       "member": "01J8Z5F0A000000000000000F1",
+       "invitation": null,
+       "reason": "founding",
+       "roles": [
+        "approver",
+        "operator",
+        "workspace_admin"
+       ],
+       "method": "passkey",
+       "activated_at": "2026-10-05T14:00:00.000000000Z",
+       "independent_approval_required": true,
+       "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z",
+       "session_ref": null
+      }
+     },
+     {
+      "event_type": "MemberInvited",
+      "event_time": "2026-10-05T15:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "invitation": "01J8Z5F1A00000000000000000",
+       "roles": [
+        "approver",
+        "viewer"
+       ],
+       "invited_by": "01J8Z5F0A000000000000000F1",
+       "step_up": {
+        "assertion_id": "assert_1500",
+        "authenticated_at": "2026-10-05T14:59:50.000000000Z",
+        "method": "passkey"
+       },
+       "invited_at": "2026-10-05T15:00:00.000000000Z",
+       "expires_at": "2026-10-12T15:00:00.000000000Z",
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberActivated",
+      "event_time": "2026-10-05T16:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0B000000000000000F2",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "invitation": "01J8Z5F1A00000000000000000",
+       "reason": "invitation_accepted",
+       "roles": [
+        "approver",
+        "viewer"
+       ],
+       "method": "oidc",
+       "activated_at": "2026-10-05T16:00:00.000000000Z",
+       "independent_approval_required": false,
+       "cool_off_ends_at": "2026-10-05T16:00:00.000000000Z",
+       "session_ref": "session_00F2"
+      }
+     },
+     {
+      "event_type": "MemberDeactivated",
+      "event_time": "2026-10-05T18:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "by": "01J8Z5F0A000000000000000F1",
+       "reason": "admin",
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberRoleChanged",
+      "event_time": "2026-10-05T19:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "changed_by": "01J8Z5F0A000000000000000F1",
+       "added": [],
+       "removed": [
+        "approver"
+       ],
+       "changed_at": "2026-10-05T19:00:00.000000000Z",
+       "independent_approval_required": true,
+       "step_up": null,
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberReactivated",
+      "event_time": "2026-10-05T20:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "by": "01J8Z5F0A000000000000000F1",
+       "step_up": {
+        "assertion_id": "assert_2000",
+        "authenticated_at": "2026-10-05T19:59:50.000000000Z",
+        "method": "passkey"
+       },
+       "roles": [
+        "viewer"
+       ],
+       "reactivated_at": "2026-10-05T20:00:00.000000000Z",
+       "independent_approval_required": true,
+       "cool_off_ends_at": "2026-10-05T20:00:00.000000000Z",
+       "session_ref": "session_00F1"
+      }
+     }
+    ],
+    "unreadable": false,
+    "probes": [
+     {
+      "at": "2026-10-05T19:00:00.000000000Z",
+      "workspace_users": 1,
+      "members": [
+       {
+        "member": "01J8Z5F0B000000000000000F2",
+        "state": "deactivated"
+       }
+      ],
+      "roles": [
+       {
+        "member": "01J8Z5F0B000000000000000F2",
+        "roles": []
+       }
+      ],
+      "invitations": []
+     },
+     {
+      "at": "2026-10-05T20:00:00.000000000Z",
+      "workspace_users": 2,
+      "members": [
+       {
+        "member": "01J8Z5F0B000000000000000F2",
+        "state": "active"
+       }
+      ],
+      "roles": [
+       {
+        "member": "01J8Z5F0B000000000000000F2",
+        "roles": [
+         "viewer"
+        ]
+       }
+      ],
+      "invitations": []
+     }
+    ]
+   },
+   {
     "name": "activated_at_the_expiry",
     "clause": "§9.12: `activated_at` < `expires_at`",
     "records": [
@@ -40781,6 +40965,445 @@
        "step_up": {
         "assertion_id": "assert_1800",
         "authenticated_at": "2026-10-05T17:59:50.000000000Z",
+        "method": "passkey"
+       },
+       "session_ref": "session_00F1"
+      }
+     }
+    ],
+    "unreadable": true,
+    "probes": [
+     {
+      "at": "2026-10-22T06:00:00.000000000Z",
+      "workspace_users": 1,
+      "members": [],
+      "roles": [],
+      "invitations": []
+     }
+    ]
+   },
+   {
+    "name": "a_role_granted_while_deactivated",
+    "clause": "§9.12, DEC-654 item 7: a grant never reaches a deactivated member, even with a removal",
+    "records": [
+     {
+      "event_type": "MemberActivated",
+      "event_time": "2026-10-05T14:00:00.000000000Z",
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "payload": {
+       "member": "01J8Z5F0A000000000000000F1",
+       "invitation": null,
+       "reason": "founding",
+       "roles": [
+        "approver",
+        "operator",
+        "workspace_admin"
+       ],
+       "method": "passkey",
+       "activated_at": "2026-10-05T14:00:00.000000000Z",
+       "independent_approval_required": true,
+       "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z",
+       "session_ref": null
+      }
+     },
+     {
+      "event_type": "MemberInvited",
+      "event_time": "2026-10-05T15:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "invitation": "01J8Z5F1A00000000000000000",
+       "roles": [
+        "viewer"
+       ],
+       "invited_by": "01J8Z5F0A000000000000000F1",
+       "step_up": {
+        "assertion_id": "assert_1500",
+        "authenticated_at": "2026-10-05T14:59:50.000000000Z",
+        "method": "passkey"
+       },
+       "invited_at": "2026-10-05T15:00:00.000000000Z",
+       "expires_at": "2026-10-12T15:00:00.000000000Z",
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberActivated",
+      "event_time": "2026-10-05T16:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0B000000000000000F2",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "invitation": "01J8Z5F1A00000000000000000",
+       "reason": "invitation_accepted",
+       "roles": [
+        "viewer"
+       ],
+       "method": "oidc",
+       "activated_at": "2026-10-05T16:00:00.000000000Z",
+       "independent_approval_required": true,
+       "cool_off_ends_at": "2026-10-05T16:00:00.000000000Z",
+       "session_ref": "session_00F2"
+      }
+     },
+     {
+      "event_type": "MemberDeactivated",
+      "event_time": "2026-10-05T17:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "by": "01J8Z5F0A000000000000000F1",
+       "reason": "admin",
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberRoleChanged",
+      "event_time": "2026-10-05T18:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "changed_by": "01J8Z5F0A000000000000000F1",
+       "added": [
+        {
+         "role": "auditor",
+         "cool_off_ends_at": "2026-10-05T18:00:00.000000000Z"
+        }
+       ],
+       "removed": [
+        "viewer"
+       ],
+       "changed_at": "2026-10-05T18:00:00.000000000Z",
+       "independent_approval_required": true,
+       "step_up": {
+        "assertion_id": "assert_1800",
+        "authenticated_at": "2026-10-05T17:59:50.000000000Z",
+        "method": "passkey"
+       },
+       "session_ref": "session_00F1"
+      }
+     }
+    ],
+    "unreadable": true,
+    "probes": [
+     {
+      "at": "2026-10-22T06:00:00.000000000Z",
+      "workspace_users": 1,
+      "members": [],
+      "roles": [],
+      "invitations": []
+     }
+    ]
+   },
+   {
+    "name": "reactivated_with_a_stripped_role",
+    "clause": "§9.12: a kept role removed while deactivated is not restored",
+    "records": [
+     {
+      "event_type": "MemberActivated",
+      "event_time": "2026-10-05T14:00:00.000000000Z",
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "payload": {
+       "member": "01J8Z5F0A000000000000000F1",
+       "invitation": null,
+       "reason": "founding",
+       "roles": [
+        "approver",
+        "operator",
+        "workspace_admin"
+       ],
+       "method": "passkey",
+       "activated_at": "2026-10-05T14:00:00.000000000Z",
+       "independent_approval_required": true,
+       "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z",
+       "session_ref": null
+      }
+     },
+     {
+      "event_type": "MemberInvited",
+      "event_time": "2026-10-05T15:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "invitation": "01J8Z5F1A00000000000000000",
+       "roles": [
+        "viewer"
+       ],
+       "invited_by": "01J8Z5F0A000000000000000F1",
+       "step_up": {
+        "assertion_id": "assert_1500",
+        "authenticated_at": "2026-10-05T14:59:50.000000000Z",
+        "method": "passkey"
+       },
+       "invited_at": "2026-10-05T15:00:00.000000000Z",
+       "expires_at": "2026-10-12T15:00:00.000000000Z",
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberActivated",
+      "event_time": "2026-10-05T16:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0B000000000000000F2",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "invitation": "01J8Z5F1A00000000000000000",
+       "reason": "invitation_accepted",
+       "roles": [
+        "viewer"
+       ],
+       "method": "oidc",
+       "activated_at": "2026-10-05T16:00:00.000000000Z",
+       "independent_approval_required": true,
+       "cool_off_ends_at": "2026-10-05T16:00:00.000000000Z",
+       "session_ref": "session_00F2"
+      }
+     },
+     {
+      "event_type": "MemberDeactivated",
+      "event_time": "2026-10-05T17:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "by": "01J8Z5F0A000000000000000F1",
+       "reason": "admin",
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberRoleChanged",
+      "event_time": "2026-10-05T18:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "changed_by": "01J8Z5F0A000000000000000F1",
+       "added": [],
+       "removed": [
+        "viewer"
+       ],
+       "changed_at": "2026-10-05T18:00:00.000000000Z",
+       "independent_approval_required": true,
+       "step_up": null,
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberReactivated",
+      "event_time": "2026-10-05T19:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "by": "01J8Z5F0A000000000000000F1",
+       "step_up": {
+        "assertion_id": "assert_1900",
+        "authenticated_at": "2026-10-05T18:59:50.000000000Z",
+        "method": "passkey"
+       },
+       "roles": [
+        "viewer"
+       ],
+       "reactivated_at": "2026-10-05T19:00:00.000000000Z",
+       "independent_approval_required": true,
+       "cool_off_ends_at": "2026-10-05T19:00:00.000000000Z",
+       "session_ref": "session_00F1"
+      }
+     }
+    ],
+    "unreadable": true,
+    "probes": [
+     {
+      "at": "2026-10-22T06:00:00.000000000Z",
+      "workspace_users": 1,
+      "members": [],
+      "roles": [],
+      "invitations": []
+     }
+    ]
+   },
+   {
+    "name": "a_role_change_after_removal",
+    "clause": "§9.12: removed is terminal",
+    "records": [
+     {
+      "event_type": "MemberActivated",
+      "event_time": "2026-10-05T14:00:00.000000000Z",
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "payload": {
+       "member": "01J8Z5F0A000000000000000F1",
+       "invitation": null,
+       "reason": "founding",
+       "roles": [
+        "approver",
+        "operator",
+        "workspace_admin"
+       ],
+       "method": "passkey",
+       "activated_at": "2026-10-05T14:00:00.000000000Z",
+       "independent_approval_required": true,
+       "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z",
+       "session_ref": null
+      }
+     },
+     {
+      "event_type": "MemberInvited",
+      "event_time": "2026-10-05T15:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "invitation": "01J8Z5F1A00000000000000000",
+       "roles": [
+        "viewer"
+       ],
+       "invited_by": "01J8Z5F0A000000000000000F1",
+       "step_up": {
+        "assertion_id": "assert_1500",
+        "authenticated_at": "2026-10-05T14:59:50.000000000Z",
+        "method": "passkey"
+       },
+       "invited_at": "2026-10-05T15:00:00.000000000Z",
+       "expires_at": "2026-10-12T15:00:00.000000000Z",
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberActivated",
+      "event_time": "2026-10-05T16:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0B000000000000000F2",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "invitation": "01J8Z5F1A00000000000000000",
+       "reason": "invitation_accepted",
+       "roles": [
+        "viewer"
+       ],
+       "method": "oidc",
+       "activated_at": "2026-10-05T16:00:00.000000000Z",
+       "independent_approval_required": true,
+       "cool_off_ends_at": "2026-10-05T16:00:00.000000000Z",
+       "session_ref": "session_00F2"
+      }
+     },
+     {
+      "event_type": "MemberDeactivated",
+      "event_time": "2026-10-05T17:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "by": "01J8Z5F0A000000000000000F1",
+       "reason": "admin",
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberRemoved",
+      "event_time": "2026-10-05T18:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "by": "01J8Z5F0A000000000000000F1",
+       "reason": "admin",
+       "session_ref": "session_00F1"
+      }
+     },
+     {
+      "event_type": "MemberRoleChanged",
+      "event_time": "2026-10-05T19:00:00.000000000Z",
+      "actor": {
+       "kind": "user",
+       "id": "01J8Z5F0A000000000000000F1",
+       "version": "1",
+       "build": null
+      },
+      "payload": {
+       "member": "01J8Z5F0B000000000000000F2",
+       "changed_by": "01J8Z5F0A000000000000000F1",
+       "added": [
+        {
+         "role": "auditor",
+         "cool_off_ends_at": "2026-10-05T19:00:00.000000000Z"
+        }
+       ],
+       "removed": [],
+       "changed_at": "2026-10-05T19:00:00.000000000Z",
+       "independent_approval_required": true,
+       "step_up": {
+        "assertion_id": "assert_1900",
+        "authenticated_at": "2026-10-05T18:59:50.000000000Z",
         "method": "passkey"
        },
        "session_ref": "session_00F1"

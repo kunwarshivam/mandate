@@ -303,6 +303,23 @@ def histories() -> list[dict]:
                 probe(day_after_h2, 1, {B: "deactivated"}, {B: []}),
             ],
         },
+        {
+            "name": "roles_removed_while_deactivated",
+            "clause": "§9.12, DEC-654 item 7: a removal-only change offboards a deactivated member's kept roles",
+            "records": [
+                founding(T0),
+                invited(h1, INV["A"], ["approver", "viewer"]),
+                accepted(h2, B, INV["A"], ["approver", "viewer"], independent=False),
+                deactivated(hours(4), B),
+                role_changed(hours(5), B, [], ["approver"]),
+                reactivated(hours(6), B, ["viewer"]),
+            ],
+            "unreadable": False,
+            "probes": [
+                probe(ts(hours(5)), 1, {B: "deactivated"}, {B: []}),
+                probe(ts(hours(6)), 2, {B: "active"}, {B: ["viewer"]}),
+            ],
+        },
         *[
             {
                 "name": name,
@@ -372,6 +389,21 @@ def unreadable_histories() -> list[tuple[str, str, list[dict]]]:
             "a_role_change_while_deactivated",
             "§9.12",
             [*two_users, deactivated(hours(3), B), role_changed(hours(4), B, ["auditor"], [])],
+        ),
+        (
+            "a_role_granted_while_deactivated",
+            "§9.12, DEC-654 item 7: a grant never reaches a deactivated member, even with a removal",
+            [*two_users, deactivated(hours(3), B), role_changed(hours(4), B, ["auditor"], ["viewer"])],
+        ),
+        (
+            "reactivated_with_a_stripped_role",
+            "§9.12: a kept role removed while deactivated is not restored",
+            [*two_users, deactivated(hours(3), B), role_changed(hours(4), B, [], ["viewer"]), reactivated(hours(5), B, ["viewer"])],
+        ),
+        (
+            "a_role_change_after_removal",
+            "§9.12: removed is terminal",
+            [*two_users, deactivated(hours(3), B), removed(hours(4), B), role_changed(hours(5), B, ["auditor"], [])],
         ),
         (
             "deactivated_twice",
@@ -475,6 +507,8 @@ class Fold:
             m = self.members.get(p["member"])
             if m is None:
                 return self.unknown_member()
+            if m.status == "deactivated":
+                return self.change_kept(m, p)
             if m.status not in LIVE and "fold.role_change_any_state" not in self.skip:
                 return self.refuse()
             if any(r not in m.roles for r in p["removed"]) and "fold.unheld_role_removed" not in self.skip:
@@ -505,6 +539,18 @@ class Fold:
             if m is None or (m.status != "deactivated" and "fold.remove_any_state" not in self.skip):
                 return self.refuse()
             m.status = "removed"
+        return None
+
+    def change_kept(self, m: Member, p: dict) -> None:
+        """DEC-654 item 7: removing kept roles from a `deactivated` member only reduces access, so it
+        is accepted for offboarding; a grant to one is refused, as `change_roles` refuses it."""
+        if p["added"] and "fold.deactivated_grant_accepted" not in self.skip:
+            return self.refuse()
+        if not p["added"] and "fold.deactivated_removal_refused" in self.skip:
+            return self.refuse()
+        if any(r not in m.kept for r in p["removed"]):
+            return self.refuse()
+        m.kept = sorted({*m.kept, *(a["role"] for a in p["added"])} - set(p["removed"]))
         return None
 
     def open(self, inv: dict, at: int) -> bool:
@@ -694,6 +740,8 @@ FOLD_MUTANTS = (
     "fold.role_change_any_state",
     "fold.deactivate_any_state",
     "fold.remove_any_state",
+    "fold.deactivated_removal_refused",
+    "fold.deactivated_grant_accepted",
 )
 
 
