@@ -757,6 +757,11 @@ after U-A1 to U-A5 are recorded.
   `doas`, `su -c` and `runuser`, `env -S`, or a dynamic `printf -v "$N"`. They are disclosed
   residuals; the build-file and live-feature checks and review stand behind them. Close them with
   a tests correction that pins each form as refused, then the implementation that refuses it.
+  *Follow-up ([DEC-851](decisions/DEC-851.md) item 6, #979's review):* the live-feature scan's
+  shell reading still has limits: a here-doc body fed to a command other than a shell is read as
+  commands, `case` arm patterns and `[[ =~ ]]` regex parentheses split a command, and a
+  single-quoted string outside the here-doc and text reading is not joined. None hides a refusal
+  rule 1′ makes today; fix each with a pin when a real line needs it.
 - **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
   want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
   so that a token that may reach both environments is on the record before it is used
