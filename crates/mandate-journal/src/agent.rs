@@ -218,6 +218,24 @@ pub enum HeldAnchor {
     Carried { seq: u64, held: bool },
 }
 
+/// Why [`held_anchor`] gave no anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldAnchorError {
+    /// The fold is a DEC-77 stub until `story` lands; once it has, the fold never returns it.
+    Unimplemented { story: &'static str },
+}
+
+/// The hold anchor of a range of one agent stream, folded from `prefix`, that stream's stored rows
+/// `seq` 1 to `from_seq − 1` (§11's `held_mismatch`, DEC-787 item 7, DEC-892). Only
+/// `AgentModeChanged` records are read, by the expected-hold rule: a hold sets it, a lift clears
+/// it, every other record keeps it. No version 2 gives `NoVersionTwo`, else `Carried` at the last
+/// version 2. A prefix that breaks `held_mismatch`, or is not the stream's `seq` 1 to `k` in order,
+/// gives `Unknown`, so the range fails closed (DEC-885 I5).
+pub fn held_anchor(prefix: &[StoredEvent]) -> Result<HeldAnchor, HeldAnchorError> {
+    let _ = prefix;
+    Err(HeldAnchorError::Unimplemented { story: "E12-3" })
+}
+
 /// [`verify_agent_stream`] with §11's `held_mismatch` anchored on `anchor`, the stored chain's
 /// hold before the range, which the caller derives (DEC-673). A full chain is anchored on nothing
 /// before it, whatever `anchor` says.
