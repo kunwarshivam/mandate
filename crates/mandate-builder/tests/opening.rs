@@ -214,7 +214,7 @@ fn an_empty_intersection_refuses_the_buy_and_never_an_exit_or_a_hold() {
 /// the regular session only, so the profile narrows the policy and never widens it.
 #[test]
 #[ignore = "pending E7-23"]
-fn the_form_is_fractional_then_whole_in_the_policys_session_and_time_in_force() {
+fn the_form_is_fractional_then_whole_in_the_policy_session_and_time_in_force() {
     let form = |p: &CapabilityProfile, class, session, tif| {
         opening_form(p, class, session, tif).map_err(|e| e.code())
     };
