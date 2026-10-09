@@ -30,3 +30,27 @@ for (const section of TOP) {
     expect(gap.end).toBeLessThanOrEqual(1);
   });
 }
+
+/**
+ * C-8: on a tab other than Overview the header still says what the agent may do now, beside its
+ * name (DEC-512), and says it once.
+ */
+for (const { scenario, agentId, mode } of [
+  { scenario: "normal", agentId: AGENT_IDS.swing, mode: "Trading" },
+  { scenario: "drawdown", agentId: AGENT_IDS.btc, mode: "Selling only" },
+  { scenario: "paused", agentId: AGENT_IDS.swing, mode: "Paused" },
+]) {
+  test(`Decisions in ${scenario}: the header says ${mode} beside the agent's name`, async ({ page }) => {
+    await page.goto(`${agentHref(agentId, "decisions")}?scenario=${scenario}`);
+    const main = page.getByRole("main");
+    const title = main.getByRole("heading", { level: 1 });
+    const chip = main.getByText(mode, { exact: true }).filter({ visible: true });
+    await expect(title).toBeVisible();
+    await expect(chip).toHaveCount(1);
+    const [name, beside] = await Promise.all([title.boundingBox(), chip.boundingBox()]);
+    const middle = beside!.y + beside!.height / 2;
+    expect(middle).toBeGreaterThan(name!.y);
+    expect(middle).toBeLessThan(name!.y + name!.height);
+    expect(beside!.x).toBeGreaterThan(name!.x + name!.width);
+  });
+}

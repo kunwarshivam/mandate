@@ -1,4 +1,4 @@
-//! The workspace API's contract, part A1a (workspace API spec §3.1, §3.4, §3.5), pending E10-10.
+//! The workspace API's contract, part A1a (workspace API spec §3.1, §3.4, §3.5).
 //! Every oracle here is the test's own: §3.5's table is parsed from the spec, §3.4's ids are hashed
 //! with `sha2` and encoded in Crockford base 32 here, and the closed enums' values are typed from
 //! the spec's text, never read back from the crate.

@@ -16,6 +16,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 mandate-accounting.workspace = true
+mandate-canon.workspace = true
 mandate-executor.workspace = true
 mandate-mcp.workspace = true
 mandate-robinhood.workspace = true

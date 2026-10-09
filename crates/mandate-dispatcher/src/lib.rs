@@ -24,20 +24,21 @@
 //! Nothing here keeps, journals, or logs a header: [`PushRequest`] and [`Relayed`] have no
 //! `Debug`, and an [`Outcome`] or a [`DispatchError`] holds no input (NT-2).
 //!
-//! Every entry point returns a `Result`, so a stub reports [`DispatchError::Unimplemented`]
-//! (DEC-77).
+//! Every entry point returns a `Result`, so a stub would report
+//! [`DispatchError::Unimplemented`] (DEC-77); none does now.
 
-use mandate_notify::Outcome;
+use mandate_notify::{Outcome, Reason};
 use mandate_push_relay::{RelayError, RelayRequest};
 use mandate_webpush::{
-    NoticeClass, PushAllowlist, PushRequest, VapidSigner, VapidSubject, WebPushError,
+    NoticeClass, PushAllowlist, PushEndpoint, PushRequest, VapidSigner, VapidSubject, WebPushError,
+    vapid_authorization,
 };
 
 /// Every way the dispatcher can fail to form a send. None of them is ever a reason to send more,
 /// and none carries an input.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DispatchError {
-    /// The body of every stub in the tests PR (DEC-77).
+    /// The body of a stub in a tests PR (DEC-77); nothing here returns it now.
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
     /// The push request could not be built; the web-push error's closed code says why.
@@ -82,9 +83,16 @@ impl Relayed {
     /// borrowed from this send (DEC-726 item 7).
     ///
     /// # Errors
-    /// Never once implemented: every field is already formed.
+    /// Never: every field is already formed.
     pub fn request(&self) -> Result<RelayRequest<'_>, DispatchError> {
-        Err(DispatchError::Unimplemented { story: "E8-14" })
+        Ok(RelayRequest {
+            relay_id: &self.relay_id,
+            endpoint: &self.push.endpoint,
+            urgency: self.push.urgency.as_str(),
+            ttl_s: self.push.ttl_s,
+            authorization: &self.push.authorization,
+            ciphertext: &self.push.body,
+        })
     }
 }
 
@@ -101,11 +109,41 @@ pub enum Prepared {
 /// `permanent { provider_error }`: spec §5.2 names no reason for a deployment's own configuration
 /// fault, and DEC-728 item 2 takes `provider_error`.
 ///
+/// The endpoint passes [`PushEndpoint::parse_allowed`], which keeps the address exactly as given,
+/// and the header comes from [`vapid_authorization`] on every call: nothing is cached, so no
+/// header outlives its attempt (DEC-726 item 3).
+///
 /// # Errors
 /// [`DispatchError::WebPush`] when the endpoint is not allowlisted or the header cannot be signed.
 pub fn prepare(attempt: &Attempt<'_>) -> Result<Prepared, DispatchError> {
-    let _ = attempt;
-    Err(DispatchError::Unimplemented { story: "E8-14" })
+    if let Route::Relayed { .. } = attempt.route
+        && attempt.subject.check_relayed().is_err()
+    {
+        return Ok(Prepared::Refused(Outcome::Permanent {
+            reason: Reason::ProviderError,
+        }));
+    }
+    let endpoint = PushEndpoint::parse_allowed(attempt.endpoint, attempt.allowlist)?;
+    let authorization = vapid_authorization(
+        &endpoint,
+        attempt.subject,
+        attempt.signer,
+        attempt.now_unix_s,
+    )?;
+    let push = PushRequest {
+        endpoint: attempt.endpoint.to_owned(),
+        ttl_s: attempt.class.ttl_s(),
+        urgency: attempt.class.urgency(),
+        authorization,
+        body: attempt.body.to_vec(),
+    };
+    Ok(match attempt.route {
+        Route::Direct => Prepared::Direct(push),
+        Route::Relayed { relay_id } => Prepared::Relayed(Relayed {
+            relay_id: relay_id.to_owned(),
+            push,
+        }),
+    })
 }
 
 /// The outcome a relay refusal is journaled as (spec §5.2, §5.3): `address_rejected` is
@@ -114,11 +152,28 @@ pub fn prepare(attempt: &Attempt<'_>) -> Result<Prepared, DispatchError> {
 /// deployment's own request that no retry heals, is `permanent { provider_error }`, never
 /// `auth_failed` (DEC-728 item 1).
 ///
+/// The relay's own `unimplemented` code is a fault on the deployment's request path too, so it is
+/// `provider_error` as well. The `match` names every refusal, so a new one cannot reach an outcome
+/// unread.
+///
 /// # Errors
-/// Never once implemented: every refusal has its outcome.
+/// Never: every refusal has its outcome.
 pub fn relay_refusal(refusal: RelayError) -> Result<Outcome, DispatchError> {
-    let _ = refusal;
-    Err(DispatchError::Unimplemented { story: "E8-14" })
+    Ok(match refusal {
+        RelayError::AddressRejected => Outcome::Permanent {
+            reason: Reason::AddressRejected,
+        },
+        RelayError::Unreachable => Outcome::Retryable {
+            reason: Reason::Timeout,
+        },
+        RelayError::Unimplemented { .. }
+        | RelayError::InvalidRelayId
+        | RelayError::InvalidEnvelope
+        | RelayError::TooLarge
+        | RelayError::InvalidAuthorization => Outcome::Permanent {
+            reason: Reason::ProviderError,
+        },
+    })
 }
 
 #[cfg(test)]

@@ -33,7 +33,7 @@ def test_every_committed_anchor_is_in_ref_py(capsys):
 def test_a_stale_anchor_is_named(tmp_path, capsys):
     directory = copy_reference(tmp_path)
     tables = mutation_anchors.anchor_tables(mutation_anchors.load_mutants(directory))
-    assert set(tables) == {"MUTANTS", "TRIPWIRE_MUTANTS", "TRIM_MUTANTS"}
+    assert set(tables) == {"MUTANTS", "TRIPWIRE_MUTANTS", "TRIM_MUTANTS", "UNASKED_MUTANTS"}
     name, (old, _new) = next(iter(tables["TRIM_MUTANTS"].items()))
     ref = directory / mutation_anchors.REFERENCE_MODEL
     text = ref.read_text(encoding="utf-8")
@@ -49,6 +49,22 @@ def test_a_stale_anchor_is_named(tmp_path, capsys):
         "every other table's anchors still occur in the edited ref.py"
     )
     assert f"TRIM_MUTANTS: {name}" in missing
+
+
+def test_a_stale_unasked_anchor_is_named(tmp_path, capsys):
+    directory = copy_reference(tmp_path)
+    tables = mutation_anchors.anchor_tables(mutation_anchors.load_mutants(directory))
+    name, (old, _new) = next(iter(tables["UNASKED_MUTANTS"].items()))
+    ref = directory / mutation_anchors.REFERENCE_MODEL
+    text = ref.read_text(encoding="utf-8")
+    assert old in text
+    ref.write_text(text.replace(old, old.replace("st", "sT", 1), 1), encoding="utf-8")
+
+    missing, _checked = mutation_anchors.missing_anchors(directory)
+    assert mutation_anchors.main([str(directory)]) == 1
+    err = capsys.readouterr().err
+    assert f"FAIL mutation anchor missing or stale: UNASKED_MUTANTS: {name} (" in err
+    assert f"UNASKED_MUTANTS: {name}" in missing
 
 
 def test_a_mutants_module_without_tables_is_refused(tmp_path, capsys):

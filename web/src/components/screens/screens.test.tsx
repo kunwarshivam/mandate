@@ -8,7 +8,7 @@ import { AppShell } from "@/components/shell/app-shell";
 import type { Workspace } from "@/fixtures/types";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
 import { clock, price } from "@/lib/format";
-import { PURPOSE_LABEL } from "@/lib/labels";
+import { MODE_MEANING, PURPOSE_LABEL } from "@/lib/labels";
 import { headroomLine } from "@/lib/limits";
 import { decisionHref } from "@/lib/screens";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
@@ -18,7 +18,7 @@ import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
 import { AlertsScreen } from "./account-screens";
 import { AgentsListScreen } from "./agents-list";
 import { ApprovalRequestScreen } from "./approval-request";
-import { ApprovalsInboxScreen, askSentence } from "./approvals-inbox";
+import { ApprovalsInboxScreen, askSentence, sharedAsks } from "./approvals-inbox";
 import { DashboardScreen } from "./dashboard";
 
 const SCENARIO_IDS = SCENARIOS.map((s) => s.id);
@@ -136,7 +136,7 @@ describe("D1 dashboard", () => {
     const askedHref = decisionHref(asked.agent_id, asked.event_id);
     const others = ws.decisions.filter((d) => d.event_id !== asked.event_id);
     const decisionRegions = () => [...main().querySelectorAll<HTMLElement>("section[aria-labelledby$=decisions-title]")];
-    const shownHrefs = (region: HTMLElement) => within(region).getAllByRole("listitem").map((li) => within(li).getByRole("link").getAttribute("href"));
+    const shownHrefs = (region: HTMLElement) => [...region.querySelectorAll<HTMLElement>("[data-slot=timeline-entry]")].map((li) => within(li).getByRole("link").getAttribute("href"));
     const closed = (status: "acted" | "expired") => (w: Workspace) => ({
       ...w,
       approvals: w.approvals.map((a) => (a.approval_id === APPROVAL_IDS.swingXyz ? { ...a, status } : a)),
@@ -215,13 +215,14 @@ describe("D1 dashboard", () => {
 describe("D2 agent detail", () => {
   const rails = (el: Element) => [...el.querySelectorAll("[data-slot=limit-rail]")];
 
-  it("keeps only a compact mandate beside the story: mode, rails in dollars, the next level, and a way to the rest", () => {
+  it("keeps only a compact mandate beside the story: what the mode means, rails in dollars, the next level, and a way to the rest", () => {
     renderScreen(`/agents/${AGENT_IDS.swing}`, <AgentDetailScreen agentId={AGENT_IDS.swing} />);
     const rail = main().querySelector("[data-layout=rail]") as HTMLElement;
     const card = within(rail).getByRole("region", { name: "Your mandate" });
     expect(card).toHaveAttribute("data-slot", "mandate-card");
     expect([...rail.children]).toEqual([card]);
-    expect(card.querySelector("[data-slot=mode-badge]")).not.toBeNull();
+    expect(within(card).getByRole("group", { name: "Mode" })).toHaveTextContent(MODE_MEANING.normal);
+    expect(card.querySelector("[data-slot=mode-badge]")).toBeNull();
     expect(rails(card).length).toBeGreaterThan(0);
     for (const r of rails(card)) expect(r).toHaveTextContent(/\$[\d,]+\.\d{2} of \$[\d,]+\.\d{2}/);
     expect(rails(card).some((r) => /profit/i.test(r.textContent ?? ""))).toBe(false);
@@ -259,7 +260,7 @@ describe("D2 agent detail", () => {
     expect(headings).toEqual(expect.arrayContaining(["Equity against your mandate", "Key figures", "Positions", "Working orders", "Recent decisions", "Activity", "News"]));
     const activity = within(main()).getByRole("region", { name: "Activity" });
     expect(story.some((col) => col.contains(activity))).toBe(true);
-    expect(activity.querySelectorAll("li").length).toBeLessThanOrEqual(5);
+    expect(activity.querySelectorAll("[data-slot=record-entry]").length).toBeLessThanOrEqual(5);
     expect(within(activity).getByRole("link", { name: "View all activity" })).toHaveAttribute("href", `/agents/${AGENT_IDS.btc}/activity`);
   });
 
@@ -400,8 +401,10 @@ describe("D2 agent detail", () => {
     });
     const today = within(main()).getAllByText("An order today.")[0].parentElement as HTMLElement;
     const late = within(main()).getAllByText("An order late the evening before, written in UTC.")[0].parentElement as HTMLElement;
-    expect(today.querySelector("time")).toHaveTextContent(/^13:10:00$/);
-    expect(late.querySelector("time")).toHaveTextContent(/^Sep 27, 2026, 23:59$/);
+    expect(within(main()).getAllByRole("list", { name: "Today" })[0]).toContainElement(today);
+    expect(within(main()).getAllByRole("list", { name: "27 September" })[0]).toContainElement(late);
+    expect(today.querySelector("time")).toHaveTextContent(/^Sep 28, 2026, 13:10:00$/);
+    expect(late.querySelector("time")).toHaveTextContent(/^Sep 27, 2026, 23:59:00$/);
   });
 
   it("shows the mode banner with what is blocked, when it ends, and who acts", () => {
@@ -436,11 +439,14 @@ describe("D5 inbox and D6 request", () => {
     const why = within(rail).getByRole("region", { name: "What sends you a request" });
     const ws = buildWorkspace("approvals");
     const rows = [...why.querySelectorAll("li")];
-    expect(rows).toHaveLength(ws.agents.length);
+    const sets = sharedAsks(ws.agents);
+    expect(rows).toHaveLength(sets.length);
+    expect(sets.flatMap((s) => s.agents)).toHaveLength(ws.agents.length);
     rows.forEach((row, i) => {
-      const agent = ws.agents[i];
-      expect(within(row).getByRole("link", { name: agent.label })).toHaveAttribute("href", `/agents/${agent.agent_id}/mandate`);
-      expect(row).toHaveTextContent(askSentence(agent));
+      for (const agent of sets[i].agents) {
+        expect(within(row).getByRole("link", { name: agent.label })).toHaveAttribute("href", `/agents/${agent.agent_id}/mandate`);
+      }
+      expect(row).toHaveTextContent(sets[i].sentence);
       expect(row).toHaveTextContent(/A request waits .+, then is skipped\.$/);
     });
     expect(askSentence(ws.agents.find((a) => a.agent_id === AGENT_IDS.swing)!)).toMatch(/^Your rules?: (?:[^;]*; )*ask when the combined model score is below 0\.65[;.]/);

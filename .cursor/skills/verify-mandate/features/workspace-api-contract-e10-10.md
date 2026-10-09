@@ -23,6 +23,25 @@
   (a whole request, response, problem, or envelope shape; a nested record, step-up, delegation,
   bid, watermark, or step) written as a JSON array refused as `type` at `""`, its member, or its
   array item.
+- **No body names a workspace:** `crates/mandate-api/tests/body_workspace.rs`, live (#1130, #560
+  minor 6): every request schema under `schemas/workspace-api/commands/` and every request type in
+  `requests.rs` has a decoder row; each example, and each `.valid.json` case applied to it, reaches
+  every object its schema describes (nested ones through `$ref`), and `workspace`, `workspace_id`,
+  or `ws` added to any of its objects is `unknown_member` at that member, or at the internally
+  tagged object holding it; no request schema names such a member; a kill switch's workspace scope
+  naming any workspace is refused, `null` accepted.
+- **Lenient decoder:** `crates/mandate-api/src/lenient.rs`, `decode_lenient` for the six API-7
+  bodies (DEC-682 item 27, DEC-689 item 2, DEC-886), stubbed with `Refused::Unimplemented`.
+  `crates/mandate-api/tests/lenient.rs`, pending E10-10: every case of
+  `schemas/workspace-api/examples/lenient/api7.json`, its `dropped` exactly and its kept value
+  against the body with those pointers removed; a body that is not a JSON object read as `{}` with
+  `[""]` for pause and hold and refused for the other four; API-4's comparison over the members
+  kept; each member of each operation's full example corrupted (wrong type, garbage, an unknown
+  nested member), dropped and listed when not hard and refused when hard, against a hard-member
+  list typed from §5; a `workspace`, `workspace_id` or `ws` member at the root, in a record, or in
+  the hard `scope`, dropped and listed and never moving the stop (#1155); duplicates; DEC-886's
+  items 2, 4 and 9; a non-object root refused `malformed` or `type` at `""`; and DEC-887's bid
+  members sent only as `null` or left out.
 - **Schemas:** `crates/mandate-api/tests/schemas.rs`: live enum and member drift against
   `schemas/workspace-api/` (DEC-683), each member `null`-able and optional exactly as its schema
   says, a kill switch scope's `null` id exactly for `workspace`, and no `serde(flatten)`; pending,
