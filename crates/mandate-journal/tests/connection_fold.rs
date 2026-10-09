@@ -390,7 +390,7 @@ fn only_a_record_that_enters_suspended_moves_the_suspension_a_rotation_must_foll
 
 /// Rule 66: "A version-1 first establishment has no `account_ref`, so it is never
 /// re-established", not even by another version 1 whose absent `account_ref` matches it.
-/// `reference/journal/connections.py` admits that one; §9.8's text refuses it.
+/// §9.8's text refuses it, and so does `reference/journal/connections.py` since v0.30 (DEC-696).
 #[test]
 fn a_version_1_first_establishment_is_never_established_again() {
     let again = |first: (&'static str, String), second: (&'static str, String)| {
@@ -410,7 +410,8 @@ fn a_version_1_first_establishment_is_never_established_again() {
 
 /// §11: a version-2 establishment's cause is a `connect` check, "`reconnect` for a later
 /// establishment of the same id", whatever the earlier establishment's version.
-/// `reference/journal/connections.py` counts only version 2; §9.8's text counts either.
+/// §9.8's text counts either version, and so does `reference/journal/connections.py` since v0.30
+/// (DEC-696).
 #[test]
 fn a_later_establishment_after_a_version_1_rests_on_a_reconnect_check() {
     let after_v1 = |occasion: &str| {

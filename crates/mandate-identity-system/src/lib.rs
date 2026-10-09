@@ -105,10 +105,6 @@ pub struct Registration {
 /// A background process's context for one workspace (DEC-642 item 5). Private fields, no
 /// `Default`, no `Clone`; its only constructor is [`SystemContext::new`].
 #[derive(Debug)]
-#[expect(
-    dead_code,
-    reason = "its fields are read by the accessors E9-8 implements, stubs until then"
-)]
 pub struct SystemContext {
     org: OrgId,
     workspace: WorkspaceId,
@@ -125,47 +121,41 @@ impl SystemContext {
             registration,
         }
     }
-}
 
-#[expect(
-    clippy::todo,
-    reason = "E9-8's stubs: `require` returns a `Refusal`, which has no `Unimplemented`, and the \
-              accessors return plain values, so each is todo!(), the other form DEC-137 names"
-)]
-impl SystemContext {
     /// The actor it was registered as.
     pub fn actor(&self) -> SystemActor {
-        todo!()
+        self.registration.actor
     }
 
     /// The witness a sensitive data API demands (DEC-655 item 4): `Ok` exactly when the
     /// registration lists `P`'s permission, and otherwise [`Refusal::Forbidden`].
     pub fn require<P: RequiredPermission>(&self) -> Result<Permitted<'_, P>, Refusal> {
-        todo!()
+        mandate_identity::demand::require(self)
     }
 }
 
 impl mandate_tenant::Sealed for SystemContext {}
 
-#[expect(clippy::todo, reason = "E9-8's stubs, todo!() as DEC-137 names")]
 impl Tenant for SystemContext {
     fn workspace(&self) -> WorkspaceId {
-        todo!()
+        self.workspace
     }
     fn org(&self) -> OrgId {
-        todo!()
+        self.org
     }
     fn principal(&self) -> PrincipalId {
-        todo!()
+        self.registration.workload
     }
     fn kind(&self) -> PrincipalKind {
-        todo!()
+        match self.registration.actor {
+            SystemActor::Agent => PrincipalKind::Agent,
+            SystemActor::System => PrincipalKind::Process,
+        }
     }
 }
 
-#[expect(clippy::todo, reason = "E9-8's stub, todo!() as DEC-137 names")]
 impl Grants for SystemContext {
-    fn grants(&self, _permission: Permission) -> bool {
-        todo!()
+    fn grants(&self, permission: Permission) -> bool {
+        self.registration.permissions.contains(&permission)
     }
 }

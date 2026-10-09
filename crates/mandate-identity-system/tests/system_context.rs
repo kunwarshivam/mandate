@@ -66,7 +66,6 @@ fn new_keeps_the_org_the_workspace_and_the_registration_apart() {
 }
 
 #[test]
-#[ignore = "pending E9-8"]
 fn a_system_context_reports_what_it_was_built_with() {
     for (workspace, workload, actor, kind) in [
         (W1, EXECUTOR, SystemActor::System, PrincipalKind::Process),
@@ -79,7 +78,6 @@ fn a_system_context_reports_what_it_was_built_with() {
 }
 
 #[test]
-#[ignore = "pending E9-8"]
 fn a_system_context_reaches_only_its_own_workspace() {
     let store = BTreeMap::from([(W1, "w1 rows"), (W2, "w2 rows")]);
     for (workspace, rows) in [(W1, "w1 rows"), (W2, "w2 rows")] {
@@ -89,7 +87,6 @@ fn a_system_context_reaches_only_its_own_workspace() {
 }
 
 #[test]
-#[ignore = "pending E9-8"]
 fn a_registration_listing_no_sensitive_permission_cannot_read_records() {
     let listed = [P::ViewAgents, P::Pause, P::KillSwitchAgent];
     let context = system(O1, W1, EXECUTOR, SystemActor::System, &listed);
@@ -98,7 +95,6 @@ fn a_registration_listing_no_sensitive_permission_cannot_read_records() {
 }
 
 #[test]
-#[ignore = "pending E9-8"]
 fn a_listed_permission_yields_a_witness_for_the_same_context() {
     let context = system(O1, W2, RUNTIME, SystemActor::Agent, &[P::ReadRecords]);
     let witness = context.require::<ReadRecords>();
@@ -113,7 +109,6 @@ fn listed(drawn: &[(P, bool)], permission: P) -> bool {
 }
 
 #[test]
-#[ignore = "pending E9-8"]
 fn require_succeeds_exactly_when_the_registration_lists_the_permission() {
     let on = proptest::collection::vec(any::<bool>(), POOL.len());
     let draws = (

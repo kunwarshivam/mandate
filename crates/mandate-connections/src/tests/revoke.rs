@@ -70,7 +70,6 @@ fn the_worked_vectors_are_the_sha256_of_their_canonical_bytes() {
 
 /// DEC-693 item 5's vectors: an absent `compromised` binds `false`, and the workspace is bound.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_revoke_digests_are_dec_693_s_vectors() {
     let digest = |workspace: &str, compromised| {
         shown(revoke_digest(workspace, &conn("conn_01"), compromised).unwrap())
@@ -84,7 +83,6 @@ fn the_revoke_digests_are_dec_693_s_vectors() {
 /// DEC-693 items 1, 3 and 4 for any ids: the digest is the SHA-256 of the canonical object written
 /// out by hand here, so evidence for one workspace, connection, or path never fits another.
 #[test]
-#[ignore = "pending E10-13"]
 fn every_revoke_digest_binds_workspace_connection_and_path() {
     let ids = (
         "[A-Za-z0-9_-]{1,64}",
@@ -110,7 +108,6 @@ fn every_revoke_digest_binds_workspace_connection_and_path() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_ordinary_revoke_commits_one_owner_revocation_when_stopped_and_flat() {
     let clear = facts(AllStopped, flat());
     let plan = plan_ordinary(&conn("conn_01"), StepUp::Verified, &clear).unwrap();
@@ -121,7 +118,6 @@ fn an_ordinary_revoke_commits_one_owner_revocation_when_stopped_and_flat() {
 /// Workspace API §4.5 and DEC-693 item 7, one reason at a time: a fold that cannot answer is
 /// never read as "no positions" or "stopped".
 #[test]
-#[ignore = "pending E10-13"]
 fn an_ordinary_revoke_is_refused_for_each_reason_alone() {
     let held = PositionsFold::Answered(BTreeSet::from([asset(1)]));
     let cases = [
@@ -142,9 +138,42 @@ fn an_ordinary_revoke_is_refused_for_each_reason_alone() {
     }
 }
 
+/// DEC-698, over every combination of step-up, agents fold, and positions fold: an ordinary revoke
+/// that several refusals hold for refuses with the first of step-up, a fold that cannot answer,
+/// positions held, agents not stopped, so a caller without step-up learns nothing of the account.
+/// The expected plan is this test's own ordered check, never the code under test's.
+#[test]
+fn an_ordinary_revoke_refuses_with_the_first_reason_in_dec_698_order() {
+    let held = PositionsFold::Answered(BTreeSet::from([asset(1)]));
+    let positions_folds = [PositionsFold::CannotAnswer, flat(), held];
+    for step_up in [StepUp::Verified, StepUp::NotVerified] {
+        for agents in [AllStopped, SomeNotStopped, CannotAnswer] {
+            for positions in positions_folds.clone() {
+                let positions_held =
+                    matches!(&positions, PositionsFold::Answered(assets) if !assets.is_empty());
+                let fold_cannot_answer =
+                    agents == CannotAnswer || positions == PositionsFold::CannotAnswer;
+                let expected = if step_up == StepUp::NotVerified {
+                    RevokePlan::Refused(StepUpNotVerified)
+                } else if fold_cannot_answer {
+                    RevokePlan::Refused(FoldCannotAnswer)
+                } else if positions_held {
+                    RevokePlan::Refused(PositionsHeld)
+                } else if agents == SomeNotStopped {
+                    RevokePlan::Refused(AgentsNotStopped)
+                } else {
+                    RevokePlan::Commit(vec![revocation("conn_01", RevokeReason::Owner)])
+                };
+                let case = format!("{step_up:?} {agents:?} {positions:?}");
+                let plan = plan_ordinary(&conn("conn_01"), step_up, &facts(agents, positions));
+                assert_eq!(plan.unwrap(), expected, "{case}");
+            }
+        }
+    }
+}
+
 /// DEC-693 item 8: positions nothing authoritative answers for are "unknown", never none.
 #[test]
-#[ignore = "pending E10-13"]
 fn remaining_positions_are_unknown_when_the_fold_cannot_answer() {
     let unknown = remaining_positions(&PositionsFold::CannotAnswer).unwrap();
     assert_eq!(unknown, RemainingPositions::Unknown);
@@ -176,7 +205,6 @@ fn step_up() -> impl Strategy<Value = StepUp> {
 /// positions"; otherwise it is refused for a reason that holds, and a fold that cannot answer
 /// always refuses. It never plans a kill switch.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_ordinary_revoke_commits_only_on_answered_clear_facts() {
     let inputs = (
         "[A-Za-z0-9_-]{1,64}",
@@ -224,7 +252,6 @@ fn an_ordinary_revoke_commits_only_on_answered_clear_facts() {
 /// exactly this connection's kill switch, then its compromised revocation, in one batch; without,
 /// the kill switch still commits and only the revocation is refused.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_compromised_revoke_is_never_refused() {
     let inputs = ("[A-Za-z0-9_-]{1,64}", step_up());
     TestRunner::deterministic()
