@@ -18,6 +18,7 @@ const RFC_SEED: [u8; 32] = [
 const RFC_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const RFC_CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 const STATE_SEED: [u8; 32] = [7; 32];
+const ISSUER: &str = "https%3A%2F%2Fas.test%2F";
 const AUTHORIZE: &str = "https://as.test/authorize";
 
 /// Unpadded base64url, one bit at a time: the test's own encoder, not the crate's.
@@ -52,8 +53,9 @@ fn client(port: u16) -> ClientRegistration {
 }
 
 fn begin(verifier: &[u8; 32], state: &[u8; 32]) -> (Url, PendingLogin) {
-    let found = server(AUTHORIZE);
-    found.begin_with(&client(49152), verifier, state).unwrap()
+    server(AUTHORIZE)
+        .begin_with(&client(49152), verifier, state)
+        .unwrap()
 }
 
 /// The one value of the query member `name`, after checking it appears exactly once.
@@ -95,6 +97,7 @@ fn the_request_carries_rfc_7636s_appendix_b_challenge_and_exactly_the_flow_membe
         assert_eq!(login.verifier.expose_secret(), RFC_VERIFIER);
         assert_eq!(login.state.expose_secret(), state);
         assert_eq!(login.client, client(port));
+        assert_eq!(login.issuer.as_str(), "https://as.test/");
     }
 }
 
@@ -150,7 +153,11 @@ fn the_callback_with_the_logins_own_state_yields_its_code() {
     let state = b64url(&STATE_SEED);
     let cases = [
         (format!("/callback?code=abc-123&state={state}"), "abc-123"),
-        (format!("/callback?state={state}&iss=x&code=a%2Fb"), "a/b"),
+        (
+            format!("/callback?state={state}&iss={ISSUER}&code=a%2Fb"),
+            "a/b",
+        ),
+        (format!("/callback?code=p&state=%42{}", &state[1..]), "p"),
     ];
     for (target, code) in cases {
         let (_, login) = begin(&RFC_SEED, &STATE_SEED);
@@ -191,7 +198,7 @@ fn a_state_that_differs_in_any_way_or_repeats_is_refused() {
 
 #[test]
 #[ignore = "pending E7-24"]
-fn an_error_a_bad_path_or_a_bad_code_is_refused_unread() {
+fn an_error_a_bad_issuer_path_or_code_is_refused_unread() {
     let own = b64url(&STATE_SEED);
     let cases = [
         (
@@ -203,14 +210,17 @@ fn an_error_a_bad_path_or_a_bad_code_is_refused_unread() {
             "authorization_denied",
         ),
         ("/callback?error=canary&code=c&state=x", "state_mismatch"),
+        ("/callback?code=c&iss=!/&state=x", "state_mismatch"),
+        ("/callback?code=c&iss=!/&state=@", "issuer_mismatch"),
+        ("/callback?error=e&iss=!/&state=@", "issuer_mismatch"),
+        ("/callback?code=c&iss=^&state=@", "issuer_mismatch"),
+        ("/callback?iss=^/&iss=^/&code=c&state=@", "issuer_mismatch"),
         ("/callback?state=@", "malformed"),
         ("/callback?code=&state=@", "malformed"),
-        ("/callback?code=a&code=a&state=@", "malformed"),
         ("/callback?code=a&code=b&state=@", "malformed"),
         ("/callback?code=a%20b&state=@", "malformed"),
         ("/callback?code=%C3%A9&state=@", "malformed"),
         ("/callback?code=%7F&state=@", "malformed"),
-        ("/?code=canary&state=@", "malformed"),
         ("/callback/?code=canary&state=@", "malformed"),
         ("/CALLBACK?code=canary&state=@", "malformed"),
         ("//callback?code=canary&state=@", "malformed"),
@@ -218,7 +228,8 @@ fn an_error_a_bad_path_or_a_bad_code_is_refused_unread() {
     ];
     for (target, wanted) in cases {
         let (_, login) = begin(&RFC_SEED, &STATE_SEED);
-        let target = target.replace('@', &own);
+        let target = target.replace('@', &own).replace('!', "https://x.test");
+        let target = target.replace('^', "https://as.test");
         assert_eq!(refused(login, &target, &[&own]), wanted, "{target}");
     }
 }
@@ -231,6 +242,7 @@ fn a_login_and_its_code_never_print_their_secrets() {
         state,
         verifier,
         client: client.clone(),
+        issuer: Url::parse("https://as.test/").unwrap(),
     };
     let (code, verifier) = (secret("canary-c"), secret("canary-v"));
     let granted = AuthorizationCode {

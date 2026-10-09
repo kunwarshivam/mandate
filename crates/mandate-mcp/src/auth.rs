@@ -154,6 +154,7 @@ pub struct PendingLogin {
     pub(crate) state: SecretString,
     pub(crate) verifier: SecretString,
     pub(crate) client: ClientRegistration,
+    pub(crate) issuer: Url,
 }
 
 /// The code the callback carried, with the verifier and client that redeem it once at the token
@@ -169,10 +170,11 @@ pub struct AuthorizationCode {
 impl PendingLogin {
     /// The request-target of the browser's `GET` to the loopback redirect; any target spends the
     /// login. The path must be exactly `/callback` ([`McpError::Malformed`]); `state` must appear
-    /// once, equal to the login's own once percent-decoded ([`McpError::StateMismatch`]); then
+    /// once, equal to the login's own once percent-decoded ([`McpError::StateMismatch`]); then an
+    /// `iss`, if any, must appear once and equal the issuer ([`McpError::IssuerMismatch`]); then
     /// `error` is [`McpError::AuthorizationDenied`], its text unread; `code` must appear once, as
     /// non-empty visible ASCII ([`McpError::Malformed`]). Other members are not read. No error
-    /// carries the state, the code or the target's text (DEC-855 items 1 to 3).
+    /// carries the state, the code or the target's text (DEC-855 items 1 to 4).
     pub fn callback(self, target: &str) -> Result<AuthorizationCode, McpError> {
         let _ = target;
         Err(McpError::Unimplemented { story: "E7-24" })
@@ -249,7 +251,7 @@ impl AuthServer {
     /// endpoint must carry no query ([`McpError::EndpointShape`]); the URL adds exactly
     /// `response_type` `code`, `client_id`, `redirect_uri`, `code_challenge`
     /// BASE64URL(SHA-256(verifier)), `code_challenge_method` `S256`, `state`, and `resource` the
-    /// MCP endpoint (DEC-855 items 4 and 5).
+    /// MCP endpoint (DEC-855 items 5 and 6).
     #[cfg_attr(
         not(test),
         allow(dead_code, reason = "`begin` calls it (O1b implementation)")
