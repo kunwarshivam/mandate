@@ -28,6 +28,7 @@
 mod budget;
 mod endpoint;
 mod error;
+mod frame;
 mod transport;
 
 pub use budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};

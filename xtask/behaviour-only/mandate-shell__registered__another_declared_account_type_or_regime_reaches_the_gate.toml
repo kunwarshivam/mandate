@@ -1,0 +1,9 @@
+file = "crates/mandate-shell/tests/registered.rs"
+test = "another_declared_account_type_or_regime_reaches_the_gate"
+reason = """
+Q2 (E7-19 slice 3 remainder, X-9, DEC-840) changes what the existing gate template answers and adds
+no stub: the template already assembles, with the shell's constants (`IntradayMargin` with zero
+maintenance excess, zero prior-close equity, `AccountType::Margin`), and the existing paper,
+tracer and registered runs need it to keep assembling. So this test fails on that answer, not at
+a stub. Q2's implementation PR deletes this row.
+"""

@@ -3,6 +3,10 @@
 //! version and the effective registrations, and the liquidity facts read the instrument those
 //! artifacts bind. The stream deploys the E7-7 paper mandate re-pinned to SPY, with the reviewed
 //! fee schedule, calendar, rule set and model content registered beside SPY's DEC-523 snapshot.
+//!
+//! The gate's account rules come from the connector and the broker, not the shell (slice Q2, X-9,
+//! DEC-840): the account type and day-trading regime are the connector's declaration, and the
+//! maintenance excess and prior-close equity are the broker's account answer (A1, DEC-524).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,15 +15,15 @@ use std::path::{Path, PathBuf};
 use mandate_accounting::AssetClass as TradedClass;
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    Asset, AssetSnapshot, Exchange as BrokerExchange, Feed as QuoteFeed, LatestQuote, MinuteBar,
-    MinuteBars, wire,
+    AccountRules, Asset, AssetSnapshot, DeclaredRegime, Exchange as BrokerExchange,
+    Feed as QuoteFeed, LatestQuote, MinuteBar, MinuteBars, alpaca_account_rules, wire,
 };
 use mandate_canon::{DecStr, Digest, Value, to_canonical};
 use mandate_executor::BindingGateConfigRefs;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_num::{Price, Qty, Usd};
-use mandate_risk::Exchange as GateExchange;
+use mandate_risk::{AccountSnapshot, AccountType, DayTradeRegime, Exchange as GateExchange};
 use mandate_shell::Cause;
 use mandate_shell::control::{
     Configuration, ConfirmedVersion, ControlRecord, Pinned, RunFacts, configuration,
@@ -35,7 +39,7 @@ const MANDATE: &str = include_str!("fixtures/tracer/mandate.json");
 const FEE: &str = include_str!("fixtures/tracer/config/fee-config.json");
 const CALENDAR: &str = include_str!("fixtures/tracer/config/trading-calendar.json");
 const RULES: &str = include_str!("fixtures/tracer/config/rule-set.json");
-const MODEL: &str = include_str!("fixtures/tracer/config/model-artifact.json");
+const E7_7_MODEL: &[u8] = include_bytes!("fixtures/tracer/config/model-artifact.json");
 const AAPL: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const SNAPSHOT: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-09-21T00:00:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}"#;
@@ -48,6 +52,20 @@ fn json(text: &str) -> Value {
 
 fn reference(bytes: &[u8]) -> String {
     format!("sha256:{}", Digest::of(bytes))
+}
+
+/// The content object `mandate model register` stores for the pinned model (DEC-504 item 1), as
+/// production registers it.
+fn model() -> String {
+    let content = mandate_modelhost::content("quant.ma_crossover", "1.0.0").unwrap();
+    String::from_utf8(content.canonical).unwrap()
+}
+
+/// The E7-7 paper mandate re-pinned to SPY and to `content`'s hash.
+fn spy_mandate(content: &str) -> String {
+    let pinned = Digest::of(content.as_bytes()).to_hex();
+    let mandate = MANDATE.replace(AAPL, SPY).replace(r#""AAPL""#, r#""SPY""#);
+    mandate.replace(&Digest::of(E7_7_MODEL).to_hex(), &pinned)
 }
 
 fn now() -> UtcNanos {
@@ -64,7 +82,13 @@ struct Stream {
 
 impl Stream {
     fn deployed(snapshot: &str, rules: &str, fee: &str) -> Self {
-        let mandate = MANDATE.replace(AAPL, SPY).replace(r#""AAPL""#, r#""SPY""#);
+        Self::with_model(snapshot, rules, fee, &model())
+    }
+
+    /// The deployment with `content` registered as the pinned model `quant.ma_crossover` 1.0.0, and
+    /// the mandate re-pinned to its hash.
+    fn with_model(snapshot: &str, rules: &str, fee: &str, content: &str) -> Self {
+        let mandate = spy_mandate(content);
         let document = to_canonical(&json(&mandate));
         let version = reference(&document);
         let paths: Vec<String> = ENVELOPE.split(' ').map(|p| format!("/{p}")).collect();
@@ -77,7 +101,7 @@ impl Stream {
         stream.store.insert(Digest::of(&document), document);
         let model = format!(
             r#"{{"admits_instruments":false,"content_hash":"{}","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}}"#,
-            stream.put(MODEL)
+            stream.put(content)
         );
         let created = format!(
             r#"{{"mandate_version":"{version}","provenance":[{}],"record_ref":"sha256:{}"}}"#,
@@ -161,7 +185,6 @@ impl Stream {
 /// deployed model, and their config references are the hashes of the registered objects and the
 /// confirmed version.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_artifacts_bind_the_registered_instrument_and_objects() {
     let nasdaq = SNAPSHOT.replace("arca", "nasdaq");
     for (snapshot, venues) in [
@@ -180,10 +203,10 @@ fn the_artifacts_bind_the_registered_instrument_and_objects() {
     let identity = artifacts.production_identity();
     assert_eq!(identity.asset_id.as_str(), SPY);
     assert_eq!(identity.symbol.as_str(), "SPY");
-    let model = (identity.model_id, identity.model_version);
-    assert_eq!(model, ("quant.ma_crossover", "1.0.0"));
-    assert_eq!(identity.model_hash, Digest::of(MODEL.as_bytes()));
-    let mandate = MANDATE.replace(AAPL, SPY).replace(r#""AAPL""#, r#""SPY""#);
+    let triple = (identity.model_id, identity.model_version);
+    assert_eq!(triple, ("quant.ma_crossover", "1.0.0"));
+    assert_eq!(identity.model_hash, Digest::of(model().as_bytes()));
+    let mandate = spy_mandate(&model());
     let refs = BindingGateConfigRefs::complete(
         reference(FEE.as_bytes()),
         reference(CALENDAR.as_bytes()),
@@ -196,9 +219,11 @@ fn the_artifacts_bind_the_registered_instrument_and_objects() {
 
 /// A registered object is judged as its file is: a fee schedule or a rule set the run cannot use
 /// is refused, never replaced by a reviewed default. A configuration whose instrument or model is
-/// not the confirmed mandate's is refused too.
+/// not the confirmed mandate's is refused too, and so is registered content whose own
+/// `model_version` or `model_id` is not the pin's although its hash is the pinned one, content
+/// that names the pin under another `kind`, and the E7-7 file's `{"id","version"}` shape, which is
+/// no DEC-504 content object and has no fallback (DEC-504).
 #[test]
-#[ignore = "pending E7-19"]
 fn a_registered_object_the_run_cannot_use_is_refused() {
     let aggressive = FEE.replace("conservative_v1", "aggressive_v1");
     let slow_quotes = RULES.replace(r#""iex_quote_max_age_s":"#, r#""iex_quote_max_age_s":6"#);
@@ -208,6 +233,18 @@ fn a_registered_object_the_run_cannot_use_is_refused() {
         Stream::deployed(SNAPSHOT, &slow_quotes, FEE),
     ] {
         assert_absent(stream.artifacts());
+    }
+    let pinned = r#""model_version":"1.0.0""#;
+    let renamed = model().replace(pinned, r#""model_version":"1.0.1""#);
+    let other_id = model().replace("quant.ma_crossover", "quant.other");
+    let other_kind = model().replace(
+        r#""kind":"quant_model_content""#,
+        r#""kind":"llm_model_content""#,
+    );
+    let e7_7_shape = String::from_utf8(E7_7_MODEL.to_vec()).unwrap();
+    for content in [renamed, other_id, other_kind, e7_7_shape] {
+        assert_ne!(content, model(), "the edit applied");
+        assert_absent(Stream::with_model(SNAPSHOT, RULES, FEE, &content).artifacts());
     }
     let (confirmed, config) = Stream::deployed(SNAPSHOT, RULES, FEE).inputs();
     let mut other_symbol = config.clone();
@@ -275,7 +312,6 @@ fn minute_bars(symbol: &str) -> MinuteBars {
 /// The liquidity facts read the instrument the registered artifacts bind: SPY's daily and minute
 /// bars give SPY's figures, and AAPL's minute bars are refused for it.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_liquidity_facts_read_the_registered_instrument() {
     let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
     let symbol = artifacts.production_identity().symbol;
@@ -329,6 +365,7 @@ fn spy_facts(asset_id: &str, symbol: &str, exchange: BrokerExchange) -> PaperFac
     };
     let broker = BrokerFacts {
         account: wire::account(account).unwrap(),
+        account_rules: alpaca_account_rules(),
         positions: Vec::new(),
         open_orders: Vec::new(),
         asset: AssetSnapshot {
@@ -349,9 +386,9 @@ fn spy_facts(asset_id: &str, symbol: &str, exchange: BrokerExchange) -> PaperFac
 
 /// The preflight judges the broker's asset record against the instrument the registered artifacts
 /// bind (X-8): SPY's id, listed on arca as its snapshot says, holds; AAPL's id, SPY on nasdaq, or
-/// another symbol is refused at the asset record.
+/// another symbol is refused at the asset record, and a registered snapshot whose ETP
+/// classification is dated after the run is refused at the classification.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_preflight_judges_the_registered_instruments_asset_record() {
     let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
     let agent = mandate_runtime::AgentId("agent_spy".to_owned());
@@ -367,5 +404,122 @@ fn the_preflight_judges_the_registered_instruments_asset_record() {
         let refused = format!("{:?}", judged(spy_facts(asset_id, symbol, exchange)));
         let at_the_record = refused.contains("Absent") && refused.contains("asset record");
         assert!(at_the_record, "{asset_id} {symbol} {exchange:?}: {refused}");
+    }
+    let classified_later = SNAPSHOT.replace("2026-09-21T00:00:00Z", "2026-09-29T00:00:00Z");
+    assert_ne!(classified_later, SNAPSHOT, "the edit applied");
+    let later = Stream::deployed(&classified_later, RULES, FEE)
+        .artifacts()
+        .unwrap();
+    let facts = spy_facts(SPY, "SPY", BrokerExchange::Arca);
+    let refused = format!(
+        "{:?}",
+        load_contexts(&later, &facts, now(), &agent).map(|_| ())
+    );
+    let at_the_classification =
+        refused.contains("Absent") && refused.contains("ETP classification");
+    assert!(at_the_classification, "{refused}");
+}
+
+/// The gate's account snapshot for SPY's registered run, with the broker's account answer edited
+/// to `equity`, `maintenance_margin` and `last_equity` and the connector's declaration replaced by
+/// `rules`.
+fn gate_account(rules: AccountRules, figures: [&str; 3]) -> Result<AccountSnapshot, Cause> {
+    let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
+    let mut facts = spy_facts(SPY, "SPY", BrokerExchange::Arca);
+    let [equity, maintenance_margin, last_equity] = figures.map(|text| Usd::parse(text).unwrap());
+    facts.broker.account.equity = equity;
+    facts.broker.account.maintenance_margin = maintenance_margin;
+    facts.broker.account.last_equity = last_equity;
+    facts.broker.account_rules = rules;
+    let agent = mandate_runtime::AgentId("agent_spy".to_owned());
+    let contexts = load_contexts(&artifacts, &facts, now(), &agent)?;
+    let decision = contexts.run.decision.expect("a decision context");
+    Ok(decision.gate.expect("an advisory gate context").account)
+}
+
+/// Alpaca's declared rules (§7.2: always margin, `intraday_margin`) reach the gate with the
+/// broker's own figures: the maintenance excess is equity less `maintenance_margin`, and the
+/// prior-close equity is `last_equity` (§9.2, DEC-524 items 2 and 4). Each expected excess is
+/// worked by hand, and the accounts differ in every figure, so no constant passes.
+#[test]
+#[ignore = "pending E7-19"]
+fn the_gate_takes_the_brokers_maintenance_excess_and_prior_close_equity() {
+    let cases = [
+        (["1000000", "0", "1000000"], "1000000"),
+        (["250000.5", "40000.25", "248000"], "210000.25"),
+        (["30000", "29999.99", "31000"], "0.01"),
+        (["25000", "25000", "24000.01"], "0"),
+    ];
+    for (figures, excess) in cases {
+        let account = gate_account(alpaca_account_rules(), figures).unwrap();
+        assert_eq!(account.account_type, AccountType::Margin, "{figures:?}");
+        let regime = DayTradeRegime::IntradayMargin {
+            maintenance_excess: Usd::parse(excess).unwrap(),
+        };
+        assert_eq!(account.regime, regime, "{figures:?}");
+        assert_eq!(account.equity, Usd::parse(figures[0]).unwrap());
+        let prior_close = Usd::parse(figures[2]).unwrap();
+        assert_eq!(account.prior_close_equity, prior_close, "{figures:?}");
+    }
+}
+
+/// Another declaration flows through as it was declared: the gate's account type and regime are
+/// the connector's, never the shell's, whichever of §7.2's types and §9.2's regimes it names.
+#[test]
+#[ignore = "pending E7-19"]
+fn another_declared_account_type_or_regime_reaches_the_gate() {
+    let figures = ["250000.5", "40000.25", "248000"];
+    let intraday = DayTradeRegime::IntradayMargin {
+        maintenance_excess: Usd::parse("210000.25").unwrap(),
+    };
+    let cases = [
+        (
+            AccountType::Margin,
+            DeclaredRegime::LegacyPdt,
+            DayTradeRegime::LegacyPdt,
+        ),
+        (AccountType::Cash, DeclaredRegime::IntradayMargin, intraday),
+        (
+            AccountType::Cash,
+            DeclaredRegime::LegacyPdt,
+            DayTradeRegime::LegacyPdt,
+        ),
+    ];
+    for (account_type, regime, expected) in cases {
+        let rules = AccountRules {
+            account_type,
+            regime,
+        };
+        let account = gate_account(rules, figures).unwrap();
+        assert_eq!(account.account_type, account_type, "{rules:?}");
+        assert_eq!(account.regime, expected, "{rules:?}");
+        assert_eq!(account.prior_close_equity, Usd::parse("248000").unwrap());
+    }
+}
+
+/// Under `intraday_margin`, a maintenance figure no broker states (a negative requirement,
+/// DEC-524 item 2) refuses the run rather than reading as no requirement, and a reported deficit
+/// refuses its opening, since nothing yet turns it into §9.2's `exits_only` (DEC-840; `AGENTS.md`
+/// rule 3). Each has its own reason.
+#[test]
+#[ignore = "pending E7-19"]
+fn an_unreadable_maintenance_figure_or_a_deficit_refuses_the_run() {
+    let cases = [
+        (
+            ["1000000", "-1", "1000000"],
+            "the broker's maintenance excess",
+        ),
+        (
+            ["30000", "30000.01", "31000"],
+            "an account with no maintenance deficit",
+        ),
+    ];
+    for (figures, reason) in cases {
+        let refused = gate_account(alpaca_account_rules(), figures);
+        let what = match refused {
+            Err(Cause::Absent { what }) => Some(what),
+            _ => None,
+        };
+        assert_eq!(what, Some(reason), "{figures:?}: {refused:?}");
     }
 }

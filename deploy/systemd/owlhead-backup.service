@@ -1,0 +1,21 @@
+# The nightly local backup (deploy/backup.sh). Started by owlhead-backup.timer, or by hand:
+#   systemctl start owlhead-backup.service
+[Unit]
+Description=Owlhead nightly backup: pg_dump of the journal database and the artifact store
+After=postgresql.service
+Requires=postgresql.service
+OnFailure=owlhead-backup-failed.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/owlhead-backup
+Nice=10
+IOSchedulingClass=idle
+UMask=0077
+NoNewPrivileges=yes
+IPAddressDeny=any
+IPAddressAllow=localhost
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/backups/owlhead
