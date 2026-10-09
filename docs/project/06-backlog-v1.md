@@ -1208,6 +1208,9 @@ story buys a service, and none uses a real identity-provider account in tests (s
   *Accepted when:* `authorize` matches spec §4.2's matrix exactly, checked by an exhaustive test over
   every role set, permission, and scope against a table parsed from the spec, not from the code (ID-2);
   no principal changes its own roles (ID-13); and the last-owner and last-admin refusals hold (§5.2).
+  *Owed (tests-correction PR, from #938's review):* a case removing roles from, and one deactivating, a
+  member whose membership is `removed`, `expired`, or `revoked`, each refused `forbidden` (DEC-654
+  item 7); no test pins that exclusion yet.
 - **E9-3 (Must)** As an admin, I want org-level limits that workspaces and agents can only
   tighten.
 - **E9-4 (Must; SC)** As a security-conscious user, I want step-up authentication for sensitive

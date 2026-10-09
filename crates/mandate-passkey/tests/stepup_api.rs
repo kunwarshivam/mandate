@@ -8,7 +8,6 @@ use mandate_passkey::stepup::{Action, ChallengeRecord, Missing, StepUpRefusal};
 use mandate_time::UtcNanos;
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_record_issued_at_the_epoch_has_a_canonical_form() {
     let action = Action {
         kind: StepUpActionKind::Approve,

@@ -6,12 +6,13 @@
 //!
 //! [DEC-662]: ../../../docs/project/decisions/DEC-662.md
 
-use mandate_canon::Digest;
+use mandate_canon::{Digest, Value, to_canonical};
 use mandate_time::UtcNanos;
 
-use crate::{Assertion, Challenge, Credential, Refusal, RelyingParty, Verified};
+use crate::{Assertion, Challenge, Credential, Refusal, RelyingParty, Verified, verify};
 use mandate_identity::{
-    AssertionId, PrincipalId, StepUpActionKind, StepUpEvidence, UlidTextError, WorkspaceId,
+    AssertionId, PrincipalId, StepUpActionKind, StepUpEvidence, StepUpMethod, UlidTextError,
+    WorkspaceId,
 };
 
 /// How long a challenge stays usable after it is issued (§7.1, §7.2 step 1).
@@ -31,10 +32,6 @@ pub enum IssueError {
     /// The expiry falls after the last instant the journal can record.
     #[error("the challenge would expire after the last representable instant")]
     OutOfRange,
-    /// The stubs of E9-4's tests PR return this, so every pending test fails on them (DEC-77,
-    /// DEC-137); the implementation PR replaces the stubs and removes the variant.
-    #[error("step-up is not implemented yet")]
-    Unimplemented,
 }
 
 /// Why a challenge record has no canonical form.
@@ -43,10 +40,6 @@ pub enum CanonicalError {
     /// An identifier has no ULID text.
     #[error(transparent)]
     Ulid(#[from] UlidTextError),
-    /// The stubs of E9-4's tests PR return this, so every pending test fails on them (DEC-77,
-    /// DEC-137); the implementation PR replaces the stubs and removes the variant.
-    #[error("step-up is not implemented yet")]
-    Unimplemented,
 }
 
 /// What workspace services issue for one step-up (§7.2 step 1). Only [`ChallengeRecord::issue`]
@@ -88,52 +81,88 @@ impl ChallengeRecord {
         action: Action,
         issued_at: UtcNanos,
     ) -> Result<Self, IssueError> {
-        let _ = (challenge_id, workspace_id, principal_id, action, issued_at);
-        Err(IssueError::Unimplemented)
+        let expires_at = issued_at
+            .secs()
+            .checked_add(CHALLENGE_LIFETIME_S)
+            .and_then(|secs| UtcNanos::from_parts(secs, issued_at.nanos()).ok())
+            .ok_or(IssueError::OutOfRange)?;
+        Ok(Self {
+            challenge_id,
+            workspace_id,
+            principal_id,
+            action,
+            issued_at,
+            expires_at,
+        })
     }
 
     /// The record's canonical form (journal spec §4): an object of seven text members, the
     /// digest as `sha256:` and its lowercase hex, the instants in the journal's timestamp form.
+    /// The member names are fixed and listed in their canonical (byte) order, and every value is
+    /// written by `mandate-canon` as a JSON string, so the challenge ID's text is escaped as the
+    /// journal escapes it.
     pub fn canonical(&self) -> Result<Vec<u8>, CanonicalError> {
-        let _ = self;
-        Err(CanonicalError::Unimplemented)
+        let members_in_key_order = [
+            (
+                "action_digest",
+                format!("sha256:{}", self.action.digest.to_hex()),
+            ),
+            ("action_kind", self.action.kind.code().to_owned()),
+            ("challenge_id", self.challenge_id.0.clone()),
+            ("expires_at", self.expires_at.to_string()),
+            ("issued_at", self.issued_at.to_string()),
+            ("principal_id", self.principal_id.to_ulid_text()?),
+            ("workspace_id", self.workspace_id.to_ulid_text()?),
+        ];
+        let members: Vec<Vec<u8>> = members_in_key_order
+            .into_iter()
+            .map(|(key, value)| {
+                [
+                    to_canonical(&Value::Str(key.to_owned())),
+                    b":".to_vec(),
+                    to_canonical(&Value::Str(value)),
+                ]
+                .concat()
+            })
+            .collect();
+        Ok([b"{".to_vec(), members.join(&b","[..]), b"}".to_vec()].concat())
     }
 
     /// The WebAuthn challenge: SHA-256 of [`ChallengeRecord::canonical`] (§7.2 step 2), so the
     /// authenticator signs the action itself.
     pub fn webauthn_challenge(&self) -> Result<Challenge, CanonicalError> {
-        let _ = self;
-        Err(CanonicalError::Unimplemented)
+        let digest = Digest::of(&self.canonical()?);
+        Ok(Challenge(digest.as_bytes().to_vec()))
     }
-}
 
-#[expect(
-    clippy::todo,
-    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
-impl ChallengeRecord {
     pub fn challenge_id(&self) -> &AssertionId {
-        todo!()
+        &self.challenge_id
     }
 
     pub fn workspace_id(&self) -> &WorkspaceId {
-        todo!()
+        &self.workspace_id
     }
 
     pub fn principal_id(&self) -> &PrincipalId {
-        todo!()
+        &self.principal_id
     }
 
     pub fn action(&self) -> Action {
-        todo!()
+        self.action
     }
 
     pub fn issued_at(&self) -> UtcNanos {
-        todo!()
+        self.issued_at
     }
 
     pub fn expires_at(&self) -> UtcNanos {
-        todo!()
+        self.expires_at
+    }
+
+    /// Whether the record is usable at `now`: from its `issued_at` until just before its
+    /// `expires_at` (DEC-662 item 5).
+    fn is_current_at(&self, now: UtcNanos) -> bool {
+        self.issued_at <= now && now < self.expires_at
     }
 }
 
@@ -198,13 +227,9 @@ pub struct Used {
     challenge_id: AssertionId,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
 impl Used {
     pub fn challenge_id(&self) -> &AssertionId {
-        todo!()
+        &self.challenge_id
     }
 }
 
@@ -227,23 +252,19 @@ pub struct Consumed {
     sign_count: Option<u32>,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
 impl Consumed {
     /// `{assertion_id, authenticated_at, method}`, where `authenticated_at` is the challenge's
     /// `issued_at`, the earliest instant the gesture can have happened (DEC-662 item 7).
     pub fn evidence(&self) -> &StepUpEvidence {
-        todo!()
+        &self.evidence
     }
 
     pub fn used(&self) -> &Used {
-        todo!()
+        &self.used
     }
 
     pub fn sign_count(&self) -> Option<u32> {
-        todo!()
+        self.sign_count
     }
 }
 
@@ -260,10 +281,6 @@ pub enum StepUpRefusal {
     Method,
     #[error("the challenge is bound to another principal, workspace, or action")]
     Mismatch,
-    /// The stubs of E9-4's tests PR return this (DEC-77, DEC-137); the implementation PR
-    /// removes it.
-    #[error("step-up is not implemented yet")]
-    Unimplemented,
 }
 
 /// What made a step-up count as missing (DEC-662 items 2 and 3).
@@ -289,7 +306,6 @@ impl StepUpRefusal {
             Self::Reused => "step_up_reused",
             Self::Method => "step_up_method",
             Self::Mismatch => "step_up_mismatch",
-            Self::Unimplemented => "unimplemented",
         }
     }
 }
@@ -305,8 +321,77 @@ pub fn consume(
     presented: &Presentation<'_>,
     now: UtcNanos,
 ) -> Result<Consumed, StepUpRefusal> {
-    let _ = (rp, environment, challenge, presented, now);
-    Err(StepUpRefusal::Unimplemented)
+    let method = match (presented.proof, environment) {
+        (Proof::Passkey { .. }, _) => StepUpMethod::Passkey,
+        (Proof::CliConfirm, Environment::Paper) => StepUpMethod::CliConfirm,
+        (Proof::CliConfirm, Environment::Live) => return Err(StepUpRefusal::Method),
+    };
+    let record = match challenge {
+        ChallengeState::Unknown => {
+            return Err(StepUpRefusal::Missing(Missing::UnknownChallenge));
+        }
+        ChallengeState::Used(_) => return Err(StepUpRefusal::Reused),
+        ChallengeState::Issued(record) => record,
+    };
+    if !record.is_current_at(now) {
+        return Err(StepUpRefusal::Stale);
+    }
+    if *presented.principal_id != record.principal_id
+        || *presented.workspace_id != record.workspace_id
+    {
+        return Err(StepUpRefusal::Mismatch);
+    }
+    let sign_count = match presented.proof {
+        Proof::Passkey {
+            assertion,
+            credential,
+        } => Some(passkey_sign_count(rp, record, &assertion, credential, now)?),
+        Proof::CliConfirm => None,
+    };
+    if presented.action != record.action {
+        return Err(StepUpRefusal::Mismatch);
+    }
+    Ok(Consumed {
+        evidence: StepUpEvidence {
+            assertion_id: record.challenge_id.clone(),
+            authenticated_at: record.issued_at,
+            method,
+        },
+        used: Used {
+            challenge_id: record.challenge_id.clone(),
+        },
+        sign_count,
+    })
+}
+
+/// §7.2 step 4's credential checks, then step 6 in [`verify`]'s own order (DEC-662 item 6): the
+/// credential is the record principal's and past its cool-off at `now`, and the assertion
+/// verifies over the record's WebAuthn challenge. Returns the counter to store.
+fn passkey_sign_count(
+    rp: &RelyingParty,
+    record: &ChallengeRecord,
+    assertion: &Assertion<'_>,
+    credential: Option<&EnrolledCredential>,
+    now: UtcNanos,
+) -> Result<u32, StepUpRefusal> {
+    let enrolled = credential
+        .filter(|enrolled| enrolled.principal_id == record.principal_id)
+        .ok_or(StepUpRefusal::Missing(Missing::NotTheirCredential))?;
+    if now < enrolled.cool_off_ends {
+        return Err(StepUpRefusal::Missing(Missing::CoolingOff));
+    }
+    let challenge = signed_challenge(record)?;
+    verify(rp, &challenge, &enrolled.credential, assertion)
+        .map(|verified| verified.sign_count)
+        .map_err(|refusal| StepUpRefusal::Missing(Missing::Passkey(refusal)))
+}
+
+/// The record's WebAuthn challenge; a record with no canonical form has none to verify against,
+/// so its step-up counts as missing.
+fn signed_challenge(record: &ChallengeRecord) -> Result<Challenge, StepUpRefusal> {
+    record
+        .webauthn_challenge()
+        .map_err(|_| StepUpRefusal::Missing(Missing::UnencodableChallenge))
 }
 
 /// Verifies a stored raw assertion again against the credential's public key, as an auditor does
@@ -318,6 +403,11 @@ pub fn reverify(
     credential: &Credential,
     assertion: &Assertion<'_>,
 ) -> Result<Verified, StepUpRefusal> {
-    let _ = (rp, record, credential, assertion);
-    Err(StepUpRefusal::Unimplemented)
+    let challenge = signed_challenge(record)?;
+    let counter_not_kept = Credential {
+        sign_count: 0,
+        ..credential.clone()
+    };
+    verify(rp, &challenge, &counter_not_kept, assertion)
+        .map_err(|refusal| StepUpRefusal::Missing(Missing::Passkey(refusal)))
 }

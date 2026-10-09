@@ -1411,16 +1411,31 @@ fn feature_map_index() -> Result<()> {
     Ok(())
 }
 
-/// One file CI runs, a workflow or a script, by its path in the repository, with its text.
+/// One of the [`ci_files`], by its path in the repository, with its text.
 struct CiFile {
     path: String,
     text: String,
 }
 
-/// Every workflow and script under `.github`, the files that decide which builds CI runs.
+/// Every file that decides what CI or a release builds, each of which may be absent: workflows,
+/// scripts and actions under `.github`, `deploy`'s scripts, and `.cargo/config.toml`.
 fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
-    let mut files = files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])?;
-    files.extend(files_by_extension(&root.join(".github/scripts"), &["sh"])?);
+    let mut files = Vec::new();
+    for (dir, extensions) in [
+        (".github/workflows", &["yml", "yaml"][..]),
+        (".github/scripts", &["sh"][..]),
+        (".github/actions", &["yml", "yaml"][..]),
+        ("deploy", &["sh"][..]),
+    ] {
+        let dir = root.join(dir);
+        if dir.is_dir() {
+            files.extend(files_by_extension(&dir, extensions)?);
+        }
+    }
+    let cargo_config = root.join(".cargo/config.toml");
+    if cargo_config.is_file() {
+        files.push(cargo_config);
+    }
     files
         .into_iter()
         .map(|file| {
@@ -1517,9 +1532,16 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
     }
     let mut compile_only_seen = false;
     for file in ci {
+        let yaml = file.path.ends_with(".yml") || file.path.ends_with(".yaml");
+        let with_lines = with_block_lines(&file.text);
         for (number, line) in logical_lines(&file.path, &file.text) {
             let at = format!("{}:{number}", file.path);
-            match live_flag(&line, runner, file.path.ends_with(".cargo/config.toml")) {
+            let ctx = LineContext {
+                runner,
+                cargo_config: file.path.ends_with(".cargo/config.toml"),
+                with_value: yaml && with_lines.contains(&number),
+            };
+            match live_flag(&line, ctx) {
                 LiveFlag::Absent => {}
                 LiveFlag::AllFeatures => problems.push(format!(
                     "{at}: `--all-features` would build the `{LIVE}` feature"
@@ -1716,11 +1738,44 @@ fn substitution(chars: &[char], start: char, index: &mut usize, nested: &mut Vec
     nested.push(inner);
 }
 
+/// What a line of a CI file is read with: the runner, and what kind of line it is.
+#[derive(Clone, Copy)]
+struct LineContext<'a> {
+    /// The crate marked `live_feature`, when exactly one workspace member is.
+    runner: Option<&'a str>,
+    /// A line of `.cargo/config.toml`, whose aliases and flags are all cargo's own.
+    cargo_config: bool,
+    /// A line inside a workflow's `with:` block: an action's input has no command word, so it
+    /// may be cargo's arguments, and `-F` and a short-flag cluster are feature flags there.
+    with_value: bool,
+}
+
+/// The numbers of the lines inside a workflow's `with:` blocks, the inputs a step passes to an
+/// action: every line below `with:` that is blank or indented further than its key.
+fn with_block_lines(text: &str) -> BTreeSet<usize> {
+    let mut lines = BTreeSet::new();
+    let mut block: Option<usize> = None;
+    for (number, line) in (1_usize..).zip(text.lines()) {
+        let indent = line.len().saturating_sub(line.trim_start().len());
+        if block.is_some_and(|column| line.trim().is_empty() || indent > column) {
+            lines.insert(number);
+            continue;
+        }
+        block = yaml_value(line)
+            .filter(|(_, value)| value.is_empty())
+            .filter(|_| line.trim_start_matches([' ', '-']).starts_with("with:"))
+            .map(|(column, _)| column);
+    }
+    lines
+}
+
 /// Judges each command of `line` on its own and keeps the worst verdict: the commands its
 /// tokens' ends separate, each substitution, and each word holding a space, which `bash -c` or a
-/// cargo alias may run (each shorter than `line`, so the reading ends). A redirection's one target
-/// word is skipped, so it may hold a `$` (`>> "$GITHUB_OUTPUT"`); the words after it are read.
-fn live_flag(line: &str, runner: Option<&str>, cargo_config: bool) -> LiveFlag {
+/// cargo alias may run (each shorter than `line`, so the reading ends), except the words of the
+/// one compile-only command, whose quoted feature list names `live` by design. A redirection's
+/// one target word is skipped, so it may hold a `$` (`>> "$GITHUB_OUTPUT"`); the words after it
+/// are read. Every word, a redirection's target included, is also held to the cargo-word rule.
+fn live_flag(line: &str, ctx: LineContext) -> LiveFlag {
     if sets_cfg_feature(line) {
         return LiveFlag::Cfg;
     }
@@ -1730,34 +1785,56 @@ fn live_flag(line: &str, runner: Option<&str>, cargo_config: bool) -> LiveFlag {
         .into_iter()
         .chain([ShellToken::End])
     {
+        if let ShellToken::Word(text) = &token
+            && cargo_word_refused(text)
+        {
+            verdict = verdict.min(LiveFlag::Unreadable);
+        }
         match token {
             ShellToken::Word(..) if target_next => target_next = false,
             ShellToken::Word(text) => words.push(text),
             ShellToken::Redirect => target_next = true,
             ShellToken::End => {
-                verdict = verdict.min(command_live_flag(&words, runner, cargo_config));
-                nested.extend(
-                    words
-                        .drain(..)
-                        .filter(|text| text.contains([' ', '\t']) && text.len() < line.len()),
-                );
+                let flag = command_live_flag(&words, ctx);
+                verdict = verdict.min(flag);
+                if flag != LiveFlag::CompileOnly {
+                    if feature_values_refused(&words, ctx) {
+                        verdict = verdict.min(LiveFlag::Unreadable);
+                    }
+                    nested.extend(
+                        words
+                            .drain(..)
+                            .filter(|text| text.contains([' ', '\t']) && text.len() < line.len()),
+                    );
+                }
+                words.clear();
                 target_next = false;
             }
         }
     }
     nested
         .iter()
-        .map(|inner| live_flag(inner, runner, cargo_config))
+        .map(|inner| live_flag(inner, ctx))
         .fold(verdict, LiveFlag::min)
+}
+
+/// Whether `word` names cargo: a word `cargo`, or a path ending `/cargo`.
+fn is_cargo(word: &str) -> bool {
+    word == "cargo" || word.ends_with("/cargo")
 }
 
 /// Reads one command's words, if it is a cargo command (a word `cargo` or `…/cargo`, or any line
 /// of the cargo configuration; `-F` is other tools' elsewhere, `gh api -F`), which cannot be read
 /// when the shell expands a word or `xargs` gives the arguments. `--features <list>`,
-/// `--features=<list>`, `-F <list>` and `-F<list>` name features, with items split on commas and
-/// spaces, each matched after any `<crate>/` or `<crate>?/` prefix. A word is read without the
-/// brackets and commas of a cargo configuration array (`["--features", "live"]`).
-fn command_live_flag(words: &[String], runner: Option<&str>, cargo_config: bool) -> LiveFlag {
+/// `--features=<list>`, `-F <list>`, `-F<list>` and a short-flag cluster `-qF<list>` name
+/// features, with items split on commas and spaces, each matched after any `<crate>/` or
+/// `<crate>?/` prefix. A word is read without the brackets and commas of a cargo configuration
+/// array (`["--features", "live"]`). Beside them, the live-token backstop: any word that holds
+/// the token `live` ([`holds_live`]) and is not the feature list of the one compile-only form is
+/// refused, whatever the command. The command is compile-only only when its subcommand, the word
+/// right after its cargo word, is `check`: a `cargo check` after `--`, or a `check` that is an
+/// option's value (`cargo --config check run`), leaves it a build (#923 review).
+fn command_live_flag(words: &[String], ctx: LineContext) -> LiveFlag {
     let names: Vec<&str> = words
         .iter()
         .map(|w| w.trim_matches(['[', ']', ',']))
@@ -1765,10 +1842,14 @@ fn command_live_flag(words: &[String], runner: Option<&str>, cargo_config: bool)
     if names.contains(&"--all-features") {
         return LiveFlag::AllFeatures;
     }
-    let is_cargo = |word: &&str| *word == "cargo" || word.ends_with("/cargo");
-    let cargo_at = names.iter().position(is_cargo);
-    if !cargo_config && cargo_at.is_none() {
-        return LiveFlag::Absent;
+    let any_live = names.iter().any(|word| holds_live(word));
+    let cargo_at = names.iter().position(|word| is_cargo(word));
+    if !ctx.cargo_config && cargo_at.is_none() {
+        return if any_live {
+            LiveFlag::Build
+        } else {
+            LiveFlag::Absent
+        };
     }
     let fed = names
         .get(..cargo_at.unwrap_or_default())
@@ -1778,36 +1859,143 @@ fn command_live_flag(words: &[String], runner: Option<&str>, cargo_config: bool)
     } else {
         LiveFlag::Absent
     };
-    let passes_live = names
+    let lists: Vec<(usize, &str)> = names
         .iter()
         .enumerate()
         .filter_map(|(index, word)| match *word {
-            "--features" | "-F" => names.get(index.saturating_add(1)).copied(),
+            "--features" | "-F" => names
+                .get(index.saturating_add(1))
+                .map(|list| (index.saturating_add(1), *list)),
             _ => word
                 .strip_prefix("--features=")
-                .or_else(|| word.strip_prefix("-F")),
+                .or_else(|| cluster_rest(word))
+                .map(|list| (index, list)),
         })
-        .flat_map(|list| list.split([',', ' ']))
+        .collect();
+    let passes_live = lists
+        .iter()
+        .flat_map(|(_, list)| list.split([',', ' ']))
         .any(|item| item.rsplit('/').next() == Some(LIVE));
+    let stray_live = names
+        .iter()
+        .enumerate()
+        .any(|(index, word)| !lists.iter().any(|(at, _)| *at == index) && holds_live(word));
+    if stray_live || (any_live && !passes_live) {
+        return LiveFlag::Build;
+    }
     if !passes_live {
         return unreadable;
     }
-    let checks = names
-        .windows(2)
-        .any(|pair| is_cargo(&pair[0]) && pair[1] == "check");
+    let checks = cargo_at
+        .and_then(|at| names.get(at.saturating_add(1)))
+        .is_some_and(|subcommand| *subcommand == "check");
     let packages: Vec<&str> = names
         .windows(2)
         .filter(|pair| pair[0] == "-p" || pair[0] == "--package")
         .map(|pair| pair[1])
         .collect();
     let whole_workspace = names.contains(&"--workspace") || names.contains(&"--all");
-    let verdict = match (checks, packages.as_slice(), runner) {
+    let verdict = match (checks, packages.as_slice(), ctx.runner) {
         (true, [package], Some(runner)) if *package == runner && !whole_workspace => {
             LiveFlag::CompileOnly
         }
         _ => LiveFlag::Build,
     };
     verdict.min(unreadable)
+}
+
+/// The live-token backstop: whether `word`'s items, split on `,`, `=`, `/`, `?`, whitespace and
+/// quotes, hold `live` exactly but in any case, or a short-flag cluster whose list does
+/// (`-qFlive`). So `liveness` is another item, and `the-runner/live` holds it.
+fn holds_live(word: &str) -> bool {
+    word.split([',', '=', '/', '?', ' ', '\t', '"', '\''])
+        .any(|item| item.eq_ignore_ascii_case(LIVE) || cluster_rest(item).is_some_and(holds_live))
+}
+
+/// The list after the first `F` of a short-flag cluster, `-<letters>F<list>` (`-qFlive`, `-Fa`).
+fn cluster_rest(item: &str) -> Option<&str> {
+    let (letters, rest) = item.strip_prefix('-')?.split_once('F')?;
+    letters
+        .chars()
+        .all(|c| c.is_ascii_alphabetic())
+        .then_some(rest)
+}
+
+/// Whether `word` holds the token `cargo`: a run of letters, digits, `_`, `-` and `.` that is
+/// `cargo` in any case, so `!cargo` holds it and `.cargo` and `cargo-nextest` do not.
+fn holds_cargo_token(word: &str) -> bool {
+    word.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')))
+        .any(|item| item.eq_ignore_ascii_case("cargo"))
+}
+
+/// The cargo-word rule: a word holding the token `cargo`, wherever it stands and whatever the
+/// command, is refused when it also holds a `$`, a backtick or a `%` format directive, which can
+/// build a flag no scan reads, or a feature flag whose value [`feature_value_refused`] refuses.
+fn cargo_word_refused(word: &str) -> bool {
+    holds_cargo_token(word)
+        && (word.contains(['$', '`'])
+            || format_directive(word)
+            || flag_refused(word, None, true, false))
+}
+
+/// Whether `word` holds a `printf` format directive, `%` then flags, a width or a precision, and a
+/// letter (`%s`, `%-8.3x`).
+fn format_directive(word: &str) -> bool {
+    word.split('%').skip(1).any(|after| {
+        after
+            .trim_start_matches(|c: char| matches!(c, '-' | '+' | ' ' | '#' | '0'..='9' | '.'))
+            .starts_with(|c: char| c.is_ascii_alphabetic())
+    })
+}
+
+/// The value rule over a command's words, whatever the command: each feature flag's value must
+/// be a complete literal ([`feature_value_refused`]). `-F` is a feature flag only in a cargo
+/// command, the cargo configuration or a `with:` value, or in a word holding the token `cargo`,
+/// so `awk -F:` and `gh api -F owner="$o"` are not; a short-flag cluster is one only in a `with:`
+/// value.
+fn feature_values_refused(words: &[String], ctx: LineContext) -> bool {
+    let cargo = ctx.with_value || ctx.cargo_config || words.iter().any(|word| is_cargo(word));
+    words.iter().enumerate().any(|(index, word)| {
+        let next = words.get(index.saturating_add(1)).map(String::as_str);
+        flag_refused(word, next, cargo || holds_cargo_token(word), ctx.with_value)
+    })
+}
+
+/// Whether `word`, read piece by piece on whitespace, holds `--all-features` or a feature flag
+/// whose value is refused: `--features`, `--features=`, `FEATURES=`, `-F` and `-F<list>` when
+/// `dash_f`, and a cluster `-qF<list>` when `cluster`. A flag that is the whole word takes `next`
+/// as its value; one that ends the word without a value has the empty value.
+fn flag_refused(word: &str, next: Option<&str>, dash_f: bool, cluster: bool) -> bool {
+    let pieces: Vec<&str> = word.split_whitespace().collect();
+    word.contains("--all-features")
+        || pieces.iter().enumerate().any(|(index, piece)| {
+            let value = if *piece == "--features" || (*piece == "-F" && dash_f) {
+                Some(
+                    pieces
+                        .get(index.saturating_add(1))
+                        .copied()
+                        .or(next.filter(|_| pieces.len() == 1))
+                        .unwrap_or_default(),
+                )
+            } else {
+                piece
+                    .strip_prefix("--features=")
+                    .or_else(|| piece.strip_prefix("-F").filter(|_| dash_f))
+                    .or_else(|| cluster_rest(piece).filter(|_| cluster))
+                    .or_else(|| piece.split_once("FEATURES=").map(|(_, value)| value))
+            };
+            value.is_some_and(feature_value_refused)
+        })
+}
+
+/// A feature value is read only as a complete literal of `[a-z0-9_,-]` without the token `live`;
+/// any other value, an empty one or one holding `$`, a backtick or `${{` included, is refused.
+fn feature_value_refused(value: &str) -> bool {
+    value.is_empty()
+        || !value
+            .chars()
+            .all(|c| matches!(c, 'a'..='z' | '0'..='9' | '_' | ',' | '-'))
+        || holds_live(value)
 }
 
 /// Code spans that look like repository paths: no spaces or globs, starting at a known root.
@@ -1862,7 +2050,6 @@ fn mutants_scheduled(
         eprintln!("    mutants: the diff generates no mutants");
         return Ok(());
     }
-    live_tests_judge_every_mutant(root, &listed)?;
     let mut test_packages: Vec<&str> = diff
         .crates
         .iter()
@@ -1874,16 +2061,60 @@ fn mutants_scheduled(
         .map(|krate| krate.package.as_str())
         .collect();
     external_oracles(&mut test_packages, &workspace_closure(&metadata_in(root)?));
+    live_tests_judge_every_mutant(root, &listed, &test_packages)?;
     let args = mutants_args(diff.path()?, shard, &test_packages);
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
     let started = fs::metadata(&diff.file)
         .and_then(|meta| meta.modified())
         .context("timing the diff this run reads")?;
+    let unmutated = UnmutatedSource::read(root, &diff.touched)?;
     let status = mutants_job_cargo(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
         .status()
         .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
+    unmutated.restored(root)?;
     mutants_outcome(root, &diff.crates, status?.code(), started)
+}
+
+/// The diff's source files as they were before an [`MUTANTS_IN_PLACE`] run mutated them, so that
+/// a run that ends without reverting its last mutant cannot leave it in the caller's checkout.
+struct UnmutatedSource(Vec<(String, Vec<u8>)>);
+
+impl UnmutatedSource {
+    fn read(root: &Path, touched: &[String]) -> Result<Self> {
+        touched
+            .iter()
+            .filter(|file| root.join(file).is_file())
+            .map(|file| {
+                fs::read(root.join(file))
+                    .map(|bytes| (file.clone(), bytes))
+                    .with_context(|| format!("reading {file} before the run mutates it"))
+            })
+            .collect::<Result<_>>()
+            .map(Self)
+    }
+
+    /// Writes back every file the run left different from what [`Self::read`] saw, and refuses the
+    /// run if there was one: a source file the run did not revert means the run did not finish
+    /// the way its exit status says.
+    fn restored(self, root: &Path) -> Result<()> {
+        let mut left_mutated = Vec::new();
+        for (file, bytes) in self.0 {
+            let path = root.join(&file);
+            if fs::read(&path).ok().as_deref() != Some(bytes.as_slice()) {
+                fs::write(&path, &bytes).with_context(|| format!("restoring {file}"))?;
+                left_mutated.push(file);
+            }
+        }
+        if !left_mutated.is_empty() {
+            bail!(
+                "`cargo mutants` left {} mutated, now restored; its verdict is not evidence \
+                 (DEC-850)",
+                left_mutated.join(", ")
+            );
+        }
+        Ok(())
+    }
 }
 
 /// The source diff the mutation gate judges: the changed `.rs` files of safety-critical crates,
@@ -2095,6 +2326,23 @@ fn external_oracles(
     true
 }
 
+/// Mutates, builds and tests in the repository itself rather than in a scratch copy of it, so the
+/// baseline and every mutant build in the target directory [`preflight_args`] has just filled
+/// (DEC-850). A scratch copy starts from an empty target directory, since cargo-mutants does not
+/// copy `target/` by default and a copy it did make would carry new mtimes in an order nobody
+/// controls. The run reverts each mutant as it finishes it; [`UnmutatedSource`] restores and
+/// refuses a run that did not.
+///
+/// It is also what keeps the run to one mutant at a time: one tree holds one mutant, and
+/// cargo-mutants 27.1.0 refuses `--jobs` beside `--in-place`. One, not two, so that a single mutant
+/// stays short (DEC-498 item 2). DEC-498 gives a CI shard at most one mutant, so there is nothing
+/// for a second worker to do there; this governs the unsharded local run, where there is.
+/// Measured on `ubuntu-24.04` over four runs of the same nine mutants, two workers contend: the
+/// per-mutant test phase reaches 181 seconds at two and 83 at one. Those runs show no throughput
+/// difference between the settings — 82 and 99 seconds a mutant at one worker, 83 and 108 at two —
+/// but two runs each are too few to claim one either way, and none is needed.
+const MUTANTS_IN_PLACE: &str = "--in-place";
+
 fn mutants_args(
     diff_path: &str,
     shard: Option<MutantShard>,
@@ -2106,14 +2354,13 @@ fn mutants_args(
         diff_path,
         "--test-tool",
         "nextest",
-        "--jobs",
-        MUTANT_JOBS,
         "--output",
         "target",
         "--timeout",
         MUTANT_TEST_TIMEOUT,
         "--build-timeout",
         MUTANT_BUILD_TIMEOUT,
+        MUTANTS_IN_PLACE,
     ]
     .into_iter()
     .map(str::to_owned)
@@ -2136,26 +2383,27 @@ fn mutants_args(
 
 /// The build directory a caller may export for their own builds. The mutants job's `cargo` children
 /// that build — the pre-flight's test listing and the mutants run — take it out of their
-/// environment: `cargo mutants` builds its baseline and each of the `--jobs` concurrent mutant
-/// copies in scratch copies of the tree, and every build of the same package from every copy writes
-/// the same artifact basename (`<package>-<metadata hash>`) into the target directory it is given,
-/// so one directory shared by the baseline, the mutant copies, and the pre-flight's build of the
-/// unmutated source can have one build's binary judge another's source and flip either verdict:
-/// #419's review met a caught mutant reported missed, and
-/// `a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict` plants the opposite, a missed
-/// mutant reported caught, the direction a gate must never fail in (#419 review, nit 3). With the
-/// variable out of the environment each scratch copy builds in a target tree of its own, which is
-/// how the run is judged when no directory is exported.
+/// environment: every build of the same package from every source tree writes the same artifact
+/// basename (`<package>-<metadata hash>`) into the target directory it is given, so one directory
+/// shared with the caller's other checkouts or with scratch copies of this tree can have one
+/// tree's binary judge another's source and flip either verdict: #419's review met a caught mutant
+/// reported missed, and `a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict` plants the
+/// opposite, a missed mutant reported caught, the direction a gate must never fail in (#419
+/// review, nit 3). With the variable out of the environment the job builds only in the target
+/// tree of the repository it was given, one source tree, which [`MUTANTS_IN_PLACE`] mutates and
+/// reverts in turn, so each build sees its own edit's newer mtime (DEC-850).
 const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 
 /// The profile every build of the mutants job runs under: no debuginfo, for the `dev` profile and
 /// for the `test` profile that inherits it (DEC-519).
 ///
-/// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. The baseline builds only the
-/// mutated packages, so a low-layer mutant's first build compiles the rest of its tested packages'
-/// graph from nothing: a `mandate-time` mutant whose tested packages included `mandate-shell` ran
-/// past the cap on CI's runner (#677). Without debuginfo that build took about a quarter less CPU
-/// time from cold, and nearly half less after a one-file change, measured in DEC-519. Debuginfo
+/// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. Before DEC-850 the baseline built
+/// only the mutated packages, so a low-layer mutant's first build compiled the rest of its tested
+/// packages' graph from nothing: a `mandate-time` mutant whose tested packages included
+/// `mandate-shell` ran past the cap on CI's runner (#677). Without debuginfo that build took about
+/// a quarter less CPU time from cold, and nearly half less after a one-file change, measured in
+/// DEC-519. Since DEC-850 the pre-flight builds that graph first, so the setting also has to match
+/// between the pre-flight and the run for the run to reuse it. Debuginfo
 /// changes no test's verdict, only what a backtrace can name, and the gate reads verdicts. It is set
 /// on the job's children rather than left to the caller, so CI and `cargo xtask check` build
 /// mutants the same way whatever the caller exported.
@@ -2215,17 +2463,49 @@ fn mutants_job_cargo_output(root: &Path, args: &[&str]) -> Result<String> {
 /// The listing is [`gate_mutants`]'s, and it is never empty here: a diff with no mutants, such as one
 /// that touches only `#[cfg(test)]` code, ends the job before this check, without starting a run
 /// that could only test nothing.
-fn live_tests_judge_every_mutant(root: &Path, mutants: &BTreeMap<String, usize>) -> Result<()> {
-    let packages: Vec<String> = mutants
-        .keys()
-        .map(|package| format!("--package={package}"))
-        .collect();
-    let mut args = vec!["nextest", "list", "--locked", "--message-format", "json"];
-    args.extend(packages.iter().map(String::as_str));
+///
+/// The listing also builds: [`preflight_args`] names every package the run tests, so this is the
+/// one build of their whole graph, in the tree the run then mutates in place (DEC-850).
+fn live_tests_judge_every_mutant(
+    root: &Path,
+    mutants: &BTreeMap<String, usize>,
+    test_packages: &[&str],
+) -> Result<()> {
+    let args = preflight_args(mutants, test_packages);
     eprintln!("    $ cargo {}", args.join(" "));
-    let listing = mutants_job_cargo_output(root, &args)?;
+    let listing =
+        mutants_job_cargo_output(root, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     let live = live_test_counts(&listing)?;
     report(unjudged_mutants(mutants, &live), "mutants")
+}
+
+/// The pre-flight's `cargo nextest list`: every package with a mutant, whose live tests it counts,
+/// and every package the run tests, whose test binaries it builds (DEC-850).
+///
+/// cargo-mutants 27.1.0 builds its unmutated baseline over the packages the run's own mutants are
+/// in, not over `--test-package`, so on its own it leaves the rest of the tested packages' graph to
+/// each mutant's first build, under [`MUTANT_BUILD_TIMEOUT`]: on #931 a `mandate-executor` mutant
+/// whose tested packages added `mandate-alpaca`, `mandate-shell` and [`REFCASES`] ran out of its
+/// sixty seconds on two attempts. Building them here, with the same profile and the same package
+/// set the mutant's build selects, in the tree [`MUTANTS_IN_PLACE`] builds in, leaves the baseline
+/// and each mutant only what their own edit changes.
+fn preflight_args(mutants: &BTreeMap<String, usize>, test_packages: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = ["nextest", "list", "--locked", "--message-format", "json"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    let mut packages: Vec<&str> = mutants.keys().map(String::as_str).collect();
+    for package in test_packages {
+        if !packages.contains(package) {
+            packages.push(package);
+        }
+    }
+    args.extend(
+        packages
+            .into_iter()
+            .map(|package| format!("--package={package}")),
+    );
+    args
 }
 
 /// One mutant of `cargo mutants --list --json`. Only its package is read here: that is the package
@@ -2323,17 +2603,6 @@ fn unjudged_mutants(
 const MUTANTS_OUT: &str = "target/mutants.out";
 const REFCASES: &str = "mandate-refcases";
 
-/// How many mutants cargo-mutants tests at once.
-///
-/// One, not two, so that a single mutant stays short. DEC-498 gives a CI shard at most one mutant,
-/// so there is nothing for a second worker to do there; this setting governs the unsharded local
-/// run, where there is. Measured
-/// on `ubuntu-24.04` over four runs of the same nine mutants, two workers contend: the per-mutant
-/// test phase reaches 181 seconds at two and 83 at one. Those runs show no throughput difference
-/// between the settings — 82 and 99 seconds a mutant at one worker, 83 and 108 at two — but two
-/// runs each are too few to claim one either way, and none is needed.
-const MUTANT_JOBS: &str = "1";
-
 /// How long one mutant's tests may run before cargo-mutants calls it a timeout, in seconds.
 ///
 /// Set explicitly because the value cargo-mutants derives is wrong for this gate and wrong in the
@@ -2347,7 +2616,7 @@ const MUTANT_JOBS: &str = "1";
 /// the twenty-second cap.
 ///
 /// Three minutes against the 83 seconds that was the slowest test phase over the two measured
-/// runs at [`MUTANT_JOBS`] workers, so a mutant the harness judges at its ordinary pace is judged
+/// runs at one worker ([`MUTANTS_IN_PLACE`]), so a mutant the harness judges at its ordinary pace is judged
 /// rather than cut off. The margin is the reason the job count is one: at two workers the same
 /// nine mutants reached 181 seconds, which this timeout would have cut off. A mutation slow
 /// enough to reach the cap anyway is bounded by it, which is what lets DEC-498 size a shard on
@@ -2369,12 +2638,13 @@ const MUTANT_TEST_TIMEOUT: &str = "180";
 /// bounded, and this is the only phase a shard cannot otherwise bound.
 ///
 /// Sixty seconds against the 16 to 27 that mutant builds took over the two measured runs at
-/// [`MUTANT_JOBS`] workers. The flakiness cargo-mutants warns about is contained here because
+/// one worker. The flakiness cargo-mutants warns about is contained here because
 /// this cap, unlike [`MUTANT_TEST_TIMEOUT`], reaches mutants alone: a `--build-timeout` run
 /// leaves the unmutated baseline uncapped, shown by command, so a cold cache compiling the
-/// workspace from scratch is never cut off. A mutant's build is not purely incremental on that
-/// baseline, since it compiles [`REFCASES`] where the baseline may not have, but the measured
-/// range already includes that.
+/// workspace from scratch is never cut off. A mutant's build is incremental: [`preflight_args`]
+/// builds every tested package's graph, [`REFCASES`] included, in the tree [`MUTANTS_IN_PLACE`]
+/// mutates, so the cap judges what the mutant's own edit costs to rebuild and never the rest of
+/// the graph, which on #931 it cut off at sixty seconds (DEC-850).
 const MUTANT_BUILD_TIMEOUT: &str = "60";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
@@ -3891,19 +4161,20 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency,
-        FEATURE_MAP, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_OUT,
-        Metadata, MutantPlan, MutantShard, MutatedCrate, Package, PendingTest, PendingTestRun,
-        REFCASES, TestOutcome, actionlint_workflows, backticked_paths, base_ref_in,
-        behaviour_only_rows, check_schedule, ci, ci_files, classify, contains_dec_id,
-        contains_word, external_oracles, failure_cause, feature_files, feature_map_problems,
-        files_by_extension, first_panic_line, forbidden_reached, generated_pending_markers,
-        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
-        listed_mutant_counts, live_feature_problems, live_test_counts, metadata_in,
-        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
-        mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
-        pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_outcomes, unjudged_mutants, verdicts, workspace_closure, workspace_packages,
+        FEATURE_MAP, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
+        MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, Package,
+        PendingTest, PendingTestRun, REFCASES, TestOutcome, UnmutatedSource, actionlint_workflows,
+        backticked_paths, base_ref_in, behaviour_only_rows, check_schedule, ci, ci_files, classify,
+        contains_dec_id, contains_word, external_oracles, failure_cause, feature_files,
+        feature_map_problems, files_by_extension, first_panic_line, forbidden_reached,
+        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
+        layer_problems, lint, listed_mutant_counts, live_feature_problems, live_test_counts,
+        metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
+        mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
+        pending_tests, plain_comment_lines, preflight_args, proptest_seeds_in, repo_root,
+        shellcheck_scripts, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
+        test_binary, test_outcomes, unjudged_mutants, verdicts, workspace_closure,
+        workspace_packages,
     };
 
     #[test]
@@ -4475,6 +4746,93 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-850: the pre-flight builds every package the run tests, not only the ones its mutants
+    /// are in, so no mutant's build under the sixty-second cap compiles the rest of that graph, as
+    /// a `mandate-executor` mutant on #931 did; and it still lists every mutated package, whose
+    /// live tests it counts.
+    #[test]
+    fn the_preflight_builds_every_tested_package_before_the_run_mutates_in_place() {
+        let mutants = BTreeMap::from([
+            ("mandate-executor".to_owned(), 3),
+            ("mandate-shell".to_owned(), 1),
+        ]);
+        let tested = [
+            "mandate-alpaca",
+            "mandate-executor",
+            "mandate-shell",
+            "mandate-refcases",
+        ];
+        let args = preflight_args(&mutants, &tested);
+        assert_eq!(
+            args.get(..2),
+            Some(&["nextest".to_owned(), "list".to_owned()][..]),
+            "the pre-flight is a nextest listing, which builds the test binaries it lists"
+        );
+        let listed: Vec<&str> = args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--package="))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "mandate-executor",
+                "mandate-shell",
+                "mandate-alpaca",
+                "mandate-refcases"
+            ],
+            "every mutated package once, then every other tested package once"
+        );
+        let lone = preflight_args(&BTreeMap::from([("mandate-journal-pg".to_owned(), 1)]), &[]);
+        assert!(
+            lone.contains(&"--package=mandate-journal-pg".to_owned()),
+            "a mutated package is listed even if the tested set omits it, so its live tests are \
+             still counted (DEC-139)"
+        );
+    }
+
+    /// DEC-850: an in-place run that ends with a mutant still in the tree has it written back and
+    /// is refused, naming the file, and a run that reverted everything passes untouched.
+    #[test]
+    fn an_in_place_run_that_leaves_a_mutant_behind_is_restored_and_refused() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-unmutated-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        let fx = Fixture(dir);
+        fx.write("crates/a/src/lib.rs", "pub fn f() -> bool { true }\n")?;
+        fx.write("crates/b/src/lib.rs", "pub fn g() -> u8 { 1 }\n")?;
+        let touched = [
+            "crates/a/src/lib.rs".to_owned(),
+            "crates/b/src/lib.rs".to_owned(),
+        ];
+
+        UnmutatedSource::read(&fx.0, &touched)?
+            .restored(&fx.0)
+            .context("a run that reverted every mutant passes")?;
+
+        let unmutated = UnmutatedSource::read(&fx.0, &touched)?;
+        fx.write("crates/b/src/lib.rs", "pub fn g() -> u8 { 0 }\n")?;
+        let refused = unmutated
+            .restored(&fx.0)
+            .expect_err("a mutant left in the tree refuses the run");
+        assert!(
+            refused
+                .to_string()
+                .contains("left crates/b/src/lib.rs mutated"),
+            "{refused}"
+        );
+        assert_eq!(
+            fs::read_to_string(fx.0.join("crates/b/src/lib.rs"))?,
+            "pub fn g() -> u8 { 1 }\n",
+            "and the caller's checkout gets its source back"
+        );
+        assert_eq!(
+            fs::read_to_string(fx.0.join("crates/a/src/lib.rs"))?,
+            "pub fn f() -> bool { true }\n"
+        );
+        Ok(())
+    }
+
     #[test]
     fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() {
         let packages = ["mandate-journal", "mandate-refcases"];
@@ -4509,12 +4867,18 @@ mod tests {
         );
         assert_eq!(
             unsharded
-                .windows(2)
-                .find(|pair| pair[0] == "--jobs")
-                .map(|pair| pair[1].as_str()),
-            Some("1"),
-            "one mutant at a time, so a shard's critical path is its mutants in a row and the \
-             timeout keeps the margin DEC-498 measured"
+                .iter()
+                .filter(|arg| *arg == MUTANTS_IN_PLACE)
+                .count(),
+            1,
+            "the run builds in the tree the pre-flight built, not in a scratch copy whose target \
+             directory starts empty (DEC-850); one tree holds one mutant at a time, so a shard's \
+             critical path is its mutants in a row and the timeout keeps the margin DEC-498 \
+             measured"
+        );
+        assert!(
+            !unsharded.iter().any(|arg| arg == "--jobs"),
+            "cargo-mutants 27.1.0 refuses `--jobs` beside `--in-place`"
         );
 
         let sharded = mutants_args(
@@ -8297,8 +8661,18 @@ jq -r "$filter" "$src"
     /// run time. Where a word is read as a command is pinned by
     /// [`commands_are_read_fail_closed_where_a_word_may_execute`], arrays by
     /// [`array_expansions_are_read_through_their_definitions`] (X1 tests correction 5).
+    ///
+    /// The backstop's match ignores case, so a bare `LIVE` or `Live` word is refused in a command
+    /// without `cargo`, and an empty feature value (`--features ""`, `--features=` with nothing
+    /// after it) is no complete literal, so it is refused (X1 tests correction 6, #923 review).
+    ///
+    /// A command is compile-only only when its subcommand, the word right after its cargo word
+    /// and before any `--`, is `check` (X1 tests correction 8, #923 review): a `cargo check` or a
+    /// `check` after `--`, which go to the program `run` or `test` builds, and a `check` that is
+    /// the value of an option before the subcommand (`cargo --config check run`) leave the command
+    /// a build, so its `live` is refused, once, at its line. The compile-only form CI runs stays
+    /// allowed.
     #[test]
-    #[ignore = "pending E7-26"]
     fn the_backstop_and_the_feature_value_rules_refuse_ci_bypasses() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
@@ -8315,6 +8689,8 @@ jq -r "$filter" "$src"
             "bash -c \"cargo test -p x\"",
             "cargo build --features paper,sim",
             "echo \"cargo test -p x\"",
+            "      - run: cargo check -p the-runner --features live",
+            "      - run: cargo check --locked -p the-runner --features=live",
         ];
         for line in allowed {
             let files = [ci_file(".github/workflows/ci.yml", line)];
@@ -8484,6 +8860,8 @@ jq -r "$filter" "$src"
             "cargo run -qFlive",
             "cargo run -vFlive",
             "cargo build -p the-runner --features LIVE",
+            "cargo build --features \"\"",
+            "cargo build --features=",
             "cargo check -p the-runner --features live && make build FEATURES=live",
             "cargo check -p the-runner --features live; c=cargo; $c run -Flive",
         ];
@@ -8497,6 +8875,8 @@ jq -r "$filter" "$src"
             "l\\ive",
             "--features=li\"ve\"",
             "--features $(echo live)",
+            "echo LIVE",
+            "echo Live",
         ];
         let refused_through_a_command_word_that_may_be_cargo = [
             "c=cargo; $c build --features live",
@@ -8519,10 +8899,22 @@ jq -r "$filter" "$src"
             "cmd=\"cargo build --features $A$B\"; $cmd",
             "read -r cmd <<< \"cargo build --features $A$B\"; $cmd",
         ];
+        let refused_where_check_is_not_the_subcommand = [
+            "cargo run -p the-runner --features live -- cargo check",
+            "cargo test -p the-runner --features live -- cargo check",
+            "cargo build -p the-runner --features live -- check",
+            "cargo +nightly run -p the-runner --features live -- cargo check",
+            "cargo --locked run -p the-runner --features live -- check",
+            "cargo --locked run -p the-runner --features live -- cargo check",
+            "cargo run --features live -- cargo check -p the-runner",
+            "/usr/bin/cargo run -p the-runner --features live -- /usr/bin/cargo check",
+            "cargo --config check run -p the-runner --features live",
+        ];
         let refused_at_line_two = refused_with_no_cargo_word
             .iter()
             .chain(&refused_through_a_command_word_that_may_be_cargo)
-            .chain(&refused_by_the_cargo_word_rule);
+            .chain(&refused_by_the_cargo_word_rule)
+            .chain(&refused_where_check_is_not_the_subcommand);
         for line in refused_at_line_two {
             let files = [ci_file(
                 ".github/scripts/build.sh",
@@ -8713,6 +9105,10 @@ jq -r "$filter" "$src"
     /// alias make that command executing, so its words are re-read; an executing `awk` or `sed`
     /// program builds a command no static reading can follow, so it is refused outright (round
     /// eleven).
+    ///
+    /// The pins of `refused_only_by_reading_fail_closed` hold no `cargo` token, no `live` and no
+    /// feature flag, so only this reading refuses them, never the backstop or the cargo-word rule
+    /// (X1 tests correction 7, step 3b's planted bugs).
     #[test]
     #[ignore = "pending E7-26"]
     fn commands_are_read_fail_closed_where_a_word_may_execute() -> Result<()> {
@@ -8737,7 +9133,24 @@ jq -r "$filter" "$src"
             "make build FEATURES=$A$B",
             "$C build -F \"$A$B\"",
         ];
-        for line in refused_through_an_executing_command_at_line_two {
+        let refused_only_by_reading_fail_closed = [
+            "awk 'BEGIN{system(c)}' c=\"$RUN\"",
+            "echo \"$X\" | sed e",
+            "sed 's/^/x/e' \"$F\"",
+            "sh <(echo \"$C $A\")",
+            "\"$(printf %s \"$C $A\")\" x",
+            "while $C \"$A\"; do :; done",
+            "until $C \"$A\"; do :; done",
+            "! $C \"$A\"",
+            "time $C \"$A\"",
+            "for i in 1; do $C \"$A\"; done",
+            "echo \"$C $A\" | xargs sh",
+            "echo \"$C $A\" | env sh",
+        ];
+        for line in refused_through_an_executing_command_at_line_two
+            .iter()
+            .chain(&refused_only_by_reading_fail_closed)
+        {
             let files = [ci_file(
                 ".github/scripts/build.sh",
                 &format!("set -e\n{line}\n"),
@@ -8930,7 +9343,6 @@ jq -r "$filter" "$src"
     /// (the demo host's runbook, DEC-822), and `.cargo/config.toml` (aliases and `rustflags`); a
     /// repository without the optional ones reads the rest (#738 review, finding 4).
     #[test]
-    #[ignore = "pending E7-26"]
     fn ci_files_reads_every_file_that_decides_a_build() -> Result<()> {
         let root = env::temp_dir().join(format!("mandate-xtask-ci-files-{}", std::process::id()));
         if root.exists() {
