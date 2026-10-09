@@ -26,6 +26,7 @@ mod catalogue;
 mod connection_fold;
 mod connections;
 mod control;
+mod control_verify;
 mod draft;
 mod merkle;
 mod notices;
@@ -54,6 +55,9 @@ pub use artifact::{
 pub use connection_fold::{
     ConnectionCheck, ConnectionFailure, ConnectionStreamRule, ConnectionVerifyError,
     verify_connection_causes, verify_connection_lifecycle,
+};
+pub use control_verify::{
+    ControlStreamCheck, ControlStreamFailure, ControlVerifyError, verify_anchor_self,
 };
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
