@@ -38,7 +38,6 @@ fn cycle(report: Report) -> Outcome {
 /// Brief step 3: a dry run names the order it would place, by its id alone, and says nothing was
 /// sent; an alert's key is not a line.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_dry_run_names_the_order_it_would_place() {
     let report = Report {
         submitted: Vec::new(),
@@ -52,7 +51,6 @@ fn a_dry_run_names_the_order_it_would_place() {
 
 /// Brief step 4: a placing run names each order it submitted, in order, by id alone.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_placing_run_names_each_submitted_order() {
     let report = Report {
         submitted: vec![ENTRY.to_owned(), "md-01JPAPERENTRY0000000000002".to_owned()],
@@ -68,7 +66,6 @@ fn a_placing_run_names_each_submitted_order() {
 
 /// FT-4 (DEC-157 item 4): a `Flat` or `Undecided` model sends nothing, and the line says which.
 #[test]
-#[ignore = "pending E7-19"]
 fn no_output_names_the_signal_and_that_nothing_was_sent() {
     let flat = lines(&Outcome::NoOutput(Signal::Flat)).unwrap();
     assert_eq!(flat, ["the model output Flat; nothing sent"]);
