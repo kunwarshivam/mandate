@@ -19,6 +19,7 @@ use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
 use crate::kill::{flatten_closes, floor_of, is_flatten, mode_holds};
+use crate::listing::query_unknown;
 use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
 use crate::ports::Ports;
@@ -718,8 +719,7 @@ pub(crate) fn overdue(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(
             ..StateEvidence::default()
         },
     )?;
-    batch.broker(BrokerRequest::GetOrderByClientId(id.clone()));
-    Ok(())
+    query_unknown(batch, id.clone())
 }
 
 /// The opening orders of `agent` (or every agent) in `instrument` (or every instrument) the broker

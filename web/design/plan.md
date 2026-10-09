@@ -70,7 +70,8 @@ the owl, the rules and the record.
       dialog that keeps Tab inside but is not modal, mounted in the frame's sheet layer under the
       dock and the tab bar, like the More sheet. `e2e/stop-visible.spec.ts` pins it at 390 and
       1280px, opened with ⌘K and with its button, and the palette's "Stop…" from the keyboard.
-      (#1038)
+      (#1038) The review's follow-up names the dialog "Command palette", gives focus back to its
+      opener when Escape closes it, and `e2e/command-bar.spec.ts` pins the Tab wrap both ways.
 
 ## C. The cutting pass (one PR, no new rules)
 
@@ -256,8 +257,9 @@ item above (C-3, C-9) are not repeated.
       mode. (C-7) Done in [#1067](https://github.com/kunwarshivam/mandate/pull/1067).
 - [ ] **A time from another day carries its date**, through one formatter shared with the
       timeline. (C-23)
-- [ ] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
-      restriction, keeping its step-up. Safety lane. (C-24)
+- [x] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
+      restriction, keeping its step-up. Safety lane. (C-24) Done in
+      [#1095](https://github.com/kunwarshivam/mandate/pull/1095).
 - [ ] **Sparklines without the false limit line.** When the limit is below the line's range, the
       pale sliver alone, with no dashed rule. (C-11)
 - [ ] **Re-scope the account chart's blank paint** (section B): blank in light and dark alike, a
