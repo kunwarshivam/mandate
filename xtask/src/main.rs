@@ -11867,6 +11867,7 @@ jq -r "$filter" "$src"
                 "case-arm",
                 "case \"$X\" in x) ${C}go test -p rh-host ;; esac",
             ),
+            ("computed-binary", "cargo-$SUB nextest run -p a-lib"),
         ];
         let mut all = jobs.to_vec();
         all.push(("lib-tests", "cargo test -p a-lib"));
@@ -11928,6 +11929,18 @@ jq -r "$filter" "$src"
             "  other-xargs:",
             "    steps:",
             "      - run: echo x | xargs rm",
+            "  grep-substitution:",
+            "    steps:",
+            "      - run: grep x <(echo y)",
+            "  grep-heredoc:",
+            "    steps:",
+            "      - run: |",
+            "          grep x <<EOF",
+            "          data",
+            "          EOF",
+            "  grep-here-string:",
+            "    steps:",
+            "      - run: grep x <<< \"$Y\"",
             "  read-tools:",
             "    steps:",
             "      - run: |",
@@ -11950,6 +11963,9 @@ jq -r "$filter" "$src"
             "env-split",
             "written-script",
             "other-xargs",
+            "grep-substitution",
+            "grep-heredoc",
+            "grep-here-string",
         ];
         unreadable(&problems, &jobs);
         names(&problems, &["python-heredoc"], &["read-tools"]);
@@ -12007,6 +12023,15 @@ jq -r "$filter" "$src"
             "  curl-script:",
             "    steps:",
             "      - run: curl -sSfL -o .github/scripts/docs-only.sh https://example.com/x",
+            "  redirect-script:",
+            "    steps:",
+            "      - run: echo x > .github/scripts/docs-only.sh",
+            "  github-env-arg:",
+            "    steps:",
+            "      - run: grep x \"$GITHUB_ENV\"",
+            "  cargo-dir-arg:",
+            "    steps:",
+            "      - run: grep x .cargo/config.toml",
             "  tar-everything:",
             "    steps:",
             "      - run: tar xzf tool.tgz",
@@ -12036,6 +12061,9 @@ jq -r "$filter" "$src"
             "rustflags",
             "tee-script",
             "curl-script",
+            "redirect-script",
+            "github-env-arg",
+            "cargo-dir-arg",
             "tar-everything",
             "install-cargo",
         ];
