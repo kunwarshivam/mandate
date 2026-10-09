@@ -35,7 +35,6 @@ fn printouts(error: &McpError) -> String {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn the_pinned_hash_covers_the_allowlisted_names_and_schemas_and_nothing_else() {
     let (_server, client) = connected(&base(), None, vec![]).await;
     assert_eq!(client.contract().unwrap(), &base_hash());
@@ -76,7 +75,6 @@ async fn the_pinned_hash_covers_the_allowlisted_names_and_schemas_and_nothing_el
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn any_change_to_a_name_or_a_schema_changes_the_hash() {
     let mut variants = vec![base()];
     for edit in [
@@ -111,7 +109,6 @@ async fn any_change_to_a_name_or_a_schema_changes_the_hash() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_matching_pin_leaves_openings_open() {
     let again = vec![listing(&base()), reply(OK)];
     let (server, mut client) = connected(&base(), Some(base_hash()), again).await;
@@ -132,7 +129,6 @@ async fn a_matching_pin_leaves_openings_open() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_different_pin_halts_openings_but_never_an_exit_a_cancel_or_a_read() {
     let answers = vec![reply(OK), reply(OK), reply(OK), reply(OK)];
     let (server, client) = connected(&base(), Some(flipped(&base_hash())), answers).await;
@@ -167,7 +163,6 @@ async fn a_different_pin_halts_openings_but_never_an_exit_a_cancel_or_a_read() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_drift_found_by_a_health_check_halts_openings_and_nothing_lifts_it() {
     let mut drifted = base();
     drifted[5]["inputSchema"]["properties"]["state"] = json!({"type": "string"});
@@ -195,7 +190,6 @@ async fn a_drift_found_by_a_health_check_halts_openings_and_nothing_lifts_it() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_fund_movement_tool_found_by_a_health_check_halts_openings() {
     let mut listed = base();
     listed.push(json!({"name": "withdraw_funds", "inputSchema": {"type": "object"}}));
@@ -209,7 +203,6 @@ async fn a_fund_movement_tool_found_by_a_health_check_halts_openings() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_tool_list_that_cannot_be_read_exactly_is_refused() {
     let mut float = base();
     float[7]["inputSchema"]["properties"]["quantity"] =
@@ -233,7 +226,6 @@ async fn a_tool_list_that_cannot_be_read_exactly_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn connect_initializes_acknowledges_and_then_lists_the_tools() {
     let (server, _client) = connected(&base(), None, vec![]).await;
     let seen = server.seen();
@@ -248,7 +240,6 @@ async fn connect_initializes_acknowledges_and_then_lists_the_tools() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn tool_metadata_and_error_text_appear_in_no_printout() {
     let mut poisoned = base();
     for t in &mut poisoned {
@@ -290,7 +281,6 @@ async fn tool_metadata_and_error_text_appear_in_no_printout() {
     );
 }
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn each_allowlisted_tool_is_called_by_name_with_its_arguments() {
     let answers = NINE.iter().map(|_| reply(OK)).collect();
     let (server, client) = connected(&base(), None, answers).await;
@@ -308,7 +298,6 @@ async fn each_allowlisted_tool_is_called_by_name_with_its_arguments() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_fund_tool_alone_halts_openings_under_a_matching_pin() {
     let mut listed = base();
     listed.push(json!({"name": "transfer_funds", "inputSchema": {"type": "object"}}));
@@ -330,7 +319,6 @@ async fn a_fund_tool_alone_halts_openings_under_a_matching_pin() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_missing_tool_found_by_a_health_check_halts_openings() {
     let gone = vec![listing(&without("cancel_equity_order"))];
     let (_server, mut client) = connected(&base(), Some(base_hash()), gone).await;
@@ -344,7 +332,6 @@ async fn a_missing_tool_found_by_a_health_check_halts_openings() {
 
 /// DEC-839 item 3: the tokens, and the three places a name is split.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn fund_movement_names_are_matched_as_whole_words() {
     for name in [
         "initiate_deposit",
@@ -397,7 +384,6 @@ fn the_hash_oracle_reproduces_the_pinned_base_hash() {
 
 /// DEC-843 item 1.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_health_check_that_reads_a_malformed_list_halts_openings() {
     let mut float = base();
     float[7]["inputSchema"]["minimum"] = serde_json::from_str("0.5").unwrap();
@@ -430,7 +416,6 @@ async fn a_health_check_that_reads_a_malformed_list_halts_openings() {
 
 /// DEC-843 item 1: no list was read, so nothing halts and the next check reads again.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_failed_health_check_exchange_halts_nothing() {
     let failures = [
         (with_type(500, "application/json", ""), "http_status"),
@@ -457,7 +442,6 @@ async fn a_failed_health_check_exchange_halts_nothing() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_throttled_health_check_halts_nothing() {
     let bucket = |capacity, secs| BucketConfig {
         capacity,
@@ -490,7 +474,6 @@ async fn a_throttled_health_check_halts_nothing() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_health_check_records_the_hash_it_read() {
     let mut drifted = base();
     drifted[5]["inputSchema"]["properties"]["state"] = json!({"type": "string"});
@@ -508,7 +491,6 @@ async fn a_health_check_records_the_hash_it_read() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_refused_initialized_acknowledgement_fails_the_connect() {
     for status in [500, 200] {
         let mut answers = handshake();
@@ -525,7 +507,6 @@ async fn a_refused_initialized_acknowledgement_fails_the_connect() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_failed_initialize_fails_the_connect_after_one_request() {
     let failures = [
         (
@@ -549,7 +530,6 @@ async fn a_failed_initialize_fails_the_connect_after_one_request() {
 /// DEC-839 item 1: integers of either sign and up to `u64::MAX` are canonical; other numbers
 /// are not, however integral their value.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn integer_bounds_hash_canonically_and_other_numbers_are_malformed() {
     for bound in [json!({"minimum": -5}), json!({"maximum": u64::MAX})] {
         let mut tools = base();
