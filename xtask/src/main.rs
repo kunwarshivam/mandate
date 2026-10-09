@@ -7952,19 +7952,26 @@ jq -r "$filter" "$src"
     /// `--features=live` is refused with it. A line is refused once, however many of its words
     /// hold the token. The pins that need no `cargo` word are listed apart from those with one.
     ///
-    /// Where a word is read as a command (the coordinator's sixth-round rulings under DEC-176,
-    /// so that main's own files stay allowed). An executing command is `bash`, `sh`, `zsh`,
-    /// `dash`, `eval`, `ssh`, `su`, `sudo`, `env`, `xargs`, `nohup`, `timeout`, `nice`, or
-    /// `docker` or `podman` with `run` or `exec`. A quoted word is re-read as a nested command
-    /// only when an executing command takes it or it follows `-c` (`ssh h "cargo build $F"`), so
-    /// `echo "$a $b"` and an awk program are not. `x=( … )` is one word. A here-doc's lines are
-    /// read as commands only when an executing command takes it, so `cat <<EOF` holding `$F` is
-    /// allowed. The lines inside a single-quoted string that spans lines are not read as
-    /// commands when the quote opens in an argument of a command that does not execute it; a
-    /// multi-line `bash -c '…'` is still read. A word holding `${{ … }}` in command position is
-    /// possibly cargo inside a `run:` value only (`run: ${{ inputs.cmd }} build $F`), and not
-    /// in a job name, an `env:` value, a `with:` input or a cache key. The live-token backstop
-    /// still reads every word of these lines.
+    /// Where a word is read as a command fails closed (the coordinator's seventh-round ruling
+    /// under DEC-176). A known non-executing command is one of `echo`, `printf`, `cat`, `jq`,
+    /// `awk`, `sed`, `grep`, `tr`, `cut`, `sort`, `uniq`, `head`, `tail`, `tee`, `wc`, `test`,
+    /// `[`, `true`, `false`, `read`, `basename`, `dirname`, `date`, `mkdir`, `rm`, `cp`, `mv`,
+    /// `ls`, `chmod`, `curl`, `git`, and `gh`, which main's `merge-approved.sh` needs for its
+    /// multi-line GraphQL query; every other command executes, unknown ones, `source`,
+    /// `.`, `exec`, `watch`, `parallel`, every shell and every wrapper included. A quoted word
+    /// holding a space, `cargo` or a `$` is re-read as a command line unless its command is
+    /// known non-executing, every later stage of its pipeline is too, and it is not inside a
+    /// `$( … )` or `<( … )` whose consumer executes (`echo "…" | sh`, `source <(echo "…")`); a
+    /// bare assignment captures its `$( … )` and does not execute it. A here-doc's
+    /// lines and a here-string's (`<<<`) target are read as commands unless their command is
+    /// known non-executing, so `cat <<EOF` holding `$F` is allowed. An `x=( … )` word is one word,
+    /// re-read as a command line when it holds `cargo`, and a command word that expands an array
+    /// (`"${x[@]}"`, `"$@"`) holds a `$`, so it may be cargo. The lines inside a single-quoted
+    /// string that spans lines are not read as commands only when its command is known
+    /// non-executing and nothing pipes it onward. A word holding `${{ … }}` in command position is
+    /// possibly cargo inside a `run:` value only (`run: ${{ inputs.cmd }} build $F`), and not in a
+    /// job name, an `env:` value, a `with:` input or a cache key. The live-token backstop still
+    /// reads every word of every line.
     #[test]
     #[ignore = "pending E7-26"]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
@@ -8298,6 +8305,61 @@ jq -r "$filter" "$src"
             assert!(problems[0].contains(path), "names the file: {problems:?}");
         }
         let refused_through_an_executing_command = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\necho \"cargo build --features $A$B\" | sh\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nprintf '%s' \"c=cargo; $c build --features $A$B\" | bash\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nsource <(echo \"cargo build --features $A$B\")\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\n. <(printf '%s\\n' \"cargo build --features $A$B\")\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nsh <<< \"cargo build --features $A$B\"\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nx=(cargo build --features \"$A$B\"); \"${x[@]}\"\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nwatch \"cargo build --features $A$B\"\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nparallel \"cargo build --features $A$B\" ::: x\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nsetsid sh <<'EOF'\ncargo build --features $A$B\nEOF\n",
+                ":3",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nfrobnicate \"cargo build $F\"\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\necho '\ncargo build $F\n' | sh\n",
+                ":3",
+            ),
             (
                 ".github/scripts/build.sh",
                 "set -e\nssh h \"cargo build $F\"\n",
