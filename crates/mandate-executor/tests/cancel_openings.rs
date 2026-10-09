@@ -10,6 +10,7 @@
 
 mod common;
 
+use std::cell::Cell;
 use std::collections::BTreeSet;
 
 use common::{
@@ -19,6 +20,8 @@ use common::{
 };
 use mandate_canon::Value;
 use mandate_executor::{BrokerRequest, Command, Effect, EventId, ExecutorConfig, Input, Ports};
+use proptest::prelude::*;
+use proptest::test_runner::{Config, TestRunner};
 
 const AAPL: &str = FixedInstruments::LIQUID_EQUITY;
 const CPHC: &str = FixedInstruments::THIN_EQUITY;
@@ -292,6 +295,37 @@ fn an_unknown_opening_is_left_to_its_query() {
     assert_eq!(exactly(&ran, &expected), None);
 }
 
+/// #1007 review, minor 2: only an opening the broker holds as `accepted` or `partially_filled` is
+/// cancelled. One still `submitting`, one whose cancel is already `pending_cancel`, and one
+/// `unknown` are left alone: none is cancelled, journaled, or queried by the command.
+#[test]
+#[ignore = "pending E7-19"]
+fn only_resting_openings_are_cancelled() {
+    let (ids, mandates, instruments, config) = fixtures();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let states = [
+        "submitting",
+        "pending_cancel",
+        "unknown",
+        "accepted",
+        "partially_filled",
+    ];
+    let book: Vec<Order> = states
+        .map(|state| {
+            (
+                format!("md-{}", state.replace('_', "-")),
+                [AGENT, AAPL, "open", state],
+            )
+        })
+        .to_vec();
+    let mut shell = shell_with(&book, &ports);
+    let ran = shell.run(command(AGENT, AAPL), &ports);
+    let expected: BTreeSet<String> = ["md-accepted", "md-partially-filled"]
+        .map(str::to_owned)
+        .into();
+    assert_eq!(exactly(&ran, &expected), None);
+}
+
 /// Mandate spec §5.9: "On entering `exits_only` or stricter, the executor cancels the agent's
 /// working opening orders", so no mode blocks this command, and nor does a missing binding gate
 /// (rule 13: a risk reduction needs no external snapshot).
@@ -312,4 +346,61 @@ fn no_mode_and_no_missing_gate_blocks_it() {
             .unwrap_or_else(|e| panic!("{mode}: step refused with {}: {e}", e.code()));
         assert_eq!(exactly(&ran, &the_two()), None, "{mode}");
     }
+}
+
+/// Every purpose and every state an order can be folded in.
+const PURPOSES: &str = "open increase risk_exit owner_exit discretionary_exit protective flatten";
+const STATES: &str =
+    "submitting accepted partially_filled pending_cancel unknown filled canceled rejected expired";
+
+fn arbitrary_book() -> impl Strategy<Value = (Vec<Order>, bool, bool)> {
+    let one = (
+        prop::sample::select(vec![AGENT, OTHER_AGENT]),
+        prop::sample::select(vec![AAPL, CPHC]),
+        prop::sample::select(PURPOSES.split(' ').collect::<Vec<_>>()),
+        prop::sample::select(STATES.split(' ').collect::<Vec<_>>()),
+    );
+    let named =
+        |n: usize, (who, name, purpose, state)| (format!("md-r{n}"), [who, name, purpose, state]);
+    let book = prop::collection::vec(one, 0..10).prop_map(move |orders| {
+        orders
+            .into_iter()
+            .enumerate()
+            .map(|(n, o)| named(n, o))
+            .collect()
+    });
+    (book, any::<bool>(), any::<bool>())
+}
+
+/// Over random books and a random target, the cancels are exactly the rule's set, each journaled
+/// before it leaves, and nothing else is sent or drafted; an empty set is an empty step.
+#[test]
+#[ignore = "pending E7-19"]
+fn over_random_books_exactly_the_rules_openings_are_cancelled() {
+    let (ids, mandates, instruments, config) = fixtures();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut runner = TestRunner::new(Config {
+        cases: 128,
+        failure_persistence: None,
+        ..Config::default()
+    });
+    let reached = Cell::new(0_u32);
+    let outcome = runner.run(&arbitrary_book(), |(book, first, aapl)| {
+        let who = if first { AGENT } else { OTHER_AGENT };
+        let name = if aapl { AAPL } else { CPHC };
+        let expected = cancelled_by_the_rule(&book, who, name);
+        let mut shell = shell_with(&book, &ports);
+        let ran = shell
+            .step(command(who, name), &ports)
+            .map_err(|e| TestCaseError::fail(format!("step refused with {}: {e}", e.code())))?;
+        if !expected.is_empty() {
+            reached.set(reached.get().saturating_add(1));
+        }
+        prop_assert_eq!(exactly(&ran, &expected), None);
+        Ok(())
+    });
+    if let Err(failure) = outcome {
+        panic!("{failure}");
+    }
+    assert!(reached.get() > 0, "some book has an opening to cancel");
 }
