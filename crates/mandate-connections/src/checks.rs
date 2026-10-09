@@ -10,6 +10,8 @@
 
 use std::collections::BTreeSet;
 
+use mandate_domain::fund_movement::is_fund_movement_name;
+
 use crate::ConnectError;
 use crate::grant::{GrantedScopes, REQUESTED_SCOPES_SORTED};
 use crate::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, ConnectionState, Environment};
@@ -121,14 +123,16 @@ pub struct CheckReport {
 }
 
 /// Runs checks 1, 2, 3, and 7 (connections spec §8.1):
-/// 1. scope: OAuth scopes exactly `trading` and `data`; no permission or tool that can move
-///    funds out; a live key whose permissions cannot be read is refused, a paper one recorded;
+/// 1. scope: the grant is the credential's kind; OAuth scopes exactly `trading` and `data`; no
+///    permission, scope, or tool that can move funds out (DEC-676); a live key whose permissions
+///    cannot be read or are empty is refused, a paper one recorded (DEC-685);
 /// 2. environment: from the broker's documented reach only, never a request; a credential that
 ///    may reach both environments is refused, except Alpaca paper OAuth while
 ///    [`ALPACA_PAPER_OAUTH_REACHES_PAPER_ONLY`] holds (DEC-821);
 /// 3. account: readable, and for Robinhood the dedicated agentic account (`dedicated` must be
 ///    `Some(true)`);
-/// 7. contract (MCP only): the allowlisted tools are present and the hash equals the pinned one.
+/// 7. contract (MCP only): the allowlisted tools are present and the hash equals the pinned one,
+///    which only the first connect may lack.
 pub fn run(input: &CheckInput) -> Result<CheckReport, ConnectError> {
     let (account, account_pii_ref) = account_check(input);
     let mut results = vec![(Check::Account, account)];
@@ -145,31 +149,20 @@ pub fn run(input: &CheckInput) -> Result<CheckReport, ConnectError> {
     })
 }
 
-/// Lowercase stems of a name that can move funds or assets out (CN-2). A name is refused when it
-/// contains any of them in any case, so `Withdraw`, `withdrawal`, and `create_ach_transfer` all
-/// are. The match is deliberately wide: a false refusal asks the owner for a trading-only
-/// credential, while a miss would hold a fund-movement permission (`AGENTS.md` rule 3).
-const FUND_MOVEMENT_STEMS: [&str; 8] = [
-    "withdraw", "transfer", "deposit", "fund", "wire", "send", "payout", "disburs",
-];
-
-fn moves_funds(name: &str) -> bool {
-    let lowered = name.to_lowercase();
-    FUND_MOVEMENT_STEMS
-        .iter()
-        .any(|stem| lowered.contains(stem))
-}
-
+/// Whether any name can move funds out (CN-2), by the one rule the MCP client also applies
+/// (DEC-839 item 3; DEC-676 items 1 and 4).
 fn any_moves_funds(names: &BTreeSet<String>) -> bool {
-    names.iter().any(|name| moves_funds(name))
+    names.iter().any(|name| is_fund_movement_name(name))
 }
 
-/// Check 1. A fund-movement name is reported as one before any mismatch (CN-2). An unreadable
-/// key is refused only for live: a paper or demo key is recorded and disclosed, and an empty set
-/// that was read shows no fund movement (DEC-441 item 4). The MCP allowlist is check 7's.
+/// Check 1. A grant of another kind than the credential is refused as a mismatch before any
+/// rule reads it (DEC-676 item 3). A fund-movement name is reported as one before any other
+/// mismatch (CN-2). A live key whose permissions cannot be read, or were read and are empty, is
+/// refused, since it cannot show fund movement absent (DEC-685); a paper or demo key is recorded
+/// and disclosed (DEC-441 item 4). The MCP allowlist is check 7's.
 fn scope_check(input: &CheckInput) -> Outcome {
-    match &input.granted {
-        Granted::OAuth(GrantedScopes(scopes)) => {
+    match (input.auth_kind, &input.granted) {
+        (AuthKind::Oauth, Granted::OAuth(GrantedScopes(scopes))) => {
             if any_moves_funds(scopes) {
                 Outcome::Failed(Reason::FundMovement)
             } else if !scopes
@@ -182,17 +175,26 @@ fn scope_check(input: &CheckInput) -> Outcome {
                 Outcome::Passed
             }
         }
-        Granted::KeyPermissions(Some(names)) | Granted::Tools(names) => {
-            if any_moves_funds(names) {
+        (AuthKind::McpOauth, Granted::Tools(tools)) => {
+            if any_moves_funds(tools) {
                 Outcome::Failed(Reason::FundMovement)
             } else {
                 Outcome::Passed
             }
         }
-        Granted::KeyPermissions(None) => match input.environment {
-            Environment::Live => Outcome::Failed(Reason::PermissionsUnreadable),
-            Environment::Paper => Outcome::Passed,
-        },
+        (AuthKind::ApiKey, Granted::KeyPermissions(Some(permissions)))
+            if any_moves_funds(permissions) =>
+        {
+            Outcome::Failed(Reason::FundMovement)
+        }
+        (AuthKind::ApiKey, Granted::KeyPermissions(permissions)) => {
+            let shown = permissions.as_ref().is_some_and(|names| !names.is_empty());
+            match input.environment {
+                Environment::Live if !shown => Outcome::Failed(Reason::PermissionsUnreadable),
+                Environment::Live | Environment::Paper => Outcome::Passed,
+            }
+        }
+        _ => Outcome::Failed(Reason::ScopeMismatch),
     }
 }
 
@@ -235,15 +237,16 @@ fn account_check(input: &CheckInput) -> (Outcome, Option<AccountPiiRef>) {
 }
 
 /// Check 7 (connections spec §6.2 rule 3): the allowlisted tools must be present, which is
-/// reported over drift, and the hash must equal the pinned one. With nothing pinned yet (the
-/// first connect), the hash seen is the one the record pins.
+/// reported over drift, and the hash must equal the pinned one. Only the first connect has no pin
+/// and pins the hash it sees; at any other occasion a missing pin fails closed as drift (DEC-676
+/// item 2).
 fn contract_check(input: &CheckInput) -> Outcome {
-    match &input.contract {
-        Some(seen) if seen.allowlisted_tools_present => match &input.pinned_contract {
-            Some(pinned) if *pinned != seen.hash => Outcome::Failed(Reason::ContractDrift),
-            _ => Outcome::Passed,
-        },
-        _ => Outcome::Failed(Reason::ToolsMissing),
+    match (&input.contract, &input.pinned_contract) {
+        (Some(seen), _) if !seen.allowlisted_tools_present => Outcome::Failed(Reason::ToolsMissing),
+        (None, _) => Outcome::Failed(Reason::ToolsMissing),
+        (Some(seen), Some(pinned)) if *pinned == seen.hash => Outcome::Passed,
+        (Some(_), None) if input.occasion == Occasion::Connect => Outcome::Passed,
+        (Some(_), _) => Outcome::Failed(Reason::ContractDrift),
     }
 }
 
