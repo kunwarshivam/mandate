@@ -95,6 +95,11 @@ fn judge<T: DeserializeOwned + Validate + Debug>(body: &[u8]) -> Result<(), Vec<
                 other => panic!("a body's violation is a schema finding: {other:?}"),
             })
             .collect()),
+        #[allow(
+            unreachable_patterns,
+            reason = "`Refused::Unimplemented` exists only while the lenient decoder is a stub (DEC-886 item 13)"
+        )]
+        Err(other) => panic!("the strict decoder refuses only as invalid: {other:?}"),
     }
 }
 
