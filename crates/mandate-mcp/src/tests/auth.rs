@@ -85,7 +85,6 @@ fn at(server: &Loopback, path: &str) -> Url {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn discovery_follows_the_challenge_to_the_pinned_servers_metadata() {
     let (found, server) = discover(flow(&metadata()), PINS).await;
     let expected = AuthServer {
@@ -107,7 +106,6 @@ async fn discovery_follows_the_challenge_to_the_pinned_servers_metadata() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn without_a_challenge_url_discovery_reads_the_endpoints_well_known_path() {
     let prm = resource("@BASE@/mcp", &["@BASE@/as"]);
     let (found, server) = discover(vec![challenge(None), prm, doc(&metadata())], PINS).await;
@@ -117,7 +115,6 @@ async fn without_a_challenge_url_discovery_reads_the_endpoints_well_known_path()
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_probe_that_is_not_a_challenge_on_the_pinned_host_goes_no_further() {
     let cases = [
         (
@@ -139,7 +136,6 @@ async fn a_probe_that_is_not_a_challenge_on_the_pinned_host_goes_no_further() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn the_resource_must_be_the_endpoint_exactly() {
     for named in [
         "@BASE@/mcp/",
@@ -155,7 +151,6 @@ async fn the_resource_must_be_the_endpoint_exactly() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn only_the_first_authorization_server_on_the_pins_is_contacted() {
     let cases: [(&[&str], &[&str], &str); 5] = [
         (&["@BASE@/as"], &["as.example"], "auth_host_not_pinned"),
@@ -177,7 +172,6 @@ async fn only_the_first_authorization_server_on_the_pins_is_contacted() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn the_issuer_must_be_the_one_its_metadata_was_read_for() {
     for issuer in ["@BASE@/as/", "@BASE@/other", "https://127.0.0.1/as"] {
         let meta = edited("issuer", Some(json!(issuer)));
@@ -187,7 +181,6 @@ async fn the_issuer_must_be_the_one_its_metadata_was_read_for() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn every_endpoint_must_be_https_on_a_pinned_authorization_host() {
     let both: &[&str] = &["127.0.0.1", "as.example"];
     let off = "https://as.example/canary";
@@ -221,7 +214,6 @@ async fn every_endpoint_must_be_https_on_a_pinned_authorization_host() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn pkce_with_s256_a_code_flow_and_a_registration_endpoint_are_required() {
     let methods = "code_challenge_methods_supported";
     let cases = [
@@ -245,7 +237,6 @@ async fn pkce_with_s256_a_code_flow_and_a_registration_endpoint_are_required() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn an_unreadable_or_redirected_document_is_refused() {
     let prm = || resource("@BASE@/mcp", &["@BASE@/as"]);
     let unreadable = || with_type(200, "application/json", "canary");
@@ -267,7 +258,6 @@ async fn an_unreadable_or_redirected_document_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_code_flow_among_other_response_types_is_accepted() {
     let meta = edited("response_types_supported", Some(json!(["token", "code"])));
     let (found, server) = discover(flow(&meta), PINS).await;
