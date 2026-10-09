@@ -37,6 +37,7 @@ pub mod document;
 pub mod goal;
 pub mod policy;
 pub mod risk;
+pub mod unasked;
 pub mod validate;
 
 pub use dec::{DecGrammar, GrammarMismatch, SchemaDec};
