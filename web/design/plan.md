@@ -72,6 +72,9 @@ the owl, the rules and the record.
       1280px, opened with ⌘K and with its button, and the palette's "Stop…" from the keyboard.
       (#1038) The review's follow-up names the dialog "Command palette", gives focus back to its
       opener when Escape closes it, and `e2e/command-bar.spec.ts` pins the Tab wrap both ways.
+      (#1089) Its review's minor 1: neither of the palette's focus returns runs while the Stop
+      sheet is open, so a press on Stop that leaves focus on the page (Safari, Firefox on macOS)
+      still ends with focus in the sheet; `e2e/command-bar.spec.ts` pins it at 390 and 1280px.
 
 ## C. The cutting pass (one PR, no new rules)
 
