@@ -120,7 +120,6 @@ fn assert_killed(name: &str, killed: &Result<(), ShellError>, kinds: &[String]) 
 /// or other bytes under its digest: refused as `market_data_untrusted` with nothing journaled for
 /// it, and the kill switch in the same session still stepped and journaled.
 #[test]
-#[ignore = "pending E15-13"]
 fn a_refused_observation_leaves_the_kill_switch_working() -> Result<(), String> {
     let stored = BTreeMap::from([(Digest::of(CLOSES), CLOSES.to_vec())]);
     let (observed, killed, kinds) = offer(Some(stored))?;
