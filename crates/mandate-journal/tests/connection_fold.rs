@@ -1358,7 +1358,6 @@ fn an_empty_anchor_takes_the_stream_of_the_first_judged_record() {
 /// chain (I1), and an unanchored one fails closed at the first record [`judged`] names (I2), an
 /// account-stream revocation included.
 #[test]
-#[ignore = "pending E7-17"]
 #[allow(
     deprecated,
     reason = "the raw fold's tests, deleted with it once their verified twins are live (DEC-889 item 3)"
@@ -1419,7 +1418,6 @@ fn every_revocation_vector_is_judged_as_its_vector_says() {
 /// request, establishment, rotation, or refusal, never a revocation (DEC-885 item 4, I6); on an
 /// account stream every connection record, a revocation included (journal spec v0.37, DEC-888).
 #[test]
-#[ignore = "pending E7-17"]
 fn the_exported_judged_lists_are_the_specs() {
     let set = |names: &[&str]| -> BTreeSet<String> {
         names.iter().map(|name| (*name).to_owned()).collect()

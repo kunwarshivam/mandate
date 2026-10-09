@@ -624,3 +624,136 @@ fn bid_members_sent_only_as_null_or_left_out_are_no_confirmation() -> Result<(),
     }
     Ok(())
 }
+
+/// Values an unknown scope member may hold that the strict scan refuses or a target could be read
+/// from: duplicates at any depth, wrong types, and objects naming `kind`, `id` or a workspace.
+const INSIDE_UNKNOWN: [&str; 10] = [
+    r#"{"a": 1, "a": 2}"#,
+    r#"{"b": {"c": [{"d": 1, "d": 1}]}}"#,
+    r#"[{"id": "agt_9", "id": "con_9"}]"#,
+    r#"{"kind": "workspace", "id": null}"#,
+    r#"{"id": "agt_9", "kind": "agent", "id": "con_9"}"#,
+    r#"{"workspace": "ws_other", "workspace": "ws_x"}"#,
+    r#""bad id!""#,
+    "5",
+    "null",
+    "[[], {}, true]",
+];
+
+/// The scope's members as sent: `kind`, then `id`, a workspace's `null`.
+fn scope_members(kind: &str, id: &Value) -> Vec<String> {
+    vec![format!(r#""kind": "{kind}""#), format!(r#""id": {id}"#)]
+}
+
+/// The kill switch's full example with `scope` as the text `scope` gives it, the rest as sent.
+fn kill_switch_text(scope: &[String]) -> String {
+    let example = examples()
+        .into_iter()
+        .find_map(|(op, body)| (op == "kill_switch").then_some(body))
+        .and_then(|mut body| {
+            body.as_object_mut()?.remove("scope");
+            Some(body.to_string())
+        })
+        .unwrap_or_default();
+    let rest = example.get(1..example.len() - 1).unwrap_or_default();
+    format!(r#"{{"scope": {{{}}}, {rest}}}"#, scope.join(", "))
+}
+
+/// `dirty` must keep exactly what `clean`, the same body without its unknown scope members, keeps,
+/// list exactly `dropped`, and keep the target `kind` and `id` name (DEC-900 items 1 and 3).
+fn assert_target_kept(
+    dirty: &str,
+    clean: &str,
+    dropped: &[String],
+    target: &Value,
+) -> Result<(), String> {
+    let (want, none) = lenient("kill_switch", clean.as_bytes()).map_err(|e| format!("{e:?}"))?;
+    assert!(none.is_empty(), "{clean}: drops nothing");
+    let (kept, listed) =
+        lenient("kill_switch", dirty.as_bytes()).map_err(|e| format!("{dirty}: {e:?}"))?;
+    assert_eq!(listed, dropped, "{dirty}: dropped");
+    assert_eq!(kept, want, "{dirty}: kept as the body without it");
+    assert_eq!(
+        without_nulls(kept)["scope"],
+        *target,
+        "{dirty}: the target never moves"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn an_unknown_scope_member_malformed_inside_is_dropped_whole_and_the_target_kept()
+-> Result<(), String> {
+    for (kind, id) in scopes() {
+        let target = without_nulls(json!({"kind": kind, "id": id}));
+        let clean = kill_switch_text(&scope_members(kind, &id));
+        for name in ["zz", "ID", "workspace"] {
+            for inside in INSIDE_UNKNOWN {
+                for at in 0..=2 {
+                    let mut scope = scope_members(kind, &id);
+                    scope.insert(at, format!(r#""{name}": {inside}"#));
+                    let dirty = kill_switch_text(&scope);
+                    let dropped = [format!("/scope/{name}")];
+                    assert_target_kept(&dirty, &clean, &dropped, &target)?;
+                }
+            }
+        }
+        let mut scope = scope_members(kind, &id);
+        scope.insert(0, format!(r#""zz": {}"#, INSIDE_UNKNOWN[0]));
+        scope.insert(2, format!(r#""yy": {}"#, INSIDE_UNKNOWN[1]));
+        scope.push(format!(r#""zz": {}"#, INSIDE_UNKNOWN[4]));
+        let dropped = ["/scope/zz".to_owned(), "/scope/yy".to_owned()];
+        assert_target_kept(&kill_switch_text(&scope), &clean, &dropped, &target)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_duplicate_kind_or_id_in_the_scope_is_refused_beside_any_unknown_member() {
+    for (kind, id) in scopes() {
+        let other = if id.is_null() {
+            id.clone()
+        } else {
+            json!("agt_2")
+        };
+        let twice = [format!(r#""kind": "{kind}""#), format!(r#""id": {other}"#)];
+        for again in twice {
+            for unknown in [None, Some(INSIDE_UNKNOWN[0]), Some(INSIDE_UNKNOWN[4])] {
+                for at in 0..=3 {
+                    let mut scope = scope_members(kind, &id);
+                    scope.push(again.clone());
+                    if let Some(inside) = unknown {
+                        scope.insert(at, format!(r#""zz": {inside}"#));
+                    }
+                    let body = kill_switch_text(&scope);
+                    let code = first_code(lenient("kill_switch", body.as_bytes()));
+                    assert_eq!(code, "duplicate_member", "{body}: never a guessed target");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_duplicate_inside_an_unknown_member_outside_the_scope_is_read_as_before() -> Result<(), String>
+{
+    let unknown = INSIDE_UNKNOWN[1];
+    for (operation, example) in examples() {
+        let text = example.to_string();
+        let rest = text.get(1..text.len() - 1).unwrap_or_default();
+        let body = format!(r#"{{"zz": {unknown}, {rest}}}"#);
+        let mut sent = example.clone();
+        sent["zz"] = json!(0);
+        assert_kept(&body, sent, &["/zz"], lenient(operation, body.as_bytes()))?;
+    }
+    let scope = scope_members("agent", &json!("agt_1")).join(", ");
+    let body = format!(r#"{{"scope": {{{scope}}}, "record": {unknown}}}"#);
+    let sent = json!({"scope": {"kind": "agent", "id": "agt_1"}, "record": 0});
+    assert_kept(
+        &body,
+        sent,
+        &["/record"],
+        lenient("kill_switch", body.as_bytes()),
+    )
+}
