@@ -10,5 +10,6 @@
   of the `membership_fold` section of `fixtures/refcases/journal.json`, its probes, unreadable
   latch, and refused record (the reference fold is `reference/journal/membership_fold.py`).
   `crates/mandate-identity/tests/membership_gaps.rs`: the backlog's three access-reducing gaps and
-  the independence check. Shared builders: `crates/mandate-identity/tests/membership/mod.rs`.
+  the independence check. `crates/mandate-identity/tests/membership_oracle.rs`: ID-7 and §5.1 over
+  random histories against an oracle written apart from the crate. Shared builders: `crates/mandate-identity/tests/membership/mod.rs`.
 - **Run:** `cargo test -p mandate-identity -- --include-ignored`.
