@@ -20,7 +20,6 @@ fn refused(layout: &Layout, role: Role) -> VaultError {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_correct_layout_starts_each_role_with_its_keys() {
     let layout = Layout::new();
     let executor = check(&layout.inputs(Role::Executor)).unwrap();
@@ -36,7 +35,6 @@ fn a_correct_layout_starts_each_role_with_its_keys() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_key_variable_in_the_environment_refuses_startup() {
     for name in FORBIDDEN_KEY_VARIABLES {
         for value in [
@@ -60,7 +58,6 @@ fn a_key_variable_in_the_environment_refuses_startup() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_api_process_refuses_the_token_key() {
     let layout = Layout::new();
     assert_eq!(
@@ -70,7 +67,6 @@ fn the_api_process_refuses_the_token_key() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn each_key_must_be_present_and_exactly_32_bytes() {
     let layout = Layout::new().without_token_key();
     assert_eq!(refused(&layout, Role::Executor), VaultError::KeyMissing);
@@ -102,7 +98,6 @@ fn each_key_must_be_present_and_exactly_32_bytes() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn every_directory_must_have_its_exact_mode() {
     let cases = [
         ("", "vault", 0o775),
@@ -129,7 +124,6 @@ fn every_directory_must_have_its_exact_mode() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn every_directory_must_have_its_owner_and_group() {
     type Skew = fn(&mut Ids);
     let cases: [(Skew, &str); 5] = [
@@ -151,7 +145,6 @@ fn every_directory_must_have_its_owner_and_group() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_symlinked_or_missing_directory_is_refused() {
     let layout = Layout::new();
     let real = layout.root.join("elsewhere");
