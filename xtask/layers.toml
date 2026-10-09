@@ -34,8 +34,8 @@
 #   3  mandate-spec, mandate-audit (read-only audit reads over the journal, scoped to one
 #      workspace; E12-6)
 #   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
-#      mandate-spec; it holds L5's audit wire types, and mandate-audit sits above it and converts
-#      into them; its server sits higher (DEC-680)
+#      mandate-spec; it holds L5's audit wire types, and mandate-audit (layer 3) sits below it, so
+#      the conversion into them sits above both; its server sits higher (DEC-680)
 #   5  mandate-builder
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
 #      mandate-runtime, mandate-mcp
