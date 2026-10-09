@@ -31,6 +31,13 @@ async function layoutAt(page: Page, width: number) {
   }));
 }
 
+/**
+ * No trace: a case is 1,000 to 1,500 actions (a resize and a read at 121 widths for every age), and a
+ * trace snapshots the page's DOM at every one, which tripled the run and took it past its budget on a
+ * loaded runner. A failure names its width and age, which is what a trace would have shown.
+ */
+test.use({ trace: "off" });
+
 for (const { scenario, initialAge, ages } of CASES) {
   test(`${scenario}: the header and main do not move as ages tick`, async ({ page }) => {
     test.setTimeout(90_000);

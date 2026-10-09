@@ -49,7 +49,7 @@ test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide
   expect(found.radius).toBe(10);
   expect(found.padding).toBe(6);
   expect(found.height, "the dock's height matches --dock-h").toBe(64);
-  expect(found.items).toHaveLength(9);
+  expect(found.items, "six links and the More menu, Stop aside (DEC-513 item 2)").toHaveLength(7);
   expect(found.stop, "Stop, at the dock's end, is as tall as its items").toBe(50);
   for (const item of found.items) {
     expect(item.width).toBeGreaterThanOrEqual(64);

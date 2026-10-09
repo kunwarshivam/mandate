@@ -2206,7 +2206,8 @@ fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag 
 /// is not known non-executing; and, unless the command is the compile-only form or text (known
 /// non-executing, with every later stage known too and no consumer that executes), each quoted
 /// word holding a space, `cargo` or a `$` or backtick, and each here-string. An executing `awk`
-/// or `sed` builds a command no reading can follow, so it is refused.
+/// or `sed` builds a command no reading can follow, so it is refused, and so is a command that
+/// runs an expanding argument as a command line ([`runs_expanding_line`]).
 fn pipeline_live_flag(
     pipeline: &[PipelineCommand],
     (line, substitutions): (&str, &[(String, usize)]),
@@ -2223,7 +2224,8 @@ fn pipeline_live_flag(
             .collect();
         let flag = command_live_flag(&words, ctx);
         let named = command.command();
-        let builds = matches!(named.first(), Some(&"awk" | &"sed")) && executing_form(&named);
+        let builds = (matches!(named.first(), Some(&"awk" | &"sed")) && executing_form(&named))
+            || runs_expanding_line(&named, &command.here_strings);
         verdict = verdict.min(flag);
         if builds || (flag != LiveFlag::CompileOnly && feature_values_refused(&words, ctx)) {
             verdict = verdict.min(LiveFlag::Unreadable);
@@ -2262,6 +2264,25 @@ fn pipeline_live_flag(
         );
     }
     verdict
+}
+
+/// Whether a command runs an expanding argument as a command line: `eval` with an argument
+/// holding `$` or a backtick, or `sh`, `bash` or `zsh` (by any path) given `-c`, alone or in a
+/// short-flag cluster, and such an argument, or such a here-string (DEC-851 item 1).
+fn runs_expanding_line(named: &[&str], here_strings: &[String]) -> bool {
+    let expands = |word: &str| word.contains(['$', '`']);
+    let arguments = named.get(1..).unwrap_or_default();
+    match named.first().and_then(|word| word.rsplit('/').next()) {
+        Some("eval") => arguments.iter().any(|word| expands(word)),
+        Some("sh" | "bash" | "zsh") => {
+            let dash_c = arguments
+                .iter()
+                .any(|word| word.starts_with('-') && !word.starts_with("--") && word.contains('c'));
+            (dash_c && arguments.iter().any(|word| expands(word)))
+                || here_strings.iter().any(|text| expands(text))
+        }
+        _ => false,
+    }
 }
 
 /// Whether `word` names cargo: a word `cargo`, or a path ending `/cargo`.
@@ -2523,7 +2544,8 @@ fn mutants_scheduled(
         .collect();
     external_oracles(&mut test_packages, &workspace_closure(&metadata_in(root)?));
     live_tests_judge_every_mutant(root, &listed, &test_packages)?;
-    let args = mutants_args(diff.path()?, shard, &test_packages);
+    let first = TestOrder::write(&shard_packages(root, diff.path()?, shard, &listed)?)?;
+    let args = mutants_args(diff.path()?, shard, &test_packages, first.as_ref())?;
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
     let started = fs::metadata(&diff.file)
@@ -2804,11 +2826,96 @@ fn external_oracles(
 /// but two runs each are too few to claim one either way, and none is needed.
 const MUTANTS_IN_PLACE: &str = "--in-place";
 
+/// The packages the run's own mutants are in: for a shard, its slice, as `cargo mutants --list`
+/// selects it with the same `--shard` and `--sharding` the run passes; unsharded, every package
+/// with a mutant (DEC-852).
+fn shard_packages(
+    root: &Path,
+    diff_path: &str,
+    shard: Option<MutantShard>,
+    listed: &BTreeMap<String, usize>,
+) -> Result<Vec<String>> {
+    let Some(shard) = shard else {
+        return Ok(listed.keys().cloned().collect());
+    };
+    let argument = shard.argument();
+    let listing = output_in(
+        root,
+        "cargo",
+        &[
+            "mutants",
+            "--list",
+            "--json",
+            "--in-diff",
+            diff_path,
+            "--shard",
+            &argument,
+            "--sharding",
+            "slice",
+        ],
+    )?;
+    Ok(listed_mutant_counts(&listing)?.into_keys().collect())
+}
+
+/// The nextest configuration that runs the mutated packages' tests before every other tested
+/// package's (DEC-852). Nextest starts tests in the order of their binaries' names, so without it
+/// a `mandate-shell` mutant waited behind `mandate-alpaca`'s, `mandate-executor`'s and
+/// [`REFCASES`]' tests: on #931 the one test that catches `use_profile -> Ok(())` failed in nine
+/// milliseconds as the 1529th of 1749, 213 seconds in, past [`MUTANT_TEST_TIMEOUT`] on a slow
+/// runner. A priority only reorders: it filters out no test, so a mutant the mutated crate's own
+/// tests miss is still judged by every other tested package's, under the same cap.
+fn test_order_config(packages: &[String]) -> String {
+    let filter: Vec<String> = packages
+        .iter()
+        .map(|package| format!("package(={package})"))
+        .collect();
+    format!(
+        "[[profile.default.overrides]]\nfilter = \"{}\"\npriority = 100\n",
+        filter.join(" | ")
+    )
+}
+
+/// The tool name `--tool-config-file` files [`test_order_config`] under.
+const TEST_ORDER_TOOL: &str = "mandate-mutants";
+
+/// A written [`test_order_config`], removed when dropped.
+struct TestOrder(PathBuf);
+
+impl TestOrder {
+    /// `None` for a slice with no mutant, which cargo-mutants ends before it tests anything.
+    fn write(packages: &[String]) -> Result<Option<Self>> {
+        if packages.is_empty() {
+            return Ok(None);
+        }
+        let file =
+            env::temp_dir().join(format!("mandate-mutants-order-{}.toml", std::process::id()));
+        fs::write(&file, test_order_config(packages))?;
+        Ok(Some(Self(file)))
+    }
+
+    /// The two `--cargo-test-arg`s that hand the file to every test phase, the baseline's
+    /// included.
+    fn args(&self) -> Result<[String; 2]> {
+        let path = self.0.to_str().context("non-UTF-8 temp path")?;
+        Ok([
+            "--cargo-test-arg=--tool-config-file".to_owned(),
+            format!("--cargo-test-arg={TEST_ORDER_TOOL}:{path}"),
+        ])
+    }
+}
+
+impl Drop for TestOrder {
+    fn drop(&mut self) {
+        fs::remove_file(&self.0).ok();
+    }
+}
+
 fn mutants_args(
     diff_path: &str,
     shard: Option<MutantShard>,
     test_packages: &[&str],
-) -> Vec<String> {
+    first: Option<&TestOrder>,
+) -> Result<Vec<String>> {
     let mut args = [
         "mutants",
         "--in-diff",
@@ -2839,7 +2946,10 @@ fn mutants_args(
             "slice".to_owned(),
         ]);
     }
-    args
+    if let Some(first) = first {
+        args.extend(first.args()?);
+    }
+    Ok(args)
 }
 
 /// The build directory a caller may export for their own builds. The mutants job's `cargo` children
@@ -4625,18 +4735,18 @@ mod tests {
         FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
         MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS,
         Package, PendingTest, PendingTestRun, REFCASES, SCHEMA_CHECKERS, SCHEMA_DIR,
-        SCHEMA_SHARD_ENV, TestOutcome, UnmutatedSource, actionlint_workflows, backticked_paths,
-        base_ref_in, behaviour_only_rows, check_schedule, ci, ci_files, classify, contains_dec_id,
-        contains_word, external_oracles, failure_cause, feature_files, feature_map_problems,
-        files_by_extension, first_panic_line, forbidden_reached, generated_pending_markers,
-        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
-        listed_mutant_counts, live_feature_problems, live_test_counts, metadata_in,
-        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
-        mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
+        SCHEMA_SHARD_ENV, TestOrder, TestOutcome, UnmutatedSource, actionlint_workflows,
+        backticked_paths, base_ref_in, behaviour_only_rows, check_schedule, ci, ci_files, classify,
+        contains_dec_id, contains_word, external_oracles, failure_cause, feature_files,
+        feature_map_problems, files_by_extension, first_panic_line, forbidden_reached,
+        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
+        layer_problems, lint, listed_mutant_counts, live_feature_problems, live_test_counts,
+        metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
+        mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
         pending_tests, plain_comment_lines, preflight_args, proptest_seeds_in, repo_root,
-        schema_mutants, shellcheck_scripts, spec_guard_problems, spec_guard_problems_for_pr,
-        status_flip_problems, test_binary, test_outcomes, unjudged_mutants, verdicts,
-        workspace_closure, workspace_packages,
+        schema_mutants, shard_packages, shellcheck_scripts, spec_guard_problems,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
+        test_outcomes, unjudged_mutants, verdicts, workspace_closure, workspace_packages,
     };
 
     #[test]
@@ -5295,10 +5405,77 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-852: the run's test phases take a nextest configuration that starts the mutated
+    /// packages' tests before every other tested package's, and only reorders: one override, a
+    /// priority and an exact-package filter, and nothing that skips or times a test.
     #[test]
-    fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() {
+    fn a_shard_runs_its_mutated_packages_tests_first() -> Result<()> {
+        let config: toml::Value = toml::from_str(&test_order_config(&[
+            "mandate-executor".to_owned(),
+            "mandate-shell".to_owned(),
+        ]))?;
+        let overrides = config
+            .get("profile")
+            .and_then(|profile| profile.get("default"))
+            .and_then(|default| default.get("overrides"))
+            .and_then(toml::Value::as_array)
+            .context("one `profile.default.overrides` list")?;
+        assert_eq!(overrides.len(), 1);
+        let first = overrides[0].as_table().context("the override is a table")?;
+        assert_eq!(
+            first.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["filter", "priority"],
+            "a priority and the packages it applies to, and no setting that skips, retries or \
+             times a test"
+        );
+        assert_eq!(
+            first.get("filter").and_then(toml::Value::as_str),
+            Some("package(=mandate-executor) | package(=mandate-shell)"),
+            "exactly the mutated packages, by exact name"
+        );
+        assert_eq!(
+            first.get("priority").and_then(toml::Value::as_integer),
+            Some(100),
+            "nextest's highest priority, so they start before every other tested package"
+        );
+
+        let order = TestOrder::write(&["mandate-shell".to_owned()])?
+            .context("a slice with a mutant writes its order")?;
+        let path = order.0.to_str().context("non-UTF-8 temp path")?.to_owned();
+        assert_eq!(
+            fs::read_to_string(&order.0)?,
+            test_order_config(&["mandate-shell".to_owned()])
+        );
+        let args = mutants_args("change.diff", None, &["mandate-shell"], Some(&order))?;
+        assert_eq!(
+            args.windows(2)
+                .filter(|pair| {
+                    pair[0] == "--cargo-test-arg=--tool-config-file"
+                        && pair[1] == format!("--cargo-test-arg=mandate-mutants:{path}")
+                })
+                .count(),
+            1,
+            "every test phase, the baseline's included, reads the order once"
+        );
+        drop(order);
+        assert!(!Path::new(&path).exists(), "and the file goes with the run");
+        assert!(
+            TestOrder::write(&[])?.is_none(),
+            "a slice with no mutant has nothing to order"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() -> Result<()> {
         let packages = ["mandate-journal", "mandate-refcases"];
-        let unsharded = mutants_args("change.diff", None, &packages);
+        let unsharded = mutants_args("change.diff", None, &packages, None)?;
+        assert!(
+            !unsharded
+                .iter()
+                .any(|arg| arg.starts_with("--cargo-test-arg")),
+            "without an order nothing is passed to nextest"
+        );
         assert!(
             !unsharded.iter().any(|arg| arg == "--shard"),
             "a local `cargo xtask check` run must cover the complete diff"
@@ -5350,7 +5527,8 @@ mod tests {
                 total: 12,
             }),
             &packages,
-        );
+            None,
+        )?;
         assert_eq!(
             sharded
                 .windows(2)
@@ -5365,6 +5543,7 @@ mod tests {
                 .count(),
             1
         );
+        Ok(())
     }
 
     #[test]
@@ -6666,6 +6845,22 @@ mod tests {
             "with one live test over `code`, the same diff passes: the pre-flight is precise, not a \
              refusal of every crate whose tests are pending",
         )?;
+        let logs: Vec<String> = fs::read_dir(fx.0.join(MUTANTS_OUT).join("log"))?
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| fs::read_to_string(entry.path()).ok())
+            .collect();
+        assert!(
+            !logs.is_empty()
+                && logs.iter().all(|log| {
+                    log.lines().any(|line| {
+                        line.contains("nextest run")
+                            && !line.contains("--no-run")
+                            && line.contains("--tool-config-file mandate-mutants:")
+                    })
+                }),
+            "every scenario's test phase, the baseline's and each mutant's, ran with the order \
+             that starts the mutated packages' tests first (DEC-852)"
+        );
         fx.write(
             "crates/covered/tests/covered.rs",
             "#[test]\nfn the_flag_is_negated() {\n    assert!(covered::negate(false));\n}\n",
@@ -7689,6 +7884,43 @@ mod tests {
         assert_eq!(
             union, everything,
             "the plan's shards together test every mutant"
+        );
+
+        let listed = listed_mutant_counts(&output_in(
+            &fx.0,
+            "cargo",
+            &[
+                "mutants",
+                "--list",
+                "--json",
+                "--in-diff",
+                diff.to_str().context("non-UTF-8 temp path")?,
+            ],
+        )?)?;
+        let diff_path = diff.to_str().context("non-UTF-8 temp path")?;
+        assert_eq!(
+            shard_packages(&fx.0, diff_path, None, &listed)?,
+            listed.keys().cloned().collect::<Vec<_>>(),
+            "unsharded, every package with a mutant comes first (DEC-852)"
+        );
+        let mut first_by_shard = BTreeSet::new();
+        for k in 0..plan.shards {
+            let shard = MutantShard {
+                index: k,
+                total: plan.shards,
+            };
+            let first = shard_packages(&fx.0, diff_path, Some(shard), &listed)?;
+            assert_eq!(
+                first.len(),
+                1,
+                "shard {k} has one mutant, so one package goes first, not the diff's {listed:?}"
+            );
+            first_by_shard.extend(first);
+        }
+        assert_eq!(
+            first_by_shard,
+            listed.keys().cloned().collect::<BTreeSet<_>>(),
+            "and between them the shards put each mutated package first where its mutants are"
         );
         fs::remove_file(&diff).ok();
 
@@ -9812,7 +10044,6 @@ jq -r "$filter" "$src"
     /// coordinator's ruling under DEC-176; X1 tests correction 9). A shell given a script file,
     /// and an `eval` or `-c` whose argument expands nothing, stay allowed.
     #[test]
-    #[ignore = "pending E7-26"]
     fn eval_and_shells_given_an_expanding_command_line_are_refused() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
