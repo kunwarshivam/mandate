@@ -10,8 +10,9 @@
 mod common;
 
 use common::scenario;
+use mandate_accounting::AccountType;
 use mandate_alpaca::error::WireError;
-use mandate_alpaca::wire;
+use mandate_alpaca::{AccountRules, DeclaredRegime, alpaca_account_rules, wire};
 use mandate_num::Usd;
 use serde_json::{Value, json};
 
@@ -130,5 +131,19 @@ fn the_parsed_accounts_maintenance_excess_is_equity_less_its_maintenance_margin(
         Ok(usd("987654.33")),
         "1000000 − 12345.67 = 987654.33: neither the prior close (987654.32) nor the last \
          requirement (1000000 − 999.99) nor the initial margin (1000000 − 55555.55)"
+    );
+}
+
+/// Trading spec §7.2 states Alpaca's account rules per broker: "Account type: Alpaca: always
+/// margin" and "Day-trading regime: Alpaca: `intraday_margin`". The connector declares exactly
+/// those, and the shell takes them from here (DEC-840).
+#[test]
+fn alpacas_declared_account_rules_are_section_7_2s() {
+    assert_eq!(
+        alpaca_account_rules(),
+        AccountRules {
+            account_type: AccountType::Margin,
+            regime: DeclaredRegime::IntradayMargin,
+        }
     );
 }
