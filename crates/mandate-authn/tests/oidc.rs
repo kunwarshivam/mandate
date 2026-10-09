@@ -160,6 +160,7 @@ fn a_signature_from_another_key_or_over_other_bytes_is_refused() {
     );
     for signer in Signer::ALLOWED {
         let token = issuer.token(signer, &claims());
+        assert!(check(&issuer, &token).is_ok(), "{signer:?}");
         let (input, sig) = token.rsplit_once('.').unwrap();
         let (header, _) = input.split_once('.').unwrap();
         let admin = b64(with("sub", json!("admin")).to_string().as_bytes());
@@ -186,6 +187,7 @@ fn an_es256_signature_is_the_raw_64_bytes_and_no_other_form() {
     let der = issuer.sign_es256_der(&header, &payload);
     assert_eq!(refused(&issuer, &der), Refusal::BadSignature, "DER");
     let token = issuer.sign_raw(Signer::Es256, &header, &payload);
+    assert!(check(&issuer, &token).is_ok(), "the raw 64 bytes verify");
     let (input, sig) = token.rsplit_once('.').unwrap();
     let raw = unb64(sig);
     assert_eq!(raw.len(), 64);
@@ -205,6 +207,12 @@ fn no_claim_is_read_before_the_signature_verifies() {
         ("nonce", json!("other")),
         ("iss", json!(7)),
     ] {
+        let genuine = issuer.token(Signer::Es256, &with(key, value.clone()));
+        assert_ne!(
+            refused(&issuer, &genuine),
+            Refusal::BadSignature,
+            "the claim alone is refused, {key} {value}"
+        );
         let token = issuer.token(Signer::ImpostorEs256, &with(key, value.clone()));
         assert_eq!(
             refused(&issuer, &token),

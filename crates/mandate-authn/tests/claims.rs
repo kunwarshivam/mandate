@@ -5,7 +5,9 @@
 mod common;
 
 use common::*;
-use mandate_authn::{CLOCK_SKEW_S, Refusal, TokenKind, TokenPart, verify};
+use mandate_authn::{
+    Algorithm, CLOCK_SKEW_S, IssuerConfig, Refusal, TokenKind, TokenPart, UtcNanos, verify,
+};
 use proptest::prelude::*;
 use serde_json::{Value, json};
 
@@ -45,12 +47,35 @@ fn the_audience_must_name_this_client_and_several_need_its_authorized_party() {
 }
 
 #[test]
+fn any_configured_audience_is_accepted_and_azp_may_name_any_of_them() {
+    let issuer = TestIssuer::new();
+    let two = IssuerConfig::new(ISSUER, &["first-client", AUDIENCE], &[Algorithm::Es256]).unwrap();
+    let outcome = |claims: Value| {
+        let token = issuer.token(Signer::Es256, &claims);
+        verify(&token, &two, &issuer.jwks(), ID, now()).map(|_| ())
+    };
+    assert_eq!(outcome(with("aud", json!(AUDIENCE))), Ok(()), "the second");
+    assert_eq!(
+        outcome(with("aud", json!(["first-client"]))),
+        Ok(()),
+        "the first"
+    );
+    let several = |aud: Value, azp: &str| with_all(&[("aud", aud), ("azp", json!(azp))]);
+    let first_named = several(json!(["other-client", AUDIENCE]), "first-client");
+    assert_eq!(outcome(first_named), Ok(()), "azp names the first");
+    let second_named = several(json!(["first-client", "other-client"]), AUDIENCE);
+    assert_eq!(outcome(second_named), Ok(()), "azp names the second");
+    let none = several(json!(["other-client", "third-client"]), "first-client");
+    assert_eq!(outcome(none), Err(Refusal::WrongAudience), "no aud is ours");
+}
+
+#[test]
 fn expiry_and_not_before_hold_to_the_stated_skew() {
     let issuer = TestIssuer::new();
     let exp = NOW_S + LIFETIME_S;
     let token = issuer.token(Signer::EdDsa, &with("nbf", json!(NOW_S)));
     let at_time = |secs: i64, nanos: u32| {
-        let now = mandate_authn::UtcNanos::from_parts(secs, nanos).unwrap();
+        let now = UtcNanos::from_parts(secs, nanos).unwrap();
         verify(&token, &config(), &issuer.jwks(), ID, now).map(|_| ())
     };
     assert_eq!(at_time(exp + CLOCK_SKEW_S - 1, 999_999_999), Ok(()));
@@ -100,7 +125,11 @@ fn an_id_token_needs_the_sign_ins_nonce_and_an_access_token_needs_none() {
         Ok(())
     );
     let shorter = &NONCE[..NONCE.len() - 1];
-    for near in [format!("{NONCE}x"), shorter.to_owned()] {
+    for near in [
+        format!("{NONCE}x"),
+        shorter.to_owned(),
+        NONCE.to_uppercase(),
+    ] {
         assert_eq!(
             outcome(with("nonce", json!(near)), ID),
             Err(Refusal::NonceMismatch),
@@ -192,10 +221,11 @@ proptest! {
 
     #[test]
     fn a_token_verifies_exactly_inside_its_skewed_window(nbf in -400i64..400, exp in -400i64..400, now_s in -600i64..600, nanos in 0u32..1_000_000_000) {
+        prop_assume!(nbf <= exp);
         let issuer = TestIssuer::new();
         let claims = with_all(&[("nbf", json!(NOW_S + nbf)), ("exp", json!(NOW_S + exp))]);
         let token = issuer.token(Signer::EdDsa, &claims);
-        let when = mandate_authn::UtcNanos::from_parts(NOW_S + now_s, nanos).unwrap();
+        let when = UtcNanos::from_parts(NOW_S + now_s, nanos).unwrap();
         let expected = if now_s >= exp + CLOCK_SKEW_S {
             Err(Refusal::Expired)
         } else if now_s < nbf - CLOCK_SKEW_S {
