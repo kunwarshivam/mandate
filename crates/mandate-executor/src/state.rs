@@ -3,11 +3,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
+use mandate_domain::CapabilityProfile;
 use mandate_num::{Price, Qty, Rounding, SignedQty, Usd};
 use mandate_time::Date;
 
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
+use crate::shape::transitional_alpaca;
 use crate::types::{
     AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, IntentBody,
     MarketObservation, Mode, OcoLegs, Order, OrderState, Protection, ProtectionPrices, Purpose,
@@ -125,6 +127,11 @@ pub struct ExecutorState {
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
     pub(crate) now: Option<RiskClock>,
+    /// The broker's capability profile protection reads (DEC-838 item 5): set by the shell from
+    /// `connector.profile()` at every start ([`ExecutorState::with_profile`]), and otherwise the
+    /// transitional Alpaca table. `None` only if that table failed to build, which protection
+    /// reads as no shape offered (journaled and alerted, DEC-838 item 1).
+    pub(crate) profile: Option<CapabilityProfile>,
 }
 
 /// One agent-scoped kill switch (trading-domain spec §5.5): whose sub-ledger it sells, as what
@@ -302,7 +309,16 @@ impl ExecutorState {
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
             now: None,
+            profile: transitional_alpaca().ok(),
         }
+    }
+
+    /// This state with the connector's capability profile, which protection reads in place of the
+    /// transitional Alpaca default (DEC-838 item 5). The shell sets it after the fold at every
+    /// start; a state built without it is Alpaca-only by contract until B3 deletes the default.
+    pub fn with_profile(mut self, profile: CapabilityProfile) -> Self {
+        self.profile = Some(profile);
+        self
     }
 
     /// Which broker account this executor owns the ledger for.

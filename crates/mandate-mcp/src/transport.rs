@@ -94,23 +94,8 @@ impl McpTransport {
         config: TransportConfig,
         clock: Box<dyn Monotonic>,
     ) -> Result<Self, McpError> {
-        if config.connect_timeout.is_zero()
-            || config.request_timeout.is_zero()
-            || config.max_answer_bytes == 0
-        {
-            return Err(McpError::BadConfig);
-        }
+        let client = http_client(&config)?;
         let budget = RateBudget::new(config.budget, clock.elapsed())?;
-        let _already_installed = rustls::crypto::ring::default_provider().install_default();
-        let client = reqwest::Client::builder()
-            .https_only(Build::CURRENT == Build::Production)
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy()
-            .connect_timeout(config.connect_timeout)
-            .timeout(config.request_timeout)
-            .user_agent(USER_AGENT)
-            .build()
-            .map_err(|_| McpError::ClientSetup)?;
         Ok(Self {
             client,
             endpoint,
@@ -146,7 +131,7 @@ impl McpTransport {
             Some("text/event-stream") => true,
             _ => return Err(McpError::ContentType),
         };
-        let body = self.read_capped(response).await?;
+        let body = read_capped(response, self.max_answer_bytes).await?;
         if is_stream {
             frame::parse_sse(&body, id)
         } else {
@@ -212,11 +197,7 @@ impl McpTransport {
         if let Some(assigned) = response.headers().get(SESSION_HEADER)
             && status.is_success()
         {
-            let visible = assigned
-                .as_bytes()
-                .iter()
-                .all(|b| (0x21..=0x7e).contains(b));
-            if !visible || assigned.is_empty() {
+            if !is_visible_ascii(assigned.as_bytes()) {
                 return Err(McpError::BadSessionId);
             }
             let mut kept = assigned.clone();
@@ -229,17 +210,47 @@ impl McpTransport {
     fn session(&self) -> std::sync::MutexGuard<'_, Option<HeaderValue>> {
         self.session.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
 
-    async fn read_capped(&self, mut response: reqwest::Response) -> Result<Vec<u8>, McpError> {
-        let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(classify)? {
-            if body.len().saturating_add(chunk.len()) > self.max_answer_bytes {
-                return Err(McpError::TooLarge);
-            }
-            body.extend_from_slice(&chunk);
-        }
-        Ok(body)
+/// The HTTP client every exchange of this crate uses: no redirect followed, no proxy, `https`
+/// only outside this crate's test build, and the configuration's timeouts, none of them zero.
+pub(crate) fn http_client(config: &TransportConfig) -> Result<reqwest::Client, McpError> {
+    if config.connect_timeout.is_zero()
+        || config.request_timeout.is_zero()
+        || config.max_answer_bytes == 0
+    {
+        return Err(McpError::BadConfig);
     }
+    let _already_installed = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::builder()
+        .https_only(Build::CURRENT == Build::Production)
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .connect_timeout(config.connect_timeout)
+        .timeout(config.request_timeout)
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|_| McpError::ClientSetup)
+}
+
+/// The answer's body, refused as [`McpError::TooLarge`] once it would exceed `max_bytes`.
+pub(crate) async fn read_capped(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, McpError> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(classify)? {
+        if body.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(McpError::TooLarge);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+/// Non-empty, and every byte visible ASCII (0x21 to 0x7e): no space, control character, or DEL.
+pub(crate) fn is_visible_ascii(bytes: &[u8]) -> bool {
+    !bytes.is_empty() && bytes.iter().all(|b| (0x21..=0x7e).contains(b))
 }
 
 /// The media type without parameters, lower case.
@@ -249,7 +260,7 @@ fn media_type(headers: &HeaderMap) -> Option<String> {
     Some(essence.trim().to_ascii_lowercase())
 }
 
-fn classify(error: reqwest::Error) -> McpError {
+pub(crate) fn classify(error: reqwest::Error) -> McpError {
     if error.is_timeout() {
         McpError::Timeout
     } else {

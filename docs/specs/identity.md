@@ -1089,17 +1089,23 @@ remains, and step-up still works through locally verified passkeys. New sign-ins
 
 ## 12. Journal records
 
-### 12.1 Events (proposed additions to journal §9, control stream)
+### 12.1 Events (journal §9, control stream)
 
-The journal spec does not yet have membership events. These are owed by E9-7's tests PR, which adds
-them to journal §9 with schemas (DEC-437 item 9):
+These are journal §9's control-stream identity records (DEC-437 item 9). The membership records are
+closed in [journal §9.12](journal.md#912-membership-records-dec-437-item-9-dec-648), which adds
+`MemberInvitationRevoked` (§5.1's `invited` to `revoked`), the accepted `invitation` on
+`MemberActivated`, the cool-off end and restored roles on `MemberReactivated`, `invited_at` on
+`MemberInvited`, the effective `independent_approval_required` on each grant (so §8.3's cool-off is
+decided by the record), and a payload `session_ref` on each until §12.2's envelope field lands ([DEC-648](../project/decisions/DEC-648.md));
+the others are catalogued in journal §9 and close in their own change:
 
 | Event | Key payload fields |
 |---|---|
 | `MemberInvited` | invitation (opaque), roles, inviting user, step-up evidence, expiry |
-| `MemberActivated` | member (opaque), roles, cool-off end, method used |
+| `MemberInvitationRevoked` | invitation, revoking admin |
+| `MemberActivated` | member (opaque), the invitation accepted (or none for the founding grant), roles, cool-off end, method used |
 | `MemberRoleChanged` | member, roles added and removed, granting user, step-up evidence for a grant, cool-off end per added role |
-| `MemberDeactivated`, `MemberReactivated`, `MemberRemoved` | member, by whom, reason code |
+| `MemberDeactivated`, `MemberReactivated`, `MemberRemoved` | member, by whom, reason code; for `MemberReactivated`, step-up evidence and the cool-off end instead of a reason |
 | `CredentialEnrolled`, `CredentialRemoved` | member, credential (opaque reference, never the key), kind, enrolment cool-off end |
 | `SessionOpened` | member, session (opaque), method, device (opaque), `first_seen_device` (true when the principal has not used the device before); the subject event of the notifications spec's `new_device` kind |
 | `SessionRevoked` (reasons schema owed to E9-7) | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `refresh_failed`, `expired`, `admin`; `expired` is a session ended by its idle or absolute limit, §6.2 and §6.4 route 1; `refresh_failed` is a refresh the provider answered with neither a grant nor a deprovision signal, §6.4 route 1; `deactivated` is a session closed because its principal's last membership that reached a scope in the deployment ended, §5.2 step 2); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
@@ -1119,8 +1125,8 @@ membership read (§4.5). Their schemas take the field when this journal change l
 
 | Owed journal edit | Story | Note |
 |---|---|---|
-| The membership events above, with schemas, in journal §9 | E9-7's tests PR (DEC-437 item 9) | Already owed by v0.1 |
-| `membership_unverified` (bool) on the risk-reducing operations' events, in journal §3 or §9 | E9-7's tests PR, with the membership events | Added by v0.2 (DEC-642 item 10). The journal spec is in a version queue, so this PR does not edit `journal.md`; no event carries the field before that change lands |
+| The membership events above, with schemas, in journal §9 | E9-7's tests PR (DEC-437 item 9) | Done: journal spec v0.25 closes them in [§9.12](journal.md#912-membership-records-dec-437-item-9-dec-648) ([DEC-648](../project/decisions/DEC-648.md)) |
+| `membership_unverified` (bool) on the risk-reducing operations' events, in journal §3 or §9 | E9-7's tests PR, with the membership events | Added by v0.2 (DEC-642 item 10). No event carries the field before that change lands |
 
 Organization-scope events (ownership, SSO, org policy, the org-scope kill switch) are written to
 each of the org's workspaces' control streams, so each workspace's records are complete on their

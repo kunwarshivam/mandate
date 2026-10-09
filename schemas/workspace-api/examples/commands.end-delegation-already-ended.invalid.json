@@ -18,6 +18,18 @@
     ]
   },
   {
+    "label": "no as_of watermark",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "a watermark seq of 0",
+    "set": {
+      "/as_of/0/seq": 0
+    }
+  },
+  {
     "label": "auto: no /outcome",
     "remove": [
       "/outcome"

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Unimplemented;
-use crate::wire::{Decimal, EventId, Id, Ref};
+use crate::wire::{Decimal, EventId, Id, Ref, rules};
 
 /// One error response. `title` is generic text fixed by `code`, never content (rule 6, API-10);
 /// `event_id` is always a member, null exactly when `effect` is [`Effect::None`], so a body that
@@ -63,8 +63,9 @@ impl Problem {
 }
 
 /// The stable machine codes of §3.5's table. Closed on the server: it can emit no other code
-/// (DEC-681 item 1). An operation's own codes join this enum with the operation's story. The last
-/// six are identity spec §4.5's refusals (DEC-643), each refused before anything is written.
+/// (DEC-681 item 1). An operation's own codes join this enum with the operation's story. Six are
+/// identity spec §4.5's refusals (DEC-643); five `step_up_*` codes (DEC-686) and `outcome_unknown`
+/// stay `x-planned` under E10-10 until the implementation serves them (DEC-689 item 5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProblemCode {
@@ -76,6 +77,11 @@ pub enum ProblemCode {
     StaleBase,
     ClassificationChanged,
     StepUpRequired,
+    StepUpMissing,
+    StepUpStale,
+    StepUpReused,
+    StepUpMethod,
+    StepUpMismatch,
     LiveUnavailable,
     ControlStreamFrozen,
     JournalUnavailable,
@@ -86,6 +92,7 @@ pub enum ProblemCode {
     LastAdmin,
     ReductionOnly,
     MembershipUnavailable,
+    OutcomeUnknown,
 }
 
 /// What the failed call left in the journal (§3.5), a closed safety enum (§3.2): the web app
@@ -155,6 +162,9 @@ pub enum PolicyValue {
     Flag(bool),
     Set(Vec<String>),
 }
+
+rules!(pending: Problem, Violation);
+rules!(none: ProblemCode, Effect);
 
 /// Why [`Problem::of`] refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

@@ -81,6 +81,7 @@ describe("Home on a phone", () => {
     );
     const list = needsYou().querySelector("ul")!;
     expect(list).toHaveClass("grid", "max-lg:flex", "max-lg:overflow-x-auto", "max-lg:snap-x", "max-lg:snap-mandatory");
+    expect(list, "the strip holds its cards' screen-reader words, so a card off to the right never widens the page").toHaveClass("relative");
     expect(list.className).not.toMatch(/max-lg:flex-(col|wrap)/);
     const items = [...list.querySelectorAll<HTMLElement>(":scope > li")];
     expect(items.length).toBeGreaterThan(1);

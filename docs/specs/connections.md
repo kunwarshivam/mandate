@@ -42,6 +42,11 @@ their rules hold. The API routes that start a connection are the workspace API s
 
 ## 0. Change history
 
+- **v0.2, amended by [DEC-687](../project/decisions/DEC-687.md):** §8.2 states how the health
+  signals count (per signal class) and how several causes are tracked; §9.1's halt paragraph no
+  longer lists a reconnect as lifting the restriction (DEC-800 item 5, journal §9.8 rule 68), and
+  contract drift clears only as DEC-687 item 3 says until the released-connector-version path is
+  decided. Each only tightens (DEC-176); no exit, protective order, cancel, or kill switch is held.
 - **v0.2:** §4's Robinhood column, §6.2's mapping, and §6.6's status column are filled from
   Robinhood's published tool contract ([robinhood-contract.md](../project/tasks/robinhood-contract.md),
   E7-15); §4's capability table is the connector's capability profile (trading spec §5.2,
@@ -633,6 +638,16 @@ only through the transitions in §9; health never adds risk and never alone bloc
 | Contract hash differs | Any | `degraded` with openings halted (contract drift) |
 | Recovery | 3 consecutive good probes | The connection's condition has cleared; the state returns to `active` only as §9.1 says, after the owner's acknowledgment |
 
+**How the signals count ([DEC-687](../project/decisions/DEC-687.md)).** The Proposed thresholds are
+the interim defaults and stay Proposed. Counting is per signal class (network, authorization,
+headroom): a failure count resets only on a good result of the same class, and a good-result count
+only on a failure of the same class; another class's result changes neither. Each new cause that
+arrives while the connection is already `degraded` or `suspended` is journaled, a degrading cause
+while `suspended` stays `suspended` and is outstanding, and the condition clears only once every
+outstanding cause has cleared. A new cause after the condition cleared refuses the owner's
+acknowledgment until it clears again (DEC-687 items 1, 2, and 5). None of this holds an exit, a
+protective order, a cancel, or the kill switch.
+
 ## 9. Lifecycle walk
 
 ### 9.1 States
@@ -641,7 +656,7 @@ only through the transitions in §9; health never adds risk and never alone bloc
 |---|---|---|---|---|---|
 | `connecting` | Step-up and connect started | No agent yet; the token-exchange process may only exchange the code, and the executor may only run checks and append their results (§5.2 step 4) | — | `ConnectionEstablished` (`active`), or the teardown of §5.2 step 6 on a refusal, a timeout, or a restart past the deadline (refused, no record kept beyond the refusal event) | System |
 | `active` | All §8.1 checks pass | As the gate allows | Yes | Any transition below | — |
-| `degraded` | Network errors, low headroom, or contract drift | **Halted**: account state `closing_only`, agents `exits_only` | Yes, while the broker accepts | Good probes, or for drift a released connector version, **then** the owner's acknowledgment (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
+| `degraded` | Network errors, low headroom, or contract drift | **Halted**: account state `closing_only`, agents `exits_only` | Yes, while the broker accepts | Good probes, or for drift a released connector version (not yet decided: until it is, drift clears only as [DEC-687](../project/decisions/DEC-687.md) item 3 says), **then** the owner's acknowledgment (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
 | `suspended` | Credential invalid: expired, revoked at the broker, refresh failed, or a later permission check failed | **Halted**: account state `closing_only`, agents `exits_only` | Attempted while any call succeeds; otherwise protection rests at the broker | Re-authorization only (DEC-800 item 5, accepted by the founder in DEC-824 item 6): the owner replaces the credential, a `reauthorize` check after the suspension passes every §8.1 check, the control services accept it for the same account as `ConnectionCredentialRotated`, and the executor clears the cause on that rotation (journal §9.8 rule 68); the owner then acknowledges (trading §7.3, cause `connection_unavailable`). A revoke and reconnect of the same account (§3) does not by itself leave `suspended`: the reconnected connection is still `suspended`, and the owner still re-authorizes | Owner, with step-up |
 | `revoked` | Platform-side revoke, refused unless every agent on it is stopped with no positions | None | None (no agents) | Reconnect of the same account reuses the record (CN-12) | Owner, with step-up |
 
@@ -654,9 +669,13 @@ because `paused` holds exits. `AccountRestrictionChanged` carries the cause
 not, and the owner gets a distinct alert. The executor journals
 `AccountRestrictionChanged` and then `AgentModeApplied` before it sends or refuses anything else,
 so replay reaches the same mode from the journal alone; the health signals themselves are never an
-unjournaled input to the mode machine. It lifts on the connection's own condition (good probes, a
-released connector version for drift, or a reconnect) and then the owner's acknowledgment; an
-account refresh is not the condition. Recovery therefore needs the owner even when the cause was
+unjournaled input to the mode machine. A degrading cause the executor holds unjournaled while
+`suspended` ([DEC-687](../project/decisions/DEC-687.md) item 1) feeds only the decision to write
+`condition_cleared` and to accept the acknowledgment, never the mode machine. It lifts on the connection's own condition clearing, as the table above
+says (good probes for `degraded`, re-authorization for `suspended`, and for contract drift
+[DEC-687](../project/decisions/DEC-687.md) item 3), and then the owner's acknowledgment; a reconnect
+lifts nothing by itself (DEC-800 item 5, journal §9.8 rule 68), and an account refresh is not the
+condition. Recovery therefore needs the owner even when the cause was
 transient. A restriction that lifts with no acknowledgment would be a separate spec-first change
 (ES-22).
 

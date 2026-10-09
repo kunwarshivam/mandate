@@ -2,16 +2,39 @@
 
 | | |
 |---|---|
-| **Status** | v0.23 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.25 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `connections` section of §9.8, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, and `hold` section of §9.11 with its `held_mismatch` range cases; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `connections` section of §9.8, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, and `membership` and `membership_fold` sections of §9.12; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.25 ([DEC-437](../project/decisions/DEC-437.md) item 9, [DEC-648](../project/decisions/DEC-648.md)):**
+  §9's control-stream table catalogues the identity spec's §12.1 records. §9.12 closes the seven
+  membership records at schema version 1, with rules 96 to 106, and states the fold that identity
+  spec §5.3's `workspace_users` reads. It adds `MemberInvitationRevoked`, which §12.1 lacked for its
+  §5.1 `invited` to `revoked` transition, the accepted `invitation` on `MemberActivated`, and the
+  cool-off end on `MemberReactivated`; each journals a state change identity spec §5 already defines.
+  `MemberInvited` also carries `invited_at`, each grant the effective `independent_approval_required`,
+  `MemberReactivated` the roles it restores, and each membership record, until the envelope gains
+  identity spec §12.2's session field, a payload `session_ref`. A record's own instant is its
+  envelope's `event_time`.
+  The credential, session, service-account, host-CLI, and break-glass records stay open until
+  their own change; the client records are §9.10's (v0.22, [DEC-671](../project/decisions/DEC-671.md)). The vectors gain a generated, additive `membership` section, so they stay
+  version 3. A generated `membership_fold` section holds membership histories with their expected
+  states and counts, reproduced by a reference fold.
+- **v0.24 ([DEC-674](../project/decisions/DEC-674.md), [DEC-676](../project/decisions/DEC-676.md)):** §9.8 states that a later check (occasion
+  `executor_start` or `daily`) whose `contract` result failed with `tools_missing` moves the
+  connection to `suspended`, journaled as `ConnectionStateChanged` with reason `check_failed`, as
+  [connections spec §8.1](connections.md#81-at-connect-at-every-executor-start-and-daily) check 1
+  says for an allowlisted tool that is absent; `contract_drift` with no other failure degrades. §9.8's
+  reasons table also reads a later check that finds no pin as `contract_drift`
+  ([DEC-676](../project/decisions/DEC-676.md) item 2). No rule changes: rule 59 already admits `check_failed` into `suspended`. The vectors gain the valid drafts
+  `checked_daily_with_tools_missing` and `suspended_on_a_failed_check` and the sequence
+  `mcp_later_tools_missing_suspends`, and stay version 3.
 - **v0.23 ([DEC-672](../project/decisions/DEC-672.md)):** §9.11 closes the hold on new openings
   ([DEC-191](../project/04-decision-log.md#decisions), [workspace API spec §4.2](workspace-api.md#42-deployments-and-the-agent-lifecycle-deployment-manager)).
   `OwnerCommandIssued` is closed for its two new commands, `hold_openings` and `lift_hold`, and only
@@ -668,6 +691,24 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `AnchorComputed`, `VerificationRun`, `IntegrityIncidentRecorded` | — | leaves, root, timestamp token (artifact); scope and result; last good hash and anchor |
 | `SegmentExported`, `SegmentEvicted`, `RetentionExtended`, `LegalHoldChanged` | — | manifest hash, range, retain-until, hold |
 | `KeyRotated`, `KeyRevoked`, `RecordsAccessed`, `ExportCreated`, `PersonalDataErased` | — | key version; accessor (opaque), scope; export manifest; subject reference |
+| `MemberInvited`, `MemberInvitationRevoked`, `MemberActivated`, `MemberRoleChanged`, `MemberDeactivated`, `MemberReactivated`, `MemberRemoved` | — | A workspace membership ([identity spec §5](identity.md#5-membership-lifecycle)); closed in §9.12 |
+| `CredentialEnrolled`, `CredentialRemoved` | — | member, credential (opaque reference, never the key), kind, enrolment cool-off end ([identity spec §10.1, §12.1](identity.md#121-events-journal-9-control-stream)) |
+| `SessionOpened` | — | member, session (opaque), method, device (opaque), `first_seen_device`; the subject of the notifications spec's `new_device` kind |
+| `SessionRevoked` | — | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `refresh_failed`, `expired`, `admin`, as [identity spec §12.1](identity.md#121-events-journal-9-control-stream) defines them); with `deprovisioned`, the subject of the notifications spec's `deprovisioned` kind |
+| `ServiceAccountIssued`, `ServiceAccountRevoked` | — | account, scopes, workspaces, expiry, issuing user |
+| `HostCliRegistered`, `HostCliRevoked` | — | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence ([identity spec §6.4](identity.md#64-the-risk-reduction-path)) |
+| `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` | — | operator (opaque), reason code, window, approvers ([identity spec §10.3](identity.md#103-break-glass-for-platform-staff-managed-mode)) |
+
+The identity records ([identity spec §12.1](identity.md#121-events-journal-9-control-stream),
+DEC-437 item 9) are control-stream records. The membership records close in §9.12. The client
+records `ClientConnected` and `ClientRevoked` are closed in §9.10 with the `client` actor (§3), journal
+spec v0.22 ([DEC-671](../project/decisions/DEC-671.md)). The
+credential, session, service-account, host-CLI, and break-glass records are listed with the members
+the identity spec names and close in their own change, as §9.2's other records do; until then
+`append` refuses them as `unknown_event_type`. `ScopeHalted` and `ScopeReenabled` are not catalogued: they
+exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor is
+`NotificationAddressChanged`: its row and schema come with the notification records' change
+([DEC-720](../project/decisions/DEC-720.md), [DEC-795](../project/decisions/DEC-795.md)).
 
 **Scheduler stream:** `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`,
 `ClockToleranceExceeded`.
@@ -1830,9 +1871,16 @@ connection `active` from then. `connecting` leaves no record but a `ConnectionRe
 | `risk_clock` | `risk_clock` | |
 
 The first three reasons are connections spec §8.2's degrading signals; the next five are §9.1's
-`suspended` causes and §9.2's vault outage. `condition_cleared` records that the cause has cleared
-(good probes, a released connector version for drift, or, out of `suspended`, a replaced credential
-the control services accepted) while the state stays where it is. `acknowledged` returns the
+`suspended` causes and §9.2's vault outage. A later `contract` check (occasion `executor_start` or
+`daily`) that fails with `tools_missing` is connections spec §8.1 check 1's, so it suspends: it is
+journaled with `check_failed` into `suspended`, never with `contract_drift`. A failed `contract`
+check with reason `contract_drift` and no other failure degrades, and a failed `scope`,
+`environment`, or `account` check suspends whatever else failed with it. A connect-time occasion
+(`connect`, `reconnect`, `reauthorize`) moves no state: its failure is a refusal
+([DEC-674](../project/decisions/DEC-674.md)).
+`condition_cleared` records that the cause has cleared (good probes, a released connector version
+for drift, or, out of `suspended`, a replaced credential the control services accepted) while the
+state stays where it is. `acknowledged` returns the
 connection to `active`, and its `causation_id` is the `OwnerAcknowledged` the executor copied (rule
 61). A reconnect continues its account stream (CN-12), and with it the state that stream last
 recorded: a connection revoked while `suspended` is still `suspended` when it is established again.
@@ -1877,7 +1925,7 @@ and rule 58 (`ConnectionChecked`).
 | `environment` | `wrong_environment` (it does not work against its own environment), `reaches_both` (the broker's documentation does not show it cannot reach the other, CN-3; DEC-441 item 21) |
 | `account` | `account_unreadable` (the account could not be read), `account_mismatch` (another account than the connection names, by fingerprint; the control services' only), `not_dedicated` (for Robinhood, not the dedicated agentic account) |
 | `uniqueness` | `already_connected` (CN-5) |
-| `contract` | `tools_missing` (an allowlisted tool is absent), `contract_drift` (the pinned hash differs) |
+| `contract` | `tools_missing` (an allowlisted tool is absent), `contract_drift` (the pinned hash differs, or a later check finds no pin: [DEC-676](../project/decisions/DEC-676.md) item 2) |
 
 An **MCP connection** is one whose broker connects through MCP (connections spec §3,
 `mcp_oauth`): `robinhood`. Its checks always list `contract`; a connection that is not MCP has no
@@ -2226,6 +2274,216 @@ verify` reports it; a stray `held: false` would otherwise drop the hold on repla
 `held` with `to` unchanged, so command status reaches `applied`. A second hold, or a lift with no
 hold standing, is copied too, with `held` as it already stood. A latched limit, a restriction, or a
 version change never sets or clears the hold, and a restart folds it from the last copy.
+
+### 9.12 Membership records ([DEC-437](../project/decisions/DEC-437.md) item 9, [DEC-648](../project/decisions/DEC-648.md))
+
+The control-stream records of a workspace membership ([identity spec §5](identity.md#5-membership-lifecycle),
+§12.1), closed at schema version 1 as §9.7's records are: every listed member is present, `null`
+only where the type is nullable, and any extra member is refused. §9.1's types and report order
+apply, and the rules number on from §9.11's. Instants are §4.7 timestamps, as the identity spec's
+cool-off and expiry are wall-clock times. A record's own instant (`invited_at`, `activated_at`,
+`changed_at`, `reactivated_at`) is the envelope's `event_time` exactly (rule 106), so a writer cannot
+date a grant into the past to escape its cool-off or a stale step-up; every cool-off end and step-up
+window is computed from `event_time`. Step-up evidence is §9.2's `DisclosureAccepted.step_up`
+type, `null` only on a `MemberRoleChanged` that grants nothing (rule 101). The test vectors' `membership` section holds a base draft
+of each record, an invalid draft for every member type and rule, and valid drafts for the cases a
+rule might be misread to refuse.
+
+The control stream is the workspace's, so no record names its workspace. A member is the opaque
+ULID of a `user` principal (identity spec §3.1); clients, service accounts, agents, and platform
+staff hold no membership. No payload carries an address, a name, an identity-provider subject, or an
+invitation token (rule 6, ID-9, §6.4): an invitation is its opaque ULID, and the invited address is a
+vault reference in the envelope's `pii_refs`.
+
+Every membership record ends with `session_ref` (`text?`): the opaque reference of the session the
+writing user acted through ([identity spec §6.2, §12.2](identity.md#122-actor-fields)), never a cookie
+or a token, and `null` for a record the system writes (rule 105). It is a payload member here only.
+Identity spec §12.2 asks every committed event to name its session, which is an envelope field and so
+a new `envelope_version` (§8); that change is owed separately (DEC-648 item 8). Organization memberships and org roles close with the
+organization story, not here.
+
+**Types**, beyond §9.1's and §9.2's:
+
+| Type | Values | Refused as |
+|---|---|---|
+| `role` | `approver` \| `auditor` \| `operator` \| `viewer` \| `workspace_admin`: the workspace roles of [identity spec §4.1](identity.md#41-roles) | As `id` |
+
+**`MemberInvited`**: a workspace admin invited an address (identity spec §5.2).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `invitation` | `ulid` | The invitation |
+| `roles` | `[role]` | The roles it names, granted only once accepted: rules 96 and 100 |
+| `invited_by` | `text` | The inviting admin (opaque): rules 97 and 98 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}` | Inviting needs step-up (identity spec §4.2): rule 102 |
+| `invited_at` | `timestamp` | The instant the invitation was issued: rule 106 |
+| `expires_at` | `timestamp` | The invitation expires unaccepted at this instant: rule 104 |
+| `session_ref` | `text?` | Rule 105 |
+
+**`MemberInvitationRevoked`**: an admin revoked an invitation before it was accepted (identity spec
+§5.1, `invited` to `revoked`). An expired invitation needs no record: its `expires_at` ends it.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `invitation` | `ulid` | |
+| `revoked_by` | `text` | The admin (opaque): rules 97 and 98 |
+| `session_ref` | `text?` | Rule 105 |
+
+**`MemberActivated`**: a membership begins, by an accepted invitation or by the founding grant that
+creates a workspace (identity spec §3.2, ID-13). It enters `cooling_off`, and is `active` from
+`cool_off_ends_at` (identity spec §5.1).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `member` | `ulid` | The user principal |
+| `invitation` | `ulid?` | The invitation accepted, or `null` for the founding grant: rule 99 |
+| `reason` | `invitation_accepted` \| `founding` | Rules 98 and 99 |
+| `roles` | `[role]` | Rules 96, 99, and 100 |
+| `method` | `passkey` \| `oidc` \| `email_link` | How the member signed in (identity spec §6.1) |
+| `activated_at` | `timestamp` | The instant the membership began: rule 106 |
+| `independent_approval_required` | `boolean` | The workspace's effective `independent_approval_required` at the grant ([mandate spec §4.3](mandate.md#43-policy-hierarchy-dec-51-dec-98)), which decides the cool-off: rule 103 |
+| `cool_off_ends_at` | `timestamp` | The end of the activation's cool-off ([identity spec §8.3](identity.md#83-cool-off-against-sock-puppets)): rule 103 |
+| `session_ref` | `text?` | The invitee's session; `null` for the founding grant: rule 105 |
+
+**`MemberRoleChanged`**: a workspace admin granted or removed roles of another member.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `member` | `ulid` | |
+| `changed_by` | `text` | The admin (opaque): rules 97 to 99 |
+| `added` | `[{role: role, cool_off_ends_at: timestamp}]` | Each role granted, and the end of its cool-off: rules 96, 100, and 103 |
+| `removed` | `[role]` | Rules 96 and 100 |
+| `changed_at` | `timestamp` | The instant of the change: rule 106 |
+| `independent_approval_required` | `boolean` | As on `MemberActivated`: rule 103 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}?` | A grant needs step-up and a removal does not: rules 101 and 102 |
+| `session_ref` | `text?` | Rule 105 |
+
+**`MemberDeactivated`**: the member loses the workspace (identity spec §5.2, §11.1).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `member` | `ulid` | |
+| `by` | `text` | Who committed it (opaque): rules 97 to 99 |
+| `reason` | `admin` \| `left` \| `deprovisioned` \| `group_removed` | An admin deactivated them, they left, the customer's directory deprovisioned them (SCIM), or an identity-provider group removal did (identity spec §11.1) |
+| `session_ref` | `text?` | Rule 105 |
+
+**`MemberReactivated`**: an admin reactivated a deactivated member, with its kept roles. It enters
+`cooling_off` again. It names the roles it restores, so its cool-off is decided by the record alone.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `member` | `ulid` | |
+| `by` | `text` | The admin (opaque): rules 97 to 99 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}` | Reactivating needs step-up (identity spec §5.1): rule 102 |
+| `roles` | `[role]` | The kept roles it restores, exactly those the member held when deactivated: rules 96 and 100 |
+| `reactivated_at` | `timestamp` | Rule 106 |
+| `independent_approval_required` | `boolean` | As on `MemberActivated`: rule 103 |
+| `cool_off_ends_at` | `timestamp` | Rule 103 |
+| `session_ref` | `text?` | Rule 105 |
+
+**`MemberRemoved`**: a deactivated member is removed. Identity records are kept for the records
+period (§6.4).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `member` | `ulid` | |
+| `by` | `text` | Who committed it (opaque): rules 97 to 99 |
+| `reason` | `admin` \| `org_deleted` | An admin removed them, or the organization's deletion ended every membership (identity spec §5.2) |
+| `session_ref` | `text?` | Rule 105 |
+
+**Consistency rules** (reason `schema` unless stated; the path is the member named):
+
+96. Role lists are strictly ascending by bytes, so no role is listed twice: `roles`, `removed`, and
+    `added` by its `role` (`non_canonical` at the list).
+97. The writer: `invited_by`, `revoked_by`, `changed_by`, and `by` equal the envelope's `actor.id`
+    (at that member), so a record names the identity that wrote it (ID-1).
+98. Who writes it (`actor.kind`): a `user` for `MemberInvited`, `MemberInvitationRevoked`,
+    `MemberRoleChanged`, and `MemberReactivated`, for `MemberActivated` with reason
+    `invitation_accepted`, for `MemberDeactivated` with reason `admin` or `left`, and for
+    `MemberRemoved` with reason `admin`; `system` for the founding grant (ID-13), for
+    `MemberDeactivated` with reason `deprovisioned` or `group_removed`, and for `MemberRemoved` with
+    reason `org_deleted`. A client never changes a membership (ID-11).
+99. Nobody changes their own membership but by leaving (ID-13). `MemberRoleChanged.changed_by`, and
+    `by` on `MemberReactivated`, on `MemberDeactivated` with reason `admin`, and on `MemberRemoved`
+    with reason `admin`, differ from `member` (at that member). `MemberDeactivated` with reason
+    `left` has `by` equal to `member` (`payload.by`). `MemberActivated`: `invitation` is `null`
+    exactly when `reason` is `founding` (`payload.invitation`), and an accepted invitation's
+    `member` equals `actor.id`, the invitee who signed in (`payload.member`).
+100. Roles: `MemberInvited.roles`, `MemberActivated.roles`, and `MemberReactivated.roles` are
+    non-empty (`payload.roles`); the
+    founding grant's include `workspace_admin`, since a workspace always has an `active` admin
+    (identity spec §5.2; `payload.roles`); a `MemberRoleChanged` adds or removes at least one role
+    (`payload.added`), and no role is both added and removed (`payload.removed`).
+101. `MemberRoleChanged.step_up` is non-null exactly when `added` is non-empty (`payload.step_up`).
+102. Step-up evidence is [mandate spec §6.1](mandate.md#61-purposes)'s, valid at the envelope's
+    `event_time`: its method is `passkey` in a `live`
+    envelope and `passkey` or `cli_confirm` otherwise ([identity spec §7.3](identity.md#73-rules);
+    `payload.step_up.method`), and 0 ≤ `event_time` − `authenticated_at` ≤ 300 seconds, so evidence
+    authenticated after the instant fails closed (`payload.step_up.authenticated_at`). That the
+    assertion was never used before is a check across records, the identity crate's (identity spec
+    §7.2).
+103. Cool-off ([identity spec §8.3](identity.md#83-cool-off-against-sock-puppets), stated once there),
+    exactly: each cool-off end is the envelope's `event_time` plus 86 400 seconds when the record's
+    `independent_approval_required` is true and the grant adds `operator` or `approver` to an existing
+    workspace, and is `event_time` itself otherwise (at that `cool_off_ends_at`). The grant adds them
+    when a `MemberActivated` with reason `invitation_accepted` or a `MemberReactivated` holds either in
+    its `roles`, or a `MemberRoleChanged` adds that role (each added role decided by itself). The
+    founding grant creates the workspace, so it never cools off.
+104. `MemberInvited.expires_at` is `invited_at` plus exactly 7 days (identity spec §5.2;
+    `payload.expires_at`).
+105. `session_ref` is non-null exactly when `actor.kind` is `user` (`payload.session_ref`): a user acts
+    through a session, and the system writes without one.
+106. A record's own instant (`invited_at`, `activated_at`, `changed_at`, `reactivated_at`) equals the
+    envelope's `event_time` exactly (at that member).
+
+**The fold** (identity spec §5.1, §5.3, ID-7). These records are the only source of a membership's
+state. Folding the control stream in `seq` order: `MemberInvited` makes an invitation `invited`
+before `expires_at` and `expired` from it; `MemberInvitationRevoked` makes it `revoked`; `MemberActivated` and
+`MemberReactivated` make the member `cooling_off` until their `cool_off_ends_at` and `active` from it;
+`MemberRoleChanged` adds and removes roles, each added role effective from its `cool_off_ends_at`
+and each removal at once; on an activation or reactivation, `operator` and `approver` are effective
+from its `cool_off_ends_at` and every other role at once;
+`MemberDeactivated` makes the member `deactivated`, keeping its roles for a reactivation; and
+`MemberRemoved` makes it `removed`. A `MemberRoleChanged` whose `added` is empty may remove kept
+roles from a `deactivated` member, so an admin can strip a suspended member's roles while offboarding
+([DEC-654](../project/decisions/DEC-654.md) item 7); a grant to a `deactivated` member is still
+refused. A deactivated member whose kept roles are all removed cannot be reactivated, since rule 100
+refuses a `MemberReactivated` with no roles: they return only by removal and a new invitation. `removed`, `expired`, and `revoked` are terminal: a removed
+member comes back only through a new invitation, which starts a new membership with no role of the
+old one. An invitation an activation used is `accepted`, the fold's own name for it: identity spec
+§5.1 has no such state, because the membership it started takes over. A record that does not fit the
+state it finds is refused: a `MemberInvited` whose invitation ULID was already issued; any record
+naming an invitation never issued or a member never activated; a second activation of a member
+whose membership is not `removed`; an activation by an invitation that is not `invited` at
+`activated_at` (so `activated_at` < `expires_at`, and an invitation activates at most once) or with
+roles other than the invitation's; a role change for a member who is not `active` or `cooling_off`,
+other than a removal only from a `deactivated` member, or that removes a role the member does not
+hold (for a `deactivated` member, one it does not keep) or adds one it does; a reactivation of a member who
+is not `deactivated`, or with roles other than those kept; a deactivation of one who is not
+`active` or `cooling_off`; a removal of one who is not `deactivated`; and a revocation of an
+invitation that is not `invited`. Such a record is refused by workspace services before it is committed; a fold that meets one anyway reads the
+membership as unreadable, and `workspace_users` as 1 (identity spec §5.3). The cross-record checks
+are the identity crate's (E9-7), not `append`'s. Besides the state checks above, they are: the
+author of an admin's record is an `active` member whose `workspace_admin` role is effective at
+`event_time` ([DEC-654](../project/decisions/DEC-654.md) item 2); the last owner and last admin
+rules (identity spec §5.2); that a step-up assertion was never used before (rule 102); that a
+record's `independent_approval_required` equals the workspace's effective policy at `event_time`
+(rule 103); and that no record carries an entry that changes nothing: `change_roles` passes one
+(DEC-654 item 6), but the fold refuses granting a held role or removing one not held, and rule 100
+refuses a record left with no entry, so workspace services drop such entries before committing and
+commit nothing when none is left.
+
+The state at an instant *t* folds the records whose `event_time` is at or before *t* (rule 106 makes
+that each record's own instant), and reads each cool-off and expiry against *t*: `workspace_users`
+(identity spec §5.3) counts the members `active` at *t*. The test vectors' `membership_fold` section
+holds histories of membership records, valid under the rules above except a record a history lists
+in `refused` with the refusal it expects (which the fold reads as out of state too), mixed with records by clients,
+agents, and service accounts, which hold no membership and which the fold ignores. Each history
+states, at named instants, each member's and invitation's state, each member's effective roles, and
+the count, written by hand from identity spec §5 and §8.3. It also holds out-of-state histories that
+read as unreadable, with a count of 1. The reference fold
+([reference/journal/membership_fold.py](../../reference/journal/membership_fold.py)) reproduces
+every one, and the identity crate's fold is tested against them.
 
 ## 10. Anchoring
 
