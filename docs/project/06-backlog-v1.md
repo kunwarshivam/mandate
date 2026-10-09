@@ -4604,8 +4604,11 @@ From the workspace API contract's drift rule (DEC-683, E10-10):
 - **A `cargo xtask` check for stale planned markers.** List every `(planned: <story>)` in a spec
   table and every `x-planned` value in `schemas/`, with its story's state, and fail on a marker
   whose story is done. Until it exists, removing a story's markers is part of its done-definition.
-- **Rust JSON-pointer checks refuse control characters**, as the schemas' pointer pattern does
-  (`[^/~\u0000-\u001f]`), wherever `mandate-api` checks a path (E10-10 implementation).
+- ~~**Rust JSON-pointer checks refuse control characters**, as the schemas' pointer pattern does
+  (`[^/~\u0000-\u001f]`), wherever `mandate-api` checks a path (E10-10 implementation).~~ Done
+  ([#1013](https://github.com/kunwarshivam/mandate/pull/1013): `is_pointer` refuses `U+0000` to
+  `U+001F` in a violation's `path`; A1 implementation part 3 applies it to a confirm's paths and a
+  `202`'s `dropped`).
 - **Journal the members an API-7 operation dropped** (DEC-682 item 27): the command event names the
   JSON pointers its `202` listed in `dropped`, so the record shows what the server ignored. A
   journal spec change first.

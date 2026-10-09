@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::envelope::{Record, StepUpEvidence};
 use crate::responses::Classification;
-use crate::wire::{Asset, Decimal, EventId, Id, Ref, Timestamp};
+use crate::wire::{Asset, Check, Decimal, EventId, Id, Ref, Rules, Timestamp, is_pointer};
 
 /// `POST /agents/{agent_id}/pause` (§5.4): `{}` is valid (DEC-682 item 8).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,7 +90,7 @@ pub enum Side {
 crate::wire::rules!(none: PauseRequest, HoldRequest, EndDelegationRequest, LiftHoldRequest);
 crate::wire::rules!(none: ResumeRequest, AcknowledgeRequest, OwnerRequest);
 
-/// `POST /mandate-versions/{mandate_version}/confirm` (§5.1): paths are pointers, a pending rule.
+/// `POST /mandate-versions/{mandate_version}/confirm` (§5.1): each confirmed path is a pointer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfirmRequest {
@@ -107,8 +107,8 @@ pub struct ConfirmRequest {
     pub record: Record,
 }
 
-/// `POST /approvals/{approval_id}/responses` (§5.2). A `skipped` names no delegation, a pending
-/// rule (DEC-682 item 11).
+/// `POST /approvals/{approval_id}/responses` (§5.2). A `skipped` names no delegation (DEC-682
+/// item 11).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApprovalResponseRequest {
@@ -139,7 +139,7 @@ pub struct DelegationChosen {
 
 /// `POST /approvals/{approval_id}/delegation-previews` (§5.3, DEC-682 item 13). `until_close`
 /// takes the three nullable members `null` and a timed shape takes all three; `max_orders` is 1 to
-/// 1,000. Both are pending rules.
+/// 1,000.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DelegationPreviewRequest {
@@ -162,7 +162,7 @@ pub enum Shape {
     KindForTime,
 }
 
-/// `POST /agents/{agent_id}/stop` (§4.2, DEC-682 item 10): a warning only with `release`, pending.
+/// `POST /agents/{agent_id}/stop` (§4.2, DEC-682 item 10): a warning exactly with `release`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StopRequest {
@@ -258,6 +258,51 @@ pub struct RevokeRequest {
     pub step_up: Option<StepUpEvidence>,
 }
 
-crate::wire::rules!(pending: ConfirmRequest, ApprovalResponseRequest, DelegationPreviewRequest);
-crate::wire::rules!(pending: StopRequest);
+impl Rules for ConfirmRequest {
+    fn rules(&self, at: &str, check: &mut Check) {
+        for (index, path) in self.confirmed_paths.iter().enumerate() {
+            let at = format!("{at}/confirmed_paths/{index}");
+            check.rule(is_pointer(path, true), &at, "pattern");
+        }
+    }
+}
+
+impl Rules for ApprovalResponseRequest {
+    fn rules(&self, at: &str, check: &mut Check) {
+        let skipped = self.verdict == Verdict::Skipped;
+        let holds = !(skipped && self.delegation.is_some());
+        check.rule(holds, &format!("{at}/delegation"), "condition");
+    }
+}
+
+impl Rules for DelegationPreviewRequest {
+    fn rules(&self, at: &str, check: &mut Check) {
+        let timed = self.shape != Shape::UntilClose;
+        let members = [
+            ("max_order_usd", self.max_order_usd.is_some()),
+            ("max_total_usd", self.max_total_usd.is_some()),
+            ("expires_at", self.expires_at.is_some()),
+        ];
+        for (name, present) in members {
+            check.rule(present == timed, &format!("{at}/{name}"), "condition");
+        }
+        max_orders(self.max_orders, at, check);
+    }
+}
+
+/// A delegation's `max_orders` under `at`, 1 to 1,000 (§5.3, DEC-682 item 13).
+pub(crate) fn max_orders(count: u32, at: &str, check: &mut Check) {
+    let holds = (1..=1000).contains(&count);
+    check.rule(holds, &format!("{at}/max_orders"), "range");
+}
+
+impl Rules for StopRequest {
+    fn rules(&self, at: &str, check: &mut Check) {
+        let holds = self.warning_shown.is_some() == self.release;
+        check.rule(holds, &format!("{at}/warning_shown"), "condition");
+    }
+}
+
+crate::wire::rules!(checked: ConfirmRequest, ApprovalResponseRequest, DelegationPreviewRequest);
+crate::wire::rules!(checked: StopRequest);
 crate::wire::rules!(none: KillSwitchRequest, OwnerExitRequest, RevokeRequest);
