@@ -39,7 +39,13 @@ Kumo override in `src/app/kumo-theme.css` must hold in the browser (DEC-200). Lo
 server already on port 4317, which may be `npm run dev`. The browser download comes from `cdn.playwright.dev`.
 
 Next.js telemetry is off when `NEXT_TELEMETRY_DISABLED=1` is set; CI sets it. The app ships no
-analytics, no session replay, and no service worker.
+analytics and no session replay. Its one service worker, `public/push-sw.js` (E8-14, DEC-793),
+only shows web push notifications: one of four fixed sentences for a push that carries exactly a
+notice id and a text key, and on a tap it opens `/n/<notice>`. It has no `fetch` handler, so it
+serves and caches nothing, and it uses no storage; `src/lib/push/worker.test.ts` pins that.
+Settings › Notifications turns it on when `NEXT_PUBLIC_OWLHEAD_VAPID_PUBLIC_KEY` holds the
+deployment's VAPID public key (unpadded base64url); until the workspace API takes a subscription,
+the screen uses a labelled fixture sender.
 
 ### Scenarios (development and the e2e build only)
 
