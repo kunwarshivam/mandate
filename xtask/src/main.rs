@@ -10857,8 +10857,8 @@ jq -r "$filter" "$src"
     }
 
     /// A `working-directory` in a YAML shape the line reader cannot follow (a quoted key, a flow
-    /// step, flow `defaults`) cannot be read, and the build it moves holds the live-only member
-    /// (#1169 round 2 review, major; DEC-176 tightening).
+    /// step, flow `defaults`, an explicit tag) cannot be read, and a build it moves that names no
+    /// package holds the live-only member (#1169 round 2 review, major; DEC-176 tightening).
     #[test]
     #[ignore = "pending E7-28"]
     fn a_working_directory_in_an_unread_yaml_shape_cannot_be_read() -> Result<()> {
@@ -10869,8 +10869,9 @@ jq -r "$filter" "$src"
              run:\n        'working-directory': crates/rh-host\n    steps:\n      - run: cargo \
              test\n  flow-step:\n    steps:\n      - {working-directory: crates/rh-host, run: \
              cargo test}\n  flow-defaults:\n    defaults: {run: {working-directory: \
-             crates/rh-host}}\n    steps:\n      - run: cargo test\n  lib-tests:\n    steps:\n      \
-             - run: cargo test -p a-lib\n",
+             crates/rh-host}}\n    steps:\n      - run: cargo test\n  tagged-dir:\n    steps:\n      \
+             - working-directory: !!str crates/rh-host\n        run: cargo test -p a-lib\n  \
+             lib-tests:\n    steps:\n      - run: cargo test -p a-lib\n",
         )];
         let problems = host_problems(&flows)?;
         let jobs = [
@@ -10878,6 +10879,7 @@ jq -r "$filter" "$src"
             "single-quoted-key",
             "flow-step",
             "flow-defaults",
+            "tagged-dir",
         ];
         unreadable(&problems, &jobs);
         names(&problems, &["rh-host"], &["lib-tests"]);
@@ -10886,8 +10888,8 @@ jq -r "$filter" "$src"
 
     /// A YAML anchor, alias or merge key carries a `working-directory` or a `run:` into a job the
     /// line reader does not see it in (`defaults: *d`, a step's `<<: *s`, `run: *c`), so each
-    /// cannot be read, and so is the anchor that holds `cargo` (#1169 round 2 review, major;
-    /// DEC-176 tightening).
+    /// cannot be read, and so is each anchor, one holding no `cargo` (`setup`) as much as one that
+    /// does (#1169 round 2 review, major; DEC-176 tightening).
     #[test]
     #[ignore = "pending E7-28"]
     fn a_yaml_anchor_alias_or_merge_cannot_be_read() -> Result<()> {
@@ -10896,8 +10898,8 @@ jq -r "$filter" "$src"
                 ".github/workflows/ci.yml",
                 "on: push\njobs:\n  setup:\n    defaults: &d\n      run:\n        \
                  working-directory: crates/rh-host\n    steps:\n      - &s\n        \
-                 working-directory: crates/rh-host\n        run: echo setup\n      - run: &c cargo \
-                 test\n  alias-defaults:\n    defaults: *d\n    steps:\n      - run: cargo test\n  \
+                 working-directory: crates/rh-host\n        run: echo setup\n  anchored-run:\n    \
+                 steps:\n      - run: &c cargo test\n  alias-defaults:\n    defaults: *d\n    steps:\n      - run: cargo test\n  \
                  merge-step:\n    steps:\n      - <<: *s\n        run: cargo test\n  alias-run:\n    \
                  steps:\n      - run: *c\n",
             ),
@@ -10909,7 +10911,13 @@ jq -r "$filter" "$src"
         let problems = host_problems(&flows)?;
         unreadable(
             &problems,
-            &["setup", "alias-defaults", "merge-step", "alias-run"],
+            &[
+                "setup",
+                "anchored-run",
+                "alias-defaults",
+                "merge-step",
+                "alias-run",
+            ],
         );
         names(&problems, &["rh-host"], &["lib-tests"]);
         Ok(())
