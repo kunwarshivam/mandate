@@ -93,6 +93,7 @@ mod ports;
 mod protection;
 mod reconcile;
 mod session;
+mod shape;
 mod state;
 mod step;
 pub mod tripwire;
@@ -109,6 +110,7 @@ pub use ports::{
 };
 pub use protection::{LadderPrice, LadderReference, is_protected};
 pub use reconcile::reconcile;
+pub use shape::{ProtectiveShape, protective_shape};
 pub use state::{
     ExecutorState, FOLD_VERSION, IntentOutcome, IntentRecord, ObservedAccount, UnresolvedAppend,
     fold,
