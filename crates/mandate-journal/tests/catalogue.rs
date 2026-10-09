@@ -197,6 +197,13 @@ const CLOSED_BY_E10_15: &[(&str, &[&str])] = &[
 /// becomes.
 const CLOSED_BY_E12_3: [&str; 3] = ["RecordsAccessed", "ExportCreated", "VerificationRun"];
 
+/// The control-stream records journal spec v0.27 §9.14 closes at schema version 1 (DEC-783), neither
+/// naming a configuration. Until E12-3's implementation the journal refuses them as not registered,
+/// so [`stream_types_and_required_config_refs_match_the_spec`] leaves their schema reason alone;
+/// `the_anchor_and_segment_records_are_catalogued_and_closed_on_the_control_stream` asserts what
+/// each becomes.
+const CLOSED_BY_SECTION_9_14: [&str; 2] = ["AnchorComputed", "SegmentExported"];
+
 /// The account stream's snapshot, which §9.2 closes with rule 24 and its registration routes there
 /// (DEC-402). It is kept apart from the eleven pairs until that registration is implemented.
 const SNAPSHOT_ON_ACCOUNT: (&str, &str) = ("AccountSnapshotRecorded", ACCT);
@@ -291,6 +298,7 @@ fn stream_types_and_required_config_refs_match_the_spec() {
                 && !closed_by_section_9_2(event_type, kind)
                 && !section_9_7
                 && !CLOSED_BY_E12_3.contains(event_type)
+                && !CLOSED_BY_SECTION_9_14.contains(event_type)
             {
                 assert_eq!(with_all.reason, expected, "{event_type} in {kind}");
             }
@@ -1460,7 +1468,21 @@ fn the_model_invocation_stays_open_on_the_agent_stream() {
 /// other version has no schema.
 #[test]
 fn the_records_access_records_are_catalogued_and_closed_on_the_control_stream() {
-    for event_type in CLOSED_BY_E12_3 {
+    closed_on_the_control_stream(&CLOSED_BY_E12_3);
+}
+
+/// §9.14's records, as §9.13's: on the control stream alone, with no configuration, closed there at
+/// schema version 1.
+#[test]
+#[ignore = "pending E12-3"]
+fn the_anchor_and_segment_records_are_catalogued_and_closed_on_the_control_stream() {
+    closed_on_the_control_stream(&CLOSED_BY_SECTION_9_14);
+}
+
+/// Each of `event_types` is refused `schema` at an unlisted member on the control stream and
+/// `wrong_stream` on every other, and has no schema at version 2.
+fn closed_on_the_control_stream(event_types: &[&str]) {
+    for event_type in event_types {
         for kind in [ACCT, AGENT, CTL, CLOCK] {
             let want = match kind {
                 CTL => (InvalidReason::Schema, "payload.unregistered".to_owned()),
