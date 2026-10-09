@@ -81,8 +81,8 @@ use crate::control::Governance;
 use crate::envelope::account_stream;
 use crate::error::Cause;
 use crate::stages::{
-    Admitted, Bars, Classifier, Connector, Executor, ExitPath, Gate, JournalWriter, MandateSource,
-    ModelRef, Protection, Reconciler, SignalModel, Sink, Sizing, Stages,
+    Admitted, Bars, Classifier, Connector, Executor, ExitPath, Gate, GovernedRefs, JournalWriter,
+    MandateSource, ModelRef, Protection, Reconciler, SignalModel, Sink, Sizing, Stages,
 };
 
 /// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts
@@ -945,9 +945,6 @@ pub struct SpecMandate {
 impl MandateSource for SpecMandate {
     fn admitted(&self) -> Result<Admitted, Cause> {
         let context = required_context(&self.context)?;
-        if context.governance.is_some() {
-            return Err(Cause::Unimplemented { story: "E7-19" });
-        }
         let validated = validated_mandate(&self.path, context)?;
         let document = validated.mandate();
         let mut instruments = document.universe.pinned_instruments.iter();
@@ -992,7 +989,10 @@ impl MandateSource for SpecMandate {
                 params,
             },
             symbol: instrument.symbol.clone(),
-            governed: None,
+            governed: context.governance.as_ref().map(|governance| GovernedRefs {
+                policy_set: governance.policy_set.content_hash,
+                model_registry: governance.model_registry.content_hash,
+            }),
         })
     }
 }
@@ -1404,6 +1404,9 @@ fn action_order_matches(
 }
 
 impl Classifier for BuilderPlan {
+    /// An opening or an increase while the confirmed mandate is nonconforming (DEC-534) fails
+    /// closed at D4d's stub. An exit never reads the governance, so nothing here denies it
+    /// (`AGENTS.md` rule 13).
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let context = required_context(&self.context)?;
         let validated = validated_mandate(&self.mandate, context)?;
@@ -1423,6 +1426,14 @@ impl Classifier for BuilderPlan {
             return Err(Cause::Absent {
                 what: "classification facts for the proposed action",
             });
+        }
+        if proposal.purpose.adds_risk()
+            && context
+                .governance
+                .as_ref()
+                .is_some_and(|governance| !governance.violations.is_empty())
+        {
+            return Err(Cause::Unimplemented { story: "E7-19" });
         }
         let classification =
             mandate_builder::classify(mandate_builder::autonomy_policy(&validated), action)?;
@@ -1491,6 +1502,10 @@ impl Gate for RiskGate {
 pub struct StoreJournal {
     backend: StoreBackend,
     recorded_at: UtcNanos,
+    /// The store the run's configuration objects were registered in. `Some` routes every append
+    /// through `append_with_config_artifacts`; `None` keeps the plain append, which refuses every
+    /// version-2 record that names a configuration object (journal spec §5.1, §11 check 6).
+    artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
 }
 
 enum StoreBackend {
@@ -1508,6 +1523,7 @@ impl StoreJournal {
         Self {
             backend: StoreBackend::Memory(MemoryJournal::new()),
             recorded_at,
+            artifacts: None,
         }
     }
 
@@ -1535,7 +1551,14 @@ impl StoreJournal {
         Self {
             backend,
             recorded_at,
+            artifacts: None,
         }
+    }
+
+    /// The same journal, appending through the artifact-aware append over `artifacts`.
+    #[must_use]
+    pub fn with_artifacts(self, artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>) -> Self {
+        Self { artifacts, ..self }
     }
 
     fn stream(stream: &str) -> Result<StreamId, Cause> {
@@ -1587,27 +1610,46 @@ impl JournalWriter for StoreJournal {
             return AppendOutcome::Unavailable;
         };
         let drafts: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
-        match &mut self.backend {
-            StoreBackend::Memory(journal) => journal.append(
-                &stream,
-                expected_head,
-                writer_epoch,
-                self.recorded_at,
-                &drafts,
-            ),
-            StoreBackend::Postgres { journal, runtime } => {
+        let recorded_at = self.recorded_at;
+        match (&mut self.backend, self.artifacts.as_deref()) {
+            (StoreBackend::Memory(journal), None) => {
+                journal.append(&stream, expected_head, writer_epoch, recorded_at, &drafts)
+            }
+            (StoreBackend::Memory(journal), Some(artifacts)) => journal
+                .append_with_config_artifacts(
+                    &stream,
+                    expected_head,
+                    writer_epoch,
+                    recorded_at,
+                    &drafts,
+                    artifacts,
+                ),
+            (StoreBackend::Postgres { journal, runtime }, None) => {
                 match runtime.block_on(journal.append(
                     &stream,
                     expected_head,
                     writer_epoch,
-                    self.recorded_at,
+                    recorded_at,
                     &drafts,
                 )) {
                     Ok(outcome) => outcome,
                     Err(_) => AppendOutcome::Unavailable,
                 }
             }
-            StoreBackend::Unavailable => AppendOutcome::Unavailable,
+            (StoreBackend::Postgres { journal, runtime }, Some(artifacts)) => {
+                match runtime.block_on(journal.append_with_config_artifacts(
+                    &stream,
+                    expected_head,
+                    writer_epoch,
+                    recorded_at,
+                    &drafts,
+                    artifacts,
+                )) {
+                    Ok(outcome) => outcome,
+                    Err(_) => AppendOutcome::Unavailable,
+                }
+            }
+            (StoreBackend::Unavailable, _) => AppendOutcome::Unavailable,
         }
     }
 }
@@ -2133,12 +2175,16 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
             context: run.clone(),
         }),
         gate: Box::new(RiskGate { context: run }),
-        journal: Box::new(StoreJournal::from_dsn(sources.journal, sources.recorded_at)),
+        journal: Box::new(
+            StoreJournal::from_dsn(sources.journal, sources.recorded_at)
+                .with_artifacts(sources.artifacts.clone()),
+        ),
         sink: Box::new(ExecutorSink {
             agent: sources.agent,
         }),
         executor: Box::new(executor),
         connector: sources.transport,
+        artifacts: sources.artifacts,
     }
 }
 

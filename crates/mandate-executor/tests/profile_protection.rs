@@ -15,8 +15,10 @@ use mandate_domain::{
     ProtectionForm as Form, QuantityForm as Qf, Retry, Row, TimeInForce as Tif,
 };
 use mandate_executor::{
-    OcoLegs, OrderType, ProtectionPrices, ProtectiveShape, TimeInForce, protective_shape,
+    ExecutorError, OcoLegs, OrderType, ProtectionPrices, ProtectiveShape, TimeInForce,
+    protective_shape,
 };
+use mandate_num::NumError;
 use proptest::prelude::*;
 
 const STOP: &str = "54000";
@@ -402,5 +404,23 @@ fn re_place_no_longer_reads_the_asset_class_and_asks_the_profile() {
     assert!(
         statement.contains("match") || statement.contains("let") || after.ends_with(")?"),
         "the result is matched or propagated, never ignored"
+    );
+}
+
+#[test]
+#[ignore = "pending E7-23"]
+fn an_offset_of_one_is_refused_and_never_sent_as_a_zero_limit() {
+    let sent = protective_shape(
+        &regular(&simple_stop_limit(Qf::Whole)),
+        AssetClass::UsEquity,
+        MarketSession::Regular,
+        qty("100"),
+        prices(false),
+        Some(fraction("1")),
+    );
+    assert_eq!(
+        sent,
+        Err(ExecutorError::Num(NumError::NotPositive)),
+        "DEC-539: a stop-limit's limit is stop x (1 - offset), and a sell's bound must stay positive"
     );
 }
