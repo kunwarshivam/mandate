@@ -24,8 +24,10 @@ use mandate_identity::Tenant;
 use mandate_identity::demand::{Permitted, ReadRecords};
 use mandate_journal::{MemoryJournal, StoredEvent, StreamId};
 
+mod timeline;
 mod trace;
 
+pub use timeline::{MAX_CONSUMED_PER_STREAM, StreamCursor, Timeline, TimelineQuery, TimelineRead};
 pub use trace::{
     Author, Hop, HopStatus, MAX_DEPTH, MAX_HOPS, MAX_NODES, Quoted, QuotedContent, Trace,
     TraceNode, TraceRead, Watermark,

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -296,6 +296,9 @@ Errors are RFC 9457 problem documents with these members:
 | `outcome_unknown` | 503 | The append's outcome could not be confirmed (an ambiguous commit, or `Fenced` during an upgrade, §7); `effect: unknown`, the derived `event_id` given, `retryable: false`. The client polls §5.5 with that `event_id` and never resends with a new key. A resend with the same key is still safe (API-4: it resolves to the original outcome), so `retryable: false` is a rule for the UI, not for correctness |
 | `address_limit` | 409 | **(planned: E8-14)** A member already holds 10 notification addresses on the channel (§4.11). `effect: none`, `retryable: false`; title "Too many notification addresses". An endpoint already held is not an error: §5.7 answers `200` |
 | `busy` | 503 | **(planned: E8-14)** The control stream moved under the call 5 times in a row (the expected-head retry of §5.7). `effect: none`, `retryable: true`; title "Try again" |
+| `fold_unavailable` | 503 | **(planned: E10-13)** An ordinary revoke (§4.5) whose journal fold of the connection's agents or of their positions cannot answer: it is unavailable, stale, or behind its watermark, its `seq` for a stream it needs being behind that stream's head as read in the same request ([DEC-693](../project/decisions/DEC-693.md) items 6 and 7). Nothing is assumed stopped or flat. `effect: none`, `retryable: false`; title "Account state unavailable". The owner sends a new request later, or revokes on compromise (§5.6), which never reads a fold |
+| `positions_held` | 409 | **(planned: E10-13)** An ordinary revoke (§4.5) while the positions fold answers that an agent on the connection holds positions (DEC-693 item 6). `effect: none`, `retryable: false`; title "Positions still held" |
+| `agents_not_stopped` | 409 | **(planned: E10-13)** An ordinary revoke (§4.5) while the agents fold answers that an agent on the connection is not `stopped` (DEC-693 item 6). `effect: none`, `retryable: false`; title "Agents not stopped" |
 
 Success is not only `202`: a command that records a change answers `202` with `phase: "recorded"`,
 and one whose change is already recorded answers `200` with that record and appends nothing, as
@@ -542,12 +545,30 @@ define yet; §11's E10-15 adds them before the operation ships.
 |---|---|---|---|
 | List, read connections | `GET /connections`, `GET /connections/{id}` | — | Opaque id, broker, environment, scopes, the 1× check, data profile, restrictions, agents granted, loss carry (O4). **References only**: no account number, key, or token (API-11) |
 | Connect | `POST /connections/oauth/start`, then the broker redirects to the fixed `GET /v1/oauth/alpaca/callback`, outside the workspace prefix because a registered redirect URI cannot carry a workspace id; the workspace comes from the single-use `state` | `ConnectionEstablished` | Step-up before start. PKCE and a single-use `state`; the callback refuses a `state` that does not name a server-issued `env=paper` request for that workspace (DEC-821 item 3), writes the code straight to the vault, and calls no broker; the token-exchange process exchanges it and the executor runs the permission checks, and the API appends the event once their passing results are journaled (§1.4); scopes beyond trading reject the connection (FR-2.2). Flow details are the connections spec's |
-| Revoke | `POST /connections/{id}/revoke` | `ConnectionRevoked` | Step-up. Refused while any agent on it holds positions or is not stopped: without the connection nothing can exit or re-protect, so an ordinary revoke is not risk reduction. For a credential the owner believes is compromised, use the next row |
+| Revoke | `POST /connections/{id}/revoke` | `ConnectionRevoked` | Step-up, bound to §5.6's ordinary-revoke digest. Refused while any agent on it holds positions or is not stopped, or while the folds that say so cannot answer (below): without the connection nothing can exit or re-protect, so an ordinary revoke is not risk reduction. For a credential the owner believes is compromised, use the next row |
 | Revoke now, on compromise | `POST /connections/{id}/revoke` with `compromised: true` | `OwnerCommandIssued` (`kill_switch`, connection scope), then `ConnectionRevoked` (reason `compromised`, journal spec §9.10), in one batch | §5.6. Never waits on positions: the kill switch runs first in the same command, then the credential is revoked |
 | Policies | `GET`, `PUT /policies/workspace` | `PolicyChanged` | A value looser than its parent is refused naming the nearest ancestor (FR-1.5); the response lists agents made nonconforming (X1). Step-up |
 | Members | `GET /members`, `POST /invitations`, `PATCH`, `DELETE /members/{id}` | Identity spec's events (journal change) | Removing a member ends their sessions and tokens at once |
 | My workspaces | `GET /v1/me/workspaces` | — | (planned: E10-10) The signed-in user's own workspace memberships, at the principal's own scope and outside every workspace path: identity spec §4.5's *List one's own workspace memberships*, which [#811](https://github.com/kunwarshivam/mandate/pull/811) adds. Returns only the caller's memberships (API-9) |
 | Clients | `GET /clients`, `POST /clients`, `DELETE /clients/{id}` | `ClientConnected`, `ClientRevoked` (journal spec §9.10) | Create needs step-up and shows the scopes in words (E10-8); revoke needs none |
+
+**The ordinary revoke's refusals** (`compromised` `false` or absent; [DEC-693](../project/decisions/DEC-693.md)
+items 6 and 7, [DEC-698](../project/decisions/DEC-698.md)). The API decides them from the journal's
+folds, never from a read model (§4.7, §6.2): the control stream for which agents are on the
+connection and their commands, and each of those agents' streams and the connection's account stream
+for mode and positions. A fold that cannot answer never reads as "no positions" or "stopped"
+(`AGENTS.md` rule 3). When more than one refusal holds, the revoke returns only the first of these,
+one code per response (§3.5), and appends nothing:
+
+1. the step-up evidence for the request's digest does not count: the step-up code §3.5 names, in
+   §3.5's order;
+2. the agents fold or the positions fold cannot answer: `fold_unavailable`;
+3. the positions fold answers that an agent on the connection holds positions: `positions_held`;
+4. the agents fold answers that an agent on the connection is not stopped: `agents_not_stopped`.
+
+Step-up comes first so that a caller whose step-up does not count learns nothing about the
+connection's agents, positions, or folds (DEC-698). The three codes are **(planned: E10-13)**. The
+revoke on compromise (§5.6) reads no fold and is refused by none of them.
 
 ### 4.6 Owner requests, the dry run, and the chat thread
 
@@ -1188,7 +1209,7 @@ gives up and says "the result is unknown; we are checking".
 |---|---|---|
 | `compromised` | `true` | Selects this path. `false` or absent is the ordinary revoke of §4.5 |
 | `record` | record or `null` | The rendered confirmation, which states what the next paragraphs say |
-| `step_up` | step-up or `null` | Bound to digest = SHA-256 of `{connection_id, compromised: true}` (kind `connection`) |
+| `step_up` | step-up or `null` | Bound to digest = SHA-256 of `{workspace_id, connection_id, compromised: true}` (kind `connection`), written in journal spec §4's canonical form and given as a §3.1 `sha256:` ref ([DEC-693](../project/decisions/DEC-693.md) items 1 and 4). The ordinary revoke of §4.5 binds `{workspace_id, connection_id, compromised: false}`, and an absent `compromised` binds `false`, so evidence for one path never counts on the other (DEC-693 item 3). DEC-693 item 5 gives worked vectors |
 
 The API commits one batch, in this order: `OwnerCommandIssued` with `kill_switch` at the
 connection's scope, then `ConnectionRevoked` with reason `compromised`. Revocation never waits on
@@ -1207,6 +1228,13 @@ positions, on fills, or on the regular session. The executor processes the batch
    positions remain at the broker, unprotected, and that the owner must also revoke the leaked key
    at the broker, since revoking it on our side does not stop someone else who holds it. This
    residual is listed for the threat model (#557).
+   The positions they name come only from what is authoritative: the connection's account stream
+   as folded from the journal ([DEC-693](../project/decisions/DEC-693.md) item 8). When nothing
+   authoritative answers (that fold is unavailable, stale, or behind its watermark), they say
+   "unknown", never 0, "none", or an empty list. The display never blocks or delays the batch: no
+   fold read sits before the append, so the kill switch reads no read model and waits on nothing
+   (API-7, API-8, `AGENTS.md` rule 13). Each value is assembled for display only, after the batch
+   commits, or separately for the pre-confirmation render.
 
 The kill-switch half is an API-7 operation: without valid step-up, or while the control stream is
 frozen, the API still commits the kill switch, and refuses only the revocation with
@@ -1486,6 +1514,13 @@ process, which is not the executor, and the permission checks run in the connect
 (§1.4; [DEC-821](../project/decisions/DEC-821.md) item 2). DEC-690 items 6 and 7 are accepted by
 the founder for paper only (DEC-821): Alpaca OAuth connects paper accounts only, and a live Alpaca
 OAuth connection needs a new decision.
+
+[DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md)
+(agent-accepted under DEC-176, each a tightening) settle the revoke: §5.6's step-up digests bind
+the workspace and `compromised`, an ordinary revoke is refused from the journal's folds and refused
+when they cannot answer, and its refusals come in one fixed order, step-up first (§4.5).
+`fold_unavailable` is `retryable: false`: [DEC-681](../project/decisions/DEC-681.md) item 9 names
+the only retryable codes, and the owner's retry is a new request.
 
 ---
 
