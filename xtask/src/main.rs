@@ -1658,6 +1658,8 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
                 variables: &variables,
                 arrays: &arrays,
                 runs_positional,
+                path: &file.path,
+                exact_line: PARSER_LIMITED_LINES.contains(&(file.path.as_str(), line.trim())),
                 quoted_reread: false,
             };
             let flag = if text_only {
@@ -1994,6 +1996,10 @@ struct LineContext<'a> {
     arrays: &'a BTreeMap<String, String>,
     /// Whether the file runs `"$@"` as a command word ([`Definitions`]).
     runs_positional: bool,
+    /// The file's path in the repository.
+    path: &'a str,
+    /// A line of [`PARSER_LIMITED_LINES`], which rule 2's sink allowlist does not judge.
+    exact_line: bool,
     /// A quoted argument word or here-string re-read as a command line, where an unreadable
     /// definition is not refused, only a readable one read through.
     quoted_reread: bool,
@@ -2232,11 +2238,11 @@ const NON_EXECUTING: &[&str] = &[
 
 /// A word skipped when finding a command's command word: an assignment (`A=1`), or a keyword
 /// after which a command follows (`if`, `then`, `else`, `elif`, `do`, `while`, `until`, `!`,
-/// `time`).
+/// `{`). `time` is a wrapper ([`unwrap`]), so its options are read.
 fn is_skipped_word(word: &str) -> bool {
     matches!(
         word,
-        "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "time" | "{"
+        "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{"
     ) || word.split_once('=').is_some_and(|(name, _)| {
         !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     })
@@ -2438,18 +2444,33 @@ fn text_line_live_flag(line: &str, ctx: LineContext) -> LiveFlag {
 struct PipelineCommand {
     words: Vec<(String, bool, usize)>,
     here_strings: Vec<String>,
+    redirects: Vec<usize>,
     start: usize,
     end: usize,
 }
 
 impl PipelineCommand {
-    /// The words from the command word on.
+    /// The words from the command word on, without the words of a redirection.
     fn command(&self) -> Vec<&str> {
         self.words
             .iter()
             .skip(self.command_index())
+            .filter(|(word, quoted, at)| !self.redirection_word(word, *quoted, *at))
             .map(|(word, _, _)| word.as_str())
             .collect()
+    }
+
+    /// Whether a word belongs to a redirection rather than the command: unquoted, and holding
+    /// `<` or `>`, or a descriptor (`2`, `{fd}`) right before a redirection's operator.
+    fn redirection_word(&self, word: &str, quoted: bool, at: usize) -> bool {
+        let descriptor = (!word.is_empty() && word.chars().all(|c| c.is_ascii_digit()))
+            || word
+                .strip_prefix('{')
+                .and_then(|rest| rest.strip_suffix('}'))
+                .is_some_and(|name| sole_variable(&format!("${name}")).is_some());
+        !quoted
+            && (word.contains(['<', '>'])
+                || (descriptor && self.redirects.contains(&at.saturating_add(1))))
     }
 
     /// The token position of the command word, or none for a bare assignment.
@@ -2457,15 +2478,12 @@ impl PipelineCommand {
         self.words.get(self.command_index()).map(|(_, _, at)| *at)
     }
 
-    /// The index of the command word: past the [`is_skipped_word`]s and a `-p` after `time`.
+    /// The index of the command word: past the [`is_skipped_word`]s and redirections.
     fn command_index(&self) -> usize {
-        let mut after_time = false;
         self.words
             .iter()
-            .position(|(word, _, _)| {
-                let skipped = is_skipped_word(word) || (after_time && word == "-p");
-                after_time = word == "time";
-                !skipped
+            .position(|(word, quoted, at)| {
+                !is_skipped_word(word) && !self.redirection_word(word, *quoted, *at)
             })
             .unwrap_or(self.words.len())
     }
@@ -2482,6 +2500,16 @@ fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag 
     }
     let mut substitutions = Vec::new();
     let tokens = shell_tokens(line, &mut substitutions);
+    let runs_shell = tokens.iter().any(|token| {
+        matches!(token, ShellToken::Word(word, _)
+            if is_shell(word.rsplit('/').next().unwrap_or(word)))
+    });
+    if (line.contains("<(") || line.contains(">("))
+        && !ctx.exact_line
+        && (line.contains(['$', '`']) || runs_shell)
+    {
+        return LiveFlag::Unreadable;
+    }
     let (mut verdict, mut reread, mut pipeline) = (LiveFlag::Absent, Vec::new(), Vec::new());
     let mut command = PipelineCommand::default();
     let (mut target_next, mut here_string_next) = (false, false);
@@ -2500,18 +2528,7 @@ fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag 
             }
             ShellToken::Word(text, quoted) => command.words.push((text, quoted, at)),
             ShellToken::Redirect => {
-                let descriptor = command.words.last().is_some_and(|(word, quoted, _)| {
-                    !quoted && !word.is_empty() && word.chars().all(|c| c.is_ascii_digit())
-                });
-                let before_command = command
-                    .words
-                    .iter()
-                    .rev()
-                    .skip(1)
-                    .all(|(word, _, _)| is_skipped_word(word));
-                if descriptor && before_command {
-                    command.words.pop();
-                }
+                command.redirects.push(at);
                 target_next = true;
             }
             ShellToken::HereString => here_string_next = true,
@@ -2617,30 +2634,25 @@ fn pipeline_live_flag(
                         ctx,
                     )
             });
-        let sink = unwrapped_named.first().filter(|_| index > 0);
-        let variable_sink = sink.is_some_and(|word| word.starts_with(['$', '`']));
-        let fed_to_shell = sink
-            .and_then(|word| word.rsplit('/').next())
-            .is_some_and(|word| matches!(word, "sh" | "bash" | "dash" | "ksh" | "zsh" | "mksh"))
-            && pipeline
-                .get(..index)
-                .unwrap_or_default()
-                .iter()
-                .any(|earlier| {
-                    earlier
-                        .words
-                        .iter()
-                        .map(|(word, _, _)| word)
-                        .chain(&earlier.here_strings)
-                        .any(|word| word.contains(['$', '`']))
-                });
+        let unknown_wrapper_option = unwrap(&named).1;
+        let compound_sink = command.words.iter().any(|(word, quoted, _)| {
+            !quoted
+                && matches!(
+                    word.as_str(),
+                    "{" | "while" | "until" | "if" | "for" | "case" | "select"
+                )
+        });
+        let sink_refused = index > 0
+            && !ctx.exact_line
+            && line.contains(['$', '`'])
+            && (compound_sink || !allowed_sink(unwrapped_named, ctx));
         let sets_positional = ctx.runs_positional
             && unwrapped_named.first() == Some(&"set")
             && unwrapped_named
                 .iter()
                 .skip(1)
                 .any(|word| word.contains(['$', '`']));
-        if expanding_command_word || variable_sink || fed_to_shell || sets_positional {
+        if expanding_command_word || unknown_wrapper_option || sink_refused || sets_positional {
             verdict = verdict.min(LiveFlag::Unreadable);
         }
         let builds = (matches!(named.first(), Some(&"awk" | &"sed")) && executing_form(&named))
@@ -2717,44 +2729,233 @@ fn runs_expanding_line(named: &[&str], here_strings: &[String], sourced_expands:
     }
 }
 
-/// `named` without its leading wrappers: `env` (its options, `-u X` and `VAR=val`), `command`,
-/// `exec`, `nohup`, `xargs`, `sudo`, `nice` and `stdbuf` (each with its options and their
-/// values), `builtin`, and `timeout` (its options and its duration).
-fn unwrapped<'w>(mut named: &'w [&'w str]) -> &'w [&'w str] {
-    loop {
-        let wrapper = named
-            .first()
-            .map(|word| word.rsplit('/').next().unwrap_or(word));
-        let (with_value, takes_word): (&[&str], bool) = match wrapper {
-            Some("env") => (&["-u", "-C", "-S"], false),
-            Some("command" | "exec" | "nohup") => (&["-a"], false),
-            Some("xargs") => (&["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"], false),
-            Some("sudo") => (
-                &["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"],
-                false,
-            ),
-            Some("nice") => (&["-n"], false),
-            Some("stdbuf") => (&["-i", "-o", "-e"], false),
-            Some("builtin") => (&[], false),
-            Some("timeout") => (&["-k", "-s"], true),
-            _ => return named,
-        };
+/// The wrappers [`unwrap`] reads through, by basename: each with the options that take a value,
+/// the options that take none, and whether a positional word (`timeout`'s duration) follows.
+const WRAPPERS: &[(&str, &[&str], &[&str], bool)] = &[
+    (
+        "env",
+        &["-u", "-C", "-S", "--unset", "--chdir", "--split-string"],
+        &[
+            "-i",
+            "-0",
+            "-v",
+            "-",
+            "--ignore-environment",
+            "--null",
+            "--debug",
+        ],
+        false,
+    ),
+    ("command", &[], &["-p", "-v", "-V"], false),
+    ("exec", &["-a"], &["-c", "-l"], false),
+    ("nohup", &[], &[], false),
+    (
+        "xargs",
+        &["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"],
+        &[
+            "-0",
+            "-r",
+            "-t",
+            "-p",
+            "-x",
+            "-o",
+            "--null",
+            "--no-run-if-empty",
+            "--verbose",
+        ],
+        false,
+    ),
+    (
+        "sudo",
+        &["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-R"],
+        &[
+            "-E", "-H", "-n", "-S", "-i", "-s", "-k", "-K", "-b", "-P", "-A", "-e", "-l", "-v",
+        ],
+        false,
+    ),
+    ("nice", &["-n"], &[], false),
+    ("stdbuf", &["-i", "-o", "-e"], &[], false),
+    ("builtin", &[], &[], false),
+    (
+        "timeout",
+        &["-k", "-s"],
+        &["-v", "--foreground", "--preserve-status", "--verbose"],
+        true,
+    ),
+    (
+        "time",
+        &["-f", "-o"],
+        &[
+            "-p",
+            "-a",
+            "-q",
+            "-v",
+            "--portability",
+            "--append",
+            "--quiet",
+        ],
+        false,
+    ),
+];
+
+/// `named` without its leading [`WRAPPERS`]: each wrapper's options (`--` ends them; a value
+/// glued to its option, `-o0`, and a `--long=value` are one word), `env`'s `VAR=val`, and
+/// `timeout`'s duration. The flag says that a wrapper had an option whose arity is not known, so
+/// the command it wraps cannot be found (DEC-851 item 6, the structural skip).
+fn unwrap<'w>(mut named: &'w [&'w str]) -> (&'w [&'w str], bool) {
+    while let Some((wrapper, with_value, without, takes_word)) = named.first().and_then(|word| {
+        let base = word.rsplit('/').next().unwrap_or(word);
+        WRAPPERS.iter().find(|(name, ..)| *name == base)
+    }) {
         let mut rest = named.get(1..).unwrap_or_default();
-        while let Some(word) = rest.first() {
-            let skip = if with_value.contains(word) {
+        while let Some(word) = rest.first().filter(|word| word.starts_with('-')) {
+            let short = word.get(..2).filter(|_| !word.starts_with("--"));
+            let skip = if *word == "--" {
+                rest = rest.get(1..).unwrap_or_default();
+                break;
+            } else if with_value.contains(word) {
                 2
-            } else if word.starts_with('-') || (wrapper == Some("env") && word.contains('=')) {
+            } else if without.contains(word)
+                || (word.starts_with("--") && word.contains('='))
+                || short.is_some_and(|option| with_value.contains(&option))
+                || word
+                    .get(1..)
+                    .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+                || (short.is_some()
+                    && word
+                        .chars()
+                        .skip(1)
+                        .all(|c| without.contains(&format!("-{c}").as_str())))
+            {
                 1
             } else {
-                break;
+                return (rest, true);
             };
             rest = rest.get(skip..).unwrap_or_default();
         }
-        if takes_word {
+        while *wrapper == "env" && rest.first().is_some_and(|word| is_skipped_word(word)) {
+            rest = rest.get(1..).unwrap_or_default();
+        }
+        if *takes_word {
             rest = rest.get(1..).unwrap_or_default();
         }
         named = rest;
     }
+    (named, false)
+}
+
+/// `named` without its leading wrappers ([`unwrap`]).
+fn unwrapped<'w>(named: &'w [&'w str]) -> &'w [&'w str] {
+    unwrap(named).0
+}
+
+/// The filters a pipeline whose line expands may feed (DEC-851 item 6, rule 2's sink allowlist):
+/// the sinks the repository's own scripts use, none of which runs its input as code. `awk` and
+/// `sed` can, in more forms than a scan reads, so the repository's own lines feeding them are on
+/// [`PARSER_LIMITED_LINES`] instead (DEC-851 item 6, the fourteenth round).
+const FILTER_SINKS: &[&str] = &[
+    "sha256sum",
+    "tee",
+    "tr",
+    "sort",
+    "grep",
+    "cut",
+    "tail",
+    "paste",
+    "cat",
+    "head",
+    "uniq",
+    "wc",
+    "read",
+];
+
+/// The repository's logical lines, each by its file and trimmed text, that rule 2's sink rules
+/// and the process-substitution rule refuse but a person has read: lines the scan's shell reading
+/// gets wrong, and the lines feeding `awk`, `sed`, a `while read` loop or a `done < <( … )`. A
+/// line not listed is refused until a person adds it (DEC-851 item 6, an interim list).
+const PARSER_LIMITED_LINES: &[(&str, &str)] = &[
+    (
+        "deploy/set-secrets.sh",
+        concat!(
+            "printf '%s' \"$answer\" | systemd-run --quiet --wait --pipe --collect  ",
+            "-p User=owlhead_exec -p Group=owlhead_exec -p UMask=0077  ",
+            "-p LoadCredential=vault-pending-key:\"$CREDENTIALS/vault-pending-key\"  ",
+            "-p LoadCredential=vault-token-key:\"$CREDENTIALS/vault-token-key\"  ",
+            "-p EnvironmentFile=\"$EXEC_ENV\"  \"${VAULT_IMPORT[@]}\"",
+        ),
+    ),
+    (
+        "deploy/set-secrets.sh",
+        "if [[ \"${line%%=*}\" =~ (KEY|SECRET|TOKEN|PASSWORD) ]]; then",
+    ),
+    (
+        ".github/scripts/docs-checks.sh",
+        r##"done < <(git log --format='%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)' "$merge_base..HEAD")"##,
+    ),
+    (
+        ".github/scripts/docs-only.sh",
+        r##"done < <(git diff --name-only "$merge_base" HEAD)"##,
+    ),
+    (
+        ".github/scripts/merge-approved.sh",
+        r##"approvals=$(awk '/^[[:space:]]*(```|~~~)/ { fenced = !fenced; next } !fenced' <<<"$body" | sed -nE 's/^[[:space:]]*([-*][[:space:]]+)?Coordinator-approved-head:[[:space:]]*([0-9a-fA-F]{40})[[:space:]]*$/\2/p' | tr 'A-F' 'a-f')"##,
+    ),
+    (
+        "deploy/allow-egress.sh",
+        r##"found="$(getent ahosts "$host" | awk '{ print $1 }' | sort -u)""##,
+    ),
+    (
+        "deploy/allow-egress.sh",
+        r##"printf '%s\n' "$allow" | sort -u | while read -r address; do"##,
+    ),
+    (
+        "deploy/backup.sh",
+        r##"free_kb="$(df -Pk "$DEST" | awk 'NR == 2 { print $4 }')""##,
+    ),
+    (
+        "deploy/bootstrap.sh",
+        r##"found="$(gpg --show-keys --with-colons "$PGDG_KEY" | awk -F: '$1 == "fpr" { print $10; exit }')""##,
+    ),
+    (
+        "deploy/install-cloudflared.sh",
+        r##"gpg --show-keys --with-colons "$1" 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }'"##,
+    ),
+    (
+        "deploy/lib.sh",
+        r##"sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'"##,
+    ),
+];
+
+/// Whether `named`, a pipeline stage after its wrappers, is a sink a line that expands may feed:
+/// one of [`FILTER_SINKS`] (`sort` without `--compress-program`), or `deploy/`'s own `put_file`
+/// and `sql`. An empty stage, such as one a comment swallowed, is not, and a compound command
+/// (`{ … }`, a loop, `if`, `case`), whose body may run anything, is refused before this.
+fn allowed_sink(named: &[&str], ctx: LineContext) -> bool {
+    match named.first().copied() {
+        Some("sort") => !named
+            .iter()
+            .any(|word| word.starts_with("--compress-program")),
+        Some(word) if FILTER_SINKS.contains(&word) => true,
+        Some("put_file" | "sql") => ctx.path.starts_with("deploy/"),
+        _ => false,
+    }
+}
+
+/// Whether `word`, a basename, names a shell: item 1's shells and their kin.
+fn is_shell(word: &str) -> bool {
+    matches!(
+        word,
+        "sh" | "bash"
+            | "dash"
+            | "ksh"
+            | "zsh"
+            | "mksh"
+            | "ash"
+            | "rbash"
+            | "ksh93"
+            | "fish"
+            | "csh"
+    )
 }
 
 /// Whether `word` names cargo: a word `cargo`, or a path ending `/cargo`.
@@ -11284,7 +11485,6 @@ jq -r "$filter" "$src"
     /// of unknown arity is refused. A `#` starts a comment only at a word's start, and a backslash
     /// escapes nothing inside single quotes, so those lines still run on.
     #[test]
-    #[ignore = "pending E7-26"]
     fn pipeline_sinks_and_wrapper_options_fail_closed() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
