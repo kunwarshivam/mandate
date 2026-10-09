@@ -150,6 +150,36 @@ impl NoticeClass {
     }
 }
 
+/// The default push-service allowlist (DEC-792 item 2): Chrome's, Firefox's, Safari's and Edge's
+/// push services. A deployment may configure a shorter list; adding a host is a reviewed change.
+pub const DEFAULT_PUSH_ALLOWLIST: [&str; 4] = [
+    "fcm.googleapis.com",
+    "updates.push.services.mozilla.com",
+    "*.push.apple.com",
+    "*.notify.windows.com",
+];
+
+/// The deployment's push-service allowlist (DEC-792 item 2, spec §4.6). Each entry is one exact
+/// host, or `*.` and a domain, which matches a proper subdomain at any depth and never the domain
+/// itself.
+#[derive(Debug, Clone)]
+pub struct PushAllowlist {
+    #[expect(dead_code, reason = "parse_allowed reads it once E8-14 implements it")]
+    entries: Vec<String>,
+}
+
+impl PushAllowlist {
+    /// From the deployment's configured entries, such as [`DEFAULT_PUSH_ALLOWLIST`]. An entry no
+    /// accepted endpoint could match is refused with [`WebPushError::InvalidEndpoint`]: a host or
+    /// domain that is not lowercase ASCII labels of letters, digits and hyphens, one with an empty
+    /// label, a trailing dot, an `xn--` label, or an all-digit last label (an IPv4 literal), a
+    /// port, a scheme, or a `*` anywhere but a leading `*.`.
+    pub fn parse(entries: &[&str]) -> Result<Self, WebPushError> {
+        let _ = entries;
+        Err(WebPushError::Unimplemented { story: "E8-14" })
+    }
+}
+
 /// A push endpoint: `https://<host>[:port]/...`, with no user information. An address (NT-2).
 #[derive(Clone, PartialEq, Eq)]
 pub struct PushEndpoint {
@@ -168,6 +198,9 @@ impl PushEndpoint {
     /// `https`, a host of lowercase letters, digits, dots and hyphens in non-empty labels, an
     /// optional port written as a nonzero number with no sign or leading zero, and a path, query
     /// and fragment of URI characters only: no user information, space, quote, or backslash.
+    ///
+    /// Syntax only, with no allowlist: consumers use [`PushEndpoint::parse_allowed`], the one
+    /// parser DEC-792 item 3 names; the E8-14 implementation makes this one private.
     pub fn parse(url: &str) -> Result<Self, WebPushError> {
         let rest = url
             .strip_prefix(HTTPS)
@@ -197,6 +230,16 @@ impl PushEndpoint {
             url: url.to_owned(),
             origin_len,
         })
+    }
+
+    /// The one parser the workspace API, the dispatcher and the relay use (DEC-792, spec §4.6):
+    /// `https`, port 443 (none written, or `:443`), no user information, and a host of lowercase
+    /// ASCII labels on `allowlist`. An IP literal, a trailing dot, a non-ASCII or `xn--` label, or a
+    /// percent-encoded character is refused, never normalized into a match; an accepted endpoint
+    /// keeps its address exactly as given. Every refusal is [`WebPushError::InvalidEndpoint`].
+    pub fn parse_allowed(url: &str, allowlist: &PushAllowlist) -> Result<Self, WebPushError> {
+        let _ = (url, allowlist);
+        Err(WebPushError::Unimplemented { story: "E8-14" })
     }
 
     /// `https://<host>[:port]`, the VAPID audience (RFC 8292 §2).
