@@ -3,7 +3,9 @@
 //! caller's context name the workspace, never a body member, so a body that names one, whether
 //! another workspace or its own, is refused before it is read. The inventories are the test's own:
 //! the request schemas are listed from `schemas/workspace-api/commands/` at run time, the request
-//! types are read from `requests.rs`'s text, and each base body is that schema's example file.
+//! types are read from `requests.rs`'s text, and each base body is that schema's example file, and the example with each of its
+//! `.valid.json` cases applied; the nested objects are found by walking those bodies, and checked
+//! against the objects each schema describes.
 
 use std::collections::BTreeSet;
 use std::fmt::Debug;
@@ -120,10 +122,6 @@ const DECODERS: [(&str, Judge); 14] = [
     ("stop-request", judge::<StopRequest>),
 ];
 
-fn example(stem: &str) -> Value {
-    json_file(&schemas().join(format!("examples/commands.{stem}.json")))
-}
-
 /// The decoders cover every request schema and every request type the crate declares, so a shape
 /// added to either without a row here fails this test rather than escaping the next one.
 #[test]
@@ -137,33 +135,187 @@ fn the_decoders_cover_every_request_schema_and_request_type() {
     assert_eq!(listed, crate_stems(), "the request types in requests.rs");
 }
 
-/// Every request body with a member naming a workspace, another or the route's own, is refused as
-/// `unknown_member` at that member and nothing else. The control: each schema's example, the base
-/// every case extends, decodes.
-#[test]
-fn a_request_body_naming_a_workspace_is_refused_at_that_member() {
-    let mut wrong = Vec::new();
-    for (stem, judge) in DECODERS {
-        let base = example(stem);
-        let encoded = serde_json::to_vec(&base).expect("json");
-        if let Err(found) = judge(&encoded) {
-            wrong.push(format!("{stem}'s example is refused: {found:?}"));
+/// A pointer token, `~` and `/` escaped (RFC 6901).
+fn escaped(token: &str) -> String {
+    token.replace('~', "~0").replace('/', "~1")
+}
+
+fn unescaped(token: &str) -> String {
+    token.replace("~1", "/").replace("~0", "~")
+}
+
+/// `body` with one `.valid.json` case applied: each `set` pointer written, each `remove` pointer
+/// deleted. Each pointer's parent is an object in the example, as every case's is.
+fn applied(mut body: Value, case: &Value) -> Value {
+    let parent = |pointer: &str| {
+        let (parent, last) = pointer.rsplit_once('/').expect("a member pointer");
+        (parent.to_owned(), unescaped(last))
+    };
+    if let Some(set) = case["set"].as_object() {
+        for (pointer, value) in set {
+            let (at, name) = parent(pointer);
+            let object = body.pointer_mut(&at).and_then(Value::as_object_mut);
+            object.expect(pointer).insert(name, value.clone());
         }
-        for member in WORKSPACE_MEMBERS {
-            for workspace in [OTHER, OWN] {
-                let mut body = base.clone();
-                body.as_object_mut()
-                    .expect("a request example is an object")
-                    .insert(member.to_owned(), json!(workspace));
-                let encoded = serde_json::to_vec(&body).expect("json");
-                let want = vec![(format!("/{member}"), "unknown_member".to_owned())];
-                let found = judge(&encoded);
-                if found != Err(want.clone()) {
-                    wrong.push(format!("{stem} + {member}={workspace}: {found:?}"));
+    }
+    for pointer in case["remove"].as_array().into_iter().flatten() {
+        let (at, name) = parent(pointer.as_str().expect("a pointer"));
+        let object = body.pointer_mut(&at).and_then(Value::as_object_mut);
+        object.expect("a parent").remove(&name);
+    }
+    body
+}
+
+/// Each schema's example, and the example with each of its `.valid.json` cases applied, so a
+/// nested object the example leaves `null`, such as an approval's `delegation`, is present in one.
+fn bodies(stem: &str) -> Vec<Value> {
+    let base = json_file(&schemas().join(format!("examples/commands.{stem}.json")));
+    let cases = json_file(&schemas().join(format!("examples/commands.{stem}.valid.json")));
+    let mut bodies = vec![base.clone()];
+    for case in cases.as_array().expect("a list of cases") {
+        bodies.push(applied(base.clone(), case));
+    }
+    bodies
+}
+
+/// One object in a body: its pointer, its pointer with array indices as `*`, and the pointer of
+/// the outermost internally tagged object holding it, if any.
+struct Nested {
+    at: String,
+    shape: String,
+    tagged: Option<String>,
+}
+
+/// Every object in `node`, the root included. An object with a string `kind` is internally tagged
+/// (the request schemas tag every one-of object on `kind`), and serde reads it whole before its
+/// members, so a refusal inside it is located at it (DEC-681 item 10).
+fn objects(node: &Value, at: &str, shape: &str, tagged: Option<&str>, out: &mut Vec<Nested>) {
+    match node {
+        Value::Object(map) => {
+            let own = map.get("kind").is_some_and(Value::is_string).then_some(at);
+            let tagged = tagged.or(own);
+            out.push(Nested {
+                at: at.to_owned(),
+                shape: shape.to_owned(),
+                tagged: tagged.map(str::to_owned),
+            });
+            for (name, child) in map {
+                let token = escaped(name);
+                let (at, shape) = (format!("{at}/{token}"), format!("{shape}/{token}"));
+                objects(child, &at, &shape, tagged, out);
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                let shape = format!("{shape}/*");
+                objects(child, &format!("{at}/{index}"), &shape, tagged, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Every object in `bodies`, by its shape.
+fn object_shapes(bodies: &[Value]) -> BTreeSet<String> {
+    let mut found = Vec::new();
+    for body in bodies {
+        objects(body, "", "", None, &mut found);
+    }
+    found.into_iter().map(|nested| nested.shape).collect()
+}
+
+/// `node` with a `$ref` into `envelope.schema.json#/$defs/` replaced by that definition.
+fn resolved<'a>(node: &'a Value, defs: &'a Value) -> &'a Value {
+    let shared = node["$ref"]
+        .as_str()
+        .and_then(|r| r.split("envelope.schema.json#/$defs/").nth(1));
+    shared.map_or(node, |name| &defs[name])
+}
+
+/// Every object a schema describes, by its shape: a node with `properties`, reached through
+/// `properties`, `items`, `oneOf`, `anyOf`, and `$ref`s into the envelope's definitions.
+fn schema_shapes(node: &Value, shape: &str, defs: &Value, out: &mut BTreeSet<String>) {
+    let node = resolved(node, defs);
+    for alternative in ["oneOf", "anyOf"] {
+        for each in node[alternative].as_array().into_iter().flatten() {
+            schema_shapes(each, shape, defs, out);
+        }
+    }
+    if let Some(properties) = node["properties"].as_object() {
+        out.insert(shape.to_owned());
+        for (name, child) in properties {
+            schema_shapes(child, &format!("{shape}/{}", escaped(name)), defs, out);
+        }
+    }
+    if !node["items"].is_null() {
+        schema_shapes(&node["items"], &format!("{shape}/*"), defs, out);
+    }
+}
+
+/// The bodies the next test extends reach every object their schema describes, nested ones
+/// included, whatever the Rust type behind it is named; a nested shape the examples miss fails
+/// here rather than escaping the next test.
+#[test]
+fn the_bodies_reach_every_object_their_schema_describes() {
+    let defs = &json_file(&schemas().join("envelope.schema.json"))["$defs"];
+    let mut wrong = Vec::new();
+    for stem in schema_stems() {
+        let schema = json_file(&schemas().join(format!("commands/{stem}.schema.json")));
+        let mut described = BTreeSet::new();
+        schema_shapes(&schema, "", defs, &mut described);
+        let reached = object_shapes(&bodies(&stem));
+        if described != reached {
+            wrong.push(format!(
+                "{stem}: described {described:?}, reached {reached:?}"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Every request body with a member naming a workspace, another or the route's own, added to any
+/// of its objects, the root or nested, is refused as `unknown_member` and nothing else: at the
+/// member, or at the internally tagged object holding it (DEC-681 item 10). The control: each body
+/// every case extends decodes.
+#[test]
+fn a_request_body_naming_a_workspace_at_any_depth_is_refused() {
+    let mut wrong = Vec::new();
+    let mut tried = 0_usize;
+    for (stem, judge) in DECODERS {
+        for base in bodies(stem) {
+            let encoded = serde_json::to_vec(&base).expect("json");
+            if let Err(found) = judge(&encoded) {
+                wrong.push(format!("{stem}'s body {base} is refused: {found:?}"));
+            }
+            let mut nested = Vec::new();
+            objects(&base, "", "", None, &mut nested);
+            for object in nested {
+                for member in WORKSPACE_MEMBERS {
+                    for workspace in [OTHER, OWN] {
+                        let mut body = base.clone();
+                        let target = body.pointer_mut(&object.at).and_then(Value::as_object_mut);
+                        target
+                            .expect("an object")
+                            .insert(member.to_owned(), json!(workspace));
+                        let at = object
+                            .tagged
+                            .clone()
+                            .unwrap_or(format!("{}/{member}", object.at));
+                        let want = vec![(at, "unknown_member".to_owned())];
+                        let found = judge(&serde_json::to_vec(&body).expect("json"));
+                        tried += 1;
+                        if found != Err(want) {
+                            wrong.push(format!(
+                                "{stem} {}/{member}={workspace}: {found:?}",
+                                object.at
+                            ));
+                        }
+                    }
                 }
             }
         }
     }
+    assert!(tried > 0, "no case was tried");
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
