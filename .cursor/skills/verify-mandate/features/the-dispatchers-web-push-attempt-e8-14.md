@@ -8,7 +8,7 @@
   mailbox, is a permanent `provider_error`), DEC-790 item 4 (`exp` 12 hours after the attempt),
   DEC-729 (a push service's status, which the relay returns unchanged under DEC-724 item 6, mapped
   to §5.2's outcome).
-- **Code:** `mandate-dispatcher` (layer 3, safety-critical, over `mandate-notify`,
+- **Code:** `mandate-dispatcher` (layer 4, safety-critical, over `mandate-notify`,
   `mandate-webpush` and `mandate-push-relay`): `crates/mandate-dispatcher/src/lib.rs` (`prepare`,
   `Attempt`, `Route`, `Prepared`, `Relayed`, `relay_refusal`, `push_status`, the closed
   `DispatchError`). A
