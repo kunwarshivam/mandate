@@ -36,6 +36,18 @@
 //!
 //! [DEC-660]: ../../../docs/project/decisions/DEC-660.md
 
+mod auth_data;
+mod cbor;
+mod client_data;
+mod cose;
+pub mod stepup;
+
+use mandate_canon::Digest;
+
+use auth_data::AuthData;
+use cbor::Cbor;
+use client_data::Ceremony;
+
 /// The relying party a workspace deployment is: its RP ID and the one origin its web app is
 /// served from, both configuration (`app.owlhead.ai` and `https://app.owlhead.ai` in production,
 /// DEC-820).
@@ -147,10 +159,6 @@ pub enum Refusal {
     SignatureInvalid,
     #[error("the signature counter did not rise")]
     CounterNotRising,
-    /// The stubs of E9-1's tests PR return this, so every pending test fails on them (DEC-77,
-    /// DEC-137); the implementation PR replaces the stubs and removes the variant.
-    #[error("passkey verification is not implemented yet")]
-    Unimplemented,
 }
 
 impl Refusal {
@@ -174,7 +182,6 @@ impl Refusal {
             Self::CredentialMismatch => "credential_mismatch",
             Self::SignatureInvalid => "signature_invalid",
             Self::CounterNotRising => "counter_not_rising",
-            Self::Unimplemented => "unimplemented",
         }
     }
 }
@@ -185,8 +192,34 @@ pub fn enrol(
     challenge: &Challenge,
     registration: &Registration<'_>,
 ) -> Result<Credential, Refusal> {
-    let _ = (rp, challenge, registration);
-    Err(Refusal::Unimplemented)
+    client_data::check(
+        registration.client_data_json,
+        Ceremony::Create,
+        rp,
+        challenge,
+    )?;
+    let object = cbor::read_all(registration.attestation_object)
+        .map_err(|_| Refusal::AttestationMalformed)?;
+    let text = |key: &str| object.get(&Cbor::Text(key.to_owned()));
+    let none_format = text("fmt") == Some(&Cbor::Text("none".to_owned()));
+    let empty_statement = text("attStmt") == Some(&Cbor::Map(Vec::new()));
+    if !none_format || !empty_statement {
+        return Err(Refusal::AttestationFormat);
+    }
+    let Some(Cbor::Bytes(bytes)) = text("authData") else {
+        return Err(Refusal::AttestationMalformed);
+    };
+    let auth_data = AuthData::parse(bytes)?;
+    auth_data.check(rp)?;
+    let Some(attested) = &auth_data.attested else {
+        return Err(Refusal::AuthenticatorDataMalformed);
+    };
+    Ok(Credential {
+        id: attested.credential_id.clone(),
+        public_key: cose::public_key(&attested.public_key)?,
+        sign_count: auth_data.sign_count,
+        backup_eligible: auth_data.backup_eligible(),
+    })
 }
 
 /// Verifies an assertion for `challenge` against the stored `credential`. On success the caller
@@ -198,6 +231,27 @@ pub fn verify(
     credential: &Credential,
     assertion: &Assertion<'_>,
 ) -> Result<Verified, Refusal> {
-    let _ = (rp, challenge, credential, assertion);
-    Err(Refusal::Unimplemented)
+    if assertion.credential_id != credential.id {
+        return Err(Refusal::CredentialMismatch);
+    }
+    client_data::check(assertion.client_data_json, Ceremony::Get, rp, challenge)?;
+    let auth_data = AuthData::parse(assertion.authenticator_data)?;
+    if auth_data.attested.is_some() {
+        return Err(Refusal::AuthenticatorDataMalformed);
+    }
+    auth_data.check(rp)?;
+    if auth_data.backup_eligible() != credential.backup_eligible {
+        return Err(Refusal::BackupFlags);
+    }
+    let client_data_hash = Digest::of(assertion.client_data_json);
+    let message = [assertion.authenticator_data, client_data_hash.as_bytes()].concat();
+    cose::verify(&credential.public_key, &message, assertion.signature)?;
+    let kept = credential.sign_count != 0 || auth_data.sign_count != 0;
+    if kept && auth_data.sign_count <= credential.sign_count {
+        return Err(Refusal::CounterNotRising);
+    }
+    Ok(Verified {
+        sign_count: auth_data.sign_count,
+        backup_state: auth_data.backup_state(),
+    })
 }

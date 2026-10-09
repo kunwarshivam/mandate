@@ -23,13 +23,17 @@ use mandate_time::UtcNanos;
 mod agent;
 mod artifact;
 mod catalogue;
+mod connections;
 mod control;
 mod draft;
 mod merkle;
 mod schema;
 mod verify;
 
-pub use agent::{AgentStreamCheck, AgentStreamFailure, verify_agent_stream};
+pub use agent::{
+    AgentStreamCheck, AgentStreamFailure, HeldAnchor, verify_agent_stream,
+    verify_agent_stream_anchored,
+};
 
 /// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, then §9.5's rule 45
 /// on the account stream (DEC-446 item 3). Each draft has already passed `Draft::parse`.
@@ -72,13 +76,17 @@ impl Environment {
     }
 }
 
-/// The four stream types of journal spec §2.
+/// The five stream types of journal spec §2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StreamType {
     Account,
     Agent,
     Control,
     Scheduler,
+    /// `ntf:{workspace_id}`, whose single writer is the workspace's notification dispatcher
+    /// (journal spec v0.12 §2, DEC-720). [`StreamId::parse`] reads it once E8-9's
+    /// slice S2 is implemented.
+    Notice,
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,

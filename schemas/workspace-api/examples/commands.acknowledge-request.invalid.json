@@ -1,0 +1,80 @@
+[
+  {
+    "label": "a missing acknowledged event",
+    "remove": [
+      "/acknowledged"
+    ]
+  },
+  {
+    "label": "an id that is not an event id",
+    "set": {
+      "/acknowledged": "evt_1"
+    }
+  },
+  {
+    "label": "auto: no /acknowledged",
+    "remove": [
+      "/acknowledged"
+    ]
+  },
+  {
+    "label": "auto: no /record",
+    "remove": [
+      "/record"
+    ]
+  },
+  {
+    "label": "auto: no /step_up",
+    "remove": [
+      "/step_up"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: no /record/artifact",
+    "remove": [
+      "/record/artifact"
+    ]
+  },
+  {
+    "label": "auto: no /record/ui_build",
+    "remove": [
+      "/record/ui_build"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /record",
+    "set": {
+      "/record/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: no /step_up/assertion_id",
+    "remove": [
+      "/step_up/assertion_id"
+    ]
+  },
+  {
+    "label": "auto: no /step_up/authenticated_at",
+    "remove": [
+      "/step_up/authenticated_at"
+    ]
+  },
+  {
+    "label": "auto: no /step_up/method",
+    "remove": [
+      "/step_up/method"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /step_up",
+    "set": {
+      "/step_up/mutant_member": 1
+    }
+  }
+]

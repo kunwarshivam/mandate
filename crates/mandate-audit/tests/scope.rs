@@ -4,24 +4,39 @@
 
 mod common;
 
-use common::{ACCOUNTS, Fixture, T, WORKSPACES, acct, ctl, event_id, limit, ws};
-use mandate_audit::{AuditError, JournalRead, MemoryRead, PageLimit, StreamType, WorkspaceId};
+use common::{
+    ACCOUNTS, Fixture, T, WS_A, WS_B, acct, ctl, event_id, limit, tenant, text, workspaces,
+};
+use mandate_audit::{AuditError, JournalRead, MemoryRead, PageLimit, StreamType};
 use mandate_canon::Digest;
+use mandate_identity::WorkspaceId;
 use mandate_journal::StreamId;
 use proptest::prelude::*;
+
+/// The workspaces a tenant context is built for. The fixture's second segment, `WS_A`'s with one
+/// more character, is no workspace's, so no tenant reads it.
+const TENANTS: [WorkspaceId; 2] = [WS_A, WS_B];
+
+/// A hosted workspace that holds no stream.
+const WS_EMPTY: WorkspaceId = WorkspaceId(0x0192_0C3A_7F10_4B2E_9D01_0000_0000_00E3);
+
+/// [`WS_A`]'s segment with one more character: a stream there is never `WS_A`'s.
+fn prefixed() -> String {
+    workspaces()[1].clone()
+}
 
 #[test]
 fn streams_lists_only_the_workspaces_written_streams_with_their_heads() {
     let mut fx = Fixture::new(2);
-    fx.marks(&acct("ws_a", "ACCT2"), 3);
-    let never_written = StreamId::parse("acct:ws_a:EMPTY").unwrap();
+    fx.marks(&acct(&text(WS_A), "ACCT2"), 3);
+    let never_written = StreamId::parse(&acct(&text(WS_A), "EMPTY")).unwrap();
     fx.journal.take_ownership(&never_written);
     let read = MemoryRead::new(&fx.journal);
     let all = PageLimit::new(None).unwrap();
-    for workspace in WORKSPACES {
-        let entries = read.streams(&ws(workspace), None, all).unwrap();
+    for workspace in TENANTS {
+        let entries = read.streams(&tenant(workspace), None, all).unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.stream_id.as_str()).collect();
-        assert_eq!(names, fx.streams_of(workspace), "{workspace}");
+        assert_eq!(names, fx.streams_of(&text(workspace)), "{workspace:?}");
         for entry in &entries {
             let rows = fx.journal.rows(&StreamId::parse(&entry.stream_id).unwrap());
             let last = rows.last().unwrap();
@@ -41,7 +56,7 @@ fn streams_lists_only_the_workspaces_written_streams_with_their_heads() {
             assert_eq!(entry.head.recorded_at, T);
         }
     }
-    assert_eq!(read.streams(&ws("ws_nobody"), None, all).unwrap(), []);
+    assert_eq!(read.streams(&tenant(WS_EMPTY), None, all).unwrap(), []);
 }
 
 /// DEC-760 item 6: the list pages by `after` and `limit` in byte order. `after` is a cursor, not
@@ -50,8 +65,8 @@ fn streams_lists_only_the_workspaces_written_streams_with_their_heads() {
 fn the_stream_list_pages_by_after_and_limit() {
     let fx = Fixture::new(1);
     let read = MemoryRead::new(&fx.journal);
-    let me = ws("ws_a");
-    let expected = fx.streams_of("ws_a");
+    let me = tenant(WS_A);
+    let expected = fx.streams_of(&text(WS_A));
     let mut after: Option<String> = None;
     let mut listed = Vec::new();
     for _ in 0..=expected.len() {
@@ -77,30 +92,33 @@ fn the_stream_list_pages_by_after_and_limit() {
             .collect()
     };
     assert_eq!(names(""), expected);
-    assert_eq!(names(&acct("ws_a", "ACCT1")), expected[1..]);
-    assert_eq!(names(&acct("ws_ab", "ACCT1")), [ctl("ws_a")]);
+    assert_eq!(names(&acct(&text(WS_A), "ACCT1")), expected[1..]);
+    assert_eq!(names(&acct(&text(WS_B), "ACCT1")), [ctl(&text(WS_A))]);
+    assert_eq!(names(&acct(&prefixed(), "ACCT1")), expected);
     assert_eq!(names("zzz"), Vec::<String>::new());
 }
 
 #[test]
 fn foreign_malformed_and_absent_ids_all_read_as_not_found() {
     let mut fx = Fixture::new(1);
+    let a = text(WS_A);
     fx.journal
-        .take_ownership(&StreamId::parse("acct:ws_a:EMPTY").unwrap());
+        .take_ownership(&StreamId::parse(&acct(&a, "EMPTY")).unwrap());
     let read = MemoryRead::new(&fx.journal);
-    let me = ws("ws_a");
+    let me = tenant(WS_A);
     for stream in [
-        acct("ws_ab", "ACCT1"),
-        acct("ws_b", "ACCT2"),
-        ctl("ws_b"),
-        ctl("ws_ab"),
-        acct("ws_a", "ACCT9"),
-        "acct:ws_a:EMPTY".to_owned(),
-        "acct:ws_a".to_owned(),
-        "ctl:ws_a:x".to_owned(),
-        " ctl:ws_a".to_owned(),
-        "ctl:ws_a ".to_owned(),
-        "CTL:ws_a".to_owned(),
+        acct(&prefixed(), "ACCT1"),
+        acct(&text(WS_B), "ACCT2"),
+        ctl(&text(WS_B)),
+        ctl(&prefixed()),
+        ctl(&a.to_lowercase()),
+        acct(&a, "ACCT9"),
+        acct(&a, "EMPTY"),
+        format!("acct:{a}"),
+        format!("ctl:{a}:x"),
+        format!(" ctl:{a}"),
+        format!("ctl:{a} "),
+        format!("CTL:{a}"),
         String::new(),
     ] {
         for after in [0, 1] {
@@ -112,9 +130,9 @@ fn foreign_malformed_and_absent_ids_all_read_as_not_found() {
         }
     }
     for stream in [
-        acct("ws_b", "ACCT1"),
-        acct("ws_a", "ACCT9"),
-        acct("ws_a", "ACCT1"),
+        acct(&text(WS_B), "ACCT1"),
+        acct(&a, "ACCT9"),
+        acct(&a, "ACCT1"),
     ] {
         assert_eq!(
             read.page(&me, &stream, 9_007_199_254_740_992, limit(5)),
@@ -124,23 +142,16 @@ fn foreign_malformed_and_absent_ids_all_read_as_not_found() {
             "a query member that is not an id is checked before the id ({stream})"
         );
     }
-    let foreign = fx.appended[&acct("ws_b", "ACCT1")].event_ids[0].clone();
-    let prefixed = fx.appended[&ctl("ws_ab")].event_ids[0].clone();
+    let foreign = fx.appended[&acct(&text(WS_B), "ACCT1")].event_ids[0].clone();
+    let neighbour = fx.appended[&ctl(&prefixed())].event_ids[0].clone();
     for id in [
         foreign,
-        prefixed,
+        neighbour,
         event_id(999_999),
         "x".to_owned(),
         String::new(),
     ] {
         assert_eq!(read.event(&me, &id), Err(AuditError::NotFound), "{id:?}");
-    }
-    for bad in ["", "ws:a", "ws a", "ws/a", "ws_a\n"] {
-        assert_eq!(
-            WorkspaceId::parse(bad),
-            Err(AuditError::NotFound),
-            "{bad:?}"
-        );
     }
 }
 
@@ -148,12 +159,12 @@ fn foreign_malformed_and_absent_ids_all_read_as_not_found() {
 fn an_event_of_the_workspace_is_served_with_its_body_and_link() {
     let fx = Fixture::new(4);
     let read = MemoryRead::new(&fx.journal);
-    for workspace in WORKSPACES {
+    for workspace in TENANTS {
         for account in ACCOUNTS {
-            let stream = acct(workspace, account);
+            let stream = acct(&text(workspace), account);
             let rows = fx.journal.rows(&StreamId::parse(&stream).unwrap());
             for (i, id) in fx.appended[&stream].event_ids.iter().enumerate() {
-                let event = read.event(&ws(workspace), id).unwrap();
+                let event = read.event(&tenant(workspace), id).unwrap();
                 assert_eq!(event.event_id, *id);
                 assert_eq!(event.stream_id, stream);
                 assert_eq!(event.seq, i as u64 + 1);
@@ -177,7 +188,7 @@ proptest! {
     /// absent one does, and every one of its own reads.
     #[test]
     fn foreign_and_absent_reads_are_indistinguishable(
-        reader in 0..WORKSPACES.len(),
+        reader in 0..TENANTS.len(),
         marks in 0..4u64,
         after in 0..6u64,
         l in 1..=1000u64,
@@ -185,13 +196,14 @@ proptest! {
     ) {
         let fx = Fixture::new(marks);
         let read = MemoryRead::new(&fx.journal);
-        let me = ws(WORKSPACES[reader]);
-        let absent_page = read.page(&me, &acct(WORKSPACES[reader], &format!("A{absent}")), after, limit(l));
+        let mine_text = text(TENANTS[reader]);
+        let me = tenant(TENANTS[reader]);
+        let absent_page = read.page(&me, &acct(&mine_text, &format!("A{absent}")), after, limit(l));
         let absent_event = read.event(&me, &event_id(absent * 1_000));
         prop_assert_eq!(&absent_page, &Err(AuditError::NotFound));
         prop_assert_eq!(&absent_event, &Err(AuditError::NotFound));
         for (stream, appended) in &fx.appended {
-            let mine = stream.split(':').nth(1) == Some(WORKSPACES[reader]);
+            let mine = stream.split(':').nth(1) == Some(mine_text.as_str());
             let page = read.page(&me, stream, after, limit(l));
             let first = appended.event_ids.first().unwrap();
             let event = read.event(&me, first);

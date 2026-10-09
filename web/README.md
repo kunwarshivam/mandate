@@ -121,14 +121,15 @@ request, an email and an optional use, in one of two places:
 
 A repeat address counts as stored, so the form never says whether someone is already on the list.
 
-## The workspace API client (E11-9, in progress)
+## The workspace API client (E11-9)
 
 `src/api/` is the typed client for the [workspace API](../docs/specs/workspace-api.md): paths under
 `/v1/workspaces/{ws}`, one `Idempotency-Key` per gesture kept across retries, every failure as
 `{code, effect}` with an unanswered command reported as `effect: "unknown"`, decimals refused as
 JSON numbers, `as_of` watermarks on every read, and no order-placing method (DEC-528).
-`src/api/mock-server.ts` is a fixture-backed `fetch` for tests and `npm run dev`. Its tests are
-pending (DEC-750) until the implementation lands; the screens still read `src/fixtures/` directly.
+`src/api/mock-server.ts` is a fixture-backed `fetch` for tests and `npm run dev`. The typed
+per-route layer comes once `schemas/workspace-api/` lands; until then the screens still read
+`src/fixtures/` directly.
 
 ## The mock-data rule
 

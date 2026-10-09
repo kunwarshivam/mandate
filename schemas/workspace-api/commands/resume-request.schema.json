@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/resume-request.schema.json",
+  "type": "object",
+  "required": [
+    "record",
+    "step_up"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /agents/{agent_id}/resume (\u00a75.4): missing step-up is forwarded and refused by the runtime (OwnerCommandRefused)."
+}

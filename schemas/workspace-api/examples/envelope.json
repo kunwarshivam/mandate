@@ -1,0 +1,539 @@
+{
+  "Envelope": [
+    {
+      "api_version": "v1",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "served_at": "2026-10-08T14:30:00.000000000Z",
+      "as_of": [
+        {
+          "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+          "seq": 312,
+          "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "recorded_at": "2026-10-08T14:30:00.000000000Z"
+        }
+      ]
+    },
+    {
+      "api_version": "v1",
+      "build": "sha256:abababababababababababababababababababababababababababababababab",
+      "served_at": "2026-10-08T14:30:00.000000000Z",
+      "as_of": [],
+      "extra": "responses add members"
+    }
+  ],
+  "ProblemCode": [
+    "unauthenticated",
+    "step_up_required",
+    "step_up_missing",
+    "step_up_stale",
+    "step_up_reused",
+    "step_up_method",
+    "step_up_mismatch",
+    "journal_unavailable",
+    "outcome_unknown",
+    "forbidden",
+    "not_found",
+    "invalid",
+    "idempotency_conflict",
+    "stale_base",
+    "classification_changed",
+    "live_unavailable",
+    "control_stream_frozen",
+    "rate_limited",
+    "own_roles",
+    "owner_role_reserved",
+    "last_owner",
+    "last_admin",
+    "reduction_only",
+    "membership_unavailable"
+  ],
+  "Effect": [
+    "none",
+    "recorded",
+    "unknown"
+  ],
+  "Violation": [
+    {
+      "kind": "schema",
+      "path": "/owner_exit/0/bid",
+      "code": "non_canonical",
+      "message": "A decimal is a canonical string."
+    },
+    {
+      "kind": "rule",
+      "path": "/autonomy/delegations/0",
+      "code": "V-022",
+      "message": "A delegation needs a confirmed grant."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "workspace",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/autonomy",
+      "key": "auto_allowed",
+      "level": "workspace",
+      "value": true,
+      "ancestor_level": "platform",
+      "ancestor_value": false,
+      "message": "Not allowed above."
+    },
+    {
+      "kind": "policy",
+      "path": "/universe/asset_classes",
+      "key": "asset_classes",
+      "level": "mandate",
+      "value": [
+        "crypto",
+        "us_equity"
+      ],
+      "ancestor_level": "organization",
+      "ancestor_value": [
+        "us_equity"
+      ],
+      "message": "Not a subset of the organization's."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "organization",
+      "value": "5000",
+      "ancestor_level": "platform",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "workspace",
+      "value": "5000",
+      "ancestor_level": "platform",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "platform",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    },
+    {
+      "kind": "policy",
+      "path": "/risk/max_order_usd",
+      "key": "max_order_usd",
+      "level": "mandate",
+      "value": "5000",
+      "ancestor_level": "organization",
+      "ancestor_value": "2500",
+      "message": "Looser than the workspace policy."
+    }
+  ],
+  "Problem": [
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [
+        {
+          "kind": "schema",
+          "path": "/owner_exit/0/bid",
+          "code": "non_canonical",
+          "message": "A decimal is a canonical string."
+        }
+      ]
+    },
+    {
+      "type": "https://mandate.dev/problems/journal_unavailable",
+      "status": 503,
+      "code": "journal_unavailable",
+      "title": "Temporarily unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/own_roles",
+      "status": 403,
+      "code": "own_roles",
+      "title": "Cannot change own roles",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/owner_role_reserved",
+      "status": 403,
+      "code": "owner_role_reserved",
+      "title": "Owner role reserved",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/last_owner",
+      "status": 409,
+      "code": "last_owner",
+      "title": "Owner must remain",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/last_admin",
+      "status": 409,
+      "code": "last_admin",
+      "title": "Admin must remain",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/reduction_only",
+      "status": 403,
+      "code": "reduction_only",
+      "title": "Risk reduction only",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/membership_unavailable",
+      "status": 503,
+      "code": "membership_unavailable",
+      "title": "Membership unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/outcome_unknown",
+      "status": 503,
+      "code": "outcome_unknown",
+      "title": "Result unknown",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/stale_base",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [],
+      "current_base": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_required",
+      "status": 401,
+      "code": "step_up_required",
+      "title": "Confirmation required",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/unauthenticated",
+      "status": 401,
+      "code": "unauthenticated",
+      "title": "Sign in required",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/forbidden",
+      "status": 403,
+      "code": "forbidden",
+      "title": "Not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/not_found",
+      "status": 404,
+      "code": "not_found",
+      "title": "Not found",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/idempotency_conflict",
+      "status": 409,
+      "code": "idempotency_conflict",
+      "title": "Key already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/classification_changed",
+      "status": 409,
+      "code": "classification_changed",
+      "title": "Classification changed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_required",
+      "status": 401,
+      "code": "step_up_required",
+      "title": "Confirmation required",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/live_unavailable",
+      "status": 409,
+      "code": "live_unavailable",
+      "title": "Live trading unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/control_stream_frozen",
+      "status": 503,
+      "code": "control_stream_frozen",
+      "title": "Changes are frozen",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/control_stream_frozen",
+      "status": 503,
+      "code": "control_stream_frozen",
+      "title": "Changes are frozen",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/rate_limited",
+      "status": 429,
+      "code": "rate_limited",
+      "title": "Too many requests",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/invalid",
+      "status": 422,
+      "code": "invalid",
+      "title": "Invalid request",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [
+        {
+          "kind": "schema",
+          "path": "/a",
+          "code": "type",
+          "message": "m"
+        }
+      ]
+    },
+    {
+      "type": "https://mandate.dev/problems/stale_base",
+      "status": 409,
+      "code": "stale_base",
+      "title": "Changed since loaded",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": [],
+      "current_base": "draft_7"
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_missing",
+      "status": 401,
+      "code": "step_up_missing",
+      "title": "Confirmation not valid",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_stale",
+      "status": 401,
+      "code": "step_up_stale",
+      "title": "Confirmation expired",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_reused",
+      "status": 401,
+      "code": "step_up_reused",
+      "title": "Confirmation already used",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_method",
+      "status": 401,
+      "code": "step_up_method",
+      "title": "Confirmation method not allowed",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_mismatch",
+      "status": 401,
+      "code": "step_up_mismatch",
+      "title": "Confirmation does not match",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_missing",
+      "status": 401,
+      "code": "step_up_missing",
+      "title": "Confirmation not valid",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_stale",
+      "status": 401,
+      "code": "step_up_stale",
+      "title": "Confirmation expired",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_reused",
+      "status": 401,
+      "code": "step_up_reused",
+      "title": "Confirmation already used",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_method",
+      "status": 401,
+      "code": "step_up_method",
+      "title": "Confirmation method not allowed",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/step_up_mismatch",
+      "status": 401,
+      "code": "step_up_mismatch",
+      "title": "Confirmation does not match",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    }
+  ],
+  "Actor": [
+    {
+      "kind": "user",
+      "id": "usr_1"
+    },
+    {
+      "kind": "client",
+      "id": "cli_1",
+      "on_behalf_of": "usr_1"
+    }
+  ],
+  "StepUpEvidence": [
+    {
+      "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+      "method": "passkey"
+    },
+    {
+      "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+      "method": "cli_confirm"
+    }
+  ],
+  "StepUpStatus": [
+    "bound",
+    "missing",
+    "unbound"
+  ],
+  "Record": [
+    {
+      "artifact": "sha256:abababababababababababababababababababababababababababababababab",
+      "ui_build": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+  ],
+  "PolicyLevel": [
+    "platform",
+    "mandate",
+    "organization",
+    "workspace"
+  ],
+  "PolicyValue": [
+    "0.25",
+    true,
+    [
+      "paper"
+    ]
+  ]
+}

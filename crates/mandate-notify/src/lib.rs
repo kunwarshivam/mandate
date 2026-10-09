@@ -1,0 +1,63 @@
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::float_arithmetic,
+    clippy::float_cmp,
+    clippy::as_conversions
+)]
+//! The closed notice: everything a push channel may carry out of the workspace deployment
+//! ([notifications spec](../../../docs/specs/notifications.md) §3, §4.2, §4.3, backlog E8-9, DEC-438
+//! items 1, 2, 10, DEC-710).
+//!
+//! **Nothing about trading can reach a provider** (`AGENTS.md` rule 6, NT-1). A [`Notification`]
+//! holds a [`NoticeId`] and a [`TextKey`] and nothing else. A notice id is minted only from a
+//! [`SecureRandom`] source and has no constructor from an event id, so no journal event id, and
+//! with it no event's creation time, can become one (NT-4):
+//!
+//! ```compile_fail,E0308
+//! let _ = mandate_notify::NoticeId::from("01J8ZNB0M000000000000000K1");
+//! ```
+//!
+//! ```compile_fail,E0423
+//! let _ = mandate_notify::NoticeId([0u8; 16]);
+//! ```
+//!
+//! The one way back from text is [`NoticeId::parse`], to resolve a link: it takes exactly 32
+//! lowercase hex digits, which no ULID is (DEC-702 item 2).
+//!
+//! **It reaches no stream.** The crate sits at layer 1 over `mandate-canon` alone, so it cannot
+//! reach the journal or the control-stream writer (NT-3 at rung 1). It is pure: the random source
+//! is passed in, and the dispatcher (E8-10) supplies the operating system's.
+//!
+//! Every entry point returns a `Result`, so a later slice's stub reports
+//! [`NotifyError::Unimplemented`] (DEC-77).
+
+mod kind;
+mod payload;
+
+pub use kind::{Class, NoticeKind, TextKey};
+pub use payload::{NoticeId, Notification, Origin, SecureRandom, link, payload};
+
+/// Every way an entry point can refuse to answer. None of them is ever a reason to send more.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum NotifyError {
+    /// The body of every stub in the tests PR (DEC-77).
+    #[error("{story} has not been implemented yet")]
+    Unimplemented { story: &'static str },
+    /// The random source could not fill an id. No notice id is minted, and nothing falls back to a
+    /// predictable one.
+    #[error("the random source is unavailable")]
+    EntropyUnavailable,
+    /// Text that is not exactly 32 lowercase hex digits was offered as a notice id.
+    #[error("a notice id is exactly 32 lowercase hex digits")]
+    NotANoticeId,
+    /// The configured origin is not `https://<lowercase host>[:<port>]` (DEC-710 item 3).
+    #[error("the workspace app origin must be https://<lowercase host>[:<port>] and nothing else")]
+    InvalidOrigin,
+    /// A fixed key could not be represented canonically.
+    #[error("the {what} cannot be represented")]
+    Unrepresentable { what: &'static str },
+}

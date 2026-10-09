@@ -56,8 +56,10 @@ number add the same path and cannot both merge, so the second renumbers.
 
 ## 4. Shared files
 
-The work tracker, the backlog, the feature map, and `status.toml` are edited by everyone. (The
-decision log was one of them until DEC-344 gave each decision its own file.) In each: add or
+The work tracker, the backlog, and `status.toml` are edited by everyone. (The decision log was one
+of them until DEC-344 gave each decision its own file, and the feature map until it became one file
+a feature under `.cursor/skills/verify-mandate/features/`: add a feature's file, or edit only your
+own feature's.) In each: add or
 change only the rows for your own stories; never rewrite another coordinator's rows; append
 rather than reorder. Rebase onto `main` immediately before merging
 and resolve conflicts by keeping both sides.

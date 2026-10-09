@@ -3802,7 +3802,6 @@ fn an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_b
 /// fill starts a new interval and ends the awaited one, the second bracket's, never the first's.
 /// The first bracket's 6 shares stay unprotected from 10, so the owner is alerted at 70, once.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3883,6 +3882,95 @@ fn a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets() {
         "the first interval is alerted once, the second ended at 32 and the third is 53 seconds \
          old, so nothing alerts again: {:?}",
         after.notifications
+    );
+}
+
+/// E4b, the case that tells "the awaited interval" from both "the first" and "the latest" (#771
+/// review): three brackets open intervals at 10, 20 and 25; the middle one is cancelled partly
+/// filled at 30, so its OCO's acknowledgment is awaited; a fourth bracket starts at 32 and must end
+/// the middle one only. The first (from 10) is then alerted at 70, the middle one never, and the
+/// third (from 25) at 85; nothing alerts at 80, which an awaited interval left open would.
+#[test]
+fn a_new_start_ends_the_awaited_middle_interval_only() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    let partly_filled = |shell: &mut Shell, at: i64, intent: &str, broker: &str| {
+        shell.run(Input::Tick(clock(at)), &ports);
+        let entry = shell
+            .run(
+                handoff(
+                    intent,
+                    common::AGENT,
+                    protected_opening(AAPL, "10", "150", "140", Some("170")),
+                ),
+                &ports,
+            )
+            .submissions()
+            .first()
+            .map(|o| o.client_order_id.as_str().to_owned())
+            .expect("each bracket is sent: a new tranche is a new bracket (§5.4)");
+        shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+                broker,
+                Some(&entry),
+                AAPL,
+                Side::Buy,
+                "10",
+                "4",
+                "partially_filled",
+            ))),
+            &ports,
+        );
+        entry
+    };
+    partly_filled(&mut shell, 10, INTENT, "b-1");
+    let middle = partly_filled(&mut shell, 20, OTHER_INTENT, "b-2");
+    partly_filled(&mut shell, 25, "01JABCDEFGHJKMNPQRSTVWXYZ2", "b-3");
+    shell.run(Input::Tick(clock(30)), &ports);
+    let awaited = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-2",
+            Some(&middle),
+            AAPL,
+            Side::Buy,
+            "10",
+            "4",
+            "canceled",
+        ))),
+        &ports,
+    );
+    assert!(
+        awaited.submissions().iter().any(|o| o.oco.is_some()),
+        "the middle bracket ends partly filled, so its 4 shares get an OCO, whose acknowledgment \
+         is awaited (DEC-346 item 6, DEC-348 item 2)"
+    );
+    partly_filled(&mut shell, 32, "01JABCDEFGHJKMNPQRSTVWXYZ3", "b-4");
+
+    let alerted = |shell: &mut Shell, at: i64| {
+        shell
+            .run(Input::Tick(clock(at)), &ports)
+            .notifications
+            .contains(&"unprotected_interval_limit")
+    };
+    assert!(!alerted(&mut shell, 69), "nothing is 60 seconds old at 69");
+    assert!(
+        alerted(&mut shell, 70),
+        "the first bracket's interval, from 10, is alerted at 70: the start at 32 did not end it"
+    );
+    assert!(
+        !alerted(&mut shell, 80),
+        "the middle bracket's interval, from 20, was the awaited one the start at 32 ended, so \
+         nothing alerts at 80"
+    );
+    assert!(
+        alerted(&mut shell, 85),
+        "the third bracket's interval, from 25, is alerted at 85: the start at 32 did not end it"
     );
 }
 

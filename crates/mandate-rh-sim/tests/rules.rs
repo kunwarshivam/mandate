@@ -4,6 +4,7 @@
 mod common;
 
 use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, account, limit, price, qty, sim};
+use mandate_rh_sim::SimError::{QuantityForm, SessionNeedsLimit, Unreadable};
 use mandate_rh_sim::{Alert, Event, OrderRequest, Session, Sim, SimError};
 
 type Outcome = Result<(), SimError>;
@@ -34,9 +35,7 @@ const MARKET: [(&str, &str); 2] = [("type", "market"), ("limit_price", "")];
 const STOP_LIMIT: [(&str, &str); 2] = [("type", "stop_limit"), ("stop_price", "499")];
 
 #[test]
-#[ignore = "pending E7-25"]
 fn quantity_forms_sessions_and_text_follow_the_contract() -> Outcome {
-    use SimError::{QuantityForm, SessionNeedsLimit, Unreadable};
     let cases: Vec<(OrderRequest, Result<(), SimError>)> = vec![
         (req(&[]), Ok(())),
         (req(&[("quantity", "1.5")]), Err(QuantityForm)),
@@ -158,7 +157,6 @@ fn quantity_forms_sessions_and_text_follow_the_contract() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn only_an_agentic_account_reviews_or_places() -> Outcome {
     let mut sim = sim()?;
     assert_eq!(
@@ -184,7 +182,6 @@ fn only_an_agentic_account_reviews_or_places() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn review_raises_each_alert_and_place_refuses_it() -> Outcome {
     let mut sim = sim()?;
     let too_big = req(&[("quantity", "20")]);
