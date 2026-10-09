@@ -234,7 +234,6 @@ fn every_check_code_names_its_seq_exactly_when_it_is_reported_at_an_event() {
 /// tenant, `seq`, order, one per stream, its own stream's); rule 114's recomputed root, through one
 /// leaf and five; a `null` token; and rule 115's writer.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_anchor_computed_draft_parses_or_is_refused_as_its_case_says() {
     every_case_of(COLD_RECORDS, "AnchorComputed", 3, 30, &[113, 114, 115]);
 }
@@ -242,7 +241,6 @@ fn every_anchor_computed_draft_parses_or_is_refused_as_its_case_says() {
 /// `SegmentExported`: its closed members and types; rule 116's tenant, bounds and genesis; rule
 /// 117's manifest hash over DEC-263's six fields; and rule 118's writer.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_segment_exported_draft_parses_or_is_refused_as_its_case_says() {
     every_case_of(COLD_RECORDS, "SegmentExported", 2, 29, &[116, 117, 118]);
 }
@@ -251,7 +249,6 @@ fn every_segment_exported_draft_parses_or_is_refused_as_its_case_says() {
 /// anchor or a segment by anyone else is refused at `actor.kind`; a client, in §3's one shape, by
 /// rule 83 at the same path.
 #[test]
-#[ignore = "pending E12-3"]
 fn only_a_system_actor_writes_an_anchor_or_a_segment() {
     let section = section(COLD_RECORDS);
     let build = format!("sha256:{}", "c".repeat(64));
