@@ -7900,14 +7900,17 @@ jq -r "$filter" "$src"
     /// the shell expands (`$` or a backtick), which cannot be read; and `--cfg feature="live"`,
     /// which sets the feature without `--features`. A flag right after a list, a lone opening
     /// quote, `--all` and `--workspace` are read too, and a quoted list ends at its closing quote,
-    /// so a flag inside it and a `$` after it are not read as features (#738's mutants).
+    /// so a flag inside it is not read as a feature (#738's mutants).
     ///
     /// A command is read whole, not a physical line at a time (#738 review, second round): a
     /// backslash continuation, or a YAML folded `>` scalar, that carries `--features live` on a
     /// later line is refused; so is `--cfg feature = "live"` with spaces or tabs around the
     /// `=`, in a command, `RUSTFLAGS` or `rustflags`; and so is a cargo command that takes
     /// arguments from a variable, `${...}`, `$(...)` or a backtick (`cargo build $FLAGS`), which
-    /// cannot be read. A quoted `--features` list followed by `--target $TARGET` stays allowed.
+    /// cannot be read. A cargo command in a CI file may contain no `$` and no backtick, because a
+    /// variable can carry a `--features` or `--cfg` flag past a line-based scan: even
+    /// `--target $TARGET`, `--target "$TARGET"` and `--target ${TARGET}` are refused (the
+    /// coordinator's ruling under DEC-176: it only refuses more).
     #[test]
     #[ignore = "pending E7-26"]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
@@ -7917,7 +7920,7 @@ jq -r "$filter" "$src"
             "cargo check -p the-runner -Flive",
             "cargo check -p the-runner --features the-runner/live",
             "cargo check -p the-runner --features 'other live'",
-            "cargo check -p the-runner --features \"other\" --target $TARGET",
+            "cargo check -p the-runner --features \"other\" --target x86_64-unknown-linux-gnu",
             "cargo build -p a-lib --features \"other --features=live\"",
         ];
         for line in allowed {
@@ -8013,6 +8016,22 @@ jq -r "$filter" "$src"
             (
                 ".github/workflows/ci.yml",
                 "env:\n  FLAGS: --features live\nsteps:\n  - run: cargo build $FLAGS\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nTARGET=\"x86_64-unknown-linux-gnu --features live\"\ncargo check -p the-runner --target $TARGET\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo check -p the-runner --target \"$TARGET\"\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo check -p the-runner --target ${TARGET}\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo check -p the-runner --features \"other\" --target $TARGET\n",
             ),
         ];
         for (path, text) in refused_across_lines {
