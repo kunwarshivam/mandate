@@ -1713,6 +1713,15 @@ fn governed_run(
     name: &str,
     store: Artifacts,
 ) -> (Result<Report, ShellError>, Stages, Rc<RefCell<Seen>>) {
+    governed_run_under(name, governance(OPEN_POLICY, &[]), store)
+}
+
+/// [`governed_run`] under `governed` rather than the open policy set.
+fn governed_run_under(
+    name: &str,
+    governed: Governance,
+    store: Artifacts,
+) -> (Result<Report, ShellError>, Stages, Rc<RefCell<Seen>>) {
     let scratch = Scratch::new(name);
     let closes = rising();
     let closes: Vec<&str> = closes.iter().map(String::as_str).collect();
@@ -1720,7 +1729,7 @@ fn governed_run(
     let transport = Scripted::new(Broker::Fresh);
     let seen = Rc::clone(&transport.seen);
     let mut context = run_context(true);
-    context.governance = Some(governance(OPEN_POLICY, &[]));
+    context.governance = Some(governed);
     let mut stages = governed_stages("mandate.json", dataset, transport, context, store);
     let outcome = run(&mut stages, &setup(true));
     (outcome, stages, seen)
@@ -1890,5 +1899,53 @@ fn an_exit_is_auto_while_the_mandate_is_nonconforming() {
             .classify(&view, &proposal)
             .map_err(|cause| cause.to_string());
         assert_eq!(answer, Ok(classified.clone()), "{purpose:?}");
+    }
+}
+
+/// DEC-534 and `AGENTS.md` rules 1 and 2 (D4c, held for D4d): an opening under a confirmed
+/// mandate that the effective policy set makes nonconforming places nothing. The run reaches the
+/// decision, since the model output is journaled, and then no intent is proposed or received, no
+/// order is recorded or submitted, the broker sees no order, and the run reports none. It
+/// asserts what is absent, never the refusal's cause, so D4c's fail-closed stop and D4d's
+/// `policy_overlay` deny both pass it, and D4d's own tests pin the cause.
+#[test]
+#[ignore = "pending E7-19"]
+fn a_nonconforming_mandate_places_no_opening_order() {
+    let no_auto = PolicyLevel {
+        name: LevelName::Workspace,
+        values: BTreeMap::from([(PolicyKey::AutoAllowed, PolicyValue::Flag(false))]),
+    };
+    let governed = governance(NO_AUTO_POLICY, &[no_auto]);
+    assert!(
+        !governed.violations.is_empty(),
+        "the mandate is nonconforming"
+    );
+    let store = governed_store(&governed);
+    let (outcome, stages, seen) =
+        governed_run_under("governed-nonconforming", governed, Some(Arc::new(store)));
+    let outcome = outcome.map_err(|error| format!("{error}: {error:?}"));
+    let agent = committed(&stages, &agent_stream());
+    assert_eq!(
+        of_type(&agent, "ModelOutputRecorded").len(),
+        1,
+        "the opening reached the decision; the run answered {outcome:?}"
+    );
+    assert!(
+        outcome.is_err(),
+        "the run reported a placed order: {outcome:?}"
+    );
+    assert_eq!(seen.borrow().posts(), 0, "the broker saw an order");
+    assert_eq!(
+        of_type(&agent, "IntentProposed").len(),
+        0,
+        "an intent was proposed"
+    );
+    let account = committed(&stages, &account_stream());
+    for event_type in ["IntentReceived", "OrderRequestRecorded", "OrderSubmitted"] {
+        assert_eq!(
+            of_type(&account, event_type).len(),
+            0,
+            "{event_type} was journaled"
+        );
     }
 }
