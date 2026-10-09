@@ -25,9 +25,8 @@ const GENESIS: &str = "000000000000000000000000000000000000000000000000000000000
 const VIEW_FORMS: [&str; 2] = ["json", "csv"];
 
 /// §11's codes a `checked_range`'s failure names: the checks reported at an event (checks 1 to
-/// 6, the anchored head, the anchor's own, the agent stream's two, the hold's, the connection's
-/// two, and the operator read's break-glass cause), then [`RANGE_CHECKS`].
-const CHECKS: [&str; 19] = [
+/// 6, the anchored head, the anchor's own, and the agent stream's two), then [`RANGE_CHECKS`].
+const CHECKS: [&str; 15] = [
     "non_canonical",
     "column_mismatch",
     "seq_gap",
@@ -39,10 +38,6 @@ const CHECKS: [&str; 19] = [
     "anchor_self_mismatch",
     "intent_action_mismatch",
     "mode_event_mismatch",
-    "held_mismatch",
-    "connection_lifecycle_mismatch",
-    "connection_cause_mismatch",
-    "break_glass_cause_mismatch",
     "anchor_root_mismatch",
     "tsa_token_invalid",
     "segment_manifest_mismatch",
