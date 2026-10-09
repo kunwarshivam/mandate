@@ -222,7 +222,6 @@ fn an_idle_timeout_longer_than_the_absolute_lifetime_is_refused() {
 /// refusing the secret, so a replayed `next` never keeps a deprovisioned subject's session open.
 /// An outage and a grant still refuse that `next` and change nothing.
 #[test]
-#[ignore = "pending E9-1"]
 fn a_deprovision_or_failed_refresh_ends_the_session_even_with_a_reused_next() {
     let rotated_once = || {
         let mut s = open();
