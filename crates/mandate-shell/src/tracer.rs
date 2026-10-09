@@ -16,7 +16,8 @@ use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_runtime::{
     ActorKind, Autonomy, Classified, Deployment, DryRunVerdict, Effect, EventDraft, FlattenPlan,
     FlattenPlanner, FlattenRequest, FoldedEvent, GateDryRun, Input, IntentHandoff, MandateView,
-    OrderPlan, Ports, Proposal, Purpose, RiskClock, RuntimeState, SignalInputs, WriterEpoch,
+    Observation, OrderPlan, Ports, Proposal, Purpose, RiskClock, RuntimeState, SignalInputs,
+    WriterEpoch,
 };
 use mandate_time::UtcNanos;
 
@@ -77,6 +78,28 @@ pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
     execute_cycle(stages, setup, &admitted, output)
 }
 
+/// One pass over the model host's observation and its output (E15-13, the brief's slice H3,
+/// DEC-503 item 6): the paper adapter stored the observation's data under its `data_ref` first,
+/// and the runtime journals `ObservationRecorded` before `ModelOutputRecorded`, both before any
+/// decision (FT-6). An observation whose artifact is not in the run's store stops the run before
+/// either record and before any order, refused as `market_data_untrusted`. The shell reads no bars
+/// and computes no output: the output it decides on is the one handed in.
+///
+/// # Errors
+/// Every [`ShellError`] is a stop after which nothing further is sent.
+pub fn run_observed(
+    stages: &mut Stages,
+    setup: &Setup,
+    observation: Observation,
+    output: mandate_runtime::ModelOutput,
+) -> Result<Report, ShellError> {
+    let _ = (stages, setup, observation, output);
+    Err(ShellError::Refused {
+        stage: Stage::Journal,
+        cause: Cause::Unimplemented { story: "E15-13" },
+    })
+}
+
 fn admit(stages: &mut Stages) -> Result<Admitted, ShellError> {
     stages.exit.probe().map_err(refused(Stage::FlattenProbe))?;
     stages
@@ -130,6 +153,23 @@ impl ProductionCycle {
     pub fn run(&mut self, output: mandate_runtime::ModelOutput) -> Result<Report, ShellError> {
         let admitted = admit(&mut self.stages)?;
         execute_cycle(&mut self.stages, &self.setup, &admitted, output)
+    }
+
+    /// Runs one cycle from the model host's observation and its output, as [`run_observed`] does
+    /// (E15-13, the brief's slice H3).
+    ///
+    /// # Errors
+    /// Every [`ShellError`] is a fail-closed stop after which nothing further is sent.
+    pub fn run_observed(
+        &mut self,
+        observation: Observation,
+        output: mandate_runtime::ModelOutput,
+    ) -> Result<Report, ShellError> {
+        let _ = (observation, output);
+        Err(ShellError::Refused {
+            stage: Stage::Journal,
+            cause: Cause::Unimplemented { story: "E15-13" },
+        })
     }
 }
 
@@ -215,6 +255,24 @@ impl<'s> Session<'s> {
             }
         }
         Ok(session)
+    }
+
+    /// Hands the runtime `observation` once its data is in the run's store under its `data_ref`
+    /// and re-hashes there; otherwise refuses before the runtime sees it, so no batch goes into
+    /// doubt and a later input, the kill switch included, still steps (E15-13, H3; rule 13).
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "run_observed calls it once E15-13 lands; until then only its pending test does"
+        )
+    )]
+    pub(crate) fn observe(&mut self, observation: Observation) -> Result<(), ShellError> {
+        let _ = observation;
+        Err(ShellError::Refused {
+            stage: Stage::Journal,
+            cause: Cause::Unimplemented { story: "E15-13" },
+        })
     }
 
     /// Journal §2's stream lifecycle: the shell that owns a new stream writes its

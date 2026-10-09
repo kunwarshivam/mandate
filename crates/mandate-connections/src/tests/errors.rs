@@ -5,6 +5,7 @@ use secrecy::SecretString;
 use super::support::{CANARIES, CODE, SECRET, TOKEN};
 use crate::ConnectError;
 use crate::exchange::{ClientSecret, TokenResponse};
+use crate::record::{ConnectionId, ConnectionState};
 use crate::vault::{AccessToken, AuthorizationCode};
 
 #[test]
@@ -22,6 +23,29 @@ fn every_error_has_its_stable_code() {
         (ConnectError::VaultUnavailable, "vault_unavailable"),
         (ConnectError::EndpointFailed, "endpoint_failed"),
         (
+            ConnectError::AlreadyConnected {
+                existing: ConnectionId("conn_a".to_owned()),
+            },
+            "already_connected",
+        ),
+        (ConnectError::ReconnectMismatch, "reconnect_mismatch"),
+        (ConnectError::FingerprintRotating, "fingerprint_rotating"),
+        (ConnectError::InvalidConnectionId, "invalid_connection_id"),
+        (ConnectError::InvalidAccountRef, "invalid_account_ref"),
+        (ConnectError::InvalidPiiRef, "invalid_pii_ref"),
+        (
+            ConnectError::InvalidRecord { member: "scopes" },
+            "invalid_record",
+        ),
+        (ConnectError::UnknownConnection, "unknown_connection"),
+        (
+            ConnectError::InvalidTransition {
+                from: ConnectionState::Revoked,
+                to: ConnectionState::Active,
+            },
+            "invalid_transition",
+        ),
+        (
             ConnectError::Unimplemented { story: "E10-13" },
             "unimplemented",
         ),
@@ -29,6 +53,19 @@ fn every_error_has_its_stable_code() {
     for (error, code) in cases {
         assert_eq!(error.code(), code, "{error:?}");
     }
+}
+
+/// An error reaches an API response (API-11): it names a connection by its id as the journal
+/// writes it, never by a type's debug form.
+#[test]
+fn already_connected_names_the_connection_plainly() {
+    let error = ConnectError::AlreadyConnected {
+        existing: ConnectionId("conn_a".to_owned()),
+    };
+    assert_eq!(
+        error.to_string(),
+        "the account is already connected as conn_a"
+    );
 }
 
 #[test]

@@ -24,13 +24,22 @@
 //!
 //! **A refusal names the check, never the value** (ID-9). [`Refusal`] and [`SetupError`] carry
 //! static text only: no token, nonce, claim, or key appears in their `Display` or `Debug`.
+//!
+//! **Route 2 refuses with one answer.** [`ReductionGate`] issues the reduction-only session's
+//! challenges and admits an assertion only over an outstanding one, consumed on first use; every
+//! refusal is the one [`Unauthenticated`], and a verified assertion is never refused for a limit
+//! (identity spec §6.4 route 2, DEC-834).
 
 mod jwks;
 mod oidc;
+mod reduction;
 
 pub use jwks::{Algorithm, Jwks};
 pub use mandate_time::UtcNanos;
 pub use oidc::{CLOCK_SKEW_S, IssuerConfig, MAX_TOKEN_BYTES, TokenKind, VerifiedSubject, verify};
+pub use reduction::{
+    CHALLENGE_LIFETIME_S, Challenge, ClientKey, ReductionGate, ReductionLimits, Unauthenticated,
+};
 
 /// The part of a compact JWS a [`Refusal::Malformed`] points at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
