@@ -50,10 +50,8 @@ impl PinnedEndpoint {
         {
             return Err(McpError::EndpointShape);
         }
-        match url.scheme() {
-            "https" => {}
-            "http" if build == Build::Test && is_loopback(&url) => {}
-            _ => return Err(McpError::NotHttps),
+        if !scheme_allowed(&url, build) {
+            return Err(McpError::NotHttps);
         }
         if url.host_str() != Some(pinned_host) {
             return Err(McpError::HostNotPinned);
@@ -63,6 +61,15 @@ impl PinnedEndpoint {
 
     pub(crate) fn url(&self) -> &Url {
         &self.url
+    }
+}
+
+/// `https`, or plain `http` to a loopback address in this crate's test build.
+pub(crate) fn scheme_allowed(url: &Url, build: Build) -> bool {
+    match url.scheme() {
+        "https" => true,
+        "http" => build == Build::Test && is_loopback(url),
+        _ => false,
     }
 }
 
