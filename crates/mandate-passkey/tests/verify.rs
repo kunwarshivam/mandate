@@ -131,6 +131,11 @@ fn client_data_that_is_not_the_expected_object_is_refused() {
     let challenge = format!(r#""challenge":"{}","#, common::b64url(&CHALLENGE));
     let malformed = [
         good.replacen('{', r#"{"type":"webauthn.get","#, 1),
+        good.replacen('{', r#"{"origin":"https://app.owlhead.ai","#, 1),
+        format!(
+            r#"{},"crossOrigin":false,"crossOrigin":false}}"#,
+            &good[..good.len() - 1]
+        ),
         good.replacen('{', &format!("{{{challenge}"), 1),
         good.replace(r#","origin":"https://app.owlhead.ai""#, ""),
         "[]".to_owned(),
@@ -184,7 +189,13 @@ fn authenticator_data_shorter_than_its_header_is_malformed() {
 fn attested_data_or_unflagged_trailing_bytes_are_refused() {
     let authenticator = Authenticator::new(Alg::Es256);
     let credential = authenticator.credential(4);
-    for (flags, tail) in [(AT, Vec::new()), (0, cbor_int(1)), (ED, Vec::new())] {
+    let extensions = [common::cbor_map(&[]), cbor_int(0)].concat();
+    for (flags, tail) in [
+        (AT, Vec::new()),
+        (0, cbor_int(1)),
+        (ED, Vec::new()),
+        (ED, extensions),
+    ] {
         let mut ceremony = Ceremony::get(&CHALLENGE, 5);
         ceremony.flags |= flags;
         let mut assertion = authenticator.assert(&ceremony);
@@ -221,6 +232,8 @@ fn backup_eligibility_never_changes_after_enrolment() {
         Err(Refusal::BackupFlags)
     );
     assert_eq!(refused(|c| c.flags |= BS), Err(Refusal::BackupFlags));
+    let plain = authenticator.assert(&Ceremony::get(&CHALLENGE, 5));
+    assert_eq!(verify_with(&eligible, &plain), Err(Refusal::BackupFlags));
 }
 
 #[test]

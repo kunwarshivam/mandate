@@ -1,0 +1,74 @@
+[
+  {
+    "label": "a float floor",
+    "set": {
+      "/floor": 99.5
+    }
+  },
+  {
+    "label": "no instrument",
+    "remove": [
+      "/instrument"
+    ]
+  },
+  {
+    "label": "a ticker for the instrument",
+    "set": {
+      "/instrument": "AAPL"
+    }
+  },
+  {
+    "label": "auto: no /instrument",
+    "remove": [
+      "/instrument"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: no /record/artifact",
+    "remove": [
+      "/record/artifact"
+    ]
+  },
+  {
+    "label": "auto: no /record/ui_build",
+    "remove": [
+      "/record/ui_build"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /record",
+    "set": {
+      "/record/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: no /step_up/assertion_id",
+    "remove": [
+      "/step_up/assertion_id"
+    ]
+  },
+  {
+    "label": "auto: no /step_up/authenticated_at",
+    "remove": [
+      "/step_up/authenticated_at"
+    ]
+  },
+  {
+    "label": "auto: no /step_up/method",
+    "remove": [
+      "/step_up/method"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /step_up",
+    "set": {
+      "/step_up/mutant_member": 1
+    }
+  }
+]

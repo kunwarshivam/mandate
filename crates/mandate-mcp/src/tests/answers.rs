@@ -11,7 +11,6 @@ use crate::{CallClass, Monotonic, SystemMonotonic, TransportConfig};
 const READ: CallClass = CallClass::Ordinary;
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_json_answer_is_the_result_of_the_request_sent() {
     let server = serve(vec![json(
         r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}"#,
@@ -43,7 +42,6 @@ async fn a_json_answer_is_the_result_of_the_request_sent() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn an_event_stream_answer_skips_server_messages_before_the_response() {
     let stream = "event: message\r\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\r\n\r\n\
                   : a comment\nid: 7\ndata: {\"jsonrpc\":\"2.0\",\ndata:  \"id\":1,\"result\":{\"ok\":true}}\n\n";
@@ -57,7 +55,6 @@ async fn an_event_stream_answer_skips_server_messages_before_the_response() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_status_media_type_or_size_out_of_bounds_is_typed() {
     let fits = r#"{"jsonrpc":"2.0","id":1,"result":{"a":1}}"#;
     let small = TransportConfig {
@@ -82,7 +79,6 @@ async fn a_status_media_type_or_size_out_of_bounds_is_typed() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_malformed_frame_is_typed() {
     let frames = [
         "{not json",

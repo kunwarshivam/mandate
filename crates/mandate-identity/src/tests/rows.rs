@@ -4,7 +4,7 @@
 use crate::{Permission, Role};
 
 /// Each row's permission text starts with exactly one of these, in the spec's order.
-pub(crate) const ROWS: [(&str, Permission); 45] = [
+pub(crate) const ROWS: [(&str, Permission); 46] = [
     ("View agents", Permission::ViewAgents),
     ("Make an owner request", Permission::OwnerRequest),
     ("Dry run", Permission::DryRun),
@@ -69,6 +69,10 @@ pub(crate) const ROWS: [(&str, Permission); 45] = [
         Permission::NotificationAddress,
     ),
     (
+        "List one's own notification addresses",
+        Permission::ListOwnNotificationAddresses,
+    ),
+    (
         "List one's own workspace memberships",
         Permission::ListOwnMemberships,
     ),
@@ -106,13 +110,14 @@ pub(crate) const ROLE_COLUMNS: [(&str, Role); 8] = [
 ];
 pub(crate) const ORG_ROLES: [Role; 3] = [Role::OrgOwner, Role::OrgAdmin, Role::BillingAdmin];
 
-/// Rows the spec gains with PR #766 (Leave, identity spec v0.2, DEC-641 item 5) and PR #811 (the two
+/// Rows the spec gains with PR #766 (Leave, identity spec v0.2, DEC-641 item 5) and PR #811 (the three
 /// `self` rows, v0.3, DEC-816), which may be absent from `docs/specs/identity.md` only until those
 /// PRs merge; I1 tests part 2, which merges after both, empties this list. Every other row must be
 /// in the spec.
-pub(crate) const OWED: [Permission; 3] = [
+pub(crate) const OWED: [Permission; 4] = [
     Permission::Leave,
     Permission::NotificationAddress,
+    Permission::ListOwnNotificationAddresses,
     Permission::ListOwnMemberships,
 ];
 

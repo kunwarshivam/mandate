@@ -32,6 +32,7 @@ None, or the questions for the founder.
 - [ ] Ordering: inputs processed in journal order
 - [ ] Replay: same inputs give identical outputs
 - [ ] No secrets or trading content in logs or notifications
+- [ ] No `x-planned` or `(planned: ...)` marker added to a value the code already serves, or a reviewer signed it off (DEC-683)
 
 ## Checks
 

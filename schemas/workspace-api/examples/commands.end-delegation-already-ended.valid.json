@@ -1,0 +1,8 @@
+[
+  {
+    "label": "auto: /outcome = \"already_ended\"",
+    "set": {
+      "/outcome": "already_ended"
+    }
+  }
+]
