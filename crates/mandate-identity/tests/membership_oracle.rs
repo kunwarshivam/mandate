@@ -1,19 +1,22 @@
 //! E9-7 M1c (DEC-657): ID-7 and §5.1 over random membership histories against an oracle written
-//! here, apart from the crate.
+//! here, apart from the crate. E9-11: before the oracle's count is trusted, it is shown to
+//! disagree with planted counts read from the fold's public state.
 
 mod membership;
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_identity::{
-    InvitationId, MembershipEvent as Event, MembershipState, PrincipalId, Role,
+    InvitationId, InvitationState, MembershipEvent as Event, MembershipFold, MembershipState,
+    PrincipalId, Role,
 };
 use mandate_time::UtcNanos;
 use membership::{
     B, DAY, EPOCH, FOUNDER, activated, cool, fold, founding, invited, reactivated, set, t,
 };
 use proptest::prelude::*;
-use proptest::test_runner::{TestCaseError, TestRunner};
+use proptest::test_runner::{TestCaseError, TestRng, TestRunner};
 
 const MEMBERS: [u128; 3] = [FOUNDER, B, 0xC];
 
@@ -242,11 +245,8 @@ fn event(o: &Oracle, at: i64, &(kind, who, inv, mask, ind, fitted, _): &Op) -> O
     })
 }
 
-/// ID-7 and §5.1 over random histories: at every probe, `workspace_users`, the unreadable latch,
-/// and each member's state, effective roles, and kept roles equal the oracle's own fold, so a
-/// member the oracle reads deactivated or removed is granted nothing and counts zero.
-#[test]
-fn the_fold_equals_an_independent_oracle_over_random_histories() {
+/// The strategy both tests draw histories from: up to 31 ops, most of them fitted.
+fn ops() -> impl Strategy<Value = Vec<Op>> {
     let fitted = proptest::bool::weighted(0.9);
     let op = (
         0..7u8,
@@ -257,30 +257,46 @@ fn the_fold_equals_an_independent_oracle_over_random_histories() {
         fitted,
         1..4_000i64,
     );
-    let strategy = proptest::collection::vec(op, 1..32);
+    proptest::collection::vec(op, 1..32)
+}
+
+/// The fold of the history `ops` name, the oracle after each record, and the instants to probe:
+/// each record's, a day later less a second, a day later, and a week past the last.
+fn history(ops: Vec<Op>) -> (MembershipFold, Vec<(i64, Oracle)>, Vec<i64>) {
+    let mut oracle = Oracle::default();
+    let mut events = vec![founding()];
+    oracle.step(0, &events[0].1);
+    let (mut snapshots, mut at) = (vec![(0, oracle.clone())], 0);
+    for op in ops {
+        at += op.6 * 60;
+        if let Some(e) = event(&oracle, at, &op) {
+            oracle.step(at, &e);
+            snapshots.push((at, oracle.clone()));
+            events.push((at, e));
+        }
+    }
+    let probes = snapshots
+        .iter()
+        .flat_map(|(at, _)| [*at, at + DAY - 1, at + DAY])
+        .chain([at + 8 * DAY]);
+    let probes = probes.collect();
+    (fold(events), snapshots, probes)
+}
+
+/// ID-7 and §5.1 over random histories: at every probe, `workspace_users`, the unreadable latch,
+/// and each member's state, effective roles, and kept roles equal the oracle's own fold, so a
+/// member the oracle reads deactivated or removed is granted nothing and counts zero.
+#[test]
+fn the_fold_equals_an_independent_oracle_over_random_histories() {
+    let strategy = ops();
     let config = ProptestConfig {
         cases: 512,
         failure_persistence: None,
         ..Default::default()
     };
     let body = |ops: Vec<Op>| -> Result<(), TestCaseError> {
-        let mut oracle = Oracle::default();
-        let mut events = vec![founding()];
-        oracle.step(0, &events[0].1);
-        let (mut snapshots, mut at) = (vec![(0, oracle.clone())], 0);
-        for op in ops {
-            at += op.6 * 60;
-            if let Some(e) = event(&oracle, at, &op) {
-                oracle.step(at, &e);
-                snapshots.push((at, oracle.clone()));
-                events.push((at, e));
-            }
-        }
-        let fold = fold(events);
-        let probes = snapshots
-            .iter()
-            .flat_map(|(at, _)| [*at, at + DAY - 1, at + DAY]);
-        for p in probes.chain([at + 8 * DAY]) {
+        let (fold, snapshots, probes) = history(ops);
+        for p in probes {
             let o = &snapshots.iter().rev().find(|(at, _)| *at <= p).unwrap().1;
             prop_assert_eq!(fold.workspace_users(t(p)), o.count(p), "ID-7 at {}", p);
             prop_assert_eq!(fold.unreadable(t(p)), o.broken, "unreadable at {}", p);
@@ -296,4 +312,106 @@ fn the_fold_equals_an_independent_oracle_over_random_histories() {
     if let Err(failure) = TestRunner::new(config).run(&strategy, body) {
         panic!("{failure}");
     }
+}
+
+/// A count of the fold's members at `p` whose state `counts` admits, or 1 when the fold is
+/// unreadable, as `workspace_users` answers then.
+fn members(fold: &MembershipFold, p: i64, counts: impl Fn(MembershipState) -> bool) -> u32 {
+    let states = MEMBERS.map(|m| fold.state(PrincipalId(m), t(p)));
+    let n = states.into_iter().flatten().filter(|s| counts(*s)).count();
+    if fold.unreadable(t(p)) {
+        1
+    } else {
+        u32::try_from(n).unwrap()
+    }
+}
+
+/// The invitations still open at `p`: every id the histories can draw is below 64.
+fn open_invitations(fold: &MembershipFold, p: i64) -> u32 {
+    let open = (1..64).map(|i| fold.invitation(InvitationId(i), t(p)));
+    let open = open
+        .filter(|s| *s == Some(InvitationState::Invited))
+        .count();
+    u32::try_from(open).unwrap()
+}
+
+/// Whether, over the same deterministic histories the oracle test draws, the oracle's count
+/// disagrees with `planted` at some probe; panics if it ever disagrees with `workspace_users`.
+fn oracle_catches(planted: impl Fn(&MembershipFold, i64) -> u32) -> bool {
+    let config = ProptestConfig {
+        cases: 512,
+        failure_persistence: None,
+        ..Default::default()
+    };
+    let rng = TestRng::deterministic_rng(config.rng_algorithm);
+    let caught = Cell::new(false);
+    let body = |ops: Vec<Op>| -> Result<(), TestCaseError> {
+        let (fold, snapshots, probes) = history(ops);
+        for p in probes {
+            let o = &snapshots.iter().rev().find(|(at, _)| *at <= p).unwrap().1;
+            prop_assert_eq!(fold.workspace_users(t(p)), o.count(p), "ID-7 at {}", p);
+            caught.set(caught.get() || planted(&fold, p) != o.count(p));
+        }
+        Ok(())
+    };
+    if let Err(failure) = TestRunner::new_with_rng(config, rng).run(&ops(), body) {
+        panic!("{failure}");
+    }
+    caught.get()
+}
+
+/// E9-11: ID-7's oracle disagrees with a count that admits members still cooling off.
+#[test]
+fn id7_oracle_catches_a_count_of_cooling_off_members() {
+    let planted = |fold: &MembershipFold, p| {
+        members(fold, p, |s| {
+            matches!(s, MembershipState::Active | MembershipState::CoolingOff)
+        })
+    };
+    assert!(
+        oracle_catches(planted),
+        "a cooling-off member went uncounted"
+    );
+}
+
+/// E9-11: ID-7's oracle disagrees with a count that adds invitations not yet accepted.
+#[test]
+fn id7_oracle_catches_a_count_of_invited_seats() {
+    let planted = |fold: &MembershipFold, p| {
+        let active = members(fold, p, |s| s == MembershipState::Active);
+        active + u32::from(!fold.unreadable(t(p))) * open_invitations(fold, p)
+    };
+    assert!(
+        oracle_catches(planted),
+        "an open invitation was never counted"
+    );
+}
+
+/// E9-11: ID-7's oracle disagrees with a count that keeps deactivated members, whose roles are
+/// only kept, not held.
+#[test]
+fn id7_oracle_catches_a_count_of_deactivated_members() {
+    let planted = |fold: &MembershipFold, p| {
+        members(fold, p, |s| {
+            matches!(s, MembershipState::Active | MembershipState::Deactivated)
+        })
+    };
+    assert!(
+        oracle_catches(planted),
+        "a deactivated member was never counted"
+    );
+}
+
+/// E9-11: ID-7's oracle disagrees with a do-nothing count that never moves off the founder.
+#[test]
+fn id7_oracle_catches_a_count_that_never_moves() {
+    assert!(oracle_catches(|_, _| 1), "the count never left 1");
+}
+
+/// The planted counts' harness is not vacuous: the count of members the fold reads active, the
+/// one each planted count perturbs, agrees with the oracle everywhere.
+#[test]
+fn id7_oracle_agrees_with_the_count_of_active_members() {
+    let active = |fold: &MembershipFold, p| members(fold, p, |s| s == MembershipState::Active);
+    assert!(!oracle_catches(active), "the active count was flagged");
 }
