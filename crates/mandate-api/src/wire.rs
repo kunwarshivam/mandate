@@ -10,12 +10,13 @@ use mandate_journal::ArtifactRef;
 use mandate_time::UtcNanos;
 use serde::de::{DeserializeOwned, Error as _, IgnoredAny, Unexpected};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_path_to_error::Segment;
 
 use crate::problem::Violation;
 
 /// The request body `body` as `T`, or every way it fails, each as one [`Violation::Schema`] with a
 /// JSON pointer and a code (DEC-681 item 10):
-/// - `malformed` at `""`: not JSON, empty, or bytes after the value;
+/// - `malformed` at `""`: not UTF-8 JSON (§3.1), empty, or bytes after the value;
 /// - `duplicate_member`: an object naming one member twice, at any depth;
 /// - `unknown_member` at the member: a member `T` does not name, so a body carrying `requested_by`
 ///   is refused and never read (API-6; DEC-681 item 6);
@@ -28,10 +29,13 @@ use crate::problem::Violation;
 /// # Errors
 /// [`Refused::Invalid`], which the server answers as `invalid` (422).
 pub fn decode<T: DeserializeOwned + Validate>(body: &[u8]) -> Result<T, Refused> {
+    std::str::from_utf8(body).map_err(|_| refuse(String::new(), "malformed"))?;
     if let Some(path) = duplicate(body)? {
         return Err(refuse(path, "duplicate_member"));
     }
-    let value: T = serde_json::from_slice(body).map_err(|error| located(body, &error))?;
+    let mut reader = serde_json::Deserializer::from_slice(body);
+    let value: T =
+        serde_path_to_error::deserialize(&mut reader).map_err(|error| located(&error))?;
     value.validate()?;
     Ok(value)
 }
@@ -68,19 +72,25 @@ fn member(parent: &str, name: &str) -> String {
 }
 
 /// The violation for serde's refusal of a body already known to be one JSON value with no
-/// duplicate member: its code read from serde's message, and its pointer from where serde stopped.
-fn located(body: &[u8], error: &serde_json::Error) -> Refused {
-    let text = error.to_string();
+/// duplicate member: its code read from serde's message, and its pointer from the path serde was
+/// deserializing when it refused, each member and variant name escaped as [`member`] does
+/// (DEC-681 item 10). A refusal inside an internally tagged object, which serde reads whole before
+/// it decodes, is located at that object.
+fn located(error: &serde_path_to_error::Error<serde_json::Error>) -> Refused {
+    let text = error.inner().to_string();
     let code = CODES
         .iter()
         .find(|(start, _)| text.starts_with(start))
         .map_or("type", |(_, code)| code);
-    let start = body
-        .split_inclusive(|byte| *byte == b'\n')
-        .take(error.line().saturating_sub(1))
-        .fold(0_usize, |sum, line| sum.saturating_add(line.len()));
-    let end = start.saturating_add(error.column());
-    refuse(pointer(&walk(body.get(..end).unwrap_or(body)).frames), code)
+    let path = error
+        .path()
+        .iter()
+        .fold(String::new(), |path, segment| match segment {
+            Segment::Seq { index } => format!("{path}/{index}"),
+            Segment::Map { key } | Segment::Enum { variant: key } => member(&path, key),
+            Segment::Unknown => path,
+        });
+    refuse(path, code)
 }
 
 /// serde's refusals by the start of their message, each with its wire code (DEC-681 item 10).
@@ -110,17 +120,16 @@ struct Walked {
     twice: bool,
 }
 
-/// Reads `prefix` to its end, or to the first member an object names twice. One reader serves both
-/// the duplicate check and the pointer of serde's refusal, so the two can never disagree on where
-/// a member is.
-fn walk(prefix: &[u8]) -> Walked {
+/// Reads `body` to its end, or to the first member an object names twice, which serde's own
+/// reader takes without refusing it.
+fn walk(body: &[u8]) -> Walked {
     let mut frames = Vec::new();
     let mut at = 0_usize;
-    while let Some(byte) = prefix.get(at) {
+    while let Some(byte) = body.get(at) {
         let mut step = 1_usize;
         match (byte, frames.last_mut()) {
             (b'"', top) => {
-                let rest = prefix.get(at..).unwrap_or_default();
+                let rest = body.get(at..).unwrap_or_default();
                 let mut strings = serde_json::Deserializer::from_slice(rest).into_iter::<String>();
                 let Some(Ok(text)) = strings.next() else {
                     break;
@@ -162,8 +171,7 @@ fn walk(prefix: &[u8]) -> Walked {
     }
 }
 
-/// The pointer of the member being read where a [`walk`] stopped: serde stops just after the
-/// member it refuses, or just after the object that lacks one.
+/// The pointer of the member being read where a [`walk`] stopped: the member named twice.
 fn pointer(frames: &[Frame]) -> String {
     frames
         .iter()

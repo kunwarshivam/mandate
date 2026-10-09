@@ -113,6 +113,44 @@ describe("the checks repeated when a deployment applies (V-002, V-006)", () => {
   });
 });
 
+/** The workspace's policy as a deployment could state it: on, off, not known, or not stated at all. */
+type PolicyValue = boolean | null | "absent";
+
+function withPolicy(value: PolicyValue, approverUsers?: number) {
+  return (ws: Workspace): Workspace => {
+    const next: Workspace = { ...ws, approver_users: approverUsers ?? ws.approver_users, independent_approval_required: value === "absent" ? null : value };
+    if (value === "absent") delete (next as Partial<Workspace>).independent_approval_required;
+    return next;
+  };
+}
+
+const DEPLOY_SECOND_PERSON = "This workspace needs a second person to approve a new agent, and that approval can't be asked for here yet, so a passkey alone can't create it.";
+
+describe("independent approval at deployment (mandate spec §4.3, V-047, DEC-444; interim until a second user can approve)", () => {
+  it.each([true, null, "absent"] as const)("refuses every deployment when the policy is %s, whatever the approver count, and names V-047 only as the rule", (value) => {
+    for (const approvers of [1, 2, 5]) {
+      const ws = withPolicy(value, approvers)(buildWorkspace("normal"));
+      const check = checkDeploy(ws, newAgent(ws).mandate);
+      expect(check, `${approvers} approvers`).toEqual({ ok: false, rule: "V-047", reason: DEPLOY_SECOND_PERSON });
+      expect(check.ok ? "" : check.reason).not.toContain("V-047");
+    }
+  });
+
+  it("refuses under the policy even a deployment V-002 or V-006 would also refuse, with V-047's reason", () => {
+    const ws = withPolicy(true)(buildWorkspace("normal"));
+    expect(checkDeploy(ws, newAgent(ws, { money: "$3,478.37", loss: "$300" }).mandate)).toEqual({ ok: false, rule: "V-047", reason: DEPLOY_SECOND_PERSON });
+    expect(checkDeploy(ws, newAgent(ws, { symbols: ["LMN"] }).mandate)).toEqual({ ok: false, rule: "V-047", reason: DEPLOY_SECOND_PERSON });
+  });
+
+  it("checks exactly as before when the policy is off, with one approver or two", () => {
+    for (const approvers of [1, 2]) {
+      const ws = withPolicy(false, approvers)(buildWorkspace("normal"));
+      expect(checkDeploy(ws, newAgent(ws).mandate)).toEqual({ ok: true });
+      expect(checkDeploy(ws, newAgent(ws, { symbols: ["LMN"] }).mandate)).toEqual({ ok: false, reason: "LMN is already traded by Agent 3. One agent trades an instrument on an account." });
+    }
+  });
+});
+
 describe("deploying", () => {
   it("adds a running agent holding nothing, at version 1 of the confirmed mandate, without touching the input", () => {
     const ws = buildWorkspace("normal");
@@ -234,9 +272,9 @@ describe("after the owner answers", () => {
 describe("the runtime's deployment", () => {
   const record = { screen: "A5" as const, environment: "paper" as const, shown: ["Confirm your mandate"] };
 
-  function mount(scenario: Parameters<typeof buildWorkspace>[0] = "normal") {
+  function mount(scenario: Parameters<typeof buildWorkspace>[0] = "normal", workspace: (ws: Workspace) => Workspace = (ws) => ws) {
     render(
-      <Providers workspace={buildWorkspace(scenario)} tick={false} recordAfterMs={RECORD_AFTER_MS}>
+      <Providers workspace={workspace(buildWorkspace(scenario))} tick={false} recordAfterMs={RECORD_AFTER_MS}>
         <RuntimeProbe />
       </Providers>,
     );
@@ -297,6 +335,32 @@ describe("the runtime's deployment", () => {
     expect(agent.positions).toHaveLength(1);
     expect(agent.orders).toEqual([expect.objectContaining({ purpose: "protective", side: "sell" })]);
     expect(probed().ws.approvals[0].status).toBe("acted");
+  });
+
+  it.each([true, null, "absent"] as const)("rejects at application a deployment sent while the policy is %s, deploys nothing, and asks nothing", (value) => {
+    mount("normal", withPolicy(value));
+    const before = structuredClone(probed().ws);
+    act(() => {
+      probed().deploy(newAgent(probed().ws), record);
+    });
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 4));
+    const [d] = probed().deployments;
+    expect(d).toMatchObject({ phase: "rejected", rule: "V-047", reason: DEPLOY_SECOND_PERSON });
+    expect(probed().ws.agents.map((a) => a.agent_id)).toEqual(before.agents.map((a) => a.agent_id));
+    expect(probed().ws.approvals).toEqual(before.approvals);
+    expect(probed().ws.timeline[d.agentId]).toBeUndefined();
+  });
+
+  it("deploys as before when the policy is off, even with one approver", () => {
+    mount("normal", withPolicy(false, 1));
+    act(() => {
+      probed().deploy(newAgent(probed().ws), record);
+    });
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    const [d] = probed().deployments;
+    expect(d.phase).toBe("recorded");
+    expect(d.rule).toBeUndefined();
+    expect(probed().ws.agents.at(-1)).toMatchObject({ agent_id: d.agentId, label: "Agent 4" });
   });
 
   it.each([

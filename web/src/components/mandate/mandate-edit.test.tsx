@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSectionScreen } from "@/components/screens/agent-detail";
 import { AppShell } from "@/components/shell/app-shell";
 import { PASSKEY_ANSWER_MS } from "@/components/stop/step-up-dialog";
-import type { Scenario } from "@/fixtures/types";
+import type { Scenario, Workspace } from "@/fixtures/types";
 import { AGENT_IDS, APPROVAL_IDS, buildWorkspace, findAgent } from "@/fixtures/workspace";
 import { propose } from "@/lib/mandate-change";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
@@ -15,7 +15,7 @@ import { ChangeReview } from "./change-review";
 
 const swing = () => findAgent(probed().ws, AGENT_IDS.swing)!;
 
-function renderEdit(scenario: Scenario = "normal", options: { role?: Role; passkey?: typeof failingPasskey } = {}) {
+function renderEdit(scenario: Scenario = "normal", options: { role?: Role; passkey?: typeof failingPasskey; workspace?: (ws: Workspace) => Workspace } = {}) {
   setPathname(`/agents/${AGENT_IDS.swing}/mandate/edit`);
   return renderWithRuntime(
     <AppShell>
@@ -185,6 +185,84 @@ describe("Mandate › Edit (A6)", () => {
     type("Largest order", "800");
     expect(review()).toHaveTextContent("Only the workspace owner can change a mandate.");
     expect(within(review()!).queryByRole("button", { name: /Confirm/ })).toBeNull();
+  });
+});
+
+describe("Mandate › Edit where the workspace requires independent approval (§4.3, V-047; interim)", () => {
+  const policy =
+    (value: boolean | null | "absent", approverUsers?: number) =>
+    (ws: Workspace): Workspace => {
+      const next: Workspace = { ...ws, approver_users: approverUsers ?? ws.approver_users, independent_approval_required: value === "absent" ? null : value };
+      if (value === "absent") delete (next as Partial<Workspace>).independent_approval_required;
+      return next;
+    };
+  const SECOND_PERSON = "This workspace needs a second person to approve a change that raises risk, and that approval can't be asked for here yet, so a passkey alone can't confirm it.";
+
+  it.each([true, null, "absent"] as const)("offers no passkey confirm for a risk-increasing version when the policy is %s, says why, and records nothing", (value) => {
+    renderEdit("normal", { workspace: policy(value) });
+    type("Lifetime loss limit", "15");
+    expect(review()).toHaveAttribute("data-classification", "risk_increasing");
+    expect(within(review()!).queryByRole("button", { name: /Confirm/ })).toBeNull();
+    const applies = review()!.querySelector<HTMLElement>("[data-slot=change-applies]")!;
+    expect(applies).toHaveTextContent("This can't be confirmed here, for the reason below.");
+    expect(applies).not.toHaveTextContent(/passkey/i);
+    const refusals = review()!.querySelector<HTMLElement>("[data-slot=change-refusals]")!;
+    expect(within(refusals).getByText("This can't be confirmed:")).toBeInTheDocument();
+    expect(within(refusals).getByText(SECOND_PERSON)).toHaveAttribute("data-rule", "V-047");
+    expect(refusals).not.toHaveTextContent("V-047");
+    expect(within(review()!).getByRole("button", { name: "Keep as is" })).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
+    expect(stepUpDialog()).toBeNull();
+    expect(probed().mandateChanges).toEqual([]);
+    expect(swing().versions).toHaveLength(2);
+    expect(swing().mandate.capital.max_loss_from_allocation).toBe("0.1");
+  });
+
+  it.each([true, null, "absent"] as const)("applies a risk-reducing version on confirm with no passkey, as before, when the policy is %s", (value) => {
+    renderEdit("normal", { workspace: policy(value) });
+    type("Largest order", "800");
+    expect(review()!.querySelector("[data-slot=change-refusals]")).toBeNull();
+    fireEvent.click(within(review()!).getByRole("button", { name: "Confirm change" }));
+    expect(stepUpDialog()).toBeNull();
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(phase()).toBe("applied");
+    expect(swing().mandate.risk.max_order_usd).toBe("800");
+  });
+
+  it.each([true, null, "absent"] as const)("applies a neutral version on confirm, as before, when the policy is %s and two people can approve", (value) => {
+    renderEdit("normal", { workspace: policy(value) });
+    type("Quiet hours start", "22:00");
+    expect(review()).toHaveAttribute("data-classification", "neutral");
+    fireEvent.click(within(review()!).getByRole("button", { name: "Confirm change" }));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(phase()).toBe("applied");
+    expect(swing().mandate.notifications.quiet_hours?.start).toBe("22:00");
+  });
+
+  it("takes the passkey for a risk-increasing version exactly as before when the policy is off", () => {
+    renderEdit("normal", { workspace: policy(false) });
+    type("Lifetime loss limit", "15");
+    expect(review()).toHaveTextContent("This raises risk, so it takes your passkey.");
+    expect(review()!.querySelector("[data-slot=change-refusals]")).toBeNull();
+    fireEvent.click(within(review()!).getByRole("button", { name: "Confirm with passkey" }));
+    press("Use passkey");
+    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS + RECORD_AFTER_MS));
+    expect(phase()).toBe("waiting");
+  });
+
+  it("with fewer than two people who can approve, refuses a neutral version and still applies a risk-reducing one (DEC-444)", () => {
+    renderEdit("normal", { workspace: policy(true, 1) });
+    type("Quiet hours start", "22:00");
+    expect(within(review()!).queryByRole("button", { name: /Confirm/ })).toBeNull();
+    expect(
+      within(review()!).getByText("This workspace needs a second person to approve any change that doesn't lower risk, and no second person can approve in it, so only a change that lowers risk can be confirmed."),
+    ).toHaveAttribute("data-rule", "V-047");
+    type("Quiet hours start", "23:00");
+    type("Largest order", "800");
+    fireEvent.click(within(review()!).getByRole("button", { name: "Confirm change" }));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(phase()).toBe("applied");
   });
 });
 

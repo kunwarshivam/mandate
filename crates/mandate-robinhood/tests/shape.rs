@@ -61,7 +61,6 @@ fn uuid_v8(text: &str) -> String {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn robinhoods_profile_is_trading_spec_5_2s_table() {
     let profile = robinhood_profile().unwrap();
     let expected = to_canonical(&parse(ROBINHOOD.as_bytes()).unwrap());
@@ -81,7 +80,6 @@ fn robinhoods_profile_is_trading_spec_5_2s_table() {
 
 /// DEC-529 item 7: one `gtc` stop-limit at stop × (1 − offset), never an OCO.
 #[test]
-#[ignore = "pending E7-6"]
 fn robinhoods_profile_protects_by_one_gtc_stop_limit() {
     let profile = robinhood_profile().unwrap();
     let price = |text| Price::parse(text).unwrap();
@@ -113,7 +111,6 @@ fn robinhoods_profile_protects_by_one_gtc_stop_limit() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn the_ref_id_is_the_version_8_uuid_of_the_keys_sha_256() {
     let entry = key("01JENTRY");
     assert_eq!(
@@ -142,7 +139,6 @@ fn the_ref_id_is_the_version_8_uuid_of_the_keys_sha_256() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn each_contract_state_reads_as_the_connections_spec_says() {
     let table = "new accepted, queued accepted, confirmed accepted, unconfirmed accepted, \
         partially_filled partially_filled, filled filled, cancelled canceled, rejected rejected, \

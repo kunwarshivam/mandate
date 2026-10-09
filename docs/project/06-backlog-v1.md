@@ -1576,6 +1576,26 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - the Robinhood connector still calls no watchlist or scan tool
     ([connections spec §6.2](../specs/connections.md#62-how-mcp-maps-to-the-connector-interface)
     rule 2).
+- **E11-12 (Must; SC, after E11-9 and E9-5)** As an owner in a workspace whose policy has
+  `independent_approval_required`, I want a risk-increasing mandate version I propose in the web
+  Edit form or a thread to go to a second user for approval, so that a change such as loosening
+  `capital.max_loss_from_allocation`, the only path that lifts a latched lifetime floor, is never
+  confirmed by my passkey alone ([mandate spec](../specs/mandate.md) V-047, §4.3, §5.7, MI-3;
+  [DEC-444](decisions/DEC-444.md)). Until it lands, the web app refuses such a version under the
+  policy, and a neutral one where fewer than two people can approve, refuses every new agent's
+  deployment under the policy, whatever the approver count, and reads an absent or unknown policy
+  value as required (the interim refusal, claim #746).
+  *Accepted when:*
+  - the request names the version, its hash and its §9.2 classification, and the approver is a
+    user other than the requester, with step-up;
+  - the same second-user flow covers the other acts V-047 names under the policy: a deployment
+    (a first version, which DEC-444's exception never covers), a high-water-mark reset
+    ([mandate spec](../specs/mandate.md) §5.8), and lifting a fired tripwire (§6.7), each approved
+    by a user other than the requester, and the web deployment's interim refusal is replaced by it;
+  - a one-user workspace is refused as V-047 says, a risk-reducing version aside (DEC-444);
+  - the version applies only after the second user's approval, and V-047 is checked again at
+    application;
+  - the interim refusal and its tests are replaced, not kept beside the flow.
 
 ### E12 Audit explorer
 
@@ -4634,12 +4654,24 @@ From the workspace API contract's drift rule (DEC-683, E10-10):
 
 From the independent review of the E10-10 A1 implementation, part 1 ([#993](https://github.com/kunwarshivam/mandate/pull/993), minors; [DEC-681](decisions/DEC-681.md) item 10):
 
-- **Locate a custom refusal on an object's last member by its name.** serde_json reports a custom
+- ~~**Locate a custom refusal on an object's last member by its name.** serde_json reports a custom
   error such as `non_canonical` after the object's closing brace when the bad member is the last
   one, so `decode` points at the parent. Locate custom errors by member name, as DEC-681 item 10
-  says ("where serde can name it"). The body is still refused, and no sibling is ever named.
-- **Refuse invalid UTF-8 inside a string value as `malformed` at `""`.** Today it is refused as
-  `type` at the member. It is still refused either way.
+  says ("where serde can name it"). The body is still refused, and no sibling is ever named.~~
+  Done ([#1104](https://github.com/kunwarshivam/mandate/pull/1104) and
+  [#1112](https://github.com/kunwarshivam/mandate/pull/1112), tests, #1112 for a map's last entry
+  and the RFC 6901 escaping of a member's name;
+  [#1117](https://github.com/kunwarshivam/mandate/pull/1117), the fix, through
+  `serde_path_to_error`, [DEC-880](decisions/DEC-880.md)).
+- ~~**Refuse invalid UTF-8 inside a string value as `malformed` at `""`.** Today it is refused as
+  `type` at the member. It is still refused either way.~~ Done
+  ([#1104](https://github.com/kunwarshivam/mandate/pull/1104), tests;
+  [#1117](https://github.com/kunwarshivam/mandate/pull/1117), the fix).
+- **Refuse a tagged object written as a JSON array** (#1104's review). `decode` accepts an
+  internally tagged object written as a JSON array (`"who": ["user","a"]`) for `Actor`, `Scope`
+  and the problem's tagged violation, which the schema refuses. Leniency only: the array form
+  decodes to the same value the object form does. Fix with a strict object-only deserializer;
+  tests first.
 
 From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
 

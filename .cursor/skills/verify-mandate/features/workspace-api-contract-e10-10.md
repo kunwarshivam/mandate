@@ -13,9 +13,10 @@
   number in a decimal refused; the problem's closed enums spelled as the spec spells them, its
   per-code titles pinned, `current_base` exactly for `stale_base`, `outcome_unknown` carrying only
   `unknown`. Live: the problem's and the policy violation's serde shapes (`event_id` a required
-  member, the two policy levels). Pending on behaviour (`xtask/behaviour-only/` rows), #993's two
-  decode minors: a custom refusal located at an object's last member, at an array's item, and at
-  an internally tagged object, and bytes that are not UTF-8 inside a string `malformed` at `""`.
+  member, the two policy levels). Live, #993's two decode minors (#1104): a custom refusal
+  located at an object's last member, at an array's item, at a map's last entry, and at an
+  internally tagged object, and bytes that are not UTF-8 inside a string `malformed` at `""`; and
+  a member's name escaped in its pointer as RFC 6901 says (#1112).
 - **Schemas:** `crates/mandate-api/tests/schemas.rs`: live enum and member drift against
   `schemas/workspace-api/` (DEC-683), each member `null`-able and optional exactly as its schema
   says, a kill switch scope's `null` id exactly for `workspace`, and no `serde(flatten)`; pending,
