@@ -326,7 +326,7 @@ fn seal(
     let ephemeral = SecretKey::from_slice(&drawn).map_err(|_| WebPushError::Random);
     drawn.fill(0);
     let ephemeral = ephemeral?;
-    let mut salt = [0u8; 16];
+    let mut salt = <[u8; 16]>::default();
     random.fill(&mut salt)?;
     let as_public = ephemeral.public_key().to_sec1_point(false);
     let ua_public = subscription.p256dh.to_sec1_point(false);
