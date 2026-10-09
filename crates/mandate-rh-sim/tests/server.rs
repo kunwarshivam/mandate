@@ -930,7 +930,6 @@ fn invalid(status: u16, message: &Value) {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_wrong_path_is_404_with_invalid_request() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let session = Wire::connect(&server.url()?).session.unwrap();
@@ -947,7 +946,6 @@ fn a_wrong_path_is_404_with_invalid_request() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn an_initialize_at_another_revision_is_400_with_invalid_request() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let mut wire = Wire::new(&server.url()?);
@@ -962,7 +960,6 @@ fn an_initialize_at_another_revision_is_400_with_invalid_request() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_request_with_no_session_is_400_with_invalid_request() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let mut wire = Wire::connect(&server.url()?);
@@ -974,7 +971,6 @@ fn a_request_with_no_session_is_400_with_invalid_request() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_request_at_another_revision_after_initialize_is_400_with_invalid_request() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let mut wire = Wire::connect(&server.url()?);
@@ -987,7 +983,6 @@ fn a_request_at_another_revision_after_initialize_is_400_with_invalid_request() 
 
 /// RFC 9110 §5.1: field names are case-insensitive.
 #[test]
-#[ignore = "pending E7-25"]
 fn header_names_are_read_without_regard_to_case() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let session = Wire::connect(&server.url()?).session.unwrap();
