@@ -133,13 +133,9 @@ impl NoticeKind {
     /// The kind's key as spec §3.2 writes it, for `OwnerAlertSent` and `NoticeIssued`.
     ///
     /// # Errors
-    /// [`NotifyError::Unimplemented`] for [`Self::NotificationAddressChanged`] until E8-9 adds it
-    /// (DEC-77); every other kind has a key.
+    /// Never: every kind has a key.
     pub fn key(self) -> Result<&'static str, NotifyError> {
         Ok(match self {
-            Self::NotificationAddressChanged => {
-                return Err(NotifyError::Unimplemented { story: "E8-9" });
-            }
             Self::ApprovalRequested => "approval_requested",
             Self::ApprovalReminder => "approval_reminder",
             Self::RiskLimit => "risk_limit",
@@ -155,6 +151,7 @@ impl NoticeKind {
             Self::IntegrityIncident => "integrity_incident",
             Self::CredentialAdded => "credential_added",
             Self::NewDevice => "new_device",
+            Self::NotificationAddressChanged => "notification_address_changed",
             Self::RecoveryUsed => "recovery_used",
             Self::RoleGranted => "role_granted",
             Self::MemberDeactivated => "member_deactivated",
@@ -178,13 +175,9 @@ impl NoticeKind {
     /// The kind's class, from spec §3.2's table.
     ///
     /// # Errors
-    /// [`NotifyError::Unimplemented`] for [`Self::NotificationAddressChanged`] until E8-9 adds it
-    /// (DEC-77); every other kind has a class.
+    /// Never: every kind has a class.
     pub fn class(self) -> Result<Class, NotifyError> {
         Ok(match self {
-            Self::NotificationAddressChanged => {
-                return Err(NotifyError::Unimplemented { story: "E8-9" });
-            }
             Self::ApprovalRequested | Self::ApprovalReminder => Class::Action,
             Self::RiskLimit
             | Self::KillSwitch
@@ -199,6 +192,7 @@ impl NoticeKind {
             | Self::IntegrityIncident
             | Self::CredentialAdded
             | Self::NewDevice
+            | Self::NotificationAddressChanged
             | Self::RecoveryUsed
             | Self::RoleGranted
             | Self::MemberDeactivated
@@ -223,13 +217,9 @@ impl NoticeKind {
     /// and the next brief (spec §3.1).
     ///
     /// # Errors
-    /// [`NotifyError::Unimplemented`] for [`Self::NotificationAddressChanged`] until E8-9 adds it
-    /// (DEC-77); every other kind has a text key or none.
+    /// Never: every kind has a text key or none.
     pub fn text_key(self) -> Result<Option<TextKey>, NotifyError> {
         Ok(match self {
-            Self::NotificationAddressChanged => {
-                return Err(NotifyError::Unimplemented { story: "E8-9" });
-            }
             Self::ApprovalRequested | Self::ApprovalReminder => Some(TextKey::ApprovalNeeded),
             Self::RiskLimit
             | Self::KillSwitch
@@ -244,6 +234,7 @@ impl NoticeKind {
             | Self::IntegrityIncident => Some(TextKey::AttentionNeeded),
             Self::CredentialAdded
             | Self::NewDevice
+            | Self::NotificationAddressChanged
             | Self::RecoveryUsed
             | Self::RoleGranted
             | Self::MemberDeactivated
