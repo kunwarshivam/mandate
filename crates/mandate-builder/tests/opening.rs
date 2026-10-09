@@ -150,7 +150,6 @@ fn hold(reason: HoldReason) -> Result<Action, &'static str> {
 /// truncates to one share, which costs 87.5. It lists no `ioc` limit, so an `ioc` opening has no
 /// form at all.
 #[test]
-#[ignore = "pending E7-23"]
 fn one_whole_share_under_a_100_usd_cap_where_the_profile_offers_only_whole_limits() {
     let market = fractionable("87.49", "87.5");
     assert_eq!(
@@ -164,7 +163,6 @@ fn one_whole_share_under_a_100_usd_cap_where_the_profile_offers_only_whole_limit
 /// the band of 0.05 × 1500 = 75, so nothing is sent. Fractional `day` limits buy
 /// 100 ÷ 100.01 = 0.99990001, truncated to 0.9999, worth 99.999999.
 #[test]
-#[ignore = "pending E7-23"]
 fn a_share_above_the_cap_sends_nothing_where_only_whole_limits_are_offered() {
     let market = fractionable("100", "100.01");
     let below = HoldReason::BelowBandAfterClipping;
@@ -177,7 +175,6 @@ fn a_share_above_the_cap_sends_nothing_where_only_whole_limits_are_offered() {
 /// grid as `propose` does: 1.1428 shares worth 99.995. The same profile lists no `gtc` fractional
 /// limit, so a `gtc` opening is one whole share.
 #[test]
-#[ignore = "pending E7-23"]
 fn fractional_day_limits_size_on_the_grid_and_a_gtc_opening_takes_whole_shares() {
     let market = fractionable("87.49", "87.5");
     let day = open(&fractional_day(), Day, &market);
@@ -190,7 +187,6 @@ fn fractional_day_limits_size_on_the_grid_and_a_gtc_opening_takes_whole_shares()
 /// and never falls back to a market order. The same profile never stops the exit of 2.5 shares at
 /// the 87.49 bid (2.5 × 87.49 = 218.725), and never turns a hold into a refusal.
 #[test]
-#[ignore = "pending E7-23"]
 fn an_empty_intersection_refuses_the_buy_and_never_an_exit_or_a_hold() {
     let cells = [Whole, Fractional, Notional].map(|f| cell(MarketOrder, f, &[Day, Gtc]));
     let no_limit = profile(vec![(UsEquity, REGULAR, cells.into())]);
@@ -216,7 +212,6 @@ fn an_empty_intersection_refuses_the_buy_and_never_an_exit_or_a_hold() {
 /// a profile may declare limits before and after the session, but the policy opens a US equity in
 /// the regular session only, so the profile narrows the policy and never widens it.
 #[test]
-#[ignore = "pending E7-23"]
 fn the_form_is_fractional_then_whole_in_the_policy_session_and_time_in_force() {
     let form = |p: &CapabilityProfile, class, session, tif| {
         opening_form(p, class, session, tif).map_err(|e| e.code())
@@ -256,7 +251,6 @@ fn the_form_is_fractional_then_whole_in_the_policy_session_and_time_in_force() {
 /// The row's second clause: deployment refuses a policy the profile cannot meet, for every asset
 /// class the mandate allows, in that class's opening session, and refuses an empty list.
 #[test]
-#[ignore = "pending E7-23"]
 fn deployment_refuses_a_policy_the_profile_cannot_meet() {
     let check = |p: &CapabilityProfile, openings: &[(AssetClass, TimeInForce)]| {
         let openings: BTreeMap<_, _> = openings.iter().copied().collect();
@@ -292,7 +286,6 @@ fn deployment_refuses_a_policy_the_profile_cannot_meet() {
 /// 2-share grid truncates to 4, worth 80 and above the 75 band. On the 0.0001 grid at an 87.5 ask
 /// it is one share.
 #[test]
-#[ignore = "pending E7-23"]
 fn whole_shares_keep_a_market_grid_coarser_than_one_share() {
     let mut coarse = swing_market();
     coarse.bid = price("19.99");
@@ -307,7 +300,6 @@ fn whole_shares_keep_a_market_grid_coarser_than_one_share() {
 /// shares. Holding 2.5 shares at the 87.49 bid, the exit sells all 2.5 (2.5 × 87.49 = 218.725),
 /// while a flat agent on the same profile and market buys one whole share.
 #[test]
-#[ignore = "pending E7-23"]
 fn a_fractional_position_exits_whole_under_a_whole_only_profile() {
     let market = fractionable("87.49", "87.5");
     let held = account("2.5", "87.49");
@@ -358,7 +350,6 @@ static REFUSALS: AtomicU32 = AtomicU32::new(0);
 /// (rule 13). The oracle reads the generator's masks: bit i of a cell's mask is `TIFS[i]`, and 0 is
 /// no cell. It sizes the 20 to 1400 USD order cap, the binding limit, in integer cents.
 #[test]
-#[ignore = "pending E7-23"]
 fn every_buy_is_one_the_policy_and_the_generated_profile_both_allow() {
     let scenario = (
         proptest::collection::vec(0u8..8, 36),

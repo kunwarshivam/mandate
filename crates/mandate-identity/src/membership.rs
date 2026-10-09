@@ -382,6 +382,10 @@ pub enum RecordRefusal {
     /// its `event_time` (DEC-648 item 7), so its cool-off (rule 103) was decided on a false input.
     #[error("the record's independent_approval_required is not the effective policy")]
     IndependenceMismatch,
+    /// The record's `seq` is not above the stream's last membership record's, or its `event_time`
+    /// is before that record's (DEC-659), so the fold would read it as out of order (DEC-657 item 4).
+    #[error("the record is out of order with the stream's last membership record")]
+    OutOfOrder,
 }
 
 /// The writer's check that a record's `independent_approval_required` equals `effective`, the
@@ -410,5 +414,20 @@ pub fn check_independence(record: &MembershipRecord, effective: bool) -> Result<
         Ok(())
     } else {
         Err(RecordRefusal::IndependenceMismatch)
+    }
+}
+
+/// The writer's check, before commit, that `next` follows `last`, the stream's last membership
+/// record, if any (DEC-659): its `seq` is above `last`'s and its `event_time` is not before it, so
+/// an equal `event_time` passes. The first membership record (`last` is `None`) passes, and every
+/// record type is checked alike. A writer that calls it never commits a record the fold reads as
+/// out of order (DEC-657 item 4), which stays the fold's backstop.
+pub fn check_order(
+    last: Option<&MembershipRecord>,
+    next: &MembershipRecord,
+) -> Result<(), RecordRefusal> {
+    match last {
+        Some(before) if !follows(before, next) => Err(RecordRefusal::OutOfOrder),
+        Some(_) | None => Ok(()),
     }
 }

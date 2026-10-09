@@ -1,5 +1,5 @@
-"""Journal spec v0.26 §9.13's reference vectors (DEC-780): the control stream's `RecordsAccessed`,
-`ExportCreated`, and `VerificationRun`.
+"""Journal spec v0.29 §9.13's reference vectors (DEC-780, DEC-774): the control stream's
+`RecordsAccessed`, `ExportCreated`, and `VerificationRun`, and §11's `break_glass_cause_mismatch`.
 
 The schemas and rules 107 to 112 live in `control.py`, beside the other closed schemas, so one
 validator judges every closed schema. This module builds the `records_access` section: a base draft of each
@@ -7,15 +7,19 @@ record, an invalid draft for every member type and rule, and valid drafts for th
 be misread to refuse. It checks the section with oracles of its own: every stream a valid draft
 names is parsed for its workspace independently of rule 107, no valid payload carries a member
 outside the closed vocabulary of streams, positions, hashes, codes, and opaque IDs, and each run's
-result is recomputed from its ranges. Every seeded bug is shown caught.
+result is recomputed from its ranges. Its `range_checks` hold control-stream chains for §11's
+`break_glass_cause_mismatch`, which the reference verifier in `control.py` judges and an oracle here
+re-walks on its own. Every seeded bug is shown caught.
 """
 
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import re
 
-from common import apply_change, change, delete, digest_strings
+from common import apply_change, change, delete, digest_strings, hash_chain
 from control import (
     AGENT_STREAM,
     OWNER,
@@ -23,6 +27,7 @@ from control import (
     STREAM,
     USER,
     WORKSPACE,
+    break_glass_failure,
     check_of,
     draft_for,
     reported,
@@ -35,7 +40,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.26 §9.13 (DEC-780)"
+SPEC = "docs/specs/journal.md v0.29 §9.13 and §11 (DEC-780, DEC-774)"
 AT = "2026-09-21T15:00:00.000000000Z"
 IDS = {
     "read": "01J8Z3R1A000000000000000R1",
@@ -566,6 +571,17 @@ def invalid_drafts() -> list[dict]:
             "schema",
             f"{R0}.failure.seq",
         ),
+        *[
+            invalid(
+                f"{code}_without_its_seq",
+                f"rule 111: `{code}` (§11) is reported at the event that breaks it (DEC-774)",
+                bad,
+                failing_on(code, None),
+                "schema",
+                f"{where}.failure.seq",
+            )
+            for code, where in LATE_EVENT_CHECKS.items()
+        ],
         invalid(
             "range_check_with_a_seq",
             "rule 111: a range check names no seq",
@@ -617,6 +633,40 @@ def invalid_drafts() -> list[dict]:
     ]
 
 
+# The §11 codes §9.13 first omitted (DEC-774 item 1) and the code DEC-774 item 2 adds, each with the
+# range of `verification_fail` it is reported in and the `seq` it is reported at: the agent stream's
+# held hold (a range of its own), and the control stream's own checks.
+LATE_EVENT_CHECKS = {
+    "held_mismatch": R0,
+    "connection_lifecycle_mismatch": R0,
+    "connection_cause_mismatch": R1,
+    "break_glass_cause_mismatch": R1,
+}
+LATE_EVENT_SEQ = {
+    "held_mismatch": 14,
+    "connection_lifecycle_mismatch": 17,
+    "connection_cause_mismatch": 5,
+    "break_glass_cause_mismatch": 9,
+}
+
+
+def failing_on(code: str, seq: int | None) -> list[dict]:
+    """`verification_fail`'s changes for a run whose first failure is `code` at `seq`. A hold is an
+    agent stream's, so its run verifies an agent-stream range instead of the account stream's."""
+    where = LATE_EVENT_CHECKS[code]
+    out = []
+    if code == "held_mismatch":
+        out.append(change(f"{R0}.stream_id", AGENT_STREAM))
+        out.append(change(f"{R0}.from_seq", 12))
+        out.append(change(f"{R0}.to_seq", 30))
+        out.append(change(f"{R0}.prev_hash", "2" * 64))
+    if where == R1:
+        out.append(change(f"{R0}.failure", None))
+        out.append(change(f"{R0}.to_hash", "1" * 64))
+        out.append(change(f"{R1}.to_hash", None))
+    return [*out, change(f"{where}.failure", {"check": code, "seq": seq})]
+
+
 def valid_drafts() -> list[dict]:
     """Cases a rule might be misread to refuse; each must be accepted."""
     read, export, view = "records_read", "export_canonical", "export_view"
@@ -653,7 +703,9 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "read_by_an_operator",
-            "rule 108 and §7: platform staff's break-glass reads are journaled where the customer reads them",
+            "rule 108 and §7: platform staff's break-glass reads are journaled where the customer reads them; "
+            "append admits it, and §11's `break_glass_cause_mismatch` fails it until DEC-261 item 9 "
+            "(range_checks.operator_read_fails_until_dec_261_item_9)",
             read,
             [
                 change("actor", OPERATOR_ACTOR),
@@ -719,12 +771,128 @@ def valid_drafts() -> list[dict]:
             bad,
             [change(f"{R0}.failure", {"check": "seq_gap", "seq": 40})],
         ),
+        *[
+            valid(
+                f"failure_at_{code}",
+                f"§9.13 and rule 111: a run records `{code}` (§11), reported at the event that breaks it (DEC-774)",
+                bad,
+                failing_on(code, LATE_EVENT_SEQ[code]),
+            )
+            for code in LATE_EVENT_CHECKS
+        ],
+    ]
+
+
+# --------------------------------------------------------------------------- §11's break-glass cause
+
+RECORDED = "2026-09-21T15:00:01.000000000Z"
+# A `PlatformOperatorAction` that opens a break-glass window. `append` refuses the record as
+# `unknown_schema` until DEC-261 item 9 closes it, so no journal can hold this body yet: it stands for
+# the record the check will find, and the check reads only its type, ID, and `seq`.
+OPERATOR_ACTION_ID = "01J8Z3R9A000000000000000B2"
+
+
+def chained(seq: int, body: dict) -> dict:
+    """A control-stream body at `seq`, before `hash_chain` gives it its `prev_hash`."""
+    return {**copy.deepcopy(body), "seq": seq, "recorded_at": RECORDED}
+
+
+def stream_opened() -> dict:
+    body = envelope("read", "StreamOpened", SERVICES, {"stream_type": "control", "workspace_id": WORKSPACE})
+    return {**body, "event_id": "01J8Z3R6A000000000000000S1"}
+
+
+def user_read() -> dict:
+    return {**copy.deepcopy(BASES["records_read"]), "event_id": "01J8Z3R7A000000000000000U1"}
+
+
+def operator_read(cause: str) -> dict:
+    """`valid_drafts`' `read_by_an_operator`, with `cause` as its `causation_id`."""
+    read = copy.deepcopy(BASES["records_read"])
+    read.update(actor=dict(OPERATOR_ACTOR), causation_id=cause, event_id="01J8Z3R8A000000000000000O1")
+    read["payload"]["accessor"] = OPERATOR_ACTOR["id"]
+    return read
+
+
+def operator_action() -> dict:
+    return {**envelope("read", "PlatformOperatorAction", OPERATOR_ACTOR, {}), "event_id": OPERATOR_ACTION_ID}
+
+
+def break_glass_case(name: str, clause: str, bodies: list[dict], from_seq: int, expect_seq: int | None) -> dict:
+    """A control stream of `bodies` from seq 1, of which the range keeps those from `from_seq`, with
+    the trusted start the chain gives it."""
+    entries = hash_chain([chained(i + 1, b) for i, b in enumerate(bodies)], GENESIS)
+    kept = entries[from_seq - 1 :]
+    expect = None if expect_seq is None else {"seq": expect_seq, "check": "break_glass_cause_mismatch"}
+    return {
+        "name": name,
+        "clause": clause,
+        "from_seq": from_seq,
+        "prev_hash": kept[0]["body"]["prev_hash"],
+        "chain": [{"body": e["body"], "hash": e["hash"]} for e in kept],
+        "expect": expect,
+    }
+
+
+def range_checks() -> list[dict]:
+    """§11's `break_glass_cause_mismatch` (DEC-774 item 2). The first case is `read_by_an_operator`,
+    which append admits, failing the check as every operator read does until DEC-261 item 9."""
+    opened, mine = stream_opened(), user_read()
+    return [
+        break_glass_case(
+            "operator_read_fails_until_dec_261_item_9",
+            "§11 break_glass_cause_mismatch: no control stream holds a PlatformOperatorAction yet, so the read "
+            "`read_by_an_operator` names fails in the full chain",
+            [opened, mine, operator_read(BREAK_GLASS)],
+            1,
+            3,
+        ),
+        break_glass_case(
+            "operator_read_citing_another_record",
+            "§11 break_glass_cause_mismatch: the cause is a PlatformOperatorAction, not any earlier record",
+            [opened, mine, operator_read(mine["event_id"])],
+            1,
+            3,
+        ),
+        break_glass_case(
+            "operator_read_citing_a_later_action",
+            "§11 break_glass_cause_mismatch: the cause comes before the read",
+            [opened, operator_read(OPERATOR_ACTION_ID), operator_action()],
+            1,
+            2,
+        ),
+        break_glass_case(
+            "operator_read_citing_its_action",
+            "§11 break_glass_cause_mismatch: passes once a PlatformOperatorAction can be journaled "
+            "(DEC-261 item 9; append refuses this chain's action as unknown_schema today)",
+            [opened, operator_action(), mine, operator_read(OPERATOR_ACTION_ID)],
+            1,
+            None,
+        ),
+        break_glass_case(
+            "operator_read_in_a_tail_range",
+            "§11: a cause before the range's trusted start is not judged by that range; the full chain judges it",
+            [opened, mine, operator_read(BREAK_GLASS)],
+            2,
+            None,
+        ),
     ]
 
 
 # --------------------------------------------------------------------------- independent oracles
 
-ORACLE_CHECKS = ("drafts.valid", "drafts.tenant", "drafts.vocabulary", "drafts.result", "invalid_drafts", "valid_drafts")
+ORACLE_CHECKS = (
+    "drafts.valid",
+    "drafts.tenant",
+    "drafts.vocabulary",
+    "drafts.result",
+    "invalid_drafts",
+    "valid_drafts",
+    "ranges.chain",
+    "ranges.same_read",
+    "ranges.reference",
+    "ranges.walk",
+)
 
 
 def found(check: str, message: str) -> str:
@@ -755,6 +923,57 @@ def accepted(section: dict) -> list[tuple[str, dict]]:
     return out
 
 
+def chain_breaks(case: dict) -> list[int]:
+    """The `seq`s whose body does not re-hash, by `json.dumps`, to its `hash`, or does not link to the
+    one before, starting from the case's trusted start."""
+    bad, prev = [], case["prev_hash"]
+    for entry in case["chain"]:
+        body = entry["body"]
+        text = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        if hashlib.sha256(text.encode()).hexdigest() != entry["hash"] or body["prev_hash"] != prev:
+            bad.append(body["seq"])
+        prev = entry["hash"]
+    return bad
+
+
+def walk_causes(case: dict) -> dict | None:
+    """The oracle's own §11 walk, written from the text: it collects the IDs of the
+    `PlatformOperatorAction`s seen so far and every ID the range holds, then asks of each operator
+    read whether its cause is among the first; failing that, whether the range could have held it."""
+    actions, held = set(), {e["body"]["event_id"] for e in case["chain"]}
+    whole = case["from_seq"] == 1
+    for entry in case["chain"]:
+        body = entry["body"]
+        if body["event_type"] == "RecordsAccessed" and body["actor"]["kind"] == "platform_operator":
+            cause = body["causation_id"]
+            if cause not in actions and (whole or cause in held):
+                return {"seq": body["seq"], "check": "break_glass_cause_mismatch"}
+        if body["event_type"] == "PlatformOperatorAction":
+            actions.add(body["event_id"])
+    return None
+
+
+def ranges_problems(section: dict) -> list[str]:
+    problems = []
+    for case in section["range_checks"]:
+        if chain_breaks(case):
+            problems.append(found("ranges.chain", f"{case['name']}: entries {chain_breaks(case)} do not chain"))
+        if break_glass_failure(entries_of(case)) != case["expect"]:
+            problems.append(found("ranges.reference", f"{case['name']}: expected {case['expect']}"))
+        if walk_causes(case) != case["expect"]:
+            problems.append(found("ranges.walk", f"{case['name']}: expected {case['expect']}"))
+    first = next(c for c in section["range_checks"] if c["name"] == "operator_read_fails_until_dec_261_item_9")
+    admitted = draft_for(section, next(c for c in section["valid_drafts"] if c["name"] == "read_by_an_operator"))
+    read = {k: v for k, v in first["chain"][-1]["body"].items() if k not in ("seq", "recorded_at", "prev_hash", "event_id")}
+    if read != {k: v for k, v in admitted.items() if k != "event_id"}:
+        problems.append(found("ranges.same_read", "the failing read is not the valid draft read_by_an_operator"))
+    return problems
+
+
+def entries_of(case: dict) -> list[dict]:
+    return [{"seq": e["body"]["seq"], "hash": e["hash"], "body": e["body"]} for e in case["chain"]]
+
+
 def check_section(section: dict) -> list[str]:
     """Every failure, so seeded bugs can be shown caught."""
     problems = []
@@ -782,7 +1001,7 @@ def check_section(section: dict) -> list[str]:
         got = violations(draft_for(section, case))
         if got:
             problems.append(found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
-    return problems
+    return problems + ranges_problems(section)
 
 
 # --------------------------------------------------------------------------- seeded bugs
@@ -813,6 +1032,7 @@ VALIDATOR_MUTANTS = (
     "rule.111.inside",
     "rule.111.to_hash",
     "rule.112",
+    *(f"classify.{code}" for code in LATE_EVENT_CHECKS),
     "types.stream_id",
     "types.digest",
     "record.extra",
@@ -849,6 +1069,16 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
     def result_flipped(s):
         s["drafts"]["verification_fail"]["payload"]["result"] = "pass"
 
+    def range_case(s, name):
+        return case(s, "range_checks", name)
+
+    def altered_after_hashing(s):
+        range_case(s, "operator_read_citing_its_action")["chain"][1]["body"]["actor"]["id"] = "operator_02"
+
+    def another_read(s):
+        body = range_case(s, "operator_read_fails_until_dec_261_item_9")["chain"][-1]["body"]
+        body["payload"]["operation"] = "journal_export"
+
     return [
         ("a base draft breaks rule 109", "drafts.valid", mutated(lambda s: s["drafts"]["export_canonical"]["payload"].update(view=VIEW))),
         ("a base read names another workspace's stream", "drafts.tenant", mutated(foreign_base)),
@@ -865,7 +1095,23 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             "valid_drafts",
             mutated(lambda s: last_ranges(s, "read_one_event")["value"][0].update(to_seq=11)),
         ),
+        ("a range case's chain is altered after it was hashed", "ranges.chain", mutated(altered_after_hashing)),
+        ("the failing operator read is not the one append admits", "ranges.same_read", mutated(another_read)),
+        (
+            "a read citing its action is expected to fail",
+            "ranges.reference",
+            mutated(lambda s: range_case(s, "operator_read_citing_its_action").update(
+                expect={"seq": 4, "check": "break_glass_cause_mismatch"})),
+        ),
+        (
+            "a read citing a later action is expected to pass",
+            "ranges.walk",
+            mutated(lambda s: range_case(s, "operator_read_citing_a_later_action").update(expect=None)),
+        ),
     ]
+
+
+CAUSE_MUTANTS = ("cause.actor", "cause.type", "cause.earlier", "cause.unresolved", "cause.tail")
 
 
 def run_mutants(section: dict) -> list[str]:
@@ -882,6 +1128,10 @@ def run_mutants(section: dict) -> list[str]:
             caught |= bool(got) if want is None else not reported(got, want)
         if not caught:
             escaped.append(f"records-access validator mutant {mutant}")
+    for mutant in CAUSE_MUTANTS:
+        skip = frozenset([mutant])
+        if all(break_glass_failure(entries_of(c), skip) == c["expect"] for c in section["range_checks"]):
+            escaped.append(f"records-access verifier mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if not any(c == check for _, c, _ in registered):
@@ -902,4 +1152,5 @@ def build_section() -> dict:
         "drafts": base_drafts(),
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
+        "range_checks": range_checks(),
     }

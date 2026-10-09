@@ -1,5 +1,6 @@
 "use client";
 
+import type { RefObject } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Breadcrumbs } from "@cloudflare/kumo/components/breadcrumbs";
@@ -176,7 +177,14 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
  * paper badge (DEC-207, DEC-452); the tab bar and its More sheet carry the rest. There, an open
  * thread hides it through `className` and carries the paper badge in its own bar (DEC-482).
  */
-export function AppHeader({ className }: { className?: string }) {
+export function AppHeader({
+  className,
+  sheetLayer,
+}: {
+  className?: string;
+  /** Where the command palette mounts: the frame's sheet layer, under the dock and the tab bar (C-21). */
+  sheetLayer?: RefObject<HTMLElement | null>;
+}) {
   const pathname = usePathname();
   const { ws } = useRuntime();
   const { role } = useRole();
@@ -217,7 +225,7 @@ export function AppHeader({ className }: { className?: string }) {
             </Breadcrumbs>
           </div>
         </div>
-        <CommandMenu />
+        <CommandMenu container={sheetLayer} />
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1.5 lg:flex-1 lg:basis-0 lg:justify-end">
           {seesAgents ? <CopilotButton className="max-lg:hidden" /> : null}
           <ThemeMenu className={`${ICON_LINK} max-lg:hidden`} />

@@ -1,0 +1,5 @@
+file = "crates/mandate-executor/src/protection.rs"
+test = "bracket_tests::the_bracket_entry_placements_are_closed"
+reason = """
+E7-19 E1b-P (DEC-859): a data reshaping with no new function; it fails on main's legacy draft, not a stub.
+"""

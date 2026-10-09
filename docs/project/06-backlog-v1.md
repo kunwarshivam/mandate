@@ -1266,6 +1266,12 @@ story buys a service, and none uses a real identity-provider account in tests (s
     refused history and a fold mutant for each.
   - Rule 103's non-cooling branch has no vector with a gap under 1 s (#789's delta review); add an
     invalid 1 ns gap and a mutant.
+  *Membership writer* (merge coordinator, 2026-10-09): E9-7 owns the one writer of `Member*`
+  records on `ctl:{workspace_id}`. It calls `mandate_identity::check_order` inside that stream's
+  serialized append, against the stream's last membership record, stamps `event_time` there,
+  re-runs the guard on every head-mismatch retry, and never clamps a refused record (DEC-659 items
+  2 and 8). Membership commands from L2's workspace API routes (E10-x) call this writer and never
+  append `Member*` records directly.
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
@@ -4613,8 +4619,11 @@ From the workspace API contract's drift rule (DEC-683, E10-10):
 - **A `cargo xtask` check for stale planned markers.** List every `(planned: <story>)` in a spec
   table and every `x-planned` value in `schemas/`, with its story's state, and fail on a marker
   whose story is done. Until it exists, removing a story's markers is part of its done-definition.
-- **Rust JSON-pointer checks refuse control characters**, as the schemas' pointer pattern does
-  (`[^/~\u0000-\u001f]`), wherever `mandate-api` checks a path (E10-10 implementation).
+- ~~**Rust JSON-pointer checks refuse control characters**, as the schemas' pointer pattern does
+  (`[^/~\u0000-\u001f]`), wherever `mandate-api` checks a path (E10-10 implementation).~~ Done
+  ([#1013](https://github.com/kunwarshivam/mandate/pull/1013): `is_pointer` refuses `U+0000` to
+  `U+001F` in a violation's `path`; A1 implementation part 3 applies it to a confirm's paths and a
+  `202`'s `dropped`).
 - **Journal the members an API-7 operation dropped** (DEC-682 item 27): the command event names the
   JSON pointers its `202` listed in `dropped`, so the record shows what the server ignored. A
   journal spec change first.
@@ -4659,6 +4668,9 @@ From E7-16's M2 implementation (`mandate-mcp`, claim #859; the shared check is l
   once lane L2 lands it (E7-12, DEC-839 item 3). `client.rs`'s `moves_funds`, `words` and
   `FUND_TOKENS` then go, and the crate gains its `mandate-domain` dependency, so the connector and
   the scope check cannot disagree on a name.
+
+- **E7-24: require `iss` when the server sets `authorization_response_iss_parameter_supported`**
+  (RFC 9207 §3, [DEC-855](decisions/DEC-855.md) item 4): a callback without `iss` is then refused.
 
 From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-841](decisions/DEC-841.md)):
 

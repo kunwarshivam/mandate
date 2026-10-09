@@ -10,7 +10,7 @@
   and the injected `Monotonic` clock), `crates/mandate-mcp/src/frame.rs` (JSON-RPC 2.0 framing, and
   the answer as one JSON body or an event stream), `crates/mandate-mcp/src/error.rs` (`McpError`,
   and `ServerText`, which has no `Display` and whose `Debug` withholds what the server sent),
-  `crates/mandate-mcp/src/auth.rs` (E7-24 O1a, DEC-847: OAuth discovery on pinned hosts, and registration; O1b, DEC-855: PKCE and the single-use `state`).
+  `crates/mandate-mcp/src/auth.rs` (E7-24 O1a, DEC-847: OAuth discovery on pinned hosts, and registration; O1b, DEC-855, DEC-861: PKCE to token).
 - **Tests:** in-crate where a loopback server is needed, since loopback is accepted only in the
   crate's own test build: `crates/mandate-mcp/src/tests/endpoint.rs`,
   `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
@@ -22,5 +22,6 @@
   allowlist, fund-movement refusal, and metadata canary; `drift.rs` adds the pinned hash and drift),
   `crates/mandate-mcp/src/tests/auth.rs` (O1a: discovery's pins, identifiers and refusals),
   `crates/mandate-mcp/src/tests/register.rs` (O1a: the public client and its loopback redirect), and
-  `crates/mandate-mcp/src/tests/login.rs` (O1b: RFC 7636's vector, the request, and the callback).
+  `crates/mandate-mcp/src/tests/login.rs` (O1b: RFC 7636's vector, the request, and the callback),
+  `listener.rs` (the listener and lifetime) and `token.rs` (the exchange and LT-9's canary scan).
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.

@@ -20,8 +20,10 @@ the owl, the rules and the record.
 - [ ] **A weekly critique.** Screenshots of every screen; one question: what is the worst thing on
       this screen; fix only that. (first run: #1017, [critique-2026-10-09.md](critique-2026-10-09.md),
       fixes in section J)
-- [ ] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
-      ten minutes that must be perfect on every release.
+- [x] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
+      ten minutes that must be perfect on every release. (spec: #1035,
+      `e2e/golden-path.spec.ts`, at 390 and 1440px in both themes; left as `fixme`: the request
+      appearing once on Home, which waits on section J's "A request once on Home", C-5)
 - [ ] **Five people, watched.** Twenty minutes each, say nothing, write down where they hesitate.
 - [ ] **Reference, not inspiration.** Five products and what is taken from each, written down:
       Linear (speed and keyboard), Bloomberg (density without clutter), Things (calm states), Arc
@@ -49,15 +51,26 @@ the owl, the rules and the record.
 - [x] **Landing windows.** Each window now cascades 28px down and right of the one in front,
       so a new one shows the last rather than covering it. "Try it." already had its button on
       the next line, and the windows scroll; the review's capture used overlay scrollbars. (R-30)
-- [ ] **The account chart's dark-mode paint.** The first `npm run shots` run found the account
+- [x] **The account chart's dark-mode paint.** The first `npm run shots` run found the account
       chart blank in dark mode on Home at 390 and 1440px (captured 900ms after load) while the
       agent's chart drew and the same screens in light drew; earlier captures at 1500ms showed it.
       Find whether the dark-mode redraw (`setChartMode`) races the draw-in, and pin it with a test
-      that reads the canvas after the mode switch.
+      that reads the canvas after the mode switch. (#1032) Cause: hydration read the chart mode
+      from the server's default, so a dark Home drew a light chart, then tore it down for a dark
+      one, later than light; the blank captures themselves (C-22, both themes) were taken before
+      the dev server hydrated, with no canvas yet, not a sizing or draw-in race. Fix: charts read
+      `<html>` while hydrating, one chart per load; `e2e/chart-paint.spec.ts` reads its pixels.
 - [x] **Set-up replies on a miss.** A second miss in a row says what shape of answer would be
       read, never a value; each model setting's question names its range, so nobody guesses.
       Defaulting a setting would amend DEC-472 and brief A3 ("each setting empty"), so it waits
       for a DEC. (R-26, R-27)
+- [x] **Stop takes a press with the command palette open (C-21).** It did not: Kumo's palette
+      dialog is modal, so it hid the frame from assistive technology and laid its scrim over
+      Stop, and a press on Stop only closed the palette. The palette is now Kumo's panel in a
+      dialog that keeps Tab inside but is not modal, mounted in the frame's sheet layer under the
+      dock and the tab bar, like the More sheet. `e2e/stop-visible.spec.ts` pins it at 390 and
+      1280px, opened with ⌘K and with its button, and the palette's "Stop…" from the keyboard.
+      (#1038)
 
 ## C. The cutting pass (one PR, no new rules)
 
@@ -226,10 +239,11 @@ The fixes the first weekly critique proposed, one per screen, most severe first.
 [critique-2026-10-09.md](critique-2026-10-09.md), cited as C-n. Findings already covered by an
 item above (C-3, C-9) are not repeated.
 
-- [ ] **DESIGN.md names the palette that ships.** Its front matter, Colors table and Meaning Rule
-      say Ink and Volt (DEC-214), while the product ships Azure and Sun with trend-coloured hero
+- [x] **DESIGN.md names the palette that ships.** Its front matter, Colors table and Meaning Rule
+      said Ink and Volt (DEC-214), while the product ships Azure and Sun with trend-coloured hero
       lines (DEC-217). DEC-217 is Accepted and supersedes DEC-214, so DESIGN.md is aligned to it
-      with no new DEC. (C-1)
+      with no new DEC. (C-1) Done in
+      [#1047](https://github.com/kunwarshivam/mandate/pull/1047).
 - [ ] **Stop above the palette's scrim.** Check that Stop takes a press with the command palette
       open; if not, keep the frame's Stop live as the More sheet does. Safety lane. (C-21)
 - [ ] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and

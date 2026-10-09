@@ -178,20 +178,28 @@ impl Fixture {
 
     /// Appends one draft the caller wrote whole, whose `event_id` is `id`, to an opened `stream`.
     pub fn append_draft(&mut self, stream: &str, id: String, draft: &[u8]) {
+        self.append_batch(stream, &[(id, draft)]);
+    }
+
+    /// Appends drafts the caller wrote whole, each with its `event_id`, in one `append` batch.
+    pub fn append_batch(&mut self, stream: &str, drafts: &[(String, &[u8])]) {
         let record = self.appended.get_mut(stream).unwrap();
         let head = record.event_ids.len() as u64;
+        let bodies: Vec<&[u8]> = drafts.iter().map(|(_, draft)| *draft).collect();
         let outcome = self.journal.append(
             &StreamId::parse(stream).unwrap(),
             head,
             record.epoch,
             UtcNanos::parse(T).unwrap(),
-            &[draft],
+            &bodies,
         );
         assert!(
             matches!(outcome, AppendOutcome::Committed(_)),
             "{outcome:?}"
         );
-        record.event_ids.push(id);
+        record
+            .event_ids
+            .extend(drafts.iter().map(|(id, _)| id.clone()));
     }
 
     /// The streams of `workspace` that the fixture opened, sorted by `stream_id` bytes.

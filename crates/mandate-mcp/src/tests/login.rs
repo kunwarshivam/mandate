@@ -43,7 +43,7 @@ fn server(authorize: &str) -> AuthServer {
     }
 }
 
-fn client(port: u16) -> ClientRegistration {
+pub(crate) fn client(port: u16) -> ClientRegistration {
     let redirect = LoopbackRedirect::new(port).unwrap();
     let client_id = "c-1".to_owned();
     ClientRegistration {
@@ -77,7 +77,6 @@ fn refused(login: PendingLogin, target: &str, secrets: &[&str]) -> &'static str 
 }
 
 #[test]
-#[ignore = "pending E7-24"]
 fn the_request_carries_rfc_7636s_appendix_b_challenge_and_exactly_the_flow_members() {
     for port in [1_u16, 49152, 65535] {
         let found = server(AUTHORIZE);
@@ -102,7 +101,6 @@ fn the_request_carries_rfc_7636s_appendix_b_challenge_and_exactly_the_flow_membe
 }
 
 #[test]
-#[ignore = "pending E7-24"]
 fn every_seed_gives_a_43_character_verifier_and_state_and_their_s256_challenge() {
     let seed = || proptest::array::uniform32(0_u8..);
     let seeds = (seed(), seed());
@@ -119,7 +117,6 @@ fn every_seed_gives_a_43_character_verifier_and_state_and_their_s256_challenge()
 }
 
 #[test]
-#[ignore = "pending E7-24"]
 fn an_authorization_endpoint_with_a_query_is_refused() {
     let plain = server(AUTHORIZE).begin_with(&client(1), &RFC_SEED, &STATE_SEED);
     assert!(plain.is_ok(), "{plain:?}");
@@ -130,7 +127,6 @@ fn an_authorization_endpoint_with_a_query_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E7-24"]
 fn each_login_draws_a_fresh_verifier_and_state_from_the_os() {
     let found = server(AUTHORIZE);
     let (url, a) = found.begin(&client(49152)).unwrap();
@@ -148,7 +144,6 @@ fn each_login_draws_a_fresh_verifier_and_state_from_the_os() {
 }
 
 #[test]
-#[ignore = "pending E7-24"]
 fn the_callback_with_the_logins_own_state_yields_its_code() {
     let state = b64url(&STATE_SEED);
     let cases = [
@@ -169,7 +164,6 @@ fn the_callback_with_the_logins_own_state_yields_its_code() {
 }
 
 #[test]
-#[ignore = "pending E7-24"]
 fn a_state_that_differs_in_any_way_or_repeats_is_refused() {
     let own = b64url(&STATE_SEED);
     let other = b64url(&[8; 32]);
@@ -197,7 +191,6 @@ fn a_state_that_differs_in_any_way_or_repeats_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E7-24"]
 fn an_error_a_bad_issuer_path_or_code_is_refused_unread() {
     let own = b64url(&STATE_SEED);
     let cases = [
