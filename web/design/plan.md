@@ -21,7 +21,7 @@ the owl, the rules and the record.
       this screen; fix only that. (first run: #1017, [critique-2026-10-09.md](critique-2026-10-09.md),
       fixes in section J)
 - [x] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
-      ten minutes that must be perfect on every release. (spec: #this PR,
+      ten minutes that must be perfect on every release. (spec: #1035,
       `e2e/golden-path.spec.ts`, at 390 and 1440px in both themes; left as `fixme`: the request
       appearing once on Home, which waits on section J's "A request once on Home", C-5)
 - [ ] **Five people, watched.** Twenty minutes each, say nothing, write down where they hesitate.
