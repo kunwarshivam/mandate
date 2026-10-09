@@ -82,7 +82,6 @@ impl Bench {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_verified_assertion_is_never_refused_for_a_rate_limit() {
     let mut bench = Bench::new((1, 1), (1, 1));
     let member = client("198.51.100.1", "laptop");
@@ -116,7 +115,6 @@ fn a_verified_assertion_is_never_refused_for_a_rate_limit() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn over_limit_requests_verify_only_against_an_outstanding_challenge_consumed_on_first_use() {
     let mut bench = Bench::new((4, 4), (1, 1));
     let who = client("198.51.100.2", "phone");
@@ -149,7 +147,6 @@ fn over_limit_requests_verify_only_against_an_outstanding_challenge_consumed_on_
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn reduction_session_failures_are_indistinguishable() {
     let mut bench = Bench::new((16, 16), (8, 8));
     let who = client("198.51.100.3", "tablet");
@@ -198,7 +195,6 @@ fn reduction_session_failures_are_indistinguishable() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn reduction_session_challenge_reads_and_returns_nothing_workspace_specific() {
     let quiet = Bench::new((1, 1), (1, 1));
     let mut busy = Bench::new((5, 3), (7, 2));
@@ -227,7 +223,6 @@ fn the_refusal_text_and_the_challenge_lifetime_are_fixed() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_challenge_is_outstanding_for_exactly_300_seconds() {
     let mut bench = Bench::new((1, 1), (9, 9));
     let who = client("198.51.100.5", "laptop");
@@ -264,7 +259,6 @@ fn a_challenge_is_outstanding_for_exactly_300_seconds() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_challenge_is_consumed_by_whichever_client_presents_it_and_never_replays() {
     let mut bench = Bench::new((1, 1), (1, 1));
     let (issuer, other) = (
@@ -302,7 +296,6 @@ fn a_challenge_is_consumed_by_whichever_client_presents_it_and_never_replays() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_challenge_limit_counts_outstanding_challenges_per_address_and_per_device() {
     let mut by_address = Bench::new((1, 9), (9, 9));
     let mut by_device = Bench::new((9, 1), (9, 9));
@@ -331,7 +324,6 @@ fn the_challenge_limit_counts_outstanding_challenges_per_address_and_per_device(
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_failure_limit_counts_per_address_and_per_device_for_300_seconds() {
     let mut bench = Bench::new((9, 9), (3, 2));
     let keys = [
@@ -415,7 +407,6 @@ struct Issued {
 /// The model is folded from the history alone and never calls the gate: the challenges issued,
 /// and every refused presentation with its presenter and time.
 #[test]
-#[ignore = "pending E9-1"]
 fn random_histories_verify_exactly_the_outstanding_challenges_within_the_limits() {
     let keys = [client("a0", "d0"), client("a0", "d1"), client("a1", "d1")];
     let shares = |a: usize, b: usize, address: bool| match address {

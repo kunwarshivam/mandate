@@ -31,7 +31,8 @@
 #      token verification and sessions as pure functions, with the issuer's keys and the clock
 #      handed in, so it never fetches a key or reads a clock; above mandate-identity, whose sealed
 #      session it builds
-#   3  mandate-spec
+#   3  mandate-spec, mandate-audit (read-only audit reads over the journal, scoped to one
+#      workspace; E12-6)
 #   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
 #      mandate-spec; it holds L5's audit wire types, and mandate-audit sits above it and converts
 #      into them; its server sits higher (DEC-680)
@@ -171,6 +172,12 @@ pure = true
 allowed_external = ["thiserror"]
 
 [crates.mandate-journal-cold]
+layer = 3
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+[crates.mandate-audit]
 layer = 3
 safety_critical = true
 pure = true

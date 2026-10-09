@@ -636,7 +636,6 @@ fn the_entries_dec_722_keeps_are_accepted_and_match() -> Result<(), WebPushError
 /// DEC-722 item 1: an exact entry names two labels or more, and so does a wildcard's domain, so one
 /// typo cannot open the sender to every host under a top-level domain.
 #[test]
-#[ignore = "pending E8-14"]
 fn an_allowlist_entry_names_at_least_two_labels() {
     let refused = ["com", "a", "localhost", "*.com", "*.a", "*.net"];
     check_refused_entries(&refused, "DEC-722 item 1");
@@ -644,7 +643,6 @@ fn an_allowlist_entry_names_at_least_two_labels() {
 
 /// DEC-722 item 2 (RFC 1123): no label of an entry starts or ends with a hyphen, in any position.
 #[test]
-#[ignore = "pending E8-14"]
 fn no_label_of_an_allowlist_entry_starts_or_ends_with_a_hyphen() {
     let refused = [
         "-a.com",
@@ -666,7 +664,6 @@ fn no_label_of_an_allowlist_entry_starts_or_ends_with_a_hyphen() {
 /// DEC-722 item 2: an endpoint whose host has a label with an edge hyphen is refused although a
 /// wildcard entry would match it; a hyphen inside a label is still accepted.
 #[test]
-#[ignore = "pending E8-14"]
 fn no_label_of_an_endpoint_host_starts_or_ends_with_a_hyphen() -> Result<(), WebPushError> {
     let list = PushAllowlist::parse(&SPEC_DEFAULT_LIST)?;
     let table = [

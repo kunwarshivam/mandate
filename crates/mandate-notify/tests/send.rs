@@ -27,7 +27,6 @@ fn key(notice: &str, recipient_id: &str, channel: PushChannel) -> String {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn a_recipient_is_1_to_64_of_lowercase_digits_and_underscore_starting_with_a_letter() {
     let longest = format!("a{}", "z_9".repeat(21));
     assert_eq!(longest.len(), 64);
@@ -44,7 +43,6 @@ fn a_recipient_is_1_to_64_of_lowercase_digits_and_underscore_starting_with_a_let
 /// NT-2: an address, a name, or anything else that is not an opaque id is refused, so none can be
 /// journaled or keyed as a recipient.
 #[test]
-#[ignore = "pending E8-9"]
 fn anything_but_an_opaque_recipient_id_is_refused() {
     answer("the control", Recipient::parse("owner"));
     let too_long = format!("a{}", "b".repeat(64));
@@ -93,7 +91,6 @@ fn schema_channels() -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_push_channels_are_the_mandate_schemas_channels() {
     let listed = schema_channels();
     assert_eq!(listed.len(), 6, "{listed:?}");
@@ -109,7 +106,6 @@ fn the_push_channels_are_the_mandate_schemas_channels() {
 /// (RFC 8785: members sorted by key, no whitespace, strings in their shortest escape-free form),
 /// for example `{"channel":"email","notice":"6f1c2a9e4b7d03581e2f9a6c4d8b0e17","recipient":"owner"}`.
 #[test]
-#[ignore = "pending E8-9"]
 fn a_provider_is_keyed_by_the_sha256_of_the_canonical_send_triple() {
     for (channel, notice, recipient_id, digest) in [
         (
@@ -171,7 +167,6 @@ fn a_provider_is_keyed_by_the_sha256_of_the_canonical_send_triple() {
 
 /// Spec §5.1: a retry reuses its key, so the same send keys the same way every time.
 #[test]
-#[ignore = "pending E8-9"]
 fn a_retry_is_keyed_as_its_first_attempt() {
     let first = key(NOTICE, "owner", PushChannel::Sms);
     assert_eq!(key(NOTICE, "owner", PushChannel::Sms), first);
@@ -180,7 +175,6 @@ fn a_retry_is_keyed_as_its_first_attempt() {
 
 /// DEC-710 item 6. The texts are spec §4.2's, written here, not read from the crate.
 #[test]
-#[ignore = "pending E8-9"]
 fn the_rendered_message_is_the_text_a_newline_and_the_link() {
     let texts = [
         "An agent in your workspace needs your approval",

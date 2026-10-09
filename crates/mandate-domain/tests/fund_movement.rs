@@ -152,7 +152,6 @@ fn the_token_set_is_exactly_the_fifteen_sorted() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn every_name_splits_into_the_parts_the_decision_names() {
     for &(name, parts, _) in TABLE {
         assert_eq!(name_tokens(name), parts, "the parts of {name:?}");
@@ -160,7 +159,6 @@ fn every_name_splits_into_the_parts_the_decision_names() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn every_name_gets_the_verdict_the_decision_names() {
     for &(name, _, moves_funds) in TABLE {
         assert_eq!(
@@ -172,7 +170,6 @@ fn every_name_gets_the_verdict_the_decision_names() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn every_token_is_refused_whole_in_any_case_and_inside_a_name() {
     for token in SET {
         let upper = token.to_ascii_uppercase();
@@ -221,7 +218,6 @@ fn ascii_separators() -> Vec<char> {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn every_ascii_non_alphanumeric_separates_parts() {
     let separators = ascii_separators();
     assert_eq!(separators.len(), 66, "128 ASCII less 62 letters and digits");
@@ -266,7 +262,6 @@ fn word() -> impl Strategy<Value = (String, String)> {
 /// is followed by a lowercase letter. The oracle refuses the name when it inserted a non-ASCII
 /// character, whatever the words, and otherwise when a word is in the set.
 #[test]
-#[ignore = "pending E7-12"]
 fn a_name_built_from_words_splits_into_them_and_is_refused_iff_one_is_in_the_set() {
     let non_ascii = proptest::option::weighted(
         0.2,

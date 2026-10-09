@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use mandate_accounting::InstrumentId;
 use mandate_canon::{Digest, Key, Object, Value};
 use mandate_executor::BrokerRequest;
-use mandate_journal::{AppendOutcome, Environment, StoredEvent};
+use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, get_artifact};
 use mandate_runtime::{
     ActorKind, Autonomy, Classified, Deployment, DryRunVerdict, Effect, EventDraft, FlattenPlan,
     FlattenPlanner, FlattenRequest, FoldedEvent, GateDryRun, Input, IntentHandoff, MandateView,
@@ -75,7 +75,7 @@ pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
     let output = map::model_output(signal, &admitted.model, &instrument, clock)
         .map_err(refused(Stage::Signal))?;
-    execute_cycle(stages, setup, &admitted, output)
+    execute_cycle(stages, setup, &admitted, None, output)
 }
 
 /// One pass over the model host's observation and its output (E15-13, the brief's slice H3,
@@ -93,11 +93,8 @@ pub fn run_observed(
     observation: Observation,
     output: mandate_runtime::ModelOutput,
 ) -> Result<Report, ShellError> {
-    let _ = (stages, setup, observation, output);
-    Err(ShellError::Refused {
-        stage: Stage::Journal,
-        cause: Cause::Unimplemented { story: "E15-13" },
-    })
+    let admitted = admit(stages)?;
+    execute_cycle(stages, setup, &admitted, Some(observation), output)
 }
 
 fn admit(stages: &mut Stages) -> Result<Admitted, ShellError> {
@@ -117,10 +114,15 @@ fn admit(stages: &mut Stages) -> Result<Admitted, ShellError> {
     Ok(admitted)
 }
 
+/// One cycle over `output`, after `observation` when the host handed one. The observation is
+/// offered only once the replayed stream shows no open cycle, so a restart never journals it
+/// again (FT-12), and always before the output, so `ObservationRecorded` precedes
+/// `ModelOutputRecorded` (FT-6).
 fn execute_cycle(
     stages: &mut Stages,
     setup: &Setup,
     admitted: &Admitted,
+    observation: Option<Observation>,
     output: mandate_runtime::ModelOutput,
 ) -> Result<Report, ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
@@ -128,6 +130,9 @@ fn execute_cycle(
     session.start()?;
     if session.cycle_open && !setup.new_cycle {
         return Err(ShellError::CycleAlreadyOpen);
+    }
+    if let Some(observation) = observation {
+        session.observe(observation)?;
     }
     session.feed(Input::ModelOutput(output))?;
     session.feed(Input::Tick(clock))?;
@@ -152,7 +157,7 @@ impl ProductionCycle {
     /// Every [`ShellError`] is a fail-closed stop after which nothing further is sent.
     pub fn run(&mut self, output: mandate_runtime::ModelOutput) -> Result<Report, ShellError> {
         let admitted = admit(&mut self.stages)?;
-        execute_cycle(&mut self.stages, &self.setup, &admitted, output)
+        execute_cycle(&mut self.stages, &self.setup, &admitted, None, output)
     }
 
     /// Runs one cycle from the model host's observation and its output, as [`run_observed`] does
@@ -165,11 +170,14 @@ impl ProductionCycle {
         observation: Observation,
         output: mandate_runtime::ModelOutput,
     ) -> Result<Report, ShellError> {
-        let _ = (observation, output);
-        Err(ShellError::Refused {
-            stage: Stage::Journal,
-            cause: Cause::Unimplemented { story: "E15-13" },
-        })
+        let admitted = admit(&mut self.stages)?;
+        execute_cycle(
+            &mut self.stages,
+            &self.setup,
+            &admitted,
+            Some(observation),
+            output,
+        )
     }
 }
 
@@ -260,19 +268,26 @@ impl<'s> Session<'s> {
     /// Hands the runtime `observation` once its data is in the run's store under its `data_ref`
     /// and re-hashes there; otherwise refuses before the runtime sees it, so no batch goes into
     /// doubt and a later input, the kill switch included, still steps (E15-13, H3; rule 13).
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "run_observed calls it once E15-13 lands; until then only its pending test does"
-        )
-    )]
+    ///
+    /// The check is a checked read ([`get_artifact`]), which re-hashes the stored bytes, so other
+    /// bytes under the digest are refused as missing ones are. It runs here, never inside the
+    /// journal append: an append refused there would leave the runtime's batch in doubt (B8).
     pub(crate) fn observe(&mut self, observation: Observation) -> Result<(), ShellError> {
-        let _ = observation;
-        Err(ShellError::Refused {
-            stage: Stage::Journal,
-            cause: Cause::Unimplemented { story: "E15-13" },
-        })
+        let reference = ArtifactRef::from_digest(observation.data_ref);
+        let stored = self
+            .stages
+            .artifacts
+            .as_deref()
+            .is_some_and(|store| get_artifact(store, &reference).is_ok());
+        if !stored {
+            return Err(ShellError::Refused {
+                stage: Stage::MarketData,
+                cause: Cause::Absent {
+                    what: "the observation's stored data",
+                },
+            });
+        }
+        self.feed(Input::Observation(observation))
     }
 
     /// Journal §2's stream lifecycle: the shell that owns a new stream writes its
