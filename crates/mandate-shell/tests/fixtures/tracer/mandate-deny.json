@@ -1,0 +1,154 @@
+{
+  "autonomy": {
+    "admission": "ask",
+    "approval": {
+      "approvers": [
+        "role:approver"
+      ],
+      "on_timeout": "skip",
+      "timeout_s": 600,
+      "two_approver_above_usd": null
+    },
+    "default": "ask",
+    "rules": [
+      {
+        "id": "no_opens",
+        "then": "deny",
+        "when": {
+          "field": "purpose",
+          "op": "in",
+          "value": [
+            "open"
+          ]
+        }
+      },
+      {
+        "id": "routine",
+        "then": "auto",
+        "when": {
+          "field": "purpose",
+          "op": "in",
+          "value": [
+            "increase",
+            "open"
+          ]
+        }
+      }
+    ]
+  },
+  "behavior": {
+    "cadence": {
+      "event_sources": [
+        "price"
+      ],
+      "interval_s": 86400
+    },
+    "description": "Tracer bullet: one share of AAPL on the moving-average baseline (internal test data).",
+    "research": null,
+    "signal_models": [
+      {
+        "admits_instruments": false,
+        "content_hash": "sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc",
+        "id": "quant.ma_crossover",
+        "max_output_age_s": 86400,
+        "params": [
+          {
+            "key": "fast_periods",
+            "value": "5"
+          },
+          {
+            "key": "slow_periods",
+            "value": "20"
+          }
+        ],
+        "version": "1.0.0",
+        "weight": "1"
+      }
+    ],
+    "sizing": {
+      "entry_threshold": "0.3",
+      "exit_threshold": "0.3",
+      "method": "conviction_linear",
+      "rebalance_band": "0.05"
+    }
+  },
+  "capital": {
+    "allocation_usd": "1000",
+    "max_loss_from_allocation": "0.1"
+  },
+  "connection_id": "conn_alpaca_paper_01",
+  "environment": "paper",
+  "goal": {
+    "end_date": null,
+    "on_complete": "hold_protected",
+    "type": "continuous"
+  },
+  "mandate_schema_version": 1,
+  "name": "tracer-aapl-deny",
+  "notifications": {
+    "channels": [
+      "email"
+    ],
+    "quiet_hours": {
+      "end": "07:00",
+      "start": "23:00",
+      "timezone": "America/New_York"
+    }
+  },
+  "protection": {
+    "crypto_stop_limit_offset": null,
+    "enabled": true,
+    "stop_distance": "0.05",
+    "take_profit_distance": "0.1"
+  },
+  "risk": {
+    "breach_confirm_s": 60,
+    "daily_breach_min_s": 3600,
+    "daily_loss_action": "exits_only",
+    "drawdown_ladder": [
+      {
+        "action": "scale_sizes",
+        "at": "0.03",
+        "factor": "0.5"
+      },
+      {
+        "action": "exits_only",
+        "at": "0.06",
+        "factor": null
+      },
+      {
+        "action": "flatten_and_pause",
+        "at": "0.08",
+        "factor": null
+      }
+    ],
+    "hysteresis": "0.01",
+    "max_daily_loss": "0.02",
+    "max_drawdown": "0.08",
+    "max_gross_exposure_usd": "1000",
+    "max_order_usd": "300",
+    "max_orders_per_day": 50,
+    "max_position_fraction": "1",
+    "max_position_usd": "1000",
+    "reentry_cooldown_s": 3600,
+    "scale_action": "limit_buys",
+    "scale_lift_after_s": 600
+  },
+  "source_text_ref": null,
+  "universe": {
+    "asset_classes": [
+      "us_equity"
+    ],
+    "leveraged_etp_disclosure_version": null,
+    "leveraged_etps_enabled": false,
+    "max_instruments": 1,
+    "pinned": true,
+    "pinned_instruments": [
+      {
+        "asset_class": "us_equity",
+        "asset_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+        "symbol": "AAPL"
+      }
+    ]
+  }
+}

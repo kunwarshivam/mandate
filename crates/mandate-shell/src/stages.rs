@@ -7,12 +7,13 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 use mandate_backtest::Signal;
 use mandate_canon::Digest;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
-use mandate_journal::{AppendOutcome, Environment, StoredEvent};
+use mandate_journal::{AppendOutcome, ArtifactSource, Environment, StoredEvent};
 use mandate_num::Price;
 use mandate_risk::Decision;
 use mandate_runtime::{
@@ -323,9 +324,16 @@ pub struct Stages {
     pub sink: Box<dyn Sink>,
     pub executor: Box<dyn Executor>,
     pub connector: Box<dyn Connector>,
+    /// The content-addressed store the run's artifacts were put in, the one the journal appends
+    /// against. An observation's data is checked here before the runtime is handed the
+    /// observation, so a missing or altered artifact never puts a runtime batch in doubt (E15-13,
+    /// the brief's slice H3; `AGENTS.md` rule 13).
+    pub artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
 }
 
 #[cfg(test)]
 mod doubles;
 #[cfg(test)]
 mod fail_closed;
+#[cfg(test)]
+mod observed;

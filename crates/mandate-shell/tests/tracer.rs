@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mandate_accounting::InstrumentId as RuntimeInstrumentId;
+use mandate_accounting::{InstrumentId as RuntimeInstrumentId, Side};
 use mandate_alpaca::{HttpRequest, Method, Response, TradingTransport, TransportError};
 use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, ActionContext, Market as BuilderMarket, RequestedBy,
@@ -45,7 +45,7 @@ use mandate_risk::{
     ValidatedMandate as GateMandate, WorkingUniverse,
 };
 use mandate_runtime::{
-    AgentId, Autonomy, Classified, ConnectionId, Deployment, MandateView, ModelOutput,
+    AgentId, Autonomy, Classified, ConnectionId, Deployment, ExitOrigin, MandateView, ModelOutput,
     OrderExecution, Proposal, ProtectionPrices, Purpose as RuntimePurpose, SignalInputs,
     TimeInForce, WorkspaceId,
 };
@@ -55,7 +55,7 @@ use mandate_shell::adapters::{
 };
 use mandate_shell::control::{Governance, Registered};
 use mandate_shell::envelope::{IdSpace, Ids};
-use mandate_shell::stages::{Classifier, JournalWriter, MandateSource, Sizing, Stages};
+use mandate_shell::stages::{Classifier, JournalWriter, MandateSource, Sizing, Stage, Stages};
 use mandate_shell::{Cause, ProductionCycle, Report, Setup, ShellError, production_cycle, run};
 use mandate_spec::ValidationContext;
 use mandate_spec::document::ProvenanceMap;
@@ -1841,6 +1841,7 @@ fn a_registry_or_policy_missing_from_the_store_stops_the_run_before_any_order() 
 /// by the built-in risk-reducing step, while the confirmed mandate is nonconforming and the overlay
 /// forbids `auto`: the discretionary sell the builder sized, and the same sell as a risk exit, a
 /// protective order and an owner exit. The opening that the same governance denies is D4d's.
+/// The same holds with no governance at all, which a run with an open position may have (D4d).
 #[test]
 fn an_exit_is_auto_while_the_mandate_is_nonconforming() {
     let no_auto = PolicyLevel {
@@ -1881,8 +1882,12 @@ fn an_exit_is_auto_while_the_mandate_is_nonconforming() {
         (Purpose::Protective, RuntimePurpose::Protective),
         (Purpose::OwnerExit, RuntimePurpose::OwnerExit),
     ];
-    for (purpose, runtime) in exits {
+    for (governance, (purpose, runtime)) in [context.governance.clone(), None]
+        .into_iter()
+        .flat_map(|governance| exits.map(|exit| (governance.clone(), exit)))
+    {
         let mut context = context.clone();
+        context.governance = governance.clone();
         let builder = context.decision.as_mut().unwrap().builder.as_mut().unwrap();
         builder.action.purpose = purpose;
         let proposal = Proposal {
@@ -1896,7 +1901,12 @@ fn an_exit_is_auto_while_the_mandate_is_nonconforming() {
         let answer = plan
             .classify(&view, &proposal)
             .map_err(|cause| cause.to_string());
-        assert_eq!(answer, Ok(classified.clone()), "{purpose:?}");
+        let governed = governance.is_some();
+        assert_eq!(
+            answer,
+            Ok(classified.clone()),
+            "{purpose:?}, governed {governed}"
+        );
     }
 }
 
@@ -1944,5 +1954,345 @@ fn a_nonconforming_mandate_places_no_opening_order() {
             0,
             "{event_type} was journaled"
         );
+    }
+}
+
+/// What D4b reads for the E7-7 mandate under a workspace level that forbids `auto`: the mandate's
+/// `auto` rule exceeds it, so the confirmed version is nonconforming (DEC-534 item 1).
+fn nonconforming() -> Governance {
+    let no_auto = PolicyLevel {
+        name: LevelName::Workspace,
+        values: BTreeMap::from([(PolicyKey::AutoAllowed, PolicyValue::Flag(false))]),
+    };
+    let governed = governance(NO_AUTO_POLICY, &[no_auto]);
+    assert!(!governed.violations.is_empty(), "the mandate conforms");
+    governed
+}
+
+/// Mandate spec §6.2 step 5c and DEC-536 item 2: the deny the overlay itself decided.
+fn overlay_deny() -> Classified {
+    Classified {
+        autonomy: Autonomy::Deny,
+        decided_by: Some("policy_overlay".to_owned()),
+    }
+}
+
+/// `mandate`'s classification of `proposal` under `context`, against the view `mandate` admits,
+/// with a refusal printed as the cause reports it.
+fn classify_under(
+    mandate: &str,
+    context: &RunContext,
+    proposal: &Proposal,
+) -> Result<Classified, String> {
+    let path = fixtures().join(mandate);
+    let context = Some(Rc::new(context.clone()));
+    let source = SpecMandate {
+        path: path.clone(),
+        context: context.clone(),
+    };
+    let view = source.admitted().unwrap().view;
+    let plan = BuilderPlan {
+        mandate: path,
+        context,
+    };
+    plan.classify(&view, proposal)
+        .map_err(|cause| format!("{cause}: {cause:?}"))
+}
+
+/// The opening the builder sizes on the fixture, re-labelled `purpose`, with `context`'s
+/// classification facts naming the same purpose.
+fn proposal_as(context: &mut RunContext, purpose: Purpose, runtime: RuntimePurpose) -> Proposal {
+    let (view, output) = builder_fixture();
+    let (model, instrument) = (output.model_id.clone(), output.instrument_id.clone());
+    let sized = size_output(context.clone(), &view, output, model, instrument);
+    let sized = sized.unwrap().unwrap();
+    assert_eq!(sized.purpose, RuntimePurpose::Open);
+    let builder = context.decision.as_mut().unwrap().builder.as_mut().unwrap();
+    builder.action.purpose = purpose;
+    Proposal {
+        purpose: runtime,
+        ..sized
+    }
+}
+
+/// The run's own builder, with each proposal it sizes turned into `purpose` on `side`, so a run
+/// reaches the decision for an increase or an exit the fresh fixture cannot size itself.
+struct Retarget {
+    inner: Box<dyn Sizing>,
+    side: Side,
+    purpose: RuntimePurpose,
+}
+
+impl Sizing for Retarget {
+    fn size(&self, view: &MandateView, inputs: &SignalInputs) -> Result<Option<Proposal>, Cause> {
+        let exit_origin =
+            (self.purpose == RuntimePurpose::DiscretionaryExit).then_some(ExitOrigin::Signal);
+        Ok(self.inner.size(view, inputs)?.map(|proposal| Proposal {
+            side: self.side,
+            purpose: self.purpose,
+            exit_origin,
+            ..proposal
+        }))
+    }
+}
+
+/// [`governed_run_under`] with every sized proposal retargeted to `purpose`, and the advisory
+/// gate holding the one share an increase adds to or an exit sells.
+fn retargeted_run(
+    name: &str,
+    governed: Option<Governance>,
+    store: Artifacts,
+    (purpose, runtime, side): (Purpose, RuntimePurpose, Side),
+) -> (Result<Report, ShellError>, Stages, Rc<RefCell<Seen>>) {
+    let scratch = Scratch::new(name);
+    let closes = rising();
+    let closes: Vec<&str> = closes.iter().map(String::as_str).collect();
+    let dataset = bars(&scratch.0, &closes);
+    let transport = Scripted::new(Broker::Fresh);
+    let seen = Rc::clone(&transport.seen);
+    let mut context = run_context(true);
+    context.governance = governed;
+    let decision = context.decision.as_mut().unwrap();
+    decision.builder.as_mut().unwrap().action.purpose = purpose;
+    let gate = decision.gate.as_mut().unwrap();
+    let held = gate.instrument.instrument.clone();
+    gate.agent.positions.insert(held, Qty::parse("1").unwrap());
+    let mut stages = governed_stages("mandate.json", dataset, transport, context, store);
+    let inner = std::mem::replace(&mut stages.sizing, Box::new(UnsizedPlan));
+    stages.sizing = Box::new(Retarget {
+        inner,
+        side,
+        purpose: runtime,
+    });
+    let outcome = run(&mut stages, &setup(true));
+    (outcome, stages, seen)
+}
+
+/// The placeholder sizing that stands in only while [`retargeted_run`] wraps the run's own.
+struct UnsizedPlan;
+
+impl Sizing for UnsizedPlan {
+    fn size(&self, _view: &MandateView, _inputs: &SignalInputs) -> Result<Option<Proposal>, Cause> {
+        panic!("the placeholder sizing is never asked")
+    }
+}
+
+/// What the account stream holds after reconciliation and before any intent reaches it.
+const RECONCILED: [&str; 4] = [
+    "StreamOpened",
+    "AccountStateObserved",
+    "AccountSnapshotRecorded",
+    "ReconciliationRun",
+];
+
+/// Mandate spec §6.2 step 5c, DEC-534 item 2 and DEC-536: the run's one decision is a version-2
+/// `deny` of `purpose` by `policy_overlay`, bound to the effective policy set and registry; no
+/// intent or approval request follows, the account stream holds nothing past reconciliation, the
+/// broker sees no order, and the run stops at the classification as a deny.
+fn assert_overlay_denied(
+    outcome: Result<Report, ShellError>,
+    stages: &Stages,
+    seen: &Rc<RefCell<Seen>>,
+    governed: &Governance,
+    purpose: &str,
+) {
+    let error = refused(outcome);
+    let denied = matches!(
+        &error,
+        ShellError::Refused {
+            stage: Stage::Classify,
+            cause: Cause::NotAuto { autonomy: "deny" },
+        }
+    );
+    assert!(denied, "{purpose}: {error}: {error:?}");
+    assert_eq!(seen.borrow().posts(), 0, "{purpose}");
+    let agent = committed(stages, &agent_stream());
+    let rows: Vec<&StoredEvent> = agent
+        .iter()
+        .filter(|row| row.event_type == "DecisionMade")
+        .collect();
+    assert_eq!(rows.len(), 1, "{purpose}");
+    assert_eq!(rows[0].schema_version, 2, "{purpose}");
+    let decision = mandate_canon::parse(&rows[0].body).unwrap();
+    for (field, expected) in [
+        ("autonomy", "deny"),
+        ("decided_by", "policy_overlay"),
+        ("purpose", purpose),
+    ] {
+        let found = payload_field(&decision, field);
+        assert_eq!(found.as_deref(), Some(expected), "{purpose}: {field}");
+    }
+    let refs = decision.get("config_refs").unwrap();
+    for (field, digest) in [
+        ("policy_set", governed.policy_set.content_hash),
+        ("model_registry", governed.model_registry.content_hash),
+    ] {
+        let expected = format!("sha256:{digest}");
+        let found = refs.get(field).and_then(Value::as_str);
+        assert_eq!(found, Some(expected.as_str()), "{purpose}: {field}");
+    }
+    for event_type in ["IntentProposed", "ApprovalRequested"] {
+        let found = of_type(&agent, event_type).len();
+        assert_eq!(found, 0, "{purpose}: {event_type}");
+    }
+    let account = committed(stages, &account_stream());
+    let types: Vec<&str> = account.iter().map(|row| row.event_type.as_str()).collect();
+    assert_eq!(types, RECONCILED, "{purpose}");
+    let (_, mut artifacts) = executor_artifacts("mandate.json");
+    artifacts.extend(governed_store(governed));
+    for stream in [agent_stream(), account_stream()] {
+        let rows = committed(stages, &stream);
+        verify_events(&rows, TrustedStart::GENESIS, &artifacts).unwrap();
+    }
+}
+
+/// Mandate spec §6.2 step 5c, DEC-534 item 2, DEC-536 (D4d): an opening under a nonconforming
+/// mandate is denied by the overlay, whatever the rules decided first: the E7-7 mandate's `auto`
+/// rule and the ask fixture's `ask` rule both become `deny`, named `policy_overlay`. The run
+/// records the deny and places nothing.
+#[test]
+#[ignore = "pending E7-19"]
+fn an_opening_under_a_nonconforming_mandate_is_denied_by_the_policy_overlay() {
+    let mut context = run_context(true);
+    context.governance = Some(nonconforming());
+    let opening = proposal_as(&mut context, Purpose::Open, RuntimePurpose::Open);
+    for mandate in ["mandate.json", "mandate-ask.json"] {
+        let answer = classify_under(mandate, &context, &opening);
+        assert_eq!(answer, Ok(overlay_deny()), "{mandate}");
+    }
+    let governed = nonconforming();
+    let store = Some(Arc::new(governed_store(&governed)) as Arc<dyn ArtifactSource + Send + Sync>);
+    let (outcome, stages, seen) = governed_run_under("overlay-open", governed.clone(), store);
+    assert_overlay_denied(outcome, &stages, &seen, &governed, "open");
+}
+
+/// DEC-534 item 2 (D4d): an increase is denied the same way. No fixture sizes an increase, since
+/// the tracer's account starts flat, so the run's own sizing is retargeted to one.
+#[test]
+#[ignore = "pending E7-19"]
+fn an_increase_under_a_nonconforming_mandate_is_denied_by_the_policy_overlay() {
+    let mut context = run_context(true);
+    context.governance = Some(nonconforming());
+    let increase = proposal_as(&mut context, Purpose::Increase, RuntimePurpose::Increase);
+    let answer = classify_under("mandate.json", &context, &increase);
+    assert_eq!(answer, Ok(overlay_deny()));
+    let governed = nonconforming();
+    let store = Some(Arc::new(governed_store(&governed)) as Arc<dyn ArtifactSource + Send + Sync>);
+    let increase = (Purpose::Increase, RuntimePurpose::Increase, Side::Buy);
+    let (outcome, stages, seen) =
+        retargeted_run("overlay-increase", Some(governed.clone()), store, increase);
+    assert_overlay_denied(outcome, &stages, &seen, &governed, "increase");
+}
+
+/// What D4b reads for the deny fixture under the workspace level that forbids `auto`: its later
+/// `routine` rule still says `auto`, so this mandate is nonconforming in its own right.
+fn nonconforming_deny_fixture() -> Governance {
+    let source = fs::read(fixtures().join("mandate-deny.json")).unwrap();
+    let mandate = mandate_spec::Mandate::parse(&mandate_canon::parse(&source).unwrap()).unwrap();
+    let no_auto = PolicyLevel {
+        name: LevelName::Workspace,
+        values: BTreeMap::from([(PolicyKey::AutoAllowed, PolicyValue::Flag(false))]),
+    };
+    let checked = mandate_spec::policy::check(&mandate, &[no_auto]).unwrap();
+    assert!(!checked.violations.is_empty(), "the deny fixture conforms");
+    Governance {
+        overlay: checked.overlay,
+        violations: checked.violations,
+        ..nonconforming()
+    }
+}
+
+/// Mandate spec §6.2 step 5c and DEC-536 item 2 (D4d): the overlay names itself only when it
+/// changed the decision. Under the deny fixture, nonconforming because its `routine` rule says
+/// `auto`, an opening that its first rule `no_opens` already denies stays `deny` labelled
+/// `rule:no_opens`, never `policy_overlay`, and the run journals that label and places nothing.
+/// An increase, which `routine` makes `auto`, is the overlay's own deny, so the same fixture
+/// shows the label follows the step that decided.
+#[test]
+#[ignore = "pending E7-19"]
+fn a_deny_the_rules_decided_under_a_nonconforming_mandate_keeps_the_rule_label() {
+    let governed = nonconforming_deny_fixture();
+    let by_rule = Classified {
+        autonomy: Autonomy::Deny,
+        decided_by: Some("rule:no_opens".to_owned()),
+    };
+    let mut context = run_context(true);
+    context.governance = Some(governed.clone());
+    let opening = proposal_as(&mut context, Purpose::Open, RuntimePurpose::Open);
+    let answer = classify_under("mandate-deny.json", &context, &opening);
+    assert_eq!(answer, Ok(by_rule));
+    let mut context = run_context(true);
+    context.governance = Some(governed.clone());
+    let increase = proposal_as(&mut context, Purpose::Increase, RuntimePurpose::Increase);
+    let answer = classify_under("mandate-deny.json", &context, &increase);
+    assert_eq!(answer, Ok(overlay_deny()));
+    let scratch = Scratch::new("deny-keeps-rule");
+    let closes = rising();
+    let closes: Vec<&str> = closes.iter().map(String::as_str).collect();
+    let dataset = bars(&scratch.0, &closes);
+    let transport = Scripted::new(Broker::Fresh);
+    let seen = Rc::clone(&transport.seen);
+    let store = Some(Arc::new(governed_store(&governed)) as Arc<dyn ArtifactSource + Send + Sync>);
+    let mut context = run_context(true);
+    context.governance = Some(governed);
+    let mut stages = governed_stages("mandate-deny.json", dataset, transport, context, store);
+    let error = refused(run(&mut stages, &setup(true)));
+    let denied = matches!(
+        &error,
+        ShellError::Refused {
+            stage: Stage::Classify,
+            cause: Cause::NotAuto { autonomy: "deny" },
+        }
+    );
+    assert!(denied, "{error}: {error:?}");
+    assert_eq!(seen.borrow().posts(), 0, "the broker saw an order");
+    let agent = committed(&stages, &agent_stream());
+    let decisions = of_type(&agent, "DecisionMade");
+    assert_eq!(decisions.len(), 1);
+    for (field, expected) in [
+        ("autonomy", "deny"),
+        ("decided_by", "rule:no_opens"),
+        ("purpose", "open"),
+    ] {
+        let found = payload_field(&decisions[0], field);
+        assert_eq!(found.as_deref(), Some(expected), "{field}");
+    }
+}
+
+/// `AGENTS.md` rules 3 and 13, DEC-534 item 2 (D4d): a discretionary exit goes through the whole
+/// agent side of a run under a nonconforming mandate and under no governance at all. It is
+/// decided `auto` by the built-in risk-reducing step, proposed, and handed to the account stream,
+/// whose binding gate then decides it on the account's own fold.
+#[test]
+fn an_exit_is_decided_and_handed_under_a_nonconforming_or_ungoverned_run() {
+    let governed = nonconforming();
+    let store = Some(Arc::new(governed_store(&governed)) as Arc<dyn ArtifactSource + Send + Sync>);
+    let cases = [
+        ("nonconforming", Some(governed), store),
+        ("ungoverned", None, None),
+    ];
+    for (name, governed, store) in cases {
+        let exit = (
+            Purpose::DiscretionaryExit,
+            RuntimePurpose::DiscretionaryExit,
+            Side::Sell,
+        );
+        let (outcome, stages, _) = retargeted_run("exit-through", governed, store, exit);
+        let outcome = outcome.map_err(|error| format!("{error}: {error:?}"));
+        assert!(outcome.is_ok(), "{name}: {outcome:?}");
+        let agent = committed(&stages, &agent_stream());
+        let decisions = of_type(&agent, "DecisionMade");
+        assert_eq!(decisions.len(), 1, "{name}");
+        for (field, expected) in [
+            ("autonomy", "auto"),
+            ("decided_by", "builtin_risk_reducing"),
+            ("purpose", "discretionary_exit"),
+        ] {
+            let found = payload_field(&decisions[0], field);
+            assert_eq!(found.as_deref(), Some(expected), "{name}: {field}");
+        }
+        assert_eq!(of_type(&agent, "IntentProposed").len(), 1, "{name}");
+        let account = committed(&stages, &account_stream());
+        assert_eq!(of_type(&account, "IntentReceived").len(), 1, "{name}");
     }
 }
