@@ -10,12 +10,15 @@
 )]
 //! Read-only audit reads over the journal, scoped to one workspace (workspace API §4.8.1, backlog
 //! E12-6, journal spec §7). Pure: no I/O of its own, no clock, no randomness, and it writes nothing
-//! to any journal. A stream or event of another workspace, a malformed id, and an absent one all
-//! read as the same [`AuditError::NotFound`] (API-9, AU-1, DEC-760 item 4). Pages follow API-15
+//! to any journal. Every read takes the caller's [`Tenant`], never a bare workspace id (identity
+//! spec ID-8), and reaches only streams whose workspace segment is that tenant's workspace ULID
+//! text (DEC-770 item 4). A stream or event of another workspace, a malformed id, and an absent one
+//! all read as the same [`AuditError::NotFound`] (API-9, AU-1, DEC-760 item 4). Pages follow API-15
 //! and DEC-760: `seq` order, each event's stored canonical body bytes with its `hash` and
 //! `prev_hash`, the stream head read with the page, and the cursor the last `seq` served.
 
 use mandate_canon::Digest;
+use mandate_identity::Tenant;
 use mandate_journal::MemoryJournal;
 
 /// Why an audit read returned nothing. `NotFound` carries no detail, so a foreign id and an absent
@@ -26,7 +29,7 @@ pub enum AuditError {
     /// The body of every stub in the tests PR (DEC-77, DEC-83).
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
-    /// The stream, event or workspace is absent, malformed, or in another workspace (API-9).
+    /// The stream or event is absent, malformed, or in another workspace (API-9).
     #[error("not found")]
     NotFound,
     /// A page `limit` outside `1..=1000` (DEC-760 item 1). Refused, never clamped.
@@ -35,19 +38,6 @@ pub enum AuditError {
     /// An `after_seq` above 2^53 − 1, the largest canonical integer (DEC-760 item 1).
     #[error("after_seq {after_seq} is outside 0..=9007199254740991")]
     AfterSeqOutOfRange { after_seq: u64 },
-}
-
-/// The caller's workspace, taken from its authenticated principal: one `[A-Za-z0-9_-]+` segment
-/// (journal spec §2).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WorkspaceId(String);
-
-impl WorkspaceId {
-    /// A malformed id names no workspace, so it reads as [`AuditError::NotFound`].
-    pub fn parse(text: &str) -> Result<Self, AuditError> {
-        let _ = text;
-        Err(AuditError::Unimplemented { story: "E12-6" })
-    }
 }
 
 /// How many events or streams one page may hold: `1..=1000`, and 100 when the caller names none
@@ -118,15 +108,17 @@ pub struct Page {
     pub at_head: bool,
 }
 
-/// The journal reads the audit explorer needs, each scoped to the caller's workspace. An adapter
-/// implements them over its store: [`MemoryRead`] here, the Postgres store in
-/// `mandate-journal-pg`.
+/// The journal reads the audit explorer needs, each scoped to the workspace of the caller's
+/// [`Tenant`], which only `mandate_identity::authorize` constructs (identity spec ID-8). A read does
+/// not check the tenant's permission again: the API layer authorizes `ReadRecords` before it calls
+/// (DEC-770 item 4). An adapter implements them over its store: [`MemoryRead`] here, the Postgres
+/// store in `mandate-journal-pg`.
 pub trait JournalRead {
-    /// The workspace's streams that hold at least one event, with their heads, in ascending
+    /// The tenant's streams that hold at least one event, with their heads, in ascending
     /// `stream_id` bytes, those after `after` only, at most `limit` of them (DEC-760 item 6).
     fn streams(
         &self,
-        workspace: &WorkspaceId,
+        tenant: &impl Tenant,
         after: Option<&str>,
         limit: PageLimit,
     ) -> Result<Vec<StreamEntry>, AuditError>;
@@ -135,14 +127,14 @@ pub trait JournalRead {
     /// the same snapshot.
     fn page(
         &self,
-        workspace: &WorkspaceId,
+        tenant: &impl Tenant,
         stream_id: &str,
         after_seq: u64,
         limit: PageLimit,
     ) -> Result<Page, AuditError>;
 
-    /// The event whose `event_id` is `event_id`, when its stream is in `workspace`.
-    fn event(&self, workspace: &WorkspaceId, event_id: &str) -> Result<JournalEvent, AuditError>;
+    /// The event whose `event_id` is `event_id`, when its stream is in the tenant's workspace.
+    fn event(&self, tenant: &impl Tenant, event_id: &str) -> Result<JournalEvent, AuditError>;
 }
 
 /// [`JournalRead`] over the in-memory journal. One borrow of the journal is one snapshot.
@@ -160,27 +152,27 @@ impl<'a> MemoryRead<'a> {
 impl JournalRead for MemoryRead<'_> {
     fn streams(
         &self,
-        workspace: &WorkspaceId,
+        tenant: &impl Tenant,
         after: Option<&str>,
         limit: PageLimit,
     ) -> Result<Vec<StreamEntry>, AuditError> {
-        let _ = (self.journal, workspace, after, limit.0);
+        let _ = (self.journal, tenant, after, limit.0);
         Err(AuditError::Unimplemented { story: "E12-6" })
     }
 
     fn page(
         &self,
-        workspace: &WorkspaceId,
+        tenant: &impl Tenant,
         stream_id: &str,
         after_seq: u64,
         limit: PageLimit,
     ) -> Result<Page, AuditError> {
-        let _ = (self.journal, workspace, stream_id, after_seq, limit.0);
+        let _ = (self.journal, tenant, stream_id, after_seq, limit.0);
         Err(AuditError::Unimplemented { story: "E12-6" })
     }
 
-    fn event(&self, workspace: &WorkspaceId, event_id: &str) -> Result<JournalEvent, AuditError> {
-        let _ = (self.journal, workspace, event_id);
+    fn event(&self, tenant: &impl Tenant, event_id: &str) -> Result<JournalEvent, AuditError> {
+        let _ = (self.journal, tenant, event_id);
         Err(AuditError::Unimplemented { story: "E12-6" })
     }
 }

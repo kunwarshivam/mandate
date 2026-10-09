@@ -1,5 +1,6 @@
-//! A journal of several workspaces, built through the append protocol, and the record of what was
-//! appended that the tests' oracles read instead of the code under test.
+//! A journal of several workspaces, built through the append protocol, the record of what was
+//! appended that the tests' oracles read instead of the code under test, and the tenant contexts
+//! the real `authorize` yields for the reads.
 #![allow(
     dead_code,
     reason = "each test crate that includes this module uses a different subset"
@@ -7,15 +8,63 @@
 
 use std::collections::BTreeMap;
 
-use mandate_audit::{PageLimit, WorkspaceId};
+use mandate_audit::PageLimit;
+use mandate_identity::{
+    Authorized, MembershipState, OrgId, Permission, Principal, PrincipalId, Role, Scope,
+    SessionKind, SessionRef, TenantContext, WorkspaceId, authorize,
+};
+use mandate_identity_testkit::{StaticLookup, membership, session};
 use mandate_journal::{AppendOutcome, MemoryJournal, StreamId};
 use mandate_time::UtcNanos;
 
 pub const T: &str = "2026-09-21T14:00:00.000000000Z";
 
-/// The workspaces every fixture holds. `ws_a` is a prefix of `ws_ab`, so a scope check that
-/// compares prefixes rather than whole segments reads across tenants.
-pub const WORKSPACES: [&str; 3] = ["ws_a", "ws_ab", "ws_b"];
+/// The two workspaces the tests read as.
+pub const WS_A: WorkspaceId = WorkspaceId(0x0192_0C3A_7F10_4B2E_9D01_0000_0000_00A1);
+pub const WS_B: WorkspaceId = WorkspaceId(0x0192_0C3A_7F10_4B2E_9D01_0000_0000_00B2);
+
+/// A workspace's stream segment: its ULID text (journal spec §2).
+pub fn text(workspace: WorkspaceId) -> String {
+    workspace.to_ulid_text().unwrap()
+}
+
+/// The workspace segments every fixture holds: [`WS_A`]'s, [`WS_A`]'s with one more character, a
+/// segment no tenant names but that has `WS_A`'s as a prefix, so a scope check that compares
+/// prefixes rather than whole segments reads across tenants, and [`WS_B`]'s.
+pub fn workspaces() -> [String; 3] {
+    [text(WS_A), format!("{}0", text(WS_A)), text(WS_B)]
+}
+
+/// An Auditor's context for `workspace`, from the real `authorize` for `ReadRecords` (the matrix
+/// grants it WA, AU and SA): the only way a read is handed a workspace (identity spec ID-8).
+pub fn tenant(workspace: WorkspaceId) -> TenantContext {
+    let user = PrincipalId(0x0192_0C3A_7F10_4B2E_9D01_0000_0000_0C01);
+    let scope = Scope::Workspace {
+        org: OrgId(0x0192_0C3A_7F10_4B2E_9D01_0000_0000_0001),
+        workspace,
+    };
+    let now = UtcNanos::parse(T).unwrap();
+    let auditor = membership(
+        user,
+        scope,
+        MembershipState::Active,
+        &[(Role::Auditor, now)],
+    );
+    let session = session(SessionRef(0x5E), SessionKind::Full, vec![auditor.clone()]);
+    let principal = Principal::User { id: user };
+    let lookup = StaticLookup(vec![auditor]);
+    match authorize(
+        &lookup,
+        &principal,
+        &session,
+        scope,
+        Permission::ReadRecords,
+        now,
+    ) {
+        Ok(Authorized::Workspace { tenant, .. }) => tenant,
+        other => panic!("an Auditor reads its workspace's records: {other:?}"),
+    }
+}
 
 /// The account streams each workspace holds, beside its control stream.
 pub const ACCOUNTS: [&str; 2] = ["ACCT1", "ACCT2"];
@@ -26,10 +75,6 @@ pub fn acct(workspace: &str, account: &str) -> String {
 
 pub fn ctl(workspace: &str) -> String {
     format!("ctl:{workspace}")
-}
-
-pub fn ws(text: &str) -> WorkspaceId {
-    WorkspaceId::parse(text).unwrap()
 }
 
 pub fn limit(n: u64) -> PageLimit {
@@ -72,7 +117,7 @@ pub struct Fixture {
 }
 
 impl Fixture {
-    /// Every workspace of [`WORKSPACES`] with its control stream and its [`ACCOUNTS`] streams, each
+    /// Every workspace segment of [`workspaces`] with its control stream and its [`ACCOUNTS`] streams, each
     /// opened, and `marks` `MarkUpdated` events on every account stream.
     pub fn new(marks: u64) -> Self {
         let mut fixture = Self {
@@ -80,7 +125,7 @@ impl Fixture {
             appended: BTreeMap::new(),
             next_id: 0,
         };
-        for workspace in WORKSPACES {
+        for workspace in &workspaces() {
             fixture.open(
                 &ctl(workspace),
                 &format!(r#"{{"stream_type":"control","workspace_id":"{workspace}"}}"#),
