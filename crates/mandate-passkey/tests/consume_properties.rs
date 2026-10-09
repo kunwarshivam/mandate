@@ -159,7 +159,6 @@ fn arrange(case: &mut Case, chosen: &[Failure], signed: &[OwnedAssertion]) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_refusal_is_the_first_injected_failure_in_spec_order() {
     let all = combinations();
     assert_eq!(all.len(), 2 * 3 * 3 * 2 * 2 * 4 * 2 * 2 * 2 * 2 * 2 * 2);
