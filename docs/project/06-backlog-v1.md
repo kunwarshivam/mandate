@@ -1335,15 +1335,19 @@ story buys a service, and none uses a real identity-provider account in tests (s
   - *ID-1, ID-16* (L2, `mandate-api` and the journal): the fuzz of forged `actor` and
     `workspace_id` fields against committed events; the org fan-out's attribution, retry through
     append failures, and all-or-nothing writes.
-  - *ID-3's stream close and ID-4's "nothing else committed"* (L2 with the workspace store).
+  - *ID-3's stream close, and ID-4's per-command table* (L2 with the workspace store): each S
+    command refused for every failure mode with nothing else committed; the identity crates cover
+    only `consume`'s own refusals.
   - *ID-6 and ID-11* (`mandate-approval` with E9-9): mapping a client or service account to its
     human, so a client counted as a second user is caught.
   - *ID-8's other layers* (the store's row-level security, `mandate-journal-pg`, NATS, the cache
     wrapper, the vault), as E9-8's note lists them; the unprefixed cache key's planted bug waits
     for the cache wrapper.
   - *ID-9* (L2, the HTTP layer): the canary log scan; recovery codes wait for E9-10.
-  - *ID-10* (the kill-switch drill), *ID-12* (E9-10, break-glass), *ID-14* (L3, notifications),
-    and *ID-15* (the global directory).
+  - *ID-10* (infrastructure, the kill-switch drill with the identity provider, the control
+    plane and the model gateway unreachable), *ID-12* (E9-10, break-glass), *ID-14* (L3,
+    notifications), and *ID-15* (infrastructure, the global directory's schema test and the
+    drill with the outbound link cut).
 - **E9-12 (Should, M8)** Round-1 minors of the identity spec's review ([#556](https://github.com/kunwarshivam/mandate/pull/556),
   freeze rule). *Accepted when the spec settles each:* (1) the workspace admin holds the kill switch's
   privileges beyond the stop (mandate §6.1, selling equities outside the session) but not the owner
