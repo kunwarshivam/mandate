@@ -2,16 +2,51 @@
 
 | | |
 |---|---|
-| **Status** | v0.35 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.36 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, `connections` section of §9.8 and its `connection_requests` section of rule 131, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, and `cold_records` section of §9.14; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, `connections` section of §9.8 and its `connection_requests` section of rule 131, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, and `verification_runs` section of §9.13's `VerificationRun` version 2; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.36 ([DEC-788](../project/decisions/DEC-788.md), [DEC-789](../project/decisions/DEC-789.md)
+  the founder, [DEC-786](../project/decisions/DEC-786.md), [DEC-787](../project/decisions/DEC-787.md)):**
+  §9.13's `VerificationRun` gains version 2, so `GET /verifications/{id}` (workspace API §4.8.1)
+  can rebuild a run from its record, and §11 gains an **incomplete** outcome for a check that
+  cannot yet be proven. Each item only refuses more or records more; none admits a range that
+  failed (DEC-176), except DEC-789's new outcome, which is the founder's.
+  - **Version 2.** Each range adds `start` (`{kind, manifest_hash, anchor_event_id}`, the
+    trusted start's record), `checked` (the events walked), and `incomplete` (the check that could
+    not finish, `tsa_token_invalid` or `null`); `result` adds `incomplete`. Version 1 is not
+    edited (§8): a closed schema gains members only at a new version, as `OrderStateChanged`'s
+    did at v0.34, even though no writer appended version 1. It stays registered and replays;
+    every writer appends version 2.
+  - **Rules 132 and 133**, numbered on after rule 131 and renumbering none. Rule 132: the start
+    names exactly its own record; genesis enters at seq 1 and an anchor at seq 2 or later;
+    `checked` never exceeds the range and is the whole range unless the range failed; a failed
+    range records no incomplete check; and while the token cannot be proven, an anchor start's
+    range never passes. Rule 133: `fail` when a range failed, else `incomplete` when one is
+    incomplete, else `pass`. Rule 112 is version 1's; rules 107, 110, and 111 judge both.
+  - **The verification's id** is its `VerificationRun`'s `event_id`, as an export's is its
+    `ExportCreated`'s (DEC-788 item 2).
+  - **§11 "Incomplete"** (DEC-789, option (iii), the founder 2026-10-09). `verify_tsa` never answers
+    `Ok` (DEC-265 item 1), so a token with the anchor's imprint, and an anchor the range checks whose
+    token is `null`, leave the token check incomplete: never `pass`, never a false
+    `tsa_token_invalid`, and no SEV-1. The CLI's `tsa_verification_incomplete` (DEC-490 item 6) is
+    the same outcome under its own word. "On failure" now says it means a `fail` result.
+  - **§9.14:** a manifest start is one the cold store vouches for; one only the hot store's record
+    vouches for is not a trusted start (DEC-787 item 5).
+  - **Vectors.** A new generated `verification_runs` section holds version 2's base drafts (passed,
+    failed, incomplete), an invalid draft for every new member and every clause of rules 132 and
+    133, and valid drafts for the readings a rule might be misread to refuse; its oracles recompute
+    each result by precedence and each count and start from the range. `records_access`, version
+    1's, is unchanged. The vectors stay version 3.
+  - **Order of the changes (ES-22).** Spec and vectors first: `mandate-journal` registers version 1
+    only, and no Rust test reads `verification_runs` yet, so `main` stays green. The tests PR
+    and the `records.rs` implementation follow and register version 2.
 - **v0.35 ([DEC-885](../project/decisions/DEC-885.md)):** §11's `connection_lifecycle_mismatch`
   verifies a range from its **connection anchor**, the state the full-chain run's fold of stream
   rules 66, 67, 68, and 131 holds before the range's trusted start, and fails closed without one,
@@ -2815,7 +2850,8 @@ identity crate's tests hold the out-of-order cases.
 ### 9.13 Records access, export, and verification records ([DEC-780](../project/decisions/DEC-780.md))
 
 The control stream's records of who read the records outside the product views, what was exported,
-and what was verified (§7, §11, §12), closed at schema version 1 as §9.7's records are: every listed
+and what was verified (§7, §11, §12), closed at schema version 1 as §9.7's records are, and
+`VerificationRun` at version 2 too (below): every listed
 member is present, `null` only where the type is nullable, and any extra member is refused. §9.1's
 types apply, with two more below. The rules number on from §9.12's. None of the three names a
 configuration.
@@ -2876,24 +2912,40 @@ export's ID.
 | `verifier_digest` | `digest` | The canonical export's verifier digest (§12, [DEC-265](../project/04-decision-log.md#decisions) item 3): one SHA-256 over every segment manifest and file, anchor root, and timestamp token, length-prefixed. A view names the digest of the canonical export it is derived from. Anyone holding the export recomputes it |
 | `view` | `digest?` | The SHA-256 of the view's bytes as served: rule 109 |
 
-**`VerificationRun`**: one run of §11's verification and its result.
+**`VerificationRun`**: one run of §11's verification and its result. Its `event_id` is the
+verification's ID: for a requested run, the `verification_id` that `POST /verifications` returns
+and `GET /verifications/{id}` resolves ([workspace API spec](workspace-api.md) §4.8.1,
+[DEC-788](../project/decisions/DEC-788.md) item 2).
+
+**Versions.** Version 2 (v0.36, [DEC-788](../project/decisions/DEC-788.md) item 1 and
+[DEC-789](../project/decisions/DEC-789.md)) is version 1 with three members added to each range,
+`start`, `checked`, and `incomplete`, and with `incomplete` as a third `result`, so a reader can
+rebuild a run's trusted start, its count of events walked, and a check it could not finish from
+the record alone. Every writer appends version 2. Version 1 is not edited (§8), stays registered,
+and keeps replaying; no writer appends it, and none did before v0.36. Rules 107, 110, and 111
+judge both versions, rule 112 version 1, and rules 132 and 133 version 2.
 
 | Member | Type | Meaning |
 |---|---|---|
 | `trigger` | `startup` \| `segment_export` \| `weekly` \| `request` \| `restore_drill` | Why it ran: §11's schedule, a principal's request, or a restore drill: rule 110 |
 | `ranges` | `[checked_range]` | Every range verified, each with its own result |
-| `result` | `pass` \| `fail` | Rule 112 |
+| `result` | `pass` \| `fail`; at version 2, `pass` \| `incomplete` \| `fail` | Rule 112; at version 2, rule 133 |
 
 A `checked_range` is a `range` whose `to_hash` is `digest?` (the head the run verified, or
-`null` when a failure left none: rule 111), followed by:
+`null` when a failure left none: rule 111), followed by, at version 1, `failure`, and at version
+2, `start`, `checked`, `failure`, and `incomplete`:
 
 | Member | Type | Meaning |
 |---|---|---|
+| `start` | `{kind: genesis \| manifest \| anchor, manifest_hash: digest?, anchor_event_id: ulid?}` | Version 2. The trusted start the range was entered from (§9.14 "What a verifier reads"): seq 1 with 64 zeros, the `SegmentExported` whose `manifest_hash` this is, or the `AnchorComputed` whose `event_id` this is. The member of the kind named is non-null and the other is `null`: rule 132 |
+| `checked` | `integer` | Version 2. The number of events the run walked from `from_seq` (§11; workspace API AU-8): rule 132 |
 | `failure` | `{check, seq: integer?}?` | The first failure §11 reports for the range, or `null`. `check` is one of §11's codes: `non_canonical`, `column_mismatch`, `seq_gap`, `rehash_mismatch`, `prev_hash_mismatch`, `artifact_missing`, `artifact_mismatch`, `anchor_head_mismatch`, `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`, `segment_gap`, `anchor_self_mismatch`, `break_glass_cause_mismatch`, `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`, `connection_lifecycle_mismatch`, `connection_cause_mismatch`; `seq` is where it was reported, for a per-event check the position walked (the previous `seq` plus 1, or `from_seq` first), whatever the body there says: rule 111 |
+| `incomplete` | `tsa_token_invalid` \| `null` | Version 2. The check §11 could not finish for the range, named by its code, or `null` (§11 "Incomplete"). At this version only the token check can be incomplete. It names a check reported for the range, so it carries no `seq` (rule 111's classes); a range that failed records its failure instead: rule 132 |
 
 A verification a principal requested for an export names that export's `ExportCreated` as its
 `causation_id`. A failed run does not repair anything and does not replace §11's incident path:
-`IntegrityIncidentRecorded` still records it.
+`IntegrityIncidentRecorded` still records it. An `incomplete` run is not a failure: it starts no
+incident (§11 "Incomplete").
 
 **Consistency rules** (reason `schema`; the path is the member named):
 
@@ -2923,7 +2975,7 @@ A verification a principal requested for an export names that export's `ExportCr
     purpose. Platform staff's break-glass reads are journaled as `RecordsAccessed` (rule 108 admits
     them); an export or a verification for them is run by the workspace's own user or service
     account.
-111. `VerificationRun`: each range, in array order, at `payload.ranges[i].<member>`: a non-null
+111. `VerificationRun`, either version: each range, in array order, at `payload.ranges[i].<member>`: a non-null
     `failure`'s `seq` is non-null exactly when its check is reported at an event (§11's per-event
     checks 1 to 6, `anchor_head_mismatch` at the anchored `seq`, `anchor_self_mismatch`,
     `break_glass_cause_mismatch`, `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`,
@@ -2931,8 +2983,28 @@ A verification a principal requested for an export names that export's `ExportCr
     `segment_manifest_mismatch`, and `segment_gap` (`failure.seq`); a non-null `seq` lies from
     `from_seq` to `to_seq` (`failure.seq`); and `to_hash` is non-null when `failure` is null
     (`to_hash`).
-112. `VerificationRun`: `result` is `pass` exactly when every range's `failure` is null
-    (`payload.result`).
+112. `VerificationRun` version 1: `result` is `pass` exactly when every range's `failure` is null
+    (`payload.result`). Version 2's `result` is rule 133's.
+132. `VerificationRun` version 2 ([DEC-788](../project/decisions/DEC-788.md) item 1,
+    [DEC-789](../project/decisions/DEC-789.md)), after rule 111: each range, in array order, with
+    its clauses in this order, at `payload.ranges[i].<member>`: `start.manifest_hash` is non-null
+    exactly when `start.kind` is `manifest` (`start.manifest_hash`); `start.anchor_event_id` is
+    non-null exactly when `start.kind` is `anchor` (`start.anchor_event_id`); a `genesis` start
+    has `from_seq` 1, so by rule 107 its `prev_hash` is 64 zeros, and an `anchor` start has
+    `from_seq` at least 2, since its leaf's `seq` is `from_seq − 1` and at least 1 (rule 113)
+    (`start.kind`); `checked` is at most `to_seq − from_seq + 1`, and §4.4 already keeps it from 0
+    (`checked`); `checked` is `to_seq − from_seq + 1` when `failure` is null, so a range that
+    passed or ended incomplete walked every event of it (`checked`); `incomplete` is null when
+    `failure` is non-null, so a range has one outcome (`incomplete`); and, while §11's token check
+    cannot answer (DEC-789), a range with an `anchor` start has a non-null `failure` or
+    `incomplete`, since its start's token is checked and cannot be proven (`incomplete`). A rule
+    cannot check that `start` names a record that exists or fits: §9.14 and workspace API §4.8.1
+    resolve it before the run, and rule 107 already ties `prev_hash` to `from_seq`.
+133. `VerificationRun` version 2: `result` is `fail` exactly when some range's `failure` is
+    non-null, `incomplete` exactly when no range's `failure` is non-null and some range's
+    `incomplete` is, and `pass` exactly when every range's `failure` and `incomplete` are null
+    (`payload.result`), so a run is never `pass` over a check it could not finish, and never
+    `fail` over one alone.
 
 ### 9.14 Anchor and segment records ([DEC-783](../project/decisions/DEC-783.md))
 
@@ -2980,7 +3052,10 @@ without the timestamp nothing outside the journal vouches for it, and a start th
 for alone is what [DEC-115](../project/04-decision-log.md#decisions) item 5 refused. A range is then
 entered from genesis, from a `SegmentExported`, or from a stamped anchor. A later record that
 supplies the missing token (the anchor stamp record, backlog) makes such an anchor a start; this
-version has none. Every start is looked up among the workspace's own control-stream records only,
+version has none. A manifest start is one the cold store vouches for: the run reads that segment's manifest
+and file from the cold store (§6.2) and checks them; a start that only the hot store's
+`SegmentExported` vouches for, because the cold store cannot be read, is not a trusted start, as an
+anchor without a `token` is not ([DEC-787](../project/decisions/DEC-787.md) item 5). Every start is looked up among the workspace's own control-stream records only,
 so a record that is absent and one of another workspace give the same refusal (workspace API
 §4.8.1, DEC-767). The test vectors' `cold_records.trusted_starts` hold these cases.
 
@@ -3307,6 +3382,36 @@ holds the other stream):
   `risk_clock`. Reported at the record. The test vectors' `connections.chains` hold a case for
   each.
 
+**Incomplete** ([DEC-789](../project/decisions/DEC-789.md), the founder): a check that cannot yet be
+proven either way ends its range `incomplete`. It is neither a pass nor a failure, and it is not a
+code of the list above: it names the check it could not finish. At this version one check can be
+incomplete, the token check whose failure is `tsa_token_invalid`:
+
+- **A token with the anchor's imprint.** `verify_tsa` checks the imprint and never answers `Ok`
+  ([DEC-265](../project/04-decision-log.md#decisions) item 1): the RFC 3161 signature, the
+  certificate chain, and revocation are not verified, so a token without the imprint fails
+  `tsa_token_invalid` and one with it is incomplete. The library calls this
+  `TsaVerificationIncomplete`; `mandate journal verify-cold` prints it as
+  `result: failed, tsa_verification_incomplete` with a non-zero exit
+  ([DEC-490](../project/decisions/DEC-490.md) item 6). That is the same outcome under the CLI's
+  word: a command line has no third exit, and it never prints `verified` for it. The CLI journals
+  nothing, so no record holds its word; a `VerificationRun` names the check, `tsa_token_invalid`,
+  in `incomplete`.
+- **An anchor the range must check whose `token` is `null`** (DEC-789 item 4). Nothing outside the
+  journal vouches for it (§9.14), so its token check cannot finish either. It is not a failure: the
+  outage is §10's journaled gap, already alerted.
+
+An incomplete check never stops a run: the checks after it still run, and a failure any of them
+finds is the range's result, which outranks it. `VerificationRun` version 2 records it in the
+range's `incomplete` and, with no range failed, as the run's `result` `incomplete` (rules 132 and
+133); version 1 cannot, which is why every writer appends version 2. **An incomplete run raises no
+SEV-1** and starts none of the responses under "On failure" below: nothing was found wrong, and
+until DEC-265 item 1's crypto half lands every stamped token is incomplete, so an alert on it would
+fire on every run that reads an anchor. It raises no alert of its own; a `null` token is already
+alerted as §10's timestamping gap. **It is not a pass either:** whatever requires a run to pass
+does not take an incomplete one as passing. When the token check can answer, the incomplete arm
+goes, as DEC-490 item 6 says of the CLI's.
+
 A reference to an event before the range's trusted start is not checked by that range, except
 through an anchor (`held_mismatch`'s, or the connection anchor, whose rotation copies a
 `condition_cleared` may name); the weekly full-chain run checks every one, and there a `mode_event`, or an operator read's `causation_id`,
@@ -3316,7 +3421,7 @@ for each for `mode_event`, and `records_access.range_checks` for the operator re
 **Schedule:** the tail of every stream at startup and before each segment export; the full chain
 weekly; results journaled as `VerificationRun`.
 
-**On failure:** SEV-1. Account- or agent-stream failures pause the affected agents (the kill switch
+**On failure** (a `fail` result; never an `incomplete` one, above): SEV-1. Account- or agent-stream failures pause the affected agents (the kill switch
 still works); control-stream failures freeze mandate and deployment changes, and the freeze never
 holds risk reduction: risk exits, protective orders, owner exits, and the kill switch at any scope
 still work (`AGENTS.md` rule 13), and the workspace API still records its risk-reducing operations
