@@ -1,10 +1,11 @@
-//! §11's control-stream checks (journal spec v0.29, E12-3), beginning with `anchor_self_mismatch`
-//! (§9.14 rule 113, DEC-783 item 6). `append` cannot see the `seq` it assigns, so the check is not
-//! an append rule; verification runs it over the stored rows of one control-stream range, in `seq`
-//! order, after [`crate::verify_events`] passed them, and reports its first failing event by `seq`
-//! (§9.13 rule 111).
+//! §11's control-stream checks (journal spec v0.29, E12-3): `anchor_self_mismatch` (§9.14 rule
+//! 113, DEC-783 item 6) and `break_glass_cause_mismatch` (§9.13 rule 108, DEC-774 item 2). `append`
+//! cannot see the `seq` it assigns or what an earlier batch holds, so neither is an append rule;
+//! verification runs each over the stored rows of one control-stream range, in `seq` order, after
+//! [`crate::verify_events`] passed them, and each reports its first failing event by `seq` (§9.13
+//! rule 111).
 
-use crate::StoredEvent;
+use crate::{StoredEvent, TrustedStart};
 
 /// §11's control-stream checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,6 +13,9 @@ pub enum ControlStreamCheck {
     /// An `AnchorComputed`'s leaf for its own control stream is missing, or does not name the
     /// event just before the anchor by `seq` and by `hash`.
     AnchorSelfMismatch,
+    /// A `platform_operator`'s `RecordsAccessed` does not name, as its `causation_id`, an earlier
+    /// `PlatformOperatorAction` on the same control stream.
+    BreakGlassCauseMismatch,
 }
 
 impl ControlStreamCheck {
@@ -19,6 +23,7 @@ impl ControlStreamCheck {
     pub fn code(self) -> &'static str {
         match self {
             Self::AnchorSelfMismatch => "anchor_self_mismatch",
+            Self::BreakGlassCauseMismatch => "break_glass_cause_mismatch",
         }
     }
 }
@@ -47,5 +52,19 @@ pub enum ControlVerifyError {
 /// check (§11); the full chain checks it.
 pub fn verify_anchor_self(rows: &[StoredEvent]) -> Result<(), ControlVerifyError> {
     let _ = rows;
+    Err(ControlVerifyError::Unimplemented { story: "E12-3" })
+}
+
+/// §11's `break_glass_cause_mismatch` over `rows` of one control-stream range entered at `start`:
+/// every `RecordsAccessed` whose actor is a `platform_operator` names, as its `causation_id`, a
+/// `PlatformOperatorAction` of the same `stream_id` at a lower `seq`, and the first read that does
+/// not is reported at its own `seq`. A cause that names a later event or one of another type fails;
+/// a cause named by no row fails only when `start.from_seq` is 1, since in a later range it may lie
+/// before the trusted start, which the full chain judges. Reads by any other actor are not judged.
+pub fn verify_break_glass_causes(
+    rows: &[StoredEvent],
+    start: TrustedStart,
+) -> Result<(), ControlVerifyError> {
+    let _ = (rows, start);
     Err(ControlVerifyError::Unimplemented { story: "E12-3" })
 }
