@@ -18,7 +18,8 @@
   their vectors and independent random walks), `crates/mandate-journal/tests/trusted_start.rs`
   (the trusted-start resolver against its vectors, each §9.14 clause, and a random oracle),
   `crates/mandate-journal/tests/connection_fold.rs` (the connection checks against their vectors,
-  and every split of every full chain against the full-chain run and an independent scan),
+  and every split of every full chain against the full-chain run and an independent scan; and
+  `JUDGED_ON_CONTROL` and `JUDGED_ON_ACCOUNT`, the judged-record lists, against §11's sets),
   `crates/mandate-journal/tests/records_access.rs` (`VerificationRun` version 2 against its
   vectors, rules 132 and 133 swept by their own oracle, and version 1 kept with rule 112; E12-3),
   `crates/mandate-journal/tests/range_walk.rs` (seeded faults against an independent comparison)
@@ -26,7 +27,7 @@
 - **Reference cases:** `journal::tamper::*`, `journal::merkle`, `journal::export_line_seq_1`, and
   the `cold_records.range_checks`, `cold_records.trusted_starts`, and
   `records_access.range_checks`, `verification_runs`, `connections`, `connection_requests`,
-  `connection_ranges`, `connection_revocations` (DEC-888; no Rust test reads it until E7-17's
-  tests PR), and `segment_rows` (journal spec v0.38's `segment_rows_mismatch`, DEC-894; no Rust test
+  `connection_ranges`, `connection_revocations` (DEC-888; read by E7-17's pending tests until
+  its code PR), and `segment_rows` (journal spec v0.38's `segment_rows_mismatch`, DEC-894; no Rust test
   reads it until E12-3's tests PR) vectors of `fixtures/refcases/journal.json`.
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-refcases`.

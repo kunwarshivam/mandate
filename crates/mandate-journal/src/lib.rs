@@ -37,8 +37,8 @@ mod verify;
 mod workspace;
 
 pub use agent::{
-    AgentStreamCheck, AgentStreamFailure, HeldAnchor, verify_agent_stream,
-    verify_agent_stream_anchored,
+    AgentStreamCheck, AgentStreamFailure, HeldAnchor, HeldAnchorError, held_anchor,
+    verify_agent_stream, verify_agent_stream_anchored,
 };
 
 /// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, §9.5's rule 45 on the
@@ -55,9 +55,9 @@ pub use artifact::{
 };
 pub use connection_fold::{
     ConnectionAnchor, ConnectionCheck, ConnectionCheckError, ConnectionFailure, ConnectionStart,
-    ConnectionStreamRule, ConnectionVerifyError, LocatedConnectionFailure,
-    verify_connection_causes, verify_connection_causes_from_genesis, verify_connection_lifecycle,
-    verify_connection_lifecycle_from,
+    ConnectionStreamRule, ConnectionVerifyError, JUDGED_ON_ACCOUNT, JUDGED_ON_CONTROL,
+    LocatedConnectionFailure, verify_connection_causes, verify_connection_causes_from_genesis,
+    verify_connection_lifecycle, verify_connection_lifecycle_from,
 };
 pub use control_verify::{
     ControlStreamCheck, ControlStreamFailure, ControlVerifyError, verify_anchor_self,
@@ -70,8 +70,8 @@ pub use start::{
     resolve_trusted_start,
 };
 pub use verify::{
-    EventCheck, EventFailure, RangeCheck, RangeWalk, RangeWalkError, TrustedStart, Verified,
-    verify_anchor, verify_events, walk_range,
+    EventCheck, EventFailure, PrefixError, RangeCheck, RangeWalk, RangeWalkError, TrustedStart,
+    Verified, VerifiedPrefix, verify_anchor, verify_events, walk_range,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

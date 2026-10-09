@@ -8,7 +8,9 @@
 //! `connection_requests` section and the hand cases at the end of this file. Journal spec v0.35
 //! (DEC-885) runs a range from its connection anchor, or fails closed without one: judged against the
 //! `connection_ranges` section, and on every split of every full-chain sequence against the
-//! full-chain run and an independent scan of the records the rules judge.
+//! full-chain run and an independent scan of the records the rules judge. Journal spec v0.37
+//! (DEC-888) refuses a `ConnectionRevoked` on an account stream under rule 68, and fails a range
+//! closed at it without an anchor: judged against the `connection_revocations` section.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -16,8 +18,9 @@ use std::path::Path;
 use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
 use mandate_journal::{
     ConnectionAnchor, ConnectionCheck, ConnectionCheckError, ConnectionFailure, ConnectionStart,
-    ConnectionStreamRule, ConnectionVerifyError, LocatedConnectionFailure, StoredEvent,
-    verify_connection_causes, verify_connection_causes_from_genesis, verify_connection_lifecycle,
+    ConnectionStreamRule, ConnectionVerifyError, JUDGED_ON_ACCOUNT, JUDGED_ON_CONTROL,
+    LocatedConnectionFailure, StoredEvent, verify_connection_causes,
+    verify_connection_causes_from_genesis, verify_connection_lifecycle,
     verify_connection_lifecycle_from,
 };
 
@@ -866,11 +869,56 @@ fn judged(row: &StoredEvent) -> bool {
     }
 }
 
+/// Judges a range case of `section`: the chain `before` it is folded into its anchor, or the range
+/// is unanchored when `before` is `null` (its rows then start at `seq` 101), and the answer must be
+/// the vector's, located by the range row's stream and `seq`, with its code. A `before` that breaks
+/// a rule anchors nothing (I5).
+fn judge_range(section: &Value, case: &Value) {
+    let label = text(case, "name");
+    let unanchored = case.get("before") == Some(&Value::Null);
+    let before = list(case, "before");
+    let records = [before, list(case, "records")].concat();
+    let records = Object::from([(Key::new("records").unwrap(), Value::Array(records))]);
+    let mut chain = rows(section, &Value::Object(records));
+    if unanchored {
+        chain.iter_mut().for_each(|row| row.seq += 100);
+    }
+    let (prefix, range) = chain.split_at(before.len());
+    let anchor = ConnectionAnchor::fold(prefix);
+    let start = match (unanchored, anchor.clone()) {
+        (false, Some(anchor)) => ConnectionStart::Anchored(anchor),
+        _ => ConnectionStart::Unanchored,
+    };
+    let expect = case.get("expect").unwrap();
+    let want = match text(expect, "outcome") {
+        "Valid" => Ok(()),
+        outcome => {
+            let check = match outcome {
+                "Unanchored" => ConnectionCheck::Unanchored,
+                _ => ConnectionCheck::LifecycleMismatch(rule(text(expect, "rule"))),
+            };
+            assert_eq!(check.code(), text(expect, "code"), "{label}");
+            let index = expect.get("index").and_then(Value::as_int).unwrap();
+            at(&range[usize::try_from(index).unwrap()], check)
+        }
+    };
+    let got = verify_connection_lifecycle_from(start, range);
+    assert_eq!(got, want, "{label}");
+    if let Err(ConnectionCheckError::Failed(failure)) = &got {
+        assert_eq!(failure.code(), text(expect, "code"), "{label}");
+    }
+    if !unanchored {
+        let clean = verify_connection_lifecycle(prefix).is_ok();
+        assert_eq!(
+            anchor.is_some(),
+            clean,
+            "{label}: I5, a broken chain anchors nothing"
+        );
+    }
+}
+
 /// §11 (v0.35, DEC-885) over the 22 `connection_ranges` and `connection_requests`'
-/// `range_after_an_unseen_request`: the chain `before` each range is folded into its anchor, or
-/// the range is unanchored when `before` is `null` (its rows then start at `seq` 101), and the
-/// answer is the vector's, located by the range row's stream and `seq`, with its code. A `before`
-/// that breaks a rule anchors nothing.
+/// `range_after_an_unseen_request`, each judged by [`judge_range`].
 #[test]
 fn every_range_vector_is_judged_from_its_anchor_as_its_vector_says() {
     let mut judged_cases = 0;
@@ -880,47 +928,7 @@ fn every_range_vector_is_judged_from_its_anchor_as_its_vector_says() {
             .iter()
             .filter(|case| text(case, "scope") == "range");
         for case in ranges {
-            let label = text(case, "name");
-            let unanchored = case.get("before") == Some(&Value::Null);
-            let before = list(case, "before");
-            let records = [before, list(case, "records")].concat();
-            let records = Object::from([(Key::new("records").unwrap(), Value::Array(records))]);
-            let mut chain = rows(&section, &Value::Object(records));
-            if unanchored {
-                chain.iter_mut().for_each(|row| row.seq += 100);
-            }
-            let (prefix, range) = chain.split_at(before.len());
-            let anchor = ConnectionAnchor::fold(prefix);
-            let start = match (unanchored, anchor.clone()) {
-                (false, Some(anchor)) => ConnectionStart::Anchored(anchor),
-                _ => ConnectionStart::Unanchored,
-            };
-            let expect = case.get("expect").unwrap();
-            let want = match text(expect, "outcome") {
-                "Valid" => Ok(()),
-                outcome => {
-                    let check = match outcome {
-                        "Unanchored" => ConnectionCheck::Unanchored,
-                        _ => ConnectionCheck::LifecycleMismatch(rule(text(expect, "rule"))),
-                    };
-                    assert_eq!(check.code(), text(expect, "code"), "{label}");
-                    let index = expect.get("index").and_then(Value::as_int).unwrap();
-                    at(&range[usize::try_from(index).unwrap()], check)
-                }
-            };
-            let got = verify_connection_lifecycle_from(start, range);
-            assert_eq!(got, want, "{label}");
-            if let Err(ConnectionCheckError::Failed(failure)) = &got {
-                assert_eq!(failure.code(), text(expect, "code"), "{label}");
-            }
-            if !unanchored {
-                let clean = verify_connection_lifecycle(prefix).is_ok();
-                assert_eq!(
-                    anchor.is_some(),
-                    clean,
-                    "{label}: I5, a broken chain anchors nothing"
-                );
-            }
+            judge_range(&section, case);
             judged_cases += 1;
         }
     }
@@ -1027,4 +1035,101 @@ fn the_unanchored_cause_keeps_the_lifecycle_code() {
     for (check, code) in codes {
         assert_eq!(failure(check).code(), code);
     }
+}
+
+/// Journal spec v0.37 (DEC-888) over the 6 `connection_revocations`: a full-chain case through
+/// [`verify_connection_lifecycle`] and from [`ConnectionStart::Genesis`], whose answers agree, and
+/// a range case from its anchor, folded by [`ConnectionAnchor::fold`], or unanchored, by
+/// [`judge_range`]. On every split of a full-chain case, an anchored range agrees with the full
+/// chain (I1), and an unanchored one fails closed at the first record [`judged`] names (I2), an
+/// account-stream revocation included.
+#[test]
+#[ignore = "pending E7-17"]
+fn every_revocation_vector_is_judged_as_its_vector_says() {
+    let section = section_named("connection_revocations");
+    let cases = list(&section, "sequences");
+    let (ranges, full): (Vec<&Value>, Vec<&Value>) = cases
+        .iter()
+        .partition(|case| text(case, "scope") == "range");
+    assert_eq!((full.len(), ranges.len()), (3, 3), "the 6 DEC-888 cases");
+    for case in ranges {
+        judge_range(&section, case);
+    }
+    let (failed, answers) = judge_in(
+        &section,
+        "sequences",
+        |case| case.get("scope").is_none(),
+        verify_connection_lifecycle,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    let refused = Err(ConnectionVerifyError::Mismatch(ConnectionFailure {
+        index: 0,
+        check: ConnectionCheck::LifecycleMismatch(ConnectionStreamRule::AccountStream),
+    }));
+    assert!(answers.contains(&refused), "an unbound stream's revocation");
+    for case in full {
+        let chain = rows(&section, case);
+        let answer = verify_connection_lifecycle(&chain);
+        let first = answer
+            .map_err(|ConnectionVerifyError::Mismatch(f)| f.index)
+            .err();
+        let full = located(&chain, answer);
+        let genesis = verify_connection_lifecycle_from(ConnectionStart::Genesis, &chain);
+        assert_eq!(
+            genesis,
+            full,
+            "{}: genesis is the full chain",
+            text(case, "name")
+        );
+        for k in 0..=chain.len() {
+            let (prefix, range) = chain.split_at(k);
+            if first.is_none_or(|index| index >= k) {
+                let anchor = ConnectionAnchor::fold(prefix).unwrap();
+                let got =
+                    verify_connection_lifecycle_from(ConnectionStart::Anchored(anchor), range);
+                assert_eq!(got, full, "I1: split at {k} of {chain:?}");
+            }
+            let first_judged = range.iter().position(judged);
+            let want = first_judged.map_or(Ok(()), |i| at(&range[i], ConnectionCheck::Unanchored));
+            let got = verify_connection_lifecycle_from(ConnectionStart::Unanchored, range);
+            assert_eq!(got, want, "I2: split at {k} of {chain:?}");
+        }
+    }
+}
+
+/// The judged-record lists lane L5's verifier CLI reads (#1206) are §11's: on a control stream a
+/// request, establishment, rotation, or refusal, never a revocation (DEC-885 item 4, I6); on an
+/// account stream every connection record, a revocation included (journal spec v0.37, DEC-888).
+#[test]
+#[ignore = "pending E7-17"]
+fn the_exported_judged_lists_are_the_specs() {
+    let set = |names: &[&str]| -> BTreeSet<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    };
+    let control = [
+        "ConnectionRequested",
+        "ConnectionEstablished",
+        "ConnectionCredentialRotated",
+        "ConnectionRefused",
+    ];
+    let account = [
+        "ConnectionChecked",
+        "ConnectionStateChanged",
+        "ConnectionCredentialRefreshed",
+        "ConnectionEstablished",
+        "ConnectionCredentialRotated",
+        "ConnectionRevoked",
+    ];
+    assert_eq!(
+        set(JUDGED_ON_CONTROL),
+        set(&control),
+        "§11's control-stream set"
+    );
+    assert_eq!(
+        set(JUDGED_ON_ACCOUNT),
+        set(&account),
+        "§11's account-stream set"
+    );
+    assert_eq!(JUDGED_ON_CONTROL.len(), control.len(), "no type twice");
+    assert_eq!(JUDGED_ON_ACCOUNT.len(), account.len(), "no type twice");
 }
