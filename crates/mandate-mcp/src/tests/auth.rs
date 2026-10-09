@@ -85,7 +85,6 @@ fn at(server: &Loopback, path: &str) -> Url {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn discovery_follows_the_challenge_to_the_pinned_servers_metadata() {
     let (found, server) = discover(flow(&metadata()), PINS).await;
     let expected = AuthServer {
@@ -107,7 +106,6 @@ async fn discovery_follows_the_challenge_to_the_pinned_servers_metadata() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn without_a_challenge_url_discovery_reads_the_endpoints_well_known_path() {
     let prm = resource("@BASE@/mcp", &["@BASE@/as"]);
     let (found, server) = discover(vec![challenge(None), prm, doc(&metadata())], PINS).await;
@@ -117,7 +115,6 @@ async fn without_a_challenge_url_discovery_reads_the_endpoints_well_known_path()
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_probe_that_is_not_a_challenge_on_the_pinned_host_goes_no_further() {
     let cases = [
         (
@@ -139,7 +136,6 @@ async fn a_probe_that_is_not_a_challenge_on_the_pinned_host_goes_no_further() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn the_resource_must_be_the_endpoint_exactly() {
     for named in [
         "@BASE@/mcp/",
@@ -155,7 +151,6 @@ async fn the_resource_must_be_the_endpoint_exactly() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn only_the_first_authorization_server_on_the_pins_is_contacted() {
     let cases: [(&[&str], &[&str], &str); 5] = [
         (&["@BASE@/as"], &["as.example"], "auth_host_not_pinned"),
@@ -177,7 +172,6 @@ async fn only_the_first_authorization_server_on_the_pins_is_contacted() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn the_issuer_must_be_the_one_its_metadata_was_read_for() {
     for issuer in ["@BASE@/as/", "@BASE@/other", "https://127.0.0.1/as"] {
         let meta = edited("issuer", Some(json!(issuer)));
@@ -187,7 +181,6 @@ async fn the_issuer_must_be_the_one_its_metadata_was_read_for() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn every_endpoint_must_be_https_on_a_pinned_authorization_host() {
     let both: &[&str] = &["127.0.0.1", "as.example"];
     let off = "https://as.example/canary";
@@ -221,7 +214,6 @@ async fn every_endpoint_must_be_https_on_a_pinned_authorization_host() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn pkce_with_s256_a_code_flow_and_a_registration_endpoint_are_required() {
     let methods = "code_challenge_methods_supported";
     let cases = [
@@ -245,7 +237,6 @@ async fn pkce_with_s256_a_code_flow_and_a_registration_endpoint_are_required() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn an_unreadable_or_redirected_document_is_refused() {
     let prm = || resource("@BASE@/mcp", &["@BASE@/as"]);
     let unreadable = || with_type(200, "application/json", "canary");
@@ -267,9 +258,45 @@ async fn an_unreadable_or_redirected_document_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_code_flow_among_other_response_types_is_accepted() {
     let meta = edited("response_types_supported", Some(json!(["token", "code"])));
     let (found, server) = discover(flow(&meta), PINS).await;
     assert_eq!(found.unwrap().token_endpoint, at(&server, "/token"));
+}
+
+/// RFC 9728 §3.1 and RFC 8414 §3.1: a terminating `/` is removed before the well-known suffix
+/// is inserted between the host and the path.
+#[tokio::test]
+async fn a_terminating_slash_is_removed_before_the_well_known_suffix_is_inserted() {
+    let meta = edited("issuer", Some(json!("@BASE@/as/")));
+    let prm = resource("@BASE@/mcp/", &["@BASE@/as/"]);
+    let server = serve(vec![challenge(None), prm, doc(&meta)]).await;
+    let endpoint = PinnedEndpoint::new("127.0.0.1", &format!("{}/", server.url)).unwrap();
+    let found = AuthServer::discover(&endpoint, PINS, &TransportConfig::CONSERVATIVE).await;
+    assert_eq!(found.unwrap().issuer, at(&server, "/as/"));
+    let wanted = [
+        "post /mcp/ http/1.1",
+        "get /.well-known/oauth-protected-resource/mcp http/1.1",
+        "get /.well-known/oauth-authorization-server/as http/1.1",
+    ];
+    assert_eq!(first_lines(&server), wanted);
+}
+
+#[tokio::test]
+async fn a_challenge_url_with_a_query_is_refused_before_it_is_dialed() {
+    let (found, server) = discover(vec![challenge(Some("@BASE@/meta/rs?canary"))], PINS).await;
+    assert_eq!(refused(found), "endpoint_shape");
+    assert_eq!(server.seen().len(), 1);
+}
+
+#[tokio::test]
+async fn an_unquoted_challenge_url_falls_back_to_the_well_known_path() {
+    let mut probe = challenge(None);
+    let value = "Bearer resource_metadata=@BASE@/meta/rs".to_owned();
+    probe.headers.push(("www-authenticate", value));
+    let prm = resource("@BASE@/mcp", &["@BASE@/as"]);
+    let (found, server) = discover(vec![probe, prm, doc(&metadata())], PINS).await;
+    assert_eq!(found.unwrap().issuer, at(&server, "/as"));
+    let wanted = "get /.well-known/oauth-protected-resource/mcp http/1.1";
+    assert_eq!(first_lines(&server)[1], wanted);
 }

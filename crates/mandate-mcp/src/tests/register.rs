@@ -51,7 +51,6 @@ fn the_loopback_redirect_is_an_ip_literal_with_the_callback_path() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn registration_asks_for_a_public_client_with_the_one_loopback_redirect() {
     let echoed = json!({"client_id": "c-1", "redirect_uris": [CALLBACK],
         "token_endpoint_auth_method": "none"});
@@ -88,7 +87,6 @@ async fn registration_asks_for_a_public_client_with_the_one_loopback_redirect() 
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_registration_that_issues_a_secret_is_refused_and_the_secret_never_surfaces() {
     let cases = [
         json!({"client_id": "c-1", "client_secret": "canary-secret"}),
@@ -103,7 +101,6 @@ async fn a_registration_that_issues_a_secret_is_refused_and_the_secret_never_sur
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_registration_that_changes_the_redirect_is_refused() {
     let other = "https://canary.example/cb";
     for listed in [json!([other]), json!([CALLBACK, other]), json!([])] {
@@ -114,7 +111,6 @@ async fn a_registration_that_changes_the_redirect_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_refused_or_unreadable_registration_returns_no_client() {
     let mut moved = with_type(302, "text/plain", "canary");
     moved.headers.push(("location", "@BASE@/x".to_owned()));
@@ -135,5 +131,37 @@ async fn a_refused_or_unreadable_registration_returns_no_client() {
         let (client, server) = register(answer).await;
         assert_eq!(refused(client), code);
         assert_eq!(server.seen().len(), 1, "{code}");
+    }
+}
+
+#[tokio::test]
+async fn a_null_client_secret_is_still_a_secret() {
+    let answer = json!({"client_id": "c-1", "client_secret": null});
+    let (client, _) = register(created(&answer)).await;
+    assert_eq!(refused(client), "client_secret_issued");
+}
+
+#[tokio::test]
+async fn a_redirect_list_other_than_the_one_element_sent_is_refused() {
+    for listed in [json!([CALLBACK, CALLBACK]), json!(CALLBACK)] {
+        let answer = json!({"client_id": "c-1", "redirect_uris": listed});
+        let (client, _) = register(created(&answer)).await;
+        assert_eq!(refused(client), "redirect_changed", "{answer}");
+    }
+}
+
+#[tokio::test]
+async fn only_201_created_is_a_registration() {
+    let body = json!({"client_id": "c-1"}).to_string();
+    let (client, server) = register(with_type(200, "application/json", &body)).await;
+    assert_eq!(refused(client), "http_status");
+    assert_eq!(server.seen().len(), 1);
+}
+
+#[tokio::test]
+async fn a_client_id_with_del_or_a_control_character_is_refused() {
+    for id in ["c\u{7f}1", "c\u{1}1"] {
+        let (client, _) = register(created(&json!({"client_id": id}))).await;
+        assert_eq!(refused(client), "malformed", "{id:?}");
     }
 }
