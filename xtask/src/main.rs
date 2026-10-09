@@ -10418,7 +10418,6 @@ jq -r "$filter" "$src"
     /// refuses the expansion as a command word and inside a re-read word, as `cargo` does. And
     /// `${x[*]}` is read as `${x[@]}` is, for a defined and an undefined array.
     #[test]
-    #[ignore = "pending E7-26"]
     fn every_array_definition_and_both_whole_array_forms_are_read() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
@@ -10817,7 +10816,6 @@ jq -r "$filter" "$src"
     /// after #979): `makefile`, `GNUmakefile`, `Justfile` and a `docker-compose*.yaml`, each
     /// holding a live build, are each refused at their own path and line.
     #[test]
-    #[ignore = "pending E7-26"]
     fn every_build_file_name_is_judged() -> Result<()> {
         let build = "build:\n\tcargo build --features live\n";
         let paths = [
@@ -10848,7 +10846,6 @@ jq -r "$filter" "$src"
     /// directory a `CACHEDIR.TAG` marks as a cache is not read, while one in `tools/` beside them
     /// is, and a `CACHEDIR.TAG` marks only its own directory.
     #[test]
-    #[ignore = "pending E7-26"]
     fn the_build_file_walk_skips_only_git_node_modules_and_caches() -> Result<()> {
         let build = "build:\n\tcargo build --features live\n";
         let root = fixture_repository(
