@@ -232,10 +232,11 @@ The fixes the first weekly critique proposed, one per screen, most severe first.
 [critique-2026-10-09.md](critique-2026-10-09.md), cited as C-n. Findings already covered by an
 item above (C-3, C-9) are not repeated.
 
-- [ ] **DESIGN.md names the palette that ships.** Its front matter, Colors table and Meaning Rule
-      say Ink and Volt (DEC-214), while the product ships Azure and Sun with trend-coloured hero
+- [x] **DESIGN.md names the palette that ships.** Its front matter, Colors table and Meaning Rule
+      said Ink and Volt (DEC-214), while the product ships Azure and Sun with trend-coloured hero
       lines (DEC-217). DEC-217 is Accepted and supersedes DEC-214, so DESIGN.md is aligned to it
-      with no new DEC. (C-1)
+      with no new DEC. (C-1) Done in
+      [#1047](https://github.com/kunwarshivam/mandate/pull/1047).
 - [ ] **Stop above the palette's scrim.** Check that Stop takes a press with the command palette
       open; if not, keep the frame's Stop live as the More sheet does. Safety lane. (C-21)
 - [ ] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and
