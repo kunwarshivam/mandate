@@ -66,8 +66,8 @@ pub use control_verify::{
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
 pub use start::{
-    AnchorRecord, AnchorRecordError, StartRequest, TrustedStartError, anchor_record,
-    resolve_trusted_start,
+    AnchorRecord, AnchorRecordError, ColdRead, ManifestStart, ResolvedStart, StartRequest,
+    TrustedStartError, anchor_record, resolve_start_from_rows, resolve_trusted_start,
 };
 pub use verify::{
     EventCheck, EventFailure, PrefixError, RangeCheck, RangeWalk, RangeWalkError, TrustedStart,
