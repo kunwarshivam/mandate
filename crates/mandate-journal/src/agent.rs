@@ -172,6 +172,8 @@ pub enum AgentStreamCheck {
     /// A `KillSwitchActivated`'s `mode_event` names no earlier `AgentModeChanged` with reason
     /// `kill_switch`.
     ModeEventMismatch,
+    /// Not implemented yet: §11's `held_mismatch` with an explicit anchor (E10-15, DEC-673).
+    Unimplemented,
 }
 
 impl AgentStreamCheck {
@@ -180,6 +182,7 @@ impl AgentStreamCheck {
         match self {
             Self::IntentActionMismatch => "intent_action_mismatch",
             Self::ModeEventMismatch => "mode_event_mismatch",
+            Self::Unimplemented => "unimplemented",
         }
     }
 }
@@ -261,6 +264,32 @@ pub fn verify_agent_stream(
         earlier.insert(row.event_id.as_str());
     }
     Ok(())
+}
+
+/// The stored chain's hold before a range, which the caller of [`verify_agent_stream_anchored`]
+/// derives (§11's `held_mismatch`, DEC-673).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldAnchor {
+    /// The caller cannot read the chain before the range.
+    Unknown,
+    /// No version-2 `AgentModeChanged` precedes the range.
+    NoVersionTwo,
+    /// The `held` the last version-2 `AgentModeChanged` before the range carried, at its `seq`.
+    Carried { seq: u64, held: bool },
+}
+
+/// [`verify_agent_stream`] with §11's `held_mismatch` anchored on `anchor` (DEC-673). Not
+/// implemented yet: E10-15's implementation PR.
+pub fn verify_agent_stream_anchored(
+    rows: &[StoredEvent],
+    start: TrustedStart,
+    anchor: HeldAnchor,
+) -> Result<(), AgentStreamFailure> {
+    let _ = (rows, anchor);
+    Err(AgentStreamFailure {
+        seq: start.from_seq,
+        check: AgentStreamCheck::Unimplemented,
+    })
 }
 
 /// The members `IntentProposed` repeats from its `DecisionMade`, in rule 10's order.

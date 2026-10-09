@@ -55,10 +55,26 @@ const TEXTS: [(TextKey, &str, &str); 4] = [
     (BriefReady, "brief_ready", "Your daily brief is ready"),
 ];
 
+/// Every kind of spec §3.2, in the table's order, typed from the table rather than from the crate
+/// or from [`CATALOGUE`], whose rows stop at the kinds already implemented.
+#[rustfmt::skip]
+const ORDER: [NoticeKind; 33] = [
+    NoticeKind::ApprovalRequested, NoticeKind::ApprovalReminder, NoticeKind::RiskLimit,
+    NoticeKind::KillSwitch, NoticeKind::AgentHeld, NoticeKind::AccountRestriction,
+    NoticeKind::Protection, NoticeKind::ExitStalled, NoticeKind::Reconciliation,
+    NoticeKind::ExternalActivity, NoticeKind::AccountState, NoticeKind::DataFeedDown,
+    NoticeKind::IntegrityIncident, NoticeKind::CredentialAdded, NoticeKind::NewDevice,
+    NoticeKind::NotificationAddressChanged, NoticeKind::RecoveryUsed, NoticeKind::RoleGranted,
+    NoticeKind::MemberDeactivated, NoticeKind::Deprovisioned, NoticeKind::BreakGlass,
+    NoticeKind::VersionRiskIncreasing, NoticeKind::DelegationAdded, NoticeKind::ConnectionAdded,
+    NoticeKind::WentLive, NoticeKind::ClientConnected, NoticeKind::ChannelLost,
+    NoticeKind::DailyBrief, NoticeKind::DelegationEnded, NoticeKind::ModelStatus,
+    NoticeKind::ResearchStatus, NoticeKind::SpendCap, NoticeKind::ApprovalClosed,
+];
+
 #[test]
 fn the_crate_lists_every_kind_once_in_the_catalogues_order() {
-    let listed: Vec<NoticeKind> = CATALOGUE.iter().map(|row| row.0).collect();
-    assert_eq!(NoticeKind::ALL.to_vec(), listed);
+    assert_eq!(NoticeKind::ALL.to_vec(), ORDER.to_vec());
     assert_eq!(
         TextKey::ALL.to_vec(),
         TEXTS.iter().map(|row| row.0).collect::<Vec<_>>()
@@ -66,7 +82,6 @@ fn the_crate_lists_every_kind_once_in_the_catalogues_order() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn every_kind_maps_to_its_key_class_and_text_key() {
     for (kind, key, class, text) in CATALOGUE {
         assert_eq!(answer("key", kind.key()), key);
@@ -75,15 +90,24 @@ fn every_kind_maps_to_its_key_class_and_text_key() {
     }
 }
 
+/// Spec §3.2's row for `notification_address_changed` (DEC-795 item 6): a member's own push
+/// address added or removed is an account change that interrupts.
 #[test]
-#[ignore = "pending E8-9"]
+fn a_notification_address_change_is_a_safety_account_change() {
+    let kind = NoticeKind::NotificationAddressChanged;
+    assert_eq!(answer("key", kind.key()), "notification_address_changed");
+    let class = answer("class", kind.class());
+    assert_eq!(answer("class key", class.key()), "safety");
+    assert_eq!(answer("text_key", kind.text_key()), Some(AccountChanged));
+}
+
+#[test]
 fn every_class_is_journaled_by_its_key() {
     let keys = [Action, Safety, Info].map(|c| answer("class key", c.key()));
     assert_eq!(keys, ["action", "safety", "info"]);
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn every_text_key_renders_its_fixed_english_text() {
     for (text, key, english) in TEXTS {
         assert_eq!(answer("key", text.key()), key);
@@ -97,7 +121,6 @@ fn every_text_key_renders_its_fixed_english_text() {
 /// urgency, outcome, and trade words NT-12 adds, as whole words, and no figure at all. A word added
 /// to either list belongs in both.
 #[test]
-#[ignore = "pending E8-9"]
 fn no_text_advises_urges_or_counts() {
     let advice = "recommend estimate target scorecard expected suggest".split(' ');
     let forbidden =

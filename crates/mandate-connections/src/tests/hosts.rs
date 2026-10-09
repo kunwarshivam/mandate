@@ -16,7 +16,6 @@ fn the_live_token_request_is_post_oauth_token() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_live_host_admits_only_post_oauth_token() {
     assert_eq!(
         admit(Method::Post, LIVE_TOKEN_URL),
@@ -91,7 +90,6 @@ fn the_live_host_admits_only_post_oauth_token() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn trading_and_account_calls_go_only_to_the_paper_host() {
     for (method, path) in [
         (Method::Post, "/v2/orders"),
@@ -147,7 +145,6 @@ fn trading_and_account_calls_go_only_to_the_paper_host() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn other_hosts_and_schemes_are_refused() {
     let refused_urls = [
         "https://paper-api.alpaca.markets.evil.example/v2/orders",
