@@ -79,3 +79,34 @@ pub fn check(inputs: &Inputs<'_>) -> Result<Keys, VaultError> {
     let _ = inputs;
     Err(VaultError::Unimplemented { story: "E10-13" })
 }
+
+/// The API process must not be given the token key in any form, a symlink included. Only a
+/// missing entry starts the API; any other failure to stat it refuses with [`VaultError::Io`]
+/// (AGENTS.md rule 3).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "check calls it once E10-13 lands; until then only its tests do"
+    )
+)]
+pub(crate) fn refuse_token_key(path: &Path) -> Result<(), VaultError> {
+    let _ = path;
+    Err(VaultError::Unimplemented { story: "E10-13" })
+}
+
+/// Reads one key straight into its secret box. The credential must be a regular file (not a
+/// symlink) of exactly [`KEY_LEN`] bytes: a missing one is [`VaultError::KeyMissing`], a wrong
+/// type or length [`VaultError::KeyMalformed`], and any other failure to stat, open, or read it
+/// [`VaultError::Io`].
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "check calls it once E10-13 lands; until then only its tests do"
+    )
+)]
+pub(crate) fn load_key(path: &Path) -> Result<SecretBox<[u8; KEY_LEN]>, VaultError> {
+    let _ = path;
+    Err(VaultError::Unimplemented { story: "E10-13" })
+}
