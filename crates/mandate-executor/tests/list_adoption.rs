@@ -12,8 +12,9 @@
 mod common;
 
 use common::{
-    AGENT, FixedInstruments, FixedMandate, OTHER_AGENT, Ran, Shell, TestIds, broker_order, config,
-    handoff, opening, ports, price, qty, stream_opened,
+    AGENT, FixedInstruments, FixedMandate, OTHER_AGENT, Ran, Shell, TestIds, broker_fill,
+    broker_order, config, handoff, key, opening, ports, price, qty, risk_exit, snapshot,
+    stream_opened, text,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -22,8 +23,9 @@ use mandate_domain::{
     ProtectionForm, QuantityForm, Retry, Row, TimeInForce as Tif,
 };
 use mandate_executor::{
-    BrokerOutcome, BrokerRequest, BrokerUnknown, ClientOrderId, ExecutorConfig, Input, ListedOrder,
-    OrderListing, OrderOrigin, OrderState, OrderType, Ports, RiskClock, TimeInForce,
+    BrokerOutcome, BrokerRequest, BrokerUnknown, BrokerUpdate, ClientOrderId, ExecutorConfig,
+    FoldedEvent, Input, ListedOrder, OrderListing, OrderOrigin, OrderState, OrderType, Ports,
+    ReconcileReason, RiskClock, TimeInForce,
 };
 use mandate_num::{Price, Qty};
 use mandate_time::UtcNanos;
@@ -420,4 +422,241 @@ fn over_generated_listings_exactly_one_exact_record_is_adopted() {
         counts.get().iter().all(|n| *n > 0),
         "zero, one and several exact records each reached"
     );
+}
+
+/// A dedicated no-query shell whose journal holds one earlier order of `AGENT`'s, 10 AAPL at 150
+/// day, cancelled (or, with `replaced`, replaced by a linked order the fold holds no request
+/// for, which is then cancelled), edited by `edit` and folded again; then the order whose answer
+/// is lost, as [`lost`] sends it.
+fn after_prior(
+    ports: &Ports<'_>,
+    replaced: bool,
+    edit: impl Fn(&mut FoldedEvent),
+) -> (Shell, ClientOrderId, Ran) {
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(ports);
+    let first = shell.run(
+        handoff(OTHER_INTENT, AGENT, opening(AAPL, "10", "150")),
+        ports,
+    );
+    let prior = first.submissions()[0].client_order_id.clone();
+    let mut answer = exact(STALE, "accepted").order;
+    answer.client_order_id = Some(prior.as_str().to_owned());
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Order(answer.clone()))),
+        ports,
+    );
+    let mut last = prior.clone();
+    if replaced {
+        answer.status = "replaced".to_owned();
+        answer.replaced_by_broker_order_id = Some("linked-1".to_owned());
+        shell.run(
+            Input::Broker(Ok(BrokerOutcome::Order(answer.clone()))),
+            ports,
+        );
+        last = shell
+            .state
+            .order(&prior)
+            .and_then(|o| o.replaced_by.clone())
+            .expect("linked");
+        answer.broker_order_id = "linked-1".to_owned();
+    }
+    answer.client_order_id = Some(last.as_str().to_owned());
+    answer.status = "canceled".to_owned();
+    shell.run(Input::Broker(Ok(BrokerOutcome::Order(answer))), ports);
+    let ended = shell.state.order(&last).map(|o| o.state);
+    assert_eq!(ended, Some(OrderState::Canceled), "the earlier order ended");
+    shell.account_journal.iter_mut().for_each(edit);
+    let mut shell = shell.restart_ready(ports);
+    shell.state = shell.state.clone().with_profile(profile(false));
+    let sent = shell.run(handoff(INTENT, AGENT, opening(AAPL, "10", "150")), ports);
+    let id = sent.submissions()[0].client_order_id.clone();
+    let lost = shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), ports);
+    (shell, id, lost)
+}
+
+/// An edit setting `field` to `value` in every `event_type` the journal holds so far.
+fn set(
+    event_type: &'static str,
+    field: &'static str,
+    value: &'static str,
+) -> impl Fn(&mut FoldedEvent) {
+    move |event| {
+        if let (true, Value::Object(members)) = (event.event_type == event_type, &mut event.payload)
+        {
+            members.insert(key(field), text(value));
+        }
+    }
+}
+
+fn listings(ran: &Ran) -> usize {
+    ran.requests
+        .iter()
+        .filter(|r| matches!(r, BrokerRequest::ListOrders(_)))
+        .count()
+}
+
+/// The only request in `ran` is one listing for `id`, never a lookup by client order id.
+fn one_listing(ran: &Ran, id: &ClientOrderId, path: &str) {
+    let named = ran.requests.iter().filter_map(|request| match request {
+        BrokerRequest::ListOrders(listing) => Some(Ok(&listing.client_order_id)),
+        BrokerRequest::GetOrderByClientId(asked) => Some(Err(asked)),
+        _ => None,
+    });
+    assert_eq!(
+        named.collect::<Vec<_>>(),
+        vec![Ok(id)],
+        "{path}: one listing, no lookup by id"
+    );
+}
+
+/// DEC-862 item 3, each half alone: an intent of another agent with no order, then an order of
+/// another agent with no intent of its own.
+#[test]
+#[ignore = "pending E7-23"]
+fn another_agents_intent_or_order_alone_stops_the_listing() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    for event_type in ["IntentReceived", "OrderRequestRecorded"] {
+        let (shell, id, lost) =
+            after_prior(&ports, false, set(event_type, "agent_id", OTHER_AGENT));
+        assert_eq!(listings(&lost), 0, "{event_type} names another agent");
+        unknown(&shell, &id, event_type);
+    }
+}
+
+/// DEC-863 item 3: an earlier order of ours differing from the lost one in any one matched member
+/// is no lookalike, so the one exact record is adopted.
+#[test]
+#[ignore = "pending E7-23"]
+fn an_earlier_order_differing_in_one_member_is_no_lookalike() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let members = [
+        ("instrument_id", OTHER),
+        ("side", "sell"),
+        ("qty", "9"),
+        ("limit_price", "149"),
+        ("type", "stop_limit"),
+        ("tif", "gtc"),
+    ];
+    for (field, value) in members {
+        let (mut shell, id, lost) = after_prior(&ports, false, set("OrderSubmitted", field, value));
+        assert_eq!(listings(&lost), 1, "{field}: listed");
+        let ran = shell.run(listed(&id, vec![exact("the-one", "accepted")]), &ports);
+        sends_nothing(&ran, field);
+        assert_state(&shell, &id, OrderState::Accepted, field);
+    }
+}
+
+/// DEC-863 item 3: an order of ours whose request the fold does not hold (a replacement the
+/// broker linked) counts as a lookalike on instrument, side and quantity alone.
+#[test]
+#[ignore = "pending E7-23"]
+fn an_order_with_no_folded_request_is_a_lookalike_on_instrument_side_and_quantity() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (mut shell, id, lost) =
+        after_prior(&ports, true, set("OrderSubmitted", "limit_price", "149"));
+    assert_eq!(listings(&lost), 1, "listed");
+    let ran = shell.run(listed(&id, vec![exact("the-one", "accepted")]), &ports);
+    sends_nothing(&ran, "a lookalike");
+    unknown(&shell, &id, "DEC-863 item 3");
+}
+
+/// DEC-862 item 3: a listing answer on a profile that queries by client order id was never asked.
+#[test]
+#[ignore = "pending E7-23"]
+fn a_listing_under_a_queryable_profile_adopts_nothing() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (mut shell, id, _) = lost(&ports, true, Before::Nothing);
+    let ran = shell.run(listed(&id, vec![exact("the-one", "accepted")]), &ports);
+    sends_nothing(&ran, "an unasked listing");
+    unknown(&shell, &id, "never asked");
+}
+
+/// A dedicated no-query shell with `AGENT`'s opening of 10 AAPL at 150 sent and unanswered.
+fn sent(ports: &Ports<'_>) -> (Shell, ClientOrderId) {
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(ports);
+    shell.state = shell.state.clone().with_profile(profile(false));
+    let sent = shell.run(handoff(INTENT, AGENT, opening(AAPL, "10", "150")), ports);
+    (shell, sent.submissions()[0].client_order_id.clone())
+}
+
+#[test]
+#[ignore = "pending E7-23"]
+fn a_duplicate_client_order_id_lists_on_a_no_query_profile() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (mut shell, id) = sent(&ports);
+    let client_order_id = id.as_str().to_owned();
+    let ran = shell.run(
+        Input::Broker(Ok(BrokerOutcome::DuplicateClientOrderId {
+            client_order_id,
+        })),
+        &ports,
+    );
+    one_listing(&ran, &id, "duplicate");
+}
+
+#[test]
+#[ignore = "pending E7-23"]
+fn a_reconciliation_missing_the_order_lists_on_a_no_query_profile() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (mut shell, id) = sent(&ports);
+    let mut answer = exact("b-1", "accepted").order;
+    answer.client_order_id = Some(id.as_str().to_owned());
+    shell.run(Input::Broker(Ok(BrokerOutcome::Submitted(answer))), &ports);
+    let missing = snapshot(shell.head().0, ReconcileReason::Scheduled);
+    let ran = shell.run(Input::BrokerSnapshot(missing), &ports);
+    one_listing(&ran, &id, "reconciliation");
+}
+
+/// Rule 5's bound: a risk exit waits on the agent's unanswered opening past the window, which
+/// marks it overdue and `Unknown`.
+#[test]
+#[ignore = "pending E7-23"]
+fn an_overdue_opening_lists_on_a_no_query_profile() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (mut shell, held) = sent(&ports);
+    let mut answer = exact("b-1", "filled").order;
+    answer.client_order_id = Some(held.as_str().to_owned());
+    answer.filled_qty = qty("10");
+    let fill = broker_fill("f-1", Some(held.as_str()), "10", "150");
+    shell.run(Input::BrokerUpdate(BrokerUpdate::Fill(fill)), &ports);
+    shell.run(Input::BrokerUpdate(BrokerUpdate::Order(answer)), &ports);
+    let second = shell.run(handoff(AGAIN, AGENT, opening(AAPL, "10", "150")), &ports);
+    let id = second.submissions()[0].client_order_id.clone();
+    shell.run(
+        handoff(OTHER_INTENT, AGENT, risk_exit(AAPL, "10", "140")),
+        &ports,
+    );
+    let window = config().unknown_absent_window_s;
+    let at = submitted_at(&shell, &id).secs() + window + 1;
+    let ran = shell.run(Input::Tick(RiskClock::from_secs(at)), &ports);
+    one_listing(&ran, &id, "overdue");
+}
+
+/// Restart re-queries every `Unknown` order: the new process is given the profile before it
+/// folds the journal, then `Started`.
+#[test]
+#[ignore = "pending E7-23"]
+fn a_restart_lists_an_unknown_order_on_a_no_query_profile() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (shell, id, _) = lost(&ports, false, Before::Nothing);
+    let mut next = Shell::new(2);
+    next.state = next.state.clone().with_profile(profile(false));
+    for event in &shell.account_journal {
+        next.fold_one(event).expect("the journal folds");
+    }
+    let epoch = next.epoch;
+    let ran = next.run(Input::Started(epoch), &ports);
+    one_listing(&ran, &id, "restart");
 }
