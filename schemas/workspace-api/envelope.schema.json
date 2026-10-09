@@ -59,11 +59,17 @@
         "membership_unavailable",
         "outcome_unknown",
         "address_limit",
-        "busy"
+        "busy",
+        "fold_unavailable",
+        "positions_held",
+        "agents_not_stopped"
       ],
       "x-planned": {
         "address_limit": "E8-14",
-        "busy": "E8-14"
+        "busy": "E8-14",
+        "fold_unavailable": "E10-13",
+        "positions_held": "E10-13",
+        "agents_not_stopped": "E10-13"
       }
     },
     "Effect": {
@@ -1046,6 +1052,90 @@
               },
               "type": {
                 "const": "https://mandate.dev/problems/busy"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "fold_unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Account state unavailable"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/fold_unavailable"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "positions_held"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Positions still held"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/positions_held"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "agents_not_stopped"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Agents not stopped"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/agents_not_stopped"
               }
             }
           }
