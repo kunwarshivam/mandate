@@ -53,6 +53,16 @@ describe("Sparkline's daily loss limit (critique C-11)", () => {
     expect(rule!.getAttribute("y2")).toBe(band!.getAttribute("y"));
   });
 
+  it("fills the chart with the band and keeps the rule on its top edge when the limit is above the line's range (DEC-738 item 3)", () => {
+    const { band, rule } = drawWithLimit(HI + 5_000);
+    expect(band).not.toBeNull();
+    expect(Number(band!.getAttribute("y"))).toBe(0);
+    expect(Number(band!.getAttribute("height"))).toBe(HEIGHT);
+    expect(rule, "the whole day is past the limit, so the rule stays at the top").not.toBeNull();
+    expect(Number(rule!.getAttribute("y1"))).toBe(0);
+    expect(Number(rule!.getAttribute("y2"))).toBe(0);
+  });
+
   it("draws neither band nor rule without a daily loss limit", () => {
     const { band, rule } = drawWithLimit(null);
     expect(band).toBeNull();
