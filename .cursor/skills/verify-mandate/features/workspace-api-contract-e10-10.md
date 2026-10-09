@@ -23,6 +23,11 @@
   (a whole request, response, problem, or envelope shape; a nested record, step-up, delegation,
   bid, watermark, or step) written as a JSON array refused as `type` at `""`, its member, or its
   array item.
+- **No body names a workspace:** `crates/mandate-api/tests/body_workspace.rs`, live (#1130, #560
+  minor 6): every request schema under `schemas/workspace-api/commands/` and every request type in
+  `requests.rs` has a decoder row; each example with `workspace`, `workspace_id`, or `ws` added is
+  `unknown_member` at that member; no request schema names such a member; a kill switch's
+  workspace scope naming any workspace is refused, `null` accepted.
 - **Schemas:** `crates/mandate-api/tests/schemas.rs`: live enum and member drift against
   `schemas/workspace-api/` (DEC-683), each member `null`-able and optional exactly as its schema
   says, a kill switch scope's `null` id exactly for `workspace`, and no `serde(flatten)`; pending,
