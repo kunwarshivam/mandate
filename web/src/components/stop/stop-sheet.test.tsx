@@ -1,8 +1,9 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentOwl } from "@/components/domain/owl";
 import { StopControl } from "@/components/shell/stop-control";
 import { StopSheet } from "@/components/stop/stop-sheet";
-import type { Scenario } from "@/fixtures/types";
+import type { AgentMode, Scenario, Workspace } from "@/fixtures/types";
 import { AGENT_IDS, SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
@@ -27,6 +28,19 @@ function choiceTitles(section: HTMLElement) {
 
 function section(sheet: HTMLElement, heading: RegExp) {
   return within(sheet).getByRole("heading", { name: heading }).closest("section")!;
+}
+
+/** An owl's eyes say its mode and nothing else (DEC-217); written out here, not read from `moodFor`. */
+const OWL_MOODS: Array<[AgentMode, string]> = [
+  ["normal", "awake"],
+  ["exits_only", "focused"],
+  ["paused", "asleep"],
+  ["stopped", "stopped"],
+];
+
+/** The owl's body, feathers included: the pixels its ID draws, apart from the eyes that follow the pointer. */
+function bodyPixels(owl: Element) {
+  return Array.from(owl.querySelectorAll(".owl-body > rect")).map((r) => ["x", "y", "width", "height", "fill"].map((k) => r.getAttribute(k)).join(","));
 }
 
 beforeEach(() => {
@@ -92,6 +106,39 @@ describe("Stop sheet choices", () => {
     expect(document.activeElement).toBe(sheet);
     fireEvent.click(within(sheet).getByRole("button", { name: /^Stop Agent 3/ }));
     expect(document.activeElement).toBe(screen.getByRole("dialog", { name: "Confirm it is you" }));
+  });
+
+  it.each(OWL_MOODS)("puts each agent's own owl at the start of its row under One agent, in its %s mode, hidden from the row's name (C-10)", (mode, mood) => {
+    const workspace = (ws: Workspace) => ({ ...ws, agents: ws.agents.map((a) => ({ ...a, mode })) });
+    renderWithRuntime(<StopControl />, "normal", { workspace });
+    const agents = workspace(buildWorkspace("normal")).agents;
+    const rows = section(openSheet(), /One agent/);
+    const triggers = within(rows).getAllByRole("button");
+    expect(triggers).toHaveLength(agents.length);
+    agents.forEach((agent, i) => {
+      const trigger = triggers[i];
+      const owl = trigger.querySelector("svg[data-slot=owl]");
+      expect(owl, `${agent.label}'s owl`).not.toBeNull();
+      expect(trigger.firstElementChild, `${agent.label}'s owl starts the row`).toBe(owl);
+      expect(trigger.querySelectorAll("svg[data-slot=owl]")).toHaveLength(1);
+      expect(owl).toHaveAttribute("aria-hidden", "true");
+      expect(owl).toHaveAttribute("data-mood", mood);
+      expect(owl).toHaveClass("size-8");
+      const alone = render(<AgentOwl agent={agent} className="size-8" />).container.querySelector("svg[data-slot=owl]")!;
+      expect(bodyPixels(owl!), `${agent.label}'s owl wears its own feathers`).toEqual(bodyPixels(alone));
+      const badge = trigger.querySelector("[data-slot=mode-badge]")!;
+      expect(trigger).toHaveAccessibleName(`${agent.label}${agent.mandate.name}${badge.textContent}`);
+    });
+  });
+
+  it("keeps the expanded row's choices, their names and order, free of the owl (C-10)", () => {
+    renderWithRuntime(<StopControl />);
+    const rows = section(openSheet(), /One agent/);
+    fireEvent.click(within(rows).getByRole("button", { name: /^Agent 1/ }));
+    expect(choiceTitles(rows)).toEqual(["Pause Agent 1", "Kill switch: close and stop", "Stop and release positions to me"]);
+    expect(within(rows).getByRole("button", { name: /^Pause Agent 1/ })).toBeInTheDocument();
+    expect(within(rows).getByRole("link", { name: /^Kill switch: close and stop/ })).toHaveAttribute("href", recordHref("kill", AGENT_IDS.btc));
+    for (const choice of choices(rows)) expect(choice.querySelector("svg[data-slot=owl]"), choice.textContent ?? "").toBeNull();
   });
 
   it("keeps account-wide choices while agent data is loading", () => {
