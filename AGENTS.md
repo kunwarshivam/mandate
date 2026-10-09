@@ -196,7 +196,7 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   schemas' mutation sweep (`schema-mutants`). CI runs them as two required checks:
   `cargo xtask ci fast` (lint, test, pending tests, spec guard) and `full`, an aggregate over
   `cargo xtask ci full` (fixtures, reference, schemas, supply chain, Postgres), every
-  deterministic `cargo xtask ci mutants` shard, and `cargo xtask ci schema-mutants` (DEC-688). Every
+  deterministic `cargo xtask ci mutants` shard, and every `cargo xtask ci schema-mutants` shard (DEC-688). Every
   required check and aggregated job must finish in under ten minutes; add parallel shards rather
   than removing tests, baselines, mutants, or safety gates (DEC-464).
 - **New crates** get an entry in `xtask/layers.toml` in the same change; safety-critical crates also

@@ -21,6 +21,8 @@ commands:
                         spec-guard | refcases | reference | schemas | supply-chain | postgres |
                         mutants | schema-mutants
   ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
+  ci schema-mutants K/N run shard K of N of the schema mutation sweep, after its baseline (CI
+                        passes it as MANDATE_SCHEMA_SHARD)
   layers                check crate layering and safety-critical policy (xtask/layers.toml)
   markers               check for debt markers and #[ignore] without a pending story
   feature-map [--index] check the verification skill's feature map against the workspace, or
@@ -67,6 +69,9 @@ const SCHEMA_DIR: &str = "schemas/workspace-api";
 const PG_URL: &str = "MANDATE_PG_URL";
 const PG_REQUIRED: &str = "MANDATE_PG_REQUIRED";
 const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
+/// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
+/// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
+const SCHEMA_SHARD_ENV: &str = "MANDATE_SCHEMA_SHARD";
 
 /// Lint header every safety-critical crate's `src/lib.rs` must carry (ADR-0001 ES-09, ES-21).
 const REQUIRED_HEADER: &str = "#![deny(
@@ -148,6 +153,10 @@ fn run() -> Result<()> {
             print!("{}", plan.outputs());
             Ok(())
         }
+        ["ci", "schema-mutants", shard] => {
+            eprintln!("==> ci schema-mutants {shard}");
+            schema_mutants(Some(shard), &mut pinned_python)
+        }
         ["ci", job] => ci(job),
         ["layers"] => layers(),
         ["markers"] => markers(),
@@ -209,8 +218,11 @@ fn ci(job: &str) -> Result<()> {
             )?;
             mutation_anchors()
         }
-        "schemas" => schema_checks(&mut |path| pinned_python(path, &[])),
-        "schema-mutants" => schema_mutants(&mut |path| pinned_python(path, &[])),
+        "schemas" => schema_checks(&mut pinned_python),
+        "schema-mutants" => {
+            let shard = env::var(SCHEMA_SHARD_ENV).ok().filter(|s| !s.is_empty());
+            schema_mutants(shard.as_deref(), &mut pinned_python)
+        }
         "supply-chain" => {
             sh("cargo", &["deny", "--locked", "check"])?;
             deps()?;
@@ -607,21 +619,27 @@ fn reference(script_and_args: &[&str]) -> Result<()> {
     pinned_python(&format!("reference/{script}"), rest)
 }
 
+/// How the schema jobs run a script: its repository path and its arguments ([`pinned_python`]).
+type ScriptRunner<'a> = dyn FnMut(&str, &[&str]) -> Result<()> + 'a;
+
 /// The `schemas` job: each of [`SCHEMA_CHECKERS`], by its repository path, through `run`.
-fn schema_checks(run: &mut dyn FnMut(&str) -> Result<()>) -> Result<()> {
+fn schema_checks(run: &mut ScriptRunner) -> Result<()> {
     for checker in SCHEMA_CHECKERS {
-        run(&format!("{SCHEMA_DIR}/{checker}"))?;
+        run(&format!("{SCHEMA_DIR}/{checker}"), &[])?;
     }
     Ok(())
 }
 
 /// The `schema-mutants` job: the sweep counts a mutant caught when any checker fails, so it first
 /// runs [`schema_checks`] on the unmutated tree, and runs no mutant unless all three pass; a
-/// failing baseline would otherwise report every mutant caught (DEC-688).
-fn schema_mutants(run: &mut dyn FnMut(&str) -> Result<()>) -> Result<()> {
+/// failing baseline would otherwise report every mutant caught (DEC-688). With `shard`, `K/N`, the
+/// sweep runs only that shard (`mutate_schemas.py --shard K/N`, which validates it); every shard
+/// checks the baseline itself, so CI's matrix needs no job of its own for it.
+fn schema_mutants(shard: Option<&str>, run: &mut ScriptRunner) -> Result<()> {
     schema_checks(run)
         .context("baseline fails: fix the schemas before mutants mean anything (DEC-688)")?;
-    run(&format!("{SCHEMA_DIR}/mutate_schemas.py"))
+    let args: Vec<&str> = shard.map(|s| vec!["--shard", s]).unwrap_or_default();
+    run(&format!("{SCHEMA_DIR}/mutate_schemas.py"), &args)
 }
 
 /// Runs the Python script at `path`, from the repository root, in the environment
@@ -7109,7 +7127,8 @@ mod tests {
     /// DEC-688: the workspace API's three schema checkers run inside `full`, and its mutation sweep
     /// is CI's own `schema-mutants` job, guarded like the others against drafts, capped at ten
     /// minutes (DEC-464), and needed by the required `full` verdict, which fails on any result of
-    /// it but success while every other job passed. The sweep runs only after all three checkers
+    /// it but success while every other job passed: the matrix's result, a success only when every
+    /// one of its three shards succeeded. Each shard runs the sweep only after all three checkers
     /// pass on the unmutated tree: a checker failing there fails the job and runs no mutant.
     #[test]
     fn the_workspace_api_schema_jobs_gate_full() -> Result<()> {
@@ -7118,20 +7137,29 @@ mod tests {
             .iter()
             .map(|c| format!("{SCHEMA_DIR}/{c}"))
             .collect();
-        let mut ran = Vec::new();
-        schema_mutants(&mut |path| {
-            ran.push(path.to_owned());
-            Ok(())
-        })?;
-        let mut expected = checkers.clone();
-        expected.push(sweep.clone());
-        assert_eq!(
-            ran, expected,
-            "the baseline's three checkers, then the sweep"
-        );
+        for (shard, sweep_args) in [
+            (None, vec![]),
+            (Some("1/3"), vec!["--shard".to_owned(), "1/3".to_owned()]),
+        ] {
+            let mut ran: Vec<(String, Vec<String>)> = Vec::new();
+            schema_mutants(shard, &mut |path, args| {
+                ran.push((
+                    path.to_owned(),
+                    args.iter().map(|a| (*a).to_owned()).collect(),
+                ));
+                Ok(())
+            })?;
+            let mut expected: Vec<(String, Vec<String>)> =
+                checkers.iter().map(|c| (c.clone(), vec![])).collect();
+            expected.push((sweep.clone(), sweep_args));
+            assert_eq!(
+                ran, expected,
+                "the baseline's three checkers, then the sweep with the shard ({shard:?}) passed through"
+            );
+        }
         for failing in &checkers {
             let mut ran = Vec::new();
-            let err = schema_mutants(&mut |path| {
+            let err = schema_mutants(Some("0/3"), &mut |path, _| {
                 ran.push(path.to_owned());
                 if path == failing {
                     anyhow::bail!("{path} failed");
@@ -7165,6 +7193,9 @@ mod tests {
         for line in [
             "if: ${{ !github.event.pull_request.draft }}",
             "timeout-minutes: 10",
+            "fail-fast: false",
+            "shard: [\"0/3\", \"1/3\", \"2/3\"]",
+            "MANDATE_SCHEMA_SHARD: ${{ matrix.shard }}",
             "run: cargo xtask ci schema-mutants",
         ] {
             assert!(
