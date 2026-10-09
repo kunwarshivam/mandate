@@ -20,7 +20,7 @@ const appNav = (page: Page, width: number) => page.getByRole("navigation", { nam
 const agentSections = (page: Page, width: number) => page.getByRole("navigation", { name: width < DESKTOP ? "This agent" : "Agent sections" });
 
 const conversation = (page: Page) => page.getByRole("log", { name: "Conversation" });
-const composer = (page: Page) => page.getByRole("textbox", { name: "Your message" });
+const composer = (page: Page) => page.getByRole("textbox", { name: "Your answer" });
 
 /** Sends one message in set-up and waits until the model has read it. */
 async function say(page: Page, text: string) {
