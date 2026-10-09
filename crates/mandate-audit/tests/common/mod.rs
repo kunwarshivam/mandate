@@ -85,7 +85,7 @@ pub fn event_id(n: u64) -> String {
     format!("01J8Z3M4{n:018}")
 }
 
-fn actor() -> String {
+pub fn actor() -> String {
     format!(
         r#"{{"kind":"system","id":"executor","version":"0.1.0","build":"sha256:{}"}}"#,
         "3".repeat(64)
@@ -144,7 +144,7 @@ impl Fixture {
         fixture
     }
 
-    fn open(&mut self, stream: &str, payload: &str) {
+    pub fn open(&mut self, stream: &str, payload: &str) {
         let id = StreamId::parse(stream).unwrap();
         let epoch = self.journal.take_ownership(&id);
         self.appended.insert(
@@ -173,6 +173,11 @@ impl Fixture {
     fn append(&mut self, stream: &str, event_type: &str, payload: &str) {
         self.next_id += 1;
         let id = event_id(self.next_id);
+        self.append_draft(stream, id.clone(), &draft(&id, stream, event_type, payload));
+    }
+
+    /// Appends one draft the caller wrote whole, whose `event_id` is `id`, to an opened `stream`.
+    pub fn append_draft(&mut self, stream: &str, id: String, draft: &[u8]) {
         let record = self.appended.get_mut(stream).unwrap();
         let head = record.event_ids.len() as u64;
         let outcome = self.journal.append(
@@ -180,12 +185,21 @@ impl Fixture {
             head,
             record.epoch,
             UtcNanos::parse(T).unwrap(),
-            &[&draft(&id, stream, event_type, payload)],
+            &[draft],
         );
         assert!(
             matches!(outcome, AppendOutcome::Committed(_)),
             "{outcome:?}"
         );
         record.event_ids.push(id);
+    }
+
+    /// The streams of `workspace` that the fixture opened, sorted by `stream_id` bytes.
+    pub fn streams_of(&self, workspace: &str) -> Vec<String> {
+        self.appended
+            .keys()
+            .filter(|s| s.split(':').nth(1) == Some(workspace))
+            .cloned()
+            .collect()
     }
 }

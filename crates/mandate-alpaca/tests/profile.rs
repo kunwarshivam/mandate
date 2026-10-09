@@ -10,7 +10,11 @@ use mandate_canon::{Digest, Key, Value, parse, to_canonical};
 use mandate_domain::{
     AssetClass, MarketSession, OrderType, ProtectionForm, QuantityForm, TimeInForce,
 };
-use mandate_executor::BrokerConnector;
+use mandate_executor::{
+    BrokerConnector, OcoLegs, OrderType as ExecutorOrderType, ProtectionPrices,
+    TimeInForce as ExecutorTif, protective_shape,
+};
+use mandate_num::{Fraction, Price, Qty};
 use mandate_time::UtcNanos;
 
 /// The profile written by hand from §5.2 and Alpaca's order documentation, as DEC-630 item 1
@@ -163,7 +167,6 @@ fn the_connector_hands_the_executor_its_profile_without_calling_the_broker() {
 /// E7-23 B2a (DEC-838 items 3 and 5): Alpaca's profile is the equities row and crypto's, exactly,
 /// and the connector hands over crypto's one resting stop-limit, whole and fractional.
 #[test]
-#[ignore = "pending E7-23"]
 fn alpacas_profile_declares_cryptos_one_resting_stop_limit() {
     let profile = alpaca_profile().unwrap();
     let Ok(Value::Object(mut expected)) = parse(ALPACA.as_bytes()) else {
@@ -200,5 +203,65 @@ fn alpacas_profile_declares_cryptos_one_resting_stop_limit() {
             [ProtectionForm::StopLimit].into(),
         );
         assert_eq!(crypto, Ok(stop_limit), "DEC-36, DEC-838 item 3");
+    }
+}
+
+/// LT-14 through the executor's own reading (DEC-838): Alpaca's profile protects an equity with
+/// a take-profit by a GTC OCO, and crypto, whole or fractional, by one GTC stop-limit at
+/// stop x (1 - offset), whatever the clock's session.
+#[test]
+fn alpacas_profile_protects_an_equity_by_oco_and_crypto_by_one_stop_limit() {
+    let profile = alpaca_profile().unwrap();
+    let price = |text| Price::parse(text).unwrap();
+    let prices = ProtectionPrices {
+        stop: price("140"),
+        take_profit: Some(price("170")),
+    };
+    let offset = Some(Fraction::parse("0.01").unwrap());
+    let shape = |class, quantity| {
+        let quantity = Qty::parse(quantity).unwrap();
+        protective_shape(
+            &profile,
+            class,
+            MarketSession::PreMarket,
+            quantity,
+            prices,
+            offset,
+        )
+        .unwrap()
+        .unwrap()
+    };
+    let equity = shape(AssetClass::UsEquity, "10");
+    assert_eq!(
+        (equity.form, equity.order_type, equity.tif),
+        (
+            ProtectionForm::Oco,
+            ExecutorOrderType::Limit,
+            ExecutorTif::Gtc
+        )
+    );
+    let legs = OcoLegs {
+        take_profit: price("170"),
+        stop: price("140"),
+        qty: Qty::parse("10").unwrap(),
+    };
+    assert_eq!(equity.oco, Some(legs));
+    for quantity in ["2", "0.5"] {
+        let crypto = shape(AssetClass::Crypto, quantity);
+        assert_eq!(
+            (crypto.form, crypto.order_type, crypto.tif, crypto.oco),
+            (
+                ProtectionForm::StopLimit,
+                ExecutorOrderType::StopLimit,
+                ExecutorTif::Gtc,
+                None
+            ),
+            "{quantity}"
+        );
+        assert_eq!(
+            (crypto.stop_price, crypto.limit_price),
+            (Some(price("140")), Some(price("138.6"))),
+            "{quantity}"
+        );
     }
 }

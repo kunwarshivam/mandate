@@ -127,7 +127,6 @@ fn the_allowlist_is_the_nine_tools_of_the_contract() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_tool_outside_the_allowlist_is_refused_before_anything_is_sent() {
     let (server, client) = connected(&base(), None, vec![]).await;
     let outside = [
@@ -156,7 +155,6 @@ async fn a_tool_outside_the_allowlist_is_refused_before_anything_is_sent() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_refused_call_draws_no_budget_and_a_throttled_class_spends_its_own() {
     let bucket = |capacity| BucketConfig {
         capacity,
@@ -190,7 +188,6 @@ async fn a_refused_call_draws_no_budget_and_a_throttled_class_spends_its_own() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn with_no_stored_pin_a_listed_fund_movement_tool_is_refused() {
     let names = [
         "transfer_funds",
@@ -230,7 +227,6 @@ async fn with_no_stored_pin_a_listed_fund_movement_tool_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn with_no_stored_pin_a_missing_allowlisted_tool_is_refused() {
     for name in NINE {
         let (_server, client) = session(vec![listing(&without(name))], None, roomy()).await;
@@ -242,7 +238,6 @@ async fn with_no_stored_pin_a_missing_allowlisted_tool_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn with_a_stored_pin_a_fund_tool_or_a_missing_tool_halts_openings_and_never_the_exit() {
     let extra = |name: &str| {
         let mut tools = base();
@@ -286,7 +281,6 @@ async fn with_a_stored_pin_a_fund_tool_or_a_missing_tool_halts_openings_and_neve
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_benign_extra_tool_connects_and_is_never_called() {
     let mut tools = base();
     tools.push(json!({"name": "get_watchlists", "inputSchema": {"type": "object"}}));
@@ -320,7 +314,6 @@ async fn connect_with(name: &str) -> Result<McpClient, McpError> {
 
 /// DEC-839 item 2: a cursor is a string or absent; anything else is not a last page.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_next_cursor_that_is_not_a_string_is_malformed() {
     let hidden = [json!({"name": "transfer_funds", "inputSchema": {"type": "object"}})];
     for next in [json!(5), Value::Null] {
@@ -336,7 +329,6 @@ async fn a_next_cursor_that_is_not_a_string_is_malformed() {
 
 /// DEC-839 item 1: an allowlisted tool needs an `inputSchema`, and `null` is none.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_null_input_schema_on_an_allowlisted_tool_is_malformed() {
     let mut tools = base();
     tools[3]["inputSchema"] = Value::Null;
@@ -346,7 +338,6 @@ async fn a_null_input_schema_on_an_allowlisted_tool_is_malformed() {
 
 /// DEC-839 item 3: each token, in a name where it is the only match.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn every_fund_token_alone_refuses_the_connect() {
     let tokens = [
         "transfer",
@@ -378,7 +369,6 @@ async fn every_fund_token_alone_refuses_the_connect() {
 /// DEC-839 item 3: the splits at a case change, a digit before a capital, a run of capitals,
 /// and every separator, then lower-casing.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn adversarial_names_are_split_as_dec_839_defines() {
     for name in ["getFundamentals", ""] {
         let client = connect_with(name).await;

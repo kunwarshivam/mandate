@@ -4,23 +4,27 @@
 //! from the crate's own checks. Each case runs on a store answering the query and on one
 //! answering every membership of every scope, so the change must pick its scope and members itself.
 
+use std::collections::BTreeSet;
+
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
+use mandate_identity_seal::LookupSeal;
 use mandate_time::UtcNanos;
 
-use crate::MembershipState::{Active, CoolingOff, Deactivated, Invited, Removed};
+use crate::MembershipState::{Active, CoolingOff, Deactivated, Expired, Invited, Removed, Revoked};
 use crate::Role::{
     Approver, Auditor, BillingAdmin, Operator as Op, OrgAdmin, OrgOwner, Viewer,
     WorkspaceAdmin as Wa,
 };
 use crate::{
-    Authorized, Membership, MembershipState, OrgId, Permission, Principal, PrincipalContext,
-    PrincipalId, PrincipalKind, Refusal, Role, RoleChange, Scope, Session, SessionKind, SessionRef,
-    StepUp, WorkspaceId, authorize, change_roles,
+    Authorized, LookupFailed, Membership, MembershipLookup, MembershipQuery, MembershipState,
+    OrgId, Permission, Principal, PrincipalContext, PrincipalId, PrincipalKind, Refusal, Role,
+    RoleChange, Scope, Session, SessionKind, SessionRef, StepUp, WorkspaceId, authorize,
+    change_roles,
 };
 
-use super::{ByMember, Everything, O1, O2, W1, W3};
+use super::{ByMember, Everything, Failing, O1, O2, Unreadable, W1, W3, hosted_in, record_of};
 
 const ORG: Scope = Scope::Org(O1);
 const WS: Scope = Scope::Workspace {
@@ -47,6 +51,9 @@ const ADM: PrincipalId = PrincipalId(0x64);
 const OPR: PrincipalId = PrincipalId(0x65);
 const VIEW: PrincipalId = PrincipalId(0x66);
 const ELSEWHERE: PrincipalId = PrincipalId(0x67);
+const STRANGER: PrincipalId = PrincipalId(0x68);
+const INVITEE: PrincipalId = PrincipalId(0x69);
+const GONE: PrincipalId = PrincipalId(0x6a);
 
 type Outcome = Result<StepUp, Refusal>;
 const REQUIRED: Outcome = Ok(StepUp::Required);
@@ -148,7 +155,6 @@ fn check(cases: &[Case]) {
 /// `own_roles`, raising or lowering, with another owner left, and before `owner_role_reserved`
 /// (§4.5's order); the same change naming another member passes.
 #[test]
-#[ignore = "pending E9-2"]
 fn no_principal_changes_its_own_roles_up_or_down() {
     let (s, two) = (store(&[]), store(&[m(OO4, ORG, Active, &[OrgOwner])]));
     let own = Err(Refusal::OwnRoles);
@@ -172,7 +178,6 @@ fn no_principal_changes_its_own_roles_up_or_down() {
 /// The way down is the leave row (DEC-641 item 5): no step-up, and §5.2 still holds on it; a
 /// suspended, cooling-off, or other scope's holder is not an active owner or admin (DEC-654 item 2).
 #[test]
-#[ignore = "pending E9-2"]
 fn leaving_needs_no_step_up_and_never_leaves_no_active_owner_or_admin() {
     let s = store(&[]);
     check(&[
@@ -188,7 +193,6 @@ fn leaving_needs_no_step_up_and_never_leaves_no_active_owner_or_admin() {
 /// adds an active successor in the same command (a cooling-off one is not); a role counts once
 /// effective at `now`, the boundary included (DEC-654 item 2).
 #[test]
-#[ignore = "pending E9-2"]
 fn the_last_active_owner_or_admin_is_never_removed_or_demoted() {
     let s = store(&[]);
     let newcomer = store(&[m(OO4, ORG, CoolingOff, &[BillingAdmin])]);
@@ -232,7 +236,6 @@ fn the_last_active_owner_or_admin_is_never_removed_or_demoted() {
 /// is `forbidden` (DEC-654 item 3); a suspended admin, another workspace, a pair the store does not
 /// hold, and a reduction-only session reach nothing.
 #[test]
-#[ignore = "pending E9-2"]
 fn only_a_workspace_admin_changes_workspace_roles() {
     let s = store(&[]);
     let grant = || ch(&[(VIEW, Op)], &[], &[]);
@@ -274,7 +277,6 @@ fn only_a_workspace_admin_changes_workspace_roles() {
 /// owner grants, removes, or (by deactivating its holder) takes the org owner role, which is
 /// refused before the last-owner rule (§4.5's order).
 #[test]
-#[ignore = "pending E9-2"]
 fn only_an_org_owner_changes_the_owner_role() {
     let s = store(&[]);
     let reserved = Err(Refusal::OwnerRoleReserved);
@@ -324,6 +326,266 @@ fn only_an_org_owner_changes_the_owner_role() {
     ]);
 }
 
+/// DEC-654 item 7: a grant to a principal whose membership does not reach the scope (none there,
+/// one only in another scope, or one `invited`, `deactivated`, or `removed`, §5.1), and a removal
+/// from or a deactivation of one with no membership in the scope at all, are `forbidden`, judged
+/// with item 3, before `own_roles`, `owner_role_reserved`, and §5.2. A removal from or a
+/// deactivation of an `invited` or `deactivated` member is judged like any other entry; a
+/// `cooling_off` member is reached and passes.
+#[test]
+fn a_grant_to_a_non_member_or_a_change_naming_no_member_is_forbidden() {
+    let s = store(&[
+        m(INVITEE, WS, Invited, &[Viewer]),
+        m(GONE, WS, Removed, &[]),
+    ]);
+    let forbidden = Err(Refusal::Forbidden);
+    check(&[
+        (&s, WA1, WS, ch(&[(VIEW, Op)], &[], &[]), REQUIRED),
+        (&s, WA1, WS, ch(&[(WA3, Op)], &[], &[]), REQUIRED),
+        (&s, OO1, ORG, ch(&[(OO3, OrgAdmin)], &[], &[]), REQUIRED),
+        (&s, WA1, WS, ch(&[(STRANGER, Viewer)], &[], &[]), forbidden),
+        (&s, WA1, WS, ch(&[], &[(STRANGER, Viewer)], &[]), forbidden),
+        (&s, WA1, WS, ch(&[], &[], &[STRANGER]), forbidden),
+        (&s, WA1, WS, ch(&[(ELSEWHERE, Op)], &[], &[]), forbidden),
+        (&s, WA1, WS, ch(&[(WA2, Op)], &[], &[]), forbidden),
+        (&s, WA1, WS, ch(&[(INVITEE, Op)], &[], &[]), forbidden),
+        (&s, WA1, WS, ch(&[(GONE, Viewer)], &[], &[]), forbidden),
+        (&s, WA1, WS, ch(&[], &[(ELSEWHERE, Wa)], &[]), forbidden),
+        (&s, OO1, ORG, ch(&[], &[], &[VIEW]), forbidden),
+        (&s, WA1, WS, ch(&[], &[(WA2, Wa)], &[]), NOT_REQUIRED),
+        (&s, WA1, WS, ch(&[], &[], &[WA2]), NOT_REQUIRED),
+        (
+            &s,
+            WA1,
+            WS,
+            ch(&[], &[(INVITEE, Viewer)], &[]),
+            NOT_REQUIRED,
+        ),
+        (&s, WA1, WS, ch(&[], &[], &[INVITEE]), NOT_REQUIRED),
+        (
+            &s,
+            OA,
+            ORG,
+            ch(&[], &[], &[OO2]),
+            Err(Refusal::OwnerRoleReserved),
+        ),
+        (
+            &s,
+            WA1,
+            WS,
+            ch(&[], &[], &[WA2, WA1]),
+            Err(Refusal::LastAdmin),
+        ),
+        (
+            &s,
+            OO1,
+            ORG,
+            ch(&[(STRANGER, OrgAdmin)], &[], &[]),
+            forbidden,
+        ),
+        (
+            &s,
+            OO1,
+            ORG,
+            ch(&[(VIEW, BillingAdmin)], &[], &[]),
+            forbidden,
+        ),
+        (&s, OO1, ORG, ch(&[], &[], &[OO2]), REQUIRED),
+        (
+            &s,
+            WA1,
+            WS,
+            ch(&[(VIEW, Op), (STRANGER, Op)], &[], &[]),
+            forbidden,
+        ),
+        (
+            &s,
+            OA,
+            ORG,
+            ch(&[(STRANGER, OrgOwner)], &[], &[]),
+            forbidden,
+        ),
+        (
+            &s,
+            OO1,
+            ORG,
+            ch(&[(STRANGER, OrgOwner)], &[], &[OO1]),
+            forbidden,
+        ),
+        (
+            &s,
+            WA1,
+            WS,
+            ch(&[(WA1, Approver), (STRANGER, Viewer)], &[], &[]),
+            forbidden,
+        ),
+    ]);
+}
+
+/// DEC-654 item 7: a membership `removed`, `expired`, or `revoked` counts as no membership in the
+/// scope, so removing a role it still lists, or deactivating it, is `forbidden`, as for a stranger.
+/// The same member `deactivated` is reached, and the same removal and deactivation pass, so the
+/// refusal comes from the departed state alone.
+#[test]
+fn a_removal_or_deactivation_naming_a_departed_member_is_forbidden() {
+    let forbidden = Err(Refusal::Forbidden);
+    for state in [Removed, Expired, Revoked] {
+        let s = store(&[m(GONE, WS, state, &[Viewer])]);
+        check(&[
+            (&s, WA1, WS, ch(&[], &[(GONE, Viewer)], &[]), forbidden),
+            (&s, WA1, WS, ch(&[], &[], &[GONE]), forbidden),
+            (&s, WA1, WS, ch(&[], &[(GONE, Viewer)], &[GONE]), forbidden),
+        ]);
+    }
+    let suspended = store(&[m(GONE, WS, Deactivated, &[Viewer])]);
+    check(&[
+        (
+            &suspended,
+            WA1,
+            WS,
+            ch(&[], &[(GONE, Viewer)], &[]),
+            NOT_REQUIRED,
+        ),
+        (&suspended, WA1, WS, ch(&[], &[], &[GONE]), NOT_REQUIRED),
+    ]);
+}
+
+/// DEC-654 item 8: an empty change goes through the roles row, so a principal that row refuses gets
+/// its refusal, never `Ok`, `last_owner`, or `last_admin`, whether or not the scope has an active
+/// owner or admin (ID-8: it answers nothing about a scope the row does not reach); an admin's
+/// carries the row's step-up.
+#[test]
+fn an_empty_change_is_judged_by_the_roles_row() {
+    let s = store(&[]);
+    let headless: Vec<Membership> = s
+        .iter()
+        .filter(|m| m.member != WA1 && m.member != OO1)
+        .cloned()
+        .collect();
+    let empty = RoleChange::default;
+    let foreign = Scope::Workspace {
+        org: O2,
+        workspace: W1,
+    };
+    let (forbidden, none) = (Err(Refusal::Forbidden), Err(Refusal::NoMembership));
+    check(&[
+        (&s, WA1, WS, empty(), NOT_REQUIRED),
+        (&s, OO1, ORG, empty(), REQUIRED),
+        (&s, OA, ORG, empty(), REQUIRED),
+        (&s, OPR, WS, empty(), forbidden),
+        (&s, VIEW, WS, empty(), forbidden),
+        (&s, BILL, ORG, empty(), forbidden),
+        (&s, OO1, WS, empty(), none),
+        (&s, WA1, ORG, empty(), none),
+        (&s, WA2, WS, empty(), none),
+        (&s, ELSEWHERE, WS, empty(), none),
+        (&s, ELSEWHERE, ORG, empty(), none),
+        (&s, WA1, WS3, empty(), none),
+        (&s, WA1, foreign, empty(), none),
+        (&headless, OPR, WS, empty(), forbidden),
+        (&headless, BILL, ORG, empty(), forbidden),
+        (&headless, STRANGER, WS, empty(), none),
+        (&headless, ELSEWHERE, ORG, empty(), none),
+    ]);
+    let reduction = run_in(SessionKind::ReductionOnly, &s, WA1, WS, &empty());
+    assert_eq!(reduction, Err(Refusal::ReductionOnly));
+}
+
+/// A store that answers only the author's own memberships, so `authorize` passes and the change's
+/// read of the scope's other members fails.
+struct AuthorOnly<'a>(PrincipalId, &'a [Membership]);
+
+impl LookupSeal for AuthorOnly<'_> {}
+
+impl MembershipLookup for AuthorOnly<'_> {
+    fn memberships(&self, query: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed> {
+        match query.member == Some(self.0) {
+            true => Ok(self
+                .1
+                .iter()
+                .filter(|m| m.member == self.0)
+                .cloned()
+                .collect()),
+            false => Err(LookupFailed),
+        }
+    }
+
+    fn workspaces(&self, org: OrgId) -> Result<BTreeSet<WorkspaceId>, LookupFailed> {
+        Ok(hosted_in(org))
+    }
+
+    fn workspace_org(&self, workspace: WorkspaceId) -> Result<Option<OrgId>, LookupFailed> {
+        Ok(record_of(workspace))
+    }
+}
+
+/// DEC-654 item 9 (a): a role change is no risk-reducing row (§4.5 lists them, DEC-642 item 10), so a
+/// failed read, the author's or the scope's members', refuses it `membership_unavailable`, and the
+/// session's roles snapshot never stands in for it.
+#[test]
+fn a_failed_membership_read_refuses_every_role_change() {
+    let s = store(&[]);
+    let cases = [
+        (WA1, WS, ch(&[(VIEW, Op)], &[], &[])),
+        (WA1, WS, ch(&[], &[(OPR, Op)], &[])),
+        (WA1, WS, ch(&[], &[], &[VIEW])),
+        (WA1, WS, ch(&[], &[], &[WA1])),
+        (WA1, WS, RoleChange::default()),
+        (OO1, ORG, ch(&[(BILL, OrgAdmin)], &[], &[])),
+        (OA, ORG, ch(&[], &[], &[BILL])),
+        (OO1, ORG, RoleChange::default()),
+    ];
+    for (by, scope, change) in cases {
+        let user = Principal::User { id: by };
+        let snapshot = s.iter().filter(|m| m.member == by).cloned().collect();
+        let session = Session {
+            reference: SESSION,
+            kind: SessionKind::Full,
+            snapshot,
+        };
+        let outcomes = [
+            change_roles(&Failing, &user, &session, scope, &change, at(0)),
+            change_roles(&Unreadable, &user, &session, scope, &change, at(0)),
+            change_roles(&AuthorOnly(by, &s), &user, &session, scope, &change, at(0)),
+        ];
+        for got in outcomes {
+            assert_eq!(
+                got,
+                Err(Refusal::MembershipUnavailable),
+                "{by:?} at {scope:?}: {change:?}"
+            );
+        }
+    }
+}
+
+/// DEC-654 item 9 (b): a member whose org owner role is recorded but still cooling off (§8.3), or whose
+/// membership is, holds it for `owner_role_reserved`, so only an org owner deactivates them; an
+/// author whose own owner role is still cooling off is not an org owner.
+#[test]
+fn a_cooling_off_owner_role_is_still_reserved_to_an_org_owner() {
+    let pending = PrincipalId(0x57);
+    let mut admin = m(pending, ORG, Active, &[OrgAdmin]);
+    admin.roles.insert(OrgOwner, at(1));
+    let s = store(&[since(OO4, ORG, Active, &[OrgOwner], at(1)), admin]);
+    let reserved = Err(Refusal::OwnerRoleReserved);
+    check(&[
+        (&s, OO1, ORG, ch(&[], &[], &[OO4]), REQUIRED),
+        (&s, OO1, ORG, ch(&[], &[], &[OO3]), REQUIRED),
+        (&s, pending, ORG, ch(&[], &[], &[BILL]), REQUIRED),
+        (&s, OA, ORG, ch(&[], &[], &[OO4]), reserved),
+        (&s, OA, ORG, ch(&[], &[], &[OO3]), reserved),
+        (&s, OA, ORG, ch(&[], &[(OO4, OrgOwner)], &[]), reserved),
+        (&s, pending, ORG, ch(&[], &[], &[OO3]), reserved),
+        (
+            &s,
+            pending,
+            ORG,
+            ch(&[(BILL, OrgOwner)], &[], &[]),
+            reserved,
+        ),
+    ]);
+}
+
 /// The scope, its kind's roles, and its admin role.
 fn kind(org: bool) -> (Scope, &'static [Role], Role) {
     match org {
@@ -349,7 +611,6 @@ type OwnDraw = (bool, bool, Vec<usize>, Vec<(u8, usize)>);
 /// `own_roles`, whatever else it holds; without those entries it passes, with step-up for a grant
 /// at a workspace and for any change at an org (§4.2).
 #[test]
-#[ignore = "pending E9-2"]
 fn no_change_naming_its_author_passes_and_the_rest_of_it_does() {
     let own = prop::collection::vec(0usize..5, 1..4);
     let others = prop::collection::vec((0u8..3, 0usize..5), 1..5);
@@ -401,7 +662,6 @@ type LastDraw = (bool, Vec<(usize, bool, u8)>, bool);
 /// successor granted it in the change, never a suspended, invited, cooling-off, or removed holder,
 /// nor one of another scope. Only a membership that reaches its scope is changed.
 #[test]
-#[ignore = "pending E9-2"]
 fn no_change_leaves_a_scope_without_an_active_owner_or_admin() {
     let members = prop::collection::vec((0usize..5, any::<bool>(), 0u8..4), 1..5);
     property(
@@ -514,7 +774,6 @@ fn into_tenant(context: PrincipalContext) -> Result<Seen, Refusal> {
 /// principal's own scope it is `no_membership`. A workspace the member does not reach, or a pair
 /// the store does not hold, yields no `PrincipalContext` to begin with.
 #[test]
-#[ignore = "pending E9-2"]
 fn into_tenant_yields_only_the_workspace_its_membership_reached() {
     let (user, leave, passkey) = (
         PrincipalKind::User,

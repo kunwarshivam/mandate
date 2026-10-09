@@ -6,8 +6,8 @@ use mandate_canon::DecStr;
 use mandate_domain::AssetId;
 use mandate_journal::ArtifactRef;
 use mandate_time::UtcNanos;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::de::{DeserializeOwned, Error as _, IgnoredAny, Unexpected};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Unimplemented;
 use crate::problem::Violation;
@@ -21,13 +21,70 @@ use crate::problem::Violation;
 /// - `type`: a member of the wrong JSON type, such as a number where a decimal string belongs;
 /// - `non_canonical`: a scalar not in its canonical form;
 /// - `missing`: a required member absent;
-/// - `enum`: a value outside its closed set.
+/// - `enum`: a value outside its closed set;
+/// - any rule of [`Validate`], checked after the shape decodes.
 ///
 /// # Errors
 /// [`Refused::Invalid`], which the server answers as `invalid` (422).
-pub fn decode<T: DeserializeOwned>(body: &[u8]) -> Result<T, Refused> {
+pub fn decode<T: DeserializeOwned + Validate>(body: &[u8]) -> Result<T, Refused> {
     let _ = body;
     Err(Refused::Unimplemented(Unimplemented))
+}
+
+/// What a schema requires that serde cannot express: a pattern on a plain string, a numeric bound,
+/// an array's length or uniqueness, or one member conditioned on another (DEC-689 item 1).
+pub trait Validate {
+    /// # Errors
+    /// [`Refused::Invalid`] with one located violation per broken rule.
+    fn validate(&self) -> Result<(), Refused>;
+}
+
+/// [`Validate`] for shapes: `none` whose serde types enforce every rule, `pending` with rules
+/// serde cannot express, stubbed until E10-10.
+macro_rules! rules {
+    (none: $($shape:ty),+) => {
+        $(impl $crate::wire::Validate for $shape {
+            fn validate(&self) -> Result<(), $crate::wire::Refused> {
+                Ok(())
+            }
+        })+
+    };
+    (pending: $($shape:ty),+) => {
+        $(impl $crate::wire::Validate for $shape {
+            fn validate(&self) -> Result<(), $crate::wire::Refused> {
+                let _ = self;
+                Err($crate::wire::Refused::Unimplemented($crate::Unimplemented))
+            }
+        })+
+    };
+}
+pub(crate) use rules;
+rules!(none: Decimal, Ref, Timestamp, Asset, Id, EventId);
+
+/// An optional member the schema lets be absent but never `null`: with `#[serde(default)]`, an
+/// absent member is `None` and a `null` one is refused as the wrong type.
+///
+/// # Errors
+/// `T`'s, including for `null`.
+pub fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+/// A member the schema pins to `null`, as `()`: any value is refused, `{}` and `[]` among them,
+/// which a bare `()` inside a tagged enum would take.
+///
+/// # Errors
+/// The wrong type, for anything but `null`.
+pub fn null<'de, D: Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+    match Option::<IgnoredAny>::deserialize(deserializer)? {
+        None => Ok(()),
+        Some(IgnoredAny) => Err(D::Error::invalid_type(
+            Unexpected::Other("a value"),
+            &"null",
+        )),
+    }
 }
 
 /// The JSON bytes of a response member or body.

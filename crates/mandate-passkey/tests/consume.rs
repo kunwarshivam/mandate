@@ -44,13 +44,11 @@ fn passkey_passed() -> Result<Outputs, StepUpRefusal> {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_challenge_expires_three_hundred_seconds_after_it_is_issued() {
     assert_eq!(record().expires_at(), at(EXPIRES));
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_record_hashes_its_journal_canonical_form() {
     let record = record();
     assert_eq!(
@@ -64,7 +62,6 @@ fn the_record_hashes_its_journal_canonical_form() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_passkey_step_up_returns_the_evidence_and_the_used_marker_together() {
     for environment in [Environment::Live, Environment::Paper] {
         let mut case = Case::new();
@@ -74,7 +71,6 @@ fn a_passkey_step_up_returns_the_evidence_and_the_used_marker_together() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn cli_confirm_counts_in_paper_only() {
     let mut case = Case::new();
     case.kind = Kind::CliConfirm;
@@ -85,7 +81,6 @@ fn cli_confirm_counts_in_paper_only() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_unknown_challenge_is_missing_and_a_used_one_is_reused() {
     let mut case = Case::new();
     case.state = State::Unknown;
@@ -98,7 +93,6 @@ fn an_unknown_challenge_is_missing_and_a_used_one_is_reused() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_challenge_counts_from_its_issue_until_just_before_its_expiry() {
     let mut case = Case::new();
     for (now, accepted) in [
@@ -119,7 +113,6 @@ fn a_challenge_counts_from_its_issue_until_just_before_its_expiry() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_challenge_bound_to_another_principal_or_workspace_is_a_mismatch() {
     let mut case = Case::new();
     assert_eq!(outputs(case.run()), passkey_passed(), "the unchanged case");
@@ -131,7 +124,6 @@ fn a_challenge_bound_to_another_principal_or_workspace_is_a_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn another_principals_credential_or_none_counts_as_missing() {
     let mut case = Case::new();
     assert_eq!(outputs(case.run()), passkey_passed(), "the unchanged case");
@@ -153,7 +145,6 @@ fn another_principals_credential_or_none_counts_as_missing() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_passkey_in_its_enrolment_cool_off_cannot_step_up() {
     let mut case = Case::new();
     let now = case.now;
@@ -171,7 +162,6 @@ fn a_passkey_in_its_enrolment_cool_off_cannot_step_up() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_assertion_that_does_not_verify_counts_as_missing_with_its_reason() {
     let mut case = Case::new();
     case.sign(&common::sha256(b"another record"), |_| {});
@@ -184,7 +174,6 @@ fn an_assertion_that_does_not_verify_counts_as_missing_with_its_reason() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_step_up_for_another_action_is_a_mismatch() {
     let mut case = Case::new();
     assert_eq!(outputs(case.run()), passkey_passed(), "the unchanged case");
@@ -202,7 +191,6 @@ fn a_step_up_for_another_action_is_a_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn two_failures_refuse_with_the_first_in_dec_662_order() {
     let mut case = Case::new();
     case.state = State::Used;
@@ -267,7 +255,6 @@ fn two_failures_refuse_with_the_first_in_dec_662_order() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_stored_assertion_reverifies_against_the_public_key_after_its_counter_moved_on() {
     let case = Case::new();
     let consumed = case.run().expect("the step-up counts");
