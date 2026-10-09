@@ -156,9 +156,8 @@ pub fn deployment(
     Ok(shown(&gesture, warnings))
 }
 
-/// The gesture's code and its warnings, sorted by code.
-fn shown(gesture: &Value, mut warnings: Vec<&'static str>) -> Shown {
-    warnings.sort_unstable();
+/// The gesture's code and its warnings, in the code order [`check_rules`] gives them.
+fn shown(gesture: &Value, warnings: Vec<&'static str>) -> Shown {
     Shown {
         code: code_of(gesture),
         warnings,
@@ -261,23 +260,4 @@ pub fn deploy(
     )?;
     committed(report, "deployed", &submitted)?;
     Ok(Some(submitted))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Warnings are shown sorted by code however the validator listed them, and printed in that
-    /// order after the code (DEC-530 item 4).
-    #[test]
-    fn warnings_are_shown_sorted_by_code() -> anyhow::Result<()> {
-        let gesture = object(vec![("gesture", text("mandate_confirm"))])?;
-        let shown = shown(&gesture, vec!["W-005", "W-002"]);
-        assert_eq!(shown.warnings, vec!["W-002", "W-005"]);
-        let mut report = Vec::new();
-        display(&mut report, &shown)?;
-        let printed = format!("code {}\nwarnings W-002, W-005\n", shown.code);
-        assert_eq!(String::from_utf8(report)?, printed);
-        Ok(())
-    }
 }

@@ -141,7 +141,6 @@ fn a_shown_code_is_the_gestures_and_showing_writes_nothing() {
 /// deployment's code, with no warnings, whatever the rules now say, and writes nothing; while
 /// another version is active, the agent is refused `agent_active`, even for a confirmed version.
 #[test]
-#[ignore = "pending E10-16"]
 fn a_deployed_agent_shows_its_version_and_refuses_another() {
     let (mut journal, mut store) = (Journal::default(), Store::new());
     store.put_artifact(SPY.as_bytes()).unwrap();
@@ -232,7 +231,6 @@ fn a_deployed_agent_shows_its_version_and_refuses_another() {
 /// Warnings are shown sorted by code (DEC-530 item 4), for a confirmation and for a deployment: a
 /// mandate with a rule after its catch-all warns W-005 as well as W-002 (mandate spec §4.2).
 #[test]
-#[ignore = "pending E10-16"]
 fn warnings_are_shown_sorted_by_code() {
     let (mut journal, mut store) = (Journal::default(), Store::new());
     store.put_artifact(SPY.as_bytes()).unwrap();
