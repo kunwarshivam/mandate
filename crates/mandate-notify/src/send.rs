@@ -2,7 +2,9 @@
 //! DEC-710 items 4 to 6): the opaque recipient, the address handle, the digest a provider sees in
 //! place of the idempotency key, and the rendered message.
 
-use crate::{NoticeId, Notification, NotifyError, Origin};
+use mandate_canon::{Digest, Key, Object, Value, to_canonical};
+
+use crate::{NoticeId, Notification, NotifyError, Origin, link};
 
 /// A recipient as journaled, logged, and keyed: an opaque user id of 1 to 64 characters of
 /// `[a-z0-9_]`, starting with a letter, and never an address or a name (NT-2, DEC-710 item 4).
@@ -16,8 +18,13 @@ impl Recipient {
     /// [`NotifyError::NotARecipient`] for anything but 1 to 64 characters of `[a-z0-9_]` starting
     /// with a letter.
     pub fn parse(id: &str) -> Result<Self, NotifyError> {
-        let _ = id;
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        let mut bytes = id.bytes();
+        let starts_with_letter = bytes.next().is_some_and(|b| b.is_ascii_lowercase());
+        if starts_with_letter && id.len() <= 64 && bytes.all(is_recipient_byte) {
+            Ok(Self(id.to_owned()))
+        } else {
+            Err(NotifyError::NotARecipient)
+        }
     }
 }
 
@@ -47,10 +54,16 @@ impl PushChannel {
     /// `telegram`, or `web_push`.
     ///
     /// # Errors
-    /// Never once implemented: every channel has a key.
+    /// Never: every channel has a key.
     pub fn key(self) -> Result<&'static str, NotifyError> {
-        let _ = self;
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(match self {
+            Self::Email => "email",
+            Self::Phone => "phone",
+            Self::Slack => "slack",
+            Self::Sms => "sms",
+            Self::Telegram => "telegram",
+            Self::WebPush => "web_push",
+        })
     }
 }
 
@@ -74,19 +87,28 @@ impl IdempotencyKey {
     /// The key of the send of `notice` to `address`.
     ///
     /// # Errors
-    /// Never once implemented: every notice id, recipient, and channel is representable.
+    /// Never: every notice id, recipient, and channel is representable.
     pub fn of(notice: &NoticeId, address: &AddressHandle) -> Result<Self, NotifyError> {
-        let _ = (notice, address);
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        let mut triple = Object::new();
+        triple.insert(
+            triple_key("channel")?,
+            Value::Str(address.channel.key()?.to_owned()),
+        );
+        triple.insert(triple_key("notice")?, Value::Str(notice.hex()?));
+        triple.insert(
+            triple_key("recipient")?,
+            Value::Str(address.recipient.0.clone()),
+        );
+        let canonical = to_canonical(&Value::Object(triple));
+        Ok(Self(Digest::of(&canonical).to_hex()))
     }
 
     /// The key's 64 lowercase hex digits, as a provider is given them.
     ///
     /// # Errors
-    /// Never once implemented.
+    /// Never: the digits were written when the key was made.
     pub fn hex(&self) -> Result<&str, NotifyError> {
-        let _ = self;
-        Err(NotifyError::Unimplemented { story: "E8-9" })
+        Ok(&self.0)
     }
 }
 
@@ -95,8 +117,21 @@ impl IdempotencyKey {
 /// email's sentence and footer placeholder (spec §4.4).
 ///
 /// # Errors
-/// Never once implemented: every text key has its text, and the origin was checked when parsed.
+/// Never: every text key has its text, and the origin was checked when parsed.
 pub fn rendered(origin: &Origin, notification: &Notification) -> Result<String, NotifyError> {
-    let _ = (origin, notification);
-    Err(NotifyError::Unimplemented { story: "E8-9" })
+    Ok(format!(
+        "{}\n{}",
+        notification.text.text()?,
+        link(origin, &notification.notice)?
+    ))
+}
+
+fn is_recipient_byte(byte: u8) -> bool {
+    byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+}
+
+fn triple_key(key: &str) -> Result<Key, NotifyError> {
+    Key::new(key).map_err(|_| NotifyError::Unrepresentable {
+        what: "idempotency key member",
+    })
 }
