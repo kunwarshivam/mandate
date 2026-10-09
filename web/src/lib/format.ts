@@ -143,3 +143,8 @@ export function seconds(n: number): string {
   if (n % 60 === 0) return `${n / 60} min`;
   return `${n} s`;
 }
+
+/** A natural list, without the serial comma: "A", "A and B", "A, B and C". */
+export function andList(items: readonly string[]): string {
+  return items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
