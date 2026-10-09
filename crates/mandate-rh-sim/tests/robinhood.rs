@@ -188,7 +188,6 @@ fn classes(probe: &Probe) -> Vec<(CallClass, &'static str)> {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_submit_reviews_then_places_once_on_the_account_with_its_ref_id() {
     let server = server();
     let (mut c, probe) = probed(&server);
@@ -235,7 +234,6 @@ fn a_submit_reviews_then_places_once_on_the_account_with_its_ref_id() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_resend_after_a_restart_carries_the_same_ref_id_and_the_broker_keeps_one_order() {
     let server = server();
     let first = run(&mut connector(&server), &submit(buy("01JOPEN"))).unwrap();
@@ -257,7 +255,6 @@ fn a_resend_after_a_restart_carries_the_same_ref_id_and_the_broker_keeps_one_ord
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_lost_place_answer_is_unknown_and_never_placed_again() {
     let server = server();
     server
@@ -288,7 +285,6 @@ fn a_lost_place_answer_is_unknown_and_never_placed_again() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_garbled_place_answer_is_unknown_never_rejected_or_filled() {
     for garble in [
         Garble::UnknownState,
@@ -318,7 +314,6 @@ fn a_garbled_place_answer_is_unknown_never_rejected_or_filled() {
 
 /// Connections spec §6.2 through the place answer: each state a fresh order may start in.
 #[test]
-#[ignore = "pending E7-6"]
 fn each_state_a_place_answers_reads_as_the_spec_says() {
     let scripted = [
         (State::New, "accepted"),
@@ -355,7 +350,6 @@ fn each_state_a_place_answers_reads_as_the_spec_says() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn an_alert_refuses_an_opening_before_the_place() {
     let server = server();
     server
@@ -376,7 +370,6 @@ fn an_alert_refuses_an_opening_before_the_place() {
 /// Rule 13 and DEC-860 item 6: a protective stop-limit draws on the reserved budget and is placed
 /// even under an alert; the simulator then refuses it, which a place reads as `Unknown`.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_protective_stop_limit_is_risk_reducing_and_no_alert_holds_it() {
     let server = server();
     let (mut c, probe) = probed(&server);
@@ -418,7 +411,6 @@ fn a_protective_stop_limit_is_risk_reducing_and_no_alert_holds_it() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_cancel_goes_by_the_order_id_and_is_refused_once_terminal() {
     let server = server();
     let (mut c, probe) = probed(&server);
@@ -480,7 +472,6 @@ fn a_cancel_goes_by_the_order_id_and_is_refused_once_terminal() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn what_the_profile_does_not_offer_is_not_sent() {
     let server = server();
     let mut c = connector(&server);
@@ -575,7 +566,6 @@ fn orders(server: &SimServer) -> Vec<mandate_rh_sim::Order> {
 /// Trading spec §5.2, Robinhood: "market: whole, fractional, notional; every other type: whole
 /// shares". DEC-860 item 7: an order the profile does not offer is `NotSent`, before any call.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_fractional_limit_or_stop_limit_is_not_sent_and_nothing_is_called() {
     let server = server();
     let (mut c, probe) = probed(&server);
@@ -606,7 +596,6 @@ fn a_fractional_limit_or_stop_limit_is_not_sent_and_nothing_is_called() {
 /// nothing is placed, and the connector does not report an order. Which refusal it reports is
 /// left open.
 #[test]
-#[ignore = "pending E7-6"]
 fn an_openings_review_refused_lost_or_without_alerts_places_nothing() {
     let bends: [(&str, Bend); 3] = [
         ("isError", refuse),
@@ -637,7 +626,6 @@ fn an_openings_review_refused_lost_or_without_alerts_places_nothing() {
 /// journaled and the order is placed anyway, so the broker accepts or rejects it." A review that
 /// is lost or refused holds a risk-reducing order no more than an alert does.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_risk_reducing_order_is_placed_when_its_review_is_lost_or_refused() {
     let sell = |purpose: Purpose| SubmitOrder {
         side: Way::Sell,
@@ -681,7 +669,6 @@ fn a_risk_reducing_order_is_placed_when_its_review_is_lost_or_refused() {
 /// timeout, a dropped connection"); an answer that is not JSON is `Unreadable` ("the broker
 /// answered and the connector could not read the answer"). Neither is `CancelAccepted`.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_lost_or_unreadable_cancel_answer_never_reads_as_cancelled() {
     let cancel = BrokerRequest::Cancel {
         client_order_id: key("01JOPEN"),
@@ -709,7 +696,6 @@ fn a_lost_or_unreadable_cancel_answer_never_reads_as_cancelled() {
 /// is `Unknown` (DEC-860 item 4: "Anything else to a place ... is `ConnectorError::Unknown`"),
 /// and to a cancel `Unreadable`, never `CancelAccepted`.
 #[test]
-#[ignore = "pending E7-6"]
 fn an_is_error_that_is_not_a_boolean_is_never_success() {
     let bends: [(&str, Bend); 2] = [("text", is_error_text), ("zero", is_error_zero)];
     for (name, bend) in bends {
@@ -744,7 +730,6 @@ fn an_is_error_that_is_not_a_boolean_is_never_success() {
 /// implement it yet"). `CancelAll` and `ClosePosition` take an `AccountWideScope` no test can
 /// build. Each is `NotSent` with nothing called, even with an order on record.
 #[test]
-#[ignore = "pending E7-6"]
 fn every_other_request_is_not_sent_and_nothing_is_called() {
     let server = server();
     let (mut c, probe) = probed(&server);
@@ -835,7 +820,6 @@ fn cancel_answered(bend: Bend) -> (Result<BrokerOutcome, ConnectorError>, String
 /// showing the order still working, part filled or filled is that order, read as §6.2 says, so the
 /// executor keeps the cancel unconfirmed and holds the reservation and the exit behind it.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_cancel_answered_with_an_order_not_cancelled_is_that_order_never_cancel_accepted() {
     for (state, filled, status, bend) in NOT_CANCELLED {
         let (outcome, order_id) = cancel_answered(bend);
@@ -864,7 +848,6 @@ fn a_cancel_answered_with_an_order_not_cancelled_is_that_order_never_cancel_acce
 
 /// DEC-867 item 2: the answer that shows the order `cancelled` is the broker's confirmation.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_cancel_answered_with_the_order_cancelled_is_cancel_accepted() {
     let (outcome, _) = cancel_answered(|r| showing(r, "cancelled", "0"));
     let id = key("01JOPEN").as_str().to_owned();
