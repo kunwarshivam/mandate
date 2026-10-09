@@ -47,7 +47,6 @@ fn bucket(capacity: u32, millis: u64) -> BucketConfig {
 }
 
 #[test]
-#[ignore = "pending E7-16"]
 fn exhausted_reads_leave_the_reserve_and_refill_brings_them_back() {
     let config = BudgetConfig {
         ordinary: bucket(2, 100),
@@ -92,7 +91,6 @@ fn exhausted_reads_leave_the_reserve_and_refill_brings_them_back() {
 }
 
 #[test]
-#[ignore = "pending E7-16"]
 fn a_zero_capacity_or_refill_period_is_refused() {
     let good = bucket(1, 1);
     for (ordinary, reserved) in [(bucket(0, 1), good), (good, bucket(1, 0))] {
@@ -109,7 +107,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     #[test]
-    #[ignore = "pending E7-16"]
     fn admissions_match_the_oracle_and_reads_never_take_an_exit_token(
         ordinary in (1u32..4, 1u64..30),
         reserved in (1u32..4, 1u64..30),

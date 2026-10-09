@@ -20,7 +20,13 @@
 //! the reference model hashes its request as a stand-in for the content object
 //! (`reference/mandate/ref.py`, `escalation_step`), so a case's hash is a name, and the runtime's
 //! `content_hash` must be the digest of its own inline `content`. Every member of a draft's payload
-//! is one the case states or one checked here, and so is its cause. The step's other effects, the
+//! is one the case states or one checked here, and so is its cause. The one reading of an unstated
+//! member is journal spec §9.7's (DEC-533 item 3): an `ApprovalResponded` writes `quorum`,
+//! `separation_of_duties` and `delegation` always, `null` where nothing was judged, so a case that
+//! leaves one unstated reads it as absent or `null`, never as a value; and a step whose grant check 7
+//! judged (rule 48) must state its `quorum`. A re-validation's `decided_by_now` is §9.7's (DEC-533
+//! item 4), or until E8-3's writer lands the superseded value the runtime writes (DEC-830). The
+//! step's other effects, the
 //! deadline timer and the opaque notification, are `mandate-runtime`'s own tests' to pin (DEC-317
 //! item 5).
 //!
@@ -129,6 +135,10 @@ const INTENDED: &[(&str, &str, As)] = &[
 /// The one member the runtime writes that no draft compares: the request's `content`, checked only
 /// as its hash's preimage (DEC-317 item 5). Any other member supplied without a value fails.
 const UNCOMPARED: &[&str] = &["content"];
+/// The `ApprovalResponded` members a case may leave unstated, each then read as absent or `null`
+/// (journal spec §9.7, DEC-533 item 3): `quorum` is `null` wherever check 7 was not judged, and the
+/// other two are `null` at this version. A case written before §9.7 states none of them.
+const NULL_UNLESS_STATED: &[&str] = &["quorum", "separation_of_duties", "delegation"];
 const TIMED_OUT: &[(&str, &str, As)] = &[("on_timeout", "on_timeout", As::Canonical)];
 const CANCELED: &[(&str, &str, As)] = &[("reason", "reason", As::Canonical)];
 const DELIVERED: &[(&str, &str, As)] = &[
@@ -730,12 +740,9 @@ impl Shell {
         if event_type == "ApprovalDelivered" && cause != approval {
             faults.push(format!("its cause is {cause:?}, not its request"));
         }
-        for key in draft.payload.as_object().into_iter().flat_map(|o| o.keys()) {
+        for (key, got) in draft.payload.as_object().into_iter().flatten() {
             if !written.contains(key.as_str()) {
-                faults.push(format!(
-                    "the runtime wrote `{}`, which the case does not state",
-                    key.as_str()
-                ));
+                faults.extend(unstated_fault(event_type, key.as_str(), got));
             }
         }
         faults
@@ -845,10 +852,10 @@ impl Shell {
             .as_ref()
             .ok_or_else(|| "a re-validation outside a response".to_owned())?;
         let canon = |value: &Json, path: &str| at(value, path).and_then(to_canon).map(Some);
-        let label = match at(now, "classification.by")? {
-            Json::Null => text(""),
-            by => to_canon(by)?,
-        };
+        let label = decided_by_now(
+            at(now, "classification")?,
+            draft.payload.get("decided_by_now"),
+        )?;
         let m_req = match at(bound, "reference_mark")? {
             Json::Null => Value::Null,
             mark => to_canon(at(mark, "price")?)?,
@@ -886,9 +893,11 @@ impl Shell {
         }
     }
 
-    /// An `ApprovalResponded`: its approval, and the control-stream event it copies.
+    /// An `ApprovalResponded`: its approval, the control-stream event it copies, and, where check 7
+    /// judged the grant, the case's own `quorum`.
     fn responded(&self, want: &Json, draft: &EventDraft) -> Vec<String> {
         let mut faults = self.names_approval(want, draft);
+        faults.extend(unstated_quorum(want));
         let source = want
             .get("source")
             .and_then(Json::as_str)
@@ -1078,6 +1087,52 @@ fn extra_fault(name: &str, want: Option<&Value>, got: Option<&Value>) -> Option<
         None if UNCOMPARED.contains(&name) => None,
         None => Some(format!("`{name}` is supplied with no value to compare")),
     }
+}
+
+/// A member the runtime wrote that the case does not state. Only an `ApprovalResponded`'s
+/// `NULL_UNLESS_STATED` member written `null` passes; a value there is one the case never stated.
+fn unstated_fault(event_type: &str, name: &str, got: &Value) -> Option<String> {
+    let null_unless_stated =
+        event_type == "ApprovalResponded" && NULL_UNLESS_STATED.contains(&name);
+    match got {
+        Value::Null if null_unless_stated => None,
+        _ => Some(format!(
+            "the runtime wrote `{name}`, which the case does not state, as {got:?}"
+        )),
+    }
+}
+
+/// The `decided_by_now` a re-validation records for the step's re-classification: journal spec
+/// §9.7's (DEC-533 item 4), the `ask`'s own label, or `null` when it is not an `ask` or its label is
+/// empty. Until E8-3's writer lands, the runtime writes the superseded value instead, the label the
+/// re-classification gave whatever its decision, `""` with none, and that one value also passes
+/// (DEC-830 item 2); no third value does.
+fn decided_by_now(classification: &Json, got: Option<&Value>) -> Result<Value, String> {
+    let by = optional_text(classification, "by")?.unwrap_or_default();
+    let superseded = text(&by);
+    if got == Some(&superseded) {
+        return Ok(superseded);
+    }
+    Ok(match str_at(classification, "decision")? {
+        "ask" if !by.is_empty() => superseded,
+        _ => Value::Null,
+    })
+}
+
+/// A case's `ApprovalResponded` whose grant check 7 judged (journal spec §9.7 rule 48: `approved`,
+/// and `admitted` or `counted`, or refused as `duplicate_approver` or `not_independent`) and that
+/// does not state the `quorum` it applied: a defect in the case, never read as `null`.
+fn unstated_quorum(want: &Json) -> Option<String> {
+    let text_at = |key: &str| want.get(key).and_then(Json::as_str);
+    let judged = text_at("verdict") == Some("approved")
+        && (matches!(text_at("result"), Some("admitted" | "counted"))
+            || matches!(
+                text_at("reason"),
+                Some("duplicate_approver" | "not_independent")
+            ));
+    (judged && want.get("quorum").is_none()).then(|| {
+        "the case does not state the `quorum` check 7 judged (journal spec §9.7 rule 48)".to_owned()
+    })
 }
 
 /// Sets aside the step's first drafts as `records` names them, by type and, where given, reason,

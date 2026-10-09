@@ -1,0 +1,85 @@
+[
+  {
+    "label": "a number for a dollar cap",
+    "set": {
+      "/max_order_usd": 300
+    }
+  },
+  {
+    "label": "max_orders 0",
+    "set": {
+      "/max_orders": 0
+    }
+  },
+  {
+    "label": "max_orders 1001",
+    "set": {
+      "/max_orders": 1001
+    }
+  },
+  {
+    "label": "a timed shape without expiry",
+    "set": {
+      "/expires_at": null
+    }
+  },
+  {
+    "label": "until_close with a cap",
+    "set": {
+      "/shape": "until_close"
+    }
+  },
+  {
+    "label": "auto: no /shape",
+    "remove": [
+      "/shape"
+    ]
+  },
+  {
+    "label": "auto: no /max_orders",
+    "remove": [
+      "/max_orders"
+    ]
+  },
+  {
+    "label": "auto: no /max_order_usd",
+    "remove": [
+      "/max_order_usd"
+    ]
+  },
+  {
+    "label": "auto: no /max_total_usd",
+    "remove": [
+      "/max_total_usd"
+    ]
+  },
+  {
+    "label": "auto: no /expires_at",
+    "remove": [
+      "/expires_at"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /shape outside its set",
+    "set": {
+      "/shape": "mutant_value"
+    }
+  },
+  {
+    "label": "no shape with until_close's nulls",
+    "remove": [
+      "/shape"
+    ],
+    "set": {
+      "/max_order_usd": null,
+      "/max_total_usd": null,
+      "/expires_at": null
+    }
+  }
+]

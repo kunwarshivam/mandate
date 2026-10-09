@@ -1,0 +1,59 @@
+[
+  {
+    "label": "instrument only",
+    "remove": [
+      "/bid",
+      "/bid_size",
+      "/quoted_at",
+      "/floor",
+      "/record",
+      "/step_up"
+    ]
+  },
+  {
+    "label": "regular session, no step-up",
+    "set": {
+      "/bid": null,
+      "/bid_size": null,
+      "/quoted_at": null,
+      "/floor": null,
+      "/step_up": null
+    }
+  },
+  {
+    "label": "auto: /bid null",
+    "set": {
+      "/bid": null
+    }
+  },
+  {
+    "label": "auto: /bid_size null",
+    "set": {
+      "/bid_size": null
+    }
+  },
+  {
+    "label": "auto: /quoted_at null",
+    "set": {
+      "/quoted_at": null
+    }
+  },
+  {
+    "label": "auto: /floor null",
+    "set": {
+      "/floor": null
+    }
+  },
+  {
+    "label": "auto: /record null",
+    "set": {
+      "/record": null
+    }
+  },
+  {
+    "label": "auto: /step_up null",
+    "set": {
+      "/step_up": null
+    }
+  }
+]

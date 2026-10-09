@@ -3,8 +3,9 @@
 
 mod common;
 
-use common::{AGENTIC, NOT_AGENTIC, account, limit, sim};
-use mandate_rh_sim::{OrderRequest, Sim, SimError};
+use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, account, limit, price, qty, sim};
+use mandate_rh_sim::SimError::{QuantityForm, SessionNeedsLimit, Unreadable};
+use mandate_rh_sim::{Alert, Event, OrderRequest, Session, Sim, SimError};
 
 type Outcome = Result<(), SimError>;
 
@@ -30,8 +31,132 @@ fn req(edits: &[(&str, &str)]) -> OrderRequest {
     r
 }
 
+const MARKET: [(&str, &str); 2] = [("type", "market"), ("limit_price", "")];
+const STOP_LIMIT: [(&str, &str); 2] = [("type", "stop_limit"), ("stop_price", "499")];
+
 #[test]
-#[ignore = "pending E7-25"]
+fn quantity_forms_sessions_and_text_follow_the_contract() -> Outcome {
+    let cases: Vec<(OrderRequest, Result<(), SimError>)> = vec![
+        (req(&[]), Ok(())),
+        (req(&[("quantity", "1.5")]), Err(QuantityForm)),
+        (req(&[MARKET[0], MARKET[1], ("quantity", "1.5")]), Ok(())),
+        (
+            req(&[MARKET[0], MARKET[1], ("market_hours", "extended_hours")]),
+            Err(SessionNeedsLimit),
+        ),
+        (
+            req(&[
+                STOP_LIMIT[0],
+                STOP_LIMIT[1],
+                ("market_hours", "all_day_hours"),
+            ]),
+            Err(SessionNeedsLimit),
+        ),
+        (
+            req(&[STOP_LIMIT[0], STOP_LIMIT[1], ("time_in_force", "gtc")]),
+            Ok(()),
+        ),
+        (req(&[("market_hours", "extended_hours")]), Ok(())),
+        (
+            req(&[("market_hours", "all_day_hours"), ("time_in_force", "gtc")]),
+            Ok(()),
+        ),
+        (
+            req(&[("quantity", ""), ("dollar_amount", "100")]),
+            Err(QuantityForm),
+        ),
+        (
+            req(&[MARKET[0], MARKET[1], ("dollar_amount", "100")]),
+            Err(Unreadable("quantity")),
+        ),
+        (req(&[("quantity", "")]), Err(Unreadable("quantity"))),
+        (req(&[("quantity", "0")]), Err(Unreadable("quantity"))),
+        (req(&[("quantity", "2.0")]), Err(Unreadable("quantity"))),
+        (req(&[("limit_price", "")]), Err(Unreadable("limit_price"))),
+        (
+            req(&[("limit_price", "501.10")]),
+            Err(Unreadable("limit_price")),
+        ),
+        (
+            req(&[("type", "stop_limit")]),
+            Err(Unreadable("stop_price")),
+        ),
+        (req(&[("type", "trailing_stop")]), Err(Unreadable("type"))),
+        (req(&[("side", "short")]), Err(Unreadable("side"))),
+        (
+            req(&[("time_in_force", "ioc")]),
+            Err(Unreadable("time_in_force")),
+        ),
+        (
+            req(&[("market_hours", "overnight")]),
+            Err(Unreadable("market_hours")),
+        ),
+        (req(&[("ref_id", "retry-1")]), Err(Unreadable("ref_id"))),
+        (
+            req(&[("quantity", "1.5"), ("market_hours", "extended_hours")]),
+            Err(QuantityForm),
+        ),
+        (
+            req(&[STOP_LIMIT[0], STOP_LIMIT[1], ("quantity", "1.5")]),
+            Err(QuantityForm),
+        ),
+        (
+            req(&[
+                ("type", "stop_market"),
+                ("limit_price", ""),
+                ("stop_price", "499"),
+                ("quantity", "1.5"),
+            ]),
+            Err(QuantityForm),
+        ),
+        (
+            req(&[
+                ("type", "stop_market"),
+                ("limit_price", ""),
+                ("stop_price", "499"),
+                ("quantity", ""),
+                ("dollar_amount", "100"),
+            ]),
+            Err(QuantityForm),
+        ),
+        (
+            req(&[("ref_id", "zzzzzzzz-0000-4000-8000-000000000001")]),
+            Err(Unreadable("ref_id")),
+        ),
+        (
+            req(&[
+                ("type", "stop_market"),
+                ("limit_price", ""),
+                ("stop_price", "499"),
+            ]),
+            Ok(()),
+        ),
+        (req(&[("symbol", "QQQ")]), Ok(())),
+    ];
+    for (i, (request, expected)) in cases.into_iter().enumerate() {
+        assert_eq!(
+            sim()?.place(&request).map(|_| ()),
+            expected,
+            "case {i}: {request:?}"
+        );
+    }
+    let dollars = req(&[
+        MARKET[0],
+        MARKET[1],
+        ("quantity", ""),
+        ("dollar_amount", "100"),
+    ]);
+    assert_eq!(
+        sim()?.place(&dollars)?.quantity,
+        qty("0.2"),
+        "100 USD at the 500 quote"
+    );
+    let unquoted = req(&[MARKET[0], MARKET[1], ("symbol", "QQQ")]);
+    assert_eq!(sim()?.place(&unquoted), Err(SimError::NoQuote));
+    Ok(())
+}
+
+#[test]
 fn only_an_agentic_account_reviews_or_places() -> Outcome {
     let mut sim = sim()?;
     assert_eq!(
@@ -53,6 +178,64 @@ fn only_an_agentic_account_reviews_or_places() -> Outcome {
         account(AGENTIC, false, false),
     ];
     assert_eq!(Sim::new(twice).map(|_| ()), Err(SimError::DuplicateAccount));
+    Ok(())
+}
+
+#[test]
+fn review_raises_each_alert_and_place_refuses_it() -> Outcome {
+    let mut sim = sim()?;
+    let too_big = req(&[("quantity", "20")]);
+    assert_eq!(sim.review(&too_big)?.alerts, vec![Alert::BuyingPower]);
+    assert_eq!(
+        sim.place(&too_big),
+        Err(SimError::Alert(Alert::BuyingPower))
+    );
+    let market = req(&[MARKET[0], MARKET[1], ("quantity", "21")]);
+    assert_eq!(
+        sim.review(&market)?.alerts,
+        vec![Alert::BuyingPower],
+        "21 at the 500 quote is over 10,000"
+    );
+    let exact = req(&[MARKET[0], MARKET[1], ("quantity", "20")]);
+    assert_eq!(
+        sim.review(&exact)?.alerts,
+        vec![],
+        "exactly the buying power"
+    );
+    assert_eq!(sim.review(&req(&[("quantity", "19")]))?.alerts, vec![]);
+    let day = |side: &str| OrderRequest {
+        account_number: DAY_TRADER.to_owned(),
+        ..limit(side, "1", "500", if side == "buy" { 2 } else { 3 })
+    };
+    let bought = sim.place(&day("buy"))?;
+    sim.fill(&bought.id, qty("1"), price("500"))?;
+    assert_eq!(
+        sim.review(&day("sell"))?.alerts,
+        vec![Alert::PatternDayTrading]
+    );
+    assert_eq!(
+        sim.place(&day("sell")),
+        Err(SimError::Alert(Alert::PatternDayTrading))
+    );
+    sim.apply(Event::EndOfDay)?;
+    sim.apply(Event::Session(Session::Regular))?;
+    assert_eq!(
+        sim.review(&day("sell"))?.alerts,
+        vec![],
+        "a new day is no day trade"
+    );
+    sim.apply(Event::Halt("SPY".to_owned()))?;
+    let review = sim.review(&req(&[]))?;
+    assert_eq!(
+        (review.quote, review.alerts),
+        (Some(price("500")), vec![Alert::Halt])
+    );
+    assert_eq!(sim.place(&req(&[])), Err(SimError::Alert(Alert::Halt)));
+    assert_eq!(
+        sim.orders(AGENTIC)?,
+        vec![],
+        "nothing an alert refused was placed"
+    );
     Ok(())
 }
 

@@ -32,6 +32,7 @@ use std::cell::{Ref, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
@@ -50,7 +51,7 @@ use mandate_executor::{
     Order as ExecutorOrder, Ports, Seq, WorkspaceId, WriterEpoch, fold, is_protected,
     paper_only_fee_config,
 };
-use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, ArtifactSource, MemoryJournal, StoredEvent, StreamId};
 use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
@@ -73,11 +74,12 @@ use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
 use mandate_time::{Date, ExchangeCalendar, TradingCalendar, UtcNanos};
 
+use crate::control::Governance;
 use crate::envelope::account_stream;
 use crate::error::Cause;
 use crate::stages::{
-    Admitted, Bars, Classifier, Connector, Executor, ExitPath, Gate, JournalWriter, MandateSource,
-    ModelRef, Protection, Reconciler, SignalModel, Sink, Sizing, Stages,
+    Admitted, Bars, Classifier, Connector, Executor, ExitPath, Gate, GovernedRefs, JournalWriter,
+    MandateSource, ModelRef, Protection, Reconciler, SignalModel, Sink, Sizing, Stages,
 };
 
 /// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts
@@ -845,6 +847,11 @@ pub struct RunContext {
     pub author: String,
     pub restricted_instruments: BTreeSet<InstrumentId>,
     pub decision: Option<DecisionContext>,
+    /// The effective policy set and model registry (DEC-484, D4b). `Some` makes the run write
+    /// `ModelOutputRecorded` and `DecisionMade` at schema version 2 with their `policy_set` and
+    /// `model_registry` refs, appended through the store's artifact-aware append (journal spec
+    /// v0.16). `None` keeps the version-1 records of a run nothing governs yet.
+    pub governance: Option<Governance>,
 }
 
 fn required_context(context: &Option<Rc<RunContext>>) -> Result<&RunContext, Cause> {
@@ -979,6 +986,10 @@ impl MandateSource for SpecMandate {
                 params,
             },
             symbol: instrument.symbol.clone(),
+            governed: context.governance.as_ref().map(|governance| GovernedRefs {
+                policy_set: governance.policy_set.content_hash,
+                model_registry: governance.model_registry.content_hash,
+            }),
         })
     }
 }
@@ -1390,6 +1401,9 @@ fn action_order_matches(
 }
 
 impl Classifier for BuilderPlan {
+    /// An opening or an increase while the confirmed mandate is nonconforming (DEC-534) fails
+    /// closed at D4d's stub. An exit never reads the governance, so nothing here denies it
+    /// (`AGENTS.md` rule 13).
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let context = required_context(&self.context)?;
         let validated = validated_mandate(&self.mandate, context)?;
@@ -1409,6 +1423,14 @@ impl Classifier for BuilderPlan {
             return Err(Cause::Absent {
                 what: "classification facts for the proposed action",
             });
+        }
+        if proposal.purpose.adds_risk()
+            && context
+                .governance
+                .as_ref()
+                .is_some_and(|governance| !governance.violations.is_empty())
+        {
+            return Err(Cause::Unimplemented { story: "E7-19" });
         }
         let classification =
             mandate_builder::classify(mandate_builder::autonomy_policy(&validated), action)?;
@@ -1477,6 +1499,10 @@ impl Gate for RiskGate {
 pub struct StoreJournal {
     backend: StoreBackend,
     recorded_at: UtcNanos,
+    /// The store the run's configuration objects were registered in. `Some` routes every append
+    /// through `append_with_config_artifacts`; `None` keeps the plain append, which refuses every
+    /// version-2 record that names a configuration object (journal spec §5.1, §11 check 6).
+    artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
 }
 
 enum StoreBackend {
@@ -1494,6 +1520,7 @@ impl StoreJournal {
         Self {
             backend: StoreBackend::Memory(MemoryJournal::new()),
             recorded_at,
+            artifacts: None,
         }
     }
 
@@ -1521,7 +1548,14 @@ impl StoreJournal {
         Self {
             backend,
             recorded_at,
+            artifacts: None,
         }
+    }
+
+    /// The same journal, appending through the artifact-aware append over `artifacts`.
+    #[must_use]
+    pub fn with_artifacts(self, artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>) -> Self {
+        Self { artifacts, ..self }
     }
 
     fn stream(stream: &str) -> Result<StreamId, Cause> {
@@ -1573,27 +1607,46 @@ impl JournalWriter for StoreJournal {
             return AppendOutcome::Unavailable;
         };
         let drafts: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
-        match &mut self.backend {
-            StoreBackend::Memory(journal) => journal.append(
-                &stream,
-                expected_head,
-                writer_epoch,
-                self.recorded_at,
-                &drafts,
-            ),
-            StoreBackend::Postgres { journal, runtime } => {
+        let recorded_at = self.recorded_at;
+        match (&mut self.backend, self.artifacts.as_deref()) {
+            (StoreBackend::Memory(journal), None) => {
+                journal.append(&stream, expected_head, writer_epoch, recorded_at, &drafts)
+            }
+            (StoreBackend::Memory(journal), Some(artifacts)) => journal
+                .append_with_config_artifacts(
+                    &stream,
+                    expected_head,
+                    writer_epoch,
+                    recorded_at,
+                    &drafts,
+                    artifacts,
+                ),
+            (StoreBackend::Postgres { journal, runtime }, None) => {
                 match runtime.block_on(journal.append(
                     &stream,
                     expected_head,
                     writer_epoch,
-                    self.recorded_at,
+                    recorded_at,
                     &drafts,
                 )) {
                     Ok(outcome) => outcome,
                     Err(_) => AppendOutcome::Unavailable,
                 }
             }
-            StoreBackend::Unavailable => AppendOutcome::Unavailable,
+            (StoreBackend::Postgres { journal, runtime }, Some(artifacts)) => {
+                match runtime.block_on(journal.append_with_config_artifacts(
+                    &stream,
+                    expected_head,
+                    writer_epoch,
+                    recorded_at,
+                    &drafts,
+                    artifacts,
+                )) {
+                    Ok(outcome) => outcome,
+                    Err(_) => AppendOutcome::Unavailable,
+                }
+            }
+            (StoreBackend::Unavailable, _) => AppendOutcome::Unavailable,
         }
     }
 }
@@ -2028,6 +2081,11 @@ pub struct Sources<T> {
     /// Validation, admission, builder, and advisory-gate facts. `None` keeps the binary fail closed
     /// until live assembly can supply every effective-dated input.
     pub run: Option<RunContext>,
+    /// The content-addressed store the run's configuration objects were registered in. The
+    /// journal checks a version-2 record's `policy_set` and `model_registry` objects in it before
+    /// it commits the record, so `None`, or a store missing either object, stops a governed run
+    /// at its first version-2 append, before any intent (journal spec §5.1, §11 check 6).
+    pub artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
     pub transport: T,
 }
 
@@ -2043,6 +2101,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         account_ref,
         executor,
         run,
+        artifacts,
         transport,
     } = sources;
     over(Sources {
@@ -2055,6 +2114,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         account_ref,
         executor,
         run,
+        artifacts,
         transport: Box::new(AlpacaConnector { transport }),
     })
 }
@@ -2100,7 +2160,10 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
             context: run.clone(),
         }),
         gate: Box::new(RiskGate { context: run }),
-        journal: Box::new(StoreJournal::from_dsn(sources.journal, sources.recorded_at)),
+        journal: Box::new(
+            StoreJournal::from_dsn(sources.journal, sources.recorded_at)
+                .with_artifacts(sources.artifacts),
+        ),
         sink: Box::new(ExecutorSink {
             agent: sources.agent,
         }),
@@ -3523,6 +3586,7 @@ mod tests {
                 builder: None,
                 gate: Some(gate),
             }),
+            governance: None,
         };
         let proposal = mandate_runtime::Proposal {
             instrument: mandate_accounting::InstrumentId::new(

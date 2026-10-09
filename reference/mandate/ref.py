@@ -244,12 +244,37 @@ def tripwire_errors(m):
             return {"V-044"}
     return set()
 
-def worst_case(m):
+STOP_LIMIT_FIELD = {1: "crypto_stop_limit_offset", 2: "stop_limit_offset"}
+
+def stop_limit_offset(p, m):
+    """DEC-539 item 5: version 1's `crypto_stop_limit_offset` reads as version 2's `stop_limit_offset`."""
+    return p[STOP_LIMIT_FIELD[m["mandate_schema_version"]]]
+
+def upcast(m):
+    """A version-1 document read as version 2 (DEC-539 item 5): only the protection field's name changes."""
+    if m["mandate_schema_version"] == 2:
+        return m
+    out = copy.deepcopy(m)
+    out["mandate_schema_version"] = 2
+    out["protection"]["stop_limit_offset"] = out["protection"].pop("crypto_stop_limit_offset")
+    return out
+
+def stop_limit_protected(m, ctx):
+    """V-008 and W-002 (DEC-539 items 2 and 3): whether any asset class the mandate may hold is protected by a
+    stop-limit under its connection's profile. `stop_limit_asset_classes` is that explicit input. Absent or null (no
+    profile, or an unknown broker), every allowed asset class counts as protected by a stop-limit: validation fails
+    closed, as DEC-539's fixed table does for any other or unknown broker (spec §4)."""
+    classes = (ctx or {}).get("stop_limit_asset_classes")
+    if classes is None:
+        return bool(m["universe"]["asset_classes"])
+    return any(c in classes for c in m["universe"]["asset_classes"])
+
+def worst_case(m, ctx=None):
     r, p = m["risk"], m["protection"]
     A = D(m["capital"]["allocation_usd"])
     pos = min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * A)
-    crypto = "crypto" in m["universe"]["asset_classes"]
-    stop = (D(p["stop_distance"]) + (D(p["crypto_stop_limit_offset"] or 0) if crypto else 0)) if p["enabled"] else None
+    offset = D(stop_limit_offset(p, m) or 0) if stop_limit_protected(m, ctx) else D(0)
+    stop = (D(p["stop_distance"]) + offset) if p["enabled"] else None
     return {"one_position_at_stop_usd": norm(pos * stop) if stop is not None else None,
             "daily_loss_budget_usd": norm(D(r["max_daily_loss"]) * A),
             "flatten_trigger_loss_usd": norm(D(r["max_drawdown"]) * A),
@@ -336,9 +361,9 @@ def semantic(m, ctx):
             errs.add("V-007")
     p = m["protection"]
     if p["enabled"]:
-        if "crypto" in u["asset_classes"] and p["crypto_stop_limit_offset"] is None:
+        if stop_limit_protected(m, ctx) and stop_limit_offset(p, m) is None:
             errs.add("V-008")
-    elif p["stop_distance"] is not None or p["take_profit_distance"] is not None or p["crypto_stop_limit_offset"] is not None:
+    elif p["stop_distance"] is not None or p["take_profit_distance"] is not None or stop_limit_offset(p, m) is not None:
         errs.add("V-008")
     sms = m["behavior"]["signal_models"]
     rule_ids = [x["id"] for x in m["autonomy"]["rules"]]
@@ -414,7 +439,8 @@ def semantic(m, ctx):
     if g.get("end_date") is not None and valid_date(g["end_date"]) and g["end_date"] < ctx["validation_date"]:
         errs.add("V-030")
     prev = ctx.get("previous_version")
-    if prev is not None and (prev["environment"] != m["environment"] or prev["connection_id"] != m["connection_id"]):
+    if prev is not None and (prev["environment"] != m["environment"] or prev["connection_id"] != m["connection_id"]
+                             or m["mandate_schema_version"] < prev.get("mandate_schema_version", m["mandate_schema_version"])):
         errs.add("V-031")
     if r["scale_action"] == "trim_to_target" and g["type"] == "accumulate":
         errs.add("V-033")
@@ -440,7 +466,7 @@ def semantic(m, ctx):
         errs.add("V-032")
     if ctx.get("eligibility_failures"):
         warns.add("W-001")
-    wc = worst_case(m)
+    wc = worst_case(m, ctx)
     if wc["one_position_at_stop_usd"] is not None and D(wc["one_position_at_stop_usd"]) > D(wc["daily_loss_budget_usd"]):
         warns.add("W-002")
     if not p["enabled"]:
@@ -1796,6 +1822,8 @@ def classify_tripwires(ot, nt):
 
 def classify(old, new):
     res = set()
+    if old["mandate_schema_version"] != new["mandate_schema_version"]:
+        old, new = upcast(old), upcast(new)
     paths = list(diff_paths(old, new))
     if "/environment" not in paths and "/connection_id" not in paths and pinning_switch(old, new, paths):
         return "risk_reducing", paths
@@ -1842,7 +1870,7 @@ def classify(old, new):
             res.add(classify_autonomy(old["autonomy"], new["autonomy"]))
         elif p == "/goal/end_date":
             res.add("increasing" if b is None or (a is not None and b > a) else "reducing")
-        elif p == "/protection/crypto_stop_limit_offset":
+        elif p in ("/protection/crypto_stop_limit_offset", "/protection/stop_limit_offset"):
             res.add("increasing" if b is not None and (a is None or D(b) > D(a)) else "reducing")
         elif p == "/protection/enabled":
             res.add("increasing" if not b else "reducing")

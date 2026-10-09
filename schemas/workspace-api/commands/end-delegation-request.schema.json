@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/end-delegation-request.schema.json",
+  "type": "object",
+  "required": [],
+  "additionalProperties": false,
+  "properties": {
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /agents/{agent_id}/delegations/{delegation_id}/end (\u00a75.3): reducing, no step-up. {} is valid. API-7 leniency (DEC-682 item 27): this schema is what a client should send; the server is lenient. No member is strict: an omitted, unknown, or unparsable `record` (or any other member) is dropped. The 202 lists every dropped member's JSON pointer in `dropped`.",
+  "x-api7-lenient": true
+}
