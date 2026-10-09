@@ -1279,6 +1279,31 @@ story buys a service, and none uses a real identity-provider account in tests (s
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
   security, journal stream prefixes, NATS accounts, cache keys, the inference cache, and the vault
   (ID-8, spec §9.1).
+  *Layers and who owes them* (lead L1 and merge coordinator, 2026-10-09). The identity crates' own
+  layer is done: no context is built from a bare ID (compile-fail doctests), every granted context
+  carries exactly its route's org and workspace (the ID-2 matrix), a snapshot or fan-out never serves
+  another workspace, the `require` witness, `SystemContext` (#1058, #1061, #1070), and a step-up
+  challenge presented in another workspace is refused. Still owed, each by its own lane:
+  - *Step-up presentation* (L1, tests PR in flight): `mandate_passkey::stepup::Presentation` still
+    takes a bare `WorkspaceId` and `PrincipalId`, so a caller can name another workspace's challenge;
+    it is to read both from the request's context instead.
+  - *Workspace API* (L2, `mandate-api`): a request body naming another workspace is refused.
+  - *Row-level security* (the workspace store): rows keyed on `workspace_id` under a per-transaction
+    setting only the context sets, and `no_principal_reads_the_membership_index_of_another`.
+  - *Own-credential API* (the workspace store): `own_credential_api_takes_no_principal_id`, a
+    compile-fail test that the credential API takes no bare principal ID.
+  - *Journal stream prefixes and writer roles* (the journal lane, `mandate-journal`,
+    `mandate-journal-pg`): append and read take a tenant context, and a stream of another workspace
+    is unreachable.
+  - *NATS accounts* (infrastructure): one account per workspace.
+  - *Cache keys* (the lane that adds the cache wrapper; no crate yet): the wrapper takes a context
+    and prefixes every key with the workspace; E9-11's unprefixed-key seeded bug depends on it.
+  - *Inference cache* (the model gateway, INF-9, INF-11).
+  - *Vault* (`mandate-vault-local` and infrastructure §5.2): one namespace per workspace.
+  - *Bootstrap crates* (the agent runtime, executor, and scheduler lanes, with L1; on hold for the
+    merge coordinator): they join `mandate-identity-system`'s `allowed_dependents`.
+  - *Outage isolation* (E9-7 with the workspace store): a deactivated member is refused through an
+    outage, and a route-2 attempt is refused in the isolation run.
 - **E9-9 (Must, M8; SC; before E10-6)** As an owner, I want my connected agent to hold a scoped,
   sender-constrained, revocable token (DEC-141). *Accepted when:* clients connect through OAuth 2.1
   with PKCE and DPoP (spec §6.6); the ID-2 test passes for the client column; a client cannot approve,
