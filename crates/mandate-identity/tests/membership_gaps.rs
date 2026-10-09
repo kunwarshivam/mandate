@@ -31,7 +31,6 @@ fn joined(invited_roles: u8, roles: u8) -> Vec<(i64, Event)> {
 
 /// §9.12: a reactivation restores exactly the kept roles, so a strict subset is refused.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_reactivation_with_a_strict_subset_of_the_kept_roles_is_refused() {
     let with = |mask| {
         let mut h = joined(AUDITOR_VIEWER, AUDITOR_VIEWER);
@@ -52,7 +51,6 @@ fn a_reactivation_with_a_strict_subset_of_the_kept_roles_is_refused() {
 
 /// §9.12: an activation takes exactly the invitation's roles, so a strict subset is refused.
 #[test]
-#[ignore = "pending E9-7"]
 fn an_activation_with_a_strict_subset_of_the_invitations_roles_is_refused() {
     let (subset, exact) = (
         joined(AUDITOR_VIEWER, 0b01000),
@@ -66,7 +64,6 @@ fn an_activation_with_a_strict_subset_of_the_invitations_roles_is_refused() {
 /// restart or shorten a cool-off by granting the role again. The grant records independence, as
 /// B's activation did, and its cool-off follows rule 103.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_grant_of_a_role_still_cooling_off_is_refused() {
     let mut h = joined(APPROVER_VIEWER, APPROVER_VIEWER);
     let added = BTreeMap::from([(Role::Approver, cool(10_800, true, &set(APPROVER)))]);
@@ -86,7 +83,6 @@ fn a_grant_of_a_role_still_cooling_off_is_refused() {
 /// §9.12 and DEC-654 item 7: a deactivated member keeps every role it held, a cooling one too, less
 /// those an admin strips while it is deactivated, and keeps nothing once reactivated.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_deactivated_member_keeps_its_cooling_roles_less_those_stripped() {
     let member = PrincipalId(B);
     let mut h = joined(APPROVER_VIEWER, APPROVER_VIEWER);
@@ -121,7 +117,6 @@ fn a_deactivated_member_keeps_its_cooling_roles_less_those_stripped() {
 /// before it makes the fold unreadable from its own `event_time`, though the record before it is
 /// not yet folded there, and leaves every earlier reading as it was.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_record_out_of_order_makes_the_fold_unreadable_from_its_instant() {
     let (f, viewer) = (|| founding().1, || set(VIEWER));
     let seq = sequenced(vec![
@@ -171,7 +166,6 @@ fn flagged(ind: bool) -> [(&'static str, Event); 4] {
 /// `independent_approval_required: false` while independence is in force would skip §8.3's
 /// cool-off, so each record type carrying it is refused; a record stating the policy passes.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_record_of_no_independence_while_it_is_in_force_is_refused() {
     let refused = Err(RecordRefusal::IndependenceMismatch);
     for ((name, without), (_, with)) in flagged(false).into_iter().zip(flagged(true)) {
@@ -185,7 +179,6 @@ fn a_record_of_no_independence_while_it_is_in_force_is_refused() {
 /// The check is equality (§9.12): each record type claiming independence the workspace does not
 /// require is refused too, and a record type with no such member passes whatever the policy.
 #[test]
-#[ignore = "pending E9-7"]
 fn the_recorded_independence_must_equal_the_effective_policy() {
     let refused = Err(RecordRefusal::IndependenceMismatch);
     for (name, with) in flagged(true) {
