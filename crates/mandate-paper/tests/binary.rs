@@ -17,6 +17,7 @@ mod conformance;
 mod support;
 
 use std::process::{Command, Output};
+use std::time::Duration;
 
 use mandate_alpaca::{KEY_ID_VAR, Pause, SECRET_VAR};
 use mandate_journal::{AppendOutcome, StreamId};
@@ -101,6 +102,25 @@ fn the_system_clock_reads_a_current_instant() {
     assert!(window[0] < now && now < window[1], "{now:?}");
 }
 
+/// Live: the shipping timer waits. On a runtime whose clock is paused, tokio's clock moves only
+/// when a timer is due, so it advances by the whole pause; a future that is ready at once leaves
+/// it where it was.
+#[test]
+fn the_system_clock_pause_waits_its_whole_duration() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .unwrap();
+    let duration = Duration::from_secs(90);
+    let waited = runtime.block_on(async {
+        let start = tokio::time::Instant::now();
+        SystemClock.pause(duration).await;
+        start.elapsed()
+    });
+    assert!(waited >= duration, "waited {waited:?} of {duration:?}");
+}
+
 /// Rule 7, DEC-846 item 6: a usage refusal names the flag, never its value, and exits non-zero.
 #[test]
 #[ignore = "pending E7-19"]
@@ -112,8 +132,10 @@ fn a_usage_refusal_names_no_value() {
     refused(&output, "--journal is given twice");
 }
 
-/// FT-10, TI-5: a variable pointing Alpaca at a host is refused before the control stream or any
-/// credential is read; the refusal names the variable only.
+/// FT-10, TI-5: a variable pointing Alpaca at a host is refused before the control stream is
+/// read, and the refusal names the variable only, never its value or a key. The keys are set and
+/// valid here, so this does not show the host check comes before the credentials; that order is
+/// pinned in-process by `run.rs`'s `every_refusal_before_the_credentials_reads_none`.
 #[test]
 #[ignore = "pending E7-19"]
 fn a_configured_host_is_refused_before_any_credential() {
@@ -127,20 +149,17 @@ fn a_configured_host_is_refused_before_any_credential() {
 }
 
 /// FT-3, DEC-846 item 1: with no journal, or one nobody answers on, there is no control stream,
-/// and the run stops before any credential: with no keys set, a credential read would refuse
-/// first. The DSN and the keys appear nowhere. Then, against a real journal
+/// and the run stops before any credential: no keys are set in either run, so a credential read
+/// would refuse first. The DSN appears nowhere. Then, against a real journal
 /// (`MANDATE_PG_URL`), the binary reads `ctl:ws1`: an empty stream deploys nothing, and one whose
 /// `AgentDeployed` names a version no store holds refuses that document, both before any
-/// credential, and neither names the DSN's password.
+/// credential, with the keys set, and neither names the DSN's password or a key.
 #[test]
 #[ignore = "pending E7-19"]
 fn the_control_stream_is_read_before_any_credential() {
     let unread = "the control stream could not be read";
     refused(&paper(&["--confirm-paper"], &[]), unread);
-    refused(
-        &paper(&["--confirm-paper", "--journal", DSN], &KEYS),
-        unread,
-    );
+    refused(&paper(&["--confirm-paper", "--journal", DSN], &[]), unread);
     let Some(db) = TestDb::new() else {
         return;
     };
