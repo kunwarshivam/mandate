@@ -284,7 +284,7 @@ item above (C-3, C-9) are not repeated.
 - [ ] **A labelled composer in set-up**, with a flat send button; still no placeholder or example.
       (C-4)
 - [x] **Alerts says all clear** when every feed answers and no agent is restricted. (C-13) Done in [#1167](https://github.com/kunwarshivam/mandate/pull/1167).
-- [ ] **Day headings on the timeline.** (C-19)
+- [x] **Day headings on the timeline.** (C-19) Done in [#1191](https://github.com/kunwarshivam/mandate/pull/1191).
 - [ ] **The status strip's state chips outlined**, not ink. (C-26)
 - [ ] **Workspace out of More** until one section is built (a DEC amending DEC-513 item 2); its
       subtitle drops "Rules". (C-20)
