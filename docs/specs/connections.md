@@ -669,7 +669,9 @@ because `paused` holds exits. `AccountRestrictionChanged` carries the cause
 not, and the owner gets a distinct alert. The executor journals
 `AccountRestrictionChanged` and then `AgentModeApplied` before it sends or refuses anything else,
 so replay reaches the same mode from the journal alone; the health signals themselves are never an
-unjournaled input to the mode machine. It lifts on the connection's own condition clearing, as the table above
+unjournaled input to the mode machine. A degrading cause the executor holds unjournaled while
+`suspended` ([DEC-687](../project/decisions/DEC-687.md) item 1) feeds only the decision to write
+`condition_cleared` and to accept the acknowledgment, never the mode machine. It lifts on the connection's own condition clearing, as the table above
 says (good probes for `degraded`, re-authorization for `suspended`, and for contract drift
 [DEC-687](../project/decisions/DEC-687.md) item 3), and then the owner's acknowledgment; a reconnect
 lifts nothing by itself (DEC-800 item 5, journal §9.8 rule 68), and an account refresh is not the
