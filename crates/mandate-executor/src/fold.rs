@@ -767,6 +767,7 @@ fn order_submitted(
         OrderDetail {
             request: Some(request),
             submitted_seq: Some(event.seq),
+            submitted_at: state.risk_clock,
             ..OrderDetail::default()
         },
     );
