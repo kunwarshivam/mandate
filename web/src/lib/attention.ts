@@ -1,4 +1,4 @@
-import type { OrderState, Workspace } from "@/fixtures/types";
+import type { Approval, OrderState, Workspace } from "@/fixtures/types";
 import { MODE_LABEL } from "./labels";
 import { agentLimits, levelNoun, nearLossLimits } from "./limits";
 import { RESTRICTIONS, type RestrictionSource } from "./restrictions";
@@ -79,6 +79,15 @@ export function needsYouLines(ws: Workspace): AlertLine[] {
     }
   }
   return lines;
+}
+
+/**
+ * Home's all-clear: no request waits and no agent has a condition (`needsYouLines`). The Alerts screen
+ * says the same line on this same condition, with every feed answering besides (C-13), so the two
+ * screens can never disagree about whether anything needs the owner.
+ */
+export function nothingNeedsYou(ws: Workspace, open: readonly Approval[]): boolean {
+  return open.length === 0 && needsYouLines(ws).length === 0;
 }
 
 /**

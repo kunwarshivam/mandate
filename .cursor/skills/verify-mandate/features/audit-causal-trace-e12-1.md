@@ -20,5 +20,7 @@
   and `as_of` covering a stream read with no match; at the depth or event bound the `intent_id` row
   reads its `IntentProposed` `already_shown` or `beyond_bound` and adds no agent stream to `as_of`.
   Slice A2b's tests cover each other link row, its `unexpected_type` by-id targets, and the
-  thesis and invocation quoted items.
+  thesis and invocation quoted items, a version-1 submission with a recorded cause still
+  showing its `not_recorded` intent (DEC-775 item 1), and an output's thesis matched across both
+  types in `seq` order as one target (DEC-775 item 4).
 - **Run:** `cargo nextest run -p mandate-audit -E 'binary(trace)'`.

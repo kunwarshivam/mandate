@@ -1635,6 +1635,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-dispatcher"
+version = "0.0.0"
+dependencies = [
+ "base64ct",
+ "mandate-notify",
+ "mandate-push-relay",
+ "mandate-time",
+ "mandate-webpush",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-domain"
 version = "0.0.0"
 dependencies = [

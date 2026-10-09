@@ -287,3 +287,53 @@ fn watermark(last: &StoredEvent) -> Watermark {
         recorded_at: last.recorded_at.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use mandate_canon::Digest;
+    use mandate_journal::StoredEvent;
+
+    use super::Members;
+
+    /// An account-stream row whose payload is `payload`, with no other link to any agent.
+    fn row(payload: &str) -> StoredEvent {
+        StoredEvent {
+            stream_id: "acct:ws:ACCT1".to_owned(),
+            seq: 2,
+            event_id: "E2".to_owned(),
+            event_type: "AgentModeApplied".to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: "2026-09-21T15:00:00.000000000Z".to_owned(),
+            prev_hash: Digest::ZERO,
+            hash: Digest::ZERO,
+            body: format!(r#"{{"causation_id":null,"payload":{payload}}}"#).into_bytes(),
+        }
+    }
+
+    /// DEC-764 item 2's "its `agent_id` (or `agent`)": a payload holding both is judged by its
+    /// `agent_id` alone, and `agent` is read only when `agent_id` is absent or `null`. No payload
+    /// the journal registers holds both today, so this is pinned on the predicate itself.
+    #[test]
+    fn an_agent_id_takes_precedence_over_agent() {
+        let members = Members {
+            agent_id: "AG1",
+            agent_stream: "agent:ws:AG1",
+            own: BTreeSet::new(),
+            intents: BTreeSet::new(),
+            orders: BTreeSet::new(),
+        };
+        let cases = [
+            (r#"{"agent_id":"AG1","agent":"AG2"}"#, true),
+            (r#"{"agent_id":"AG2","agent":"AG1"}"#, false),
+            (r#"{"agent_id":"AG2","agent":"*"}"#, false),
+            (r#"{"agent_id":null,"agent":"AG1"}"#, true),
+            (r#"{"agent":"AG1"}"#, true),
+        ];
+        for (payload, mine) in cases {
+            assert_eq!(members.holds(&row(payload)), mine, "{payload}");
+        }
+    }
+}

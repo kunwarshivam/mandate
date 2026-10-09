@@ -70,6 +70,20 @@ export function Panel({ children, className, well = false }: { children: ReactNo
   return <div className={cn(well && "rounded-2xl bg-background px-4 py-3 sm:px-5", className)}>{children}</div>;
 }
 
+/**
+ * Silence as a feature: the brand owl and one plain line, in the landing page's chrome face, with no
+ * meaning colour and no motion. Home's Needs you and the top of Alerts say it on the condition
+ * `nothingNeedsYou` decides, so they say it together or not at all (C-13).
+ */
+export function AllClear() {
+  return (
+    <p data-slot="all-clear" className="pixel-face flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
+      <BrandOwl className="size-8" />
+      All clear. Nothing needs you.
+    </p>
+  );
+}
+
 /** No agents yet: one sentence and the one next step. */
 export function EmptyBoard() {
   return (
