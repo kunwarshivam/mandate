@@ -10736,6 +10736,214 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// [`resolved_live_problems`] over [`live_only_outside_defaults`] and `flows`, every build
+    /// resolving as [`unreached_host`].
+    fn host_problems(flows: &[CiFile]) -> Result<Vec<String>> {
+        resolved_live_problems(
+            &live_policy(),
+            &live_only_outside_defaults(),
+            flows,
+            &unreached_host,
+        )
+    }
+
+    /// Asserts that each of `jobs` (never empty) has a problem naming it, in backticks, that says
+    /// it cannot be read (DEC-868 item 3).
+    fn unreadable(problems: &[String], jobs: &[&str]) {
+        assert!(!jobs.is_empty(), "a check names something");
+        for job in jobs {
+            let named = problems
+                .iter()
+                .any(|p| p.contains(&format!("`{job}`")) && p.contains("cannot be read"));
+            assert!(named, "`{job}` cannot be read: {problems:?}");
+        }
+    }
+
+    /// The control: a plain block-style workflow whose jobs build `-p a-lib`, with an empty flow
+    /// mapping and flat flow sequences of scalars, which hide no key, is not flagged (#1169 round
+    /// 2 review; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_plain_block_style_workflow_is_not_flagged() -> Result<()> {
+        let flows = [ci_file(
+            ".github/workflows/ci.yml",
+            "on: push\npermissions: {}\njobs:\n  setup:\n    runs-on: ubuntu-24.04\n    steps:\n      \
+             - run: echo ready\n  lib-tests:\n    runs-on: ubuntu-24.04\n    permissions: {}\n    \
+             needs: [setup]\n    strategy:\n      matrix:\n        shard: [\"0/2\", \"1/2\"]\n    \
+             steps:\n      - uses: actions/checkout@v4 # a comment naming cargo\n      - name: Test \
+             the library\n        run: cargo test -p a-lib\n      - run: |\n          # cargo test \
+             in a comment\n          cargo test -p a-lib\n          cargo clippy -p a-lib\n",
+        )];
+        assert_eq!(host_problems(&flows)?, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// A cargo invocation of a workflow job that names no `-p`/`--package` selects every
+    /// workspace member, whatever directory it runs in, so it holds a live-only member nothing
+    /// depends on (#1169 round 2 review, major; DEC-176 tightening). `cargo install`, with
+    /// `--path` in either spelling, selects every member too; a `-p` build of another crate
+    /// does not.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_build_naming_no_package_selects_every_member() -> Result<()> {
+        let flows = [workflow(&[
+            ("bare", "cargo test"),
+            ("release", "cargo build --release"),
+            ("install", "cargo install --path crates/rh-host"),
+            (
+                "glued-install",
+                "cargo install --locked --path=crates/rh-host",
+            ),
+            ("lib-tests", "cargo test -p a-lib"),
+        ])];
+        names(
+            &host_problems(&flows)?,
+            &["rh-host", "bare", "release", "install", "glued-install"],
+            &["lib-tests"],
+        );
+        Ok(())
+    }
+
+    /// `env -C <dir>`, `env --chdir`, and `cargo -C <dir>` (with `-Z unstable-options` or a
+    /// `+toolchain`) change the directory cargo reads, so the build cannot be read, and with no
+    /// `-p` it holds the live-only member too (#1169 round 2 review, major; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_directory_change_by_env_or_cargo_cannot_be_read() -> Result<()> {
+        let jobs = [
+            ("env-c", "env -C crates/rh-host cargo test"),
+            ("env-chdir", "env --chdir=crates/rh-host cargo test"),
+            (
+                "env-chdir-spaced",
+                "env --chdir crates/rh-host cargo test -p a-lib",
+            ),
+            ("cargo-c", "cargo -C crates/rh-host test"),
+            (
+                "cargo-c-unstable",
+                "cargo -Z unstable-options -C crates/rh-host test",
+            ),
+            (
+                "cargo-c-nightly",
+                "cargo +nightly -Z unstable-options -C crates/rh-host test -p a-lib",
+            ),
+        ];
+        let mut all = jobs.to_vec();
+        all.push(("lib-tests", "cargo test -p a-lib"));
+        let problems = host_problems(&[workflow(&all)])?;
+        unreadable(&problems, &jobs.map(|(job, _)| job));
+        names(&problems, &["rh-host", "env-c", "cargo-c"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A shell string that holds `cargo` (`bash -c`, `sh -c`, a shell by its path, `env -S`,
+    /// `env --split-string`) hides the invocation from the reader, so it cannot be read (#1169
+    /// round 2 review, major; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_shell_string_holding_cargo_cannot_be_read() -> Result<()> {
+        let jobs = [
+            ("bash-c", "bash -c 'cargo test'"),
+            ("sh-c", "sh -c \"cargo test -p rh-host\""),
+            ("bin-bash-c", "/bin/bash -c 'cargo build'"),
+            ("env-s", "env -S 'cargo test'"),
+            ("env-split", "env --split-string='cargo test'"),
+        ];
+        let mut all = jobs.to_vec();
+        all.push(("lib-tests", "cargo test -p a-lib"));
+        let problems = host_problems(&[workflow(&all)])?;
+        unreadable(&problems, &jobs.map(|(job, _)| job));
+        names(&problems, &["bash-c"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A `working-directory` in a YAML shape the line reader cannot follow (a quoted key, a flow
+    /// step, flow `defaults`) cannot be read, and the build it moves holds the live-only member
+    /// (#1169 round 2 review, major; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_working_directory_in_an_unread_yaml_shape_cannot_be_read() -> Result<()> {
+        let flows = [ci_file(
+            ".github/workflows/ci.yml",
+            "on: push\njobs:\n  quoted-key:\n    steps:\n      - \"working-directory\": \
+             crates/rh-host\n        run: cargo test\n  single-quoted-key:\n    defaults:\n      \
+             run:\n        'working-directory': crates/rh-host\n    steps:\n      - run: cargo \
+             test\n  flow-step:\n    steps:\n      - {working-directory: crates/rh-host, run: \
+             cargo test}\n  flow-defaults:\n    defaults: {run: {working-directory: \
+             crates/rh-host}}\n    steps:\n      - run: cargo test\n  lib-tests:\n    steps:\n      \
+             - run: cargo test -p a-lib\n",
+        )];
+        let problems = host_problems(&flows)?;
+        let jobs = [
+            "quoted-key",
+            "single-quoted-key",
+            "flow-step",
+            "flow-defaults",
+        ];
+        unreadable(&problems, &jobs);
+        names(&problems, &["rh-host"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A YAML anchor, alias or merge key carries a `working-directory` or a `run:` into a job the
+    /// line reader does not see it in (`defaults: *d`, a step's `<<: *s`, `run: *c`), so each
+    /// cannot be read, and so is the anchor that holds `cargo` (#1169 round 2 review, major;
+    /// DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_yaml_anchor_alias_or_merge_cannot_be_read() -> Result<()> {
+        let flows = [
+            ci_file(
+                ".github/workflows/ci.yml",
+                "on: push\njobs:\n  setup:\n    defaults: &d\n      run:\n        \
+                 working-directory: crates/rh-host\n    steps:\n      - &s\n        \
+                 working-directory: crates/rh-host\n        run: echo setup\n      - run: &c cargo \
+                 test\n  alias-defaults:\n    defaults: *d\n    steps:\n      - run: cargo test\n  \
+                 merge-step:\n    steps:\n      - <<: *s\n        run: cargo test\n  alias-run:\n    \
+                 steps:\n      - run: *c\n",
+            ),
+            ci_file(
+                ".github/workflows/lib.yml",
+                "on: push\njobs:\n  lib-tests:\n    steps:\n      - run: cargo test -p a-lib\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &["setup", "alias-defaults", "merge-step", "alias-run"],
+        );
+        names(&problems, &["rh-host"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A `run:` written so the reader does not find its cargo invocation (a quoted value, an
+    /// anchored or tagged value, a quoted `run` key, a flow step) cannot be read (#1169 round 2
+    /// review, major; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_run_value_hiding_cargo_cannot_be_read() -> Result<()> {
+        let flows = [ci_file(
+            ".github/workflows/ci.yml",
+            "on: push\njobs:\n  quoted-run:\n    steps:\n      - run: \"cargo test\"\n  \
+             single-quoted-run:\n    steps:\n      - run: 'cargo test'\n  anchored-run:\n    \
+             steps:\n      - run: &c cargo test\n  tagged-run:\n    steps:\n      - run: !!str \
+             cargo test\n  quoted-run-key:\n    steps:\n      - \"run\": cargo test\n  flow-run:\n    \
+             steps:\n      - {run: cargo test}\n  lib-tests:\n    steps:\n      - run: cargo test \
+             -p a-lib\n",
+        )];
+        let problems = host_problems(&flows)?;
+        let jobs = [
+            "quoted-run",
+            "single-quoted-run",
+            "anchored-run",
+            "tagged-run",
+            "quoted-run-key",
+            "flow-run",
+        ];
+        unreadable(&problems, &jobs);
+        names(&problems, &["quoted-run"], &["lib-tests"]);
+        Ok(())
+    }
+
     /// A resolve that fails, or an invocation word the shell expands, is a problem naming the job
     /// rather than an abort, and so is a default build that cannot be resolved (DEC-868 item 3).
     #[test]
