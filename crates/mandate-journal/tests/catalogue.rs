@@ -1390,7 +1390,6 @@ fn the_connection_records_are_catalogued_and_closed_on_their_streams() {
 /// control stream too: a payload with no `command` is refused at that member, since §9.11 reads it
 /// for every command.
 #[test]
-#[ignore = "pending E10-15"]
 fn the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream() {
     let wrong_stream = (InvalidReason::WrongStream, "event_type".to_owned());
     for (event_type, refs) in CLOSED_BY_E10_15 {
