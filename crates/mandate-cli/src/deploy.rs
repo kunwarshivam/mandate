@@ -18,7 +18,7 @@ const DEPLOYED: &str = "AgentDeployed";
 
 /// The agent's active deployment: its latest `AgentDeployed`, when no `AgentStopped` for it is
 /// later.
-fn active<'a>(rows: &'a [Row], agent: &str) -> Option<&'a Row> {
+pub(crate) fn active<'a>(rows: &'a [Row], agent: &str) -> Option<&'a Row> {
     let latest = rows.iter().rev().find(|r| {
         matches!(r.event_type.as_str(), DEPLOYED | "AgentStopped")
             && r.member("agent_id") == Some(agent)

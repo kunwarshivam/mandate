@@ -9,3 +9,11 @@ query-filters:
   # AGENTS.md rules 6 and 7, not by this query.
   - exclude:
       id: rust/cleartext-logging
+
+# Published cryptographic test vectors (DEC-794): RFC 8291 §5 and Appendix A, and RFC 8188 §3.1's
+# keys, salts and messages, which the web push tests reproduce byte-exact. They are never used
+# outside tests: only `crates/mandate-webpush/src/tests.rs` includes this directory, and its test
+# `no_product_code_reaches_the_rfc_vectors` fails if the crate's product files name it. Only this
+# one directory is ignored; every query still runs on every other path.
+paths-ignore:
+  - crates/mandate-webpush/tests/vectors
