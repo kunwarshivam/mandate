@@ -386,6 +386,10 @@ fn the_shared_endpoint_table_holds_on_the_default_list() -> Result<(), WebPushEr
             Ok("https://fcm.googleapis.com/fcm/send/abc"),
         ),
         (
+            "https://fcm.googleapis.com/fcm/send/AbC-123",
+            Ok("https://fcm.googleapis.com/fcm/send/AbC-123"),
+        ),
+        (
             "https://updates.push.services.mozilla.com/wpush/v2/gA",
             Ok("https://updates.push.services.mozilla.com/wpush/v2/gA"),
         ),
@@ -433,6 +437,29 @@ fn the_shared_endpoint_table_holds_on_the_default_list() -> Result<(), WebPushEr
         ("https://android.googleapis.com/gcm/send/abc", REFUSED),
     ];
     check_endpoints(&list, &table)
+}
+
+/// RFC 8292 §2: `aud` is the push resource's origin, whose ASCII serialization (RFC 6454 §6.2)
+/// omits the default port, so a written `:443` never reaches the token; the address keeps it.
+#[test]
+#[ignore = "pending E8-14"]
+fn the_vapid_audience_omits_a_written_default_port() -> Result<(), WebPushError> {
+    let url = "https://fcm.googleapis.com:443/fcm/send/x";
+    let endpoint =
+        PushEndpoint::parse_allowed(url, &PushAllowlist::parse(&DEFAULT_PUSH_ALLOWLIST)?)?;
+    assert_eq!(endpoint.url, url, "the stored address is unchanged");
+    let header = vapid_authorization(&endpoint, &subject()?, &TestSigner::new(), NOW)?;
+    let claims = header
+        .strip_prefix("vapid t=")
+        .and_then(|t| t.split('.').nth(1))
+        .unwrap_or_default();
+    let claims = String::from_utf8(b64(claims)).unwrap_or_default();
+    let aud = claims
+        .split(r#""aud":""#)
+        .nth(1)
+        .and_then(|rest| rest.split('"').next());
+    assert_eq!(aud, Some("https://fcm.googleapis.com"), "RFC 6454 §6.2");
+    Ok(())
 }
 
 #[test]
