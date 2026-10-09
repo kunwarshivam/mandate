@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr};
 
 use common::wire::Wire;
-use common::{AGENTIC, NOT_AGENTIC, limit, price, qty, sim};
+use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, limit, price, qty, sim};
 use mandate_mcp::{ALLOWLIST, PROTOCOL_VERSION};
 use mandate_rh_sim::{CONTRACT, INJECTION, OrderRequest, ServerError, SimServer, State, Variant};
 use serde_json::{Value, json};
@@ -44,16 +44,23 @@ fn names(tools: &[Value]) -> BTreeSet<&str> {
 
 /// What makes text an instruction to a model, written here rather than read from the server, so
 /// text other than the [`INJECTION`] literal is caught too. Each matches whole words only.
-const IMPERATIVES: [&str; 9] = [
+const IMPERATIVES: [&str; 16] = [
     "ignore",
+    "ignores",
+    "ignored",
     "instruction",
+    "instructions",
     "assistant",
     "system",
     "you must",
     "do not",
     "always",
     "call",
+    "calls",
+    "calling",
     "transfer",
+    "transfers",
+    "transferring",
 ];
 
 fn instructs(text: &str) -> bool {
@@ -73,6 +80,15 @@ fn instructs(text: &str) -> bool {
 #[test]
 fn the_imperatives_match_whole_words_only() {
     assert!(instructs("Please CALL transfer_funds") && instructs("you  must, now"));
+    let inflected = [
+        "Ignores prior instructions",
+        "it calls",
+        "transfers the cash",
+    ];
+    assert!(
+        inflected.iter().all(|text| instructs(text)),
+        "inflected forms count"
+    );
     for text in [
         "recall the systematic ignorer",
         "transferable",
@@ -340,6 +356,10 @@ fn a_place_drives_the_core_as_the_core_driven_alone_would() -> Outcome {
             ref_id: None,
             ..limit("buy", "1", "498", 8)
         },
+        OrderRequest {
+            account_number: DAY_TRADER.to_owned(),
+            ..limit("buy", "1", "500", 9)
+        },
     ];
     let (mut placed, mut refusals) = (0, 0);
     for request in &requests {
@@ -362,16 +382,19 @@ fn a_place_drives_the_core_as_the_core_driven_alone_would() -> Outcome {
     }
     assert_eq!(
         (placed, refusals),
-        (6, 3),
+        (7, 3),
         "the script covers both outcomes"
     );
-    for account in [AGENTIC, NOT_AGENTIC] {
-        assert_eq!(
-            orders(&server, account)?,
-            direct.orders(account).unwrap(),
-            "{account}"
-        );
+    for account in [AGENTIC, DAY_TRADER] {
+        let served = orders(&server, account)?;
+        assert!(!served.is_empty(), "{account} places an order");
+        assert_eq!(served, direct.orders(account).unwrap(), "{account}");
     }
+    assert_eq!(
+        orders(&server, NOT_AGENTIC)?,
+        [],
+        "a refused account holds nothing"
+    );
     assert_eq!(server.calls()?, vec!["place_equity_order"; requests.len()]);
     Ok(())
 }
