@@ -72,15 +72,11 @@ fn anything_else_is_a_usage_error() {
         &format!("{IDS} --agent b --confirm-paper"),
         "a flag given twice",
     );
-    let secret = format!("{IDS} --journal postgres://paper:hunter2@db/j --place-one-order");
-    let refused = parsed(&secret)
-        .map(|_| ())
-        .map_err(|error| error.to_string());
-    let shown = format!("{refused:?}");
-    assert!(
-        shown.starts_with("Err(") && !shown.contains("hunter2"),
-        "{shown}"
-    );
+    let dsn = "--journal postgres://paper:hunter2@db/j";
+    let secret = format!("{IDS} --confirm-paper {dsn} {dsn}");
+    let refused = parsed(&secret).map(|_| ()).map_err(|e| e.to_string());
+    let expected = Err("--journal is given twice".to_owned());
+    assert_eq!(refused, expected, "the DSN may hold a password (rule 7)");
     for extra in [
         "--mandate m",
         "--config-dir c",

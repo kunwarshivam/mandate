@@ -295,13 +295,13 @@ fn a_rerun_with_the_same_code_answers_the_committed_event() {
     let mut j = passing("connect");
     let mut ids = FixedIds::default();
     let code = shown(&mut j, &request());
-    let first = attempt(&mut j, &mut ids, &request(), Some(&code))
-        .0
-        .unwrap();
-    let again = attempt(&mut j, &mut ids, &request(), Some(&code))
-        .0
-        .unwrap();
+    let (first, first_out) = attempt(&mut j, &mut ids, &request(), Some(&code));
+    let (again, again_out) = attempt(&mut j, &mut ids, &request(), Some(&code));
+    let (first, again) = (first.unwrap(), again.unwrap());
     assert_eq!(first, again);
+    for printed in [&first_out, &again_out] {
+        assert!(!printed.contains(PII), "{printed}");
+    }
     assert_eq!(j.rows(&stream(CONTROL)).unwrap().len(), 1);
     assert_eq!(ids.assertions, 1, "the re-run spends no assertion");
 }

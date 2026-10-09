@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Duration;
 
-use mandate_canon::{Digest, Int, Key, Object, Value, parse, to_canonical};
+use mandate_canon::{Digest, Int, Key, Object, Value, encode_ulid, parse, to_canonical};
 use mandate_journal::{AppendOutcome, ArtifactRef, Environment, Head, StoredEvent, StreamId};
 use mandate_time::UtcNanos;
 
@@ -547,29 +547,8 @@ fn derive(
     let digest = Digest::of(&to_canonical(&bound));
     let mut high = [0_u8; 16];
     high.copy_from_slice(&digest.as_bytes()[..16]);
-    Ok(ulid(u128::from_be_bytes(high)))
+    Ok(encode_ulid(u128::from_be_bytes(high)))
 }
-
-/// `n` in ULID's 26 Crockford base-32 digits, most significant first. The fallbacks are dead: a
-/// digit's shift is at most 125 bits, which neither overflows `checked_mul` nor reaches 128 for
-/// `checked_shr`, and a five-bit index always names one of the 32 letters; they stand in for the
-/// panics the lint header forbids.
-fn ulid(n: u128) -> String {
-    const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-    (0..ULID_LEN)
-        .rev()
-        .map(|digit| {
-            let shifted = digit
-                .checked_mul(5)
-                .and_then(|bits| n.checked_shr(bits))
-                .unwrap_or_default();
-            let index = usize::try_from(shifted & 0x1f).unwrap_or_default();
-            ALPHABET.get(index).copied().map_or('0', char::from)
-        })
-        .collect()
-}
-
-const ULID_LEN: u32 = 26;
 
 /// The pause before retry `retry` (1 for the first retry) of the command whose id is `event_id`:
 /// doubling from [`FIRST_BACKOFF`] to at most [`LAST_BACKOFF`], plus a jitter below that base drawn
