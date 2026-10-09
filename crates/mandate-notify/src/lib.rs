@@ -37,19 +37,23 @@
 //! digest of the notice, recipient, and channel (NT-2, DEC-710 items 4, 5), through a [`Provider`]
 //! that answers an [`Outcome`] (§5.2, DEC-712). [`canary`] is NT-1's scan (DEC-710 item 7).
 //!
-//! [`quiet_hours`] is the dispatcher's quiet-hours rule by class (E8-10 slice D1, DEC-701 item 1,
-//! DEC-725). It takes its instant, and the zone's offsets, from the caller.
+//! [`quiet_hours`], [`coalesce`], [`next_attempt`], and [`notice_keys`] are the dispatcher's pure
+//! rules: quiet hours by class, the coalescing fold, the retry schedule, and one notice per cause
+//! (E8-10 slice D1, DEC-701 item 1, DEC-725). Each takes its instants, and the zone's offsets,
+//! from the caller.
 //!
 //! Every entry point returns a `Result`, so a later slice's stub reports
 //! [`NotifyError::Unimplemented`] (DEC-77).
 
 pub mod canary;
+mod delivery;
 mod kind;
 mod payload;
 mod provider;
 mod quiet;
 mod send;
 
+pub use delivery::{Alert, Message, Pass, Read, Retry, coalesce, next_attempt, notice_keys};
 pub use kind::{Class, NoticeKind, TextKey};
 pub use payload::{NoticeId, Notification, Origin, SecureRandom, link, payload};
 pub use provider::{FixtureProvider, Outcome, Provider, Reason, Sent};
