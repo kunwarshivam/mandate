@@ -64,6 +64,8 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   DEC-104 item 5; DEC-129 items 25 to 27; DEC-250; DEC-265 item 1; DEC-266 item 4; DEC-285
   item 6; DEC-476 item 7 (which model reads the owner's words at `/agents/new`, through which
   route, its spend cap and data terms); DEC-480 (acting from a message).
+- **DEC-773** (causal trace authorship): (a) should an owner-selected signal model's output read
+  `owner_selected`? (b) What does the label say? Meanwhile every quoted item is `platform_authored`.
 - **Decided, record still to land:** DEC-360 (option (c)), DEC-410 item 3, DEC-422 (#514 open).
 - **Design calls the plan parks for you:** the landing wordmark (DEC-467 chose the block letters;
   the plan prefers one era of type); the short set-up summary (counsel, DEC-477 question 23);

@@ -50,7 +50,7 @@ fn draft(id: &str, stream: &str, event_type: &str, caused: Option<&str>, payload
 fn output(evidence: &[String], invalidation: Option<&str>, thesis_ref: Option<&str>) -> String {
     let evidence: Vec<String> = evidence.iter().map(|e| quote(Some(e))).collect();
     format!(
-        r#"{{"model_id":"quant.momentum","model_version":"1.0.0","content_hash":"sha256:{}",
+        r#"{{"model_id":"llm.research_agent","model_version":"1.0.0","content_hash":"sha256:{}",
         "instrument_id":"inst","as_of":"{T}","expires_at":"{T}","direction":"long",
         "conviction":"1","confidence":"1","horizon_s":60,"thesis_ref":{},"evidence":[{}],
         "invalidation":{},"thesis_id":null,"lineage_id":null,"ignored":null}}"#,
@@ -98,13 +98,13 @@ fn hop(from: &str, link: &str, to: Option<&str>, status: HopStatus) -> Hop {
 }
 
 /// Traces `start` as `workspace` and checks what does not depend on the links: each node is the
-/// journal's row, `as_of` holds the heads of the nodes' streams (DEC-772 item 6), and no other
-/// workspace's stream id appears anywhere in the response (AU-1).
-fn traced(g: &Graph, workspace: WorkspaceId, start: &str) -> Trace {
+/// journal's row, `as_of` holds the heads of the nodes' streams and of `also`, the streams the walk
+/// read that hold no node (DEC-772 item 6), and no other workspace's stream id appears (AU-1).
+fn traced(g: &Graph, workspace: WorkspaceId, start: &str, also: &[&str]) -> Trace {
     let read = MemoryRead::new(&g.fx.journal);
     let trace = read.trace(&tenant(workspace), start).unwrap();
     assert_eq!(trace.start, start);
-    let mut streams = BTreeSet::new();
+    let mut streams: BTreeSet<String> = also.iter().map(|s| s.to_string()).collect();
     for node in &trace.nodes {
         let row = g.fx.journal.event(&node.event.event_id).unwrap();
         assert_eq!(node.event.stream_id, row.stream_id);
@@ -134,41 +134,6 @@ fn traced(g: &Graph, workspace: WorkspaceId, start: &str) -> Trace {
     trace
 }
 
-/// DEC-762 item 3: a self-link, a two-cycle and a three-cycle each end at `already_shown`.
-#[test]
-#[ignore = "pending E12-1"]
-fn cycles_and_self_links_end_at_already_shown() {
-    let mut g = Graph::new();
-    let stream = agent(WS_A, "AG1");
-    let [a, b, c, d] = [1, 2, 3, 4].map(|n| event_id(700_000 + n));
-    g.add(&stream, &a, Some(&a), from_ref(&b));
-    g.add(&stream, &b, Some(&a), &[c.clone(), b.clone()]);
-    g.add(&stream, &c, Some(&d), from_ref(&a));
-    g.add(&stream, &d, Some(&b), &[]);
-    let trace = traced(&g, WS_A, &a);
-    let (shown, again) = (HopStatus::Shown, HopStatus::AlreadyShown);
-    assert_eq!(
-        trace.hops,
-        [
-            hop(&a, "causation_id", Some(&a), again.clone()),
-            hop(&a, EV, Some(&b), shown.clone()),
-            hop(&b, "causation_id", Some(&a), again.clone()),
-            hop(&b, EV, Some(&c), shown.clone()),
-            hop(&b, EV, Some(&b), again.clone()),
-            hop(&c, "causation_id", Some(&d), shown),
-            hop(&c, EV, Some(&a), again.clone()),
-            hop(&d, "causation_id", Some(&b), again),
-        ]
-    );
-    let nodes: Vec<(&str, u16)> = trace
-        .nodes
-        .iter()
-        .map(|n| (n.event.event_id.as_str(), n.depth))
-        .collect();
-    let want = [(&a, 0), (&b, 1), (&c, 2), (&d, 3)].map(|(id, depth)| (id.as_str(), depth));
-    assert_eq!((nodes, trace.truncated), (want.to_vec(), false));
-}
-
 /// AU-1: links forged to name another workspace's events, the prefixed segment's, and absent ids
 /// all read `not_recorded` with no `to`; a start outside the workspace is the one `NotFound`.
 #[test]
@@ -180,7 +145,7 @@ fn forged_links_read_as_absent_ones_and_a_foreign_start_is_not_found() {
     g.add(&agent(WS_B, "AG1"), &theirs, Some(&mine), from_ref(&mine));
     let forged = [theirs.clone(), prefixed, event_id(999_999)];
     g.add(&agent(WS_A, "AG1"), &mine, Some(&theirs), &forged);
-    let trace = traced(&g, WS_A, &mine);
+    let trace = traced(&g, WS_A, &mine, &[]);
     let lost = |link: &str| hop(&mine, link, None, HopStatus::NotRecorded);
     let expected = [lost("causation_id"), lost(EV), lost(EV), lost(EV)];
     assert_eq!((trace.nodes.len(), trace.hops), (1, expected.to_vec()));

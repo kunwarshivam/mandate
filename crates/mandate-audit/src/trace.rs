@@ -44,7 +44,7 @@ pub struct Hop {
     pub status: HopStatus,
 }
 
-/// Who a quoted output is attributed to (`QuotedContent.author`, mandate spec §6.4, §8.1).
+/// Who a quoted output is attributed to (`QuotedContent.author`, mandate spec §6.4, DEC-773).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Author {
     OwnerSelected,
