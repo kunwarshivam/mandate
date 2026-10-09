@@ -25,9 +25,19 @@ use proptest::prelude::any;
 use proptest::test_runner::{Config, TestRunner};
 use serde_json::{Map, Value, json};
 
-/// The recorded agentic account, and three other accounts of the same customer: no number is a
-/// part of another, so finding one in an output means its data got through.
-const NUMBERS: [&str; 4] = ["5QR00001", "9ZX00002", "9ZX00003", "9ZX00004"];
+/// The recorded agentic account, three other accounts of the same customer (no number is a part of
+/// another, so finding one in an output means its data got through), and three near misses of
+/// the recorded number: case-different, padded, and with it as a prefix (DEC-875 item 1).
+const NUMBERS: [&str; 7] = [
+    "5QR00001",
+    "9ZX00002",
+    "9ZX00003",
+    "9ZX00004",
+    "5qr00001",
+    " 5QR00001",
+    "5QR000012",
+];
+const NEAR: [usize; 3] = [4, 5, 6];
 const OURS: &str = NUMBERS[0];
 const OTHER: RobinhoodError = RobinhoodError::OtherAccount;
 const READS: [AccountRead; 3] = [
@@ -171,7 +181,7 @@ fn only_the_agentic_accounts_records_reach_the_caller() {
             ours.map(|at| object(json!({"account_number": OURS, "tag": at})))
                 .collect::<Vec<_>>()
         });
-        let leaked = NUMBERS[1..]
+        let leaked = NUMBERS[1..4]
             .iter()
             .any(|n| format!("{outcome:?}").contains(n));
         proptest::prop_assert!(!leaked, "another account's data got through: {outcome:?}");
@@ -199,6 +209,26 @@ fn zero_or_several_agentic_accounts_fail_closed_with_no_guess() {
         (vec![(0, true), (1, true)], &two, "two agentic accounts"),
         (vec![(0, true), (0, true)], &two, "ours listed twice"),
         (vec![(0, true), (0, false)], &two, "ours read two ways"),
+        (
+            vec![(4, true), (0, false)],
+            &none,
+            "a case-different number is not ours",
+        ),
+        (
+            vec![(5, true), (0, false)],
+            &none,
+            "a padded number is not ours",
+        ),
+        (
+            vec![(6, true), (0, false)],
+            &none,
+            "a longer number is not ours",
+        ),
+        (
+            vec![(4, true)],
+            &none,
+            "a near miss never rescues a missing account",
+        ),
     ];
     for (list, error, why) in cases {
         let positions = read_answer(AccountRead::Positions, &[0, 1]);
@@ -224,13 +254,15 @@ fn a_read_naming_another_account_is_refused_with_nothing_called() {
         ("get_equity_orders", orders),
     ]);
     for read in READS {
-        for named in [
+        let misses = NEAR.map(|at| json!(NUMBERS[at]));
+        let named = [
             json!(NUMBERS[1]),
             json!(5),
             Value::Null,
             json!(""),
             json!([OURS]),
-        ] {
+        ];
+        for named in named.into_iter().chain(misses) {
             let filters = object(json!({"account_number": named, "symbol": "SPY"}));
             let refused = ready(c.read(read, &filters));
             assert_eq!(refused, Err(OTHER), "{read:?} {named}");
@@ -261,7 +293,8 @@ fn an_answer_that_cannot_be_attributed_refuses_the_whole_read() {
         json!({"structuredContent": {"positions": [ours]}, "isError": true}),
         json!({"content": []}),
     ];
-    for answer in unattributed {
+    let near = NEAR.map(|at| list(json!([ours, {"account_number": NUMBERS[at], "tag": 1}])));
+    for answer in unattributed.into_iter().chain(near) {
         let (c, _) = connector(&[
             ("get_accounts", accounts(&[(0, true)])),
             ("get_equity_positions", answer.clone()),
@@ -304,10 +337,8 @@ fn a_failed_account_check_holds_no_exit_on_the_agentic_account() {
     ];
     let (mut c, calls) = connector(&script);
     let check = ready(c.read(AccountRead::Positions, &Map::new()));
-    assert_eq!(check, Err(RobinhoodError::AmbiguousAgenticAccount));
     let named = object(json!({"account_number": NUMBERS[1]}));
     let other = ready(c.read(AccountRead::Orders, &named));
-    assert_eq!(other, Err(OTHER));
     calls.borrow_mut().clear();
     let (stop_limit, limit) = (OrderType::StopLimit, OrderType::Limit);
     let exits = [
@@ -361,4 +392,55 @@ fn a_failed_account_check_holds_no_exit_on_the_agentic_account() {
         assert_eq!(*class, CallClass::RiskReducing, "{tool}");
         assert_eq!(arguments["account_number"], json!(OURS), "{tool}");
     }
+    assert_eq!(check, Err(RobinhoodError::AmbiguousAgenticAccount));
+    assert_eq!(other, Err(OTHER), "the exits above ran after both refusals");
+}
+
+/// Answers `get_accounts` with each list in turn, and every other tool with no records.
+struct Changing {
+    lists: RefCell<Vec<Value>>,
+    calls: Calls,
+}
+
+impl Tools for Changing {
+    async fn call_tool(
+        &self,
+        class: CallClass,
+        tool: &'static str,
+        arguments: &Value,
+    ) -> Result<String, McpError> {
+        self.calls
+            .borrow_mut()
+            .push((class, tool, arguments.clone()));
+        let mut lists = self.lists.borrow_mut();
+        let answer = match tool {
+            "get_accounts" if !lists.is_empty() => lists.remove(0),
+            _ => content(json!({ "positions": [] })),
+        };
+        Ok(answer.to_string())
+    }
+}
+
+/// DEC-875 item 2: each read checks the account list afresh, so a pass is never remembered.
+#[test]
+#[ignore = "pending E7-6"]
+fn every_read_checks_the_account_list_afresh() {
+    let lists = vec![accounts(&[(0, true)]), accounts(&[(0, true), (1, true)])];
+    let calls = Calls::default();
+    let tools = Changing {
+        lists: RefCell::new(lists),
+        calls: Rc::clone(&calls),
+    };
+    let c = RobinhoodConnector::new(tools, OURS.to_owned());
+    assert_eq!(
+        ready(c.read(AccountRead::Positions, &Map::new())),
+        Ok(vec![])
+    );
+    let second = ready(c.read(AccountRead::Positions, &Map::new()));
+    assert_eq!(second, Err(RobinhoodError::AmbiguousAgenticAccount));
+    let tools: Vec<&str> = calls.borrow().iter().map(|(_, tool, _)| *tool).collect();
+    assert_eq!(
+        tools,
+        ["get_accounts", "get_equity_positions", "get_accounts"]
+    );
 }

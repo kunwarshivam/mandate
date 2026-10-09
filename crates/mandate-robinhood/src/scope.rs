@@ -24,8 +24,9 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// or the list is [`RobinhoodError::Unreadable`]. Exactly one record may be agentic, and it
     /// must be the only one under the recorded number: more than one agentic record, or the
     /// number listed twice, is [`RobinhoodError::AmbiguousAgenticAccount`]; otherwise a recorded
-    /// account that is absent or not agentic is [`RobinhoodError::NoAgenticAccount`]. Another
-    /// account is never adopted in its place, and no other record is returned.
+    /// account that is absent or not agentic is [`RobinhoodError::NoAgenticAccount`]. Numbers
+    /// match byte for byte, with no normalization. Another account, a near miss of the recorded
+    /// number included, is never adopted in its place, and no other record is returned.
     pub async fn agentic_account(&self) -> Result<Map<String, Value>, RobinhoodError> {
         Err(RobinhoodError::Unimplemented { story: "E7-6" })
     }
@@ -35,8 +36,10 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// recorded number as text is [`RobinhoodError::OtherAccount`], with nothing called. Then
     /// [`Self::agentic_account`] runs, and its refusal is the read's, so a non-agentic account's
     /// data is never read. The tool is called with the recorded `account_number`, and only the
-    /// answer's records naming it are returned; a record naming another account is dropped, and
-    /// one naming none, or an answer of another shape, is [`RobinhoodError::Unreadable`]. No
+    /// answer's records naming it byte for byte are returned. A record naming another account is
+    /// dropped, but one naming a near miss of the recorded number (equal to it, or one a prefix of
+    /// the other, once both are trimmed and ASCII lower-cased), one naming none, or an answer of
+    /// another shape is [`RobinhoodError::Unreadable`]. No
     /// order, cancel or exit waits on a read (`AGENTS.md` rule 13).
     pub async fn read(
         &self,
