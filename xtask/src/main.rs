@@ -1862,7 +1862,6 @@ fn mutants_scheduled(
         eprintln!("    mutants: the diff generates no mutants");
         return Ok(());
     }
-    live_tests_judge_every_mutant(root, &listed)?;
     let mut test_packages: Vec<&str> = diff
         .crates
         .iter()
@@ -1874,16 +1873,60 @@ fn mutants_scheduled(
         .map(|krate| krate.package.as_str())
         .collect();
     external_oracles(&mut test_packages, &workspace_closure(&metadata_in(root)?));
+    live_tests_judge_every_mutant(root, &listed, &test_packages)?;
     let args = mutants_args(diff.path()?, shard, &test_packages);
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
     let started = fs::metadata(&diff.file)
         .and_then(|meta| meta.modified())
         .context("timing the diff this run reads")?;
+    let unmutated = UnmutatedSource::read(root, &diff.touched)?;
     let status = mutants_job_cargo(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
         .status()
         .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
+    unmutated.restored(root)?;
     mutants_outcome(root, &diff.crates, status?.code(), started)
+}
+
+/// The diff's source files as they were before an [`MUTANTS_IN_PLACE`] run mutated them, so that
+/// a run that ends without reverting its last mutant cannot leave it in the caller's checkout.
+struct UnmutatedSource(Vec<(String, Vec<u8>)>);
+
+impl UnmutatedSource {
+    fn read(root: &Path, touched: &[String]) -> Result<Self> {
+        touched
+            .iter()
+            .filter(|file| root.join(file).is_file())
+            .map(|file| {
+                fs::read(root.join(file))
+                    .map(|bytes| (file.clone(), bytes))
+                    .with_context(|| format!("reading {file} before the run mutates it"))
+            })
+            .collect::<Result<_>>()
+            .map(Self)
+    }
+
+    /// Writes back every file the run left different from what [`Self::read`] saw, and refuses the
+    /// run if there was one: a source file the run did not revert means the run did not finish
+    /// the way its exit status says.
+    fn restored(self, root: &Path) -> Result<()> {
+        let mut left_mutated = Vec::new();
+        for (file, bytes) in self.0 {
+            let path = root.join(&file);
+            if fs::read(&path).ok().as_deref() != Some(bytes.as_slice()) {
+                fs::write(&path, &bytes).with_context(|| format!("restoring {file}"))?;
+                left_mutated.push(file);
+            }
+        }
+        if !left_mutated.is_empty() {
+            bail!(
+                "`cargo mutants` left {} mutated, now restored; its verdict is not evidence \
+                 (DEC-850)",
+                left_mutated.join(", ")
+            );
+        }
+        Ok(())
+    }
 }
 
 /// The source diff the mutation gate judges: the changed `.rs` files of safety-critical crates,
@@ -2095,6 +2138,23 @@ fn external_oracles(
     true
 }
 
+/// Mutates, builds and tests in the repository itself rather than in a scratch copy of it, so the
+/// baseline and every mutant build in the target directory [`preflight_args`] has just filled
+/// (DEC-850). A scratch copy starts from an empty target directory, since cargo-mutants does not
+/// copy `target/` by default and a copy it did make would carry new mtimes in an order nobody
+/// controls. The run reverts each mutant as it finishes it; [`UnmutatedSource`] restores and
+/// refuses a run that did not.
+///
+/// It is also what keeps the run to one mutant at a time: one tree holds one mutant, and
+/// cargo-mutants 27.1.0 refuses `--jobs` beside `--in-place`. One, not two, so that a single mutant
+/// stays short (DEC-498 item 2). DEC-498 gives a CI shard at most one mutant, so there is nothing
+/// for a second worker to do there; this governs the unsharded local run, where there is.
+/// Measured on `ubuntu-24.04` over four runs of the same nine mutants, two workers contend: the
+/// per-mutant test phase reaches 181 seconds at two and 83 at one. Those runs show no throughput
+/// difference between the settings — 82 and 99 seconds a mutant at one worker, 83 and 108 at two —
+/// but two runs each are too few to claim one either way, and none is needed.
+const MUTANTS_IN_PLACE: &str = "--in-place";
+
 fn mutants_args(
     diff_path: &str,
     shard: Option<MutantShard>,
@@ -2106,14 +2166,13 @@ fn mutants_args(
         diff_path,
         "--test-tool",
         "nextest",
-        "--jobs",
-        MUTANT_JOBS,
         "--output",
         "target",
         "--timeout",
         MUTANT_TEST_TIMEOUT,
         "--build-timeout",
         MUTANT_BUILD_TIMEOUT,
+        MUTANTS_IN_PLACE,
     ]
     .into_iter()
     .map(str::to_owned)
@@ -2136,26 +2195,27 @@ fn mutants_args(
 
 /// The build directory a caller may export for their own builds. The mutants job's `cargo` children
 /// that build — the pre-flight's test listing and the mutants run — take it out of their
-/// environment: `cargo mutants` builds its baseline and each of the `--jobs` concurrent mutant
-/// copies in scratch copies of the tree, and every build of the same package from every copy writes
-/// the same artifact basename (`<package>-<metadata hash>`) into the target directory it is given,
-/// so one directory shared by the baseline, the mutant copies, and the pre-flight's build of the
-/// unmutated source can have one build's binary judge another's source and flip either verdict:
-/// #419's review met a caught mutant reported missed, and
-/// `a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict` plants the opposite, a missed
-/// mutant reported caught, the direction a gate must never fail in (#419 review, nit 3). With the
-/// variable out of the environment each scratch copy builds in a target tree of its own, which is
-/// how the run is judged when no directory is exported.
+/// environment: every build of the same package from every source tree writes the same artifact
+/// basename (`<package>-<metadata hash>`) into the target directory it is given, so one directory
+/// shared with the caller's other checkouts or with scratch copies of this tree can have one
+/// tree's binary judge another's source and flip either verdict: #419's review met a caught mutant
+/// reported missed, and `a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict` plants the
+/// opposite, a missed mutant reported caught, the direction a gate must never fail in (#419
+/// review, nit 3). With the variable out of the environment the job builds only in the target
+/// tree of the repository it was given, one source tree, which [`MUTANTS_IN_PLACE`] mutates and
+/// reverts in turn, so each build sees its own edit's newer mtime (DEC-850).
 const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 
 /// The profile every build of the mutants job runs under: no debuginfo, for the `dev` profile and
 /// for the `test` profile that inherits it (DEC-519).
 ///
-/// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. The baseline builds only the
-/// mutated packages, so a low-layer mutant's first build compiles the rest of its tested packages'
-/// graph from nothing: a `mandate-time` mutant whose tested packages included `mandate-shell` ran
-/// past the cap on CI's runner (#677). Without debuginfo that build took about a quarter less CPU
-/// time from cold, and nearly half less after a one-file change, measured in DEC-519. Debuginfo
+/// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. Before DEC-850 the baseline built
+/// only the mutated packages, so a low-layer mutant's first build compiled the rest of its tested
+/// packages' graph from nothing: a `mandate-time` mutant whose tested packages included
+/// `mandate-shell` ran past the cap on CI's runner (#677). Without debuginfo that build took about
+/// a quarter less CPU time from cold, and nearly half less after a one-file change, measured in
+/// DEC-519. Since DEC-850 the pre-flight builds that graph first, so the setting also has to match
+/// between the pre-flight and the run for the run to reuse it. Debuginfo
 /// changes no test's verdict, only what a backtrace can name, and the gate reads verdicts. It is set
 /// on the job's children rather than left to the caller, so CI and `cargo xtask check` build
 /// mutants the same way whatever the caller exported.
@@ -2215,17 +2275,49 @@ fn mutants_job_cargo_output(root: &Path, args: &[&str]) -> Result<String> {
 /// The listing is [`gate_mutants`]'s, and it is never empty here: a diff with no mutants, such as one
 /// that touches only `#[cfg(test)]` code, ends the job before this check, without starting a run
 /// that could only test nothing.
-fn live_tests_judge_every_mutant(root: &Path, mutants: &BTreeMap<String, usize>) -> Result<()> {
-    let packages: Vec<String> = mutants
-        .keys()
-        .map(|package| format!("--package={package}"))
-        .collect();
-    let mut args = vec!["nextest", "list", "--locked", "--message-format", "json"];
-    args.extend(packages.iter().map(String::as_str));
+///
+/// The listing also builds: [`preflight_args`] names every package the run tests, so this is the
+/// one build of their whole graph, in the tree the run then mutates in place (DEC-850).
+fn live_tests_judge_every_mutant(
+    root: &Path,
+    mutants: &BTreeMap<String, usize>,
+    test_packages: &[&str],
+) -> Result<()> {
+    let args = preflight_args(mutants, test_packages);
     eprintln!("    $ cargo {}", args.join(" "));
-    let listing = mutants_job_cargo_output(root, &args)?;
+    let listing =
+        mutants_job_cargo_output(root, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     let live = live_test_counts(&listing)?;
     report(unjudged_mutants(mutants, &live), "mutants")
+}
+
+/// The pre-flight's `cargo nextest list`: every package with a mutant, whose live tests it counts,
+/// and every package the run tests, whose test binaries it builds (DEC-850).
+///
+/// cargo-mutants 27.1.0 builds its unmutated baseline over the packages the run's own mutants are
+/// in, not over `--test-package`, so on its own it leaves the rest of the tested packages' graph to
+/// each mutant's first build, under [`MUTANT_BUILD_TIMEOUT`]: on #931 a `mandate-executor` mutant
+/// whose tested packages added `mandate-alpaca`, `mandate-shell` and [`REFCASES`] ran out of its
+/// sixty seconds on two attempts. Building them here, with the same profile and the same package
+/// set the mutant's build selects, in the tree [`MUTANTS_IN_PLACE`] builds in, leaves the baseline
+/// and each mutant only what their own edit changes.
+fn preflight_args(mutants: &BTreeMap<String, usize>, test_packages: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = ["nextest", "list", "--locked", "--message-format", "json"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    let mut packages: Vec<&str> = mutants.keys().map(String::as_str).collect();
+    for package in test_packages {
+        if !packages.contains(package) {
+            packages.push(package);
+        }
+    }
+    args.extend(
+        packages
+            .into_iter()
+            .map(|package| format!("--package={package}")),
+    );
+    args
 }
 
 /// One mutant of `cargo mutants --list --json`. Only its package is read here: that is the package
@@ -2323,17 +2415,6 @@ fn unjudged_mutants(
 const MUTANTS_OUT: &str = "target/mutants.out";
 const REFCASES: &str = "mandate-refcases";
 
-/// How many mutants cargo-mutants tests at once.
-///
-/// One, not two, so that a single mutant stays short. DEC-498 gives a CI shard at most one mutant,
-/// so there is nothing for a second worker to do there; this setting governs the unsharded local
-/// run, where there is. Measured
-/// on `ubuntu-24.04` over four runs of the same nine mutants, two workers contend: the per-mutant
-/// test phase reaches 181 seconds at two and 83 at one. Those runs show no throughput difference
-/// between the settings — 82 and 99 seconds a mutant at one worker, 83 and 108 at two — but two
-/// runs each are too few to claim one either way, and none is needed.
-const MUTANT_JOBS: &str = "1";
-
 /// How long one mutant's tests may run before cargo-mutants calls it a timeout, in seconds.
 ///
 /// Set explicitly because the value cargo-mutants derives is wrong for this gate and wrong in the
@@ -2347,7 +2428,7 @@ const MUTANT_JOBS: &str = "1";
 /// the twenty-second cap.
 ///
 /// Three minutes against the 83 seconds that was the slowest test phase over the two measured
-/// runs at [`MUTANT_JOBS`] workers, so a mutant the harness judges at its ordinary pace is judged
+/// runs at one worker ([`MUTANTS_IN_PLACE`]), so a mutant the harness judges at its ordinary pace is judged
 /// rather than cut off. The margin is the reason the job count is one: at two workers the same
 /// nine mutants reached 181 seconds, which this timeout would have cut off. A mutation slow
 /// enough to reach the cap anyway is bounded by it, which is what lets DEC-498 size a shard on
@@ -2369,12 +2450,13 @@ const MUTANT_TEST_TIMEOUT: &str = "180";
 /// bounded, and this is the only phase a shard cannot otherwise bound.
 ///
 /// Sixty seconds against the 16 to 27 that mutant builds took over the two measured runs at
-/// [`MUTANT_JOBS`] workers. The flakiness cargo-mutants warns about is contained here because
+/// one worker. The flakiness cargo-mutants warns about is contained here because
 /// this cap, unlike [`MUTANT_TEST_TIMEOUT`], reaches mutants alone: a `--build-timeout` run
 /// leaves the unmutated baseline uncapped, shown by command, so a cold cache compiling the
-/// workspace from scratch is never cut off. A mutant's build is not purely incremental on that
-/// baseline, since it compiles [`REFCASES`] where the baseline may not have, but the measured
-/// range already includes that.
+/// workspace from scratch is never cut off. A mutant's build is incremental: [`preflight_args`]
+/// builds every tested package's graph, [`REFCASES`] included, in the tree [`MUTANTS_IN_PLACE`]
+/// mutates, so the cap judges what the mutant's own edit costs to rebuild and never the rest of
+/// the graph, which on #931 it cut off at sixty seconds (DEC-850).
 const MUTANT_BUILD_TIMEOUT: &str = "60";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
@@ -3891,19 +3973,20 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency,
-        FEATURE_MAP, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_OUT,
-        Metadata, MutantPlan, MutantShard, MutatedCrate, Package, PendingTest, PendingTestRun,
-        REFCASES, TestOutcome, actionlint_workflows, backticked_paths, base_ref_in,
-        behaviour_only_rows, check_schedule, ci, ci_files, classify, contains_dec_id,
-        contains_word, external_oracles, failure_cause, feature_files, feature_map_problems,
-        files_by_extension, first_panic_line, forbidden_reached, generated_pending_markers,
-        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
-        listed_mutant_counts, live_feature_problems, live_test_counts, metadata_in,
-        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
-        mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
-        pending_tests, plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_outcomes, unjudged_mutants, verdicts, workspace_closure, workspace_packages,
+        FEATURE_MAP, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
+        MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, Package,
+        PendingTest, PendingTestRun, REFCASES, TestOutcome, UnmutatedSource, actionlint_workflows,
+        backticked_paths, base_ref_in, behaviour_only_rows, check_schedule, ci, ci_files, classify,
+        contains_dec_id, contains_word, external_oracles, failure_cause, feature_files,
+        feature_map_problems, files_by_extension, first_panic_line, forbidden_reached,
+        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
+        layer_problems, lint, listed_mutant_counts, live_feature_problems, live_test_counts,
+        metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
+        mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
+        pending_tests, plain_comment_lines, preflight_args, proptest_seeds_in, repo_root,
+        shellcheck_scripts, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
+        test_binary, test_outcomes, unjudged_mutants, verdicts, workspace_closure,
+        workspace_packages,
     };
 
     #[test]
@@ -4475,6 +4558,93 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-850: the pre-flight builds every package the run tests, not only the ones its mutants
+    /// are in, so no mutant's build under the sixty-second cap compiles the rest of that graph, as
+    /// a `mandate-executor` mutant on #931 did; and it still lists every mutated package, whose
+    /// live tests it counts.
+    #[test]
+    fn the_preflight_builds_every_tested_package_before_the_run_mutates_in_place() {
+        let mutants = BTreeMap::from([
+            ("mandate-executor".to_owned(), 3),
+            ("mandate-shell".to_owned(), 1),
+        ]);
+        let tested = [
+            "mandate-alpaca",
+            "mandate-executor",
+            "mandate-shell",
+            "mandate-refcases",
+        ];
+        let args = preflight_args(&mutants, &tested);
+        assert_eq!(
+            args.get(..2),
+            Some(&["nextest".to_owned(), "list".to_owned()][..]),
+            "the pre-flight is a nextest listing, which builds the test binaries it lists"
+        );
+        let listed: Vec<&str> = args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--package="))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "mandate-executor",
+                "mandate-shell",
+                "mandate-alpaca",
+                "mandate-refcases"
+            ],
+            "every mutated package once, then every other tested package once"
+        );
+        let lone = preflight_args(&BTreeMap::from([("mandate-journal-pg".to_owned(), 1)]), &[]);
+        assert!(
+            lone.contains(&"--package=mandate-journal-pg".to_owned()),
+            "a mutated package is listed even if the tested set omits it, so its live tests are \
+             still counted (DEC-139)"
+        );
+    }
+
+    /// DEC-850: an in-place run that ends with a mutant still in the tree has it written back and
+    /// is refused, naming the file, and a run that reverted everything passes untouched.
+    #[test]
+    fn an_in_place_run_that_leaves_a_mutant_behind_is_restored_and_refused() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-unmutated-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        let fx = Fixture(dir);
+        fx.write("crates/a/src/lib.rs", "pub fn f() -> bool { true }\n")?;
+        fx.write("crates/b/src/lib.rs", "pub fn g() -> u8 { 1 }\n")?;
+        let touched = [
+            "crates/a/src/lib.rs".to_owned(),
+            "crates/b/src/lib.rs".to_owned(),
+        ];
+
+        UnmutatedSource::read(&fx.0, &touched)?
+            .restored(&fx.0)
+            .context("a run that reverted every mutant passes")?;
+
+        let unmutated = UnmutatedSource::read(&fx.0, &touched)?;
+        fx.write("crates/b/src/lib.rs", "pub fn g() -> u8 { 0 }\n")?;
+        let refused = unmutated
+            .restored(&fx.0)
+            .expect_err("a mutant left in the tree refuses the run");
+        assert!(
+            refused
+                .to_string()
+                .contains("left crates/b/src/lib.rs mutated"),
+            "{refused}"
+        );
+        assert_eq!(
+            fs::read_to_string(fx.0.join("crates/b/src/lib.rs"))?,
+            "pub fn g() -> u8 { 1 }\n",
+            "and the caller's checkout gets its source back"
+        );
+        assert_eq!(
+            fs::read_to_string(fx.0.join("crates/a/src/lib.rs"))?,
+            "pub fn f() -> bool { true }\n"
+        );
+        Ok(())
+    }
+
     #[test]
     fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() {
         let packages = ["mandate-journal", "mandate-refcases"];
@@ -4509,12 +4679,18 @@ mod tests {
         );
         assert_eq!(
             unsharded
-                .windows(2)
-                .find(|pair| pair[0] == "--jobs")
-                .map(|pair| pair[1].as_str()),
-            Some("1"),
-            "one mutant at a time, so a shard's critical path is its mutants in a row and the \
-             timeout keeps the margin DEC-498 measured"
+                .iter()
+                .filter(|arg| *arg == MUTANTS_IN_PLACE)
+                .count(),
+            1,
+            "the run builds in the tree the pre-flight built, not in a scratch copy whose target \
+             directory starts empty (DEC-850); one tree holds one mutant at a time, so a shard's \
+             critical path is its mutants in a row and the timeout keeps the margin DEC-498 \
+             measured"
+        );
+        assert!(
+            !unsharded.iter().any(|arg| arg == "--jobs"),
+            "cargo-mutants 27.1.0 refuses `--jobs` beside `--in-place`"
         );
 
         let sharded = mutants_args(
