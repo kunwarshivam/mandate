@@ -1,8 +1,0 @@
-file = "crates/mandate-alpaca/tests/hand.rs"
-test = "a_cancel_looks_the_order_up_then_deletes_it_by_the_broker_id"
-reason = """
-DEC-867 items 2 and 3: the Alpaca client answers `CancelAccepted` on any 2xx `DELETE` without
-reading the order back, so this test fails on that behaviour, not at a stub: the client is
-implemented. The Alpaca fix PR (`claude/alpaca-cancel-confirm`) reads the order back once and
-deletes this row with the test's ignore line.
-"""
