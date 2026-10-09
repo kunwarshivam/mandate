@@ -37918,6 +37918,29 @@
     }
    },
    {
+    "name": "admin_granted_at_once_under_independence",
+    "clause": "rule 103: `workspace_admin` never cools off, even where independence is required",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "payload.added",
+      "value": [
+       {
+        "role": "workspace_admin",
+        "cool_off_ends_at": "2026-10-05T14:00:00.000000000Z"
+       }
+      ]
+     },
+     {
+      "path": "payload.removed",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "left",
     "clause": "rules 98 and 99: a member leaves by themselves",
     "base_draft": "deactivated",

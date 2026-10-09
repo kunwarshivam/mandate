@@ -1369,17 +1369,18 @@ def cool_offs(event_type: str, p: dict, skip: frozenset[str]) -> list[tuple[str,
     its path (rule 103). They apply exactly when independence is required and the grant adds operator
     or approver to an existing workspace."""
     independent = p.get("independent_approval_required") is True or "boundary.rule_103_ignores_independence" in skip
+    roles = COOLING_ROLES + (("workspace_admin",) if "boundary.rule_103_admin_cools" in skip else ())
     if event_type == "MemberActivated":
-        cooling = independent and p["reason"] != "founding" and any(r in COOLING_ROLES for r in listed(p["roles"]))
+        cooling = independent and p["reason"] != "founding" and any(r in roles for r in listed(p["roles"]))
         if "boundary.rule_103_founding_cools" in skip and p["reason"] == "founding":
-            cooling = independent and any(r in COOLING_ROLES for r in listed(p["roles"]))
+            cooling = independent and any(r in roles for r in listed(p["roles"]))
         return [(p["cool_off_ends_at"], cooling, "payload.cool_off_ends_at")]
     if event_type == "MemberReactivated":
-        cooling = independent and any(r in COOLING_ROLES for r in listed(p["roles"]))
+        cooling = independent and any(r in roles for r in listed(p["roles"]))
         return [(p["cool_off_ends_at"], cooling, "payload.cool_off_ends_at")]
     if event_type == "MemberRoleChanged":
         return [
-            (a.get(END[1:]), independent and a.get("role") in COOLING_ROLES, f"payload.added[{i}]{END}")
+            (a.get(END[1:]), independent and a.get("role") in roles, f"payload.added[{i}]{END}")
             for i, a in enumerate(record_items(p["added"]))
         ]
     return []

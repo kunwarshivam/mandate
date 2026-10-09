@@ -806,6 +806,12 @@ def valid_drafts() -> list[dict]:
             ],
         ),
         valid(
+            "admin_granted_at_once_under_independence",
+            "rule 103: `workspace_admin` never cools off, even where independence is required",
+            "role_changed",
+            [change("payload.added", [{"role": "workspace_admin", "cool_off_ends_at": AT}]), change("payload.removed", [])],
+        ),
+        valid(
             "left",
             "rules 98 and 99: a member leaves by themselves",
             "deactivated",
@@ -1010,6 +1016,7 @@ VALIDATOR_MUTANTS = (
     "boundary.rule_103_ignores_independence",
     "boundary.rule_103_founding_cools",
     "boundary.rule_103_either",
+    "boundary.rule_103_admin_cools",
     "record.extra",
     "record.missing",
     *sorted({f"loose.payload.{member}" for cases in MEMBER_CASES.values() for member, _, _ in cases}),
