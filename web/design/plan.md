@@ -228,8 +228,8 @@ item above (C-3, C-9) are not repeated.
 
 - [ ] **DESIGN.md names the palette that ships.** Its front matter, Colors table and Meaning Rule
       say Ink and Volt (DEC-214), while the product ships Azure and Sun with trend-coloured hero
-      lines (DEC-217). Waits on the founder to confirm DEC-217 stands; then a DEC and the rewrite.
-      (C-1)
+      lines (DEC-217). DEC-217 is Accepted and supersedes DEC-214, so DESIGN.md is aligned to it
+      with no new DEC. (C-1)
 - [ ] **Stop above the palette's scrim.** Check that Stop takes a press with the command palette
       open; if not, keep the frame's Stop live as the More sheet does. Safety lane. (C-21)
 - [ ] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and
@@ -259,7 +259,8 @@ item above (C-3, C-9) are not repeated.
 - [ ] **Alerts says all clear** when every feed answers and no agent is restricted. (C-13)
 - [ ] **Day headings on the timeline.** (C-19)
 - [ ] **The status strip's state chips outlined**, not ink. (C-26)
-- [ ] **Workspace out of More** until one section is built; its subtitle drops "Rules". (C-20)
+- [ ] **Workspace out of More** until one section is built (a DEC amending DEC-513 item 2); its
+      subtitle drops "Rules". (C-20)
 - [ ] **One left edge across densities** on the audit screens. (C-17)
 - [ ] **One paragraph per set of shared rules** on the Approvals rail. (C-12)
 - [ ] **The phone thread header without the slug.** (C-16)
