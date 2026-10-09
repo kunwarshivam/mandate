@@ -571,12 +571,13 @@ fn two_lost_answers_for_one_body_leave_records_nothing_tells_apart() -> Outcome 
 #[ignore = "pending E7-25"]
 fn a_garbled_answer_follows_an_order_the_core_placed_and_only_that_answer_is_bent() -> Outcome {
     let states: Vec<&str> = STATES.iter().map(|s| state_text(*s)).collect();
-    for garble in [
+    let all = [
         Garble::UnknownState,
         Garble::MissingId,
         Garble::NumberQuantity,
         Garble::NotJson,
-    ] {
+    ];
+    for garble in all {
         let (server, mut wire) = served(Variant::Honest)?;
         server.garble_next(garble)?;
         let request = limit("buy", "1", "501", 1);
@@ -585,19 +586,48 @@ fn a_garbled_answer_follows_an_order_the_core_placed_and_only_that_answer_is_ben
             .unwrap();
         assert_eq!(reply.status, 200, "{garble:?}");
         assert_eq!(reply.header("content-type"), Some("application/json"));
-        let content = || reply.result()["structuredContent"].clone();
-        match garble {
-            Garble::UnknownState => {
-                let state = content()["state"].as_str().unwrap().to_owned();
-                assert!(!states.contains(&state.as_str()), "{state}");
-            }
-            Garble::MissingId => assert_eq!(content().get("id"), None),
-            Garble::NumberQuantity => assert!(content()["quantity"].is_number()),
-            Garble::NotJson => assert!(serde_json::from_str::<Value>(&reply.body).is_err()),
-        }
         let mut direct = sim().unwrap();
         direct.place(&request).unwrap();
         let held = direct.orders(AGENTIC).unwrap();
+        let bent = match garble {
+            Garble::UnknownState => "state",
+            Garble::MissingId => "id",
+            Garble::NumberQuantity => "quantity",
+            Garble::NotJson => {
+                assert!(serde_json::from_str::<Value>(&reply.body).is_err());
+                ""
+            }
+        };
+        if garble != Garble::NotJson {
+            let result = reply.result();
+            assert!(
+                !refused(&result),
+                "{garble:?}: bent, never a refusal: {result}"
+            );
+            let content = &result["structuredContent"];
+            let expected = row(&held[0]);
+            for (key, value) in expected.as_object().unwrap() {
+                if key != bent {
+                    assert_eq!(&content[key], value, "{garble:?}: {key} of {content}");
+                }
+            }
+            match garble {
+                Garble::UnknownState => {
+                    let state = content["state"].as_str().unwrap();
+                    assert!(!states.contains(&state), "{state}");
+                }
+                Garble::MissingId => assert_eq!(content.get("id"), None),
+                _ => {
+                    assert!(content["quantity"].is_number(), "{content}");
+                    let quantity = content["quantity"].to_string();
+                    assert_eq!(
+                        quantity,
+                        held[0].quantity.to_string(),
+                        "the core's quantity"
+                    );
+                }
+            }
+        }
         assert_eq!(
             orders(&server, AGENTIC)?,
             held,

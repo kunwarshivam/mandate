@@ -4,7 +4,7 @@
 //! these tests cannot use it (DEC-849 item 2). It reads `application/json` answers only, the one
 //! form the simulator writes.
 
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
@@ -112,7 +112,8 @@ impl Wire {
         )
     }
 
-    /// One exchange; `None` when the connection closes or resets with no byte of an answer.
+    /// One exchange; `None` when the connection closes or resets with no byte of an answer. A
+    /// server that holds the connection open past the read timeout fails the test instead.
     pub fn try_post(&mut self, body: &Value) -> Option<Reply> {
         let body = body.to_string();
         let mut head = format!(
@@ -134,8 +135,13 @@ impl Wire {
             .write_all(format!("{head}\r\n{body}").as_bytes())
             .unwrap();
         let mut answer = String::new();
-        if stream.read_to_string(&mut answer).is_err() || answer.is_empty() {
-            return None;
+        match stream.read_to_string(&mut answer) {
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                panic!("neither an answer nor a close within the read timeout")
+            }
+            Err(_) => return None,
+            Ok(_) if answer.is_empty() => return None,
+            Ok(_) => {}
         }
         let (head, body) = answer.split_once("\r\n\r\n").unwrap();
         let mut lines = head.lines();
