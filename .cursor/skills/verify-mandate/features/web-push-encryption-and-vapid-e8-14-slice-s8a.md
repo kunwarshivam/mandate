@@ -9,11 +9,13 @@
   `Subscription`, `PushEndpoint`, `PushAllowlist` and `DEFAULT_PUSH_ALLOWLIST`, `VapidSubject`, the
   `SecureRandom` and `VapidSigner` traits, and `NoticeClass`'s fixed urgency and TTL) and `crates/mandate-webpush/src/payload.rs` (the closed
   `PushPlaintext` and `PushText`); `PushAllowlist::parse` and `PushEndpoint::parse_allowed`, the
-  one public endpoint parser (DEC-792).
+  one public endpoint parser (DEC-792). `VapidSubject::check_relayed` (DEC-727, a relayed send's
+  `sub` is a role mailbox) is a stub until the S8b implementation PR.
 - **Tests:** `crates/mandate-webpush/src/tests.rs`, with the published vectors and their fixtures in
   `crates/mandate-webpush/tests/vectors/mod.rs` (DEC-794): the RFC 8291 §5 and RFC 8188 §3.1 vectors
   byte-exact, a receiver-side decrypt oracle, an ES256 check of the VAPID token against the
   signer's public key, the size cap, refusals, and properties for the opaque payload and the
   token's expiry; DEC-792's shared endpoint table, the wildcard and exact entry rules, a shortened
-  list, malformed entries, and a VAPID `aud` that omits a written `:443`.
+  list, malformed entries, and a VAPID `aud` that omits a written `:443`; DEC-727's role-mailbox
+  table for a relayed subject (pending).
 - **Run:** `cargo nextest run -p mandate-webpush`; `cargo xtask ci pending`.

@@ -380,6 +380,15 @@ impl VapidSubject {
         }
         Ok(Self(uri.to_owned()))
     }
+
+    /// DEC-727: the subject a deployment signs with when it sends through the relay is
+    /// `mailto:<role>@<domain>`, `<role>` exactly one of DEC-727 item 2's role mailboxes and
+    /// `<domain>` non-empty, never a person's address; anything else, an `https:` subject
+    /// included, is [`WebPushError::InvalidSubject`]. A direct send keeps [`VapidSubject::parse`]'s
+    /// rule.
+    pub fn check_relayed(&self) -> Result<(), WebPushError> {
+        Err(WebPushError::Unimplemented { story: "E8-14" })
+    }
 }
 
 /// The parts of one push request (RFC 8030 §5, RFC 8291 §4, RFC 8292 §3).
