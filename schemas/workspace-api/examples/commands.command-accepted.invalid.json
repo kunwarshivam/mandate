@@ -44,6 +44,18 @@
     }
   },
   {
+    "label": "a null step-up status",
+    "set": {
+      "/step_up_status": null
+    }
+  },
+  {
+    "label": "a null dropped list",
+    "set": {
+      "/dropped": null
+    }
+  },
+  {
     "label": "auto: no /command_id",
     "remove": [
       "/command_id"
