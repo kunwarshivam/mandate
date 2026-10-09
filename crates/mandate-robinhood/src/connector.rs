@@ -2,7 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_accounting::Side;
+use mandate_accounting::{InstrumentId, Side};
+use mandate_canon::Value as Canon;
 use mandate_domain::{
     AssetClass, CapabilityProfile, MarketSession, OrderType as CellType, ProfileError,
     ProtectionForm, QuantityForm,
@@ -76,10 +77,70 @@ impl<T: Tools> RobinhoodConnector<T> {
         account_number: String,
         records: &[FoldedEvent],
     ) -> Result<Self, crate::RobinhoodError> {
-        let _ = tools;
-        let _ = account_number;
-        let _ = records;
-        Err(crate::RobinhoodError::Unimplemented { story: "E7-6" })
+        let mut connector = Self::new(tools, account_number);
+        let mut submitted: BTreeMap<ClientOrderId, (InstrumentId, Side)> = BTreeMap::new();
+        let mut ids: BTreeMap<ClientOrderId, BTreeSet<String>> = BTreeMap::new();
+        for record in records {
+            let text = |member: &str| record.payload.get(member).and_then(Canon::as_str);
+            let Some(key) = text("client_order_id").and_then(|k| ClientOrderId::parse(k).ok())
+            else {
+                continue;
+            };
+            match record.event_type.as_str() {
+                "OrderSubmitted" => {
+                    let side = match text("side") {
+                        Some("buy") => Side::Buy,
+                        Some("sell") => Side::Sell,
+                        _ => continue,
+                    };
+                    let Some(instrument) =
+                        text("instrument_id").and_then(|i| InstrumentId::new(i).ok())
+                    else {
+                        continue;
+                    };
+                    submitted.insert(key, (instrument, side));
+                }
+                "OrderStateChanged" => {
+                    let old = text("replaces").and_then(|k| ClientOrderId::parse(k).ok());
+                    if let Some(origin) = old.and_then(|old| submitted.get(&old).cloned()) {
+                        submitted.insert(key.clone(), origin);
+                    }
+                    let known = ids.entry(key).or_default();
+                    if let Some(id) = text("broker_order_id") {
+                        known.insert(id.to_owned());
+                    }
+                }
+                _ => {}
+            }
+        }
+        connector.in_doubt = submitted.keys().cloned().collect();
+        for (key, known) in ids {
+            let mut only = known.iter();
+            let (Some(id), None) = (only.next(), only.next()) else {
+                continue;
+            };
+            let Some((instrument, side)) = submitted.get(&key) else {
+                continue;
+            };
+            let order = BrokerOrder {
+                broker_order_id: id.clone(),
+                client_order_id: Some(key.as_str().to_owned()),
+                instrument: instrument.clone(),
+                side: *side,
+                qty: Qty::ZERO,
+                filled_qty: Qty::ZERO,
+                limit_price: None,
+                stop_price: None,
+                status: String::new(),
+                reject_code: None,
+                replaced_by_broker_order_id: None,
+                legs: Vec::new(),
+                created_on: None,
+            };
+            connector.in_doubt.remove(&key);
+            connector.placed.insert(key, order);
+        }
+        Ok(connector)
     }
 
     /// Review, then place with the [`crate::ref_id`]. An opening or an increase draws on the
@@ -89,7 +150,7 @@ impl<T: Tools> RobinhoodConnector<T> {
     async fn submit(&mut self, order: &SubmitOrder) -> Result<BrokerOutcome, ConnectorError> {
         let mut arguments = self.arguments(order).ok_or(NOT_OFFERED)?;
         let key = &order.client_order_id;
-        if self.in_doubt.contains(key) {
+        if self.in_doubt.contains(key) || self.placed.contains_key(key) {
             return Err(IN_DOUBT);
         }
         let opening = order.purpose.adds_risk();

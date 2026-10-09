@@ -176,7 +176,6 @@ fn cancelled_by(id: &str) -> (CallClass, &'static str, Value) {
 const NONE: Value = Value::Null;
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_restored_key_cancels_by_its_one_journaled_id_with_its_own_instrument_and_side() {
     let (spy, qqq) = (key("01JSPY"), key("01JQQQ"));
     let mut s = Stream::default();
@@ -224,7 +223,6 @@ fn refused_with_nothing_called(records: &[FoldedEvent], keys: &[&ClientOrderId])
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_whose_records_carry_no_id_is_not_sent_and_nothing_is_called() {
     let lone = key("01JLONE");
     let mut s = Stream::default();
@@ -236,7 +234,6 @@ fn a_key_whose_records_carry_no_id_is_not_sent_and_nothing_is_called() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn two_different_ids_under_one_key_are_not_sent_and_nothing_is_called() {
     let torn = key("01JTORN");
     let mut s = Stream::default();
@@ -250,7 +247,6 @@ fn two_different_ids_under_one_key_are_not_sent_and_nothing_is_called() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn an_in_doubt_place_is_not_sent_neither_placed_again_nor_guessed() {
     let (silent, lost) = (key("01JSILENT"), key("01JLOST"));
     let mut s = Stream::default();
@@ -264,7 +260,6 @@ fn an_in_doubt_place_is_not_sent_neither_placed_again_nor_guessed() {
 /// DEC-870: a replacement successor's own record carries its own id, and its instrument and side
 /// are those of the order it replaces, through every link of the chain.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_replacement_successor_is_found_by_its_own_id() {
     let (first, second, third) = (
         key("01JFIRST"),
@@ -319,7 +314,6 @@ fn a_replacement_successor_is_found_by_its_own_id() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn version_1_records_give_no_recoverable_id() {
     let (old, new) = (key("01JOLD"), successor("01JREPLACEV1"));
     let mut s = Stream::default();
@@ -334,7 +328,6 @@ fn version_1_records_give_no_recoverable_id() {
 /// DEC-860 item 4 across a restart: a key the stream submitted, whether its place is in doubt
 /// or answered, is never placed again; a `Submit` of it is `Unknown` with nothing called.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_the_journal_submitted_is_never_placed_again() {
     let (silent, lost, placed, fresh) = (key("01JA"), key("01JB"), key("01JC"), key("01JNEW"));
     let mut s = Stream::default();
@@ -376,7 +369,6 @@ fn a_key_the_journal_submitted_is_never_placed_again() {
 /// Random streams over four keys. The oracle counts each key's distinct non-null ids from the
 /// generated choices, never from the records: one id cancels by it, none or two is `NotSent`.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_cancels_exactly_when_its_records_carry_one_distinct_id() {
     let keys: Vec<ClientOrderId> = (0..4).map(|n| key(&format!("01JPROP{n}"))).collect();
     let choice = (0..keys.len(), 0..6_usize);
