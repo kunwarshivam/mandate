@@ -91,6 +91,20 @@ fn a_later_or_equal_event_time_with_a_higher_seq_passes() {
     let early = UtcNanos::from_parts(EPOCH + 3_599, 999_999_999).unwrap();
     let next = MembershipRecord::new(Seal::grant(), 5, early, event());
     assert_eq!(check_order(Some(&last()), &next), REFUSED, "1 ns before");
+    let within = |nanos| UtcNanos::from_parts(EPOCH + 3_600, nanos).unwrap();
+    let same_second = MembershipRecord::new(Seal::grant(), 4, within(500), event());
+    let earlier = MembershipRecord::new(Seal::grant(), 5, within(499), event());
+    let later = MembershipRecord::new(Seal::grant(), 5, within(501), event());
+    assert_eq!(
+        check_order(Some(&same_second), &earlier),
+        REFUSED,
+        "1 ns before, same second"
+    );
+    assert_eq!(
+        check_order(Some(&same_second), &later),
+        Ok(()),
+        "1 ns after, same second"
+    );
 }
 
 /// DEC-659: an `event_time` before the last record's is refused, even by one nanosecond and even
@@ -115,6 +129,20 @@ fn an_earlier_event_time_is_refused() {
     let one_ns_early = UtcNanos::from_parts(EPOCH + 3_599, 999_999_999).unwrap();
     let next = MembershipRecord::new(Seal::grant(), 5, one_ns_early, event());
     assert_eq!(check_order(Some(&last()), &next), REFUSED, "1 ns before");
+    let within = |nanos| UtcNanos::from_parts(EPOCH + 3_600, nanos).unwrap();
+    let same_second = MembershipRecord::new(Seal::grant(), 4, within(500), event());
+    let earlier = MembershipRecord::new(Seal::grant(), 5, within(499), event());
+    let later = MembershipRecord::new(Seal::grant(), 5, within(501), event());
+    assert_eq!(
+        check_order(Some(&same_second), &earlier),
+        REFUSED,
+        "1 ns before, same second"
+    );
+    assert_eq!(
+        check_order(Some(&same_second), &later),
+        Ok(()),
+        "1 ns after, same second"
+    );
 }
 
 /// DEC-659: a `seq` equal to or below the last record's is refused, whatever its `event_time`;
