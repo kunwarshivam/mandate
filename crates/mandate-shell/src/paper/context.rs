@@ -62,8 +62,9 @@ impl PaperClock for FixedPaperClock {
 /// `ACTIVE`, is blocked or suspended, or owes accrued fees; an asset record older than the quote
 /// bound, read after `now`, or naming another asset id, class, or exchange; an ETP classification
 /// dated after `now`; a quote for another instrument, off the IEX feed, stamped after `now`, older
-/// than the bound, or crossed; and a clock outside the New York regular session or inside its close
-/// window.
+/// than the bound, or crossed; a clock outside the New York regular session or inside its close
+/// window; and, under a declared `intraday_margin` regime, a maintenance figure the executor refuses
+/// or a reported maintenance deficit (DEC-840 item 4).
 ///
 /// # Errors
 /// [`Cause::Absent`] naming the first fact that does not hold.
