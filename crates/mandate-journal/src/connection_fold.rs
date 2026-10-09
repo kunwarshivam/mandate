@@ -153,17 +153,20 @@ struct Folds {
 impl Folds {
     /// Continues each stream's fold over `rows`, stopping at the first that breaks a rule.
     fn run<'r>(&mut self, rows: &[Row<'r>]) -> Option<Failing<'r>> {
-        rows.iter().find_map(|row| {
-            let stream = row.stored.stream_id.clone();
-            let refused = match row.stream {
-                StreamType::Control => self.controls.entry(stream).or_default().admit(row).err(),
-                _ => {
-                    let admitted = self.accounts.entry(stream).or_default().admits(row);
-                    (!admitted).then_some(ConnectionStreamRule::AccountStream)
-                }
-            };
-            refused.map(|rule| row.failing(ConnectionCheck::LifecycleMismatch(rule)))
-        })
+        rows.iter().find_map(|row| self.step(row))
+    }
+
+    /// Continues the fold of `row`'s stream over `row`, failing it when it breaks a rule.
+    fn step<'r>(&mut self, row: &Row<'r>) -> Option<Failing<'r>> {
+        let stream = row.stored.stream_id.clone();
+        let refused = match row.stream {
+            StreamType::Control => self.controls.entry(stream).or_default().admit(row).err(),
+            _ => {
+                let admitted = self.accounts.entry(stream).or_default().admits(row);
+                (!admitted).then_some(ConnectionStreamRule::AccountStream)
+            }
+        };
+        refused.map(|rule| row.failing(ConnectionCheck::LifecycleMismatch(rule)))
     }
 }
 
@@ -205,7 +208,21 @@ pub enum ConnectionStart {
 /// 131 holds after each stream's records `1` to `from_seq − 1`, derived only by folding the stored
 /// chain, never from a read model.
 #[derive(Debug, Clone)]
-pub struct ConnectionAnchor(Folds);
+pub struct ConnectionAnchor {
+    scope: AnchorScope,
+    folds: Folds,
+}
+
+/// The streams an anchored run judges.
+#[derive(Debug, Clone)]
+enum AnchorScope {
+    /// Every stream the run is given, each from its own fold: the deprecated raw fold's, deleted
+    /// with it (DEC-889 item 3).
+    EveryStream,
+    /// One stream's (DEC-889 item 1): the prefix's, or `None` for an empty prefix, whose stream is
+    /// that of the range's first judged record (DEC-889 item 2).
+    Stream(Option<String>),
+}
 
 impl ConnectionAnchor {
     /// The anchor after `prefix`, the stored rows of the range's streams from `seq` 1 up to its
@@ -215,11 +232,7 @@ impl ConnectionAnchor {
     /// deleted once that lands.
     #[deprecated(note = "unverified prefix; use from_verified (DEC-892)")]
     pub fn fold(prefix: &[StoredEvent]) -> Option<ConnectionAnchor> {
-        let mut folds = Folds::default();
-        folds
-            .run(&connection_rows(prefix))
-            .is_none()
-            .then_some(ConnectionAnchor(folds))
+        Self::folded(prefix, AnchorScope::EveryStream)
     }
 
     /// The anchor of one stream after `prefix`, its rows `seq` 1 to `from_seq − 1` that
@@ -230,8 +243,42 @@ impl ConnectionAnchor {
     pub fn from_verified(
         prefix: &VerifiedPrefix<'_>,
     ) -> Result<ConnectionAnchor, ConnectionAnchorError> {
-        let _ = prefix;
-        Err(ConnectionAnchorError::Unimplemented { story: "E7-17" })
+        let rows = prefix.rows();
+        let stream = rows.last().map(|row| row.stream_id.clone());
+        Self::folded(rows, AnchorScope::Stream(stream)).ok_or(ConnectionAnchorError::Broken)
+    }
+
+    /// The anchor of `scope` after `rows`, or `None` when they break rule 66, 67, 68, or 131.
+    fn folded(rows: &[StoredEvent], scope: AnchorScope) -> Option<ConnectionAnchor> {
+        let mut folds = Folds::default();
+        folds
+            .run(&connection_rows(rows))
+            .is_none()
+            .then_some(ConnectionAnchor { scope, folds })
+    }
+
+    /// Continues the anchor's fold over `rows`. Scoped to one stream, it fails closed with
+    /// [`ConnectionCheck::Unanchored`] at the first judged record of any other stream, and skips
+    /// another stream's control-stream `ConnectionRevoked`, which nothing judges (DEC-889 item 2,
+    /// DEC-885 I6).
+    fn run<'r>(self, rows: &[Row<'r>]) -> Option<Failing<'r>> {
+        let ConnectionAnchor { scope, mut folds } = self;
+        let stream = match scope {
+            AnchorScope::EveryStream => return folds.run(rows),
+            AnchorScope::Stream(stream) => stream.or_else(|| {
+                rows.iter()
+                    .find(|row| row.judged())
+                    .map(|row| row.stored.stream_id.clone())
+            }),
+        };
+        rows.iter().find_map(|row| {
+            if stream.as_ref() == Some(&row.stored.stream_id) {
+                folds.step(row)
+            } else {
+                row.judged()
+                    .then(|| row.failing(ConnectionCheck::Unanchored))
+            }
+        })
     }
 }
 
@@ -240,7 +287,8 @@ impl ConnectionAnchor {
 pub enum ConnectionAnchorError {
     /// The prefix breaks rule 66, 67, 68, or 131 (DEC-885 item 2, I5).
     Broken,
-    /// The fold is a DEC-77 stub until `story` lands.
+    /// Never returned now that E7-17 built the fold; kept, as `PrefixError` keeps its own, so a
+    /// caller's match stays the same across the crate's stubs (DEC-77).
     Unimplemented { story: &'static str },
 }
 
@@ -268,8 +316,9 @@ impl LocatedConnectionFailure {
 
 /// §11's `connection_lifecycle_mismatch` from `start` over `rows`, given as
 /// [`verify_connection_lifecycle`] takes them. From [`ConnectionStart::Genesis`] it is the full
-/// chain; anchored, it judges every row as the full chain would, rule 131's closing existence
-/// included; unanchored, it fails closed with [`ConnectionCheck::Unanchored`] at the first
+/// chain; anchored, it judges the anchor's stream as the full chain would, rule 131's closing
+/// existence included, and fails closed with [`ConnectionCheck::Unanchored`] at the first record
+/// of another stream that the unanchored run would fail at (DEC-889 item 2); unanchored, it fails closed with [`ConnectionCheck::Unanchored`] at the first
 /// `ConnectionRequested`, `ConnectionEstablished`, `ConnectionCredentialRotated`, or
 /// `ConnectionRefused` on a control stream or connection record on an account stream, a
 /// `ConnectionRevoked` there included; a control-stream `ConnectionRevoked` never fails (DEC-885
@@ -281,13 +330,10 @@ pub fn verify_connection_lifecycle_from(
     let rows = connection_rows(rows);
     let failing = match start {
         ConnectionStart::Genesis => Folds::default().run(&rows),
-        ConnectionStart::Anchored(ConnectionAnchor(mut folds)) => folds.run(&rows),
+        ConnectionStart::Anchored(anchor) => anchor.run(&rows),
         ConnectionStart::Unanchored => rows
             .iter()
-            .find(|row| {
-                row.stream != StreamType::Control
-                    || JUDGED_ON_CONTROL.contains(&row.stored.event_type.as_str())
-            })
+            .find(|row| row.judged())
             .map(|row| row.failing(ConnectionCheck::Unanchored)),
     };
     failing.map_or(Ok(()), |failing| Err(failing.located()))
@@ -400,6 +446,13 @@ impl<'r> Row<'r> {
             stored: self.stored,
             check,
         }
+    }
+
+    /// Whether a range rule judges the record: every connection record on an account stream, and
+    /// a request, establishment, rotation, or refusal on a control stream (DEC-885 item 4, DEC-888).
+    fn judged(&self) -> bool {
+        self.stream != StreamType::Control
+            || JUDGED_ON_CONTROL.contains(&self.stored.event_type.as_str())
     }
 
     fn payload(&self) -> &Value {

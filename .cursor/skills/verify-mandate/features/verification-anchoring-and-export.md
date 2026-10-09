@@ -25,8 +25,8 @@
   `crates/mandate-journal/tests/connection_fold.rs` (the connection checks against their vectors,
   and every split of every full chain against the full-chain run and an independent scan;
   `JUDGED_ON_CONTROL` and `JUDGED_ON_ACCOUNT`, the judged-record lists, against §11's sets; and
-  the pending E7-17 tests bind each prefix first, and a forged, short, or unbound prefix fails
-  closed),
+  the verified-anchor tests bind each prefix first, a forged, short, or unbound prefix fails
+  closed, and an anchored run fails closed at another stream's judged record; E7-17),
   `crates/mandate-journal/tests/records_access.rs` (`VerificationRun` version 2 against its
   vectors, rules 132 and 133 swept by their own oracle, and version 1 kept with rule 112; E12-3),
   `crates/mandate-journal/tests/range_walk.rs` (seeded faults against an independent comparison)
