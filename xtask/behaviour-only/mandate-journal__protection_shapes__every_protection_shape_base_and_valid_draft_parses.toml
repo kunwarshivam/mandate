@@ -1,0 +1,9 @@
+file = "crates/mandate-journal/tests/protection_shapes.rs"
+test = "every_protection_shape_base_and_valid_draft_parses"
+reason = """
+E7-19 E1b-P (journal spec v0.33 §9.5 rules 41 and 44, DEC-859): `Draft::parse` is already
+implemented and still enforces v0.32, so it refuses the 11 newly valid `ProtectionChanged` shapes at
+`payload.orders`, `payload.awaiting` or `payload.entry`. The test fails on that answer rather than
+at a stub. The code PR that loosens `protection_changed_rules` deletes this file with the test's
+`#[ignore]` line.
+"""
