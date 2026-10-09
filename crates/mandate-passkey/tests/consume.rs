@@ -119,6 +119,11 @@ fn a_challenge_counts_from_its_issue_until_just_before_its_expiry() {
 #[ignore = "pending E9-4"]
 fn a_challenge_bound_to_another_principal_or_workspace_is_a_mismatch() {
     let mut case = Case::new();
+    assert_eq!(
+        case.run(),
+        Ok(passkey_consumed(case.now)),
+        "the unchanged case"
+    );
     case.principal = stepup::mallory();
     assert_eq!(case.run(), Err(StepUpRefusal::Mismatch));
     let mut case = Case::new();
@@ -130,6 +135,11 @@ fn a_challenge_bound_to_another_principal_or_workspace_is_a_mismatch() {
 #[ignore = "pending E9-4"]
 fn another_principals_credential_or_none_counts_as_missing() {
     let mut case = Case::new();
+    assert_eq!(
+        case.run(),
+        Ok(passkey_consumed(case.now)),
+        "the unchanged case"
+    );
     case.enrolled = case
         .enrolled
         .map(|e| mandate_passkey::stepup::EnrolledCredential {
@@ -182,6 +192,11 @@ fn an_assertion_that_does_not_verify_counts_as_missing_with_its_reason() {
 #[ignore = "pending E9-4"]
 fn a_step_up_for_another_action_is_a_mismatch() {
     let mut case = Case::new();
+    assert_eq!(
+        case.run(),
+        Ok(passkey_consumed(case.now)),
+        "the unchanged case"
+    );
     case.action = Action {
         digest: Digest::of(b"another approval's content object"),
         ..case.action
