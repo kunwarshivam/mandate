@@ -48,7 +48,6 @@ fn accepted(id: &str) -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_providers_reasons_are_the_specs_closed_set() {
     let keys: Vec<&str> = Reason::ALL
         .into_iter()
@@ -62,7 +61,6 @@ fn the_providers_reasons_are_the_specs_closed_set() {
 /// The keys are `send.rs`'s `sha256sum` literals for `owner`, notice `6f1c…0e17`, on email and SMS
 /// (DEC-710 item 5); the message is §4.2's text, a newline, and the link (item 6).
 #[test]
-#[ignore = "pending E8-9"]
 fn the_fixture_accepts_a_held_address_and_records_the_digest_and_message_never_the_address() {
     let email = handle("owner", PushChannel::Email);
     let sms = handle("owner", PushChannel::Sms);
@@ -82,7 +80,6 @@ fn the_fixture_accepts_a_held_address_and_records_the_digest_and_message_never_t
 /// DEC-712, spec §5.1: an active address whose vault entry is gone is a terminal failure that
 /// sends nothing; a held address still goes.
 #[test]
-#[ignore = "pending E8-9"]
 fn a_handle_with_no_vault_entry_is_permanent_address_missing_and_sends_nothing() {
     let email = handle("owner", PushChannel::Email);
     let mut provider = answer(
