@@ -1807,6 +1807,7 @@ dependencies = [
  "mandate-marketdata",
  "mandate-modelhost",
  "mandate-num",
+ "mandate-runtime",
  "mandate-shell",
  "mandate-spec",
  "mandate-time",

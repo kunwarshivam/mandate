@@ -21,7 +21,7 @@ use mandate_time::{Date, UtcNanos};
 
 use super::absent;
 use super::artifacts::Artifacts;
-use crate::adapters::{trusted_daily_bars, untrusted};
+use crate::adapters::{trusted_daily_bars, trusted_daily_closes, untrusted};
 use crate::error::Cause;
 
 /// What the broker answered to the preflight's six GETs, exactly as `mandate-alpaca` read it, beside
@@ -206,8 +206,7 @@ pub fn daily_closes(
     daily: &Path,
     now: UtcNanos,
 ) -> Result<Vec<(Date, Price)>, Cause> {
-    let _ = (symbol, daily, now);
-    Err(Cause::Unimplemented { story: "E7-19" })
+    trusted_daily_closes(daily, symbol.as_str(), now)
 }
 
 fn refusal(error: LiquidityError) -> Cause {
