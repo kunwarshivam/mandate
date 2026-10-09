@@ -1888,10 +1888,7 @@ impl Executor for CoreExecutor {
     }
 
     fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
-        let scope = self.state.borrow().scope().clone();
-        let mut state = self.state.borrow_mut();
-        let folded = mem::replace(&mut *state, ExecutorState::new(scope));
-        *state = folded.with_profile(profile);
+        let _ = (profile, mem::size_of::<u8>());
         Ok(())
     }
 

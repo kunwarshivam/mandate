@@ -218,10 +218,17 @@ fn ci(job: &str) -> Result<()> {
         "postgres" => postgres(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "fast" => {
-            for part in FAST_JOB {
-                ci(part)?;
-            }
-            Ok(())
+            let pk = ["--package=mandate-alpaca", "--package=mandate-executor", "--package=mandate-shell", "--package=mandate-refcases"];
+            let mut a = vec!["nextest", "run", "--no-run"];
+            a.extend(pk);
+            sh("cargo", &a)?;
+            let mut b = vec!["nextest", "run", "--status-level", "all", "--final-status-level", "fail"];
+            b.extend(pk);
+            let _ = sh("cargo", &b);
+            let mut c = vec!["nextest", "run", "--no-fail-fast", "--status-level", "fail", "--final-status-level", "slow"];
+            c.extend(pk);
+            let _ = sh("cargo", &c);
+            bail!("measurement only")
         }
         "full" => {
             for part in FULL_JOB {
