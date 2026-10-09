@@ -1,16 +1,18 @@
-//! The loopback MCP server over the core (E7-25, S2 tests part 1): loopback only, the session,
-//! and the pinned contract (LT-1, LT-8). Oracles: the contract file, `mandate-mcp`'s allowlist and
-//! revision, and a hash computed outside Rust.
+//! The loopback MCP server over the core (E7-25, S2 tests parts 1 and 2): loopback only, the
+//! session, the pinned contract, tool calls driving the core, unlisted tools, and the extra-tool
+//! and injection variants (LT-1, LT-8, CN-9). Oracles: the contract file, `mandate-mcp`'s
+//! allowlist and revision, a hash computed outside Rust, imperatives written here, the core
+//! driven directly, and the contract's own state and alert names.
 
 mod common;
 
 use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr};
 
-use common::sim;
 use common::wire::Wire;
-use mandate_mcp::ALLOWLIST;
-use mandate_rh_sim::{CONTRACT, INJECTION, ServerError, SimServer, Variant};
+use common::{AGENTIC, limit, price, qty, sim};
+use mandate_mcp::{ALLOWLIST, PROTOCOL_VERSION};
+use mandate_rh_sim::{CONTRACT, INJECTION, OrderRequest, ServerError, SimServer, State, Variant};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -38,6 +40,60 @@ fn hash(tools: &[Value]) -> String {
 
 fn names(tools: &[Value]) -> BTreeSet<&str> {
     tools.iter().map(|t| t["name"].as_str().unwrap()).collect()
+}
+
+/// What makes text an instruction to a model, written here rather than read from the server, so
+/// text other than the [`INJECTION`] literal is caught too.
+const IMPERATIVES: [&str; 9] = [
+    "ignore",
+    "instruction",
+    "assistant",
+    "system",
+    "you must",
+    "do not",
+    "always",
+    "call ",
+    "transfer",
+];
+
+fn instructs(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    IMPERATIVES.iter().any(|word| lower.contains(word))
+}
+
+fn served(variant: Variant) -> Result<(SimServer, Wire), ServerError> {
+    let server = SimServer::start(sim().unwrap(), variant)?;
+    let wire = Wire::connect(&server.url()?);
+    Ok((server, wire))
+}
+
+/// The request as `place_equity_order`'s arguments, under the contract's parameter names.
+fn arguments(r: &OrderRequest) -> Value {
+    let mut args = json!({"account_number": r.account_number, "symbol": r.symbol,
+        "side": r.side, "type": r.order_type});
+    let optional = [
+        ("quantity", &r.quantity),
+        ("dollar_amount", &r.dollar_amount),
+        ("limit_price", &r.limit_price),
+        ("stop_price", &r.stop_price),
+        ("time_in_force", &r.time_in_force),
+        ("market_hours", &r.market_hours),
+        ("ref_id", &r.ref_id),
+    ];
+    for (name, value) in optional {
+        if let Some(value) = value {
+            args[name] = json!(value);
+        }
+    }
+    args
+}
+
+fn refused(result: &Value) -> bool {
+    result["isError"] == json!(true)
+}
+
+fn orders(server: &SimServer, account: &str) -> Result<Vec<mandate_rh_sim::Order>, ServerError> {
+    server.drive(|s| s.orders(account).unwrap())
 }
 
 #[test]
@@ -72,7 +128,18 @@ fn the_handshake_answers_the_transports_revision_and_a_session_later_requests_ne
     wire.session = Some(format!("{session}x"));
     let stale = wire.request("tools/list", json!({}));
     assert_eq!(stale.status, 404, "a session it never gave: {}", stale.body);
+    let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}});
+    wire.session = None;
+    assert_eq!(
+        wire.post(&note).status,
+        400,
+        "a notification needs the session too"
+    );
     wire.session = Some(other);
+    wire.protocol = "2025-03-26".to_owned();
+    let revision = wire.request("tools/list", json!({}));
+    assert_eq!(revision.status, 400, "another revision: {}", revision.body);
+    wire.protocol = PROTOCOL_VERSION.to_owned();
     assert_eq!(wire.request("tools/list", json!({})).status, 200);
     Ok(())
 }
@@ -103,7 +170,8 @@ fn the_honest_listing_is_the_pinned_contract_and_carries_no_instruction_text() -
             None,
             "the contract publishes none"
         );
-        assert!(tool["description"].is_string(), "{}", tool["name"]);
+        let description = tool["description"].as_str().unwrap();
+        assert!(!instructs(description), "{}: {description}", tool["name"]);
     }
     let text = Value::Array(tools).to_string();
     assert!(
@@ -115,5 +183,134 @@ fn the_honest_listing_is_the_pinned_contract_and_carries_no_instruction_text() -
         Vec::<String>::new(),
         "a listing is not a call"
     );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn the_extra_tool_variant_lists_one_more_tool_keeps_the_hash_and_reaches_nothing() -> Outcome {
+    for extra in ["place_option_order", "transfer_funds"] {
+        let (server, mut wire) = served(Variant::ExtraTool(extra.to_owned()))?;
+        let tools = wire.list();
+        let mut expected = BTreeSet::from(ALLOWLIST);
+        expected.insert(extra);
+        assert_eq!(names(&tools), expected, "{extra}");
+        assert_eq!(
+            hash(&tools),
+            PINNED,
+            "{extra}: not allowlisted, so not hashed"
+        );
+        let answer = wire.call(extra, arguments(&limit("buy", "1", "501", 1)));
+        assert!(refused(&answer), "{extra}: {answer}");
+        assert_eq!(server.calls()?, [extra], "every call is recorded");
+        assert_eq!(orders(&server, AGENTIC)?, [], "{extra} reaches no order");
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn the_injection_variant_carries_instruction_text_in_every_description_and_result() -> Outcome {
+    assert!(
+        instructs(INJECTION),
+        "the imperatives catch the variant's own text"
+    );
+    let (server, mut wire) = served(Variant::Injection)?;
+    let tools = wire.list();
+    assert_eq!(
+        (names(&tools), hash(&tools)),
+        (BTreeSet::from(ALLOWLIST), PINNED.to_owned())
+    );
+    for tool in &tools {
+        let description = tool["description"].as_str().unwrap();
+        assert!(description.contains(INJECTION), "{}", tool["name"]);
+    }
+    let request = limit("buy", "1", "501", 1);
+    let placed = wire.call("place_equity_order", arguments(&request));
+    let listed = wire.call("get_equity_orders", json!({"account_number": AGENTIC}));
+    let refusal = wire.call(
+        "place_equity_order",
+        arguments(&limit("sell", "9", "499", 2)),
+    );
+    for result in [&placed, &listed, &refusal] {
+        assert!(result.to_string().contains(INJECTION), "{result}");
+    }
+    assert!(!refused(&placed) && refused(&refusal), "{placed} {refusal}");
+    let mut direct = sim().unwrap();
+    direct.place(&request).unwrap();
+    assert_eq!(
+        orders(&server, AGENTIC)?,
+        direct.orders(AGENTIC).unwrap(),
+        "text moves nothing"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn an_unlisted_tool_or_an_unknown_method_is_a_protocol_error_that_reaches_nothing() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    let args = json!({"name": "get_equity_tax_lots", "arguments": {"account_number": AGENTIC}});
+    let unlisted = wire.request("tools/call", args).message();
+    assert_eq!(
+        (&unlisted["error"]["code"], unlisted.get("result")),
+        (&json!(-32602), None)
+    );
+    let unknown = wire.request("resources/list", json!({})).message();
+    assert_eq!(
+        (&unknown["error"]["code"], unknown.get("result")),
+        (&json!(-32601), None)
+    );
+    assert_eq!(server.calls()?, ["get_equity_tax_lots"]);
+    assert_eq!(orders(&server, AGENTIC)?, []);
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn review_reads_and_cancel_drive_the_core_and_review_places_nothing() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    let buy = |q: &str, at: &str, n| arguments(&limit("buy", q, at, n));
+    let id = |answer: Value| {
+        answer["structuredContent"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let review = wire.call("review_equity_order", buy("100", "501", 1));
+    let alerts = &review["structuredContent"]["alerts"];
+    assert_eq!(alerts, &json!(["buying_power"]), "{review}");
+    assert_eq!(orders(&server, AGENTIC)?, [], "review places nothing");
+    let filled = id(wire.call("place_equity_order", buy("1", "501", 2)));
+    server.drive(|s| s.fill(&filled, qty("1"), price("500")).unwrap())?;
+    let cancel = |id: &str| json!({"account_number": AGENTIC, "order_id": id});
+    let late = wire.call("cancel_equity_order", cancel(&filled));
+    assert!(refused(&late), "a filled order: {late}");
+    let working = id(wire.call("place_equity_order", buy("1", "499", 3)));
+    let cancelled = wire.call("cancel_equity_order", cancel(&working));
+    assert!(!refused(&cancelled), "{cancelled}");
+    let newest = orders(&server, AGENTIC)?;
+    assert_eq!((newest.len(), newest[0].state), (2, State::Cancelled));
+    let listed = wire.call("get_equity_orders", json!({"account_number": AGENTIC}));
+    let rows = listed["structuredContent"]["orders"].as_array().unwrap();
+    let seen: Vec<(&Value, &Value)> = rows.iter().map(|o| (&o["id"], &o["state"])).collect();
+    let (working, filled) = (json!(working), json!(filled));
+    let expected = [(&working, &json!("cancelled")), (&filled, &json!("filled"))];
+    assert_eq!(seen, expected, "newest first, with the contract's states");
+    assert!(
+        !instructs(&listed.to_string()),
+        "honest results instruct nothing"
+    );
+    let calls = [
+        "review_equity_order",
+        "place_equity_order",
+        "cancel_equity_order",
+    ];
+    let then = [
+        "place_equity_order",
+        "cancel_equity_order",
+        "get_equity_orders",
+    ];
+    assert_eq!(server.calls()?, [calls, then].concat());
     Ok(())
 }

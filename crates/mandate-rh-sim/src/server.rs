@@ -16,7 +16,9 @@ use std::net::SocketAddr;
 
 use crate::Sim;
 
-/// The pinned contract: the allowlisted tools' names, descriptions and input schemas.
+/// The pinned contract: the allowlisted tools' names, descriptions and input schemas. Where the
+/// published contract gives no shape, the file assumes one or leaves the parameter out
+/// ([DEC-849] item 5).
 pub const CONTRACT: &str = include_str!("../contract/tools.json");
 
 /// The instruction text the injection variant puts in every description and every result.
