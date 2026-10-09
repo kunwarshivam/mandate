@@ -253,7 +253,7 @@ pure = false
 layer = 6
 safety_critical = true
 pure = false
-allowed_external = ["getrandom", "reqwest", "rustls", "secrecy", "serde", "serde_json", "thiserror"]
+allowed_external = ["getrandom", "reqwest", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]
 
 [crates.mandate-connections]
 layer = 6
