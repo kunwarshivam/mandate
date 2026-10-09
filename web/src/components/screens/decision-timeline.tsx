@@ -9,7 +9,7 @@ import type { GateDecision, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { clock } from "@/lib/format";
 import { actionSentence, gateRule, verdictBadge } from "@/lib/gate-reasons";
-import { PURPOSE_LABEL } from "@/lib/labels";
+import { PURPOSE_LABEL, withRuleSentences } from "@/lib/labels";
 import { decisionHref } from "@/lib/screens";
 import { cn } from "@/lib/utils";
 
@@ -30,7 +30,8 @@ export function tally(decisions: GateDecision[]): string {
 /**
  * What the agents set out to do, newest first, narrow enough for a rail or a phone: each entry hangs
  * off one hairline by the agent's owl, with the action, the gate's verdict in words, who and when, and
- * one line of why: the rule that held it, or else what happened next. The verdict sits first, in
+ * one line of why: the rule that held it, or else what happened next, the owner's rules named by
+ * their sentence (critique C-6) where the audit keeps their ids. The verdict sits first, in
  * one column of one width on every row, so it never wraps and the eye reads it down the list
  * (DEC-512); it wears no meaning colour.
  */
@@ -72,7 +73,7 @@ export function DecisionTimeline({ ws, decisions }: { ws: Workspace; decisions: 
                   {rule}
                 </p>
               ) : d.then ? (
-                <p className="text-sm text-pretty text-muted-foreground">{d.then}</p>
+                <p className="text-sm text-pretty text-muted-foreground">{agent ? withRuleSentences(d.then, agent.mandate.autonomy.rules) : d.then}</p>
               ) : null}
             </div>
           </li>

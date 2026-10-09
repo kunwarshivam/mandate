@@ -443,7 +443,7 @@ describe("D5 inbox and D6 request", () => {
       expect(row).toHaveTextContent(askSentence(agent));
       expect(row).toHaveTextContent(/A request waits .+, then is skipped\.$/);
     });
-    expect(askSentence(ws.agents.find((a) => a.agent_id === AGENT_IDS.swing)!)).toMatch(/^Your rules? (“\w+”, )*“low_score”/);
+    expect(askSentence(ws.agents.find((a) => a.agent_id === AGENT_IDS.swing)!)).toMatch(/^Your rules?: (.+; )*ask when the combined model score is below 0.65[;.]/);
   });
 
   it("gives Approve and Skip the same variant and weight, with no focus or selection", () => {
@@ -483,7 +483,7 @@ describe("D5 inbox and D6 request", () => {
   it("states the default, the trigger, the risk in dollars, and the score's meaning", () => {
     request(APPROVAL_IDS.btc);
     expect(main()).toHaveTextContent("If you do nothing, this action is skipped.");
-    expect(main()).toHaveTextContent("Your rule “low_score”: ask when the combined model score is below 0.65.");
+    expect(main()).toHaveTextContent("Your rule: ask when the combined model score is below 0.65.");
     expect(within(main()).getByRole("heading", { name: "Risk impact in dollars" })).toBeInTheDocument();
     expect(main()).toHaveTextContent("$850.50");
     expect(main()).toHaveTextContent("Combined model score, not a probability of profit");

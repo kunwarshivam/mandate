@@ -228,7 +228,7 @@ const pendingSwing: Approval = {
     decided_by: "rule:low_score",
     combined_score: "0.574",
   },
-  trigger: "Your rule “low_score”: ask when the combined model score is below 0.65.",
+  trigger: "Your rule: ask when the combined model score is below 0.65.",
   risk_impact: [
     { field: "order_usd", value: "282.6", cap: "1000" },
     { field: "position_usd_after", value: "1412.44", cap: "1500" },
@@ -272,7 +272,7 @@ const pendingBtc: Approval = {
     decided_by: "rule:low_score",
     combined_score: "0.61",
   },
-  trigger: "Your rule “low_score”: ask when the combined model score is below 0.65.",
+  trigger: "Your rule: ask when the combined model score is below 0.65.",
   risk_impact: [
     { field: "order_usd", value: "850.5", cap: "1000" },
     { field: "position_usd_after", value: "8224.18", cap: "10000" },
@@ -309,7 +309,7 @@ const pendingLmn: Approval = {
     decided_by: "rule:low_score",
     combined_score: "0.52",
   },
-  trigger: "Your rule “low_score”: ask when the combined model score is below 0.65. Orders above $400 need two approvers.",
+  trigger: "Your rule: ask when the combined model score is below 0.65. Orders above $400 need two approvers.",
   risk_impact: [
     { field: "order_usd", value: "456.7", cap: "1000" },
     { field: "position_usd_after", value: "456.7", cap: "2500" },
