@@ -31,11 +31,11 @@ function declared(selector: string): Record<string, string> {
 }
 
 /**
- * Every look the stylesheet can give an owl on `<html>`: none, and each `data-owl` value it styles.
- * A per-load pick is checked at every value it could land on, so a collision that a random draw
- * only sometimes makes is always made here.
+ * Every look `<html>` could give an owl: none, and each `data-owl` value DEC-452's retired per-load
+ * pick used ("1" to "4", one per agent colour). The stylesheet styles none of them now; they are
+ * listed, not read from it, so a mapping that comes back is checked at every value it could land on.
  */
-const PICKS: Array<string | undefined> = [undefined, ...new Set(Array.from(CSS.matchAll(/html\[data-owl="([^"]+)"\]/g), (m) => m[1]))];
+const PICKS: Array<string | undefined> = [undefined, "1", "2", "3", "4"];
 
 /** The custom properties in force on an owl's `<svg>`, in a theme, with `<html>` carrying this pick. */
 function owlScope(theme: Theme, pick: string | undefined): Record<string, string> {
