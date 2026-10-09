@@ -1284,12 +1284,14 @@ story buys a service, and none uses a real identity-provider account in tests (s
   carries exactly its route's org and workspace (the ID-2 matrix), a snapshot or fan-out never serves
   another workspace, the `require` witness, `SystemContext` (#1058, #1061, #1070), and a step-up
   challenge presented in another workspace is refused. Still owed, each by its own lane:
-  - *Step-up presentation* (L1, DEC-649): `Presentation` reads its workspace and principal from the
-    request's context, never from bare IDs.
+  - *Step-up presentation* (L1, tests PR in flight): `mandate_passkey::stepup::Presentation` still
+    takes a bare `WorkspaceId` and `PrincipalId`, so a caller can name another workspace's challenge;
+    it is to read both from the request's context instead.
   - *Workspace API* (L2, `mandate-api`): a request body naming another workspace is refused.
   - *Row-level security* (the workspace store): rows keyed on `workspace_id` under a per-transaction
-    setting only the context sets; `no_principal_reads_the_membership_index_of_another` and
-    `own_credential_api_takes_no_principal_id`.
+    setting only the context sets, and `no_principal_reads_the_membership_index_of_another`.
+  - *Own-credential API* (the workspace store): `own_credential_api_takes_no_principal_id`, a
+    compile-fail test that the credential API takes no bare principal ID.
   - *Journal stream prefixes and writer roles* (the journal lane, `mandate-journal`,
     `mandate-journal-pg`): append and read take a tenant context, and a stream of another workspace
     is unreachable.
