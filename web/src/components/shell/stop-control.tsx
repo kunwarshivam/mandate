@@ -9,8 +9,9 @@ import { StopSheet } from "@/components/stop/stop-sheet";
 import { attentionText, stopAttention } from "@/lib/attention";
 import { useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
+import { OPEN_STOP_EVENT, openStop } from "./open-stop";
 
-export const OPEN_STOP_EVENT = "owlhead:open-stop";
+export { OPEN_STOP_EVENT, openStop } from "./open-stop";
 
 /** The agent a path is scoped to, if any. IDs are opaque and never shown as titles. */
 export function agentIdFrom(pathname: string): string | null {
@@ -27,10 +28,6 @@ export function useStopAttention(ws: Workspace): string[] {
   const current = useMemo(() => (ws.status === "loading" ? null : stopAttention(ws)), [ws]);
   if (current && current.join("\n") !== known.join("\n")) setKnown(current);
   return current ?? known;
-}
-
-export function openStop(): void {
-  window.dispatchEvent(new Event(OPEN_STOP_EVENT));
 }
 
 /**

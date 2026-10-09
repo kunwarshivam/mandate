@@ -2,7 +2,10 @@
 //! `Submit` is review then place with the derived `ref_id` on the recorded account; a re-send
 //! after a restart is deduplicated; a lost or garbled place answer is `Unknown` and never placed
 //! again (LT-6); the place answer's states read as connections spec §6.2 says; and no call leaves
-//! the allowlist (LT-8). Part 3 adds alerts (LT-5), protection, `Cancel` and the `NotSent` cases. These tests live here, not in
+//! the allowlist (LT-8). Part 3: an alert refuses an opening and never a protective order (LT-5),
+//! `Cancel` goes by the broker's `order_id`, and what the profile does not offer is not sent. The
+//! tests correction for #1097 pins the review, cancel and refusal paths no test above reaches,
+//! with a rewrite of one tool's answer after the server has answered. These tests live here, not in
 //! `mandate-robinhood`, so no product crate depends on the simulator (first live trade brief).
 //! Oracles: the simulator's own records and call log, `sha2`, and the spec's tables typed here.
 
@@ -17,24 +20,30 @@ use common::wire::Wire;
 use common::{AGENTIC, price, qty, sim};
 use mandate_accounting::{InstrumentId, Side as Way};
 use mandate_executor::{
-    BrokerConnector, BrokerOutcome, BrokerRequest, ClientOrderId, ConnectorError, EventId,
-    IntentId, OrderType as Kind, Purpose, SubmitOrder, TimeInForce as Tif,
+    ActivityCursor, BracketLegs, BrokerConnector, BrokerOutcome, BrokerRequest, ClientOrderId,
+    ConnectorError, EventId, IntentId, OcoLegs, OrderListing, OrderOrigin, OrderType as Kind,
+    Purpose, RiskClock, SubmitOrder, TimeInForce as Tif,
 };
 use mandate_mcp::{ALLOWLIST, CallClass, McpError};
 use mandate_rh_sim::{Event, Fault, Garble, MarketHours, OrderType, Session, Side, SimServer};
 use mandate_rh_sim::{State, TimeInForce, Variant};
 use mandate_robinhood::{RobinhoodConnector, Tools};
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 const REVIEW: &str = "review_equity_order";
 const PLACE: &str = "place_equity_order";
+const CANCEL: &str = "cancel_equity_order";
+
+/// A rewrite of a tool's answer, given the JSON-RPC `result` the server sent.
+type Bend = fn(Value) -> Result<String, McpError>;
 
 /// What a test sets and reads beside the connector: a garble for the next place answer, never
-/// the review before it, and each call's budget class.
+/// the review before it, a bend of the next answer to one tool, and each call's budget class.
 #[derive(Default)]
 struct Probe {
     garble_place: Cell<Option<Garble>>,
+    bend: Cell<Option<(&'static str, Bend)>>,
     classes: RefCell<Vec<(CallClass, &'static str)>>,
 }
 
@@ -61,10 +70,14 @@ impl Tools for Loopback<'_> {
         let reply = self.wire.borrow_mut().call_raw(tool, args.clone());
         let message: Value = serde_json::from_str(&reply.ok_or(McpError::Network)?.body)
             .map_err(|_| McpError::Malformed)?;
-        message
-            .get("result")
-            .map(Value::to_string)
-            .ok_or(McpError::Malformed)
+        let result = message.get("result").cloned().ok_or(McpError::Malformed)?;
+        match self.probe.bend.take() {
+            Some((bent, bend)) if bent == tool => bend(result),
+            other => {
+                self.probe.bend.set(other);
+                Ok(result.to_string())
+            }
+        }
     }
 }
 
@@ -122,6 +135,22 @@ fn buy(intent: &str) -> SubmitOrder {
         oco: None,
         extended_hours: false,
         purpose: Purpose::Open,
+    }
+}
+
+/// A `gtc` protective stop-limit sell of 1 SPY, stop 480, limit 475.
+fn stop(intent: &str) -> SubmitOrder {
+    let (stop_price, limit_price) = (Some(price("480")), Some(price("475")));
+    let (order_type, tif, purpose) = (Kind::StopLimit, Tif::Gtc, Purpose::Protective);
+    SubmitOrder {
+        side: Way::Sell,
+        qty: qty("1"),
+        stop_price,
+        limit_price,
+        order_type,
+        tif,
+        purpose,
+        ..buy(intent)
     }
 }
 
@@ -323,4 +352,429 @@ fn each_state_a_place_answers_reads_as_the_spec_says() {
         server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap()[0].state,
         State::Queued
     );
+}
+
+#[test]
+#[ignore = "pending E7-6"]
+fn an_alert_refuses_an_opening_before_the_place() {
+    let server = server();
+    server
+        .drive(|sim| sim.apply(Event::Halt("SPY".to_owned())))
+        .unwrap()
+        .unwrap();
+    let outcome = run(&mut connector(&server), &submit(buy("01JHALT"))).unwrap();
+    let BrokerOutcome::Rejected(reject) = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(
+        reject.client_order_id.as_deref(),
+        Some(key("01JHALT").as_str())
+    );
+    assert_eq!(calls(&server), [REVIEW]);
+}
+
+/// Rule 13 and DEC-860 item 6: a protective stop-limit draws on the reserved budget and is placed
+/// even under an alert; the simulator then refuses it, which a place reads as `Unknown`.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_protective_stop_limit_is_risk_reducing_and_no_alert_holds_it() {
+    let server = server();
+    let (mut c, probe) = probed(&server);
+    let BrokerOutcome::Submitted(entry) = run(&mut c, &submit(buy("01JENTRY"))).unwrap() else {
+        panic!()
+    };
+    server
+        .drive(|sim| sim.fill(&entry.broker_order_id, qty("2"), price("499")))
+        .unwrap()
+        .unwrap();
+    let placed = run(&mut c, &submit(stop("01JSTOP1"))).unwrap();
+    assert!(matches!(placed, BrokerOutcome::Submitted(_)), "{placed:?}");
+    let resting = &server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap()[0];
+    assert_eq!(
+        (resting.side, resting.order_type, resting.time_in_force),
+        (Side::Sell, OrderType::StopLimit, TimeInForce::Gtc)
+    );
+    assert_eq!(
+        (resting.stop_price, resting.limit_price),
+        (Some(price("480")), Some(price("475")))
+    );
+    server
+        .drive(|sim| sim.apply(Event::Halt("SPY".to_owned())))
+        .unwrap()
+        .unwrap();
+    let held = run(&mut c, &submit(stop("01JSTOP2")));
+    assert!(matches!(held, Err(ConnectorError::Unknown(_))), "{held:?}");
+    assert_eq!(
+        calls(&server),
+        [REVIEW, PLACE, REVIEW, PLACE, REVIEW, PLACE]
+    );
+    let stops = &classes(&probe)[2..];
+    assert!(
+        stops
+            .iter()
+            .all(|(class, _)| *class == CallClass::RiskReducing),
+        "{stops:?}"
+    );
+}
+
+#[test]
+#[ignore = "pending E7-6"]
+fn a_cancel_goes_by_the_order_id_and_is_refused_once_terminal() {
+    let server = server();
+    let (mut c, probe) = probed(&server);
+    let cancel = |intent: &str| BrokerRequest::Cancel {
+        client_order_id: key(intent),
+    };
+    let unknown = run(&mut c, &cancel("01JNEVER"));
+    let refused = ConnectorError::NotSent {
+        code: "no_order_id",
+    };
+    assert_eq!(
+        unknown,
+        Err(refused),
+        "DEC-860 item 7: escalated, never dropped"
+    );
+    assert!(
+        server.calls().unwrap().is_empty(),
+        "never cancelled by guess"
+    );
+    run(&mut c, &submit(buy("01JKEEP"))).unwrap();
+    let BrokerOutcome::Submitted(gone) = run(&mut c, &submit(buy("01JGONE"))).unwrap() else {
+        panic!()
+    };
+    let outcome = run(&mut c, &cancel("01JKEEP")).unwrap();
+    let id = key("01JKEEP").as_str().to_owned();
+    assert_eq!(
+        outcome,
+        BrokerOutcome::CancelAccepted {
+            client_order_id: id
+        }
+    );
+    assert_eq!(
+        classes(&probe).last(),
+        Some(&(CallClass::RiskReducing, CANCEL))
+    );
+    server
+        .drive(|sim| sim.fill(&gone.broker_order_id, qty("2"), price("499")))
+        .unwrap()
+        .unwrap();
+    let BrokerOutcome::Rejected(reject) = run(&mut c, &cancel("01JGONE")).unwrap() else {
+        panic!()
+    };
+    assert_eq!(
+        reject.client_order_id.as_deref(),
+        Some(key("01JGONE").as_str())
+    );
+    let states: Vec<State> = server
+        .drive(|sim| sim.orders(AGENTIC))
+        .unwrap()
+        .unwrap()
+        .iter()
+        .map(|o| o.state)
+        .collect();
+    assert_eq!(states, [State::Filled, State::Cancelled]);
+    assert_eq!(
+        calls(&server),
+        [REVIEW, PLACE, REVIEW, PLACE, CANCEL, CANCEL]
+    );
+}
+
+#[test]
+#[ignore = "pending E7-6"]
+fn what_the_profile_does_not_offer_is_not_sent() {
+    let server = server();
+    let mut c = connector(&server);
+    let legs = OcoLegs {
+        take_profit: price("520"),
+        stop: price("480"),
+        qty: qty("2"),
+    };
+    let bracket = Some(BracketLegs {
+        take_profit: price("520"),
+        stop: price("480"),
+    });
+    let refused = [
+        submit(SubmitOrder {
+            bracket,
+            ..buy("01JBRKT")
+        }),
+        submit(SubmitOrder {
+            oco: Some(legs),
+            ..buy("01JOCO")
+        }),
+        submit(SubmitOrder {
+            extended_hours: true,
+            ..buy("01JEXT")
+        }),
+        submit(SubmitOrder {
+            tif: Tif::Ioc,
+            ..buy("01JIOC")
+        }),
+    ];
+    for request in &refused {
+        let outcome = run(&mut c, request);
+        assert!(
+            matches!(outcome, Err(ConnectorError::NotSent { .. })),
+            "{request:?}: {outcome:?}"
+        );
+    }
+    assert!(server.calls().unwrap().is_empty());
+}
+
+/// The answer lost after the server acted on the call.
+fn lose(_: Value) -> Result<String, McpError> {
+    Err(McpError::Network)
+}
+
+/// A tool result with `isError`, as the server sends a refusal.
+fn refuse(_: Value) -> Result<String, McpError> {
+    let block = json!({"type": "text", "text": "refused"});
+    Ok(json!({"content": [block], "isError": true}).to_string())
+}
+
+/// The review's own answer with its `alerts` array taken out.
+fn without_alerts(mut result: Value) -> Result<String, McpError> {
+    let content = result["structuredContent"].as_object_mut().unwrap();
+    assert!(content.remove("alerts").is_some(), "the review had alerts");
+    Ok(result.to_string())
+}
+
+/// Text that is not JSON.
+fn not_json(_: Value) -> Result<String, McpError> {
+    Ok("{\"isError\": fal".to_owned())
+}
+
+/// The server's own answer with `isError` the string `"false"`.
+fn is_error_text(mut result: Value) -> Result<String, McpError> {
+    result["isError"] = json!("false");
+    Ok(result.to_string())
+}
+
+/// The server's own answer with `isError` the number 0.
+fn is_error_zero(mut result: Value) -> Result<String, McpError> {
+    result["isError"] = json!(0);
+    Ok(result.to_string())
+}
+
+/// A long position of 2 SPY, bought and filled at 499 through the connector.
+fn long(server: &SimServer, c: &mut Connector<'_>) {
+    let outcome = run(c, &submit(buy("01JLONG"))).unwrap();
+    let BrokerOutcome::Submitted(entry) = outcome else {
+        panic!("{outcome:?}")
+    };
+    server
+        .drive(|sim| sim.fill(&entry.broker_order_id, qty("2"), price("499")))
+        .unwrap()
+        .unwrap();
+}
+
+fn orders(server: &SimServer) -> Vec<mandate_rh_sim::Order> {
+    server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap()
+}
+
+/// Trading spec §5.2, Robinhood: "market: whole, fractional, notional; every other type: whole
+/// shares". DEC-860 item 7: an order the profile does not offer is `NotSent`, before any call.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_fractional_limit_or_stop_limit_is_not_sent_and_nothing_is_called() {
+    let server = server();
+    let (mut c, probe) = probed(&server);
+    let fractional = [
+        SubmitOrder {
+            qty: qty("1.5"),
+            ..buy("01JFRACL")
+        },
+        SubmitOrder {
+            qty: qty("0.5"),
+            ..stop("01JFRACS")
+        },
+    ];
+    for order in fractional {
+        let outcome = run(&mut c, &submit(order.clone()));
+        assert!(
+            matches!(outcome, Err(ConnectorError::NotSent { .. })),
+            "{order:?}: {outcome:?}"
+        );
+    }
+    assert!(server.calls().unwrap().is_empty());
+    assert!(classes(&probe).is_empty());
+}
+
+/// Connections spec §6.2: "A pre-trade alert refuses an opening or an increase before the place."
+/// The spec names no outcome for a review refused with `isError`, lost, or answered without an
+/// `alerts` array, so what is pinned is the outcome that adds no risk (`AGENTS.md` rule 3):
+/// nothing is placed, and the connector does not report an order. Which refusal it reports is
+/// left open.
+#[test]
+#[ignore = "pending E7-6"]
+fn an_openings_review_refused_lost_or_without_alerts_places_nothing() {
+    let bends: [(&str, Bend); 3] = [
+        ("isError", refuse),
+        ("lost", lose),
+        ("no alerts", without_alerts),
+    ];
+    for purpose in [Purpose::Open, Purpose::Increase] {
+        for (name, bend) in bends {
+            let server = server();
+            let (mut c, probe) = probed(&server);
+            probe.bend.set(Some((REVIEW, bend)));
+            let order = SubmitOrder {
+                purpose,
+                ..buy("01JREVIEW")
+            };
+            let outcome = run(&mut c, &submit(order));
+            assert!(
+                !matches!(outcome, Ok(BrokerOutcome::Submitted(_))),
+                "{purpose:?} {name}: {outcome:?}"
+            );
+            assert_eq!(calls(&server), [REVIEW], "{purpose:?} {name}");
+            assert!(orders(&server).is_empty(), "{purpose:?} {name}");
+        }
+    }
+}
+
+/// `AGENTS.md` rule 13 and connections spec §6.2: "For a sell or a protective order the alert is
+/// journaled and the order is placed anyway, so the broker accepts or rejects it." A review that
+/// is lost or refused holds a risk-reducing order no more than an alert does.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_risk_reducing_order_is_placed_when_its_review_is_lost_or_refused() {
+    let sell = |purpose: Purpose| SubmitOrder {
+        side: Way::Sell,
+        qty: qty("1"),
+        purpose,
+        ..buy("01JSELL")
+    };
+    let reducing = [
+        (sell(Purpose::RiskExit), OrderType::Limit),
+        (sell(Purpose::OwnerExit), OrderType::Limit),
+        (sell(Purpose::DiscretionaryExit), OrderType::Limit),
+        (sell(Purpose::Flatten), OrderType::Limit),
+        (stop("01JSTOP"), OrderType::StopLimit),
+    ];
+    let bends: [(&str, Bend); 2] = [("lost", lose), ("isError", refuse)];
+    for (order, kind) in reducing {
+        for (name, bend) in bends {
+            let server = server();
+            let (mut c, probe) = probed(&server);
+            long(&server, &mut c);
+            probe.bend.set(Some((REVIEW, bend)));
+            let outcome = run(&mut c, &submit(order.clone()));
+            let case = format!("{:?} {name}", order.purpose);
+            assert!(
+                matches!(outcome, Ok(BrokerOutcome::Submitted(_))),
+                "{case}: {outcome:?}"
+            );
+            assert_eq!(calls(&server), [REVIEW, PLACE, REVIEW, PLACE], "{case}");
+            let sells: Vec<_> = orders(&server)
+                .into_iter()
+                .filter(|o| o.side == Side::Sell)
+                .map(|o| (o.order_type, o.quantity))
+                .collect();
+            assert_eq!(sells, [(kind, qty("1"))], "{case}");
+        }
+    }
+}
+
+/// Trading spec §5.7: a cancel's outcome is known only from the broker ("PendingCancel -->
+/// Canceled: confirmed"). A lost cancel answer is `Unknown` (`ConnectorError::Unknown`: "a
+/// timeout, a dropped connection"); an answer that is not JSON is `Unreadable` ("the broker
+/// answered and the connector could not read the answer"). Neither is `CancelAccepted`.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_lost_or_unreadable_cancel_answer_never_reads_as_cancelled() {
+    let cancel = BrokerRequest::Cancel {
+        client_order_id: key("01JOPEN"),
+    };
+    let server = server();
+    let (mut c, probe) = probed(&server);
+    run(&mut c, &submit(buy("01JOPEN"))).unwrap();
+    probe.bend.set(Some((CANCEL, lose)));
+    let lost = run(&mut c, &cancel);
+    assert!(matches!(lost, Err(ConnectorError::Unknown(_))), "{lost:?}");
+    assert_eq!(calls(&server), [REVIEW, PLACE, CANCEL]);
+    let server = crate::server();
+    let (mut c, probe) = probed(&server);
+    run(&mut c, &submit(buy("01JOPEN"))).unwrap();
+    probe.bend.set(Some((CANCEL, not_json)));
+    let garbled = run(&mut c, &cancel);
+    assert!(
+        matches!(garbled, Err(ConnectorError::Unreadable { .. })),
+        "{garbled:?}"
+    );
+    assert_eq!(calls(&server), [REVIEW, PLACE, CANCEL]);
+}
+
+/// The MCP tool result's `isError` is a boolean. One that is not is not an answer: to a place it
+/// is `Unknown` (DEC-860 item 4: "Anything else to a place ... is `ConnectorError::Unknown`"),
+/// and to a cancel `Unreadable`, never `CancelAccepted`.
+#[test]
+#[ignore = "pending E7-6"]
+fn an_is_error_that_is_not_a_boolean_is_never_success() {
+    let bends: [(&str, Bend); 2] = [("text", is_error_text), ("zero", is_error_zero)];
+    for (name, bend) in bends {
+        let server = server();
+        let (mut c, probe) = probed(&server);
+        probe.bend.set(Some((PLACE, bend)));
+        let placed = run(&mut c, &submit(buy("01JPLACE")));
+        assert!(
+            matches!(placed, Err(ConnectorError::Unknown(_))),
+            "{name}: {placed:?}"
+        );
+        assert_eq!(calls(&server), [REVIEW, PLACE], "{name}");
+        let server = crate::server();
+        let (mut c, probe) = probed(&server);
+        run(&mut c, &submit(buy("01JOPEN"))).unwrap();
+        probe.bend.set(Some((CANCEL, bend)));
+        let cancel = BrokerRequest::Cancel {
+            client_order_id: key("01JOPEN"),
+        };
+        let cancelled = run(&mut c, &cancel);
+        assert!(
+            matches!(cancelled, Err(ConnectorError::Unreadable { .. })),
+            "{name}: {cancelled:?}"
+        );
+        assert_eq!(calls(&server), [REVIEW, PLACE, CANCEL], "{name}");
+    }
+}
+
+/// Connections spec §6.2: `GetOrderByClientId` "Not offered (U-R2)", `ListActivities` "No feed in
+/// the contract (U-R8)", `AcknowledgeReplace` "Not applicable"; the list and the reads are C2's
+/// and C3's, so C1 does not implement them (`ConnectorError::NotSent`: "the connector does not
+/// implement it yet"). `CancelAll` and `ClosePosition` take an `AccountWideScope` no test can
+/// build. Each is `NotSent` with nothing called, even with an order on record.
+#[test]
+#[ignore = "pending E7-6"]
+fn every_other_request_is_not_sent_and_nothing_is_called() {
+    let server = server();
+    let (mut c, probe) = probed(&server);
+    run(&mut c, &submit(buy("01JOPEN"))).unwrap();
+    let listing = OrderListing {
+        client_order_id: key("01JOPEN"),
+        instrument: InstrumentId::new("SPY").unwrap(),
+        origin: OrderOrigin::Agentic,
+        created_since: RiskClock::from_secs(0),
+    };
+    let others = [
+        BrokerRequest::AcknowledgeReplace {
+            replaced: key("01JOPEN"),
+        },
+        BrokerRequest::GetOrderByClientId(key("01JOPEN")),
+        BrokerRequest::ListOrders(listing),
+        BrokerRequest::ListOpenOrders,
+        BrokerRequest::ListPositions,
+        BrokerRequest::GetAccount,
+        BrokerRequest::ListActivities {
+            since: ActivityCursor("0".to_owned()),
+        },
+    ];
+    for request in &others {
+        let outcome = run(&mut c, request);
+        assert!(
+            matches!(outcome, Err(ConnectorError::NotSent { .. })),
+            "{request:?}: {outcome:?}"
+        );
+    }
+    assert_eq!(calls(&server), [REVIEW, PLACE]);
+    assert_eq!(classes(&probe).len(), 2);
 }

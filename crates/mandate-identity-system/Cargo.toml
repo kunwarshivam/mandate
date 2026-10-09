@@ -1,0 +1,17 @@
+[package]
+name = "mandate-identity-system"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The SystemContext the deployment's background processes act with, for the bootstrap crates xtask/layers.toml allows only (DEC-642 items 5 to 8, DEC-668)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-identity.workspace = true
+mandate-tenant.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

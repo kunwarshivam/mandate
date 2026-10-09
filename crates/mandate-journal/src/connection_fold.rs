@@ -11,12 +11,12 @@
 //! reported by its index in `rows`. A body that does not parse is skipped too, since §11's
 //! per-event `non_canonical` check reports it.
 //!
-//! `reference/journal/connections.py` judged the vectors with one fold over every account stream;
-//! here each account stream and each control stream has its own, as §9.8 says. Two more places
-//! follow §9.8's text where the oracle is looser: a version-1 first establishment is never
-//! re-established (rule 66), and a control-stream establishment of an id established before, at
-//! either version, is a `reconnect` (§11). Streams have no global order (§2), so a cause or an
-//! original is looked up among every row given, wherever it sits.
+//! Each account stream and each control stream has its own fold, as §9.8 says. A version-1 first
+//! establishment is never re-established (rule 66), and a control-stream establishment of an id
+//! established before on that control stream, at either version, is a `reconnect` (§11);
+//! `reference/journal/connections.py` takes the same readings since journal spec v0.30
+//! ([DEC-696](../../../docs/project/decisions/DEC-696.md)). Streams have no global order (§2), so a
+//! cause or an original is looked up among every row given, wherever it sits.
 
 use std::collections::{BTreeMap, BTreeSet};
 
