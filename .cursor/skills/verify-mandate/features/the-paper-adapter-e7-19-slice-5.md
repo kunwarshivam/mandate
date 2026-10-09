@@ -7,7 +7,8 @@
   (`Args`, `parse`, `Ports`, `Outcome`, `PaperError`, `run`), which hands the model host's output
   and its stored closes to `mandate-shell`'s `ProductionCycle::run_observed`; the closes come from
   `mandate_shell::paper::daily_closes`. The `mandate-paper` binary (`src/main.rs`) prints what
-  `process` returns over the `Production` ports (pending E7-19).
+  `process` returns over the `Production` ports: the control stream read from the Postgres
+  journal, `Credentials::from_env` with `AlpacaPaperHttp`, and the system clock.
 - **Tests:** `crates/mandate-paper/tests/run.rs` (one order through the cycle after the closes are
   stored, a dry run that sends nothing and keeps no journal, a `Flat` model, the refusals before
   any credential, SPY and AAPL from journaled inputs alone, a held position, stale bars, the

@@ -123,7 +123,6 @@ fn the_system_clock_pause_waits_its_whole_duration() {
 
 /// Rule 7, DEC-846 item 6: a usage refusal names the flag, never its value, and exits non-zero.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_usage_refusal_names_no_value() {
     let output = paper(
         &["--confirm-paper", "--journal", DSN, "--journal", DSN],
@@ -137,7 +136,6 @@ fn a_usage_refusal_names_no_value() {
 /// valid here, so this does not show the host check comes before the credentials; that order is
 /// pinned in-process by `run.rs`'s `every_refusal_before_the_credentials_reads_none`.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_configured_host_is_refused_before_any_credential() {
     let host = ("ALPACA_API_BASE", "https://api.alpaca.markets");
     let output = paper(
@@ -155,7 +153,6 @@ fn a_configured_host_is_refused_before_any_credential() {
 /// `AgentDeployed` names a version no store holds refuses that document, both before any
 /// credential, with the keys set, and neither names the DSN's password or a key.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_control_stream_is_read_before_any_credential() {
     let unread = "the control stream could not be read";
     refused(&paper(&["--confirm-paper"], &[]), unread);

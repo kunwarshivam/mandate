@@ -321,4 +321,4 @@ allowed_external = ["thiserror"]
 layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["thiserror"]
+allowed_external = ["thiserror", "tokio"]

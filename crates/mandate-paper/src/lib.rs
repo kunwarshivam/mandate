@@ -26,10 +26,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
-use mandate_alpaca::{AlpacaPaperHttp, DataTransport, Pause, TokioPause, TradingTransport};
+use mandate_alpaca::{
+    AlpacaPaperHttp, Credentials, DataTransport, Pause, TokioPause, TradingTransport,
+};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
-use mandate_journal::{ArtifactRef, ArtifactStore};
+use mandate_journal::{ArtifactRef, ArtifactStore, StoredEvent, StreamId};
+use mandate_journal_pg::PgJournal;
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
 use mandate_num::Price;
 use mandate_runtime::Observation;
@@ -70,7 +73,8 @@ pub trait Ports {
     /// The workspace control stream's records, read once per run, or [`PaperError::Control`].
     fn control_stream(&mut self, workspace: &str) -> Result<Vec<ControlRecord>, PaperError>;
 
-    /// The credentials and transport, or [`PaperError::Credentials`]; once, after all else.
+    /// The credentials and transport, or [`PaperError::Credentials`]; called at most once, and
+    /// only after every check that needs no credential.
     fn connect(&mut self) -> Result<Self::Transport, PaperError>;
 
     /// The clock and the timer; its `now` is the run's one clock read and the binding gate's.
@@ -354,19 +358,40 @@ impl Ports for Production {
     /// `ctl:{workspace}`'s records from the journal, read once, or [`PaperError::Control`] when
     /// there is no journal or it cannot be read. The error never names the DSN (rule 7).
     fn control_stream(&mut self, workspace: &str) -> Result<Vec<ControlRecord>, PaperError> {
-        let _ = (&self.journal, workspace);
-        Err(PaperError::Unimplemented { story: "E7-19" })
+        let dsn = self.journal.as_deref().ok_or(PaperError::Control)?;
+        let stream = StreamId::parse(&format!("ctl:{workspace}")).ok_or(PaperError::Control)?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| PaperError::Control)?;
+        let rows = runtime.block_on(async {
+            let journal = PgJournal::from_dsn(dsn).map_err(|_| PaperError::Control)?;
+            journal.rows(&stream).await.map_err(|_| PaperError::Control)
+        })?;
+        rows.iter().map(control_record).collect()
     }
 
     /// `Credentials::from_env` and one [`AlpacaPaperHttp`], or [`PaperError::Credentials`]; the
     /// error never names a key.
     fn connect(&mut self) -> Result<AlpacaPaperHttp, PaperError> {
-        Err(PaperError::Unimplemented { story: "E7-19" })
+        let credentials = Credentials::from_env().map_err(|_| PaperError::Credentials)?;
+        AlpacaPaperHttp::new(credentials).map_err(|_| PaperError::Credentials)
     }
 
     fn pause(&self) -> SystemClock {
         SystemClock
     }
+}
+
+/// One verified row as the control-stream fold reads it: its `seq`, type and body's `payload`.
+fn control_record(row: &StoredEvent) -> Result<ControlRecord, PaperError> {
+    let body = mandate_canon::parse(&row.body).map_err(|_| PaperError::Control)?;
+    let payload = body.get("payload").ok_or(PaperError::Control)?.clone();
+    Ok(ControlRecord {
+        seq: row.seq,
+        event_type: row.event_type.clone(),
+        payload,
+    })
 }
 
 /// The process's clock and timer: the system clock, read with nanoseconds, and the tokio timer.
@@ -395,6 +420,30 @@ where
     A: IntoIterator<Item = String>,
     V: IntoIterator<Item = (String, String)>,
 {
-    let _ = (args.into_iter(), vars.into_iter());
-    Err(PaperError::Unimplemented { story: "E7-19" })
+    let args = parse(args)?;
+    let vars: Vec<(String, String)> = vars.into_iter().collect();
+    let mut ports = Production {
+        journal: args.journal.clone(),
+    };
+    Ok(lines(&run(&args, &vars, &mut ports)?))
+}
+
+/// What a run that refused nothing prints, one line each: the order a dry run would place, each
+/// submitted order, or the model's `Flat` or `Undecided`. Ids and the signal only, never a value
+/// (rule 7).
+#[must_use]
+pub fn lines(outcome: &Outcome) -> Vec<String> {
+    match outcome {
+        Outcome::NoOutput(signal) => vec![format!("the model output {signal:?}; nothing sent")],
+        Outcome::Cycle(report) => {
+            let would_place = report.would_place.iter().map(|order| {
+                format!(
+                    "would place {} (nothing sent; pass --place-one-order)",
+                    order.client_order_id.as_str()
+                )
+            });
+            let submitted = report.submitted.iter().map(|id| format!("submitted {id}"));
+            would_place.chain(submitted).collect()
+        }
+    }
 }
