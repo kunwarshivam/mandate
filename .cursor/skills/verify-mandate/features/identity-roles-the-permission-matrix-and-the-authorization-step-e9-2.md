@@ -10,10 +10,9 @@
   `StepUpActionKind`, `StepUpEvidence`) and `src/permission.rs` (one `Permission` per §4.2 row).
   `src/demand.rs` holds what a sensitive data API demands (DEC-655, E9-8): the sealed
   `RequiredPermission`, its one marker `ReadRecords`, and the `Permitted<'a, P>` witness, which
-  only `TenantContext::require` yields and which is a `Tenant`.
-  `change_roles` (which yields the change's resolved step-up, DEC-654),
-  `PrincipalContext::into_tenant`, `TenantContext::require`, and the witness's `Tenant` methods
-  are stubs.
+  only `TenantContext::require` yields and which is a `Tenant`; `require` and the witness's
+  `Tenant` methods are implemented (E9-8). `change_roles` (which yields the change's resolved
+  step-up, DEC-654) and `PrincipalContext::into_tenant` are stubs.
 - **Tests:** in the crate, because its session, membership, and lookup types are sealed to it:
   `crates/mandate-identity/src/tests/matrix.rs` (ID-2 and the failed membership read, pending
   E9-2: every role set, membership state, cool-off, session kind, principal kind, permission, and
@@ -28,7 +27,7 @@
   `compile_fail` doctests in `src/lib.rs` (a `TenantContext` cannot be built, defaulted, or cloned,
   nor `Tenant` implemented, an `OrgContext` or `PrincipalContext` cannot be built, and an
   `OrgContext` is not a `Tenant`, outside the crate), with their in-crate controls;
-  `crates/mandate-identity/src/tests/demand.rs` (pending E9-8: a context for each other workspace row
+  `crates/mandate-identity/src/tests/demand.rs` (live, E9-8: a context for each other workspace row
   is refused `forbidden` by `require::<ReadRecords>()`, and the witness reports the context it
   was called on) and the `compile_fail` doctests in `src/demand.rs` (the witness cannot be built,
   defaulted, or cloned, nor `RequiredPermission` implemented, outside the crate, and a data API
