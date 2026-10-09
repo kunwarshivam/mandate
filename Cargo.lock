@@ -1804,6 +1804,7 @@ dependencies = [
  "mandate-artifacts-fs",
  "mandate-canon",
  "mandate-journal",
+ "mandate-journal-pg",
  "mandate-marketdata",
  "mandate-modelhost",
  "mandate-num",
@@ -1811,7 +1812,10 @@ dependencies = [
  "mandate-shell",
  "mandate-spec",
  "mandate-time",
+ "proptest",
+ "sqlx",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
