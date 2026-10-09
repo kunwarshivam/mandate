@@ -20,7 +20,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   failed (DEC-176), except DEC-789's new outcome, which is the founder's.
   - **Version 2.** Each range adds `start` (`{kind, manifest_hash, anchor_event_id}`, the
     trusted start's record), `checked` (the events walked), and `incomplete` (the check that could
-    not finish, `tsa_token_invalid` or `null`); `result` adds `incomplete`. Version 1 is not
+    not finish and its cause, `{check: tsa_token_invalid, cause}`, or `null`); `result` adds
+    `incomplete`. Version 1 is not
     edited (§8): a closed schema gains members only at a new version, as `OrderStateChanged`'s
     did at v0.34, even though no writer appended version 1. It stays registered and replays;
     every writer appends version 2.
@@ -38,15 +39,18 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
     `tsa_token_invalid`, and no SEV-1. The CLI's `tsa_verification_incomplete` (DEC-490 item 6) is
     the same outcome under its own word. "On failure" now says it means a `fail` result.
   - **Restore drills** ([DEC-789](../project/decisions/DEC-789.md) item 9, the founder 2026-10-09):
-    a drill passes on a token-only `incomplete` (every event walked, nothing failed, only the token
-    check unproven, from either cause); any other incomplete check or any failure is still an
-    integrity incident. Only `result: fail` raises the SEV-1 alert; `incomplete` is an
+    a drill passes on a token-only `incomplete` (every event walked, nothing failed, and every
+    incomplete range's `cause` `token_unverifiable`); `anchor_unstamped`, any other incomplete
+    check, or any failure is still an integrity incident (the coordinator's narrower reading under
+    DEC-176, the founder informed). So each range's `incomplete` is `{check, cause}`, its `cause`
+    `token_unverifiable` or `anchor_unstamped`, the latter recorded when a range meets both
+    (DEC-789 item 7). Only `result: fail` raises the SEV-1 alert; `incomplete` is an
     informational row of infrastructure design §8.2 that pages no one.
   - **§9.14:** a manifest start is one the cold store vouches for; one only the hot store's record
     vouches for is not a trusted start (DEC-787 item 5).
   - **Vectors.** A new generated `verification_runs` section holds version 2's base drafts (passed,
-    failed, incomplete), an invalid draft for every new member and every clause of rules 132 and
-    133, and valid drafts for the readings a rule might be misread to refuse; its oracles recompute
+    failed, incomplete), an invalid draft for every new member (`incomplete.cause` included) and
+    every clause of rules 132 and 133, and valid drafts for the readings a rule might be misread to refuse; its oracles recompute
     each result by precedence and each count and start from the range. `records_access`, version
     1's, is unchanged. The vectors stay version 3.
   - **Order of the changes (ES-22).** Spec and vectors first: `mandate-journal` registers version 1
@@ -2945,7 +2949,7 @@ A `checked_range` is a `range` whose `to_hash` is `digest?` (the head the run ve
 | `start` | `{kind: genesis \| manifest \| anchor, manifest_hash: digest?, anchor_event_id: ulid?}` | Version 2. The trusted start the range was entered from (§9.14 "What a verifier reads"): seq 1 with 64 zeros, the `SegmentExported` whose `manifest_hash` this is, or the `AnchorComputed` whose `event_id` this is. The member of the kind named is non-null and the other is `null`: rule 132 |
 | `checked` | `integer` | Version 2. The number of events the run walked from `from_seq` (§11; workspace API AU-8): rule 132 |
 | `failure` | `{check, seq: integer?}?` | The first failure §11 reports for the range, or `null`. `check` is one of §11's codes: `non_canonical`, `column_mismatch`, `seq_gap`, `rehash_mismatch`, `prev_hash_mismatch`, `artifact_missing`, `artifact_mismatch`, `anchor_head_mismatch`, `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`, `segment_gap`, `anchor_self_mismatch`, `break_glass_cause_mismatch`, `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`, `connection_lifecycle_mismatch`, `connection_cause_mismatch`; `seq` is where it was reported, for a per-event check the position walked (the previous `seq` plus 1, or `from_seq` first), whatever the body there says: rule 111 |
-| `incomplete` | `tsa_token_invalid` \| `null` | Version 2. The check §11 could not finish for the range, named by its code, or `null` (§11 "Incomplete"). At this version only the token check can be incomplete. It names a check reported for the range, so it carries no `seq` (rule 111's classes); a range that failed records its failure instead: rule 132 |
+| `incomplete` | `{check: tsa_token_invalid, cause: token_unverifiable \| anchor_unstamped}?` | Version 2. The check §11 could not finish for the range, named by its code, and why, or `null` (§11 "Incomplete", [DEC-789](../project/decisions/DEC-789.md) items 7 and 9). At this version only the token check can be incomplete. `cause` is `token_unverifiable` for a stamped token whose imprint matches and `anchor_unstamped` for an anchor the range checks whose `token` is `null`; a range with both records `anchor_unstamped`. It names a check reported for the range, so it carries no `seq` (rule 111's classes); a range that failed records its failure instead: rule 132 |
 
 A verification a principal requested for an export names that export's `ExportCreated` as its
 `causation_id`. A failed run does not repair anything and does not replace §11's incident path:
@@ -3002,7 +3006,10 @@ incident (§11 "Incomplete").
     passed or ended incomplete walked every event of it (`checked`); `incomplete` is null when
     `failure` is non-null, so a range has one outcome (`incomplete`); and, while §11's token check
     cannot answer (DEC-789), a range with an `anchor` start has a non-null `failure` or
-    `incomplete`, since its start's token is checked and cannot be proven (`incomplete`). A rule
+    `incomplete`, since its start's token is checked and cannot be proven (`incomplete`). A
+    non-null `incomplete` always names its `cause`: the member is not nullable, so `cause` is
+    non-null exactly when `incomplete` is, and its absence or `null` is refused `schema` at
+    `incomplete.cause`. A rule
     cannot check that `start` names a record that exists or fits: §9.14 and workspace API §4.8.1
     resolve it before the run, and rule 107 already ties `prev_hash` to `from_seq`. On a failed
     range `checked` is only bounded, on purpose: how far a walk got before its first failure
@@ -3010,7 +3017,8 @@ incident (§11 "Incomplete").
     an anchor inside a range: the record lists no anchors, so a `pass` recorded for a `genesis` or
     `manifest` range that holds a stamped anchor's leaf, or one with a `null` token, would pass
     `append`. The run's logic must never write it, and its AU-8 test must show it does not
-    ([DEC-787](../project/decisions/DEC-787.md) item 8).
+    ([DEC-787](../project/decisions/DEC-787.md) item 8). For the same reason no rule can check that
+    a range with both causes recorded `anchor_unstamped`; that test is DEC-787 item 8's too.
 133. `VerificationRun` version 2: `result` is `fail` exactly when some range's `failure` is
     non-null, `incomplete` exactly when no range's `failure` is non-null and some range's
     `incomplete` is, and `pass` exactly when every range's `failure` and `incomplete` are null
@@ -3408,11 +3416,13 @@ incomplete, the token check whose failure is `tsa_token_invalid`:
   word: a command line has no third exit, and it never prints `verified` for it. Its `failed` is
   only that output form and its non-zero exit; this spec does not count it as a failure (no `fail`
   result, no SEV-1), and this version does not change the CLI. The CLI journals
-  nothing, so no record holds its word; a `VerificationRun` names the check, `tsa_token_invalid`,
-  in `incomplete`.
+  nothing, so no record holds its word; a `VerificationRun` records
+  `incomplete: {check: tsa_token_invalid, cause: token_unverifiable}`.
 - **An anchor the range must check whose `token` is `null`** (DEC-789 item 7). Nothing outside the
   journal vouches for it (§9.14), so its token check cannot finish either. It is not a failure: the
-  outage is §10's journaled gap, already alerted.
+  outage is §10's journaled gap, already alerted. A `VerificationRun` records it with
+  `cause: anchor_unstamped`. A range that meets both causes records `anchor_unstamped`, the one a
+  drill treats as an incident (below).
 
 An incomplete check never stops a run: the checks after it still run, and a failure any of them
 finds is the range's result, which outranks it. `VerificationRun` version 2 records it in the
@@ -3426,11 +3436,15 @@ and a `null` token is already alerted as §10's timestamping gap. **It is not a 
 whatever requires a run to pass does not take an incomplete one as passing, with one exception the
 founder made ([DEC-789](../project/decisions/DEC-789.md) item 9): a **restore drill** (infrastructure
 design OPS-8, §6.3, §6.4) passes when every event of every range was walked (`checked` is the
-whole range), no range failed, and the token check is the only check incomplete, whatever its
-cause above: a stamped token with the imprint, or an anchor with a `null` token. At this version
-`incomplete` can name nothing but the token check (§9.13), so every incomplete run is token-only;
-a check that a later version lets end incomplete counts for a drill only if a decision says so.
-Any other incomplete check, and any failure, is an integrity incident for a drill. When the token
+whole range), no range failed, and the only check incomplete is the token check from the first
+cause above, a stamped token with the imprint that cannot yet be verified. The second cause, an
+anchor with a `null` token, was never vouched for: a drill that meets it is an integrity incident,
+though the run still records `incomplete` and raises no SEV-1 (DEC-789 item 9, the narrower
+reading the coordinator ruled under DEC-176). The drill reads the cause from the record: it
+passes only on `pass`, or on `incomplete` with every event walked and every incomplete range's
+`cause` `token_unverifiable`; any `anchor_unstamped` is an incident. A check that a later version lets end incomplete counts
+for a drill only if a decision says so. Any other incomplete check, and any failure, is an
+integrity incident for a drill. When the token
 check can answer, the incomplete arm goes, as DEC-490 item 6 says of the CLI's.
 
 A reference to an event before the range's trusted start is not checked by that range, except

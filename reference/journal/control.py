@@ -686,12 +686,15 @@ SCHEMAS[("ctl", "VerificationRun")] = rec(
 # Version 1 is not edited (§8) and stays registered.
 START_KINDS = ("genesis", "manifest", "anchor")
 INCOMPLETE_CHECKS = ("tsa_token_invalid",)
+# DEC-789 items 7 and 9: why the token check could not finish. A stamped token whose imprint matches
+# cannot yet be verified; an anchor with a `null` token was never stamped, which a drill counts as an incident.
+INCOMPLETE_CAUSES = ("token_unverifiable", "anchor_unstamped")
 CHECKED_RANGE_V2 = rec(
     *CHECKED_RANGE.fields[:5],
     ("start", rec(("kind", one_of(*START_KINDS)), ("manifest_hash", opt(DIGEST_HEX)), ("anchor_event_id", opt(ULID)))),
     ("checked", INT),
     CHECKED_RANGE.fields[5],
-    ("incomplete", opt(one_of(*INCOMPLETE_CHECKS))),
+    ("incomplete", opt(rec(("check", one_of(*INCOMPLETE_CHECKS)), ("cause", one_of(*INCOMPLETE_CAUSES))))),
 )
 VERIFICATION_RUN_V2 = rec(
     ("trigger", one_of(*TRIGGERS)),
@@ -902,6 +905,8 @@ def nested_record(path: str) -> str:
         return "failure"
     if path.startswith("payload.ranges[") and path.endswith(".start"):
         return "start"
+    if path.startswith("payload.ranges[") and path.endswith(".incomplete"):
+        return "incomplete"
     if path.startswith("payload.ranges["):
         return "range"
     if path.startswith("payload.leaves["):

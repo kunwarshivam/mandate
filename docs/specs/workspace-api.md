@@ -1017,8 +1017,11 @@ ascending `stream_id` bytes:
   §11's token check can answer: never `pass`, and never `tsa_token_invalid` for a token whose
   imprint matches.
 - **Result:** `{stream_id, from_seq, to_seq, trusted_start, result: "pass" | "incomplete" | "fail",
-  checked, first_failure: {seq: integer | null, check} | null, incomplete: "tsa_token_invalid" |
-  null}`.
+  checked, first_failure: {seq: integer | null, check} | null, incomplete: {check:
+  "tsa_token_invalid", cause: "token_unverifiable" | "anchor_unstamped"} | null}`. `cause` says
+  why the token check could not finish: a stamped token whose imprint matches, or an anchor the
+  range checks with a `null` token; a range with both reports `anchor_unstamped` (journal spec
+  §9.13, [DEC-789](../project/decisions/DEC-789.md) item 7).
   - `to_seq` is the resolved last `seq`, never `null`, and `trusted_start` is the request's, with
     a `manifest_hash` as a `sha256:` ref (**Hash forms**).
   - `check` is one of journal spec §11's codes. `first_failure.seq` is `null` exactly for

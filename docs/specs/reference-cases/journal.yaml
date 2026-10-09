@@ -33125,7 +33125,9 @@ verification_runs:
             anchor_event_id: 01J8Z3A1A000000000000000A1
           checked: 19
           failure: null
-          incomplete: tsa_token_invalid
+          incomplete:
+            check: tsa_token_invalid
+            cause: token_unverifiable
         result: incomplete
       artifact_refs: []
       pii_refs: []
@@ -33144,7 +33146,9 @@ verification_runs:
         start: anchor
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33168,7 +33172,9 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33192,7 +33198,9 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33216,7 +33224,9 @@ verification_runs:
           anchor_event_id: 7
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33240,7 +33250,9 @@ verification_runs:
           anchor_event_id: anchor_one
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33264,7 +33276,9 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: '19'
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33288,14 +33302,14 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: 19
         failure: null
-        incomplete: 7
+        incomplete: tsa_token_invalid
     - path: artifact_refs
       value: []
     expect:
       outcome: Invalid
       reason: schema
       path: payload.ranges[0].incomplete
-  - name: run_incomplete.ranges[0].incomplete.form
+  - name: run_incomplete.ranges[0].incomplete.check.kind
     clause: §9.13 types, version 2
     base_draft: run_incomplete
     changes:
@@ -33312,13 +33326,93 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: 19
         failure: null
-        incomplete: seq_gap
+        incomplete:
+          check: 7
+          cause: token_unverifiable
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].incomplete.check
+  - name: run_incomplete.ranges[0].incomplete.check.form
+    clause: §9.13 types, version 2
+    base_draft: run_incomplete
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        start:
+          kind: anchor
+          manifest_hash: null
+          anchor_event_id: 01J8Z3A1A000000000000000A1
+        checked: 19
+        failure: null
+        incomplete:
+          check: seq_gap
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
       outcome: Invalid
       reason: non_canonical
-      path: payload.ranges[0].incomplete
+      path: payload.ranges[0].incomplete.check
+  - name: run_incomplete.ranges[0].incomplete.cause.kind
+    clause: §9.13 types, version 2
+    base_draft: run_incomplete
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        start:
+          kind: anchor
+          manifest_hash: null
+          anchor_event_id: 01J8Z3A1A000000000000000A1
+        checked: 19
+        failure: null
+        incomplete:
+          check: tsa_token_invalid
+          cause: 7
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].incomplete.cause
+  - name: run_incomplete.ranges[0].incomplete.cause.form
+    clause: §9.13 types, version 2
+    base_draft: run_incomplete
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        start:
+          kind: anchor
+          manifest_hash: null
+          anchor_event_id: 01J8Z3A1A000000000000000A1
+        checked: 19
+        failure: null
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_missing
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.ranges[0].incomplete.cause
   - name: run_incomplete.result.kind
     clause: §9.13 types, version 2
     base_draft: run_incomplete
@@ -33454,7 +33548,9 @@ verification_runs:
         start: null
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33478,7 +33574,9 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33502,13 +33600,67 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: null
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
       outcome: Invalid
       reason: schema
       path: payload.ranges[0].checked
+  - name: run_incomplete.ranges[0].incomplete.check.null
+    clause: §9.13 types, version 2
+    base_draft: run_incomplete
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        start:
+          kind: anchor
+          manifest_hash: null
+          anchor_event_id: 01J8Z3A1A000000000000000A1
+        checked: 19
+        failure: null
+        incomplete:
+          check: null
+          cause: token_unverifiable
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].incomplete.check
+  - name: run_incomplete.ranges[0].incomplete.cause.null
+    clause: §9.13 types, version 2
+    base_draft: run_incomplete
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        start:
+          kind: anchor
+          manifest_hash: null
+          anchor_event_id: 01J8Z3A1A000000000000000A1
+        checked: 19
+        failure: null
+        incomplete:
+          check: tsa_token_invalid
+          cause: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].incomplete.cause
   - name: run_incomplete.result.null
     clause: §9.13 types, version 2
     base_draft: run_incomplete
@@ -33534,7 +33686,9 @@ verification_runs:
         to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33557,7 +33711,9 @@ verification_runs:
           manifest_hash: null
           anchor_event_id: 01J8Z3A1A000000000000000A1
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33605,13 +33761,67 @@ verification_runs:
           prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
       outcome: Invalid
       reason: schema
       path: payload.ranges[0].start.prev_hash
+  - name: incomplete_without_its_cause
+    clause: '§9.13 closed and rule 132: a non-null incomplete names its cause'
+    base_draft: run_incomplete
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        start:
+          kind: anchor
+          manifest_hash: null
+          anchor_event_id: 01J8Z3A1A000000000000000A1
+        checked: 19
+        failure: null
+        incomplete:
+          check: tsa_token_invalid
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].incomplete.cause
+  - name: incomplete_extra_member
+    clause: '§9.13 closed: an incomplete check carries no seq; it is reported for the range (rule 111)'
+    base_draft: run_incomplete
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        start:
+          kind: anchor
+          manifest_hash: null
+          anchor_event_id: 01J8Z3A1A000000000000000A1
+        checked: 19
+        failure: null
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
+          seq: 17
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].incomplete.seq
   - name: version_1_records_no_incomplete
     clause: '§9.13 versions: version 1''s result is pass or fail, so it cannot record an incomplete run'
     base_draft: run_incomplete
@@ -33802,7 +34012,9 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -33922,7 +34134,9 @@ verification_runs:
           anchor_event_id: null
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -34042,7 +34256,9 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: 30
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -34190,7 +34406,9 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: 18
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -34216,7 +34434,9 @@ verification_runs:
         failure:
           check: rehash_mismatch
           seq: 17
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
       - stream_id: ctl:ws_01J8Z2
         from_seq: 1
         to_seq: 9
@@ -34280,7 +34500,9 @@ verification_runs:
           anchor_event_id: null
         checked: 19
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -34332,7 +34554,9 @@ verification_runs:
           anchor_event_id: null
         checked: 9
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -34427,7 +34651,9 @@ verification_runs:
           anchor_event_id: 01J8Z3A1A000000000000000A1
         checked: 29
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -34599,7 +34825,9 @@ verification_runs:
           anchor_event_id: null
         checked: 9
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -34635,7 +34863,9 @@ verification_runs:
           anchor_event_id: null
         checked: 9
         failure: null
-        incomplete: tsa_token_invalid
+        incomplete:
+          check: tsa_token_invalid
+          cause: token_unverifiable
     - path: artifact_refs
       value: []
     expect:
@@ -34651,13 +34881,91 @@ verification_runs:
     expect:
       outcome: Valid
   - name: restore_drill_incomplete
-    clause: 'rules 110 and 133: a restore drill''s run may end incomplete; a token-only incomplete passes the drill (DEC-789 item 9, infrastructure design OPS-8)'
+    clause: 'rules 110 and 133: a restore drill''s run may end incomplete; its anchor start has a token (§9.14), so this is cause (a) and passes the drill (DEC-789 item 9, infrastructure design OPS-8)'
     base_draft: run_incomplete
     changes:
     - path: actor
       value: *id087
     - path: payload.trigger
       value: restore_drill
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: restore_drill_null_token_anchor_incomplete
+    clause: 'rule 133 and DEC-789 items 7 and 9: a genesis range holding a null-token anchor''s leaf records incomplete with cause anchor_unstamped, never fail, and append accepts it; a drill reads the cause and calls an integrity incident (infrastructure design OPS-8)'
+    base_draft: run_passed
+    changes:
+    - path: actor
+      value: *id087
+    - path: payload.trigger
+      value: restore_drill
+    - path: payload.result
+      value: incomplete
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        start:
+          kind: genesis
+          manifest_hash: null
+          anchor_event_id: null
+        checked: 40
+        failure: null
+        incomplete:
+          check: tsa_token_invalid
+          cause: anchor_unstamped
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        start:
+          kind: manifest
+          manifest_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          anchor_event_id: null
+        checked: 19
+        failure: null
+        incomplete: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        start:
+          kind: genesis
+          manifest_hash: null
+          anchor_event_id: null
+        checked: 9
+        failure: null
+        incomplete: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: both_causes_record_anchor_unstamped
+    clause: '§9.13 and DEC-789 item 7: an anchor start (a stamped token, cause token_unverifiable) whose range also holds a null-token anchor''s leaf records anchor_unstamped, the cause that stays an incident; the record cannot show the other cause, so the run''s tests hold this precedence (DEC-787 item 8)'
+    base_draft: run_incomplete
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+        start:
+          kind: anchor
+          manifest_hash: null
+          anchor_event_id: 01J8Z3A1A000000000000000A1
+        checked: 19
+        failure: null
+        incomplete:
+          check: tsa_token_invalid
+          cause: anchor_unstamped
     - path: artifact_refs
       value: []
     expect:

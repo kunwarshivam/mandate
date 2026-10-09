@@ -50,7 +50,9 @@ ANCHOR_ID = "01J8Z3A1A000000000000000A1"
 ACCOUNT_STREAM = f"acct:{WORKSPACE}:01J8Z2ACCT00000000000000A1"
 GENESIS = "0" * 64
 MANIFEST = "a" * 64
-V2_VOCABULARY = VOCABULARY | {"start", "kind", "manifest_hash", "anchor_event_id", "checked", "incomplete"}
+V2_VOCABULARY = VOCABULARY | {"start", "kind", "manifest_hash", "anchor_event_id", "checked", "incomplete", "cause"}
+UNVERIFIABLE = {"check": "tsa_token_invalid", "cause": "token_unverifiable"}
+UNSTAMPED = {"check": "tsa_token_invalid", "cause": "anchor_unstamped"}
 
 GENESIS_START = {"kind": "genesis", "manifest_hash": None, "anchor_event_id": None}
 MANIFEST_START = {"kind": "manifest", "manifest_hash": MANIFEST, "anchor_event_id": None}
@@ -102,7 +104,7 @@ def base_drafts() -> dict[str, dict]:
         checked_range(STREAM, 1, 9, GENESIS, "4" * 64, GENESIS_START, 9),
     ]
     unfinished = [
-        checked_range(AGENT_STREAM, 12, 30, "2" * 64, "3" * 64, ANCHOR_START, 19, None, "tsa_token_invalid"),
+        checked_range(AGENT_STREAM, 12, 30, "2" * 64, "3" * 64, ANCHOR_START, 19, None, dict(UNVERIFIABLE)),
     ]
     return {
         "run_passed": envelope("run_passed", SERVICES, {"trigger": "weekly", "ranges": passed, "result": "pass"}),
@@ -161,19 +163,28 @@ MEMBER_CASES = {
         (f"{R0}.start.kind", 7, "cold_store"),
         (f"{R0}.start.anchor_event_id", 7, "anchor_one"),
         (f"{R0}.checked", "19", None),
-        (f"{R0}.incomplete", 7, "seq_gap"),
+        (f"{R0}.incomplete", "tsa_token_invalid", None),
+        (f"{R0}.incomplete.check", 7, "seq_gap"),
+        (f"{R0}.incomplete.cause", 7, "token_missing"),
         ("payload.result", True, "unproven"),
     ),
     "run_passed": ((f"{R1}.start.manifest_hash", 7, "sha256:" + MANIFEST),),
 }
 NULLED = {
-    "run_incomplete": (f"{R0}.start", f"{R0}.start.kind", f"{R0}.checked", "payload.result"),
+    "run_incomplete": (
+        f"{R0}.start",
+        f"{R0}.start.kind",
+        f"{R0}.checked",
+        f"{R0}.incomplete.check",
+        f"{R0}.incomplete.cause",
+        "payload.result",
+    ),
 }
 
 
 def seeded_key(path: str) -> str:
     """The `loose` and `nullable` seeded-bug key suffix of a member: its record and name."""
-    depth = "start" if ".start." in path else "failure" if ".failure." in path else "range" if "]." in path else "payload"
+    depth = "start" if ".start." in path else "incomplete" if ".incomplete." in path else "failure" if ".failure." in path else "range" if "]." in path else "payload"
     return f"{depth}.{path.rsplit('.', 1)[-1]}"
 
 
@@ -210,6 +221,26 @@ def member_drafts() -> list[dict]:
             [change(f"{R0}.start.prev_hash", "2" * 64)],
             "schema",
             f"{R0}.start.prev_hash",
+        )
+    )
+    out.append(
+        invalid(
+            "incomplete_without_its_cause",
+            "§9.13 closed and rule 132: a non-null incomplete names its cause",
+            "run_incomplete",
+            [delete(f"{R0}.incomplete.cause")],
+            "schema",
+            f"{R0}.incomplete.cause",
+        )
+    )
+    out.append(
+        invalid(
+            "incomplete_extra_member",
+            "§9.13 closed: an incomplete check carries no seq; it is reported for the range (rule 111)",
+            "run_incomplete",
+            [change(f"{R0}.incomplete.seq", 17)],
+            "schema",
+            f"{R0}.incomplete.seq",
         )
     )
     return out
@@ -382,7 +413,7 @@ def invalid_drafts() -> list[dict]:
             "failed_range_also_incomplete",
             "rule 132: a failed range records its failure, never an incomplete check too",
             bad,
-            [change(f"{R0}.incomplete", "tsa_token_invalid")],
+            [change(f"{R0}.incomplete", UNVERIFIABLE)],
             "schema",
             f"{R0}.incomplete",
         ),
@@ -414,7 +445,7 @@ def invalid_drafts() -> list[dict]:
             "fail_reported_as_incomplete",
             "rule 133: a failure outranks an incomplete check",
             bad,
-            [change(f"{R1}.incomplete", "tsa_token_invalid"), change("payload.result", "incomplete")],
+            [change(f"{R1}.incomplete", UNVERIFIABLE), change("payload.result", "incomplete")],
             "schema",
             "payload.result",
         ),
@@ -489,13 +520,13 @@ def valid_drafts() -> list[dict]:
             "in_range_anchor_leaves_a_genesis_range_incomplete",
             "§11 Incomplete (DEC-789 item 7): an in-range anchor's token check, stamped or null, cannot finish",
             ok,
-            [change(f"{R2}.incomplete", "tsa_token_invalid"), change("payload.result", "incomplete")],
+            [change(f"{R2}.incomplete", UNVERIFIABLE), change("payload.result", "incomplete")],
         ),
         valid(
             "failure_outranks_another_ranges_incomplete",
             "rule 133: one failed range fails the run whatever another range left unfinished",
             bad,
-            [change(f"{R1}.incomplete", "tsa_token_invalid")],
+            [change(f"{R1}.incomplete", UNVERIFIABLE)],
         ),
         valid(
             "requested_run_by_a_service_account",
@@ -505,9 +536,31 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "restore_drill_incomplete",
-            "rules 110 and 133: a restore drill's run may end incomplete; a token-only incomplete passes the drill (DEC-789 item 9, infrastructure design OPS-8)",
+            "rules 110 and 133: a restore drill's run may end incomplete; its anchor start has a token (§9.14), "
+            "so this is cause (a) and passes the drill (DEC-789 item 9, infrastructure design OPS-8)",
             unfinished,
             [change("actor", SERVICES), change("payload.trigger", "restore_drill")],
+        ),
+        valid(
+            "restore_drill_null_token_anchor_incomplete",
+            "rule 133 and DEC-789 items 7 and 9: a genesis range holding a null-token anchor's leaf records "
+            "incomplete with cause anchor_unstamped, never fail, and append accepts it; a drill reads the cause "
+            "and calls an integrity incident (infrastructure design OPS-8)",
+            ok,
+            [
+                change("actor", SERVICES),
+                change("payload.trigger", "restore_drill"),
+                change(f"{R0}.incomplete", UNSTAMPED),
+                change("payload.result", "incomplete"),
+            ],
+        ),
+        valid(
+            "both_causes_record_anchor_unstamped",
+            "§9.13 and DEC-789 item 7: an anchor start (a stamped token, cause token_unverifiable) whose range "
+            "also holds a null-token anchor's leaf records anchor_unstamped, the cause that stays an incident; "
+            "the record cannot show the other cause, so the run's tests hold this precedence (DEC-787 item 8)",
+            unfinished,
+            [change(f"{R0}.incomplete", UNSTAMPED)],
         ),
     ]
 
@@ -521,6 +574,7 @@ ORACLE_CHECKS = (
     "drafts.outcome",
     "drafts.count",
     "drafts.start",
+    "drafts.cause",
     "invalid_drafts",
     "valid_drafts",
 )
@@ -575,6 +629,11 @@ def check_section(section: dict) -> list[str]:
             expected = {"genesis": set(), "manifest": {"manifest_hash"}, "anchor": {"anchor_event_id"}}[start["kind"]]
             entry = {"genesis": r["from_seq"] == 1, "manifest": True, "anchor": r["from_seq"] > 1}[start["kind"]]
             unproven = start["kind"] == "anchor" and range_outcome(r) == "pass"
+            unfinished = r["incomplete"]
+            if unfinished is not None and (
+                set(unfinished) != {"check", "cause"} or unfinished["cause"] not in ("token_unverifiable", "anchor_unstamped")
+            ):
+                problems.append(found("drafts.cause", f"{name}: {r['stream_id']} incomplete {unfinished}"))
             if named != expected or not entry or unproven:
                 problems.append(found("drafts.start", f"{name}: {r['stream_id']} start {start} at {r['from_seq']}"))
     for case in section["invalid_drafts"]:
@@ -639,6 +698,9 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
     def short_count(s):
         base_range(s, "run_passed", 1)["checked"] = 18
 
+    def unknown_cause(s):
+        base_range(s, "run_incomplete")["incomplete"]["cause"] = "anchor_missing"
+
     def anchor_at_genesis(s):
         r = base_range(s, "run_passed")
         r["start"] = dict(ANCHOR_START)
@@ -650,6 +712,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         ("an incomplete run is reported as passed", "drafts.outcome", mutated(incomplete_as_pass)),
         ("a passed range is short of its end", "drafts.count", mutated(short_count)),
         ("an anchor start at seq 1 passes", "drafts.start", mutated(anchor_at_genesis)),
+        ("an incomplete check names an unknown cause", "drafts.cause", mutated(unknown_cause)),
         (
             "an invalid draft's expectation differs",
             "invalid_drafts",
