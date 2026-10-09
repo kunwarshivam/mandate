@@ -9,11 +9,21 @@
 
 use std::collections::BTreeMap;
 
-use mandate_domain::{AssetClass, CapabilityProfile, MarketSession, QuantityForm, TimeInForce};
+use mandate_domain::{
+    AssetClass, CapabilityProfile, MarketSession, OrderType, QuantityForm, TimeInForce,
+};
+use mandate_num::Qty;
 use mandate_time::UtcNanos;
 
 use crate::BuilderError;
-use crate::builder::{AccountSnapshot, BuilderMandate, Market, ModelOutput, Proposal, RiskContext};
+use crate::builder::{
+    AccountSnapshot, Action, BuilderMandate, Market, ModelOutput, Proposal, RiskContext, propose,
+};
+
+/// The quantity forms an opening may take, in the order they are preferred: fractional first, so a
+/// profile that offers it sizes on the market's own grid as [`propose`] does (LT-14), then whole
+/// shares. Never notional: the builder sizes a quantity (DEC-854 item 1).
+const OPENING_FORMS: [QuantityForm; 2] = [QuantityForm::Fractional, QuantityForm::Whole];
 
 /// Where an opening goes: the connection's profile, and the time in force the caller sends the
 /// opening with (the builder does not choose it; DEC-854 item 2).
@@ -36,8 +46,19 @@ pub fn opening_form(
     session: MarketSession,
     time_in_force: TimeInForce,
 ) -> Result<QuantityForm, BuilderError> {
-    let _ = (profile, asset_class, session, time_in_force);
-    Err(BuilderError::Unimplemented)
+    let outside_the_policy_session =
+        asset_class == AssetClass::UsEquity && session != MarketSession::Regular;
+    if outside_the_policy_session {
+        return Err(BuilderError::NoOpeningForm);
+    }
+    OPENING_FORMS
+        .into_iter()
+        .find(|&form| {
+            profile
+                .cell(asset_class, session, OrderType::Limit, form)
+                .is_ok_and(|cell| cell.times_in_force.contains(&time_in_force))
+        })
+        .ok_or(BuilderError::NoOpeningForm)
 }
 
 /// [`crate::propose`] at the venue: a buy is sized in the quantity form [`opening_form`] gives,
@@ -54,8 +75,27 @@ pub fn propose_on(
     outputs: &[ModelOutput],
     now: UtcNanos,
 ) -> Result<Proposal, BuilderError> {
-    let _ = (venue, mandate, account, market, risk, outputs, now);
-    Err(BuilderError::Unimplemented)
+    let form = match opening_form(
+        venue.profile,
+        market.asset_class,
+        market.session,
+        venue.time_in_force,
+    ) {
+        Ok(form) => form,
+        Err(BuilderError::NoOpeningForm) => {
+            let proposal = propose(mandate, account, market, risk, outputs, now)?;
+            return match proposal.action {
+                Action::Buy { .. } => Err(BuilderError::NoOpeningForm),
+                Action::Hold { .. } | Action::Sell { .. } => Ok(proposal),
+            };
+        }
+        Err(other) => return Err(other),
+    };
+    let mut sized = market.clone();
+    if form == QuantityForm::Whole {
+        sized.increment = sized.increment.max(Qty::parse("1")?);
+    }
+    propose(mandate, account, &sized, risk, outputs, now)
 }
 
 /// Deployment's check that the profile can meet the opening policy: every asset class the mandate
@@ -68,6 +108,15 @@ pub fn deployable(
     profile: &CapabilityProfile,
     openings: &BTreeMap<AssetClass, TimeInForce>,
 ) -> Result<(), BuilderError> {
-    let _ = (profile, openings);
-    Err(BuilderError::Unimplemented)
+    if openings.is_empty() {
+        return Err(BuilderError::NoOpeningForm);
+    }
+    for (&asset_class, &time_in_force) in openings {
+        let opening_session = match asset_class {
+            AssetClass::UsEquity => MarketSession::Regular,
+            AssetClass::Crypto => MarketSession::Crypto,
+        };
+        opening_form(profile, asset_class, opening_session, time_in_force)?;
+    }
+    Ok(())
 }
