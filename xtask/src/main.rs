@@ -8297,6 +8297,10 @@ jq -r "$filter" "$src"
     /// run time. Where a word is read as a command is pinned by
     /// [`commands_are_read_fail_closed_where_a_word_may_execute`], arrays by
     /// [`array_expansions_are_read_through_their_definitions`] (X1 tests correction 5).
+    ///
+    /// The backstop's match ignores case, so a bare `LIVE` or `Live` word is refused in a command
+    /// without `cargo`, and an empty feature value (`--features ""`, `--features=` with nothing
+    /// after it) is no complete literal, so it is refused (X1 tests correction 6, #923 review).
     #[test]
     #[ignore = "pending E7-26"]
     fn the_backstop_and_the_feature_value_rules_refuse_ci_bypasses() -> Result<()> {
@@ -8484,6 +8488,8 @@ jq -r "$filter" "$src"
             "cargo run -qFlive",
             "cargo run -vFlive",
             "cargo build -p the-runner --features LIVE",
+            "cargo build --features \"\"",
+            "cargo build --features=",
             "cargo check -p the-runner --features live && make build FEATURES=live",
             "cargo check -p the-runner --features live; c=cargo; $c run -Flive",
         ];
@@ -8497,6 +8503,8 @@ jq -r "$filter" "$src"
             "l\\ive",
             "--features=li\"ve\"",
             "--features $(echo live)",
+            "echo LIVE",
+            "echo Live",
         ];
         let refused_through_a_command_word_that_may_be_cargo = [
             "c=cargo; $c build --features live",
@@ -8713,6 +8721,10 @@ jq -r "$filter" "$src"
     /// alias make that command executing, so its words are re-read; an executing `awk` or `sed`
     /// program builds a command no static reading can follow, so it is refused outright (round
     /// eleven).
+    ///
+    /// The pins of `refused_only_by_reading_fail_closed` hold no `cargo` token, no `live` and no
+    /// feature flag, so only this reading refuses them, never the backstop or the cargo-word rule
+    /// (X1 tests correction 7, step 3b's planted bugs).
     #[test]
     #[ignore = "pending E7-26"]
     fn commands_are_read_fail_closed_where_a_word_may_execute() -> Result<()> {
@@ -8737,7 +8749,24 @@ jq -r "$filter" "$src"
             "make build FEATURES=$A$B",
             "$C build -F \"$A$B\"",
         ];
-        for line in refused_through_an_executing_command_at_line_two {
+        let refused_only_by_reading_fail_closed = [
+            "awk 'BEGIN{system(c)}' c=\"$RUN\"",
+            "echo \"$X\" | sed e",
+            "sed 's/^/x/e' \"$F\"",
+            "sh <(echo \"$C $A\")",
+            "\"$(printf %s \"$C $A\")\" x",
+            "while $C \"$A\"; do :; done",
+            "until $C \"$A\"; do :; done",
+            "! $C \"$A\"",
+            "time $C \"$A\"",
+            "for i in 1; do $C \"$A\"; done",
+            "echo \"$C $A\" | xargs sh",
+            "echo \"$C $A\" | env sh",
+        ];
+        for line in refused_through_an_executing_command_at_line_two
+            .iter()
+            .chain(&refused_only_by_reading_fail_closed)
+        {
             let files = [ci_file(
                 ".github/scripts/build.sh",
                 &format!("set -e\n{line}\n"),

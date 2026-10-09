@@ -70,6 +70,16 @@ pub enum McpError {
     ContractMissingTool,
     #[error("the server's tool contract differs from the pinned one")]
     ContractDrift,
+    #[error("an authorization host or endpoint is not on the pinned authorization hosts")]
+    AuthHostNotPinned,
+    #[error("the protected-resource metadata names another resource")]
+    ResourceMismatch,
+    #[error("the authorization server metadata names another issuer")]
+    IssuerMismatch,
+    #[error("the authorization server does not offer PKCE with S256")]
+    PkceUnsupported,
+    #[error("the authorization server offers no client registration")]
+    RegistrationUnavailable,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -99,6 +109,11 @@ impl McpError {
             Self::FundMovementTool => "fund_movement_tool",
             Self::ContractMissingTool => "contract_missing_tool",
             Self::ContractDrift => "contract_drift",
+            Self::AuthHostNotPinned => "auth_host_not_pinned",
+            Self::ResourceMismatch => "resource_mismatch",
+            Self::IssuerMismatch => "issuer_mismatch",
+            Self::PkceUnsupported => "pkce_unsupported",
+            Self::RegistrationUnavailable => "registration_unavailable",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }

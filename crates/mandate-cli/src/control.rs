@@ -598,27 +598,40 @@ pub fn backoff(retry: u32, event_id: &str) -> Result<Duration, ControlError> {
 /// overflows.
 const BACKOFF_DOUBLINGS: u32 = 16;
 
-/// One attempt at appending `bytes`, the draft of `event_id`: its stored `seq` once the journal
-/// holds it, or `None` for an answer that is retried.
+/// What one attempt at an append found.
+enum Attempted {
+    /// The journal holds the draft, at this `seq`.
+    Stored(u64),
+    /// The stream's head was not the one the append expected.
+    Moved,
+    /// A fence, a lost answer, or an unavailable journal: the same append is tried again.
+    Retry,
+}
+
+/// One attempt at appending `bytes`, the draft of `event_id`, at `pinned` when the caller decided
+/// at that head, or at the head read now.
 fn attempt(
     journal: &mut dyn ControlJournal,
     stream: &StreamId,
-    event_id: &str,
-    bytes: &[u8],
+    (event_id, bytes): (&str, &[u8]),
+    pinned: Option<u64>,
     now: Now,
-) -> Result<Option<u64>, ControlError> {
+) -> Result<Attempted, ControlError> {
     let epoch = journal.take_ownership(stream)?;
-    let head = journal.head(stream)?.seq;
+    let head = match pinned {
+        Some(head) => head,
+        None => journal.head(stream)?.seq,
+    };
     match journal.append(stream, head, epoch, now.at, &[bytes])? {
         AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows) => rows
             .iter()
             .find(|row| row.event_id == event_id)
-            .map(|row| Some(row.seq))
+            .map(|row| Attempted::Stored(row.seq))
             .ok_or_else(|| ControlError::Journal("the stored event is missing".into())),
-        AppendOutcome::Fenced { .. }
-        | AppendOutcome::HeadMismatch { .. }
-        | AppendOutcome::Ambiguous
-        | AppendOutcome::Unavailable => Ok(None),
+        AppendOutcome::HeadMismatch { .. } => Ok(Attempted::Moved),
+        AppendOutcome::Fenced { .. } | AppendOutcome::Ambiguous | AppendOutcome::Unavailable => {
+            Ok(Attempted::Retry)
+        }
         AppendOutcome::IdempotencyConflict { stored_seq } => Err(ControlError::Journal(format!(
             "another event is stored under this id at seq {stored_seq}"
         ))),
@@ -695,6 +708,8 @@ pub(crate) fn commit(
 /// schema version, the cause's event id, and the payload's members other than the step-up evidence.
 #[derive(Debug, Clone)]
 pub(crate) struct Caused {
+    /// The control stream's head the owner's command read the rows it checked at.
+    pub(crate) head: u64,
     pub(crate) event_type: &'static str,
     pub(crate) schema_version: u64,
     pub(crate) causation_id: String,
@@ -702,9 +717,11 @@ pub(crate) struct Caused {
 }
 
 /// Commits `caused` with fresh `cli_confirm` evidence whose `authenticated_at` is the instant the
-/// owner ran the command, a timestamp as journal spec §9.8 types it (DEC-802 item 8). Its event id
-/// is derived from the key, the cause and the control stream's head (DEC-290), so a retry commits
-/// nothing twice.
+/// owner ran the command, a timestamp as journal spec §9.8 types it (DEC-802 item 8), appended at
+/// `caused.head` and nowhere else: what the command checked against the stream's rows holds at the
+/// append (#907 review). Its event id is derived from the key, the cause and that head (DEC-290), so
+/// a retry commits nothing twice. `None` when the stream has moved past that head: the command
+/// reads the rows again and decides again.
 ///
 /// # Errors
 /// As [`commit`].
@@ -714,15 +731,15 @@ pub(crate) fn commit_caused(
     owner: &Owner,
     caused: Caused,
     now: Now,
-) -> Result<Submitted, ControlError> {
+) -> Result<Option<Submitted>, ControlError> {
     let Caused {
+        head,
         event_type,
         schema_version,
         causation_id,
         mut key,
     } = caused;
     let stream = control_stream(owner)?;
-    let head = journal.head(&stream)?.seq;
     let mut bound = key.clone();
     bound.push(("causation_id", text(&causation_id)));
     let event_id = derive(&stream, event_type, &object(bound)?, true, head)?;
@@ -749,14 +766,18 @@ pub(crate) fn commit_caused(
         payload,
         now,
     )?;
-    settle(
-        journal,
-        &stream,
-        event_id,
-        Repeat::FindsEarlier,
-        &bytes,
-        now,
-    )
+    let mut retries = 1..ATTEMPTS;
+    loop {
+        match attempt(journal, &stream, (&event_id, &bytes), Some(head), now)? {
+            Attempted::Stored(seq) => return Ok(Some(Submitted { event_id, seq })),
+            Attempted::Moved => return Ok(None),
+            Attempted::Retry => {}
+        }
+        let Some(retry) = retries.next() else {
+            return Err(unsettled(&event_id, Repeat::FindsEarlier));
+        };
+        journal.wait(backoff(retry, &event_id)?);
+    }
 }
 
 /// Every digest reference `value` holds, at any depth: what the envelope's `artifact_refs` lists,
@@ -820,17 +841,18 @@ fn settle(
 ) -> Result<Submitted, ControlError> {
     let mut retries = 1..ATTEMPTS;
     loop {
-        if let Some(stored) = attempt(journal, stream, &event_id, bytes, now)? {
-            return Ok(Submitted {
-                event_id,
-                seq: stored,
-            });
+        if let Attempted::Stored(seq) = attempt(journal, stream, (&event_id, bytes), None, now)? {
+            return Ok(Submitted { event_id, seq });
         }
         let Some(retry) = retries.next() else {
-            break;
+            return Err(unsettled(&event_id, repeat));
         };
         journal.wait(backoff(retry, &event_id)?);
     }
+}
+
+/// Why a command gave up after [`ATTEMPTS`], naming the event it may have committed.
+fn unsettled(event_id: &str, repeat: Repeat) -> ControlError {
     let again = match repeat {
         Repeat::FindsEarlier => {
             "if nothing else has been committed since, running it again finds it rather than \
@@ -838,10 +860,10 @@ fn settle(
         }
         Repeat::AlwaysCommits => "running it again commits another",
     };
-    Err(ControlError::Journal(format!(
+    ControlError::Journal(format!(
         "the control stream did not settle after {ATTEMPTS} attempts; the command may have been \
          committed once, as event {event_id}; {again}"
-    )))
+    ))
 }
 
 #[cfg(test)]

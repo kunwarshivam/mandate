@@ -624,6 +624,15 @@ def valid_drafts() -> list[dict]:
             ],
         ),
         valid(
+            "checked_daily_with_tools_missing",
+            "rules 57 and 58: a later contract check finds an allowlisted tool absent (DEC-674)",
+            chk,
+            [
+                change("payload.occasion", "daily"),
+                change("payload.results", results("contract", contract="tools_missing")),
+            ],
+        ),
+        valid(
             "unreadable_account_without_a_reference",
             "rule 62",
             chk,
@@ -677,6 +686,12 @@ def valid_drafts() -> list[dict]:
         valid("degraded_again", "rules 59 and 60: a cause returns before the acknowledgment", st, state("degraded", "degraded", "rate_headroom")),
         valid("suspended_while_degraded", "rule 60", st, state("degraded", "suspended", "authorization_failed")),
         valid("suspended_again", "rule 60", st, state("suspended", "suspended", "lease_expired")),
+        valid(
+            "suspended_on_a_failed_check",
+            "rule 59: a later tools_missing suspends with check_failed (DEC-674)",
+            st,
+            state("active", "suspended", "check_failed"),
+        ),
         valid("suspension_cleared", "rule 59: the state stays", st, state("suspended", "suspended", "condition_cleared")),
         valid(
             "acknowledged_back_to_active",
@@ -858,6 +873,16 @@ def sequences() -> list[dict]:
             "mcp_lists_its_contract",
             "rule 68: an MCP connection's checks list check 7",
             [checked(1, "connect", *results("contract")), bound(2, None, *mcp), checked(3, "daily", *results("contract"))],
+        ),
+        sequence(
+            "mcp_later_tools_missing_suspends",
+            "rules 59, 60, and 68: a later contract check failing with tools_missing suspends with check_failed (DEC-674)",
+            [
+                checked(1, "connect", *results("contract")),
+                bound(2, None, *mcp),
+                checked(3, "daily", *results("contract", contract="tools_missing")),
+                moved(4, "active", "suspended", "check_failed"),
+            ],
         ),
         sequence(
             "state_on_an_unbound_stream",

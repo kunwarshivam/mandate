@@ -9,7 +9,8 @@
   per message, the `Mcp-Session-Id` carried, no redirect followed, bounded timeouts and answer size,
   and the injected `Monotonic` clock), `crates/mandate-mcp/src/frame.rs` (JSON-RPC 2.0 framing, and
   the answer as one JSON body or an event stream), `crates/mandate-mcp/src/error.rs` (`McpError`,
-  and `ServerText`, which has no `Display` and whose `Debug` withholds what the server sent).
+  and `ServerText`, which has no `Display` and whose `Debug` withholds what the server sent),
+  `crates/mandate-mcp/src/auth.rs` (E7-24 O1a, DEC-847: OAuth discovery on pinned hosts only).
 - **Tests:** in-crate where a loopback server is needed, since loopback is accepted only in the
   crate's own test build: `crates/mandate-mcp/src/tests/endpoint.rs`,
   `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
@@ -18,5 +19,6 @@
   `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/bounds.rs` (sessions,
   redirects, timeouts, the exit budget, and a canary in server text),
   `crates/mandate-mcp/src/tests/errors.rs`, and `crates/mandate-mcp/src/tests/contract.rs` (M2: the
-  allowlist, fund-movement refusal, and metadata canary; `drift.rs` adds the pinned hash and drift).
+  allowlist, fund-movement refusal, and metadata canary; `drift.rs` adds the pinned hash and drift),
+  and `crates/mandate-mcp/src/tests/auth.rs` (O1a: discovery's pins, identifiers and refusals).
 - **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
