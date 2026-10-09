@@ -1534,6 +1534,156 @@
       "event_id": null,
       "retryable": true,
       "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/fold_unavailable",
+      "status": 409,
+      "code": "fold_unavailable",
+      "title": "Account state unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/fold_unavailable",
+      "status": 503,
+      "code": "fold_unavailable",
+      "title": "Account state unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/fold_unavailable",
+      "status": 503,
+      "code": "fold_unavailable",
+      "title": "Account state unavailable",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/fold_unavailable",
+      "status": 503,
+      "code": "fold_unavailable",
+      "title": "Try again",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/busy",
+      "status": 503,
+      "code": "fold_unavailable",
+      "title": "Account state unavailable",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/positions_held",
+      "status": 503,
+      "code": "positions_held",
+      "title": "Positions still held",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/positions_held",
+      "status": 409,
+      "code": "positions_held",
+      "title": "Positions still held",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/positions_held",
+      "status": 409,
+      "code": "positions_held",
+      "title": "Positions still held",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/positions_held",
+      "status": 409,
+      "code": "positions_held",
+      "title": "Try again",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/busy",
+      "status": 409,
+      "code": "positions_held",
+      "title": "Positions still held",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/agents_not_stopped",
+      "status": 503,
+      "code": "agents_not_stopped",
+      "title": "Agents not stopped",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/agents_not_stopped",
+      "status": 409,
+      "code": "agents_not_stopped",
+      "title": "Agents not stopped",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/agents_not_stopped",
+      "status": 409,
+      "code": "agents_not_stopped",
+      "title": "Agents not stopped",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/agents_not_stopped",
+      "status": 409,
+      "code": "agents_not_stopped",
+      "title": "Try again",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/busy",
+      "status": 409,
+      "code": "agents_not_stopped",
+      "title": "Agents not stopped",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
     }
   ],
   "Actor": [
