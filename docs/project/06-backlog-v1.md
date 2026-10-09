@@ -706,6 +706,43 @@ after U-A1 to U-A5 are recorded.
   `max_order_usd` exceeds §5.2's 200,000 USD is refused; every existing equity test still passes;
   and no crypto rule is relaxed (DEC-450 item 3). A gate check of the 200,000 USD cap is a later
   row.
+- **E7-23 (Must, M6, the first live trade, DEC-529; SC)** As the founder, I want each broker to
+  declare what it supports as a capability profile, so that shared code never branches on a broker
+  and a new broker is one profile, not new rules ([DEC-531](decisions/DEC-531.md),
+  [DEC-630](decisions/DEC-630.md), [ADR-0004](../adr/0004-broker-capability-profiles.md), trading spec §5.2; the
+  [first live trade](tasks/first-live-trade.md) rows SP1, B1, B2a, B2b, B3). *Accepted when:*
+  `CapabilityProfile` and its canonical hash live in `mandate-domain`; `BrokerConnector::profile`
+  hands each connector's profile to the executor; Alpaca declares trading spec §5.2's table as its
+  profile with no Alpaca outcome changed (LT-14); protection, reconciliation and the builder's
+  quantity form read the profile, and the executor's `asset_class == Crypto` protection branch is
+  gone (LT-2); policy and profile intersect, never override (LT-3); and a property test over
+  generated profiles checks every order sent is one the profile allows.
+- **E7-24 (Must, M6, the first live trade, DEC-529; SC)** As the founder, I want to log in to
+  Robinhood with OAuth for one run, holding the token only in the connector process's memory, so
+  that no credential reaches a disk, a log, the journal or an agent (CN-1, `AGENTS.md` rule 7; the
+  [first live trade](tasks/first-live-trade.md) rows O1a, O1b). *Accepted when:* the PKCE login
+  runs in the founder's browser through a loopback redirect; the token is a `SecretString` in the
+  connector process only and is gone at exit (a restart logs out); a canary-token test scans every
+  output, error and artifact (LT-9); expiry mid-run leaves the deployment `closing_only` and the
+  resting stop untouched; and no test or CI job reaches a Robinhood host (LT-1).
+- **E7-25 (Must, M6, the first live trade, DEC-124; SC)** As the founder, I want a simulated
+  Robinhood server that speaks the published contract over loopback MCP with Robinhood's rules, so
+  that every Robinhood test and the founder's rehearsal run without touching Robinhood (DEC-124's
+  paper stage; the [first live trade](tasks/first-live-trade.md) rows S1, S2, R0). *Accepted
+  when:* `mandate-rh-sim` is a `tool` crate no production crate depends on; it serves the nine
+  allowlisted tools with the contract's shapes, its order states and its rules (no query by
+  `ref_id`, one GTC stop-limit as protection); its pure core carries the property tests
+  of S1's tests PRs; and the rehearsal (R0) runs the live build against it on a journal separate from
+  the live one.
+- **E7-26 (Must, M6, the first live trade, DEC-529 item 3; SC)** As the founder, I want one
+  deployment runner for any environment and broker, with live hosts only behind a `live` feature
+  that only the runner may enable, so that no other build can reach a live broker (ES-23; the
+  [first live trade](tasks/first-live-trade.md) rows X1, G1a, G1b). *Accepted when:*
+  `cargo xtask live-feature` lets only the runner declare a `live` feature, and no CI or release
+  build enables it except one compile-only job (ES-23 as DEC-529 item 3 narrows it), so the
+  default build contains no Robinhood host (LT-1); the runner built from the
+  paper path's E1a takes any broker connector and environment through `ProductionCycle::run`
+  (LT-4); and a restart after a run sends no second order (LT-6).
 - **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
   want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
   so that a token that may reach both environments is on the record before it is used

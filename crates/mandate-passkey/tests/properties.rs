@@ -71,7 +71,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
-    #[ignore = "pending E9-1"]
     fn a_signed_response_for_the_issued_challenge_verifies(
         alg in alg(),
         bytes in prop::collection::vec(any::<u8>(), 16..64),
@@ -84,7 +83,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E9-1"]
     fn any_change_to_a_signed_response_is_refused(
         alg in alg(),
         bytes in prop::collection::vec(any::<u8>(), 16..64),
@@ -110,7 +108,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E9-1"]
     fn the_counter_is_accepted_exactly_when_it_rises_or_is_never_kept(
         stored in prop_oneof![Just(0u32), 0u32..8, any::<u32>()],
         presented in prop_oneof![Just(0u32), 0u32..8, any::<u32>()],
