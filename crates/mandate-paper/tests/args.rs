@@ -27,7 +27,6 @@ fn usage(text: &str, why: &str) {
 
 /// Every flag reaches its own field, and only `--place-one-order` asks to place (FT-1).
 #[test]
-#[ignore = "pending E7-19"]
 fn each_flag_reaches_its_field() {
     let placing = parsed(&format!(
         "{IDS} --journal d --confirm-paper --place-one-order"
@@ -49,7 +48,6 @@ fn each_flag_reaches_its_field() {
 /// The paper acknowledgement is required, a placement needs its journal (DEC-157 item 6), every
 /// id, path and value is required, and no argument names a mandate, configuration, output or host.
 #[test]
-#[ignore = "pending E7-19"]
 fn anything_else_is_a_usage_error() {
     usage(IDS, "--confirm-paper is required");
     let placing = format!("{IDS} --confirm-paper --place-one-order");

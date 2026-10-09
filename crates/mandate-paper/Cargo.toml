@@ -10,17 +10,18 @@ description = "The paper adapter: the confirmed deployment, the GET-only preflig
 workspace = true
 
 [dependencies]
-mandate-alpaca.workspace = true
-mandate-modelhost.workspace = true
-mandate-shell.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
 mandate-accounting.workspace = true
+mandate-alpaca.workspace = true
 mandate-artifacts-fs.workspace = true
 mandate-canon.workspace = true
 mandate-journal.workspace = true
-mandate-marketdata.workspace = true
+mandate-modelhost.workspace = true
 mandate-num.workspace = true
+mandate-runtime.workspace = true
+mandate-shell.workspace = true
 mandate-spec.workspace = true
 mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+mandate-marketdata.workspace = true
