@@ -251,7 +251,7 @@ item above (C-3, C-9) are not repeated.
       restriction, keeping its step-up. Safety lane. (C-24)
 - [ ] **Sparklines without the false limit line.** When the limit is below the line's range, the
       pale sliver alone, with no dashed rule. (C-11)
-- [ ] **The account chart's blank paint**, once section B's "dark-mode paint": blank in light and
+- [x] **The account chart's blank paint**, once section B's "dark-mode paint": blank in light and
       dark alike, a capture taken after load but before the chart drew, not the mode. (C-22)
       - Dark drew twice (#1032): hydration read the chart mode from the server's default, so a
         dark Home drew a light chart, then tore it down for a dark one, later than light. Charts
@@ -263,6 +263,7 @@ item above (C-3, C-9) are not repeated.
         none stayed blank; at `networkidle` plus 900ms, the shots timing, 5 had no canvas yet,
         all at 1440px and in both themes. `npm run shots` now waits for every chart on screen to
         show its line, and the spec covers the paused and reconciliation Homes.
+        ([#1106](https://github.com/kunwarshivam/mandate/pull/1106))
 - [ ] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
       and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6)
 - [ ] **Positions on a phone as two-line rows**, so the value and the P&L are on screen. (C-14)
