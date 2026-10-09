@@ -16,8 +16,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `executor_start` or `daily`) whose `contract` result failed with `tools_missing` moves the
   connection to `suspended`, journaled as `ConnectionStateChanged` with reason `check_failed`, as
   [connections spec §8.1](connections.md#81-at-connect-at-every-executor-start-and-daily) check 1
-  says for an allowlisted tool that is absent; only `contract_drift` degrades. No rule changes: rule
-  59 already admits `check_failed` into `suspended`. The vectors gain the valid drafts
+  says for an allowlisted tool that is absent; `contract_drift` with no other failure degrades. No
+  rule changes: rule 59 already admits `check_failed` into `suspended`. The vectors gain the valid drafts
   `checked_daily_with_tools_missing` and `suspended_on_a_failed_check` and the sequence
   `mcp_later_tools_missing_suspends`, and stay version 3.
 - **v0.23 ([DEC-672](../project/decisions/DEC-672.md)):** §9.11 closes the hold on new openings
@@ -1840,8 +1840,11 @@ connection `active` from then. `connecting` leaves no record but a `ConnectionRe
 The first three reasons are connections spec §8.2's degrading signals; the next five are §9.1's
 `suspended` causes and §9.2's vault outage. A later `contract` check (occasion `executor_start` or
 `daily`) that fails with `tools_missing` is connections spec §8.1 check 1's, so it suspends: it is
-journaled with `check_failed` into `suspended`, never with `contract_drift`, and only a
-`contract_drift` failure degrades ([DEC-674](../project/decisions/DEC-674.md)).
+journaled with `check_failed` into `suspended`, never with `contract_drift`. A failed `contract`
+check with reason `contract_drift` and no other failure degrades, and a failed `scope`,
+`environment`, or `account` check suspends whatever else failed with it. A connect-time occasion
+(`connect`, `reconnect`, `reauthorize`) moves no state: its failure is a refusal
+([DEC-674](../project/decisions/DEC-674.md)).
 `condition_cleared` records that the cause has cleared (good probes, a released connector version
 for drift, or, out of `suspended`, a replaced credential the control services accepted) while the
 state stays where it is. `acknowledged` returns the
