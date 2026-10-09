@@ -64,6 +64,23 @@ fn anything_else_is_a_usage_error() {
         let empty = format!("{others} {flag} --confirm-paper");
         usage(&empty, &format!("{flag} needs a value"));
     }
+    usage(
+        &format!("{IDS} --confirm-paper --journal"),
+        "--journal needs a value",
+    );
+    usage(
+        &format!("{IDS} --agent b --confirm-paper"),
+        "a flag given twice",
+    );
+    let secret = format!("{IDS} --journal postgres://paper:hunter2@db/j --place-one-order");
+    let refused = parsed(&secret)
+        .map(|_| ())
+        .map_err(|error| error.to_string());
+    let shown = format!("{refused:?}");
+    assert!(
+        shown.starts_with("Err(") && !shown.contains("hunter2"),
+        "{shown}"
+    );
     for extra in [
         "--mandate m",
         "--config-dir c",
@@ -73,7 +90,7 @@ fn anything_else_is_a_usage_error() {
     ] {
         usage(
             &format!("{IDS} --confirm-paper {extra}"),
-            "{extra} is no input",
+            &format!("{extra} is no input"),
         );
     }
 }

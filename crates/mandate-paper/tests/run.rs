@@ -15,7 +15,7 @@ use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records,
 use mandate_modelhost::Signal;
 use mandate_paper::{Args, Outcome, PaperError, Ports, run};
 use mandate_shell::ShellError;
-use mandate_shell::control::{ControlRecord, DeploymentRefusal};
+use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 use std::cell::RefCell;
 use std::fs;
@@ -329,37 +329,72 @@ fn a_stop_names_what_stopped_the_run() {
     assert_eq!(store, "the artifact store could not be opened or written");
 }
 
-/// FT-3 and FT-10 (DEC-505 item 1, TI-5): an agent never deployed, one stopped after its
-/// deployment, a document missing from the store, and a configured host each stop the run before
-/// any credential is read, so nothing can be sent.
+/// Appends a control-stream record after the others.
+fn push(records: &mut Vec<ControlRecord>, event_type: &str, payload: &str) {
+    let seq = u64::try_from(records.len()).unwrap() + 1;
+    let (event_type, payload) = (event_type.to_owned(), json(payload));
+    records.push(ControlRecord {
+        seq,
+        event_type,
+        payload,
+    });
+}
+
+/// FT-3, FT-10 (DEC-505 item 1, TI-5, rule 7): no credential is read before any of phase 1's or the
+/// registrations' refusals: agent undeployed or stopped; document missing, corrupt or live; version
+/// unconfirmed; a kind unregistered; a fee schedule not yet in effect; or a configured host.
 #[test]
 #[ignore = "pending E7-19"]
 fn every_refusal_before_the_credentials_reads_none() {
-    let host = [(
-        "ALPACA_API_BASE".to_owned(),
-        "https://api.alpaca.markets".to_owned(),
-    )];
-    for case in ["undeployed", "stopped", "missing", "host"] {
+    let host =
+        [("ALPACA_API_BASE", "https://api.alpaca.markets")].map(|(k, v)| (k.into(), v.into()));
+    let cases = "undeployed stopped missing corrupt live unconfirmed unregistered fee_date host";
+    for case in cases.split(' ') {
         let mut scene = Scene::new(case, 231..256);
+        let mut store = FsArtifactStore::open(&scene.args.store).unwrap();
         let records = &mut scene.ports.records;
-        let stopped = json(r#"{"agent_id":"agent_spy"}"#);
-        let event_type = "AgentStopped".to_owned();
+        let deployed = records.iter().find(|r| r.event_type == "AgentDeployed");
+        let version = deployed.and_then(|r| r.payload.get("mandate_version")?.as_str());
+        let version = ArtifactRef::parse(version.unwrap()).unwrap();
+        let live = spy_mandate(&model()).replace(r#""paper""#, r#""live""#);
+        let live = store.put_artifact(&to_canonical(&json(&live))).unwrap();
+        let deploy = format!(
+            r#"{{"agent_id":"agent_spy","mandate_version":"{live}","record_ref":"sha256:{}"}}"#,
+            "6".repeat(64)
+        );
+        let fee = store.put_artifact(FEE.replace("2026-01-01", "2026-12-01").as_bytes());
+        let fee = format!(
+            r#"{{"admits_instruments":null,"content_hash":"{}","kind":"fee_config","model_id":null,"model_version":null,"params":[]}}"#,
+            fee.unwrap()
+        );
+        let rule_set = json(r#""rule_set""#);
         match case {
             "undeployed" => records.retain(|r| r.event_type != "AgentDeployed"),
-            "stopped" => records.push(ControlRecord {
-                seq: 99,
-                event_type,
-                payload: stopped,
-            }),
+            "stopped" => push(records, "AgentStopped", r#"{"agent_id":"agent_spy"}"#),
             "missing" => scene.args.store = scene.root.join("empty"),
+            "corrupt" => fs::write(store.object_path(&version), b"{}").unwrap(),
+            "live" => push(records, "AgentDeployed", &deploy),
+            "unconfirmed" => records.retain(|r| r.event_type != "MandateConfirmed"),
+            "unregistered" => records.retain(|r| r.payload.get("kind") != Some(&rule_set)),
+            "fee_date" => push(records, "ConfigSnapshotRegistered", &fee),
             _ => {}
         }
         let vars: &[(String, String)] = if case == "host" { &host } else { &[] };
         let outcome = run(&scene.args, vars, &mut scene.ports);
         let refused = match &outcome {
-            Err(PaperError::Deployment(DeploymentRefusal::NotDeployed)) => "undeployed",
-            Err(PaperError::Deployment(DeploymentRefusal::Stopped)) => "stopped",
-            Err(PaperError::Deployment(DeploymentRefusal::DocumentMissing)) => "missing",
+            Err(PaperError::Deployment(refusal)) => match refusal {
+                DeploymentRefusal::NotDeployed => "undeployed",
+                DeploymentRefusal::Stopped => "stopped",
+                DeploymentRefusal::DocumentMissing => "missing",
+                DeploymentRefusal::DocumentCorrupt => "corrupt",
+                DeploymentRefusal::Live => "live",
+                DeploymentRefusal::Violations(_) => "unconfirmed",
+                _ => "another deployment refusal",
+            },
+            Err(PaperError::Configuration(ConfigRefusal::Unregistered { kind: "rule_set" })) => {
+                "unregistered"
+            }
+            Err(PaperError::Configuration(ConfigRefusal::FeeNotYetEffective)) => "fee_date",
             Err(PaperError::Shell(ShellError::NonPaperHost { .. })) => "host",
             _ => "something else",
         };
