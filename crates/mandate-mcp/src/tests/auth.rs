@@ -301,6 +301,24 @@ async fn an_unquoted_challenge_url_falls_back_to_the_well_known_path() {
     assert_eq!(first_lines(&server)[1], wanted);
 }
 
+/// A parameter starts at the start of the challenge or right after a comma, with no space needed
+/// (RFC 9110 §11.2), so `resource_metadata` is read in both places.
+#[tokio::test]
+async fn the_challenge_url_is_read_at_the_start_and_right_after_a_comma() {
+    let cases = [
+        r#"Bearer realm="a",resource_metadata="@BASE@/meta/rs""#,
+        r#"resource_metadata="@BASE@/meta/rs""#,
+    ];
+    for value in cases {
+        let mut probe = challenge(None);
+        probe.headers.push(("www-authenticate", value.to_owned()));
+        let prm = resource("@BASE@/mcp", &["@BASE@/as"]);
+        let (found, server) = discover(vec![probe, prm, doc(&metadata())], PINS).await;
+        assert_eq!(found.unwrap().issuer, at(&server, "/as"), "{value}");
+        assert_eq!(first_lines(&server)[1], "get /meta/rs http/1.1", "{value}");
+    }
+}
+
 /// RFC 8414 §2: the issuer identifier has no query or fragment components.
 #[tokio::test]
 #[ignore = "pending E7-24"]
