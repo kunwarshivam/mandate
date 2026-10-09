@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/approval-response-accepted.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "response_id",
+    "phase"
+  ],
+  "properties": {
+    "response_id": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "phase": {
+      "const": "recorded"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    },
+    "dropped": {
+      "description": "The JSON pointers of request members an API-7 operation dropped rather than refused (DEC-682 item 27). Absent when nothing was dropped. Never the root `\"\"`: only pause and hold read a body that is not JSON.",
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)+$"
+      }
+    }
+  },
+  "description": "The 202 of an approval response (\u00a75.2): recorded, never approved (API-12).",
+  "unevaluatedProperties": false
+}

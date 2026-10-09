@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/confirm-accepted.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "command_id",
+    "phase",
+    "classification",
+    "applies"
+  ],
+  "properties": {
+    "command_id": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "phase": {
+      "const": "recorded"
+    },
+    "classification": {
+      "enum": [
+        "risk_increasing",
+        "risk_reducing",
+        "neutral"
+      ]
+    },
+    "applies": {
+      "enum": [
+        "now",
+        "next_safe_point"
+      ]
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "description": "The 202 of a confirm (\u00a75.1).",
+  "unevaluatedProperties": false
+}

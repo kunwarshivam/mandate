@@ -29,8 +29,15 @@
 /crates/mandate-artifacts-fs/ @kunwarshivam
 /crates/mandate-domain/     @kunwarshivam
 /crates/mandate-approval/   @kunwarshivam
+/crates/mandate-authn/      @kunwarshivam
+/crates/mandate-identity/   @kunwarshivam
+/crates/mandate-identity-seal/ @kunwarshivam
+/crates/mandate-notify/     @kunwarshivam
+/crates/mandate-identity-testkit/ @kunwarshivam
+/crates/mandate-passkey/    @kunwarshivam
 /crates/mandate-cli/        @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
+/crates/mandate-api/        @kunwarshivam
 /crates/mandate-accounting/ @kunwarshivam
 /crates/mandate-sim/        @kunwarshivam
 /crates/mandate-risk/       @kunwarshivam
@@ -46,5 +53,8 @@
 /crates/mandate-liquidity/  @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
 /crates/mandate-mcp/        @kunwarshivam
+/crates/mandate-connections/ @kunwarshivam
+/crates/mandate-vault-local/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-modelhost/  @kunwarshivam
+/crates/mandate-webpush/    @kunwarshivam
