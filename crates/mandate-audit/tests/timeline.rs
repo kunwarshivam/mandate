@@ -1,4 +1,4 @@
-//! E12-2 slices T1a and T1b: the per-agent timeline's core read (workspace API §4.8.1 "Timeline",
+//! E12-2 slices T1a to T1c: the per-agent timeline's core read (workspace API §4.8.1 "Timeline",
 //! AU-1, AU-5, DEC-760, DEC-764, DEC-777): the merge, the filters that still consume, `limit`, the
 //! 10,000-event cap, paging under appends, and the one `NotFound`. Each expectation is written from
 //! the fixture's own appends, never from the code under test.
@@ -12,7 +12,7 @@ use common::{ctl, workspaces};
 use mandate_audit::{AuditError, MAX_CONSUMED_PER_STREAM, MemoryRead, StreamCursor, Timeline};
 use mandate_audit::{TimelineQuery, TimelineRead};
 use mandate_canon::Digest;
-use mandate_journal::StreamId;
+use mandate_journal::{AppendOutcome, InvalidReason, StreamId};
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
 use proptest::test_runner::{TestCaseError, TestRunner};
@@ -799,4 +799,53 @@ fn order_links_are_version_two_and_read_every_timeline_stream() {
     let fill = j.one(&s1, 4, ("FillApplied", 1, None, &filled("O5")));
     let expected = [vec![j.opened(&stream(None))], placed, vec![fill]].concat();
     assert_eq!(served(&j), (expected, j.heads()));
+}
+
+/// DEC-779's tripwire. DEC-764 item 2 makes `AccountRestrictionChanged` and a connection- or
+/// workspace-scope `KillSwitchActivated` on an account stream the agent's, but the journal registers
+/// neither payload at schema version 1 or 2, so `append` refuses both and the timeline leaves that
+/// clause out. The day either becomes recordable this test fails, and DEC-779 lapses: that change's
+/// tests PR adds those timeline cases, and the clause follows them (DEC-77).
+#[test]
+fn the_account_wide_records_the_timeline_omits_are_not_yet_recordable() {
+    let mut j = Journal::new();
+    let to = stream(Some("ACCT1"));
+    let a = text(WS_A);
+    let offers = [
+        (
+            "AccountRestrictionChanged",
+            r#"{"restriction":"closing_only","reason":"broker"}"#.to_owned(),
+        ),
+        (
+            "KillSwitchActivated",
+            r#"{"scope":"connection","subject":"ACCT1","reason":"owner"}"#.to_owned(),
+        ),
+        (
+            "KillSwitchActivated",
+            format!(r#"{{"scope":"workspace","subject":"{a}","reason":"owner"}}"#),
+        ),
+        (
+            "KillSwitchActivated",
+            format!(r#"{{"scope":"agent","subject":"{ME}","reason":"owner"}}"#),
+        ),
+    ];
+    for ((typed, payload), version) in offers.iter().flat_map(|o| [(o, 1), (o, 2)]) {
+        j.next += 1;
+        let id = event_id(j.next);
+        let body = format!(
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"{id}","stream_id":"{to}",
+            "event_type":"{typed}","schema_version":{version},"event_time":"{T}","clock_source":"local",
+            "causation_id":null,"correlation_id":null,"actor":{},"config_refs":{{}},
+            "payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#,
+            actor()
+        );
+        let outcome = j.fx.try_append_at(&to, T, &[(id, body.as_bytes())]);
+        let refused = match &outcome {
+            AppendOutcome::Invalid { error, .. } => {
+                error.reason == InvalidReason::UnknownSchema && error.path == "payload"
+            }
+            _ => false,
+        };
+        assert!(refused, "{typed} v{version} {payload}: {outcome:?}");
+    }
 }

@@ -5,6 +5,7 @@ import * as agentRoute from "@/app/(app)/agents/[agentId]/page";
 import * as approvalRoute from "@/app/(app)/approvals/[approvalId]/page";
 import { DECISION_KEY } from "@/components/kumo/key";
 import { AppShell } from "@/components/shell/app-shell";
+import type { Workspace } from "@/fixtures/types";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
 import { clock, price } from "@/lib/format";
 import { PURPOSE_LABEL } from "@/lib/labels";
@@ -109,9 +110,11 @@ describe("D1 dashboard", () => {
     const rail = main().querySelector<HTMLElement>("[data-layout=rail]")!;
     const region = rail.querySelector<HTMLElement>("section[aria-labelledby=rail-decisions-title]")!;
     const entries = [...region.querySelectorAll<HTMLElement>("[data-slot=timeline-entry]")];
-    expect(entries).toHaveLength(Math.min(4, ws.decisions.length));
+    const openRequest = (id: string | undefined) => !!id && approvalAt(findApproval(ws, id)!, ws.now).status === "delivered";
+    const shown = ws.decisions.filter((d) => !openRequest(d.approval_id));
+    expect(entries).toHaveLength(Math.min(4, shown.length));
     entries.forEach((entry, i) => {
-      const d = ws.decisions[i];
+      const d = shown[i];
       expect(entry).toHaveAttribute("data-verdict", d.verdict);
       expect(entry.querySelector("svg[data-slot=owl]")).not.toBeNull();
       expect(within(entry).getByRole("link")).toHaveAttribute("href", decisionHref(d.agent_id, d.event_id));
@@ -124,6 +127,62 @@ describe("D1 dashboard", () => {
     });
     expect(region.querySelector("[data-slot=decision-tally]")).toHaveTextContent(/^The latest 4 decisions: \d+ allowed(, \d+ (asked you|not allowed|held|waiting))+\.$/);
     expect(within(region).getByRole("link", { name: /All decisions/ })).toHaveAttribute("href", "/audit/decisions");
+  });
+
+  describe("a request appears once on Home (DESIGN.md, Needs you; critique C-5)", () => {
+    const ws = buildWorkspace("normal");
+    const asked = ws.decisions.find((d) => d.approval_id === APPROVAL_IDS.swingXyz)!;
+    const askedHref = decisionHref(asked.agent_id, asked.event_id);
+    const others = ws.decisions.filter((d) => d.event_id !== asked.event_id);
+    const decisionRegions = () => [...main().querySelectorAll<HTMLElement>("section[aria-labelledby$=decisions-title]")];
+    const shownHrefs = (region: HTMLElement) => within(region).getAllByRole("listitem").map((li) => within(li).getByRole("link").getAttribute("href"));
+    const closed = (status: "acted" | "expired") => (w: Workspace) => ({
+      ...w,
+      approvals: w.approvals.map((a) => (a.approval_id === APPROVAL_IDS.swingXyz ? { ...a, status } : a)),
+    });
+
+    it("shows an open request once, under Needs you, and leaves its Asked you row out of the Decisions rail", () => {
+      renderScreen("/", <DashboardScreen />);
+      expect(findApproval(ws, APPROVAL_IDS.swingXyz)?.status, "the request is open").toBe("delivered");
+      const links = within(main()).getAllByRole("link", { name: /buy 2 XYZ at/i });
+      expect(links).toHaveLength(1);
+      expect(links[0]).toHaveAttribute("href", `/approvals/${APPROVAL_IDS.swingXyz}`);
+      expect(within(main()).getByRole("region", { name: /^Needs you/ }).contains(links[0])).toBe(true);
+      const regions = decisionRegions();
+      expect(regions).toHaveLength(2);
+      const [rail, phone] = regions;
+      expect(shownHrefs(rail)).toEqual(others.slice(0, 4).map((d) => decisionHref(d.agent_id, d.event_id)));
+      expect(shownHrefs(phone)).toEqual(others.slice(0, 3).map((d) => decisionHref(d.agent_id, d.event_id)));
+      for (const r of regions) expect(r.querySelector(`a[href="${askedHref}"]`)).toBeNull();
+    });
+
+    it.each(["acted", "expired"] as const)("shows the request's decision row in the rail again once it is %s", (status) => {
+      renderWithRuntime(<AppShell>{<DashboardScreen />}</AppShell>, "normal", { workspace: closed(status) });
+      expect(within(within(main()).getByRole("region", { name: /^Needs you/ })).queryByRole("link", { name: /buy 2 XYZ at/i })).toBeNull();
+      for (const region of decisionRegions()) {
+        const row = within(region).getByRole("link", { name: "Buy 2 XYZ at $141.30" });
+        expect(row).toHaveAttribute("href", askedHref);
+        expect(row.closest("li")?.querySelector("[data-slot=verdict]")).toHaveTextContent("Asked you");
+      }
+      const [rail, phone] = decisionRegions();
+      expect(shownHrefs(rail)).toEqual(ws.decisions.slice(0, 4).map((d) => decisionHref(d.agent_id, d.event_id)));
+      expect(shownHrefs(phone)).toEqual(ws.decisions.slice(0, 3).map((d) => decisionHref(d.agent_id, d.event_id)));
+    });
+
+    it("shows the row again once the owner answers the request", () => {
+      vi.useFakeTimers();
+      try {
+        const view = renderScreen(`/approvals/${APPROVAL_IDS.swingXyz}`, <ApprovalRequestScreen approvalId={APPROVAL_IDS.swingXyz} />);
+        fireEvent.click(within(main()).getByRole("button", { name: "Approve" }));
+        act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 3));
+        setPathname("/");
+        view.rerender(<AppShell>{<DashboardScreen />}</AppShell>);
+        expect(within(within(main()).getByRole("region", { name: /^Needs you/ })).queryByRole("link", { name: /buy 2 XYZ at/i })).toBeNull();
+        for (const region of decisionRegions()) expect(region.querySelector(`a[href="${askedHref}"]`)).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("keeps news off Home: it is read on each agent's page, beside its decisions", () => {

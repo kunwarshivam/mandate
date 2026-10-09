@@ -8,10 +8,11 @@ import { AccountEquityChart } from "@/components/charts/equity-chart";
 import { ModeBadge } from "@/components/domain/mode";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { AgentOwl } from "@/components/domain/owl";
-import type { Agent, Approval, Workspace } from "@/fixtures/types";
+import type { Agent, Approval, GateDecision, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { needsYouLines } from "@/lib/attention";
 import { clock, price, quantity, zoneLabel } from "@/lib/format";
+import { verdictBadge } from "@/lib/gate-reasons";
 import { headroomLine } from "@/lib/limits";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
@@ -138,12 +139,22 @@ function PhoneAgentRow({ agent }: { agent: Agent }) {
 }
 
 /**
+ * Home's decisions leave out the one that asked for a request still open under Needs you, so a
+ * request appears once on Home (DESIGN.md, Needs you; critique C-5). Once the request is answered or
+ * skipped its row comes back; the audit and the agent's Decisions keep it throughout.
+ */
+function decisionsBesideNeedsYou(decisions: GateDecision[], open: Approval[]): GateDecision[] {
+  const openIds = new Set(open.map((a) => a.approval_id));
+  return decisions.filter((d) => !(verdictBadge(d) === "Asked you" && d.approval_id && openIds.has(d.approval_id)));
+}
+
+/**
  * The latest decisions, after the fact: what each agent set out to do and what its mandate said. Home
  * keeps them beside the money, not ahead of it, with the audit one link away.
  */
-function RecentDecisions({ ws, count, id, className }: { ws: Workspace; count: number; id: string; className?: string }) {
+function RecentDecisions({ ws, open, count, id, className }: { ws: Workspace; open: Approval[]; count: number; id: string; className?: string }) {
   const canAudit = useCan("audit.view");
-  const decisions = ws.decisions.slice(0, count);
+  const decisions = decisionsBesideNeedsYou(ws.decisions, open).slice(0, count);
   return (
     <Section title="Decisions" id={id} className={className} action={canAudit && decisions.length > 0 ? <SectionLink href="/audit/decisions">All decisions</SectionLink> : undefined}>
       {decisions.length === 0 ? (
@@ -180,7 +191,7 @@ function Dashboard() {
       <h1 className="sr-only">Dashboard</h1>
       <SideRail className="max-lg:gap-8 lg:col-start-2 lg:row-start-1">
         <NeedsYou ws={ws} open={open} />
-        <RecentDecisions ws={ws} count={DECISIONS_SHOWN} id="rail-decisions-title" className="max-lg:hidden" />
+        <RecentDecisions ws={ws} open={open} count={DECISIONS_SHOWN} id="rail-decisions-title" className="max-lg:hidden" />
       </SideRail>
 
       <div data-layout="main" className="grid min-w-0 grid-cols-1 content-start gap-(--section-gap) lg:col-start-1 lg:row-start-1">
@@ -206,7 +217,7 @@ function Dashboard() {
 
         <AssetsSection ws={ws} className="max-lg:hidden" />
 
-        <RecentDecisions ws={ws} count={DECISIONS_SHOWN_ON_PHONE} id="phone-decisions-title" className="lg:hidden" />
+        <RecentDecisions ws={ws} open={open} count={DECISIONS_SHOWN_ON_PHONE} id="phone-decisions-title" className="lg:hidden" />
       </div>
     </div>
   );
