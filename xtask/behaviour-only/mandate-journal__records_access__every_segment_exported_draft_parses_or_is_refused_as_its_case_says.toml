@@ -1,0 +1,8 @@
+file = "crates/mandate-journal/tests/records_access.rs"
+test = "every_segment_exported_draft_parses_or_is_refused_as_its_case_says"
+reason = """
+E12-3's (DEC-783, journal spec v0.27 §9.14). It checks `Draft::parse`, the journal's existing
+check, so there is no stub to stop at: until E12-3's implementation, the journal refuses
+`AnchorComputed` and `SegmentExported` as `unknown_schema`, which is the behaviour it fails on.
+E12-3's implementation deletes this file with the test's `#[ignore]` line.
+"""
