@@ -1092,7 +1092,7 @@ remains, and step-up still works through locally verified passkeys. New sign-ins
 ### 12.1 Events (journal §9, control stream)
 
 These are journal §9's control-stream identity records (DEC-437 item 9). The membership records are
-closed in [journal §9.8](journal.md#98-membership-records-dec-437-item-9-dec-648), which adds
+closed in [journal §9.12](journal.md#912-membership-records-dec-437-item-9-dec-648), which adds
 `MemberInvitationRevoked` (§5.1's `invited` to `revoked`), the accepted `invitation` on
 `MemberActivated`, the cool-off end and restored roles on `MemberReactivated`, `invited_at` on
 `MemberInvited`, the effective `independent_approval_required` on each grant (so §8.3's cool-off is

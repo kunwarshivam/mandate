@@ -1,11 +1,11 @@
-"""Journal spec v0.19 §9.8's reference vectors (DEC-437 item 9, DEC-648): the control stream's seven
+"""Journal spec v0.25 §9.12's reference vectors (DEC-437 item 9, DEC-648): the control stream's seven
 membership records.
 
-The schemas and rules 54 to 61 live in `control.py`, beside §9.2's to §9.7's, so one validator judges
+The schemas and rules 96 to 106 live in `control.py`, beside §9.2's to §9.7's, so one validator judges
 every closed schema. This module builds the `membership` section: a base draft of each record, an
 invalid draft for every member type and rule, and valid drafts for the cases a rule might be misread
 to refuse. It checks the section with an oracle of its own: every cool-off a valid draft states is
-recomputed with calendar arithmetic, independently of rule 61's nanosecond comparison. Every seeded
+recomputed with calendar arithmetic, independently of rule 103's nanosecond comparison. Every seeded
 bug is shown caught.
 """
 
@@ -29,7 +29,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.19 §9.8 (DEC-437 item 9, DEC-648)"
+SPEC = "docs/specs/journal.md v0.25 §9.12 (DEC-437 item 9, DEC-648)"
 AT = "2026-10-05T14:00:00.000000000Z"
 A_DAY_LATER = "2026-10-06T14:00:00.000000000Z"
 EXPIRES = "2026-10-12T14:00:00.000000000Z"
@@ -250,8 +250,8 @@ MEMBER_CASES = {
     ),
 }
 # Non-nullable members a `null` must not satisfy, each its own case.
-# A `null` writer fails rule 55, a `null` cool-off end rule 61, a `null` expiry rule 62, and a `null` own
-# instant rule 64, at the member's own path with the same reason, so such a draft is refused identically whether or not its type is checked first.
+# A `null` writer fails rule 97, a `null` cool-off end rule 103, a `null` expiry rule 104, and a `null` own
+# instant rule 106, at the member's own path with the same reason, so such a draft is refused identically whether or not its type is checked first.
 RULE_TYPED = (
     "by",
     "changed_by",
@@ -280,27 +280,27 @@ def member_drafts() -> list[dict]:
     for base, cases in MEMBER_CASES.items():
         for member, wrong_kind, wrong_form in cases:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.kind", "§9.8 types", base, [change(path, wrong_kind)], "schema", path))
+            out.append(invalid(f"{base}.{member}.kind", "§9.12 types", base, [change(path, wrong_kind)], "schema", path))
             if wrong_form is not None:
                 form = [change(path, wrong_form)]
-                out.append(invalid(f"{base}.{member}.form", "§9.8 types", base, form, "non_canonical", path))
+                out.append(invalid(f"{base}.{member}.form", "§9.12 types", base, form, "non_canonical", path))
         for member in NULLED[base]:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.null", "§9.8 types", base, [change(path, None)], "schema", path))
+            out.append(invalid(f"{base}.{member}.null", "§9.12 types", base, [change(path, None)], "schema", path))
         some = MEMBER_CASES[base][0][0]
-        out.append(invalid(f"{base}.missing", "§9.8 closed", base, [delete(f"payload.{some}")], "schema", f"payload.{some}"))
-        out.append(invalid(f"{base}.extra", "§9.8 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
+        out.append(invalid(f"{base}.missing", "§9.12 closed", base, [delete(f"payload.{some}")], "schema", f"payload.{some}"))
+        out.append(invalid(f"{base}.extra", "§9.12 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
     return out
 
 
 def invalid_drafts() -> list[dict]:
     """Each draft breaks exactly one rule, or the rules its `also` lists; together they cover every
-    §9.8 member type and rule."""
+    §9.12 member type and rule."""
     return [
         *member_drafts(),
         invalid(
             "invited_role_unknown",
-            "§9.8: `role` is a workspace role; an org role is not",
+            "§9.12: `role` is a workspace role; an org role is not",
             "invited",
             [change("payload.roles", ["org_owner"])],
             "non_canonical",
@@ -308,7 +308,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "added_role_missing_its_end",
-            "§9.8: each added role is closed",
+            "§9.12: each added role is closed",
             "role_changed",
             [change("payload.added", [{"role": "auditor"}])],
             "schema",
@@ -316,7 +316,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "step_up_time_as_seconds",
-            "§9.8: step-up evidence is §9.2's, with a timestamp",
+            "§9.12: step-up evidence is §9.2's, with a timestamp",
             "reactivated",
             [change("payload.step_up.authenticated_at", 1790000000)],
             "schema",
@@ -332,7 +332,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "invited_roles_unsorted",
-            "rule 54",
+            "rule 96",
             "invited",
             [change("payload.roles", ["viewer", "approver"])],
             "non_canonical",
@@ -340,7 +340,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "activated_roles_repeated",
-            "rule 54: a repeat is refused as a swap is",
+            "rule 96: a repeat is refused as a swap is",
             "activated",
             [change("payload.roles", ["approver", "approver"])],
             "non_canonical",
@@ -348,7 +348,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "removed_unsorted",
-            "rule 54",
+            "rule 96",
             "role_changed",
             [change("payload.removed", ["viewer", "approver"])],
             "non_canonical",
@@ -356,7 +356,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "added_unsorted",
-            "rule 54",
+            "rule 96",
             "role_changed",
             [
                 change(
@@ -369,7 +369,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "invited_by_another",
-            "rule 55: the writer is the inviter",
+            "rule 97: the writer is the inviter",
             "invited",
             [change("payload.invited_by", MEMBER)],
             "schema",
@@ -377,7 +377,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "revoked_by_another",
-            "rule 55",
+            "rule 97",
             "invitation_revoked",
             [change("payload.revoked_by", MEMBER)],
             "schema",
@@ -385,7 +385,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "removed_by_another",
-            "rule 55",
+            "rule 97",
             "removed",
             [change("payload.by", "01J8Z4M0AD0000000000000AD2")],
             "schema",
@@ -393,7 +393,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "invited_by_the_system",
-            "rule 56: an admin invites",
+            "rule 98: an admin invites",
             "invited",
             [change("actor", SERVICES), change("payload.invited_by", SERVICES["id"]), change("payload.session_ref", None)],
             "schema",
@@ -401,7 +401,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "founding_by_a_user",
-            "rule 56: the system issues the founding grant (ID-13)",
+            "rule 98: the system issues the founding grant (ID-13)",
             "founding",
             [change("actor", user(ADMIN)), change("payload.session_ref", "session_founder")],
             "schema",
@@ -409,7 +409,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "accepted_by_the_system",
-            "rule 56: the invitee accepts",
+            "rule 98: the invitee accepts",
             "activated",
             [change("actor", SERVICES | {"id": MEMBER}), change("payload.session_ref", None)],
             "schema",
@@ -417,7 +417,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "deprovisioned_by_a_user",
-            "rule 56: the directory sync deprovisions",
+            "rule 98: the directory sync deprovisions",
             "deactivated",
             [change("payload.reason", "deprovisioned")],
             "schema",
@@ -425,7 +425,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "org_deleted_by_a_user",
-            "rule 56",
+            "rule 98",
             "removed",
             [change("payload.reason", "org_deleted")],
             "schema",
@@ -433,7 +433,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "role_changed_by_a_platform_operator",
-            "rule 56: platform staff never change a membership (ID-12)",
+            "rule 98: platform staff never change a membership (ID-12)",
             "role_changed",
             [change("actor", {"kind": "platform_operator", "id": ADMIN, "version": "1", "build": None}), change("payload.session_ref", None)],
             "schema",
@@ -441,7 +441,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "own_roles_changed",
-            "rule 57: no admin changes their own roles (ID-13)",
+            "rule 99: no admin changes their own roles (ID-13)",
             "role_changed",
             [change("payload.member", ADMIN)],
             "schema",
@@ -449,7 +449,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "own_reactivation",
-            "rule 57",
+            "rule 99",
             "reactivated",
             [change("payload.member", ADMIN)],
             "schema",
@@ -457,7 +457,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "own_deactivation_as_admin",
-            "rule 57: leaving is `left`",
+            "rule 99: leaving is `left`",
             "deactivated",
             [change("payload.member", ADMIN)],
             "schema",
@@ -465,7 +465,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "own_removal",
-            "rule 57",
+            "rule 99",
             "removed",
             [change("payload.member", ADMIN)],
             "schema",
@@ -473,7 +473,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "left_by_another",
-            "rule 57: only the member leaves",
+            "rule 99: only the member leaves",
             "deactivated",
             [change("payload.reason", "left")],
             "schema",
@@ -481,7 +481,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "accepted_without_its_invitation",
-            "rule 57",
+            "rule 99",
             "activated",
             [change("payload.invitation", None)],
             "schema",
@@ -489,7 +489,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "founding_with_an_invitation",
-            "rule 57",
+            "rule 99",
             "founding",
             [change("payload.invitation", INVITATION)],
             "schema",
@@ -497,7 +497,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "accepted_for_another",
-            "rule 57: the invitee who signed in is the member",
+            "rule 99: the invitee who signed in is the member",
             "activated",
             [change("payload.member", ADMIN)],
             "schema",
@@ -505,7 +505,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "invited_to_no_role",
-            "rule 58",
+            "rule 100",
             "invited",
             [change("payload.roles", [])],
             "schema",
@@ -513,7 +513,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "activated_with_no_role",
-            "rule 58",
+            "rule 100",
             "activated",
             [change("payload.roles", []), change("payload.cool_off_ends_at", AT)],
             "schema",
@@ -521,7 +521,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "founding_without_an_admin",
-            "rule 58: a workspace always has an admin",
+            "rule 100: a workspace always has an admin",
             "founding",
             [change("payload.roles", ["approver", "operator"])],
             "schema",
@@ -529,7 +529,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "role_change_changing_nothing",
-            "rule 58",
+            "rule 100",
             "role_changed",
             [change("payload.added", []), change("payload.removed", []), change("payload.step_up", None)],
             "schema",
@@ -537,7 +537,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "role_added_and_removed",
-            "rule 58",
+            "rule 100",
             "role_changed",
             [change("payload.removed", ["auditor"])],
             "schema",
@@ -545,7 +545,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "grant_without_step_up",
-            "rule 59: a grant needs step-up",
+            "rule 101: a grant needs step-up",
             "role_changed",
             [change("payload.step_up", None)],
             "schema",
@@ -553,7 +553,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "removal_with_step_up",
-            "rule 59: a removal carries none",
+            "rule 101: a removal carries none",
             "role_changed",
             [change("payload.added", [])],
             "schema",
@@ -561,7 +561,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "live_step_up_by_cli_confirm",
-            "rule 60: `live` takes a passkey only",
+            "rule 102: `live` takes a passkey only",
             "invited",
             [change("environment", "live"), change("payload.step_up.method", "cli_confirm")],
             "schema",
@@ -569,7 +569,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "paper_step_up_by_password",
-            "rule 60",
+            "rule 102",
             "reactivated",
             [change("payload.step_up.method", "password")],
             "schema",
@@ -577,7 +577,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "cool_off_of_an_hour",
-            "rule 61: zero or exactly 24 hours",
+            "rule 103: zero or exactly 24 hours",
             "activated",
             [change("payload.cool_off_ends_at", "2026-10-05T15:00:00.000000000Z")],
             "schema",
@@ -585,7 +585,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "cool_off_a_nanosecond_short",
-            "rule 61",
+            "rule 103",
             "reactivated",
             [change("payload.cool_off_ends_at", "2026-10-06T13:59:59.999999999Z")],
             "schema",
@@ -593,7 +593,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "cool_off_before_its_start",
-            "rule 61",
+            "rule 103",
             "reactivated",
             [change("payload.cool_off_ends_at", "2026-10-04T14:00:00.000000000Z")],
             "schema",
@@ -601,7 +601,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "founding_cooling_off",
-            "rule 61: the founding grant never has one",
+            "rule 103: the founding grant never has one",
             "founding",
             [change("payload.cool_off_ends_at", A_DAY_LATER)],
             "schema",
@@ -609,7 +609,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "viewer_cooling_off",
-            "rule 61: only operator and approver may cool off",
+            "rule 103: only operator and approver may cool off",
             "activated",
             [change("payload.roles", ["auditor", "viewer"])],
             "schema",
@@ -617,7 +617,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "added_auditor_cooling_off",
-            "rule 61, at the added role's own end",
+            "rule 103, at the added role's own end",
             "role_changed",
             [change("payload.added", [{"role": "auditor", "cool_off_ends_at": A_DAY_LATER}])],
             "schema",
@@ -625,7 +625,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "step_up_after_the_instant",
-            "rule 60: evidence authenticated after the grant fails closed (mandate spec §6.1)",
+            "rule 102: evidence authenticated after the grant fails closed (mandate spec §6.1)",
             "role_changed",
             [change("payload.step_up.authenticated_at", "2026-10-05T14:00:00.000000001Z")],
             "schema",
@@ -633,7 +633,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "step_up_a_nanosecond_stale",
-            "rule 60: 300 seconds and no more",
+            "rule 102: 300 seconds and no more",
             "reactivated",
             [change("payload.step_up.authenticated_at", "2026-10-05T13:54:59.999999999Z")],
             "schema",
@@ -641,7 +641,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "invitation_of_six_days",
-            "rule 62: 7 days exactly",
+            "rule 104: 7 days exactly",
             "invited",
             [change("payload.expires_at", "2026-10-11T14:00:00.000000000Z")],
             "schema",
@@ -649,7 +649,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "user_without_a_session",
-            "rule 63: a user acts through a session",
+            "rule 105: a user acts through a session",
             "deactivated",
             [change("payload.session_ref", None)],
             "schema",
@@ -657,7 +657,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "system_with_a_session",
-            "rule 63: the system writes without one",
+            "rule 105: the system writes without one",
             "founding",
             [change("payload.session_ref", "session_founding")],
             "schema",
@@ -665,7 +665,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "activated_in_the_past",
-            "rules 61 and 64: the reviewer's probe, a grant dated back to escape its cool-off",
+            "rules 103 and 106: the reviewer's probe, a grant dated back to escape its cool-off",
             "activated",
             [
                 change("payload.activated_at", "2020-01-01T00:00:00.000000000Z"),
@@ -677,7 +677,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "changed_a_nanosecond_in_the_future",
-            "rule 64",
+            "rule 106",
             "role_changed",
             [change("payload.changed_at", "2026-10-05T14:00:00.000000001Z")],
             "schema",
@@ -685,7 +685,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "invited_a_nanosecond_early",
-            "rule 64: a week from a self-chosen instant is still refused",
+            "rule 106: a week from a self-chosen instant is still refused",
             "invited",
             [
                 change("payload.invited_at", "2026-10-05T13:59:59.999999999Z"),
@@ -696,7 +696,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "reactivated_in_the_past",
-            "rule 64",
+            "rule 106",
             "reactivated",
             [change("payload.reactivated_at", "2026-10-04T14:00:00.000000000Z")],
             "schema",
@@ -704,7 +704,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "cooling_without_independence",
-            "rule 61: no day is owed when independence is not required",
+            "rule 103: no day is owed when independence is not required",
             "activated",
             [change("payload.independent_approval_required", False)],
             "schema",
@@ -712,7 +712,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "operator_at_once_under_independence",
-            "rule 61: a day is owed",
+            "rule 103: a day is owed",
             "role_changed",
             [
                 change(
@@ -725,7 +725,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "approver_reactivated_at_once_under_independence",
-            "rule 61",
+            "rule 103",
             "reactivated",
             [change("payload.cool_off_ends_at", AT)],
             "schema",
@@ -733,7 +733,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "reactivated_with_no_role",
-            "rule 58",
+            "rule 100",
             "reactivated",
             [change("payload.roles", []), change("payload.cool_off_ends_at", AT)],
             "schema",
@@ -741,7 +741,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "reactivated_roles_unsorted",
-            "rule 54",
+            "rule 96",
             "reactivated",
             [change("payload.roles", ["viewer", "approver"])],
             "non_canonical",
@@ -749,7 +749,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "rules_reported_in_order",
-            "§9.1 order: rule 55 before rule 57 before rule 61",
+            "§9.1 order: rule 97 before rule 99 before rule 103",
             "role_changed",
             [
                 change("payload.changed_by", MEMBER),
@@ -767,37 +767,37 @@ def valid_drafts() -> list[dict]:
     return [
         valid(
             "activated_without_a_cool_off",
-            "rule 61: without independence required, an approver activates at once",
+            "rule 103: without independence required, an approver activates at once",
             "activated",
             [change("payload.independent_approval_required", False), change("payload.cool_off_ends_at", AT)],
         ),
         valid(
             "viewer_activated_at_once",
-            "rule 61: a role that never cools off",
+            "rule 103: a role that never cools off",
             "activated",
             [change("payload.roles", ["auditor", "viewer"]), change("payload.cool_off_ends_at", AT)],
         ),
         valid(
             "founding_owner_bundle_in_live",
-            "rules 56 to 58 and 61: the retail owner bundle (identity spec §4.3)",
+            "rules 98 to 100 and 103: the retail owner bundle (identity spec §4.3)",
             "founding",
             [change("environment", "live")],
         ),
         valid(
             "removal_only",
-            "rules 58 and 59: removing a role needs no step-up",
+            "rules 100 and 101: removing a role needs no step-up",
             "role_changed",
             [change("payload.added", []), change("payload.step_up", None)],
         ),
         valid(
             "grant_only",
-            "rule 58: nothing removed",
+            "rule 100: nothing removed",
             "role_changed",
             [change("payload.removed", [])],
         ),
         valid(
             "operator_granted_without_a_cool_off",
-            "rule 61: without independence required, an operator grant is effective at once",
+            "rule 103: without independence required, an operator grant is effective at once",
             "role_changed",
             [
                 change("payload.added", [{"role": "operator", "cool_off_ends_at": AT}]),
@@ -807,13 +807,13 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "left",
-            "rules 56 and 57: a member leaves by themselves",
+            "rules 98 and 99: a member leaves by themselves",
             "deactivated",
             [change("actor", user(MEMBER)), change("payload.by", MEMBER), change("payload.reason", "left")],
         ),
         valid(
             "deprovisioned_by_the_directory",
-            "rule 56",
+            "rule 98",
             "deactivated",
             [
                 change("actor", SERVICES),
@@ -824,7 +824,7 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "group_removed",
-            "rule 56",
+            "rule 98",
             "deactivated",
             [
                 change("actor", SERVICES),
@@ -835,7 +835,7 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "removed_by_org_deletion",
-            "rule 56",
+            "rule 98",
             "removed",
             [
                 change("actor", SERVICES),
@@ -846,43 +846,43 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "reactivated_at_once",
-            "rule 61: without independence required",
+            "rule 103: without independence required",
             "reactivated",
             [change("payload.independent_approval_required", False), change("payload.cool_off_ends_at", AT)],
         ),
         valid(
             "viewer_reactivated_at_once_under_independence",
-            "rule 61: kept roles that never cool off",
+            "rule 103: kept roles that never cool off",
             "reactivated",
             [change("payload.roles", ["auditor", "viewer"]), change("payload.cool_off_ends_at", AT)],
         ),
         valid(
             "founding_under_independence",
-            "rule 61: the founding grant never cools off, even where independence is required",
+            "rule 103: the founding grant never cools off, even where independence is required",
             "founding",
             [change("payload.independent_approval_required", True)],
         ),
         valid(
             "paper_step_up_by_cli_confirm",
-            "rule 60: `cli_confirm` in paper (DEC-155)",
+            "rule 102: `cli_confirm` in paper (DEC-155)",
             "invited",
             [change("payload.step_up.method", "cli_confirm")],
         ),
         valid(
             "step_up_at_the_window_edge",
-            "rule 60: exactly 300 seconds is still valid",
+            "rule 102: exactly 300 seconds is still valid",
             "invited",
             [change("payload.step_up.authenticated_at", "2026-10-05T13:55:00.000000000Z")],
         ),
         valid(
             "step_up_at_the_instant",
-            "rule 60: zero seconds is valid",
+            "rule 102: zero seconds is valid",
             "reactivated",
             [change("payload.step_up.authenticated_at", AT)],
         ),
         valid(
             "invited_to_every_role",
-            "rule 54",
+            "rule 96",
             "invited",
             [change("payload.roles", ["approver", "auditor", "operator", "viewer", "workspace_admin"])],
         ),
@@ -983,33 +983,33 @@ def check_section(section: dict) -> list[str]:
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = (
-    "rule.54.roles",
-    "rule.54.removed",
-    "rule.54.added",
-    "rule.55",
-    "rule.56",
-    "rule.57.self",
-    "rule.57.left",
-    "rule.57.invitation",
-    "rule.57.invitee",
-    "rule.58.empty",
-    "rule.58.founding_admin",
-    "rule.58.no_change",
-    "rule.58.disjoint",
-    "rule.59",
-    "rule.60.method",
-    "rule.60.window",
-    "rule.61.MemberActivated",
-    "rule.61.MemberReactivated",
-    "rule.61.MemberRoleChanged",
-    "rule.62",
-    "rule.63",
-    "boundary.rule_60_after",
-    "boundary.rule_60_window",
-    "rule.64",
-    "boundary.rule_61_ignores_independence",
-    "boundary.rule_61_founding_cools",
-    "boundary.rule_61_either",
+    "rule.96.roles",
+    "rule.96.removed",
+    "rule.96.added",
+    "rule.97",
+    "rule.98",
+    "rule.99.self",
+    "rule.99.left",
+    "rule.99.invitation",
+    "rule.99.invitee",
+    "rule.100.empty",
+    "rule.100.founding_admin",
+    "rule.100.no_change",
+    "rule.100.disjoint",
+    "rule.101",
+    "rule.102.method",
+    "rule.102.window",
+    "rule.103.MemberActivated",
+    "rule.103.MemberReactivated",
+    "rule.103.MemberRoleChanged",
+    "rule.104",
+    "rule.105",
+    "boundary.rule_102_after",
+    "boundary.rule_102_window",
+    "rule.106",
+    "boundary.rule_103_ignores_independence",
+    "boundary.rule_103_founding_cools",
+    "boundary.rule_103_either",
     "record.extra",
     "record.missing",
     *sorted({f"loose.payload.{member}" for cases in MEMBER_CASES.values() for member, _, _ in cases}),
@@ -1033,7 +1033,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
 
     return [
         (
-            "a base draft breaks rule 55",
+            "a base draft breaks rule 97",
             "drafts.valid",
             mutated(lambda s: s["drafts"]["removed"]["payload"].update(by=MEMBER)),
         ),
