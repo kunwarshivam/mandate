@@ -11,5 +11,7 @@
   latch, and refused record (the reference fold is `reference/journal/membership_fold.py`).
   `crates/mandate-identity/tests/membership_gaps.rs`: the backlog's three access-reducing gaps, the
   kept roles, the order check (DEC-657 item 4), and the independence check on every record type
-  that carries the flag. Shared builders: `crates/mandate-identity/tests/membership/mod.rs`.
+  that carries the flag. `crates/mandate-identity/tests/membership_oracle.rs`: ID-7 and §5.1 over
+  random histories against an oracle written apart from the crate. Shared builders:
+  `crates/mandate-identity/tests/membership/mod.rs`.
 - **Run:** `cargo test -p mandate-identity -- --include-ignored`.
