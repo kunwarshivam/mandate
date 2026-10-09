@@ -9,7 +9,7 @@ use super::server::{Answer, Loopback, reply, serve, with_type};
 use crate::{ALLOWLIST, BucketConfig, BudgetConfig, CallClass, ContractHash, McpClient, McpError};
 use crate::{McpTransport, TransportConfig};
 
-const NINE: [&str; 9] = [
+pub(super) const NINE: [&str; 9] = [
     "get_accounts",
     "get_portfolio",
     "get_equity_positions",
@@ -21,9 +21,9 @@ const NINE: [&str; 9] = [
     "cancel_equity_order",
 ];
 const INPUT: &str = r#"{"type":"object","properties":{"account_number":{"type":"string"}},"required":["account_number"]}"#;
-const OK: &str = r#""result":{"content":[]}"#;
+pub(super) const OK: &str = r#""result":{"content":[]}"#;
 
-fn tool(name: &str) -> Value {
+pub(super) fn tool(name: &str) -> Value {
     let mut tool = json!({"name": name, "description": "d", "inputSchema": serde_json::from_str::<Value>(INPUT).unwrap()});
     if name == "get_accounts" {
         tool["outputSchema"] =
@@ -32,26 +32,26 @@ fn tool(name: &str) -> Value {
     tool
 }
 
-fn base() -> Vec<Value> {
+pub(super) fn base() -> Vec<Value> {
     NINE.iter().map(|name| tool(name)).collect()
 }
 
-fn cat(first: Vec<Answer>, second: Vec<Answer>) -> Vec<Answer> {
+pub(super) fn cat(first: Vec<Answer>, second: Vec<Answer>) -> Vec<Answer> {
     first.into_iter().chain(second).collect()
 }
 
-fn listing(tools: &[Value]) -> Answer {
+pub(super) fn listing(tools: &[Value]) -> Answer {
     reply(&format!(r#""result":{}"#, json!({ "tools": tools })))
 }
 
-fn page(tools: &[Value], next: &str) -> Answer {
+pub(super) fn page(tools: &[Value], next: &str) -> Answer {
     reply(&format!(
         r#""result":{}"#,
         json!({"tools": tools, "nextCursor": next})
     ))
 }
 
-fn handshake() -> Vec<Answer> {
+pub(super) fn handshake() -> Vec<Answer> {
     vec![
         reply(
             r#""result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"s","version":"1"}}"#,
@@ -60,7 +60,7 @@ fn handshake() -> Vec<Answer> {
     ]
 }
 
-fn roomy() -> TransportConfig {
+pub(super) fn roomy() -> TransportConfig {
     let bucket = BucketConfig {
         capacity: 100,
         refill_every: Duration::from_secs(1),
@@ -74,7 +74,7 @@ fn roomy() -> TransportConfig {
     }
 }
 
-async fn session(
+pub(super) async fn session(
     tail: Vec<Answer>,
     pin: Option<ContractHash>,
     config: TransportConfig,
@@ -85,7 +85,7 @@ async fn session(
     (server, client)
 }
 
-async fn connected(
+pub(super) async fn connected(
     tools: &[Value],
     pin: Option<ContractHash>,
     more: Vec<Answer>,
@@ -94,12 +94,12 @@ async fn connected(
     (server, client.unwrap())
 }
 
-fn sent(server: &Loopback, index: usize) -> Value {
+pub(super) fn sent(server: &Loopback, index: usize) -> Value {
     let request = &server.seen()[index];
     serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap()
 }
 
-fn sent_names(server: &Loopback) -> Vec<String> {
+pub(super) fn sent_names(server: &Loopback) -> Vec<String> {
     (3..server.seen().len())
         .map(|i| {
             sent(server, i)["params"]["name"]
@@ -110,7 +110,7 @@ fn sent_names(server: &Loopback) -> Vec<String> {
         .collect()
 }
 
-fn without(name: &str) -> Vec<Value> {
+pub(super) fn without(name: &str) -> Vec<Value> {
     base().into_iter().filter(|t| t["name"] != name).collect()
 }
 
