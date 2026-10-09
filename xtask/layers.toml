@@ -244,7 +244,7 @@ allowed_external = ["reqwest", "rustls", "serde", "serde_json", "thiserror"]
 layer = 6
 safety_critical = true
 pure = true
-allowed_external = ["thiserror"]
+allowed_external = ["secrecy", "thiserror"]
 
 [crates.mandate-journal-pg]
 layer = 6
