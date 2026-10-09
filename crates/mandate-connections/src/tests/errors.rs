@@ -1,6 +1,11 @@
-//! Every error has a stable code.
+//! Every error has a stable code, and no secret wrapper prints its secret.
 
+use secrecy::SecretString;
+
+use super::support::{CANARIES, CODE, SECRET, TOKEN};
 use crate::ConnectError;
+use crate::exchange::{ClientSecret, TokenResponse};
+use crate::vault::{AccessToken, AuthorizationCode};
 
 #[test]
 fn every_error_has_its_stable_code() {
@@ -23,5 +28,37 @@ fn every_error_has_its_stable_code() {
     ];
     for (error, code) in cases {
         assert_eq!(error.code(), code, "{error:?}");
+    }
+}
+
+#[test]
+fn secret_wrappers_print_no_secret() {
+    let printed = [
+        (
+            format!("{:?}", AuthorizationCode(SecretString::from(CODE))),
+            "AuthorizationCode(redacted)",
+        ),
+        (
+            format!("{:?}", AccessToken(SecretString::from(TOKEN))),
+            "AccessToken(redacted)",
+        ),
+        (
+            format!("{:?}", ClientSecret(SecretString::from(SECRET))),
+            "ClientSecret(redacted)",
+        ),
+    ];
+    for (text, expected) in printed {
+        assert_eq!(text, expected);
+    }
+    let response = format!(
+        "{:?}",
+        TokenResponse {
+            access_token: AccessToken(SecretString::from(TOKEN)),
+            token_type: "bearer".to_owned(),
+            scope: "trading data".to_owned(),
+        }
+    );
+    for canary in CANARIES {
+        assert!(!response.contains(canary), "{response}");
     }
 }
