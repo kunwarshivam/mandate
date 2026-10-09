@@ -1411,16 +1411,31 @@ fn feature_map_index() -> Result<()> {
     Ok(())
 }
 
-/// One file CI runs, a workflow or a script, by its path in the repository, with its text.
+/// One of the [`ci_files`], by its path in the repository, with its text.
 struct CiFile {
     path: String,
     text: String,
 }
 
-/// Every workflow and script under `.github`, the files that decide which builds CI runs.
+/// Every file that decides what CI or a release builds, each of which may be absent: workflows,
+/// scripts and actions under `.github`, `deploy`'s scripts, and `.cargo/config.toml`.
 fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
-    let mut files = files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])?;
-    files.extend(files_by_extension(&root.join(".github/scripts"), &["sh"])?);
+    let mut files = Vec::new();
+    for (dir, extensions) in [
+        (".github/workflows", &["yml", "yaml"][..]),
+        (".github/scripts", &["sh"][..]),
+        (".github/actions", &["yml", "yaml"][..]),
+        ("deploy", &["sh"][..]),
+    ] {
+        let dir = root.join(dir);
+        if dir.is_dir() {
+            files.extend(files_by_extension(&dir, extensions)?);
+        }
+    }
+    let cargo_config = root.join(".cargo/config.toml");
+    if cargo_config.is_file() {
+        files.push(cargo_config);
+    }
     files
         .into_iter()
         .map(|file| {
@@ -1517,9 +1532,16 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
     }
     let mut compile_only_seen = false;
     for file in ci {
+        let yaml = file.path.ends_with(".yml") || file.path.ends_with(".yaml");
+        let with_lines = with_block_lines(&file.text);
         for (number, line) in logical_lines(&file.path, &file.text) {
             let at = format!("{}:{number}", file.path);
-            match live_flag(&line, runner, file.path.ends_with(".cargo/config.toml")) {
+            let ctx = LineContext {
+                runner,
+                cargo_config: file.path.ends_with(".cargo/config.toml"),
+                with_value: yaml && with_lines.contains(&number),
+            };
+            match live_flag(&line, ctx) {
                 LiveFlag::Absent => {}
                 LiveFlag::AllFeatures => problems.push(format!(
                     "{at}: `--all-features` would build the `{LIVE}` feature"
@@ -1716,11 +1738,44 @@ fn substitution(chars: &[char], start: char, index: &mut usize, nested: &mut Vec
     nested.push(inner);
 }
 
+/// What a line of a CI file is read with: the runner, and what kind of line it is.
+#[derive(Clone, Copy)]
+struct LineContext<'a> {
+    /// The crate marked `live_feature`, when exactly one workspace member is.
+    runner: Option<&'a str>,
+    /// A line of `.cargo/config.toml`, whose aliases and flags are all cargo's own.
+    cargo_config: bool,
+    /// A line inside a workflow's `with:` block: an action's input has no command word, so it
+    /// may be cargo's arguments, and `-F` and a short-flag cluster are feature flags there.
+    with_value: bool,
+}
+
+/// The numbers of the lines inside a workflow's `with:` blocks, the inputs a step passes to an
+/// action: every line below `with:` that is blank or indented further than its key.
+fn with_block_lines(text: &str) -> BTreeSet<usize> {
+    let mut lines = BTreeSet::new();
+    let mut block: Option<usize> = None;
+    for (number, line) in (1_usize..).zip(text.lines()) {
+        let indent = line.len().saturating_sub(line.trim_start().len());
+        if block.is_some_and(|column| line.trim().is_empty() || indent > column) {
+            lines.insert(number);
+            continue;
+        }
+        block = yaml_value(line)
+            .filter(|(_, value)| value.is_empty())
+            .filter(|_| line.trim_start_matches([' ', '-']).starts_with("with:"))
+            .map(|(column, _)| column);
+    }
+    lines
+}
+
 /// Judges each command of `line` on its own and keeps the worst verdict: the commands its
 /// tokens' ends separate, each substitution, and each word holding a space, which `bash -c` or a
-/// cargo alias may run (each shorter than `line`, so the reading ends). A redirection's one target
-/// word is skipped, so it may hold a `$` (`>> "$GITHUB_OUTPUT"`); the words after it are read.
-fn live_flag(line: &str, runner: Option<&str>, cargo_config: bool) -> LiveFlag {
+/// cargo alias may run (each shorter than `line`, so the reading ends), except the words of the
+/// one compile-only command, whose quoted feature list names `live` by design. A redirection's
+/// one target word is skipped, so it may hold a `$` (`>> "$GITHUB_OUTPUT"`); the words after it
+/// are read. Every word, a redirection's target included, is also held to the cargo-word rule.
+fn live_flag(line: &str, ctx: LineContext) -> LiveFlag {
     if sets_cfg_feature(line) {
         return LiveFlag::Cfg;
     }
@@ -1730,34 +1785,56 @@ fn live_flag(line: &str, runner: Option<&str>, cargo_config: bool) -> LiveFlag {
         .into_iter()
         .chain([ShellToken::End])
     {
+        if let ShellToken::Word(text) = &token
+            && cargo_word_refused(text)
+        {
+            verdict = verdict.min(LiveFlag::Unreadable);
+        }
         match token {
             ShellToken::Word(..) if target_next => target_next = false,
             ShellToken::Word(text) => words.push(text),
             ShellToken::Redirect => target_next = true,
             ShellToken::End => {
-                verdict = verdict.min(command_live_flag(&words, runner, cargo_config));
-                nested.extend(
-                    words
-                        .drain(..)
-                        .filter(|text| text.contains([' ', '\t']) && text.len() < line.len()),
-                );
+                let flag = command_live_flag(&words, ctx);
+                verdict = verdict.min(flag);
+                if flag != LiveFlag::CompileOnly {
+                    if feature_values_refused(&words, ctx) {
+                        verdict = verdict.min(LiveFlag::Unreadable);
+                    }
+                    nested.extend(
+                        words
+                            .drain(..)
+                            .filter(|text| text.contains([' ', '\t']) && text.len() < line.len()),
+                    );
+                }
+                words.clear();
                 target_next = false;
             }
         }
     }
     nested
         .iter()
-        .map(|inner| live_flag(inner, runner, cargo_config))
+        .map(|inner| live_flag(inner, ctx))
         .fold(verdict, LiveFlag::min)
+}
+
+/// Whether `word` names cargo: a word `cargo`, or a path ending `/cargo`.
+fn is_cargo(word: &str) -> bool {
+    word == "cargo" || word.ends_with("/cargo")
 }
 
 /// Reads one command's words, if it is a cargo command (a word `cargo` or `…/cargo`, or any line
 /// of the cargo configuration; `-F` is other tools' elsewhere, `gh api -F`), which cannot be read
 /// when the shell expands a word or `xargs` gives the arguments. `--features <list>`,
-/// `--features=<list>`, `-F <list>` and `-F<list>` name features, with items split on commas and
-/// spaces, each matched after any `<crate>/` or `<crate>?/` prefix. A word is read without the
-/// brackets and commas of a cargo configuration array (`["--features", "live"]`).
-fn command_live_flag(words: &[String], runner: Option<&str>, cargo_config: bool) -> LiveFlag {
+/// `--features=<list>`, `-F <list>`, `-F<list>` and a short-flag cluster `-qF<list>` name
+/// features, with items split on commas and spaces, each matched after any `<crate>/` or
+/// `<crate>?/` prefix. A word is read without the brackets and commas of a cargo configuration
+/// array (`["--features", "live"]`). Beside them, the live-token backstop: any word that holds
+/// the token `live` ([`holds_live`]) and is not the feature list of the one compile-only form is
+/// refused, whatever the command. The command is compile-only only when its subcommand, the word
+/// right after its cargo word, is `check`: a `cargo check` after `--`, or a `check` that is an
+/// option's value (`cargo --config check run`), leaves it a build (#923 review).
+fn command_live_flag(words: &[String], ctx: LineContext) -> LiveFlag {
     let names: Vec<&str> = words
         .iter()
         .map(|w| w.trim_matches(['[', ']', ',']))
@@ -1765,10 +1842,14 @@ fn command_live_flag(words: &[String], runner: Option<&str>, cargo_config: bool)
     if names.contains(&"--all-features") {
         return LiveFlag::AllFeatures;
     }
-    let is_cargo = |word: &&str| *word == "cargo" || word.ends_with("/cargo");
-    let cargo_at = names.iter().position(is_cargo);
-    if !cargo_config && cargo_at.is_none() {
-        return LiveFlag::Absent;
+    let any_live = names.iter().any(|word| holds_live(word));
+    let cargo_at = names.iter().position(|word| is_cargo(word));
+    if !ctx.cargo_config && cargo_at.is_none() {
+        return if any_live {
+            LiveFlag::Build
+        } else {
+            LiveFlag::Absent
+        };
     }
     let fed = names
         .get(..cargo_at.unwrap_or_default())
@@ -1778,36 +1859,143 @@ fn command_live_flag(words: &[String], runner: Option<&str>, cargo_config: bool)
     } else {
         LiveFlag::Absent
     };
-    let passes_live = names
+    let lists: Vec<(usize, &str)> = names
         .iter()
         .enumerate()
         .filter_map(|(index, word)| match *word {
-            "--features" | "-F" => names.get(index.saturating_add(1)).copied(),
+            "--features" | "-F" => names
+                .get(index.saturating_add(1))
+                .map(|list| (index.saturating_add(1), *list)),
             _ => word
                 .strip_prefix("--features=")
-                .or_else(|| word.strip_prefix("-F")),
+                .or_else(|| cluster_rest(word))
+                .map(|list| (index, list)),
         })
-        .flat_map(|list| list.split([',', ' ']))
+        .collect();
+    let passes_live = lists
+        .iter()
+        .flat_map(|(_, list)| list.split([',', ' ']))
         .any(|item| item.rsplit('/').next() == Some(LIVE));
+    let stray_live = names
+        .iter()
+        .enumerate()
+        .any(|(index, word)| !lists.iter().any(|(at, _)| *at == index) && holds_live(word));
+    if stray_live || (any_live && !passes_live) {
+        return LiveFlag::Build;
+    }
     if !passes_live {
         return unreadable;
     }
-    let checks = names
-        .windows(2)
-        .any(|pair| is_cargo(&pair[0]) && pair[1] == "check");
+    let checks = cargo_at
+        .and_then(|at| names.get(at.saturating_add(1)))
+        .is_some_and(|subcommand| *subcommand == "check");
     let packages: Vec<&str> = names
         .windows(2)
         .filter(|pair| pair[0] == "-p" || pair[0] == "--package")
         .map(|pair| pair[1])
         .collect();
     let whole_workspace = names.contains(&"--workspace") || names.contains(&"--all");
-    let verdict = match (checks, packages.as_slice(), runner) {
+    let verdict = match (checks, packages.as_slice(), ctx.runner) {
         (true, [package], Some(runner)) if *package == runner && !whole_workspace => {
             LiveFlag::CompileOnly
         }
         _ => LiveFlag::Build,
     };
     verdict.min(unreadable)
+}
+
+/// The live-token backstop: whether `word`'s items, split on `,`, `=`, `/`, `?`, whitespace and
+/// quotes, hold `live` exactly but in any case, or a short-flag cluster whose list does
+/// (`-qFlive`). So `liveness` is another item, and `the-runner/live` holds it.
+fn holds_live(word: &str) -> bool {
+    word.split([',', '=', '/', '?', ' ', '\t', '"', '\''])
+        .any(|item| item.eq_ignore_ascii_case(LIVE) || cluster_rest(item).is_some_and(holds_live))
+}
+
+/// The list after the first `F` of a short-flag cluster, `-<letters>F<list>` (`-qFlive`, `-Fa`).
+fn cluster_rest(item: &str) -> Option<&str> {
+    let (letters, rest) = item.strip_prefix('-')?.split_once('F')?;
+    letters
+        .chars()
+        .all(|c| c.is_ascii_alphabetic())
+        .then_some(rest)
+}
+
+/// Whether `word` holds the token `cargo`: a run of letters, digits, `_`, `-` and `.` that is
+/// `cargo` in any case, so `!cargo` holds it and `.cargo` and `cargo-nextest` do not.
+fn holds_cargo_token(word: &str) -> bool {
+    word.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')))
+        .any(|item| item.eq_ignore_ascii_case("cargo"))
+}
+
+/// The cargo-word rule: a word holding the token `cargo`, wherever it stands and whatever the
+/// command, is refused when it also holds a `$`, a backtick or a `%` format directive, which can
+/// build a flag no scan reads, or a feature flag whose value [`feature_value_refused`] refuses.
+fn cargo_word_refused(word: &str) -> bool {
+    holds_cargo_token(word)
+        && (word.contains(['$', '`'])
+            || format_directive(word)
+            || flag_refused(word, None, true, false))
+}
+
+/// Whether `word` holds a `printf` format directive, `%` then flags, a width or a precision, and a
+/// letter (`%s`, `%-8.3x`).
+fn format_directive(word: &str) -> bool {
+    word.split('%').skip(1).any(|after| {
+        after
+            .trim_start_matches(|c: char| matches!(c, '-' | '+' | ' ' | '#' | '0'..='9' | '.'))
+            .starts_with(|c: char| c.is_ascii_alphabetic())
+    })
+}
+
+/// The value rule over a command's words, whatever the command: each feature flag's value must
+/// be a complete literal ([`feature_value_refused`]). `-F` is a feature flag only in a cargo
+/// command, the cargo configuration or a `with:` value, or in a word holding the token `cargo`,
+/// so `awk -F:` and `gh api -F owner="$o"` are not; a short-flag cluster is one only in a `with:`
+/// value.
+fn feature_values_refused(words: &[String], ctx: LineContext) -> bool {
+    let cargo = ctx.with_value || ctx.cargo_config || words.iter().any(|word| is_cargo(word));
+    words.iter().enumerate().any(|(index, word)| {
+        let next = words.get(index.saturating_add(1)).map(String::as_str);
+        flag_refused(word, next, cargo || holds_cargo_token(word), ctx.with_value)
+    })
+}
+
+/// Whether `word`, read piece by piece on whitespace, holds `--all-features` or a feature flag
+/// whose value is refused: `--features`, `--features=`, `FEATURES=`, `-F` and `-F<list>` when
+/// `dash_f`, and a cluster `-qF<list>` when `cluster`. A flag that is the whole word takes `next`
+/// as its value; one that ends the word without a value has the empty value.
+fn flag_refused(word: &str, next: Option<&str>, dash_f: bool, cluster: bool) -> bool {
+    let pieces: Vec<&str> = word.split_whitespace().collect();
+    word.contains("--all-features")
+        || pieces.iter().enumerate().any(|(index, piece)| {
+            let value = if *piece == "--features" || (*piece == "-F" && dash_f) {
+                Some(
+                    pieces
+                        .get(index.saturating_add(1))
+                        .copied()
+                        .or(next.filter(|_| pieces.len() == 1))
+                        .unwrap_or_default(),
+                )
+            } else {
+                piece
+                    .strip_prefix("--features=")
+                    .or_else(|| piece.strip_prefix("-F").filter(|_| dash_f))
+                    .or_else(|| cluster_rest(piece).filter(|_| cluster))
+                    .or_else(|| piece.split_once("FEATURES=").map(|(_, value)| value))
+            };
+            value.is_some_and(feature_value_refused)
+        })
+}
+
+/// A feature value is read only as a complete literal of `[a-z0-9_,-]` without the token `live`;
+/// any other value, an empty one or one holding `$`, a backtick or `${{` included, is refused.
+fn feature_value_refused(value: &str) -> bool {
+    value.is_empty()
+        || !value
+            .chars()
+            .all(|c| matches!(c, 'a'..='z' | '0'..='9' | '_' | ',' | '-'))
+        || holds_live(value)
 }
 
 /// Code spans that look like repository paths: no spaces or globs, starting at a known root.
@@ -8309,7 +8497,6 @@ jq -r "$filter" "$src"
     /// a build, so its `live` is refused, once, at its line. The compile-only form CI runs stays
     /// allowed.
     #[test]
-    #[ignore = "pending E7-26"]
     fn the_backstop_and_the_feature_value_rules_refuse_ci_bypasses() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
@@ -8980,7 +9167,6 @@ jq -r "$filter" "$src"
     /// (the demo host's runbook, DEC-822), and `.cargo/config.toml` (aliases and `rustflags`); a
     /// repository without the optional ones reads the rest (#738 review, finding 4).
     #[test]
-    #[ignore = "pending E7-26"]
     fn ci_files_reads_every_file_that_decides_a_build() -> Result<()> {
         let root = env::temp_dir().join(format!("mandate-xtask-ci-files-{}", std::process::id()));
         if root.exists() {
