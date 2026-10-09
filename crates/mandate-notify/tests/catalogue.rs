@@ -93,7 +93,6 @@ fn every_kind_maps_to_its_key_class_and_text_key() {
 /// Spec §3.2's row for `notification_address_changed` (DEC-795 item 6): a member's own push
 /// address added or removed is an account change that interrupts.
 #[test]
-#[ignore = "pending E8-9"]
 fn a_notification_address_change_is_a_safety_account_change() {
     let kind = NoticeKind::NotificationAddressChanged;
     assert_eq!(answer("key", kind.key()), "notification_address_changed");

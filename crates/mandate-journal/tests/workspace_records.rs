@@ -131,7 +131,9 @@ fn every_e10_15_draft_parses_or_is_refused_as_its_case_says() {
 
 /// Rule 84's batch clause: a compromised revocation names, earlier in its batch, the kill switch at
 /// its connection's scope. Each valid batch commits, with or without an unrelated draft between,
-/// and each invalid one fails at its draft.
+/// and each invalid one fails at its draft. Every valid draft also commits alone, with no kill
+/// switch: among them an owner's `ConnectionRevoked` version 2, a version 1, and a compromised
+/// `ClientRevoked`, which the clause leaves alone.
 #[test]
 #[ignore = "pending E10-15"]
 fn a_compromised_revocation_follows_its_connections_kill_switch_in_its_batch() {
@@ -176,7 +178,33 @@ fn a_compromised_revocation_follows_its_connections_kill_switch_in_its_batch() {
             ));
         }
     }
+    let mut alone = Vec::new();
+    for case in list(&section, "valid_drafts") {
+        let body = draft(&section, case);
+        let got = check(&[Draft::parse(&body).unwrap()]);
+        if got.is_some() {
+            failed.push(format!(
+                "{} alone: want None, got {got:?}",
+                text(case, "name")
+            ));
+        }
+        let body = parse(&body).unwrap();
+        let reason = body.get("payload").map(|p| text(p, "reason").to_owned());
+        let version = body.get("schema_version").and_then(Value::as_int);
+        alone.push((text(&body, "event_type").to_owned(), version, reason));
+    }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
+    let ordinary = [
+        ("ConnectionRevoked", 2, "owner"),
+        ("ConnectionRevoked", 1, ""),
+        ("ClientRevoked", 1, "compromised"),
+    ];
+    for (event_type, version, reason) in ordinary {
+        let found = alone.iter().any(|(t, v, r)| {
+            t == event_type && *v == Some(version) && r.as_deref() == Some(reason)
+        });
+        assert!(found, "no valid {event_type} v{version} `{reason}` draft");
+    }
     assert!(
         !valid.is_empty() && invalid.len() >= 6,
         "{} and {} batches",

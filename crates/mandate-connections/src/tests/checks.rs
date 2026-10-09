@@ -206,13 +206,13 @@ fn nothing_that_can_move_funds_out_is_accepted() {
     );
 }
 
-/// Fund movement is judged by whole tokens (DEC-839 item 3 as #888 amends it, shared by check 1
-/// under DEC-676 item 1): a name is split at every character that is not a letter or digit, at
-/// each lower-to-upper and digit-to-upper change, and before the last capital of a run of capitals
-/// that a lowercase letter follows (`ACHDebit` is `ach`, `debit`); lowercased; and refused when a
-/// token is in DEC-839's set. A name with any character that is not ASCII is refused whatever its
-/// tokens, so a homoglyph cannot spell a fund word past the rule. A word that only contains one,
-/// such as `fundamentals`, is another word. The rule is the same for every kind of grant: a key
+/// Fund movement is judged by whole tokens (DEC-839 item 3, shared by check 1 under DEC-676 item
+/// 1): a name is split at every character that is not a letter or digit, at each lower-to-upper
+/// and digit-to-upper change, and before the last capital of a run of capitals that a lowercase
+/// letter follows (`ACHDebit` is `ach`, `debit`); lowercased; and refused when a token is in
+/// DEC-839's set. A name with any character that is not ASCII is refused whatever its tokens, so a
+/// homoglyph cannot spell a fund word past the rule. A word that only contains one, such as
+/// `fundamentals`, is another word. The rule is the same for every kind of grant: a key
 /// permission, an OAuth scope, and an MCP tool.
 #[test]
 #[ignore = "pending E7-12"]
@@ -278,7 +278,7 @@ const FUND_MOVEMENT_NAMES: [&str; 15] = [
     "w\u{456}re",
 ];
 
-/// Every token of DEC-839 item 3's set, as #888 amends it, as a bare name.
+/// Every token of DEC-839 item 3's set, as a bare name.
 const FUND_MOVEMENT_TOKENS: [&str; 15] = [
     "transfer",
     "transfers",

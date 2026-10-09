@@ -3,6 +3,7 @@
 
 mod checks;
 mod errors;
+mod exchange;
 mod grant;
 mod hosts;
 mod record;

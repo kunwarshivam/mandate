@@ -8,7 +8,8 @@
   two consumptions, `PrincipalContext`, the sealed `Tenant`
   and `MembershipLookup`, `MembershipQuery`, `Session`, `Membership`, `Refusal`, `ClientScope`,
   `StepUpActionKind`, `StepUpEvidence`) and `src/permission.rs` (one `Permission` per §4.2 row).
-  Tests PR: `authorize`, `change_roles`, and the context consumptions are stubs.
+  `change_roles` (which yields the change's resolved step-up, DEC-654) and
+  `PrincipalContext::into_tenant` are stubs.
 - **Tests:** in the crate, because its session, membership, and lookup types are sealed to it:
   `crates/mandate-identity/src/tests/matrix.rs` (ID-2 and the failed membership read, pending
   E9-2: every role set, membership state, cool-off, session kind, principal kind, permission, and
@@ -17,7 +18,9 @@
   `crates/mandate-identity/src/tests/rows.rs` and the test doubles in
   `crates/mandate-identity/src/tests/mod.rs`; `crates/mandate-identity/src/tests/wire.rs` (each
   refusal's code, and the step-up kinds and client scopes read from workspace API §3.6 and §3.8,
-  live); `org_fanout_workspaces_come_from_the_store` in `matrix.rs` (pending E9-2); and the
+  live); `org_fanout_workspaces_come_from_the_store` in `matrix.rs`;
+  `crates/mandate-identity/src/tests/roles.rs` (pending E9-2: ID-13's own roles, the leave row,
+  the last active owner and admin of §5.2, and §4.2's role-change rows, read as DEC-654 says); and the
   `compile_fail` doctests in `src/lib.rs` (a `TenantContext` cannot be built, defaulted, or cloned,
   nor `Tenant` implemented, an `OrgContext` or `PrincipalContext` cannot be built, and an
   `OrgContext` is not a `Tenant`, outside the crate), with their in-crate controls.
