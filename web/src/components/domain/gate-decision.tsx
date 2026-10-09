@@ -12,7 +12,9 @@ export const VERDICT_COLUMN = "[--verdict-w:5.75rem]";
 /**
  * The gate's verdict as one chip in one style everywhere (DEC-512): a quiet chip on the well for an
  * allow that went out, and an ink ring for everything that did not (asked you, not allowed, held,
- * waiting). It takes the verdict column's width and never wraps; it carries no meaning colour.
+ * waiting). It takes the verdict column's width and never wraps; it carries no meaning colour. The
+ * quiet chip keeps a hairline in its own secondary ink, inset so the width holds: in dark mode the
+ * well sits a step from the card, and without the edge the chip vanished (critique C-18).
  */
 export function VerdictChip({ decision, className }: { decision: GateDecision; className?: string }) {
   const sent = decision.verdict === "allow" && !decision.approval_id;
@@ -21,7 +23,7 @@ export function VerdictChip({ decision, className }: { decision: GateDecision; c
       data-slot="verdict"
       className={cn(
         "inline-flex h-6 w-(--verdict-w) shrink-0 items-center justify-center rounded-md px-1 text-label whitespace-nowrap",
-        sent ? "bg-background text-muted-foreground" : "bg-card text-foreground ring-1 ring-foreground ring-inset",
+        sent ? "bg-background text-muted-foreground ring-1 ring-muted-foreground ring-inset" : "bg-card text-foreground ring-1 ring-foreground ring-inset",
         className,
       )}
     >

@@ -16,9 +16,11 @@
 
 mod connector;
 mod profile;
+mod scope;
 
 pub use connector::{RobinhoodConnector, Tools};
 pub use profile::robinhood as robinhood_profile;
+pub use scope::AccountRead;
 
 use mandate_canon::Digest;
 use mandate_executor::ClientOrderId;
@@ -30,6 +32,19 @@ pub enum RobinhoodError {
     Unimplemented { story: &'static str },
     #[error("the order state is none of the contract's ten")]
     UnknownState,
+    /// The account list shows no agentic account under the recorded number (CN-8, DEC-875).
+    #[error("the recorded account is not the agentic account the broker lists")]
+    NoAgenticAccount,
+    /// The account list shows more than one agentic account, or the recorded number more than
+    /// once; none of them is picked (CN-8, DEC-875).
+    #[error("the broker lists more than one agentic account; none is picked")]
+    AmbiguousAgenticAccount,
+    /// A read whose arguments name another account; nothing was sent (CN-8).
+    #[error("the read names another account and was not sent")]
+    OtherAccount,
+    /// A read's answer is lost, or cannot be read and attributed to one account (rule 3).
+    #[error("the read could not be read ({code})")]
+    Unreadable { code: &'static str },
 }
 
 /// The `ref_id` for the order with this idempotency key (DEC-860 item 1): a UUID version 8
