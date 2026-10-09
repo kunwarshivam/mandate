@@ -1733,6 +1733,7 @@ dependencies = [
 name = "mandate-mcp"
 version = "0.0.0"
 dependencies = [
+ "mandate-canon",
  "proptest",
  "reqwest",
  "rustls",

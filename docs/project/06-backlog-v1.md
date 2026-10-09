@@ -4582,3 +4582,10 @@ From the independent reviews of three CI and xtask conflict-and-queue fixes ([#7
   - Refuse two feature files with the same `# ` title, which `--index` would list twice.
   - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
     the README is never read as a feature.
+
+From E7-16's M2 implementation (`mandate-mcp`, claim #859; the shared check is lane L2's):
+
+- **E7-16: switch `mandate-mcp`'s private fund-movement tokenizer to `mandate_domain::fund_movement`**
+  once lane L2 lands it (E7-12, DEC-839 item 3). `client.rs`'s `moves_funds`, `words` and
+  `FUND_TOKENS` then go, and the crate gains its `mandate-domain` dependency, so the connector and
+  the scope check cannot disagree on a name.
