@@ -45,6 +45,10 @@ pub enum DispatchError {
     /// The push request could not be built; the web-push error's closed code says why.
     #[error("the push request could not be built: {0}")]
     WebPush(#[from] WebPushError),
+    /// A push service accepted a send, but the caller gave no id to journal it under: the journal
+    /// refuses `delivered` without one, so no `accepted` is formed (DEC-729 item 1).
+    #[error("an accepted push needs a message id")]
+    NoMessageId,
 }
 
 /// How a deployment reaches the push service (spec §4.6, HLD §4).
@@ -182,18 +186,23 @@ pub fn relay_refusal(refusal: RelayError) -> Result<Outcome, DispatchError> {
 /// DEC-729).
 ///
 /// - Any `2xx` is `accepted`, carrying `message_id`, the id the caller journals as
-///   `provider_message_id`, unchanged.
+///   `provider_message_id`, unchanged. An empty `message_id` with a `2xx` is
+///   [`DispatchError::NoMessageId`], never an `accepted` with no id; with any other status the id
+///   is not read.
 /// - Any `3xx` is `permanent { address_rejected }`: no redirect is followed (§4.6).
-/// - `404` and `410`, a subscription that is gone, are `permanent { address_rejected }`.
-/// - `400`, `401` and `403`, faults of the deployment's own request or VAPID header, are
-///   `permanent { provider_error }`, never `auth_failed` (DEC-728's reading).
+/// - `404` and `410`, a subscription that is gone (RFC 8030 §7.3, RFC 9110 §15.5.11), are
+///   `permanent { address_rejected }`.
+/// - `400`, a fault of the deployment's own request, is `permanent { provider_error }` (DEC-728's
+///   reading). `401` and `403`, about its VAPID header, are too, never `auth_failed`, so they mark
+///   no address: the interim of DEC-729 item 4, which is Proposed for the founder.
 /// - `413` is `permanent { too_large }`.
 /// - `429` is `retryable { rate_limited }` (§5.3) and any `5xx` is `retryable { provider_error }`.
 /// - Every other status, one outside `100..=599` included, is `retryable { provider_error }`: an
 ///   unknown answer is retried inside the class's window and marks no address.
 ///
 /// # Errors
-/// Never, once implemented; the stub reports [`DispatchError::Unimplemented`] (DEC-77).
+/// [`DispatchError::NoMessageId`] for a `2xx` with an empty `message_id`. The stub reports
+/// [`DispatchError::Unimplemented`] (DEC-77).
 pub fn push_status(status: u16, message_id: &str) -> Result<Outcome, DispatchError> {
     let _ = (status, message_id);
     Err(DispatchError::Unimplemented { story: "E8-14" })

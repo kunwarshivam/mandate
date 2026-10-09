@@ -19,7 +19,8 @@
   schedule; a relayed send with a person's subject builds no header and is refused
   `provider_error`; the relay's `address_rejected` marks the address, its `unreachable` is a
   retried timeout, and every other refusal is a permanent `provider_error` that marks nothing; and a canary subject reaches no outcome or error.
-  Three tests are pending on the `push_status` stub (DEC-77): each status's row, that over every
-  `u16` only a `3xx`, `404` or `410` marks the address and none is `auth_failed`, and that every
-  other status but a `2xx`, `400`, `401`, `403` and `413` is retried inside the `safety` window.
+  Four tests are pending on the `push_status` stub (DEC-77): each status's row, that over every
+  `u16` only a `3xx`, `404` or `410` marks the address and none is `auth_failed`, that every
+  other status but a `2xx`, `400`, `401`, `403` and `413` is retried inside the `safety` window,
+  and that a `2xx` with an empty message id is refused `NoMessageId`.
 - **Run:** `cargo nextest run -p mandate-dispatcher`.
