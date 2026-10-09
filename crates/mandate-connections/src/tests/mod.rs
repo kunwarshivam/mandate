@@ -1,7 +1,10 @@
-//! Tests of the connect core. Pending tests fail at an `Unimplemented` stub until E10-13 lands.
+//! Tests of the connect core. Each pending test fails at the `Unimplemented` stub of the story its
+//! `#[ignore]` names until that story lands.
 
 mod errors;
+mod exchange;
 mod grant;
 mod hosts;
+mod record;
 mod start;
 mod support;
