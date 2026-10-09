@@ -10,6 +10,7 @@ use proptest::prelude::*;
 
 const ID: &str = "0123456789abcdef0123456789abcdef";
 const FCM: &str = "https://fcm.googleapis.com/fcm/send/dGVzdA";
+const EVIL: &str = "https://evil.example/x";
 const ACTION: (&str, u32) = ("high", 3_600);
 const SAFETY: (&str, u32) = ("high", 86_400);
 const INFO: (&str, u32) = ("normal", 21_600);
@@ -141,6 +142,44 @@ fn a_relay_id_is_exactly_32_lowercase_hex_digits() -> Result<(), RelayError> {
         refused(&w, RelayError::InvalidRelayId)?;
     }
     Ok(())
+}
+
+/// DEC-724 item 8, written by hand: faults `i` (relay id), `e` (endpoint), `v` (envelope) and `s`
+/// (size) in one request, and the refusal that must win, the first in that order.
+#[rustfmt::skip]
+const FIRST_FAULT: [(&str, RelayError); 9] = [
+    ("ie", RelayError::InvalidRelayId), ("ev", RelayError::AddressRejected),
+    ("vs", RelayError::InvalidEnvelope), ("is", RelayError::InvalidRelayId),
+    ("es", RelayError::AddressRejected), ("iv", RelayError::InvalidRelayId),
+    ("evs", RelayError::AddressRejected), ("ivs", RelayError::InvalidRelayId),
+    ("ievs", RelayError::InvalidRelayId),
+];
+
+/// Every refusal posts nothing and leaves one log entry, with the id only when it parsed.
+#[test]
+#[ignore = "pending E8-14"]
+fn with_several_faults_the_first_in_the_fixed_order_is_the_refusal() -> Result<(), RelayError> {
+    for (faults, first) in FIRST_FAULT {
+        let has = |fault| faults.contains(fault);
+        let id = if has('i') { "zqrule" } else { ID };
+        let endpoint = if has('e') { EVIL } else { FCM };
+        let (urgency, ttl) = if has('v') { ("low", 1) } else { SAFETY };
+        let len = if has('s') { 513 } else { 230 };
+        let w = Wire(id.into(), endpoint.into(), urgency.into(), ttl, body(len));
+        refused(&w, first)?;
+    }
+    Ok(())
+}
+
+/// The two octet counts either side of the cap, forced rather than only sampled.
+#[test]
+#[ignore = "pending E8-14"]
+fn exactly_512_bytes_is_forwarded_once_and_513_is_refused_too_large() -> Result<(), RelayError> {
+    let (answer, posts, log) = run(&wire(FCM, SAFETY, 512), PushAnswer::Status(201))?;
+    assert_eq!(answer, OK);
+    assert_eq!(posts, [(FCM.to_owned(), SAFETY.0, SAFETY.1, body(512))]);
+    assert_eq!(log, [entry(ID, OK)]);
+    refused(&wire(FCM, SAFETY, 513), RelayError::TooLarge)
 }
 
 fn urgencies() -> impl Strategy<Value = &'static str> {
