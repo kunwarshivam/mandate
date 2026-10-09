@@ -1,8 +1,0 @@
-file = "crates/mandate-alpaca/tests/profile.rs"
-test = "a_fractional_or_notional_order_is_day_only_and_never_protective"
-reason = """
-E7-23 B2a's (DEC-838 item 5). It pins Alpaca's profile with crypto's stop-limit row, which the
-implementation adds, so on today's equities-only profile it fails on the declared rows, not at a
-stub: alpaca_profile is implemented. The implementation PR deletes this file with the #[ignore]
-line.
-"""

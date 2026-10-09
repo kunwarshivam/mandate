@@ -1,8 +1,8 @@
 file = "crates/mandate-alpaca/tests/profile.rs"
-test = "alpaca_declares_trading_spec_5_2_and_dec_630s_object"
+test = "alpacas_profile_declares_cryptos_one_resting_stop_limit"
 reason = """
 E7-23 B2a's (DEC-838 item 5). It pins Alpaca's profile with crypto's stop-limit row, which the
 implementation adds, so on today's equities-only profile it fails on the declared rows, not at a
-stub: alpaca_profile is implemented. The implementation PR deletes this file with the #[ignore]
-line.
+stub: alpaca_profile is implemented. The equities row stays pinned live by the B1 tests beside it.
+The implementation PR deletes this file with the #[ignore] line.
 """

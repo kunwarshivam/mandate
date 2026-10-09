@@ -1,8 +1,0 @@
-file = "crates/mandate-alpaca/tests/profile.rs"
-test = "the_connector_hands_the_executor_its_profile_without_calling_the_broker"
-reason = """
-E7-23 B2a's (DEC-838 item 5). It pins Alpaca's profile with crypto's stop-limit row, which the
-implementation adds, so on today's equities-only profile it fails on the declared rows, not at a
-stub: alpaca_profile is implemented. The implementation PR deletes this file with the #[ignore]
-line.
-"""
