@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.34 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.35 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, `connections` section of §9.8 and its `connection_requests` section of rule 131, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, and `cold_records` section of §9.14; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -12,6 +12,27 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.35 ([DEC-885](../project/decisions/DEC-885.md)):** §11's `connection_lifecycle_mismatch`
+  verifies a range from its **connection anchor**, the state the full-chain run's fold of stream
+  rules 66, 67, 68, and 131 holds before the range's trusted start, and fails closed without one,
+  as `held_mismatch` does ([DEC-782](../project/decisions/DEC-782.md) item 4). A range's fold no
+  longer starts empty, which reported a false SEV-1 on a valid rotation, `reauthorize` or
+  `reconnect` refusal, re-establishment, daily check, or state change that followed an
+  establishment or binding before the range. It refuses more and admits nothing new (DEC-176).
+  - **The anchor.** Derived only by folding the stored chain from `seq` 1, never from a read
+    model; §11 lists what it holds on each stream type. A chain that breaks a rule before the range
+    yields none.
+  - **Anchored**, a range judges every record as the full chain does, rule 131's closing
+    existence included, which [DEC-699](../project/decisions/DEC-699.md) had kept to the
+    full-chain run only because an empty fold could not see a request before the range; §9.8's
+    rule 131 ranges clause says so.
+  - **Unanchored**, a range fails closed at its first record rule 66, 67, 68, or 131 judges,
+    reported as `connection_lifecycle_mismatch` with cause `unanchored`; rule 111's codes are
+    unchanged, and a `ConnectionRevoked` never fails closed. `connection_cause_mismatch` stays
+    full-chain only.
+  - **Vectors.** A new section, `connection_ranges` (22 cases, 5 range mutants); the range vector
+    `range_after_an_unseen_request` gains the chain before it and keeps its answer. The code
+    change that reads them follows (ES-22).
 - **v0.34 ([DEC-869](../project/decisions/DEC-869.md)):** §9.16 journals the broker's own id for
   an order, so a connector that cancels by it (the Robinhood connector, connections spec §6.2)
   rebuilds its `client_order_id` → order id map from the account stream at start and never holds
@@ -2204,8 +2225,9 @@ contract to check, so an absent `contract` passes only for it (rule 68, §11).
 
 **Stream rules** (connections spec §3, CN-5, §9.1). These need the stream's earlier records, which
 `append` does not fold. The stream's owner checks them against its own fold and refuses the draft
-before appending; §11's `connection_lifecycle_mismatch` checks them on every range. Each holds on its
-own stream:
+before appending; §11's `connection_lifecycle_mismatch` checks them on every range, from the
+range's connection anchor, the fold's state before its trusted start, or failing closed without one
+([DEC-885](../project/decisions/DEC-885.md)). Each holds on its own stream:
 
 66. Control stream, `ConnectionEstablished`: when an earlier `ConnectionEstablished` names the same
     `connection_id`, the latest earlier `ConnectionEstablished` or `ConnectionRevoked` of that id is
@@ -2268,9 +2290,10 @@ arrives in §9.10 (v0.22, DEC-671), and these rules count a revocation of either
      - **Revocation.** A `ConnectionRevoked` of an id with an open request closes it, and is never
        refused. A later establishment or `ConnectionRefused` (occasion `connect`) of that id that
        has no request of its own breaks this rule.
-     - **Ranges.** That a closing record has an open request is checked in the full-chain run
-       only: a range's fold starts empty at its trusted start, and the request may be before it.
-       A range checks the other clauses on the requests it holds.
+     - **Ranges.** A range checks every clause, that a closing record has an open request
+       included, from its connection anchor (§11), which carries the open requests and whether the
+       stream holds a request; a range with no anchor fails closed at its first record this rule
+       or rules 66 to 68 judge ([DEC-885](../project/decisions/DEC-885.md), amending DEC-699).
 
 **No mapping to `JournaledFact`** beyond `ConnectionEstablished`'s (§9.2): the control-stream
 version, never its copy. `ConnectionRequested` maps to none. The executor folds the account-stream records itself, and the connection
@@ -3240,8 +3263,35 @@ On a control or account stream ([§9.8](#98-connection-records-dec-800)):
 
 - `connection_lifecycle_mismatch` — a record that breaks stream rule 66, 67, 68, or 131, reported
   at that record. A `ConnectionRequested` still open at the range's end is a connect in progress,
-  not a mismatch. Rule 131's requirement that a connect's establishment or refusal has a request is
-  checked in the full-chain run only, since a range may begin after that request.
+  not a mismatch. **The check anchors on the stored chain, not on the range**
+  ([DEC-885](../project/decisions/DEC-885.md)): those rules read records a range can begin after (an
+  establishment, a revocation, a request, a binding copy, a check, a state), so the verifier is
+  given the range's **connection anchor**, the state the full-chain run's fold of rules 66, 67, 68,
+  and 131 holds after the stream's records `1` to `from_seq − 1`. Its caller derives it by that
+  fold over the stored chain (the hot store, or an export's segments from `seq` 1), never from a
+  read model or a service's memory. On a control stream it holds each id's first establishment, its
+  latest establishment or revocation, and its latest scopes; each `account_ref`'s holder; the open
+  requests with their members; every `account_ref` a request named; rule 67's ids whose latest
+  revocation closed a request and ids revoked by one that closed none; and whether the stream holds
+  a request. On an account stream it holds the owning `connection_id`; the latest copy of the
+  establishment, or none while `connecting`; the latest check of each occasion, with its `seq`,
+  whether it passed every result, and whether it listed `contract`; each rotation copy and the
+  `seq` of its `reauthorize` check; the state the last `ConnectionStateChanged` left and whether it
+  was a `condition_cleared`; and the `seq` of the last entry into `suspended`. A full chain is
+  anchored on nothing before it.
+  - **Anchored**, the range judges every record in it from that state, as the full-chain run
+    would, rule 131's requirement that a connect's establishment or refusal closes an open request
+    included: the anchor carries the requests before the range. An anchored range and the full
+    chain report the same first record and rule.
+  - **No anchor**, because the caller cannot read the chain before the range, or the fold breaks a
+    rule before it (which the full-chain run reports): the range fails closed at its first record
+    that rule 66, 67, 68, or 131 judges, a `ConnectionRequested`, `ConnectionEstablished`,
+    `ConnectionCredentialRotated`, or `ConnectionRefused` on a control stream or any connection
+    record on an account stream, since a record before the range can break each. It is reported
+    at that record as `connection_lifecycle_mismatch`, as having no anchor (cause `unanchored`,
+    not a rule), as `held_mismatch` reports its own; records before it are not judged. A
+    `ConnectionRevoked` is never judged, so it never fails closed. The test vectors'
+    `connection_ranges` hold the anchored and unanchored cases.
 
 Across the control stream and its account streams, in the full-chain run only (a range never
 holds the other stream):
@@ -3257,8 +3307,9 @@ holds the other stream):
   `risk_clock`. Reported at the record. The test vectors' `connections.chains` hold a case for
   each.
 
-A reference to an event before the range's trusted start is not checked by that range; the weekly
-full-chain run checks every one, and there a `mode_event`, or an operator read's `causation_id`,
+A reference to an event before the range's trusted start is not checked by that range, except
+through an anchor (`held_mismatch`'s, or the connection anchor, whose rotation copies a
+`condition_cleared` may name); the weekly full-chain run checks every one, and there a `mode_event`, or an operator read's `causation_id`,
 that names no earlier event fails. The test vectors' `agent_stream.range_verification` holds a case
 for each for `mode_event`, and `records_access.range_checks` for the operator read's cause.
 
