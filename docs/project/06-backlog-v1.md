@@ -773,6 +773,15 @@ after U-A1 to U-A5 are recorded.
   environment, and the disclosure the owner confirmed, with vectors, tests first; and no Alpaca
   OAuth connect appends `ConnectionEstablished` before that event.
 
+- **E7-28 (Should, M6, after E7-26; tooling)** As the founder, I want X1's shell reading to
+  parse `case` arm patterns, `[[ … ]]` tests (their `|` and parentheses), single-quoted strings
+  that span lines, and `${…}` holding a space, so that the live-feature check's interim exact-line
+  list ([DEC-851](decisions/DEC-851.md) item 6) can be emptied. *Accepted when:* a tests
+  correction pins each form on real-line shapes, the tokenizer reads them, the exact-line list in
+  `xtask/src/main.rs` is empty, and `cargo xtask live-feature` still exits 0 on the repository.
+  Beside it, the stronger artifact-level check DEC-851 item 6's threat model names: assert from
+  `cargo metadata` and the build plan that no CI job resolves the `live` feature.
+
 ### E8 Escalation and approvals
 
 - **E8-1 (Must, M7)** As an approver, I want requests with the proposed action, alternatives,
