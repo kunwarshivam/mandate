@@ -22,8 +22,8 @@ the owl, the rules and the record.
       fixes in section J)
 - [x] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
       ten minutes that must be perfect on every release. (spec: #1035,
-      `e2e/golden-path.spec.ts`, at 390 and 1440px in both themes; left as `fixme`: the request
-      appearing once on Home, which waits on section J's "A request once on Home", C-5)
+      `e2e/golden-path.spec.ts`, at 390 and 1440px in both themes; the request appearing once on
+      Home was a `fixme` until section J's "A request once on Home", C-5, #1090)
 - [ ] **Five people, watched.** Twenty minutes each, say nothing, write down where they hesitate.
 - [ ] **Reference, not inspiration.** Five products and what is taken from each, written down:
       Linear (speed and keyboard), Bloomberg (density without clutter), Things (calm states), Arc
@@ -248,8 +248,8 @@ item above (C-3, C-9) are not repeated.
       open; if not, keep the frame's Stop live as the More sheet does. Safety lane. (C-21)
 - [x] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and
       reconciliation conditions do. (C-25, #1057)
-- [ ] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
-      leaves out its "Asked you" row. (C-5)
+- [x] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
+      leaves out its "Asked you" row. (C-5, #1090)
 - [ ] **"At the limit:" on the overview card**, so a limit's action never reads as the current
       mode. (C-7)
 - [ ] **A time from another day carries its date**, through one formatter shared with the
