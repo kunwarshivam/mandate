@@ -8,13 +8,17 @@ use std::fmt::Debug;
 use mandate_api::envelope::{
     Actor, ApiVersion, Record, StepUpEvidence, StepUpMethod, StepUpStatus, Watermark,
 };
+use mandate_api::problem::{Problem, Violation};
 use mandate_api::requests::{
-    AcknowledgeRequest, EndDelegationRequest, HoldRequest, LiftHoldRequest, OwnerRequest,
-    PauseRequest, ResumeRequest, Side,
+    AcknowledgeRequest, ApprovalResponseRequest, BidConfirmation, ConfirmRequest, DelegationChosen,
+    DelegationPreviewRequest, EndDelegationRequest, Environment, HoldRequest, KillSwitchRequest,
+    LiftHoldRequest, OwnerExitRequest, OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest,
+    Scope, Shape, Side, StopRequest, Verdict,
 };
 use mandate_api::responses::{
-    AlreadyEnded, Applies, ApprovalResponseAccepted, Classification, CommandAccepted,
-    ConfirmAccepted, EndDelegationAlreadyEnded, Recorded,
+    AlreadyEnded, Applies, ApprovalResponseAccepted, Classification, CommandAccepted, CommandPhase,
+    CommandStatus, ConfirmAccepted, DelegationPreview, EndDelegationAlreadyEnded, IncreasesRisk,
+    PreviewedDelegation, Recorded, Step,
 };
 use mandate_api::wire::{Refused, Validate, decode, encode};
 use serde::Serialize;
@@ -110,6 +114,18 @@ fn the_closed_enums_are_exactly_the_schemas_values() {
     let kinds: Vec<_> = branches.iter().map(kind).collect();
     let rust = serde_names::<Actor>(json!({"kind": "no_such_value"}));
     closed_set("Actor", &json!({ "enum": kinds }), &rust);
+    let confirm = &schema!("confirm-request")["properties"];
+    enum_drift::<Classification>(&confirm["classification_shown"]);
+    enum_drift::<Verdict>(&schema!("approval-response-request")["properties"]["verdict"]);
+    enum_drift::<Shape>(&schema!("delegation-preview-request")["properties"]["shape"]);
+    let preview = &schema!("delegation-preview")["properties"];
+    enum_drift::<IncreasesRisk>(&preview["classification"]);
+    enum_drift::<Shape>(&preview["delegation"]["properties"]["shape"]);
+    let kill = &schema!("kill-switch-request")["properties"];
+    enum_drift::<Environment>(&kill["environment_shown"]["oneOf"][0]);
+    let kinds = serde_names::<Scope>(json!({"kind": "no_such_value"}));
+    closed_set("Scope", &kill["scope"]["properties"]["kind"], &kinds);
+    enum_drift::<CommandPhase>(&schema!("command-status")["properties"]["phase"]);
 }
 
 /// The members the schema objects name, against `T`'s, less a tag `T` is tagged on.
@@ -148,6 +164,29 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<ResumeRequest>(&[&schema!("resume-request")], None);
     members::<AcknowledgeRequest>(&[&schema!("acknowledge-request")], None);
     members::<OwnerRequest>(&[&schema!("owner-request")], None);
+    members::<ConfirmRequest>(&[&schema!("confirm-request")], None);
+    let approval = schema!("approval-response-request");
+    members::<ApprovalResponseRequest>(&[&approval], None);
+    members::<DelegationChosen>(&[&approval["properties"]["delegation"]["oneOf"][0]], None);
+    members::<DelegationPreviewRequest>(&[&schema!("delegation-preview-request")], None);
+    members::<StopRequest>(&[&schema!("stop-request")], None);
+    let kill = schema!("kill-switch-request");
+    members::<KillSwitchRequest>(&[&kill], None);
+    let scope = &kill["properties"]["scope"];
+    let kinds = scope["properties"]["kind"]["enum"].as_array();
+    for kind in kinds.expect("kinds").iter().filter_map(Value::as_str) {
+        members::<Scope>(&[scope], Some(("kind", kind)));
+    }
+    let exit = &kill["properties"]["owner_exit"]["oneOf"][0]["items"];
+    members::<BidConfirmation>(&[exit], None);
+    members::<OwnerExitRequest>(&[&schema!("owner-exit-request")], None);
+    members::<RevokeRequest>(&[&schema!("revoke-request")], None);
+    let preview = schema!("delegation-preview");
+    members::<DelegationPreview>(&[&defs["Envelope"], &preview], None);
+    members::<PreviewedDelegation>(&[&preview["properties"]["delegation"]], None);
+    let status = schema!("command-status");
+    members::<CommandStatus>(&[&defs["Envelope"], &status], None);
+    members::<Step>(&[&status["$defs"]["Step"]], None);
 }
 
 /// Each member is `null`-able exactly when its schema says `oneOf` with `{type: null}`, and each
@@ -192,6 +231,23 @@ fn every_member_is_null_able_and_optional_exactly_as_its_schema_says() {
     nulls::<ResumeRequest>(&[&schema!("resume-request")]);
     nulls::<AcknowledgeRequest>(&[&schema!("acknowledge-request")]);
     nulls::<OwnerRequest>(&[&schema!("owner-request")]);
+    nulls::<ConfirmRequest>(&[&schema!("confirm-request")]);
+    let approval = schema!("approval-response-request");
+    nulls::<ApprovalResponseRequest>(&[&approval]);
+    nulls::<DelegationChosen>(&[&approval["properties"]["delegation"]["oneOf"][0]]);
+    nulls::<DelegationPreviewRequest>(&[&schema!("delegation-preview-request")]);
+    nulls::<StopRequest>(&[&schema!("stop-request")]);
+    let kill = schema!("kill-switch-request");
+    nulls::<KillSwitchRequest>(&[&kill]);
+    nulls::<BidConfirmation>(&[&kill["properties"]["owner_exit"]["oneOf"][0]["items"]]);
+    nulls::<OwnerExitRequest>(&[&schema!("owner-exit-request")]);
+    nulls::<RevokeRequest>(&[&schema!("revoke-request")]);
+    let preview = schema!("delegation-preview");
+    nulls::<DelegationPreview>(&[envelope, &preview]);
+    nulls::<PreviewedDelegation>(&[&preview["properties"]["delegation"]]);
+    let status = schema!("command-status");
+    nulls::<CommandStatus>(&[envelope, &status]);
+    nulls::<Step>(&[&status["$defs"]["Step"]]);
 }
 
 /// DEC-682 item 23: no type of the crate flattens another, since serde could not then refuse an
@@ -292,6 +348,49 @@ fn the_envelope_shapes_accept_their_examples_and_refuse_the_invalid() {
     check::<Watermark>(&of("Watermark", &common), &of("Watermark", &invalid));
 }
 
+/// The codes `envelope.schema.json` marks planned under a story not in flight (DEC-683 item 5): no
+/// variant serves them yet, so their examples wait for that story.
+fn planned_elsewhere() -> BTreeSet<String> {
+    let codes = &file!("workspace-api/envelope.schema.json")["$defs"]["ProblemCode"];
+    let planned = codes["x-planned"].as_object().cloned().unwrap_or_default();
+    let in_flight = |story: &Value| story.as_str().is_some_and(|s| IN_FLIGHT.contains(&s));
+    let waiting = planned.into_iter().filter(|(_, story)| !in_flight(story));
+    waiting.map(|(code, _)| code).collect()
+}
+
+/// §3.5's problem and its violations (§4.3, DEC-682 items 22 and 28) against their examples: each
+/// valid one decodes and encodes back, and each invalid one is refused, but a problem whose code
+/// waits for a story not in flight.
+#[test]
+#[ignore = "pending E10-10"]
+fn the_problem_and_its_violations_accept_their_examples_and_refuse_the_invalid() {
+    let good = [file!("workspace-api/examples/envelope.json")];
+    let bad = [file!("workspace-api/examples/envelope.invalid.json")];
+    let waiting = planned_elsewhere();
+    let served = |p: &Value| !p["code"].as_str().is_some_and(|c| waiting.contains(c));
+    let problems = |files: &[Value]| -> Vec<Value> {
+        of("Problem", files).into_iter().filter(served).collect()
+    };
+    check::<Problem>(&problems(&good), &problems(&bad));
+    check::<Violation>(&of("Violation", &good), &of("Violation", &bad));
+}
+
+/// A pointer's segment may hold any character but a control character (the schemas' pointer
+/// pattern, DEC-682 items 22 and 27): a space is one, `U+001F` is not, in a violation's `path`
+/// and in a `202`'s `dropped`.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_pointer_may_hold_a_space_but_never_a_control_character() {
+    let examples = file!("workspace-api/examples/envelope.json");
+    let finding = examples.pointer("/Violation/0").expect("a schema finding");
+    let accepted = file!("workspace-api/examples/commands.command-accepted.json");
+    let [space, control] = ["/a b", "/a\u{1f}b"];
+    let path = |p: &str| apply(finding, &json!({"set": {"/path": p}}));
+    check::<Violation>(&[path(space)], &[path(control)]);
+    let dropped = |p: &str| apply(&accepted, &json!({"set": {"/dropped": [p]}}));
+    check::<CommandAccepted>(&[dropped(space)], &[dropped(control)]);
+}
+
 /// A shape's example with its `.valid` cases applied, and its `.invalid` cases applied.
 fn instances(cases: [Value; 3]) -> (Vec<Value>, Vec<Value>) {
     let [base, valid, invalid] = cases;
@@ -353,4 +452,78 @@ fn the_plain_requests_match_their_examples() {
     request::<ResumeRequest>(cases!("resume-request"));
     request::<AcknowledgeRequest>(cases!("acknowledge-request"));
     request::<OwnerRequest>(cases!("owner-request"));
+}
+
+/// `Scope` holds the kill switch's `if`/`then` as variants tagged on `kind`, so `nulls` cannot read
+/// it from `properties`: `id` is `null` for exactly the kind the schema's `if` names, and that kind
+/// takes nothing else (DEC-689 item 1).
+#[test]
+fn a_scope_takes_a_null_id_exactly_for_the_kind_its_schema_names() {
+    let scope = &schema!("kill-switch-request")["properties"]["scope"];
+    let null_kind = &scope["if"]["properties"]["kind"]["const"];
+    assert_eq!(scope["then"]["properties"]["id"], json!({"type": "null"}));
+    let kinds = scope["properties"]["kind"]["enum"].as_array();
+    for kind in kinds.expect("kinds") {
+        let decoded = serde_json::from_value::<Scope>(json!({"kind": kind, "id": null}));
+        assert_eq!(decoded.is_ok(), kind == null_kind, "{kind}: {decoded:?}");
+    }
+    let ids = [json!("ws_1"), json!({}), json!([]), json!(false)];
+    let bodies = ids.map(|id| json!({"kind": null_kind, "id": id}));
+    for body in bodies.into_iter().chain([json!({ "kind": null_kind })]) {
+        let decoded = serde_json::from_value::<Scope>(body.clone());
+        assert!(decoded.is_err(), "{body}");
+    }
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn the_conditional_requests_match_their_examples() {
+    request::<ConfirmRequest>(cases!("confirm-request"));
+    request::<ApprovalResponseRequest>(cases!("approval-response-request"));
+    request::<DelegationPreviewRequest>(cases!("delegation-preview-request"));
+    request::<StopRequest>(cases!("stop-request"));
+    request::<KillSwitchRequest>(cases!("kill-switch-request"));
+    request::<OwnerExitRequest>(cases!("owner-exit-request"));
+    request::<RevokeRequest>(cases!("revoke-request"));
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn the_conditional_responses_match_their_examples() {
+    response::<DelegationPreview>(cases!("delegation-preview"));
+    response::<CommandStatus>(cases!("command-status"));
+}
+
+/// `base` with the integer at `pointer` set to each edge of `bounds` and one past it: each edge
+/// decodes, and each value past one is refused.
+fn edges<T: DeserializeOwned + Validate + Debug>(base: &Value, pointer: &str, bounds: &Value) {
+    let low = bounds["minimum"].as_u64().expect("a minimum");
+    let mut values = vec![(low, true), (low.wrapping_sub(1), false)];
+    if let Some(high) = bounds["maximum"].as_u64() {
+        values.extend([(high, true), (high.wrapping_add(1), false)]);
+    }
+    for (value, valid) in values {
+        let body = apply(base, &json!({ "set": { pointer: value } }));
+        let got = decode::<T>(body.to_string().as_bytes());
+        let refused = matches!(got, Err(Refused::Invalid { .. }));
+        assert!(got.is_ok() == valid && refused != valid, "{value}: {got:?}");
+    }
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn the_integer_bounds_hold_at_their_schemas_edges() {
+    let [request, ..] = cases!("delegation-preview-request");
+    let bounds = &schema!("delegation-preview-request")["properties"]["max_orders"];
+    edges::<DelegationPreviewRequest>(&request, "/max_orders", bounds);
+    let [preview, ..] = cases!("delegation-preview");
+    let bounds = schema!("delegation-preview")
+        .pointer("/properties/delegation/properties/max_orders")
+        .cloned();
+    edges::<DelegationPreview>(&preview, "/delegation/max_orders", &bounds.expect("bounds"));
+    let [status, ..] = cases!("command-status");
+    let seq = schema!("command-status")
+        .pointer("/$defs/Step/properties/seq")
+        .cloned();
+    edges::<CommandStatus>(&status, "/steps/0/seq", &seq.expect("bounds"));
 }

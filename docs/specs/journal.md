@@ -5,7 +5,7 @@
 | **Status** | v0.25 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `connections` section of §9.8, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, and `membership` section of §9.12; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `connections` section of §9.8, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, and `membership` and `membership_fold` sections of §9.12; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
@@ -24,7 +24,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   envelope's `event_time`.
   The credential, session, service-account, host-CLI, and break-glass records stay open until
   their own change; the client records are §9.10's (v0.22, [DEC-671](../project/decisions/DEC-671.md)). The vectors gain a generated, additive `membership` section, so they stay
-  version 3.
+  version 3. A generated `membership_fold` section holds membership histories with their expected
+  states and counts, reproduced by a reference fold.
 - **v0.24 ([DEC-674](../project/decisions/DEC-674.md), [DEC-676](../project/decisions/DEC-676.md)):** §9.8 states that a later check (occasion
   `executor_start` or `daily`) whose `contract` result failed with `tools_missing` moves the
   connection to `suspended`, journaled as `ConnectionStateChanged` with reason `check_failed`, as
@@ -2439,7 +2440,9 @@ period (§6.4).
 state. Folding the control stream in `seq` order: `MemberInvited` makes an invitation `invited`
 before `expires_at` and `expired` from it; `MemberInvitationRevoked` makes it `revoked`; `MemberActivated` and
 `MemberReactivated` make the member `cooling_off` until their `cool_off_ends_at` and `active` from it;
-`MemberRoleChanged` adds and removes roles, each added role effective from its `cool_off_ends_at`;
+`MemberRoleChanged` adds and removes roles, each added role effective from its `cool_off_ends_at`
+and each removal at once; on an activation or reactivation, `operator` and `approver` are effective
+from its `cool_off_ends_at` and every other role at once;
 `MemberDeactivated` makes the member `deactivated`, keeping its roles for a reactivation; and
 `MemberRemoved` makes it `removed`. A `MemberRoleChanged` whose `added` is empty may remove kept
 roles from a `deactivated` member, so an admin can strip a suspended member's roles while offboarding
@@ -2447,7 +2450,10 @@ roles from a `deactivated` member, so an admin can strip a suspended member's ro
 refused. A deactivated member whose kept roles are all removed cannot be reactivated, since rule 100
 refuses a `MemberReactivated` with no roles: they return only by removal and a new invitation. `removed`, `expired`, and `revoked` are terminal: a removed
 member comes back only through a new invitation, which starts a new membership with no role of the
-old one. A record that does not fit the state it finds is refused: a second activation of a member
+old one. An invitation an activation used is `accepted`, the fold's own name for it: identity spec
+§5.1 has no such state, because the membership it started takes over. A record that does not fit the
+state it finds is refused: a `MemberInvited` whose invitation ULID was already issued; any record
+naming an invitation never issued or a member never activated; a second activation of a member
 whose membership is not `removed`; an activation by an invitation that is not `invited` at
 `activated_at` (so `activated_at` < `expires_at`, and an invitation activates at most once) or with
 roles other than the invitation's; a role change for a member who is not `active` or `cooling_off`,
@@ -2466,6 +2472,18 @@ record's `independent_approval_required` equals the workspace's effective policy
 (DEC-654 item 6), but the fold refuses granting a held role or removing one not held, and rule 100
 refuses a record left with no entry, so workspace services drop such entries before committing and
 commit nothing when none is left.
+
+The state at an instant *t* folds the records whose `event_time` is at or before *t* (rule 106 makes
+that each record's own instant), and reads each cool-off and expiry against *t*: `workspace_users`
+(identity spec §5.3) counts the members `active` at *t*. The test vectors' `membership_fold` section
+holds histories of membership records, valid under the rules above except a record a history lists
+in `refused` with the refusal it expects (which the fold reads as out of state too), mixed with records by clients,
+agents, and service accounts, which hold no membership and which the fold ignores. Each history
+states, at named instants, each member's and invitation's state, each member's effective roles, and
+the count, written by hand from identity spec §5 and §8.3. It also holds out-of-state histories that
+read as unreadable, with a count of 1. The reference fold
+([reference/journal/membership_fold.py](../../reference/journal/membership_fold.py)) reproduces
+every one, and the identity crate's fold is tested against them.
 
 ## 10. Anchoring
 

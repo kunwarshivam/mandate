@@ -1804,13 +1804,18 @@ dependencies = [
  "mandate-artifacts-fs",
  "mandate-canon",
  "mandate-journal",
+ "mandate-journal-pg",
  "mandate-marketdata",
  "mandate-modelhost",
  "mandate-num",
+ "mandate-runtime",
  "mandate-shell",
  "mandate-spec",
  "mandate-time",
+ "proptest",
+ "sqlx",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
