@@ -13,11 +13,13 @@
 //! - **One callback per login** (O1b, DEC-855): fresh PKCE and an exact single-use `state`;
 //!   secrets are [`SecretString`]s only, never printed or in an error (LT-9).
 
+use std::io::Write;
+use std::net::Ipv4Addr;
 use std::time::Duration;
 
 use reqwest::header::{ACCEPT, CONTENT_TYPE, WWW_AUTHENTICATE};
 use reqwest::{RequestBuilder, Response, StatusCode, Url};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
@@ -35,6 +37,15 @@ const PROBE_ID: u64 = 1;
 const RESOURCE_WELL_KNOWN: &str = "/.well-known/oauth-protected-resource";
 const SERVER_WELL_KNOWN: &str = "/.well-known/oauth-authorization-server";
 const JSON: &str = "application/json";
+const FORM: &str = "application/x-www-form-urlencoded";
+const BASE64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const BLANK_LINE: &[u8] = b"\r\n\r\n";
+/// The most bytes a callback's head may have, its blank line included (DEC-861 item 2).
+const MAX_HEAD: usize = 8192;
+const RECEIVED: &str = "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n\
+    Login received. You can close this window.";
+const REFUSED: &str = "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n\
+    Login refused. You can close this window.";
 
 /// The members of RFC 9728 protected-resource metadata discovery reads.
 #[derive(Deserialize)]
@@ -53,6 +64,13 @@ struct ServerMetadata {
     response_types_supported: Vec<String>,
     #[serde(default)]
     code_challenge_methods_supported: Vec<String>,
+}
+
+/// The members of an RFC 6749 §5.1 token answer the exchange reads; a refresh token is never read.
+#[derive(Deserialize)]
+struct Granted {
+    access_token: Option<Value>,
+    token_type: Option<Value>,
 }
 
 /// The members of an RFC 7591 registration answer the login reads. A client secret is noted only
@@ -122,10 +140,6 @@ impl LoopbackRedirect {
 
 /// The client the authorization server registered: a public client id, which is not a secret
 /// (RFC 6749 §2.2), and the one redirect it was registered with.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "the authorization request (O1b) reads them")
-)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientRegistration {
     pub(crate) client_id: String,
@@ -147,10 +161,6 @@ pub struct ClientRegistration {
 ///     login.clone()
 /// }
 /// ```
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "O1b's implementation reads them")
-)]
 #[derive(Debug)]
 pub struct PendingLogin {
     pub(crate) state: SecretString,
@@ -161,7 +171,6 @@ pub struct PendingLogin {
 
 /// The code the callback carried, with the verifier and client that redeem it once at the token
 /// endpoint (O1b part 2).
-#[cfg_attr(not(test), allow(dead_code, reason = "the exchange reads them"))]
 #[derive(Debug)]
 pub struct AuthorizationCode {
     pub(crate) code: SecretString,
@@ -178,8 +187,36 @@ impl PendingLogin {
     /// non-empty visible ASCII ([`McpError::Malformed`]). Other members are not read. No error
     /// carries the state, the code or the target's text (DEC-855 items 1 to 4).
     pub fn callback(self, target: &str) -> Result<AuthorizationCode, McpError> {
-        let _ = target;
-        Err(McpError::Unimplemented { story: "E7-24" })
+        let query = target
+            .strip_prefix("/callback?")
+            .ok_or(McpError::Malformed)?;
+        let mut url = Url::parse("http://127.0.0.1/").map_err(|_| McpError::Malformed)?;
+        url.set_query(Some(query));
+        let all = |name: &str| -> Vec<String> {
+            let named = url.query_pairs().filter(|(key, _)| key == name);
+            named.map(|(_, value)| value.into_owned()).collect()
+        };
+        let own = self.state.expose_secret();
+        if !matches!(all("state").as_slice(), [state] if state == own) {
+            return Err(McpError::StateMismatch);
+        }
+        let issuer = self.issuer.as_str();
+        match all("iss").as_slice() {
+            [] => {}
+            [iss] if iss == issuer => {}
+            _ => return Err(McpError::IssuerMismatch),
+        }
+        if !all("error").is_empty() {
+            return Err(McpError::AuthorizationDenied);
+        }
+        match all("code").as_slice() {
+            [code] if is_visible_ascii(code.as_bytes()) => Ok(AuthorizationCode {
+                code: SecretString::from(code.clone()),
+                verifier: self.verifier,
+                client: self.client,
+            }),
+            _ => Err(McpError::Malformed),
+        }
     }
 }
 
@@ -194,7 +231,6 @@ pub struct AccessToken {
 }
 
 /// The listener on the loopback redirect: `127.0.0.1` only, on a port the system picks.
-#[cfg_attr(not(test), allow(dead_code, reason = "O1b's implementation reads it"))]
 #[derive(Debug)]
 pub struct CallbackListener {
     pub(crate) socket: tokio::net::TcpListener,
@@ -203,7 +239,11 @@ pub struct CallbackListener {
 impl CallbackListener {
     /// Binds `127.0.0.1:0`, never another address, and returns the redirect naming its port.
     pub async fn bind() -> Result<(Self, LoopbackRedirect), McpError> {
-        Err(McpError::Unimplemented { story: "E7-24" })
+        let socket = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .map_err(|_| McpError::Network)?;
+        let port = socket.local_addr().map_err(|_| McpError::Network)?.port();
+        Ok((Self { socket }, LoopbackRedirect::new(port)?))
     }
 
     /// One request, then closed; `clock` started when `login` began (DEC-861 items 1 to 3).
@@ -212,8 +252,16 @@ impl CallbackListener {
         login: PendingLogin,
         clock: &dyn Monotonic,
     ) -> Result<AuthorizationCode, McpError> {
-        let _ = (login, clock);
-        Err(McpError::Unimplemented { story: "E7-24" })
+        let (stream, _) = self.socket.accept().await.map_err(|_| McpError::Network)?;
+        drop(self.socket);
+        let head = read_head(&stream).await;
+        let outcome = if clock.elapsed() >= LOGIN_LIFETIME {
+            Err(McpError::LoginExpired)
+        } else {
+            request_target(&head).and_then(|target| login.callback(target))
+        };
+        answer(stream, if outcome.is_ok() { RECEIVED } else { REFUSED });
+        outcome
     }
 }
 
@@ -224,8 +272,32 @@ impl AuthServer {
         code: AuthorizationCode,
         config: &TransportConfig,
     ) -> Result<AccessToken, McpError> {
-        let _ = (code, config);
-        Err(McpError::Unimplemented { story: "E7-24" })
+        let client = http_client(config)?;
+        let mut form = Url::parse("http://form.invalid/").map_err(|_| McpError::Malformed)?;
+        form.query_pairs_mut()
+            .append_pair("grant_type", "authorization_code")
+            .append_pair("code", code.code.expose_secret())
+            .append_pair("redirect_uri", &code.client.redirect.uri())
+            .append_pair("client_id", &code.client.client_id)
+            .append_pair("code_verifier", code.verifier.expose_secret())
+            .append_pair("resource", self.resource.as_str());
+        let request = client
+            .post(self.token_endpoint.clone())
+            .header(ACCEPT, JSON)
+            .header(CONTENT_TYPE, FORM)
+            .body(form.query().unwrap_or_default().to_owned());
+        let response = send(request).await?;
+        let granted: Granted = read_json(response, StatusCode::OK, config.max_answer_bytes).await?;
+        let bearer = granted.token_type.as_ref().and_then(Value::as_str);
+        if !bearer.is_some_and(|kind| kind.eq_ignore_ascii_case("Bearer")) {
+            return Err(McpError::Malformed);
+        }
+        let token = granted.access_token.as_ref().and_then(Value::as_str);
+        let token = token.filter(|token| is_visible_ascii(token.as_bytes()));
+        let token = token.ok_or(McpError::Malformed)?;
+        Ok(AccessToken {
+            secret: SecretString::from(token.to_owned()),
+        })
     }
 
     /// An unauthenticated `POST` of `initialize` to the endpoint, which must answer `401`; the
@@ -288,8 +360,11 @@ impl AuthServer {
     /// [`AuthServer::begin_with`] with 32 bytes each for the verifier and the `state` from the
     /// operating system's generator, or [`McpError::RandomUnavailable`] if it fails.
     pub fn begin(&self, client: &ClientRegistration) -> Result<(Url, PendingLogin), McpError> {
-        let _ = client;
-        Err(McpError::Unimplemented { story: "E7-24" })
+        let mut verifier = [0_u8; 32];
+        let mut state = [0_u8; 32];
+        getrandom::getrandom(&mut verifier).map_err(|_| McpError::RandomUnavailable)?;
+        getrandom::getrandom(&mut state).map_err(|_| McpError::RandomUnavailable)?;
+        self.begin_with(client, &verifier, &state)
     }
 
     /// The authorization request (RFC 6749 §4.1.1, RFC 7636 §4.3, RFC 8707). The verifier and
@@ -298,18 +373,34 @@ impl AuthServer {
     /// `response_type` `code`, `client_id`, `redirect_uri`, `code_challenge`
     /// BASE64URL(SHA-256(verifier)), `code_challenge_method` `S256`, `state`, and `resource` the
     /// MCP endpoint (DEC-855 items 5 and 6).
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "`begin` calls it (O1b implementation)")
-    )]
     pub(crate) fn begin_with(
         &self,
         client: &ClientRegistration,
         verifier_seed: &[u8; 32],
         state_seed: &[u8; 32],
     ) -> Result<(Url, PendingLogin), McpError> {
-        let _ = (client, verifier_seed, state_seed);
-        Err(McpError::Unimplemented { story: "E7-24" })
+        if self.authorization_endpoint.query().is_some() {
+            return Err(McpError::EndpointShape);
+        }
+        let verifier = base64url(verifier_seed);
+        let state = base64url(state_seed);
+        let challenge = base64url(mandate_canon::Digest::of(verifier.as_bytes()).as_bytes());
+        let mut url = self.authorization_endpoint.clone();
+        url.query_pairs_mut()
+            .append_pair("response_type", "code")
+            .append_pair("client_id", &client.client_id)
+            .append_pair("redirect_uri", &client.redirect.uri())
+            .append_pair("code_challenge", &challenge)
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("state", &state)
+            .append_pair("resource", self.resource.as_str());
+        let login = PendingLogin {
+            state: SecretString::from(state),
+            verifier: SecretString::from(verifier),
+            client: client.clone(),
+            issuer: self.issuer.clone(),
+        };
+        Ok((url, login))
     }
 
     /// RFC 7591 registration at the registration endpoint, as a public client: `client_name`
@@ -463,6 +554,77 @@ fn on_auth_host(text: &str, auth_hosts: &[&str]) -> Result<Url, McpError> {
         return Err(McpError::AuthHostNotPinned);
     }
     Ok(url)
+}
+
+/// Unpadded base64url (RFC 7636 appendix A): each group of up to three bytes gives one more
+/// character than it has bytes.
+fn base64url(bytes: &[u8]) -> String {
+    let mut text = String::new();
+    for group in bytes.chunks(3) {
+        let mut word = [0_u8; 4];
+        for (to, from) in word.iter_mut().skip(1).zip(group) {
+            *to = *from;
+        }
+        let word = u32::from_be_bytes(word);
+        for shift in [18_u32, 12, 6, 0]
+            .into_iter()
+            .take(group.len().saturating_add(1))
+        {
+            let at = usize::try_from(word.wrapping_shr(shift) & 0x3f).ok();
+            if let Some(&letter) = at.and_then(|at| BASE64URL.get(at)) {
+                text.push(char::from(letter));
+            }
+        }
+    }
+    text
+}
+
+/// The bytes of one request up to its blank line, read until it ends, the connection closes, or
+/// one byte more than [`MAX_HEAD`] has arrived.
+async fn read_head(stream: &tokio::net::TcpStream) -> Vec<u8> {
+    let mut head = Vec::new();
+    let mut chunk = [0_u8; 1024];
+    while !head.windows(4).any(|four| four == BLANK_LINE) {
+        let room = MAX_HEAD.saturating_add(1).saturating_sub(head.len());
+        let Some(into) = chunk.get_mut(..room.min(1024)) else {
+            break;
+        };
+        let waiting = stream.peek(into).await.unwrap_or(0);
+        let into = into.get_mut(..waiting).unwrap_or_default();
+        let read = stream.try_read(into).unwrap_or(0);
+        if read == 0 {
+            break;
+        }
+        head.extend_from_slice(into.get(..read).unwrap_or_default());
+    }
+    head
+}
+
+/// The target of `GET <target> HTTP/1.1`, from a head that ends within [`MAX_HEAD`] bytes.
+fn request_target(head: &[u8]) -> Result<&str, McpError> {
+    let end = head.windows(4).position(|four| four == BLANK_LINE);
+    let within = end
+        .and_then(|end| end.checked_add(4))
+        .filter(|&len| len <= MAX_HEAD);
+    let head = within
+        .and_then(|len| head.get(..len))
+        .ok_or(McpError::Malformed)?;
+    let text = std::str::from_utf8(head).map_err(|_| McpError::Malformed)?;
+    let line = text.split("\r\n").next().unwrap_or_default();
+    match line.split(' ').collect::<Vec<_>>().as_slice() {
+        ["GET", target, "HTTP/1.1"] => Ok(target),
+        _ => Err(McpError::Malformed),
+    }
+}
+
+/// The fixed answer, written in blocking mode: a hundred bytes into a fresh loopback socket's
+/// empty send buffer, so nothing waits. Dropping the stream closes it.
+fn answer(stream: tokio::net::TcpStream, text: &str) {
+    let Ok(mut stream) = stream.into_std() else {
+        return;
+    };
+    let _blocking = stream.set_nonblocking(false);
+    let _unread_by_a_closed_browser = stream.write_all(text.as_bytes());
 }
 
 /// A `3xx` ends the exchange: no redirect is followed.
