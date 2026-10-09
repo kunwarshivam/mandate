@@ -49,15 +49,34 @@ pub enum CanonicalError {
     Unimplemented,
 }
 
-/// What workspace services issue for one step-up (§7.2 step 1).
+/// What workspace services issue for one step-up (§7.2 step 1). Only [`ChallengeRecord::issue`]
+/// builds one, so `expires_at` is always `issued_at` plus [`CHALLENGE_LIFETIME_S`]: a record read
+/// back from the challenge store is rebuilt with `issue` from its stored members, never with an
+/// expiry of its own.
+///
+/// ```compile_fail,E0451
+/// use mandate_canon::Digest;
+/// use mandate_identity::{AssertionId, PrincipalId, StepUpActionKind, WorkspaceId};
+/// use mandate_passkey::stepup::{Action, ChallengeRecord};
+/// use mandate_time::UtcNanos;
+///
+/// let a_day_long_challenge = ChallengeRecord {
+///     challenge_id: AssertionId("01J9ZQ4B7Y8K3M5N6P7Q8R9S0T".to_owned()),
+///     workspace_id: WorkspaceId(1),
+///     principal_id: PrincipalId(2),
+///     action: Action { kind: StepUpActionKind::Approve, digest: Digest::of(b"an approval") },
+///     issued_at: UtcNanos::EPOCH,
+///     expires_at: UtcNanos::from_parts(86_400, 0).unwrap(),
+/// };
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChallengeRecord {
-    pub challenge_id: AssertionId,
-    pub workspace_id: WorkspaceId,
-    pub principal_id: PrincipalId,
-    pub action: Action,
-    pub issued_at: UtcNanos,
-    pub expires_at: UtcNanos,
+    challenge_id: AssertionId,
+    workspace_id: WorkspaceId,
+    principal_id: PrincipalId,
+    action: Action,
+    issued_at: UtcNanos,
+    expires_at: UtcNanos,
 }
 
 impl ChallengeRecord {
@@ -85,6 +104,36 @@ impl ChallengeRecord {
     pub fn webauthn_challenge(&self) -> Result<Challenge, CanonicalError> {
         let _ = self;
         Err(CanonicalError::Unimplemented)
+    }
+}
+
+#[expect(
+    clippy::todo,
+    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
+)]
+impl ChallengeRecord {
+    pub fn challenge_id(&self) -> &AssertionId {
+        todo!()
+    }
+
+    pub fn workspace_id(&self) -> &WorkspaceId {
+        todo!()
+    }
+
+    pub fn principal_id(&self) -> &PrincipalId {
+        todo!()
+    }
+
+    pub fn action(&self) -> Action {
+        todo!()
+    }
+
+    pub fn issued_at(&self) -> UtcNanos {
+        todo!()
+    }
+
+    pub fn expires_at(&self) -> UtcNanos {
+        todo!()
     }
 }
 
@@ -135,19 +184,67 @@ pub struct Presentation<'a> {
 }
 
 /// The challenge a consumed step-up used. The caller marks it used in the same transaction that
-/// commits the action's event with [`Consumed::evidence`] (§7.2 step 5).
+/// commits the action's event with [`Consumed::evidence`] (§7.2 step 5). Only [`consume`] builds
+/// one.
+///
+/// ```compile_fail,E0451
+/// use mandate_identity::AssertionId;
+/// use mandate_passkey::stepup::Used;
+///
+/// let marked = Used { challenge_id: AssertionId("01J9ZQ4B7Y8K3M5N6P7Q8R9S0T".to_owned()) };
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Used {
-    pub challenge_id: AssertionId,
+    challenge_id: AssertionId,
+}
+
+#[expect(
+    clippy::todo,
+    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
+)]
+impl Used {
+    pub fn challenge_id(&self) -> &AssertionId {
+        todo!()
+    }
 }
 
 /// A step-up that passed: the evidence to record, the challenge to mark used, and for a passkey
-/// the signature counter to store.
+/// the signature counter to store. Only [`consume`] builds one, so no caller holds step-up
+/// evidence that did not pass it.
+///
+/// ```compile_fail,E0451
+/// use mandate_identity::StepUpEvidence;
+/// use mandate_passkey::stepup::{Consumed, Used};
+///
+/// fn forge(evidence: StepUpEvidence, used: Used) -> Consumed {
+///     Consumed { evidence, used, sign_count: None }
+/// }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Consumed {
-    pub evidence: StepUpEvidence,
-    pub used: Used,
-    pub sign_count: Option<u32>,
+    evidence: StepUpEvidence,
+    used: Used,
+    sign_count: Option<u32>,
+}
+
+#[expect(
+    clippy::todo,
+    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
+)]
+impl Consumed {
+    /// `{assertion_id, authenticated_at, method}`, where `authenticated_at` is the challenge's
+    /// `issued_at`, the earliest instant the gesture can have happened (DEC-662 item 7).
+    pub fn evidence(&self) -> &StepUpEvidence {
+        todo!()
+    }
+
+    pub fn used(&self) -> &Used {
+        todo!()
+    }
+
+    pub fn sign_count(&self) -> Option<u32> {
+        todo!()
+    }
 }
 
 /// Why a presented step-up does not count.
