@@ -132,7 +132,6 @@ fn the_closed_tables_are_the_specs() {
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn rfc_8291_section_5_message_is_reproduced_byte_exact() -> Result<(), WebPushError> {
     let plaintext = b"When I grow up, I want to be a watermelon";
     let body = seal(&subscription(ENDPOINT)?, plaintext, None, &mut rfc_random())?;
@@ -141,7 +140,6 @@ fn rfc_8291_section_5_message_is_reproduced_byte_exact() -> Result<(), WebPushEr
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn rfc_8188_section_3_1_record_is_reproduced_byte_exact() -> Result<(), WebPushError> {
     let expected = b64(RFC_8188_MESSAGE);
     let salt: [u8; 16] = expected
@@ -154,7 +152,6 @@ fn rfc_8188_section_3_1_record_is_reproduced_byte_exact() -> Result<(), WebPushE
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn a_notice_decrypts_with_the_subscriptions_key_to_its_padded_payload() -> Result<(), WebPushError>
 {
     let notice = PushPlaintext::new([0xab; 16], PushText::ApprovalNeeded);
@@ -183,7 +180,6 @@ fn a_notice_decrypts_with_the_subscriptions_key_to_its_padded_payload() -> Resul
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn the_vapid_token_verifies_against_the_signers_public_key() -> Result<(), WebPushError> {
     let signer = TestSigner::new();
     let endpoint = PushEndpoint::parse("https://push.example.net:8443/a/b?c")?;
@@ -218,7 +214,6 @@ fn the_vapid_token_verifies_against_the_signers_public_key() -> Result<(), WebPu
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn the_envelope_is_fixed_by_class_and_the_endpoint_passes_through() -> Result<(), WebPushError> {
     let table = [
         (NoticeClass::Action, "high", 3_600),
@@ -253,7 +248,6 @@ fn the_envelope_is_fixed_by_class_and_the_endpoint_passes_through() -> Result<()
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn a_body_over_512_octets_is_refused_and_one_at_512_is_not() -> Result<(), WebPushError> {
     let sub = subscription(ENDPOINT)?;
     let at_cap = seal(&sub, &[b'a'; 409], None, &mut rfc_random())?;
@@ -286,7 +280,6 @@ fn a_body_over_512_octets_is_refused_and_one_at_512_is_not() -> Result<(), WebPu
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn bad_endpoints_keys_and_subjects_are_refused() -> Result<(), WebPushError> {
     let endpoint = PushEndpoint::parse(ENDPOINT)?;
     assert_eq!(
@@ -349,7 +342,6 @@ proptest! {
     /// NT-1: whatever the notice id and text key, the plaintext is exactly the closed payload, so
     /// every body is the same length and opens to the payload's own bytes.
     #[test]
-    #[ignore = "pending E8-14"]
     fn every_payload_is_the_closed_pair_and_every_body_one_size(
         notice in any::<[u8; 16]>(),
         text in 0usize..4,
@@ -373,7 +365,6 @@ proptest! {
 
     /// RFC 8292 §2: `exp` is in the future and never more than 24 hours ahead.
     #[test]
-    #[ignore = "pending E8-14"]
     fn the_token_expires_within_24_hours(now in 0u64..=4_102_444_800) {
         let endpoint = PushEndpoint::parse(ENDPOINT)?;
         let header = vapid_authorization(&endpoint, &subject()?, &TestSigner::new(), now)?;
