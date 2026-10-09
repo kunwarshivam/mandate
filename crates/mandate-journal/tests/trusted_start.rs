@@ -1,8 +1,7 @@
 //! E12-3 (journal spec v0.29 §9.14 "What a verifier reads", §11; DEC-783 item 8, DEC-767): the
-//! trusted start of a range, judged against the vectors' `cold_records.trusted_starts` (built by
-//! `reference/journal/cold.py`, judged there by `control.py`'s `trusted_start` and the oracle
-//! `resolve_start`), against hand-built records for each clause of §9.14's text, and against random
-//! records whose answer this file derives from how it built them.
+//! trusted start of a range, judged against `cold_records.trusted_starts` (built by `cold.py`,
+//! judged by `control.py`'s `trusted_start` and the oracle `resolve_start`), hand-built records for
+//! each clause of §9.14, and random records whose answer this file derives from how it built them.
 
 use std::path::Path;
 
@@ -18,12 +17,10 @@ const AGENT: &str = "agent:ws_1:G1";
 const FOREIGN_ACCT: &str = "acct:ws_2:A1";
 const FOREIGN_AGENT: &str = "agent:ws_2:G1";
 const TOKEN: &str = r#""sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa""#;
+const IDS: [&str; 6] = ["E0", "E1", "E2", "E3", "E4", "E5"];
 const REFUSED: Answer = Err(TrustedStartError::Refused);
 
 type Answer = Result<TrustedStart, TrustedStartError>;
-
-/// An anchor leaf: `stream_id`, `seq`, `hash`.
-type Leaf = (&'static str, u64, Digest);
 
 fn start(from_seq: u64, prev_hash: Digest) -> Answer {
     Ok(TrustedStart {
@@ -93,7 +90,7 @@ fn segment(stream: &str, first: u64, last: u64, prev: Digest) -> (String, Digest
 }
 
 /// An `AnchorComputed` payload over `leaves`, with a token when `stamped`.
-fn anchor(leaves: &[Leaf], stamped: bool) -> String {
+fn anchor(leaves: &[(&str, u64, Digest)], stamped: bool) -> String {
     let leaves: Vec<String> = leaves
         .iter()
         .map(|(s, n, h)| format!(r#"{{"hash":"{}","seq":{n},"stream_id":"{s}"}}"#, h.to_hex()))
@@ -234,25 +231,45 @@ fn another_workspaces_record_is_refused_as_an_absent_one() {
     assert_eq!(resolve(FOREIGN_ACCT, 3, at("F2")), start(3, digest("f2")));
 }
 
-/// A record whose start cannot be read is no start (a timeout or ambiguity resolves to the safe
-/// default, AGENTS.md rule 3): the hash is never defaulted.
+/// No start from an unreadable record (AGENTS.md rule 3) or for a stream with no workspace segment,
+/// not even genesis; a record answers only as its own `event_type`.
 #[test]
 #[ignore = "pending E12-3"]
-fn a_record_whose_start_cannot_be_read_is_refused() {
+fn an_unreadable_record_a_malformed_stream_or_another_type_is_refused() {
     let (seg, seg_hash) = segment(ACCT, 4, 9, digest("p4"));
-    let bad_prev = seg.replace(&digest("p4").to_hex(), "not-a-digest");
-    let bad_leaf = anchor(&[(ACCT, 9, digest("a9"))], true).replace(&digest("a9").to_hex(), "x");
-    let mut unparsed = row(CTL, "B3", "AnchorComputed", &anchor(&[], true));
-    unparsed.body = b"{".to_vec();
+    let (bad, bad_hash) = segment("acct::A1", 4, 9, digest("p4"));
+    let (as_anchor, other) = segment(ACCT, 5, 9, digest("p5"));
+    let leaves = [("acct::A1", 9, digest("a9")), (ACCT, 9, digest("a9"))];
+    let stamped = anchor(&leaves, true);
+    let bad_prev = seg.replace(&digest("p4").to_hex(), "x");
+    let bad_leaf = stamped.replace(&digest("a9").to_hex(), "x");
+    let mut unparsed = row(CTL, "B3", "AnchorComputed", &stamped);
+    let mut unparsed_segment = row(CTL, "B4", "SegmentExported", &as_anchor);
+    (unparsed.body, unparsed_segment.body) = (b"{".to_vec(), b"{".to_vec());
     let records = [
         row(CTL, "B1", "SegmentExported", &bad_prev),
         row(CTL, "B2", "AnchorComputed", &bad_leaf),
         unparsed,
+        unparsed_segment,
+        row("ctl:", "N1", "SegmentExported", &bad),
+        row("ctl:", "N2", "AnchorComputed", &stamped),
+        row(CTL, "T1", "VerificationRun", &stamped),
+        row(CTL, "T2", "AnchorComputed", &as_anchor),
     ];
-    let resolve = |n, request| resolve_trusted_start(&records, ACCT, n, request);
-    assert_eq!(resolve(4, by(seg_hash)), REFUSED, "a bad prev hash");
-    assert_eq!(resolve(10, at("B2")), REFUSED, "an unreadable leaf hash");
-    assert_eq!(resolve(10, at("B3")), REFUSED, "a body that does not parse");
+    let resolve = |s, n, request| resolve_trusted_start(&records, s, n, request);
+    for (name, s, n, request) in [
+        ("an unreadable first_prev_hash", ACCT, 4, by(seg_hash)),
+        ("an unreadable leaf hash", ACCT, 10, at("B2")),
+        ("a body that does not parse", ACCT, 10, at("B3")),
+        ("no workspace segment", "acct", 1, StartRequest::Genesis),
+        ("an empty workspace", "acct::A1", 1, StartRequest::Genesis),
+        ("an empty workspace's segment", "acct::A1", 4, by(bad_hash)),
+        ("an empty workspace's anchor", "acct::A1", 10, at("N2")),
+        ("an anchor's payload under another type", ACCT, 10, at("T1")),
+        ("a segment unparsed, or as an anchor", ACCT, 5, by(other)),
+    ] {
+        assert_eq!(resolve(s, n, request), REFUSED, "{name}");
+    }
 }
 
 /// A small deterministic generator (xorshift64), so the random records need no dependency.
@@ -267,16 +284,8 @@ impl Rng {
     }
 }
 
-/// What a request names, owned, so the oracle can keep it.
-#[derive(Clone, PartialEq)]
-enum Key {
-    Manifest(Digest),
-    Anchor(String),
-}
-
-/// Random segments and anchors on two workspaces' control streams, some stamped, some segments
-/// naming the other workspace's stream; the expected start of each random request comes only from
-/// the list of starts this test recorded as it built each usable record, never from crate code.
+/// Random segments and anchors on two workspaces, some stamped, some naming a foreign stream; each
+/// request's answer comes only from the starts recorded while building usable records.
 #[test]
 #[ignore = "pending E12-3"]
 fn random_records_resolve_as_built() {
@@ -285,46 +294,41 @@ fn random_records_resolve_as_built() {
         (FOREIGN_CTL, [FOREIGN_ACCT, FOREIGN_AGENT, FOREIGN_CTL]),
     ];
     let all = [ACCT, AGENT, CTL, FOREIGN_ACCT, FOREIGN_AGENT, FOREIGN_CTL];
-    let mut rng = Rng(0x2545_F491_4F6C_DD1D);
-    let mut wrong = Vec::new();
+    let (mut rng, mut wrong) = (Rng(0x2545_F491_4F6C_DD1D), Vec::new());
     for round in 0..200 {
         let (mut records, mut keys, mut serves) = (Vec::new(), Vec::new(), Vec::new());
         for i in 0..1 + rng.below(6) {
             let (ctl, own) = workspaces[rng.below(2) as usize];
-            let id = format!("E{round}x{i}");
+            let id = IDS[i as usize];
             if rng.below(2) == 0 {
                 let pool: &[&str] = if rng.below(4) == 0 { &all } else { &own[..2] };
                 let s = pool[rng.below(pool.len() as u64) as usize];
                 let first = 1 + rng.below(12);
-                let prev = if first == 1 {
-                    Digest::ZERO
-                } else {
-                    digest(&id)
-                };
+                let prev = if first == 1 { Digest::ZERO } else { digest(id) };
                 let (payload, hash) = segment(s, first, first + rng.below(5), prev);
-                records.push(row(ctl, &id, "SegmentExported", &payload));
-                keys.push(Key::Manifest(hash));
+                records.push(row(ctl, id, "SegmentExported", &payload));
+                keys.push(by(hash));
                 if s.split(':').nth(1) == ctl.split(':').nth(1) {
-                    serves.push((Key::Manifest(hash), s, first, prev));
+                    serves.push((by(hash), s, first, prev));
                 }
                 continue;
             }
             let stamped = rng.below(2) == 0;
-            let mut leaves: Vec<Leaf> = Vec::new();
+            let mut leaves = Vec::new();
             for s in [own[0], own[1], own[2]] {
                 if s == ctl || rng.below(2) == 0 {
-                    leaves.push((s, 1 + rng.below(12), digest(&format!("{id}{s}"))));
+                    leaves.push((s, 1 + rng.below(12), digest(&format!("{round}{id}{s}"))));
                 }
             }
-            records.push(row(ctl, &id, "AnchorComputed", &anchor(&leaves, stamped)));
-            keys.push(Key::Anchor(id.clone()));
+            records.push(row(ctl, id, "AnchorComputed", &anchor(&leaves, stamped)));
+            keys.push(at(id));
             for &(s, n, h) in leaves.iter().filter(|_| stamped) {
-                serves.push((Key::Anchor(id.clone()), s, n + 1, h));
+                serves.push((at(id), s, n + 1, h));
             }
         }
-        keys.push(Key::Anchor("absent".to_owned()));
+        keys.push(at("absent"));
         for _ in 0..20 {
-            let key = keys[rng.below(keys.len() as u64) as usize].clone();
+            let key = keys[rng.below(keys.len() as u64) as usize];
             let fitting: Vec<_> = serves.iter().filter(|f| f.0 == key).collect();
             let (s, n) = match fitting.get(rng.below(2 * fitting.len() as u64 + 1) as usize) {
                 Some(f) => (f.1, f.2),
@@ -337,11 +341,7 @@ fn random_records_resolve_as_built() {
                 (true, _) | (false, None) => REFUSED,
                 (false, Some(f)) => start(n, f.3),
             };
-            let request = match (&key, genesis) {
-                (_, true) => StartRequest::Genesis,
-                (Key::Manifest(h), _) => by(*h),
-                (Key::Anchor(id), _) => at(id),
-            };
+            let request = if genesis { StartRequest::Genesis } else { key };
             let got = resolve_trusted_start(&records, s, n, request);
             if got != want {
                 wrong.push(format!("{round}: {s}@{n}: want {want:?}, got {got:?}"));

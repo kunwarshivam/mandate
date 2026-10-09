@@ -7,8 +7,7 @@ use mandate_canon::Digest;
 
 use crate::{StoredEvent, TrustedStart};
 
-/// The start a verification names: workspace API §4.8.1's `trusted_start`. It names the record to
-/// read; it never carries the `prev_hash`.
+/// Workspace API §4.8.1's `trusted_start`: it names the record to read, never the `prev_hash`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartRequest<'a> {
     /// Seq 1 with 64 zeros.
