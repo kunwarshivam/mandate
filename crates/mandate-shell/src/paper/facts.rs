@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    AssetSnapshot, DataClient, DataTransport, LatestQuote, MinuteBars, Pause, RetryPolicy,
-    TradingClient, TradingTransport,
+    AccountRules, AssetSnapshot, DataClient, DataTransport, LatestQuote, MinuteBars, Pause,
+    RetryPolicy, TradingClient, TradingTransport, alpaca_account_rules,
 };
 use mandate_executor::{BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest};
 use mandate_liquidity::{
@@ -24,10 +24,15 @@ use super::artifacts::Artifacts;
 use crate::adapters::{trusted_daily_bars, untrusted};
 use crate::error::Cause;
 
-/// What the broker answered to the preflight's six GETs, exactly as `mandate-alpaca` read it.
+/// What the broker answered to the preflight's six GETs, exactly as `mandate-alpaca` read it, beside
+/// the account rules `mandate-alpaca` declares for it.
 #[derive(Debug, Clone)]
 pub struct BrokerFacts {
     pub account: BrokerAccount,
+    /// The account type and day-trading regime the connector declares for its broker (trading
+    /// spec §7.2), which the gate's account snapshot takes rather than any shell value (X-9,
+    /// DEC-840).
+    pub account_rules: AccountRules,
     pub positions: Vec<BrokerPosition>,
     pub open_orders: Vec<BrokerOrder>,
     pub asset: AssetSnapshot,
@@ -60,7 +65,9 @@ pub struct PaperFacts {
 /// `ListOpenOrders` through [`TradingClient::call_one`], the asset record through
 /// [`TradingClient::asset`], the latest IEX quote through [`DataClient::latest_quote`], whose age
 /// bound is the rule-set artifact's, and the trailing window's IEX minute bars through
-/// [`DataClient::recent_minute_bars`]. Nothing here can submit, cancel, or close.
+/// [`DataClient::recent_minute_bars`]. The account rules are the connector's declaration,
+/// [`alpaca_account_rules`], which no broker call answers. Nothing here can submit, cancel, or
+/// close.
 ///
 /// # Errors
 /// [`Cause::Absent`] when a read is not answered with the fact it asked for.
@@ -122,6 +129,7 @@ where
             .map_err(|_| absent("the trailing window's IEX minute bars"))?;
         Ok(BrokerFacts {
             account,
+            account_rules: alpaca_account_rules(),
             positions,
             open_orders,
             asset,
