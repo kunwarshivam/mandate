@@ -34,7 +34,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
     ACCOUNT_STREAM, CrashPoint, FixedInstruments, FixedMandate, Ran, Shell, TestIds, clock, config,
-    handoff, opening, ports, quote, risk_exit, scope, snapshot, stream_opened,
+    handoff, named_orders, opening, ports, protected_instrument, quote, risk_exit, scope, snapshot,
+    stream_opened,
 };
 use mandate_canon::Value;
 use mandate_executor::{
@@ -236,8 +237,8 @@ impl ShadowBook {
                 }
                 "ProtectionChanged" if field(draft, "action") == Some("placed") => {
                     let covered = field(draft, "qty").and_then(units).unwrap_or(0);
-                    for id in field(draft, "orders").unwrap_or_default().split(',') {
-                        book.protective.insert(id.to_owned());
+                    for id in named_orders(&draft.payload, "orders") {
+                        book.protective.insert(id.clone());
                         book.orders
                             .entry(id.to_owned())
                             .or_insert_with(|| ShadowOrder {
@@ -508,16 +509,12 @@ impl ProtectionAccountant {
                 }
                 "ProtectionChanged" => {
                     let (Some(name), Some(action)) =
-                        (field(draft, "instrument"), field(draft, "action"))
+                        (protected_instrument(&draft.payload), field(draft, "action"))
                     else {
                         continue;
                     };
-                    let named: BTreeSet<String> = field(draft, "orders")
-                        .unwrap_or_default()
-                        .split(',')
-                        .filter(|id| !id.is_empty())
-                        .map(str::to_owned)
-                        .collect();
+                    let named: BTreeSet<String> =
+                        named_orders(&draft.payload, "orders").into_iter().collect();
                     match action {
                         "unprotected_start" => accountant.intervals.push(Interval {
                             instrument: name.to_owned(),
@@ -1973,7 +1970,7 @@ proptest! {
                     || run.drafts.iter().skip(at).any(|d| {
                     d.event_type == "ProtectionChanged"
                         && field(d, "action") == Some("placed")
-                        && field(d, "instrument") == Some(CPHC)
+                        && protected_instrument(&d.payload) == Some(CPHC)
                 })),
             "the protected lead's entry filled completely with the agent in no mode that may hold \
              protection (no kill switch, not paused or stopped: AGENTS.md rule 13, §5.5), so its \
@@ -2152,9 +2149,9 @@ proptest! {
                     if draft.event_type == "ProtectionChanged"
                         && field(draft, "action") == Some("placed") =>
                 {
-                    let name = field(draft, "instrument").unwrap_or_default();
-                    for id in field(draft, "orders").unwrap_or_default().split(',') {
-                        instrument_of.insert(id.to_owned(), name.to_owned());
+                    let name = protected_instrument(&draft.payload).unwrap_or_default();
+                    for id in named_orders(&draft.payload, "orders") {
+                        instrument_of.insert(id, name.to_owned());
                     }
                 }
                 Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
@@ -2187,8 +2184,8 @@ proptest! {
                     if draft.event_type == "ProtectionChanged"
                         && field(draft, "action") == Some("cancelled") =>
                 {
-                    for id in field(draft, "orders").unwrap_or_default().split(',') {
-                        outstanding.remove(id);
+                    for id in named_orders(&draft.payload, "orders") {
+                        outstanding.remove(&id);
                     }
                 }
                 Effect::Broker(BrokerRequest::Submit(order))
@@ -2235,7 +2232,7 @@ proptest! {
             match effect {
                 Effect::Journal(draft) if draft.event_type == "ProtectionChanged" => {
                     let (Some(name), Some(action)) =
-                        (field(draft, "instrument"), field(draft, "action"))
+                        (protected_instrument(&draft.payload), field(draft, "action"))
                     else {
                         continue;
                     };

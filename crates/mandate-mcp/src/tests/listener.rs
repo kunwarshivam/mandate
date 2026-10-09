@@ -67,7 +67,6 @@ fn a_login_lives_600_seconds() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn the_listener_binds_127_0_0_1_only_on_the_port_its_redirect_names() {
     let (listener, redirect) = CallbackListener::bind().await.unwrap();
     let bound = listener.socket.local_addr().unwrap();
@@ -77,7 +76,6 @@ async fn the_listener_binds_127_0_0_1_only_on_the_port_its_redirect_names() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn one_get_callback_yields_its_code_and_then_the_port_is_closed() {
     let (result, answer, reopened) = run(GOOD, Duration::ZERO).await;
     let code = result.unwrap();
@@ -89,7 +87,6 @@ async fn one_get_callback_yields_its_code_and_then_the_port_is_closed() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_bad_or_foreign_request_answers_400_and_spends_the_login() {
     let long = format!(
         "GET /callback?code=c&state=@ HTTP/1.1\r\nx: {}\r\n\r\n",
@@ -132,7 +129,6 @@ fn sized(size: usize) -> String {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn the_head_cap_is_exactly_8192_bytes() {
     let (result, answer, _) = run(&sized(8192), Duration::ZERO).await;
     assert!(result.is_ok(), "{result:?}");
@@ -143,7 +139,6 @@ async fn the_head_cap_is_exactly_8192_bytes() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_callback_at_or_after_the_lifetime_is_refused() {
     let last = LOGIN_LIFETIME - Duration::from_nanos(1);
     let (result, answer, _) = run(GOOD, last).await;
