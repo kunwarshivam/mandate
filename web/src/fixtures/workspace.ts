@@ -4,6 +4,7 @@
  * inside every limit they are not meant to break; none is a performance record.
  */
 import { add, dec, toFixed } from "@/lib/decimal";
+import { versionInForce } from "@/lib/mandate-history";
 import { BTC_HISTORY, LMN_HISTORY, SWING_HISTORY } from "./history";
 import { INSTRUMENTS, btcAccumulator, lmnCore, provenance, twoStockSwing } from "./mandates";
 import type { Agent, Approval, CancelReason, GateDecision, Health, Scenario, TimelineEvent, Workspace } from "./types";
@@ -392,7 +393,20 @@ const resolved: Approval[] = [
   },
 ];
 
-const decisions: GateDecision[] = [
+/**
+ * A gate decision bound to the mandate version in force for its agent when it was made, as
+ * `GateDecided` records it in `config_refs.mandate_version`: derived from the agent's versions
+ * rather than typed, so a fixture decision cannot name a version that was not in force.
+ */
+function underVersionInForce(agents: readonly Agent[], d: Omit<GateDecision, "mandate_version">): GateDecision {
+  const a = agents.find((x) => x.agent_id === d.agent_id);
+  const version = a ? versionInForce(a.versions, d.at) : null;
+  if (!version) throw new Error(`fixture decision ${d.event_id} has no mandate version in force`);
+  return { ...d, mandate_version: version };
+}
+
+const decisions: GateDecision[] = (
+  [
   {
     event_id: "01JB5GQAPENECFSECZP11HYGCP",
     at: t("14:04:58"),
@@ -455,7 +469,8 @@ const decisions: GateDecision[] = [
     reason_code: "discretionary_exit_regular_session_only",
     action: { side: "sell", qty: "2", symbol: "QRS", limit_price: "97.9", purpose: "discretionary_exit" },
   },
-];
+  ] satisfies Array<Omit<GateDecision, "mandate_version">>
+).map((d) => underVersionInForce([btc, swing, lmn], d));
 
 const timeline: Record<string, TimelineEvent[]> = {
   [AGENT_IDS.btc]: [
@@ -573,14 +588,14 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
         { code: "stale_mark", since: t("14:03:11"), symbol: "XYZ" },
         { code: "stale_mark", since: t("14:03:11"), symbol: "QRS" },
       ];
-      ws.decisions.unshift({
+      ws.decisions.unshift(underVersionInForce(ws.agents, {
         event_id: "01JB2NTQSC0J4DZCKCEXEGJ6ZB",
         at: t("14:04:40"),
         agent_id: AGENT_IDS.swing,
         verdict: "deny",
         reason_code: "stale_mark",
         action: { side: "buy", qty: "1", symbol: "QRS", limit_price: "97.7", purpose: "increase" },
-      });
+      }));
       return ws;
     }
     case "paused": {
@@ -612,14 +627,14 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
         if (d.agent_id === AGENT_IDS.btc && d.client_order_id && canceled.some((o) => o.client_order_id === d.client_order_id)) d.action = { ...d.action, limit_price: DRAWDOWN_RESTING_LIMIT };
       }
       for (const e of ws.timeline[AGENT_IDS.btc]) e.text = e.text.replace("$55,900.00", "$51,700.00");
-      ws.decisions.unshift({
+      ws.decisions.unshift(underVersionInForce(ws.agents, {
         event_id: "01JBEZT39S3D19T33BSWM75ANC",
         at: t("14:04:30"),
         agent_id: AGENT_IDS.btc,
         verdict: "deny",
         reason_code: "agent_exits_only",
         action: { side: "buy", qty: "0.01", symbol: "BTC/USD", limit_price: "51700", purpose: "increase" },
-      });
+      }));
       b.versions = [...b.versions, BTC_RAISE_REJECTED];
       ws.timeline[AGENT_IDS.btc].unshift(
         { event_id: "01JBF6P2M8XKQ4D7N9R3T5W1YC", at: t("14:03:34"), kind: "version", text: "Mandate version rejected: an allocation increase is refused while a limit is latched." },
@@ -657,14 +672,14 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
         submitted_at: t("14:04:51"),
         time_in_force: "day",
       });
-      ws.decisions.unshift({
+      ws.decisions.unshift(underVersionInForce(ws.agents, {
         event_id: "01JB64G5D6TZWBE8TXF7JJHHQG",
         at: t("14:05:02"),
         agent_id: AGENT_IDS.swing,
         verdict: "deny",
         reason_code: "unknown_order_in_flight",
         action: { side: "sell", qty: "5", symbol: "QRS", limit_price: "97.6", purpose: "discretionary_exit" },
-      });
+      }));
       ws.timeline[AGENT_IDS.swing].unshift({
         event_id: "01JBM9S346Q3D25VT4F5V37E3T",
         at: t("14:04:57"),

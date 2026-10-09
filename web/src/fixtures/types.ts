@@ -243,6 +243,12 @@ export interface GateDecision {
   event_id: string;
   at: Iso;
   agent_id: string;
+  /**
+   * The mandate version the gate decided under: `GateDecided`'s `config_refs.mandate_version`
+   * (journal spec §9, `man`), the hash of the stored mandate document (mandate spec §9.1). The
+   * owner's rules are read from that version, never from the agent's current one.
+   */
+  mandate_version: ContentRef;
   verdict: "allow" | "deny" | "defer";
   reason_code: ReasonCode | null;
   action: { side: "buy" | "sell"; qty: Decimal; symbol: string; limit_price: Decimal; purpose: Purpose };
