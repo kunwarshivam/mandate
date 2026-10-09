@@ -45,6 +45,20 @@
 //! }
 //! ```
 //!
+//! [`Tenant`], which every data API over a workspace takes, lives in `mandate-tenant` and is
+//! re-exported here (DEC-642 item 7, DEC-668). Its sealing supertrait is not, so no type outside
+//! that crate's allowed dependents implements it:
+//!
+//! ```compile_fail,E0277
+//! struct Forged;
+//! impl mandate_identity::Tenant for Forged {
+//!     fn workspace(&self) -> mandate_identity::WorkspaceId { mandate_identity::WorkspaceId(1) }
+//!     fn org(&self) -> mandate_identity::OrgId { mandate_identity::OrgId(1) }
+//!     fn principal(&self) -> mandate_identity::PrincipalId { mandate_identity::PrincipalId(1) }
+//!     fn kind(&self) -> mandate_identity::PrincipalKind { mandate_identity::PrincipalKind::User }
+//! }
+//! ```
+//!
 //! **A sensitive data API can demand the permission too** (DEC-655): it takes a
 //! [`demand::Permitted`] witness, which only [`TenantContext::require`] yields, and only for a
 //! context authorized for the witness's permission ([`demand`]).
@@ -175,142 +189,15 @@ mod matrix;
 mod membership;
 mod permission;
 
+pub use mandate_tenant::{
+    OrgId, PrincipalId, PrincipalKind, SessionRef, Tenant, UlidTextError, WorkspaceId,
+};
 use matrix::Column;
 pub use membership::{
     InvitationId, InvitationState, MembershipEvent, MembershipFold, MembershipRecord,
     RecordRefusal, check_independence, check_order,
 };
 pub use permission::Permission;
-
-/// A principal's opaque ID, a ULID (identity spec §3.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PrincipalId(pub u128);
-
-/// An organization's opaque ID, a ULID (§3.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OrgId(pub u128);
-
-/// A workspace's opaque ID, a ULID (§3.2). No data API takes one bare (ID-8).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WorkspaceId(pub u128);
-
-/// A session's opaque reference (identity spec §6.3, §12.2): what every committed event names as
-/// `session_ref`, never the cookie or the token. For the host CLI, its registration's ID.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SessionRef(pub u128);
-
-/// Why a text is not a ULID's: it must be 26 characters of uppercase Crockford base32, the first at
-/// most `7`, as the journal validates it (journal spec §3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum UlidTextError {
-    /// Not 26 characters of uppercase Crockford base32 whose first is at most `7`.
-    #[error("not 26 characters of uppercase Crockford base32 whose first is at most 7")]
-    Invalid,
-}
-
-const ULID_LEN: usize = 26;
-const CROCKFORD: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-/// The 26 uppercase Crockford base32 digits of `value`, most significant first. The first digit is
-/// at most `7` because 128 bits leave 3 for it.
-fn encode_ulid(mut value: u128) -> Result<String, UlidTextError> {
-    let mut reversed = String::with_capacity(ULID_LEN);
-    for _ in 0..ULID_LEN {
-        let digit = usize::try_from(value % 32).map_err(|_| UlidTextError::Invalid)?;
-        let ch = CROCKFORD.chars().nth(digit).ok_or(UlidTextError::Invalid)?;
-        reversed.push(ch);
-        value /= 32;
-    }
-    Ok(reversed.chars().rev().collect())
-}
-
-/// The value of a canonical ULID text: exactly 26 characters of the uppercase Crockford alphabet,
-/// the first at most `7`; anything else, such as lowercase, `I`, `L`, `O`, `U` or a space, is
-/// [`UlidTextError::Invalid`].
-fn decode_ulid(text: &str) -> Result<u128, UlidTextError> {
-    if text.chars().count() != ULID_LEN
-        || !text.starts_with(['0', '1', '2', '3', '4', '5', '6', '7'])
-    {
-        return Err(UlidTextError::Invalid);
-    }
-    text.chars().try_fold(0u128, |acc, ch| {
-        let digit = CROCKFORD
-            .chars()
-            .position(|c| c == ch)
-            .and_then(|d| u128::try_from(d).ok())
-            .ok_or(UlidTextError::Invalid)?;
-        acc.checked_mul(32)
-            .and_then(|shifted| shifted.checked_add(digit))
-            .ok_or(UlidTextError::Invalid)
-    })
-}
-
-impl PrincipalId {
-    /// The principal's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
-    pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        encode_ulid(self.0)
-    }
-
-    /// The principal a ULID's text names, or [`UlidTextError::Invalid`].
-    pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        decode_ulid(text).map(Self)
-    }
-}
-
-impl OrgId {
-    /// The organization's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
-    pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        encode_ulid(self.0)
-    }
-
-    /// The organization a ULID's text names, or [`UlidTextError::Invalid`].
-    pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        decode_ulid(text).map(Self)
-    }
-}
-
-impl WorkspaceId {
-    /// The workspace's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
-    pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        encode_ulid(self.0)
-    }
-
-    /// The workspace a ULID's text names, or [`UlidTextError::Invalid`].
-    pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        decode_ulid(text).map(Self)
-    }
-}
-
-impl SessionRef {
-    /// The session reference's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
-    pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        encode_ulid(self.0)
-    }
-
-    /// The session reference a ULID's text names, or [`UlidTextError::Invalid`].
-    pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        decode_ulid(text).map(Self)
-    }
-}
-
-/// The principal kinds of identity spec §3.1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum PrincipalKind {
-    /// A person.
-    User,
-    /// An owner-connected agent acting for one user (DEC-141).
-    Client,
-    /// An organization's automation, read and export only in v1.
-    ServiceAccount,
-    /// A deployed agent's runtime; it holds no column of §4.2.
-    Agent,
-    /// Executor, scheduler, workspace services; no column of §4.2.
-    Process,
-    /// The on-host command line of a workspace deployment (§6.4 route 3).
-    HostCli,
-    /// Platform staff, only inside break-glass (§10.3).
-    PlatformOperator,
-}
 
 /// An authenticated principal, with what its kind's column of §4.2 is scoped to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -595,36 +482,8 @@ impl TenantContext {
     }
 }
 
-/// What every data API over a workspace takes: a [`TenantContext`] for a request, or, from E9-8,
-/// the `SystemContext` of `mandate-identity-system` for the deployment's own background processes
-/// (DEC-642 items 3 and 5 to 7). It is sealed, so no other type implements it, and none of its
-/// implementors takes a bare workspace ID:
-///
-/// ```compile_fail,E0277
-/// struct Forged;
-/// impl mandate_identity::Tenant for Forged {
-///     fn workspace(&self) -> mandate_identity::WorkspaceId { mandate_identity::WorkspaceId(1) }
-///     fn org(&self) -> mandate_identity::OrgId { mandate_identity::OrgId(1) }
-///     fn principal(&self) -> mandate_identity::PrincipalId { mandate_identity::PrincipalId(1) }
-///     fn kind(&self) -> mandate_identity::PrincipalKind { mandate_identity::PrincipalKind::User }
-/// }
-/// ```
-pub trait Tenant: sealed::Sealed {
-    /// The workspace whose data may be reached.
-    fn workspace(&self) -> WorkspaceId;
-    /// The workspace's organization.
-    fn org(&self) -> OrgId;
-    /// Who acts: the authenticated principal, or the process's workload identity.
-    fn principal(&self) -> PrincipalId;
-    /// The actor's kind.
-    fn kind(&self) -> PrincipalKind;
-}
-
-mod sealed {
-    pub trait Sealed {}
-    impl Sealed for super::TenantContext {}
-    impl<P: super::demand::RequiredPermission> Sealed for super::demand::Permitted<'_, P> {}
-}
+impl mandate_tenant::Sealed for TenantContext {}
+impl<P: demand::RequiredPermission> mandate_tenant::Sealed for demand::Permitted<'_, P> {}
 
 /// What an authorization at an organization's scope yields (identity spec §4.5, DEC-832 items 1 to
 /// 3). Sealed as [`TenantContext`] is: private fields, built only by [`authorize`], no `Default`,
