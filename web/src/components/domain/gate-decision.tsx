@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { Agent, GateDecision } from "@/fixtures/types";
 import { clock } from "@/lib/format";
-import { actionSentence, gateRule, verdictBadge } from "@/lib/gate-reasons";
+import { actionSentence, decidedRule, verdictBadge } from "@/lib/gate-reasons";
 import { PURPOSE_LABEL } from "@/lib/labels";
 import { STRETCHED_LINK } from "./positions";
 
@@ -32,7 +32,7 @@ export function VerdictChip({ decision, className }: { decision: GateDecision; c
 
 /**
  * A gate decision in plain language: the verdict first, in its column, then the action and the
- * rule, never an error code.
+ * rule as the decision's own mandate version states it, never an error code.
  */
 export function GateDecisionRow({
   decision,
@@ -47,7 +47,7 @@ export function GateDecisionRow({
   href?: string;
   className?: string;
 }) {
-  const rule = decision.reason_code && agent ? gateRule(decision.reason_code, agent.mandate) : null;
+  const rule = agent ? decidedRule(decision, agent) : null;
   return (
     <li
       data-verdict={decision.verdict}

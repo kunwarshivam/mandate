@@ -511,7 +511,6 @@ fn a_rotation_of_a_connection_never_established_is_refused() {
 /// Rule 131 and rule 67's exceptions (journal spec v0.32, DEC-699) over the 27 full-chain
 /// `sequences` of the `connection_requests` section: each first failing record, and its rule.
 #[test]
-#[ignore = "pending E7-17"]
 fn every_connection_request_sequence_is_judged_as_its_vector_says() {
     let section = section_named("connection_requests");
     let full_chain = |case: &Value| case.get("scope").is_none();
@@ -622,7 +621,6 @@ fn control(records: &[&str]) -> Vec<StoredEvent> {
 /// connection, and no version-1 connect after a request. The vector holds one range case; the
 /// rest are written here, each answer §9.8's text.
 #[test]
-#[ignore = "pending E7-17"]
 fn a_range_checks_rule_131_only_on_the_requests_it_holds() {
     let section = section_named("connection_requests");
     let range = |case: &Value| text(case, "scope") == "range";
@@ -676,7 +674,6 @@ fn a_range_checks_rule_131_only_on_the_requests_it_holds() {
 /// connect before it, with no request of its own, is not judged, and once a request exists a
 /// connect of another id that skips its own breaks the rule.
 #[test]
-#[ignore = "pending E7-17"]
 fn rule_131_binds_a_stream_only_from_its_first_request() {
     let lifecycle = |records: &[&str]| verify_connection_lifecycle(&control(records));
     assert_eq!(
@@ -700,7 +697,6 @@ fn rule_131_binds_a_stream_only_from_its_first_request() {
 /// revocation closed a request, so a connection established after its request was revoked once
 /// reconnects normally.
 #[test]
-#[ignore = "pending E7-17"]
 fn rule_67_excepts_only_a_revocation_that_closed_a_request() {
     let lifecycle = |records: &[&str]| verify_connection_lifecycle(&control(records));
     let retried = [
@@ -746,7 +742,6 @@ fn rule_67_excepts_only_a_revocation_that_closed_a_request() {
 /// id never established breaks the rule, and closes no request; before the first request it is not
 /// judged.
 #[test]
-#[ignore = "pending E7-17"]
 fn a_version_1_connect_is_judged_only_from_the_first_request() {
     let lifecycle = |records: &[&str]| verify_connection_lifecycle(&control(records));
     assert_eq!(
@@ -768,7 +763,6 @@ fn a_version_1_connect_is_judged_only_from_the_first_request() {
 /// even one from before the first request; and another workspace's request neither binds this
 /// stream nor counts as its open request or its used `account_ref`.
 #[test]
-#[ignore = "pending E7-17"]
 fn a_request_binds_its_members_and_account_ref_on_its_own_stream() {
     let lifecycle = |records: &[&str]| verify_connection_lifecycle(&control(records));
     for member in ["broker=robinhood", "environment=live", "user=user_owner_02"] {

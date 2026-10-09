@@ -327,11 +327,6 @@ pub struct Presentation<'a> {
     pub proof: Proof<'a>,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "E9-4's stub for DEC-649: `new` returns a plain value, which has no `Unimplemented`, \
-              so it is todo!(), the other form DEC-137 names"
-)]
 impl<'a> Presentation<'a> {
     /// The step-up the request `context` presents: the context's workspace and principal, with
     /// `action` and `proof` ([DEC-649] item 1). The context is the one `authorize` returned for
@@ -351,8 +346,12 @@ impl<'a> Presentation<'a> {
     ///
     /// [DEC-649]: ../../../docs/project/decisions/DEC-649.md
     pub fn new(context: &TenantContext, action: Action, proof: Proof<'a>) -> Self {
-        let _ = (context, action, proof);
-        todo!()
+        Self {
+            workspace_id: context.workspace(),
+            principal_id: context.principal(),
+            action,
+            proof,
+        }
     }
 }
 

@@ -27,7 +27,10 @@ use mandate_journal_cold::{
     ColdCheck, ColdFailure, SegmentFile, SegmentManifest, import_line, verify_range, verify_tsa,
 };
 
-use crate::journal::{Refusal, Span, open_source, parse_anchor, refuse, shown, trusted_start};
+use crate::journal::{
+    Refusal, Span, StreamFailure, open_source, parse_anchor, refuse, shown, stream_checks,
+    trusted_start,
+};
 
 #[derive(Debug, Args)]
 pub struct VerifyColdArgs {
@@ -66,8 +69,8 @@ pub struct VerifyColdArgs {
 pub const TSA_VERIFICATION_INCOMPLETE: &str = "tsa_verification_incomplete";
 
 /// The run's result: everything verified, or the one failure reported first. The segment checks
-/// and the per-event checks run in range order first (DEC-264), then the anchor's two checks,
-/// then the token's, so a failing export is described by its first failing check alone.
+/// and the per-event checks run in range order first (DEC-264), then the range checks of the
+/// stream's type (DEC-782), then the anchor's two checks, then the token's, so a failing export is described by its first failing check alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ColdOutcome {
     /// Every check passed over the span the trusted start and the segments cover. Never the
@@ -78,6 +81,8 @@ pub enum ColdOutcome {
     Cold(ColdFailure),
     /// An anchor check failed although every segment and per-event check passed.
     Range(RangeCheck),
+    /// A range check of the stream's type failed, at an event (spec §11, DEC-782).
+    Stream(StreamFailure),
 }
 
 impl ColdOutcome {
@@ -92,6 +97,7 @@ impl ColdOutcome {
             Self::Cold(ColdFailure::TsaTokenInvalid) => Some(ColdCheck::TsaTokenInvalid.code()),
             Self::Cold(ColdFailure::TsaVerificationIncomplete) => Some(TSA_VERIFICATION_INCOMPLETE),
             Self::Range(check) => Some(check.code()),
+            Self::Stream(failure) => Some(failure.code),
         }
     }
 
@@ -123,6 +129,7 @@ impl fmt::Display for ColdOutcome {
                 write!(f, "failed, {TSA_VERIFICATION_INCOMPLETE}")
             }
             Self::Range(check) => write!(f, "failed, {}", check.code()),
+            Self::Stream(failure) => write!(f, "failed, seq {}, {}", failure.seq, failure.code),
         }
     }
 }
@@ -278,8 +285,8 @@ fn unreadable(path: &Path, error: &std::io::Error) -> anyhow::Error {
 }
 
 /// Runs the checks in DEC-490 item 5's order: the cold walk over the segments from the trusted
-/// start, the export's one stream, the anchor's head and root over the rows the walk verified,
-/// then the token, which never verifies.
+/// start, the export's one stream, the range checks of its type (DEC-782 item 1), the anchor's
+/// head and root over the rows the walk verified, then the token, which never verifies.
 fn check(
     start: TrustedStart,
     segments: &[Segment],
@@ -313,6 +320,9 @@ fn check(
                 ),
             )
         })?;
+    if let Some(failure) = stream_checks(&stream, &rows, start)? {
+        return Ok(ColdOutcome::Stream(failure));
+    }
     if let Some(anchor) = anchor {
         if !anchor
             .leaves

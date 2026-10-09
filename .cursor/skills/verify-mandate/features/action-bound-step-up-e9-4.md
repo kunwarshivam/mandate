@@ -17,7 +17,7 @@
   in DEC-662's order), with the fixture in `tests/stepup/mod.rs`; `tests/issue.rs` (issuance
   against `authorize` and an oracle parsed from §4.2, and no context for a service account or the
   host CLI); `tests/presentation.rs` (a challenge counts only under the context it was issued
-  to, pending E9-4); and the `compile_fail` doctests on
+  to); and the `compile_fail` doctests on
   `ChallengeRecord`, `Used`, `Consumed` (no caller builds one), and `issue_challenge` and
   `Presentation::new` (no call without a context).
 - **Run:** `cargo nextest run -p mandate-passkey` and `cargo test -p mandate-passkey --doc`.

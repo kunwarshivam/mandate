@@ -18,7 +18,7 @@ macro_rules! response {
     ($(#[$doc:meta])* $name:ident { $($(#[$attr:meta])* $member:ident: $ty:ty,)* }) => {
         $(#[$doc])*
         #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-        #[serde(deny_unknown_fields)]
+        #[serde(remote = "Self", deny_unknown_fields)]
         pub struct $name {
             pub api_version: ApiVersion,
             pub build: Ref,
@@ -28,6 +28,7 @@ macro_rules! response {
         }
 
         crate::wire::rules!(checked: $name);
+        crate::wire::object_only!($name);
     };
 }
 
@@ -223,7 +224,7 @@ response! {
 /// The delegation a preview's version adds, as the owner entered it. Mandate spec §6.5's other
 /// members are planned with E8-15 (DEC-681 item 8).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct PreviewedDelegation {
     #[serde(deserialize_with = "Option::deserialize")]
     pub expires_at: Option<Timestamp>,
@@ -257,7 +258,7 @@ response! {
 
 /// One event a command produced.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct Step {
     #[serde(deserialize_with = "Option::deserialize")]
     pub reason: Option<String>,
@@ -266,3 +267,5 @@ pub struct Step {
     pub event_type: String,
     pub recorded_at: Timestamp,
 }
+
+crate::wire::object_only!(PreviewedDelegation, Step);

@@ -1,9 +1,0 @@
-file = "crates/mandate-api/tests/contract.rs"
-test = "a_problems_violation_given_as_an_array_is_refused_as_type_at_its_item"
-reason = """
-E10-10, DEC-881: `decode` is already implemented, and accepts a problem's violation written as a
-JSON array (`["schema", "/bid", "type", "m"]`) and refuses `[]` as `missing`, where `type` at
-`/violations/0` is expected, so this test fails on that answer rather than at a stub. The change
-that reads a tagged object only from a JSON object deletes this file with the test's `#[ignore]`
-line.
-"""
