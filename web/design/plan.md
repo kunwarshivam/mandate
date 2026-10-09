@@ -252,8 +252,8 @@ item above (C-3, C-9) are not repeated.
       leaves out its "Asked you" row. (C-5)
 - [x] **"At the limit:" on the overview card**, so a limit's action never reads as the current
       mode. (C-7) Done in [#1067](https://github.com/kunwarshivam/mandate/pull/1067).
-- [ ] **A time from another day carries its date**, through one formatter shared with the
-      timeline. (C-23)
+- [x] **A time from another day carries its date**, through one formatter shared with the
+      timeline. (C-23) Done in [#1091](https://github.com/kunwarshivam/mandate/pull/1091).
 - [ ] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
       restriction, keeping its step-up. Safety lane. (C-24)
 - [ ] **Sparklines without the false limit line.** When the limit is below the line's range, the
