@@ -708,6 +708,12 @@ def valid_drafts() -> list[dict]:
             [change(f"{R0}.failure", {"check": "prev_hash_mismatch", "seq": 1})],
         ),
         valid(
+            "failure_at_an_anchor_of_its_own_control_stream",
+            "rule 111: `anchor_self_mismatch` (§11, DEC-783) is reported at the `AnchorComputed`",
+            bad,
+            [change("payload.ranges[1].failure", {"check": "anchor_self_mismatch", "seq": 9}), change("payload.ranges[1].to_hash", None)],
+        ),
+        valid(
             "failure_at_the_last_event",
             "rule 111",
             bad,

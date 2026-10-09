@@ -10,6 +10,7 @@ use proptest::prelude::*;
 
 const ID: &str = "0123456789abcdef0123456789abcdef";
 const FCM: &str = "https://fcm.googleapis.com/fcm/send/dGVzdA";
+const EVIL: &str = "https://evil.example/x";
 const ACTION: (&str, u32) = ("high", 3_600);
 const SAFETY: (&str, u32) = ("high", 86_400);
 const INFO: (&str, u32) = ("normal", 21_600);
@@ -98,7 +99,6 @@ fn refused(w: &Wire, reason: RelayError) -> Result<(), RelayError> {
 /// A valid request is posted once, exactly as given, and answers the push service's status, a
 /// `3xx` included; a push service that does not answer is `unreachable`, never retried (NT-9).
 #[test]
-#[ignore = "pending E8-14"]
 fn a_valid_request_is_posted_once_and_answers_the_status_or_unreachable() -> Result<(), RelayError>
 {
     let statuses = [201, 308, 410, 429].map(|s| (PushAnswer::Status(s), Ok(s)));
@@ -117,7 +117,6 @@ fn a_valid_request_is_posted_once_and_answers_the_status_or_unreachable() -> Res
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn only_an_allowlisted_endpoint_of_at_most_2048_octets_is_forwarded() -> Result<(), RelayError> {
     let fill = |total: usize| format!("{FCM}{}", "a".repeat(total.saturating_sub(FCM.len())));
     for endpoint in ALLOWED.map(str::to_owned).into_iter().chain([fill(2_048)]) {
@@ -131,7 +130,6 @@ fn only_an_allowlisted_endpoint_of_at_most_2048_octets_is_forwarded() -> Result<
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn a_relay_id_is_exactly_32_lowercase_hex_digits() -> Result<(), RelayError> {
     RelayId::parse(ID)?;
     RelayId::parse(&"f".repeat(32))?;
@@ -141,6 +139,42 @@ fn a_relay_id_is_exactly_32_lowercase_hex_digits() -> Result<(), RelayError> {
         refused(&w, RelayError::InvalidRelayId)?;
     }
     Ok(())
+}
+
+/// DEC-724 item 8, written by hand: faults `i` (relay id), `e` (endpoint), `v` (envelope) and `s`
+/// (size) in one request, and the refusal that must win, the first in that order.
+#[rustfmt::skip]
+const FIRST_FAULT: [(&str, RelayError); 9] = [
+    ("ie", RelayError::InvalidRelayId), ("ev", RelayError::AddressRejected),
+    ("vs", RelayError::InvalidEnvelope), ("is", RelayError::InvalidRelayId),
+    ("es", RelayError::AddressRejected), ("iv", RelayError::InvalidRelayId),
+    ("evs", RelayError::AddressRejected), ("ivs", RelayError::InvalidRelayId),
+    ("ievs", RelayError::InvalidRelayId),
+];
+
+/// Every refusal posts nothing and leaves one log entry, with the id only when it parsed.
+#[test]
+fn with_several_faults_the_first_in_the_fixed_order_is_the_refusal() -> Result<(), RelayError> {
+    for (faults, first) in FIRST_FAULT {
+        let has = |fault| faults.contains(fault);
+        let id = if has('i') { "zqrule" } else { ID };
+        let endpoint = if has('e') { EVIL } else { FCM };
+        let (urgency, ttl) = if has('v') { ("low", 1) } else { SAFETY };
+        let len = if has('s') { 513 } else { 230 };
+        let w = Wire(id.into(), endpoint.into(), urgency.into(), ttl, body(len));
+        refused(&w, first)?;
+    }
+    Ok(())
+}
+
+/// The two octet counts either side of the cap, forced rather than only sampled.
+#[test]
+fn exactly_512_bytes_is_forwarded_once_and_513_is_refused_too_large() -> Result<(), RelayError> {
+    let (answer, posts, log) = run(&wire(FCM, SAFETY, 512), PushAnswer::Status(201))?;
+    assert_eq!(answer, OK);
+    assert_eq!(posts, [(FCM.to_owned(), SAFETY.0, SAFETY.1, body(512))]);
+    assert_eq!(log, [entry(ID, OK)]);
+    refused(&wire(FCM, SAFETY, 513), RelayError::TooLarge)
 }
 
 fn urgencies() -> impl Strategy<Value = &'static str> {
@@ -161,7 +195,6 @@ fn wires() -> impl Strategy<Value = Wire> {
 
 proptest! {
     #[test]
-    #[ignore = "pending E8-14"]
     fn the_cap_admits_512_bytes_and_refuses_513_and_over(
         len in prop_oneof![Just(512usize), Just(513), 0usize..=2_048]
     ) {
@@ -171,7 +204,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E8-14"]
     fn only_one_class_pair_of_urgency_and_ttl_is_forwarded(urgency in urgencies(), ttl in ttls()) {
         let w = wire(FCM, (urgency, ttl), 230);
         if PAIRS.contains(&(urgency, ttl)) {
@@ -185,7 +217,6 @@ proptest! {
     /// Nothing is retained: a run of requests through one log and one push service leaves exactly
     /// what each request leaves alone, one log entry each, and no entry holds an address.
     #[test]
-    #[ignore = "pending E8-14"]
     fn nothing_carries_over_from_one_request_to_the_next(ws in prop::collection::vec(wires(), 1..8)) {
         let (mut pushes, mut log) = (Pushes(Vec::new(), PushAnswer::Status(201)), Vec::new());
         let (mut posts, mut entries, mut answers) = (Vec::new(), Vec::new(), Vec::new());
@@ -208,7 +239,6 @@ proptest! {
 /// the ciphertext as given, an allowlisted endpoint, a class's fixed pair, and opaque ids; with
 /// those two stated exceptions (CP-1) set aside, the canary scan finds nothing.
 #[test]
-#[ignore = "pending E8-14"]
 fn rule_6_the_relay_passes_on_only_the_body_the_endpoint_the_class_pair_and_opaque_ids()
 -> Result<(), RelayError> {
     let mut ws: Vec<Wire> = PAIRS.into_iter().map(|p| wire(FCM, p, 230)).collect();

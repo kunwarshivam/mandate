@@ -158,7 +158,6 @@ fn assert_bound(issued: &Issued, kind: K, unverified: bool) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_principal_who_may_not_act_cannot_obtain_a_challenge() {
     let day_ago = at(NOW_SECS - 86_400);
     let operator = membership(USER, ws(W1), Active, &[(Role::Operator, day_ago)]);
@@ -195,7 +194,6 @@ fn a_principal_who_may_not_act_cannot_obtain_a_challenge() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_authorized_principal_obtains_a_challenge_bound_to_its_action() {
     let day_ago = at(NOW_SECS - 86_400);
     let roles = [Role::WorkspaceAdmin, Role::Operator, Role::Approver].map(|r| (r, day_ago));
@@ -253,7 +251,6 @@ fn case((roles, state, flags, asked, kind): Draw) -> Result<(), TestCaseError> {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_challenge_is_issued_exactly_when_the_matrix_grants_the_action() {
     let roles = prop::collection::vec(0u8..3, 8);
     let draw = (roles, 0..5usize, 0..4u8, 0..44usize, 0..18usize);

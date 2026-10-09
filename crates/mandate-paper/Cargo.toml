@@ -15,6 +15,7 @@ mandate-alpaca.workspace = true
 mandate-artifacts-fs.workspace = true
 mandate-canon.workspace = true
 mandate-journal.workspace = true
+mandate-journal-pg.workspace = true
 mandate-modelhost.workspace = true
 mandate-num.workspace = true
 mandate-runtime.workspace = true
@@ -22,10 +23,10 @@ mandate-shell.workspace = true
 mandate-spec.workspace = true
 mandate-time.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "rt", "time"] }
 
 [dev-dependencies]
 mandate-executor.workspace = true
-mandate-journal-pg.workspace = true
 mandate-marketdata.workspace = true
 proptest.workspace = true
 sqlx.workspace = true

@@ -499,3 +499,63 @@ fn intent_links_are_scoped_to_the_named_streams_and_typed() {
     let depths: Vec<u16> = trace.nodes.iter().map(|n| n.depth).collect();
     assert_eq!((depths, trace.hops), (vec![0, 1, 2], expected.to_vec()));
 }
+
+/// DEC-772 items 2 and 6: an `IntentReceived` at depth 16, or once the trace holds 256 events, reads
+/// its `IntentProposed` `already_shown` when that event is a node and `beyond_bound` when not, and a
+/// bound that kept the agent stream from being looked up adds no watermark for it.
+#[test]
+#[ignore = "pending E12-1"]
+fn the_intent_row_at_a_bound_reads_no_agent_stream() {
+    let mut g = Graph::new();
+    let (account, outputs) = (format!("acct:{}:ACCT1", text(WS_A)), agent(WS_A, "AG2"));
+    let [received, proposed, wide, named] = [1, 2, 3, 4].map(|n| event_id(790_000 + n));
+    let event = draft(
+        &proposed,
+        &agent(WS_A, "AG1"),
+        "IntentProposed",
+        Some(&named),
+        PROPOSED,
+    );
+    g.fx.append_draft(&agent(WS_A, "AG1"), proposed.clone(), &event);
+    let payload = format!(
+        r#"{{"intent_id":"{proposed}","agent_id":"AG1","instrument_id":"inst","side":"buy",
+        "type":"limit","tif":"day","qty":"1","limit_price":"10","purpose":"open"}}"#
+    );
+    let event = draft(&received, &account, "IntentReceived", None, &payload);
+    g.fx.append_draft(&account, received.clone(), &event);
+    let chain: Vec<String> = (0..16).map(|i| event_id(791_000 + i)).collect();
+    for pair in chain.windows(2) {
+        g.add(&outputs, &pair[0], Some(&pair[1]), &[]);
+    }
+    g.add(&outputs, &chain[15], None, from_ref(&received));
+    let leaves: Vec<String> = (0..254).map(|i| event_id(792_000 + i)).collect();
+    for leaf in &leaves {
+        g.add(&outputs, leaf, None, &[]);
+    }
+    let cited: Vec<String> = leaves.iter().chain([&received]).cloned().collect();
+    g.add(&outputs, &wide, None, &cited);
+    let cited = [&proposed]
+        .into_iter()
+        .chain(&leaves[1..])
+        .chain([&received]);
+    let cited: Vec<String> = cited.cloned().collect();
+    g.add(&outputs, &named, None, &cited);
+    let link = "payload.intent_id";
+    let again = hop(&received, link, Some(&received), HopStatus::AlreadyShown);
+    let beyond = hop(&received, link, None, HopStatus::BeyondBound);
+    let shown = hop(&received, link, Some(&proposed), HopStatus::AlreadyShown);
+    for (start, nodes, last) in [
+        (&chain[0], 17, &beyond),
+        (&wide, 256, &beyond),
+        (&named, 256, &shown),
+    ] {
+        let trace = traced(&g, WS_A, start, &[]);
+        let tail = [again.clone(), beyond.clone(), last.clone()];
+        let received_at = trace.nodes.last().map(|n| n.event.event_id.as_str());
+        assert_eq!(
+            (trace.nodes.len(), received_at, trace.truncated),
+            (nodes, Some(received.as_str()), true)
+        );
+        assert_eq!(&trace.hops[trace.hops.len() - 3..], &tail[..]);
+    }
+}

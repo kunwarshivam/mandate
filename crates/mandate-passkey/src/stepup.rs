@@ -11,8 +11,8 @@ use mandate_time::UtcNanos;
 
 use crate::{Assertion, Challenge, Credential, Refusal, RelyingParty, Verified, verify};
 use mandate_identity::{
-    AssertionId, PrincipalId, StepUpActionKind, StepUpEvidence, StepUpMethod, TenantContext,
-    UlidTextError, WorkspaceId,
+    AssertionId, Permission, PrincipalId, StepUpActionKind, StepUpEvidence, StepUpMethod,
+    TenantContext, UlidTextError, WorkspaceId,
 };
 
 /// How long a challenge stays usable after it is issued (§7.1, §7.2 step 1).
@@ -196,12 +196,8 @@ impl Issued {
 
     /// The context's [`TenantContext::membership_unverified`]: true only for a risk-reducing row
     /// (an owner exit) authorized from the session's roles snapshot during a membership outage.
-    #[expect(
-        clippy::todo,
-        reason = "a getter's stub is todo!(), the form DEC-137 names"
-    )]
     pub fn membership_unverified(&self) -> bool {
-        todo!()
+        self.membership_unverified
     }
 }
 
@@ -237,10 +233,45 @@ pub fn issue_challenge(
     challenge_id: AssertionId,
     issued_at: UtcNanos,
 ) -> Result<Issued, IssueRefusal> {
-    let _ = (context, action, challenge_id, issued_at);
-    Err(IssueRefusal::Refused(
-        mandate_identity::Refusal::Unimplemented { story: "E9-4" },
-    ))
+    if context.permission() != row_of(action.kind) {
+        return Err(IssueRefusal::Refused(mandate_identity::Refusal::Forbidden));
+    }
+    let record = ChallengeRecord::issue(
+        challenge_id,
+        context.workspace(),
+        context.principal(),
+        action,
+        issued_at,
+    )?;
+    Ok(Issued {
+        record,
+        membership_unverified: context.membership_unverified(),
+    })
+}
+
+/// The identity spec §4.2 row a step-up action kind needs (workspace API spec §3.6, DEC-665 item
+/// 2). Every row named here carries **S**, so a context authorized for a row without it matches
+/// no kind (DEC-665 item 3), and a new kind does not compile until its row is named.
+fn row_of(kind: StepUpActionKind) -> Permission {
+    match kind {
+        StepUpActionKind::ConfirmVersion => Permission::ConfirmRiskIncreasing,
+        StepUpActionKind::Deploy => Permission::Deploy,
+        StepUpActionKind::Approve => Permission::Approve,
+        StepUpActionKind::Connection => Permission::BrokerConnection,
+        StepUpActionKind::Resume | StepUpActionKind::Stop => Permission::ResumeOrStop,
+        StepUpActionKind::Acknowledge => Permission::Acknowledge,
+        StepUpActionKind::OwnerExit => Permission::OwnerExit,
+        StepUpActionKind::KillSwitchPrivilege => Permission::KillSwitchPrivileges,
+        StepUpActionKind::Disclosure => Permission::AcceptDisclosure,
+        StepUpActionKind::PolicyLoosen => Permission::WorkspacePolicyLoosen,
+        StepUpActionKind::MemberInvite => Permission::WorkspaceMembers,
+        StepUpActionKind::RoleGrant => Permission::WorkspaceRoles,
+        StepUpActionKind::ClientConnect => Permission::ConnectClient,
+        StepUpActionKind::CredentialEnrol => Permission::OwnPasskey,
+        StepUpActionKind::NotificationAddress => Permission::NotificationAddress,
+        StepUpActionKind::BreakGlassApprove => Permission::ApproveBreakGlass,
+        StepUpActionKind::LiftHold => Permission::LiftClientHold,
+    }
 }
 
 /// Where the action runs, which decides the methods step-up accepts (§7.3).
