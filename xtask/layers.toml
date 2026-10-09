@@ -219,7 +219,7 @@ allowed_external = ["thiserror"]
 layer = 4
 safety_critical = true
 pure = true
-allowed_external = ["serde", "serde_json", "sha2", "thiserror"]
+allowed_external = ["serde", "serde_json", "serde_path_to_error", "sha2", "thiserror"]
 # The identity system crate holds sessions and credentials; the contract never reaches it
 # (DEC-642 item 6).
 forbidden_internal = ["mandate-identity-system"]

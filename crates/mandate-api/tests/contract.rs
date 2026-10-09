@@ -452,7 +452,6 @@ fn mislocated<T: DeserializeOwned + Validate + Debug>(
 /// (DEC-681 item 10): at the root, in a nested object, and in an array's object, pretty-printed or
 /// not. A first member, and `missing` at the object that lacks it, are the controls.
 #[test]
-#[ignore = "pending E10-10"]
 fn a_custom_refusal_on_an_objects_last_member_is_located_at_the_member() {
     let fixture: [(&[u8], &str, &str); 4] = [
         (
@@ -539,7 +538,6 @@ impl Validate for Quotes {
 /// item 10): the first, a middle, and the last item, with the array the first or last member, and
 /// never the parent or a sibling item. A wrong JSON type on the first item is the control.
 #[test]
-#[ignore = "pending E10-10"]
 fn a_custom_refusal_on_an_array_item_is_located_at_that_item() {
     let cases: [(&[u8], &str, &str); 6] = [
         (
@@ -614,7 +612,6 @@ impl Validate for Crowd {
 /// names already: the tagged object as a first member, an unknown `kind` or one of the wrong JSON
 /// type at `/who/kind`, and a `who` that is not an object, `type` at `/who`.
 #[test]
-#[ignore = "pending E10-10"]
 fn a_refusal_inside_a_tagged_object_is_located_at_that_object() {
     let cases: [(&[u8], &str, &str); 15] = [
         (
@@ -744,7 +741,6 @@ fn spliced(text: &str, bad: &[u8]) -> Vec<u8> {
 /// body, a member's value at any depth, or a member's name. Bad bytes outside a string are the
 /// control, already refused so.
 #[test]
-#[ignore = "pending E10-10"]
 fn invalid_utf8_inside_a_string_is_malformed_at_the_root() {
     let ok = r#"{"bid": "1.5", "effect": "none"}"#;
     let fixtures = [
