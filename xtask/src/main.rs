@@ -1741,19 +1741,24 @@ fn resolved_live_problems(
         .flatten()
         .filter_map(|enabled| enabled.strip_prefix("dep:"))
         .collect();
-    let mut builds = vec![("the default build".to_owned(), Vec::new())];
+    let mut builds = vec![("the default build".to_owned(), Vec::new(), false)];
     for file in workflows
         .iter()
         .filter(|file| file.path.starts_with(".github/workflows/"))
     {
-        for (job, words) in workflow_cargo_invocations(file) {
-            let at = format!("{}: job `{job}`, `cargo {}`", file.path, words.join(" "));
-            builds.push((at, words));
+        for invocation in workflow_cargo_invocations(file) {
+            let at = format!(
+                "{}: job `{}`, `cargo {}`",
+                file.path,
+                invocation.job,
+                invocation.words.join(" ")
+            );
+            builds.push((at, invocation.words, invocation.moved));
         }
     }
     let mut problems = Vec::new();
     let mut compile_only_seen = false;
-    for (at, words) in builds {
+    for (at, words, moved) in builds {
         if words.iter().any(|word| word.contains(['$', '`'])) {
             problems.push(format!("{at}: words the shell expands cannot be resolved"));
             continue;
@@ -1780,7 +1785,7 @@ fn resolved_live_problems(
             ));
         }
         compile_only_seen |= compile_only;
-        let reached = reached_ids(&resolve, &selected_ids(meta, &resolve, &words));
+        let reached = reached_ids(&resolve, &selected_ids(meta, &resolve, &words, moved));
         for node in &resolve.nodes {
             let name = node_name(meta, &node.id);
             let runner_allowed = compile_only && runner == Some(name);
@@ -1812,13 +1817,22 @@ fn resolved_live_problems(
 /// The ids of `resolve` an invocation's `words` select, which a build starts from: each package
 /// `-p`/`--package` names, every member less each `--exclude` under `--workspace` or `--all`, and
 /// otherwise `meta`'s default members (`[]` is the default build). A selection the check cannot
-/// match to a node, a pattern or an unknown name, selects every member, so it can only refuse more.
+/// match to a node, a pattern or an unknown name, selects every member, so it can only refuse more;
+/// so does a build that may run from another directory (`moved`, a `cd` or a `working-directory`)
+/// or names `--manifest-path`, since cargo then builds the package there (#1169 review, major).
 fn selected_ids<'a>(
     meta: &'a Metadata,
     resolve: &'a Resolve,
     words: &[String],
+    moved: bool,
 ) -> BTreeSet<&'a str> {
     let (mut named, mut excluded, mut whole) = (Vec::new(), Vec::new(), false);
+    let members = || meta.workspace_members.iter().map(String::as_str).collect();
+    let elsewhere =
+        |word: &String| word == "--manifest-path" || word.starts_with("--manifest-path=");
+    if moved || words.iter().take_while(|word| *word != "--").any(elsewhere) {
+        return members();
+    }
     let mut rest = words.iter().map(String::as_str);
     while let Some(word) = rest.next() {
         match word {
@@ -1838,7 +1852,6 @@ fn selected_ids<'a>(
             }
         }
     }
-    let members = || meta.workspace_members.iter().map(String::as_str).collect();
     if whole {
         let mut all: BTreeSet<&str> = members();
         all.retain(|id| !excluded.contains(&node_name(meta, id)));
@@ -2025,12 +2038,52 @@ fn workflow_jobs(text: &str) -> BTreeMap<usize, String> {
     jobs
 }
 
+/// One cargo invocation of a workflow's `run:` steps.
+struct CargoInvocation {
+    /// The job it runs in.
+    job: String,
+    /// Its words after `cargo`.
+    words: Vec<String>,
+    /// Whether it may run outside the repository root: a `cd` or `pushd` comes before it in its
+    /// job, or a `working-directory:` is set in its job or outside every job.
+    moved: bool,
+}
+
+/// The jobs of `file` (by name) in which a `working-directory:` is set, and whether one is set
+/// outside the top-level `jobs:` (a workflow's `defaults:`), which moves every job.
+fn working_directory_jobs(text: &str, jobs: &BTreeMap<usize, String>) -> (BTreeSet<String>, bool) {
+    let (mut moved, mut everywhere) = (BTreeSet::new(), false);
+    let mut top_level = "";
+    for (number, line) in (1_usize..).zip(text.lines()) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if line.len() == trimmed.len() {
+            top_level = trimmed.split(':').next().unwrap_or(trimmed).trim();
+            continue;
+        }
+        let key = trimmed.trim_start_matches([' ', '-']).split(':').next();
+        if key.map(str::trim) != Some("working-directory") {
+            continue;
+        }
+        match jobs.range(..=number).next_back() {
+            Some((_, job)) if top_level == "jobs" => {
+                moved.insert(job.clone());
+            }
+            _ => everywhere = true,
+        }
+    }
+    (moved, everywhere)
+}
+
 /// Each cargo invocation of `file`'s `run:` steps, with its job and its words after `cargo`, each
 /// command read up to a shell operator or redirection, its command word found after its
 /// assignments and [`WRAPPERS`].
-fn workflow_cargo_invocations(file: &CiFile) -> Vec<(String, Vec<String>)> {
+fn workflow_cargo_invocations(file: &CiFile) -> Vec<CargoInvocation> {
     let run_lines = block_lines(&file.text, "run");
     let jobs = workflow_jobs(&file.text);
+    let (mut moved_jobs, everywhere) = working_directory_jobs(&file.text, &jobs);
     let mut invocations = Vec::new();
     for (number, line) in logical_lines(&file.path, &file.text) {
         if !run_lines.contains(&number) {
@@ -2063,11 +2116,17 @@ fn workflow_cargo_invocations(file: &CiFile) -> Vec<(String, Vec<String>)> {
                 .map(String::as_str)
                 .skip_while(|word| is_skipped_word(word))
                 .collect();
-            if let Some((cargo, args)) = unwrapped(&named).split_first()
-                && is_cargo(cargo)
-            {
-                let words = args.iter().map(|word| (*word).to_owned()).collect();
-                invocations.push((job.clone(), words));
+            let Some((command_word, args)) = unwrapped(&named).split_first() else {
+                continue;
+            };
+            if matches!(*command_word, "cd" | "pushd") {
+                moved_jobs.insert(job.clone());
+            } else if is_cargo(command_word) {
+                invocations.push(CargoInvocation {
+                    job: job.clone(),
+                    words: args.iter().map(|word| (*word).to_owned()).collect(),
+                    moved: everywhere || moved_jobs.contains(&job),
+                });
             }
         }
     }
@@ -10991,7 +11050,6 @@ jq -r "$filter" "$src"
     /// member and holds a live-only member nothing depends on (#1169 review, major; DEC-176
     /// tightening); a `-p` build with no path does not.
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_build_with_a_manifest_path_selects_every_member() -> Result<()> {
         let flows = [workflow(&[
             (
@@ -11022,7 +11080,6 @@ jq -r "$filter" "$src"
     /// block, makes cargo build the package of that directory, so the build selects every member
     /// and holds a live-only member nothing depends on (#1169 review, major; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_build_after_a_cd_selects_every_member() -> Result<()> {
         let flows = [ci_file(
             ".github/workflows/ci.yml",
@@ -11049,7 +11106,6 @@ jq -r "$filter" "$src"
     /// holds a live-only member nothing depends on (#1169 review, major; DEC-176 tightening); a
     /// job in another file with no working directory does not.
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_build_in_a_working_directory_selects_every_member() -> Result<()> {
         let flows = [
             ci_file(
