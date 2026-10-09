@@ -1,0 +1,11 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "an_owner_exit_outside_the_session_prices_from_the_confirmed_bid"
+reason = """
+E7-4's, let past the kill switch's stub by slice 7 (#668; DEC-485 item 17; DEC-485 item 11):
+outside the regular session a confirmed owner's flatten is queued for the session at the floor
+rather than sold in extended hours from the confirmed bid. A loud stub there would fail the whole
+step that prices the close: the switch's own step where nothing needs cancelling first, so its
+mode and record would never be journaled (`AGENTS.md` rule 13: the kill switch is always
+available), or the step confirming the protection's cancel, leaving the position unprotected and
+unsold. The session slice deletes this file with the extended-hours path.
+"""

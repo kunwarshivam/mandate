@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_canon::{Digest, Value};
+use mandate_canon::{Digest, Int, Key, Object, Value, to_canonical};
 
 use crate::{AssetClass, MarketSession};
 
@@ -122,11 +122,58 @@ impl CapabilityProfile {
     /// Validates the rows and the idempotency claims, and builds the canonical object. The order
     /// of `rows` and of each row's `cells` is not part of the profile.
     pub fn new(
-        _profile_version: u32,
-        _rows: Vec<Row>,
-        _idempotency: Idempotency,
+        profile_version: u32,
+        rows: Vec<Row>,
+        idempotency: Idempotency,
     ) -> Result<Self, ProfileError> {
-        Err(ProfileError::Unimplemented)
+        if profile_version == 0 {
+            return Err(ProfileError::VersionZero);
+        }
+        if rows.is_empty() {
+            return Err(ProfileError::NoRows);
+        }
+        let claims =
+            idempotency.retry != Retry::NotIdempotent || idempotency.query_by_client_order_id;
+        if claims && !idempotency.client_order_id {
+            return Err(ProfileError::ClaimWithoutClientId);
+        }
+        let mut sorted = BTreeMap::new();
+        for row in &rows {
+            let place = (row.asset_class.as_str(), row.session.as_str());
+            if sorted.insert(place, row_object(row)?).is_some() {
+                return Err(ProfileError::DuplicateRow);
+            }
+        }
+        let cells = rows
+            .into_iter()
+            .flat_map(|row| {
+                row.cells.into_iter().map(move |cell| {
+                    let place = (
+                        row.asset_class,
+                        row.session,
+                        cell.order_type,
+                        cell.quantity_form,
+                    );
+                    (place, cell)
+                })
+            })
+            .collect();
+        let canonical = object([
+            ("idempotency", idempotency_object(idempotency)?),
+            ("kind", Value::Str(Self::KIND.to_owned())),
+            (
+                "profile_version",
+                Value::Int(Int::new(u64::from(profile_version)).ok_or(ProfileError::NonCanonical)?),
+            ),
+            ("rows", Value::Array(sorted.into_values().collect())),
+        ])?;
+        let content_hash = Digest::of(&to_canonical(&canonical));
+        Ok(Self {
+            canonical,
+            content_hash,
+            idempotency,
+            cells,
+        })
     }
 
     /// The canonical object (DEC-630 item 6) that [`CapabilityProfile::content_hash`] hashes.
@@ -155,8 +202,121 @@ impl CapabilityProfile {
         order_type: OrderType,
         quantity_form: QuantityForm,
     ) -> Result<&Cell, ProfileError> {
-        let _ = (&self.cells, asset_class, session, order_type, quantity_form);
-        Err(ProfileError::Unimplemented)
+        self.cells
+            .get(&(asset_class, session, order_type, quantity_form))
+            .ok_or(ProfileError::NotOffered)
+    }
+}
+
+/// One row's object, its cells sorted by order type then quantity form.
+fn row_object(row: &Row) -> Result<Value, ProfileError> {
+    if row.cells.is_empty() {
+        return Err(ProfileError::EmptyRow);
+    }
+    let mut cells = BTreeMap::new();
+    for cell in &row.cells {
+        if cell.times_in_force.is_empty() {
+            return Err(ProfileError::NoTimeInForce);
+        }
+        let key = (
+            order_type(cell.order_type),
+            quantity_form(cell.quantity_form),
+        );
+        let value = object([
+            ("order_type", Value::Str(key.0.to_owned())),
+            (
+                "protection_forms",
+                spellings(cell.protection_forms.iter().map(|&p| protection_form(p))),
+            ),
+            ("quantity_form", Value::Str(key.1.to_owned())),
+            (
+                "times_in_force",
+                spellings(cell.times_in_force.iter().map(|&t| time_in_force(t))),
+            ),
+        ])?;
+        if cells.insert(key, value).is_some() {
+            return Err(ProfileError::DuplicateCell);
+        }
+    }
+    object([
+        (
+            "asset_class",
+            Value::Str(row.asset_class.as_str().to_owned()),
+        ),
+        ("cells", Value::Array(cells.into_values().collect())),
+        ("session", Value::Str(row.session.as_str().to_owned())),
+    ])
+}
+
+fn idempotency_object(idempotency: Idempotency) -> Result<Value, ProfileError> {
+    object([
+        ("client_order_id", Value::Bool(idempotency.client_order_id)),
+        (
+            "query_by_client_order_id",
+            Value::Bool(idempotency.query_by_client_order_id),
+        ),
+        ("retry", Value::Str(retry(idempotency.retry).to_owned())),
+    ])
+}
+
+fn object<const N: usize>(members: [(&str, Value); N]) -> Result<Value, ProfileError> {
+    let mut built = Object::new();
+    for (name, value) in members {
+        let key = Key::new(name).map_err(|_| ProfileError::NonCanonical)?;
+        built.insert(key, value);
+    }
+    Ok(Value::Object(built))
+}
+
+/// A set as an array sorted by spelling, so the hash never depends on a variant's position.
+fn spellings<'a>(names: impl Iterator<Item = &'a str>) -> Value {
+    let sorted: BTreeSet<&str> = names.collect();
+    Value::Array(
+        sorted
+            .into_iter()
+            .map(|n| Value::Str(n.to_owned()))
+            .collect(),
+    )
+}
+
+fn order_type(order_type: OrderType) -> &'static str {
+    match order_type {
+        OrderType::Market => "market",
+        OrderType::Limit => "limit",
+        OrderType::Stop => "stop",
+        OrderType::StopLimit => "stop_limit",
+    }
+}
+
+fn quantity_form(form: QuantityForm) -> &'static str {
+    match form {
+        QuantityForm::Whole => "whole",
+        QuantityForm::Fractional => "fractional",
+        QuantityForm::Notional => "notional",
+    }
+}
+
+fn time_in_force(tif: TimeInForce) -> &'static str {
+    match tif {
+        TimeInForce::Day => "day",
+        TimeInForce::Gtc => "gtc",
+        TimeInForce::Ioc => "ioc",
+    }
+}
+
+fn protection_form(form: ProtectionForm) -> &'static str {
+    match form {
+        ProtectionForm::Bracket => "bracket",
+        ProtectionForm::Oco => "oco",
+        ProtectionForm::StopLimit => "stop_limit",
+    }
+}
+
+fn retry(retry: Retry) -> &'static str {
+    match retry {
+        Retry::Idempotent => "idempotent",
+        Retry::NotIdempotent => "not_idempotent",
+        Retry::Unknown => "unknown",
     }
 }
 

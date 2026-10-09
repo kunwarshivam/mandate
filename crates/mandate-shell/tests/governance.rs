@@ -111,7 +111,6 @@ fn pinned() -> Pinned {
 /// order; a record of another type carrying a registration's payload does not count, and neither
 /// does a later `model_version` registration of another id, version or hash.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_latest_policy_set_and_registry_govern() {
     let early = policy_set(&[&level("workspace", r#""max_orders_per_day":100"#)]);
     let late = policy_set(&[&level("workspace", r#""max_orders_per_day":60"#)]);
@@ -151,7 +150,6 @@ fn the_latest_policy_set_and_registry_govern() {
 /// nothing: the mandate conforms, every value it states is the effective one, and `auto` stays as
 /// the mandate has it (mandate spec §4.3, stricter-of).
 #[test]
-#[ignore = "pending E7-19"]
 fn a_looser_policy_never_loosens_the_confirmed_mandate() {
     let mandate = Mandate::parse(&json(MANDATE)).unwrap();
     let stated = values_of(&mandate).unwrap();
@@ -178,7 +176,6 @@ fn a_looser_policy_never_loosens_the_confirmed_mandate() {
 /// no refusal, but the violations, which deny every action that adds risk (DEC-534), and an
 /// overlay that forbids `auto`.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_mandate_beyond_a_later_policy_is_nonconforming_not_refused() {
     let tight = level(
         "workspace",
@@ -213,9 +210,11 @@ fn a_mandate_beyond_a_later_policy_is_nonconforming_not_refused() {
 
 /// Each kind must be registered and its object stored intact; the policy set must read as
 /// `policy.schema.json` and journal spec §9 say; and the registry must be shaped as §9 says and
-/// hold exactly one entry equal to the pinned model's registration (DEC-484 item 5).
+/// hold exactly one entry equal to the pinned model's registration (DEC-484 item 5). Journal spec
+/// §9's `model_registry` object has exactly the members `kind`, `model_registry_version` (1) and
+/// `models`; `models` are strictly sorted and unique by `model_id`; and each entry has exactly the
+/// five members, whose `params` are strictly sorted and unique strings.
 #[test]
-#[ignore = "pending E7-19"]
 fn an_unregistered_unreadable_or_mismatched_policy_or_registry_refuses() {
     let policy = policy_set(&[&level("workspace", r#""max_orders_per_day":100"#)]);
     let entries = registry(&[ENTRY]);
@@ -256,6 +255,16 @@ fn an_unregistered_unreadable_or_mismatched_policy_or_registry_refuses() {
         r#""fast_periods","slow_periods""#,
         r#""slow_periods","fast_periods""#,
     );
+    let duplicate_params = ENTRY.replace(
+        r#""fast_periods","slow_periods""#,
+        r#""fast_periods","fast_periods""#,
+    );
+    let sixth_member = ENTRY.replace(
+        r#""admits_instruments""#,
+        r#""extra":1,"admits_instruments""#,
+    );
+    let renamed_member = ENTRY.replace(r#""params""#, r#""parameters""#);
+    let retyped_params = ENTRY.replace(r#""fast_periods","#, "7,");
     let retyped = [
         (r#""model_version":"1.0.0""#, r#""model_version":100"#),
         (r#""content_hash":"@H""#, r#""content_hash":7"#),
@@ -272,6 +281,11 @@ fn an_unregistered_unreadable_or_mismatched_policy_or_registry_refuses() {
         registry(&[OTHER, ENTRY]),
         registry(&[ENTRY, ENTRY]),
         registry(&[&unsorted_params]),
+        registry(&[&duplicate_params]),
+        registry(&[&sixth_member]),
+        registry(&[&renamed_member]),
+        registry(&[&retyped_params]),
+        entries.replace(r#""kind":"model_registry""#, r#""kind":"policy_set""#),
         entries.replace(r#""models""#, r#""extra":1,"models""#),
         entries.replace(
             r#""model_registry_version":1"#,
@@ -309,7 +323,6 @@ fn an_unregistered_unreadable_or_mismatched_policy_or_registry_refuses() {
 /// silent fallback). Each later object is missing from the store, corrupt, off its schema, or, for
 /// the registry, without the pinned model's entry.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_later_unusable_policy_or_registry_never_falls_back_to_an_earlier_one() {
     let policy = policy_set(&[&level("workspace", r#""max_orders_per_day":100"#)]);
     let entries = registry(&[ENTRY]);

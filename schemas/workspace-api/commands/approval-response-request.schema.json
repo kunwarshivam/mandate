@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/approval-response-request.schema.json",
+  "type": "object",
+  "required": [
+    "verdict",
+    "content_hash",
+    "record",
+    "step_up",
+    "delegation"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "enum": [
+        "approved",
+        "skipped"
+      ]
+    },
+    "content_hash": {
+      "$ref": "../common.schema.json#/$defs/ContentRef"
+    },
+    "record": {
+      "$ref": "../envelope.schema.json#/$defs/Record"
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "delegation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "preview_id",
+            "mandate_version"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "preview_id": {
+              "$ref": "../common.schema.json#/$defs/Id"
+            },
+            "mandate_version": {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /approvals/{approval_id}/responses (\u00a75.2). Users only. A Skip carries no delegation (outside this schema; the server drops one it is sent) and is never refused for step-up (API-7). An `approved` without step-up bound to the content hash, or with a delegation and no step-up bound to the preview's step_up_digest (\u00a75.3), is the server's 401 step_up_required, not a schema refusal. API-7 leniency (DEC-682 item 27): this schema is what a client should send; the server is lenient. Lenient for `skipped` only: `verdict` and `content_hash` are strict, and an omitted, unknown, or unparsable `record`, `step_up`, or `delegation` (or any other member) is dropped. An `approved` is not risk reduction and is judged strictly. The 202 lists every dropped member's JSON pointer in `dropped`. Skip's content_hash stays strict: an answer binds what was shown (API-12).",
+  "if": {
+    "properties": {
+      "verdict": {
+        "const": "skipped"
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "delegation": {
+        "type": "null"
+      }
+    }
+  },
+  "x-api7-lenient": true
+}
