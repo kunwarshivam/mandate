@@ -24,7 +24,7 @@ import type {
 } from "@/fixtures/types";
 import { LOSS_CEILING } from "@/components/new-agent/draft";
 import { type Dec, ONE, ZERO, abs, add, dec, div, fromInt, mul, sub, toDecimalString } from "./decimal";
-import { mandateVersion, unallocatedUsd } from "./fixture-journey";
+import { INDEPENDENT_APPROVAL_RULE, independentApprovalRequired, mandateVersion, unallocatedUsd } from "./fixture-journey";
 import { fixtureUlid } from "./fixture-ids";
 import { percent, price, quantity, seconds, usd } from "./format";
 import { changeLabel, changeValue } from "./mandate-paths";
@@ -519,13 +519,7 @@ export interface Proposal extends Diff {
   refusals: Refusal[];
 }
 
-/** The rule id a refusal for independent approval carries, kept in the record, never in the sentence (C-6). */
-export const INDEPENDENT_APPROVAL_RULE = "V-047";
-
-/** §4.3's effective policy. Only a stated `false` turns it off: absent or not known counts as required (rule 3). */
-export function independentApprovalRequired(ws: Workspace): boolean {
-  return ws.independent_approval_required !== false;
-}
+export { INDEPENDENT_APPROVAL_RULE, independentApprovalRequired };
 
 /**
  * §4.3 and V-047: under `independent_approval_required` a version that is not risk-reducing needs a
@@ -533,6 +527,12 @@ export function independentApprovalRequired(ws: Workspace): boolean {
  * confirmed with a passkey alone. With fewer than two people who can approve, V-047 refuses a
  * neutral version too and lets only a risk-reducing one through (DEC-444). The approver count is a
  * lower bound on the workspace's users; with two or more, a neutral version needs no second user.
+ *
+ * `approver_users` stands in for V-047's user count as a lower bound on the workspace's active
+ * members. That holds only if the served count is of active approver members alone: V-047 counts no
+ * pending invitation and no deactivated account, so a count that included either could let a
+ * neutral version through in a workspace with one real user. Fewer than two approvers refuses even
+ * where other active members exist, which only adds refusals.
  */
 function independentApproval(ws: Workspace, classification: ChangeClass | null): Refusal | null {
   if (!independentApprovalRequired(ws) || classification === null || classification === "risk_reducing") return null;
