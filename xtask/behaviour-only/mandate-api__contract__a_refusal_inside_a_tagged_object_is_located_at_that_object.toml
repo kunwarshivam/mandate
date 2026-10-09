@@ -1,0 +1,9 @@
+file = "crates/mandate-api/tests/contract.rs"
+test = "a_refusal_inside_a_tagged_object_is_located_at_that_object"
+reason = """
+E10-10's decode minors from #993's review (DEC-681 item 10): `decode` is already implemented, and
+locates a refusal inside an internally tagged object that is its parent's last member at the
+parent (`""` instead of `/who`), and one inside a tagged array item at the array or at the next
+item (`/crowd/1` for item 0), so this test fails on that answer rather than at a stub. The change
+that locates it at the tagged object deletes this file with the test's `#[ignore]` line.
+"""
