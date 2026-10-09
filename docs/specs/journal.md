@@ -13,8 +13,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 ## Change history
 
 - **v0.31 ([DEC-659](../project/decisions/DEC-659.md)):** §9.12 gains **Order**, which states a
-  reading DEC-659 already took under DEC-176 (it only tightens) and the identity crate already
-  implements (`check_order`, `write_membership`).
+  reading DEC-659 already took under DEC-176 (it only tightens). The identity crate implements
+  `check_order`, and E9-7's writer slice implements `write_membership` (DEC-646).
   - **The writer.** The one writer of the seven `Member*` types on `ctl:{workspace_id}`
     ([DEC-646](../project/decisions/DEC-646.md)) checks order inside the serialized append, against
     `last`, the stream's last membership record: an `event_time` before `last`'s, or a `seq` not
