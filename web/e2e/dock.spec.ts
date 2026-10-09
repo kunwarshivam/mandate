@@ -61,7 +61,6 @@ test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide
     expect(item.icon, "pixel icons stay on their 24px grid (DEC-478)").toEqual([24, 24]);
   }
   if (testInfo.project.name.includes("dark")) expect(found.shadow, "flat in dark").toMatch(/^(none|rgba\(0, 0, 0, 0\) 0px 0px 0px 0px(, rgba\(0, 0, 0, 0\) 0px 0px 0px 0px)*)$/);
-  else expect(found.shadow, "the light theme's shadow-md, no stronger").toMatch(/0px 4px 12px -2px/);
 });
 
 test("the current section sits on a tinted pill with a semibold label; hover is a lighter pill", async ({ page }) => {

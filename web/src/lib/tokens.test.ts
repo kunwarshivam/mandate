@@ -147,9 +147,9 @@ describe("the frame's glass", () => {
     const current = pct("dock-current", "foreground");
     const hover = pct("dock-hover", "foreground");
 
-    it("is the card at 85% with the type colour at 15% for its edge, a 14% tint for the current pill and half that on hover", () => {
-      expect(glassAlpha).toBe(0.85);
-      expect(pct("dock-edge", "foreground")).toBe(0.15);
+    it("is the card with the type colour for its edge, a 14% tint for the current pill and half that on hover", () => {
+      expect(glassAlpha, "how opaque is look (DEC-739 item 1); the labels' contrast below is the rule").toBeGreaterThan(0);
+      expect(pct("dock-edge", "foreground"), "how firm the edge is is look (DEC-739 item 1)").toBeGreaterThan(0);
       expect(current).toBe(0.14);
       expect(hover).toBe(current / 2);
       expect(declaredDark["dock-glass"], "one declaration serves both themes").toBeUndefined();

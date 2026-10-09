@@ -16,7 +16,9 @@ the owl, the rules and the record.
       #669).
 - [x] **Test sort** (DEC-511 item 5). Loosen look-pinning tests to the invariant they protect,
       remove the ones that only notice the look changed, keep every safety and compliance test
-      exactly as it is. Its own PR. (part 1, #882; part 2, #1005)
+      exactly as it is. Its own PR. (part 1, #882; part 2, #1005; part 2's four "unsure" pins, the
+      agent chart's 200px, the header's 65px, the dock's light shadow and the glass alphas, ruled
+      look by the founder and unpinned to their outcomes, DEC-739 item 1, #1128)
 - [ ] **A weekly critique.** Screenshots of every screen; one question: what is the worst thing on
       this screen; fix only that. (first run: #1017, [critique-2026-10-09.md](critique-2026-10-09.md),
       fixes in section J)
