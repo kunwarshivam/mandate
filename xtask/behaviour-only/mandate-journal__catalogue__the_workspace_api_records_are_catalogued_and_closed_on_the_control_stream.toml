@@ -1,0 +1,8 @@
+file = "crates/mandate-journal/tests/catalogue.rs"
+test = "the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream"
+reason = """
+E10-15's (DEC-670 and DEC-671, journal spec v0.21 and v0.22, §9.9 and §9.10). It checks
+`Draft::parse`, the journal's existing check, so there is no stub to stop at: until E10-15's
+implementation, the journal answers `unknown_event_type` for the new records, which is the
+behaviour it fails on. E10-15's implementation deletes this file with the test's `#[ignore]` line.
+"""

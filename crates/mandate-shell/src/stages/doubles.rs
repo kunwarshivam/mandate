@@ -213,6 +213,7 @@ impl World {
                 world: self.clone(),
                 script: Script::Accept,
             }),
+            artifacts: None,
         }
     }
 }

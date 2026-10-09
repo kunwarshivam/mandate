@@ -261,6 +261,7 @@ fn an_rs256_or_eddsa_signature_of_another_length_is_refused() {
     let issuer = TestIssuer::new();
     for signer in [Signer::Rs256, Signer::EdDsa] {
         let token = issuer.token(signer, &claims());
+        assert!(check(&issuer, &token).is_ok(), "{signer:?}");
         let (input, sig) = token.rsplit_once('.').unwrap();
         let raw = unb64(sig);
         let short = format!("{input}.{}", b64(&raw[..raw.len() - 1]));

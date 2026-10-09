@@ -124,6 +124,9 @@ pub enum EndReason {
     RefreshFailed,
     /// A rotated refresh token was presented again: the whole family is revoked.
     RefreshReuse,
+    /// The idle timeout or the absolute lifetime passed, or a granted refresh found an outage
+    /// session's idle timeout lapsed (DEC-816 item 8).
+    Expired,
     Admin,
 }
 
@@ -136,6 +139,7 @@ impl EndReason {
             Self::Deprovisioned => "deprovisioned",
             Self::RefreshFailed => "refresh_failed",
             Self::RefreshReuse => "refresh_reuse",
+            Self::Expired => "expired",
             Self::Admin => "admin",
         }
     }
@@ -186,7 +190,9 @@ pub enum SessionRefusal {
     #[error("the idle timeout is longer than the absolute lifetime")]
     IdleLongerThanAbsolute,
     /// `now` is earlier than the session's opening or its last admitted activity: the clock
-    /// went backwards, and the session refuses rather than guess.
+    /// went backwards, and the session refuses rather than guess. Only [`Request::Other`] and a
+    /// refresh are refused this way; a pause or a kill switch is judged at the last activity
+    /// instead, so a backwards clock never refuses risk reduction (rule 13, DEC-652 item 5).
     #[error("the clock is behind the session")]
     ClockBehind,
     /// The refresh secret to rotate to is the presented one or one already rotated away.
@@ -195,15 +201,10 @@ pub enum SessionRefusal {
     /// A time this transition would compute is outside the clock's range.
     #[error("the session's times cannot be represented")]
     Unrepresentable,
-    /// The session ended.
+    /// The session ended. The call that ends it returns this too, and so does every later one;
+    /// the caller journals the reason once, when [`SessionRecord::ended`] first turns `Some`.
     #[error("the session has ended")]
     Ended { reason: EndReason },
-    /// The idle timeout passed since the last request.
-    #[error("the session timed out")]
-    IdleExpired,
-    /// The absolute lifetime passed.
-    #[error("the session reached its absolute lifetime")]
-    AbsoluteExpired,
     /// The access token expired; a refresh is needed.
     #[error("the access token has expired")]
     AccessExpired,
@@ -217,7 +218,8 @@ pub enum SessionRefusal {
     #[error("the refresh token is not this session's")]
     UnknownRefreshToken,
     /// The provider sent a deprovision signal for this subject since its last successful sign-in,
-    /// so the local passkey route is closed to it.
+    /// so the local passkey route is closed to it. Route 2 answers it, like every refusal, with
+    /// the one [`crate::Unauthenticated`] (DEC-816 item 6).
     #[error("the identity provider deprovisioned this subject since its last sign-in")]
     DeprovisionSeen,
 }
@@ -279,7 +281,13 @@ impl SessionRecord {
         todo!()
     }
 
-    /// Admits `request` at `now`, and on success counts it as activity for the idle timeout.
+    /// Admits `request` at `now`, and on success counts it as activity for the idle timeout. A
+    /// request at or after the absolute lifetime, or a full session's idle timeout, ends the
+    /// session with [`EndReason::Expired`] (DEC-816 item 8). A [`Request::Pause`] or
+    /// [`Request::KillSwitch`] at a `now` earlier than the last activity is judged at the last
+    /// activity instead of `now`, never [`SessionRefusal::ClockBehind`], and moves no timer; every
+    /// other rule still applies at that instant. A live session refuses any other request at such
+    /// a `now` with [`SessionRefusal::ClockBehind`], whatever its reach (DEC-652 item 5).
     pub fn authorize(&mut self, _request: Request, _now: UtcNanos) -> Result<(), SessionRefusal> {
         Err(SessionRefusal::Unimplemented { story: "E9-1" })
     }
@@ -288,7 +296,10 @@ impl SessionRecord {
     /// `next` when it grants. A rotated token presented again ends the session with
     /// [`EndReason::RefreshReuse`]; a deprovision signal ends it with
     /// [`EndReason::Deprovisioned`], and any other answer that is not an outage with
-    /// [`EndReason::RefreshFailed`].
+    /// [`EndReason::RefreshFailed`]. A refresh at or after the absolute lifetime or a full
+    /// session's idle timeout, or a grant to an outage session whose idle timeout lapsed, ends it
+    /// with [`EndReason::Expired`] (DEC-816 item 8). A `now` earlier than the last activity is
+    /// refused [`SessionRefusal::ClockBehind`] and changes nothing.
     pub fn refresh(
         &mut self,
         _presented: &RefreshSecret,

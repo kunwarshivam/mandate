@@ -5,8 +5,8 @@
 use std::collections::BTreeMap;
 
 use mandate_authn::{
-    EndReason, OrgKind, ProviderAnswer, RefreshSecret, Request, SessionLimits, SessionPolicy,
-    SessionRecord, SessionRefusal, SubjectStanding, UtcNanos,
+    EndReason, OrgKind, ProviderAnswer, RefreshSecret, Refreshed, Request, SessionLimits,
+    SessionPolicy, SessionRecord, SessionRefusal, SubjectStanding, UtcNanos,
 };
 use mandate_identity::{
     Membership, MembershipState, OrgId, PrincipalId, Role, Scope, Session, SessionKind, SessionRef,
@@ -53,6 +53,19 @@ fn a_full_record_admits_a_full_session_with_its_snapshot_as_read() {
     let mut record = open();
     let session = record.admit(Request::Other, at(10), REFERENCE, snapshot());
     assert_eq!(session, Ok(expected(SessionKind::Full)));
+    let refreshed = record.refresh(
+        &RefreshSecret([1; 32]),
+        ProviderAnswer::Granted,
+        &RefreshSecret([2; 32]),
+        at(3_609),
+    );
+    assert_eq!(
+        refreshed,
+        Ok(Refreshed::Rotated {
+            access_expires_at: at(3_909)
+        }),
+        "the admitted request at 10 reset the idle hour, as `authorize` does"
+    );
 }
 
 #[test]
@@ -105,11 +118,20 @@ fn a_refused_record_builds_no_session() {
         })
     );
     let mut idle = open();
+    let expired = Err(SessionRefusal::Ended {
+        reason: EndReason::Expired,
+    });
     let lapsed = idle.admit(Request::Pause, at(3_600), REFERENCE, snapshot());
-    assert_eq!(lapsed, Err(SessionRefusal::IdleExpired));
+    assert_eq!(lapsed, expired, "the idle timeout ends the session");
+    assert_eq!(idle.ended(), Some(EndReason::Expired));
+    for request in [Request::Pause, Request::KillSwitch, Request::Other] {
+        let again = idle.admit(request, at(3_601), REFERENCE, snapshot());
+        assert_eq!(again, expired, "{request:?} after the lapse");
+    }
     let mut fresh = open();
     let late = fresh.admit(Request::Other, at(300), REFERENCE, snapshot());
     assert_eq!(late, Err(SessionRefusal::AccessExpired));
+    assert_eq!(fresh.ended(), None, "an expired access token ends nothing");
 }
 
 /// Four entries in the order the store read them: an org membership, two workspaces with

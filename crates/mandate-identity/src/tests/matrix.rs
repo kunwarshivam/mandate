@@ -600,7 +600,6 @@ fn the_matrix_parses_by_its_grammar_and_every_column_grants() {
 }
 
 #[test]
-#[ignore = "pending E9-2"]
 fn id2_authorize_grants_exactly_the_matrix_for_every_role_set_kind_and_scope() {
     let rows = matrix();
     let mut checked = 0u64;
@@ -689,7 +688,6 @@ fn id2_authorize_grants_exactly_the_matrix_for_every_role_set_kind_and_scope() {
 /// other row; a reduction-only session still reaches only its rows; principal scope reads nothing;
 /// and the principals that never read memberships answer as their column says.
 #[test]
-#[ignore = "pending E9-2"]
 fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() {
     let rows = matrix();
     let user = Principal::User { id: USER };
@@ -794,7 +792,6 @@ fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() 
 /// A snapshot entry serves only its own scope (DEC-816): with W1's entry holding every role and
 /// W2's none, a request in W2 during an outage gets nothing from W1's roles.
 #[test]
-#[ignore = "pending E9-2"]
 fn a_snapshot_entry_never_serves_another_workspace() {
     let ws2 = Scope::Workspace {
         org: O1,
@@ -841,7 +838,6 @@ fn a_snapshot_entry_never_serves_another_workspace() {
 /// org kill switch is still authorized from the snapshot, with no set, and the route's workspace is
 /// checked against its own record instead.
 #[test]
-#[ignore = "pending E9-2"]
 fn org_fanout_workspaces_come_from_the_store() {
     let owner = BTreeSet::from([Role::OrgOwner]);
     let none = BTreeSet::new();
@@ -960,7 +956,6 @@ fn org_fanout_workspaces_come_from_the_store() {
 /// operator by their columns; each grant flagged `membership_unverified`; and a reduction-only
 /// session still reaches only its rows.
 #[test]
-#[ignore = "pending E9-2"]
 fn an_unreadable_workspace_record_never_refuses_risk_reduction() {
     let rows = matrix();
     let user = Principal::User { id: USER };
@@ -1080,7 +1075,6 @@ fn org_owner() -> Vec<Membership> {
 /// workspace; a context built live checks the route's workspace against its set alone, needing no
 /// record.
 #[test]
-#[ignore = "pending E9-2"]
 fn an_org_route_with_no_set_and_no_record_is_pending_never_refused() {
     let ms = org_owner();
     let unhosted = WorkspaceId(0x29);
@@ -1124,7 +1118,6 @@ fn an_org_route_with_no_set_and_no_record_is_pending_never_refused() {
 /// enumerated it answers `NoSetYet`, never a refusal, a caller-named set, or part of one; live, it
 /// answers exactly the store's set, unflagged.
 #[test]
-#[ignore = "pending E9-2"]
 fn every_workspace_has_no_set_during_an_outage_and_the_full_set_live() {
     let ms = org_owner();
     let session = session(SessionKind::Full, ms.clone());

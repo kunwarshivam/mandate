@@ -124,8 +124,11 @@ fn the_idle_timeout_counts_from_the_last_admitted_request_and_the_absolute_from_
     assert_eq!(s.authorize(Request::Pause, at(end)), Ok(()));
     assert_eq!(
         s.authorize(Request::Pause, at(12 * HOUR)),
-        Err(SessionRefusal::AbsoluteExpired)
+        Err(ended(EndReason::Expired)),
+        "the absolute lifetime ends the session"
     );
+    assert_eq!(s.ended(), Some(EndReason::Expired));
+    assert_refused_after(&mut s, token + 1, at(12 * HOUR + 1), EndReason::Expired);
 
     let mut idle = open();
     let refreshed = idle.refresh(
@@ -139,15 +142,33 @@ fn the_idle_timeout_counts_from_the_last_admitted_request_and_the_absolute_from_
     let quiet = 2 * HOUR + 298;
     assert_eq!(
         idle.authorize(Request::Pause, at(quiet)),
-        Err(SessionRefusal::IdleExpired)
+        Err(ended(EndReason::Expired)),
+        "the idle timeout ends the session"
     );
-    let late = idle.refresh(&secret(2), ProviderAnswer::Granted, &secret(3), at(quiet));
-    assert_eq!(late, Err(SessionRefusal::IdleExpired));
+    assert_eq!(idle.ended(), Some(EndReason::Expired));
+    assert_refused_after(&mut idle, 2, at(quiet), EndReason::Expired);
+
+    let mut quiet_refresh = open();
+    let lapsed = quiet_refresh.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(HOUR));
     assert_eq!(
-        idle.ended(),
-        None,
-        "an idle session lapses; nothing revoked it"
+        lapsed,
+        Err(ended(EndReason::Expired)),
+        "a refresh at the idle timeout"
     );
+    assert_eq!(quiet_refresh.ended(), Some(EndReason::Expired));
+    assert_refused_after(&mut quiet_refresh, 1, at(HOUR), EndReason::Expired);
+}
+
+/// Every call after the one that ended `s` is refused `Ended { reason }`, whatever it asks, and
+/// `end` reports nothing new, so the reason is journaled once.
+fn assert_refused_after(s: &mut SessionRecord, token: u8, now: UtcNanos, reason: EndReason) {
+    for request in [Request::Pause, Request::KillSwitch, Request::Other] {
+        assert_eq!(s.authorize(request, now), Err(ended(reason)), "{request:?}");
+    }
+    let refresh = s.refresh(&secret(token), ProviderAnswer::Granted, &secret(200), now);
+    assert_eq!(refresh, Err(ended(reason)), "a refresh");
+    assert_eq!(s.ended(), Some(reason), "the first reason stays");
+    assert_eq!(s.end(EndReason::SignOut), None, "journaled once");
 }
 
 #[test]
@@ -233,20 +254,46 @@ fn a_refresh_never_rotates_to_a_secret_used_before() {
 fn a_clock_behind_the_session_fails_closed() {
     let mut s = open();
     assert_eq!(
-        s.authorize(Request::Pause, at(-1)),
+        s.authorize(Request::Other, at(-1)),
         Err(SessionRefusal::ClockBehind),
-        "before the opening"
+        "a request before the opening"
+    );
+    let early = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(-1));
+    assert_eq!(
+        early,
+        Err(SessionRefusal::ClockBehind),
+        "a refresh before the opening"
     );
     assert_eq!(s.authorize(Request::Other, at(100)), Ok(()));
     assert_eq!(
-        s.authorize(Request::Pause, at(99)),
+        s.authorize(Request::Other, at(99)),
         Err(SessionRefusal::ClockBehind),
-        "before the last activity"
+        "a request before the last activity"
     );
-    let refresh = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(50));
-    assert_eq!(refresh, Err(SessionRefusal::ClockBehind));
+    let behind = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(50));
     assert_eq!(
-        s.authorize(Request::Other, at(100)),
+        behind,
+        Err(SessionRefusal::ClockBehind),
+        "a refresh before the last activity"
+    );
+    assert_eq!(s.authorize(Request::Pause, at(99)), Ok(()), "rule 13");
+    assert_eq!(s.authorize(Request::KillSwitch, at(-1)), Ok(()), "rule 13");
+    assert_eq!(s.ended(), None, "a clock behind ends nothing");
+    let kept = s.refresh(
+        &secret(1),
+        ProviderAnswer::Granted,
+        &secret(2),
+        at(HOUR + 99),
+    );
+    assert_eq!(
+        kept,
+        Ok(Refreshed::Rotated {
+            access_expires_at: at(HOUR + 399)
+        }),
+        "the idle timer still counts from 100, and no refused refresh consumed the token"
+    );
+    assert_eq!(
+        s.authorize(Request::Other, at(HOUR + 99)),
         Ok(()),
         "the same instant is not behind"
     );
@@ -306,4 +353,10 @@ fn the_idle_timer_never_runs_past_the_absolute_lifetime_at_the_clock_s_end() {
     );
     let last = UtcNanos::from_parts(start + 299, 0).unwrap();
     assert_eq!(s.authorize(Request::KillSwitch, last), Ok(()));
+    let clock_end = UtcNanos::from_parts(MAX_SECS, 0).unwrap();
+    assert_eq!(
+        s.authorize(Request::KillSwitch, clock_end),
+        Err(ended(EndReason::Expired)),
+        "the absolute lifetime ends at the clock's last second, with no overflow"
+    );
 }

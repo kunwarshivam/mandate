@@ -1551,6 +1551,11 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `ExportCreated` before it is served, its canonical form passes the journal verifier, and derived
   JSON and CSV name their manifest hash (API-16); a viewer can read none of it and an auditor can act
   on nothing (API-2).
+  *Follow-up (#797 review; [DEC-770](decisions/DEC-770.md) item 5):* journal spec §2 defines the
+  notice stream `ntf:{workspace_id}`, but `mandate_journal::StreamId::parse` does not parse `ntf:`,
+  so `mandate-audit`'s `StreamType::Notice` is unreachable and an `ntf:` id reads as absent. Owed:
+  `StreamId` parses notice streams (journal, E5), then the audit reads list and page them, with a
+  case in `crates/mandate-audit/tests/scope.rs`.
 
 ### E13 Hybrid deployment
 
