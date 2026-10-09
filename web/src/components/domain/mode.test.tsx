@@ -23,7 +23,7 @@ function whoActs(): HTMLElement {
 }
 
 function banner(code: RestrictionCode, role?: "owner" | "operator" | "approver" | "viewer") {
-  return renderWithRuntime(<ModeBanner mode="paused" restrictions={[{ code, since: SINCE }]} />, "normal", role ? { role } : undefined);
+  return renderWithRuntime(<ModeBanner mode="paused" restrictions={[{ code, since: SINCE }]} now={SINCE} />, "normal", role ? { role } : undefined);
 }
 
 /**
@@ -81,7 +81,7 @@ describe("Who acts says where the owner ends a restriction (C-24)", () => {
     renderWithRuntime(
       <>
         <StopSheetHost />
-        <ModeBanner mode="paused" restrictions={[{ code: "owner_pause", since: SINCE }]} />
+        <ModeBanner mode="paused" restrictions={[{ code: "owner_pause", since: SINCE }]} now={SINCE} />
       </>,
       "paused",
     );

@@ -127,6 +127,7 @@ test.describe("Stop answers a press while the page cross-fades (brief §5, rule 
       await page.setViewportSize({ width, height: 800 });
       await page.goto("/");
       await page.waitForLoadState("networkidle");
+      await untilHydrated(page, width);
       const stop = page.getByRole("button", { name: "Stop", exact: true });
       const before = await page.evaluate(() => window.__viewTransitions.started);
       const perHop: string[] = [];
@@ -174,6 +175,21 @@ test.describe("Stop answers a press while the page cross-fades (brief §5, rule 
     });
   }
 });
+
+/**
+ * Next hydrates after load, and a link pressed before then is a full page load with no view
+ * transition, so a hop measured from it proves nothing. Stop opening its sheet is the proof that
+ * React has taken over; the sheet is closed again before any hop is counted.
+ */
+async function untilHydrated(page: Page, width: number) {
+  const sheet = page.getByRole("dialog", { name: /^Stop/ });
+  await expect(async () => {
+    await frameStop(page, width).click();
+    await expect(sheet).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+}
 
 /** The frame's Stop at a width: at the end of the dock from `lg` (DEC-207), of the tab bar below it. */
 function frameStop(page: Page, width: number) {

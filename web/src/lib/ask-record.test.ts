@@ -101,6 +101,12 @@ describe("asking the record", () => {
     expect(lines(interpret("why was it denied?", ctx(AGENT_IDS.btc)))).toEqual(["At 13:40:02, Agent 1: buy 0.02 BTC/USD. Not allowed: Orders are at most $1,000.00."]);
   });
 
+  it("dates a restriction that began on an earlier day when it says an agent's status (C-23)", () => {
+    const said = lines(interpret("What is its status?", ctx(AGENT_IDS.btc, "drawdown")));
+    expect(said).toContain("Since Sep 26, 2026, 15:12: Drawdown: sizes scaled.");
+    expect(said).toContain("Since 14:01:12: Drawdown: selling only.");
+  });
+
   it("says what it can answer when nothing matches, without guessing", () => {
     const reply = interpret("tell me a joke", ctx());
     expect(lines(reply)).toEqual(["I can't answer that one. Try one of these."]);

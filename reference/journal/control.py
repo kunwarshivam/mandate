@@ -371,6 +371,15 @@ SCHEMAS[("ctl", "ConnectionRefused")] = rec(
     ("user", STR),
     ("step_up", STEP_UP),
 )
+# §9.8 v0.32 (DEC-694 item 4, DEC-699): the pending connection a connect starts with.
+SCHEMAS[("ctl", "ConnectionRequested")] = rec(
+    ("connection_id", IDENT_T),
+    ("account_ref", ULID),
+    ("broker", STR),
+    ("environment", one_of("paper", "live")),
+    ("user", STR),
+    ("step_up", STEP_UP),
+)
 ROTATED_FIELDS = (("connection_id", IDENT_T), ("scopes", list_of(STR)), ("user", STR), ("step_up", STEP_UP))
 SCHEMAS[("ctl", "ConnectionCredentialRotated")] = rec(*ROTATED_FIELDS)
 SCHEMAS[("acct", "ConnectionCredentialRotated")] = rec(*ROTATED_FIELDS, ("risk_clock", RISK_CLOCK))

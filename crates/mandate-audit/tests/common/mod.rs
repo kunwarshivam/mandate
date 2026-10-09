@@ -188,6 +188,21 @@ impl Fixture {
 
     /// Appends drafts in one `append` batch whose `recorded_at` is `recorded_at`.
     pub fn append_batch_at(&mut self, stream: &str, recorded_at: &str, drafts: &[(String, &[u8])]) {
+        let outcome = self.try_append_at(stream, recorded_at, drafts);
+        assert!(
+            matches!(outcome, AppendOutcome::Committed(_)),
+            "{outcome:?}"
+        );
+    }
+
+    /// Offers drafts to `append` in one batch whose `recorded_at` is `recorded_at`, and returns what
+    /// `append` answered; only a committed batch is recorded.
+    pub fn try_append_at(
+        &mut self,
+        stream: &str,
+        recorded_at: &str,
+        drafts: &[(String, &[u8])],
+    ) -> AppendOutcome {
         let record = self.appended.get_mut(stream).unwrap();
         let head = record.event_ids.len() as u64;
         let bodies: Vec<&[u8]> = drafts.iter().map(|(_, draft)| *draft).collect();
@@ -198,13 +213,12 @@ impl Fixture {
             UtcNanos::parse(recorded_at).unwrap(),
             &bodies,
         );
-        assert!(
-            matches!(outcome, AppendOutcome::Committed(_)),
-            "{outcome:?}"
-        );
-        record
-            .event_ids
-            .extend(drafts.iter().map(|(id, _)| id.clone()));
+        if matches!(outcome, AppendOutcome::Committed(_)) {
+            record
+                .event_ids
+                .extend(drafts.iter().map(|(id, _)| id.clone()));
+        }
+        outcome
     }
 
     /// The streams of `workspace` that the fixture opened, sorted by `stream_id` bytes.

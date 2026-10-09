@@ -277,6 +277,44 @@ fn a_head_that_always_moves_is_contended() {
     assert_eq!(counts, (ATTEMPTS, ATTEMPTS), "only the concurrent records");
 }
 
+/// DEC-646 item 3 fixes the number of attempts at eight, not just at whatever [`ATTEMPTS`] says.
+#[test]
+fn the_writer_makes_eight_attempts() {
+    assert_eq!(ATTEMPTS, 8);
+}
+
+/// A stream whose head is already `u64::MAX`, its last membership record there.
+struct Full {
+    appends: u32,
+}
+
+impl ControlStream for Full {
+    type Error = Infallible;
+
+    fn read(&mut self) -> Result<ControlView, Infallible> {
+        let last = ControlEntry::Membership(record(u64::MAX, 0, event(9)));
+        Ok(ControlView {
+            head: u64::MAX,
+            tail: vec![last],
+        })
+    }
+
+    fn append(&mut self, _: u64, _: &MembershipRecord) -> Result<Appended, Infallible> {
+        self.appends += 1;
+        Ok(Appended::Committed)
+    }
+}
+
+/// No `seq` follows `u64::MAX`: the writer answers `StreamFull` and never appends or wraps.
+#[test]
+#[ignore = "pending E9-7"]
+fn a_full_stream_takes_no_record() {
+    let mut stream = Full { appends: 0 };
+    let got = write_membership(&mut stream, || t(3_600), event(1));
+    assert_eq!(got, Err(WriteError::StreamFull));
+    assert_eq!(stream.appends, 0, "nothing was appended");
+}
+
 /// Over random writes, clocks, and concurrent records, an accumulator kept apart from the writer
 /// and the stream predicts each answer and every row, and the stream's membership records stay in
 /// `seq` and `event_time` order.

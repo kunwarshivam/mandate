@@ -22,8 +22,8 @@ the owl, the rules and the record.
       fixes in section J)
 - [x] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
       ten minutes that must be perfect on every release. (spec: #1035,
-      `e2e/golden-path.spec.ts`, at 390 and 1440px in both themes; left as `fixme`: the request
-      appearing once on Home, which waits on section J's "A request once on Home", C-5)
+      `e2e/golden-path.spec.ts`, at 390 and 1440px in both themes; the request appearing once on
+      Home was a `fixme` until section J's "A request once on Home", C-5, #1090)
 - [ ] **Five people, watched.** Twenty minutes each, say nothing, write down where they hesitate.
 - [ ] **Reference, not inspiration.** Five products and what is taken from each, written down:
       Linear (speed and keyboard), Bloomberg (density without clutter), Things (calm states), Arc
@@ -251,17 +251,17 @@ item above (C-3, C-9) are not repeated.
       reconciliation conditions do. (C-25, #1057)
       - Every in-flight order state (`IN_FLIGHT`) now says why too, swept by a test so a state
         added later can't lose its line. (#1083)
-- [ ] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
-      leaves out its "Asked you" row. (C-5)
+- [x] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
+      leaves out its "Asked you" row. (C-5, #1090)
 - [x] **"At the limit:" on the overview card**, so a limit's action never reads as the current
       mode. (C-7) Done in [#1067](https://github.com/kunwarshivam/mandate/pull/1067).
-- [ ] **A time from another day carries its date**, through one formatter shared with the
-      timeline. (C-23)
+- [x] **A time from another day carries its date**, through one formatter shared with the
+      timeline. (C-23) Done in [#1091](https://github.com/kunwarshivam/mandate/pull/1091).
 - [x] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
       restriction, keeping its step-up. Safety lane. (C-24) Done in
       [#1095](https://github.com/kunwarshivam/mandate/pull/1095).
-- [ ] **Sparklines without the false limit line.** When the limit is below the line's range, the
-      pale sliver alone, with no dashed rule. (C-11)
+- [x] **Sparklines without the false limit line.** When the limit is below the line's range, the
+      pale sliver alone, with no dashed rule. (C-11, #1093)
 - [ ] **Re-scope the account chart's blank paint** (section B): blank in light and dark alike, a
       draw race after load, not the mode. (C-22)
 - [ ] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
@@ -270,7 +270,8 @@ item above (C-3, C-9) are not repeated.
 - [ ] **Shots without the scenario panel**, and each scenario captured on the agent it affects.
       Tooling. (C-27, C-28)
 - [ ] **The mode chip in the desktop agent header**, on every tab. (C-8)
-- [ ] **Owls in the Stop sheet's agent rows.** Safety lane. (C-10)
+- [x] **Owls in the Stop sheet's agent rows.** Safety lane. (C-10) Done in
+      [#1103](https://github.com/kunwarshivam/mandate/pull/1103).
 - [ ] **The Allowed chip keeps its edge in dark mode**, with its fill in the contrast pairs. (C-18)
 - [ ] **A labelled composer in set-up**, with a flat send button; still no placeholder or example.
       (C-4)
