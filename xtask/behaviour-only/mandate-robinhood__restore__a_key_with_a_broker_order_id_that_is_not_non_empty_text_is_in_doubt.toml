@@ -1,8 +1,0 @@
-file = "crates/mandate-robinhood/tests/restore.rs"
-test = "a_key_with_a_broker_order_id_that_is_not_non_empty_text_is_in_doubt"
-reason = """
-DEC-874 item 1: main accepts an empty-string `broker_order_id` as a key's one id and skips a
-non-string one, so the key cancels where it must be in doubt. `RobinhoodConnector::restore` is
-implemented on main (E7-6, #1200), so there is no stub to stop at: the test fails on the answer the
-implementation gives. The E7-6 change that adopts DEC-874 deletes the marker and this file.
-"""
