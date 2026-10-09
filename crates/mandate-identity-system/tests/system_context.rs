@@ -55,6 +55,16 @@ fn rows_of(
     store.get(&context.workspace()).copied()
 }
 
+/// Live, so the mutation gate can judge the crate's non-stub code (DEC-139): `new` keeps each
+/// value in its own field.
+#[test]
+fn new_keeps_the_org_the_workspace_and_the_registration_apart() {
+    let c = system(O1, W2, RUNTIME, SystemActor::Agent, &[P::Pause]);
+    let want = "SystemContext { org: OrgId(17), workspace: WorkspaceId(34), registration: \
+                Registration { workload: PrincipalId(66), actor: Agent, permissions: {Pause} } }";
+    assert_eq!(format!("{c:?}"), want);
+}
+
 #[test]
 #[ignore = "pending E9-8"]
 fn a_system_context_reports_what_it_was_built_with() {
