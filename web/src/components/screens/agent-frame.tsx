@@ -107,12 +107,13 @@ function PhoneSectionLinks({ agent }: { agent: Agent }) {
  */
 export function AgentFrame({ agent, title, description, children }: { agent: Agent; title?: string; description?: ReactNode; children: ReactNode }) {
   const canStop = useCan("stop.open");
+  const { ws, now } = useRuntime();
   return (
     <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8">
       <PageHeader
         title={title ?? agent.label}
         icon={<AgentOwl agent={agent} className="size-12 sm:size-16" />}
-        environment={useRuntime().ws.environment}
+        environment={ws.environment}
         status={<ModeBadge mode={agent.mode} className="lg:hidden" />}
         description={description ?? agent.mandate.name}
         tabs={TOP_SECTIONS.map((s) => ({ href: agentHref(agent.agent_id, s.key), label: s.label }))}
@@ -139,7 +140,7 @@ export function AgentFrame({ agent, title, description, children }: { agent: Age
           ) : null
         }
       >
-        <ModeBanner mode={agent.mode} restrictions={agent.restrictions} showMode={false} />
+        <ModeBanner mode={agent.mode} restrictions={agent.restrictions} now={now} showMode={false} />
       </PageHeader>
       {children}
       <PhoneSectionLinks agent={agent} />

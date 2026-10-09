@@ -1,0 +1,8 @@
+file = "crates/mandate-api/tests/contract.rs"
+test = "a_custom_refusal_on_a_maps_last_entry_is_located_at_its_escaped_key"
+reason = """
+E10-10's decode minors from #993's review (DEC-681 item 10): `decode` is already implemented, and
+locates a `non_canonical` refusal on a map's last entry at the map (`/prices`) instead of at the
+entry's escaped key (`/prices/a~1b~0c`), so this test fails on that answer rather than at a stub.
+The change that locates it at the entry deletes this file with the test's `#[ignore]` line.
+"""

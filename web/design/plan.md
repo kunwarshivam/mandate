@@ -255,8 +255,8 @@ item above (C-3, C-9) are not repeated.
       leaves out its "Asked you" row. (C-5, #1090)
 - [x] **"At the limit:" on the overview card**, so a limit's action never reads as the current
       mode. (C-7) Done in [#1067](https://github.com/kunwarshivam/mandate/pull/1067).
-- [ ] **A time from another day carries its date**, through one formatter shared with the
-      timeline. (C-23)
+- [x] **A time from another day carries its date**, through one formatter shared with the
+      timeline. (C-23) Done in [#1091](https://github.com/kunwarshivam/mandate/pull/1091).
 - [x] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
       restriction, keeping its step-up. Safety lane. (C-24) Done in
       [#1095](https://github.com/kunwarshivam/mandate/pull/1095).
@@ -270,7 +270,8 @@ item above (C-3, C-9) are not repeated.
 - [ ] **Shots without the scenario panel**, and each scenario captured on the agent it affects.
       Tooling. (C-27, C-28)
 - [ ] **The mode chip in the desktop agent header**, on every tab. (C-8)
-- [ ] **Owls in the Stop sheet's agent rows.** Safety lane. (C-10)
+- [x] **Owls in the Stop sheet's agent rows.** Safety lane. (C-10) Done in
+      [#1103](https://github.com/kunwarshivam/mandate/pull/1103).
 - [ ] **The Allowed chip keeps its edge in dark mode**, with its fill in the contrast pairs. (C-18)
 - [ ] **A labelled composer in set-up**, with a flat send button; still no placeholder or example.
       (C-4)
