@@ -7930,19 +7930,27 @@ jq -r "$filter" "$src"
     /// scripts are checked like CI's. A wrapper over a cargo command without `live`, and a
     /// here-doc without cargo, stay allowed.
     ///
-    /// The live-token backstop (#738 review, fourth round, the coordinator's ruling under
-    /// DEC-176): beside the word scan, every word of every file the check reads that is not in a
-    /// comment, a YAML scalar value included, is refused when its item list holds the token
-    /// `live`, unless the word sits in the one allowed compile-only form. Items split on `,`,
-    /// `=`, whitespace and quotes, and match `live` exactly but in any case, so `liveness` and
-    /// `the-runner/live` are other items. It closes what a cargo-word scan cannot see: `-F=live`,
-    /// a command named through a variable, `${CARGO:-cargo}` or `$(which cargo)`, a
-    /// `cargo-<tool>` binary, a `with:` input, `make FEATURES=live`, `LIVE`, and an assignment
-    /// such as `FLAGS="--features live"`, which is refused on its own line beside the command
-    /// that expands it. A short-flag cluster holding `F` (`-qFlive`, `-vFlive`) is one item the
-    /// backstop cannot split, so the word scan reads the list after its `F` as `-F` gives it. A
-    /// quoted list holding `--features=live` is refused with it. A line is refused once, however
-    /// many of its words hold the token.
+    /// The live-token backstop (#738 review, fourth and fifth rounds, the coordinator's rulings
+    /// under DEC-176): beside the word scan, every word of every file the check reads that is not
+    /// in a comment, a YAML scalar value included, is refused when its item list holds the token
+    /// `live`. The word is read lexed, after its quotes and backslashes are removed (`l\ive`,
+    /// `li"ve"`), and a substitution's text is read by the same backstop. Items split on `,`,
+    /// `=`, `/`, `?`, whitespace and quotes, and match `live` exactly but in any case, so
+    /// `liveness` is another item and `the-runner/live` and `the-runner?/live` hold it. In an
+    /// item of the form `-<letters>F<rest>`, a short-flag cluster such as `-qFlive`, the part
+    /// after the first `F` is read as an item list too. The one exemption is per word and per
+    /// command, never per line: only the feature list of the one allowed compile-only command is
+    /// exempt, so another command on its line (`&& make FEATURES=live`) is still read.
+    ///
+    /// A command whose command word holds a `$` or a backtick (`$c`, `"${CARGO:-cargo}"`,
+    /// `$(which cargo)`) may be cargo, so its other words that hold a `$` or a backtick cannot be
+    /// read and are refused (`--features $A$B`, `$'\x6cive'`, `$(echo li)ve`); so are the lines
+    /// of a here-doc fed to `sh`. This closes what a cargo-word scan cannot see: `-F=live`, a
+    /// cluster, a command named through a variable, a `cargo-<tool>` binary, a `with:` input,
+    /// `make FEATURES=live`, `LIVE`, and an assignment such as `FLAGS="--features live"`, which is
+    /// refused on its own line beside the command that expands it. A quoted list holding
+    /// `--features=live` is refused with it. A line is refused once, however many of its words
+    /// hold the token. The pins that need no `cargo` word are listed apart from those with one.
     #[test]
     #[ignore = "pending E7-26"]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
@@ -8127,15 +8135,56 @@ jq -r "$filter" "$src"
             "cargo run -F=live",
             "cargo run -qFlive",
             "cargo run -vFlive",
-            "c=cargo; $c build --features live",
-            "\"${CARGO:-cargo}\" build --features live",
-            "$(which cargo) build --features live",
+            "cargo build -p the-runner --features LIVE",
+            "cargo check -p the-runner --features live && make build FEATURES=live",
+            "cargo check -p the-runner --features live; c=cargo; $c run -Flive",
+        ];
+        let refused_with_no_cargo_word = [
             "cargo-nextest nextest run --features live",
             "cargo-mutants mutants --features live",
             "make build FEATURES=live",
-            "cargo build -p the-runner --features LIVE",
             "FEATURES=\"a,live\"",
+            "make FEATURES=the-runner/live",
+            "make FLAGS=-qFlive",
+            "l\\ive",
+            "--features=li\"ve\"",
+            "--features $(echo live)",
         ];
+        let refused_through_a_command_word_that_may_be_cargo = [
+            "c=cargo; $c build --features live",
+            "\"${CARGO:-cargo}\" build --features live",
+            "$(which cargo) build --features live",
+            "c=cargo; $c build --features the-runner?/live",
+            "$c build -qFthe-runner/live",
+            "c=cargo; A=li; B=ve; $c build --features $A$B",
+            "$c build --features $'\\x6cive'",
+            "$c build --features $(echo li)ve",
+        ];
+        let without_a_plain_cargo_word = refused_with_no_cargo_word
+            .iter()
+            .chain(&refused_through_a_command_word_that_may_be_cargo);
+        for line in without_a_plain_cargo_word {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let here_doc_fed_to_sh = [ci_file(
+            ".github/scripts/build.sh",
+            "set -e\nsh <<'EOF'\nc=cargo; A=li; B=ve; $c build --features $A$B\nEOF\n",
+        )];
+        let problems = live_feature_problems(&policy, &meta(), &here_doc_fed_to_sh)?;
+        assert_eq!(problems.len(), 1, "a here-doc fed to sh: {problems:?}");
+        assert!(
+            problems[0].contains(".github/scripts/build.sh:3"),
+            "names the file and the here-doc's line: {problems:?}"
+        );
         for line in refused_by_words_before_an_operator {
             let files = [ci_file(
                 ".github/scripts/build.sh",
@@ -8188,7 +8237,7 @@ jq -r "$filter" "$src"
                 "{text}"
             );
         }
-        let refused_inputs = [
+        let refused_inputs_with_no_cargo_word = [
             (
                 ".github/workflows/ci.yml",
                 "steps:\n  - uses: an/action@v1\n    with:\n      args: --features live\n",
@@ -8201,8 +8250,16 @@ jq -r "$filter" "$src"
                 ".github/actions/build/action.yml",
                 "runs:\n  using: composite\n  steps:\n    - uses: an/action@v1\n      with:\n        args: --features live\n",
             ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: --features the-runner/live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: -qFlive\n",
+            ),
         ];
-        for (path, text) in refused_inputs {
+        for (path, text) in refused_inputs_with_no_cargo_word {
             let files = [ci_file(path, text)];
             let problems = live_feature_problems(&policy, &meta(), &files)?;
             assert_eq!(problems.len(), 1, "{text}: {problems:?}");
