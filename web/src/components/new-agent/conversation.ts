@@ -11,10 +11,15 @@ import { type Draft, LOSS_CEILING, type Loss, MODELS, NO_STRATEGY, type Strategy
  * The log only grows: a past message stays as it was shown.
  */
 
-/** What the account knows that a value must fit: the money no agent uses (V-002), and who trades a symbol (V-006). */
+/**
+ * What the account knows that a value must fit: the money no agent uses (V-002), and who trades a
+ * symbol (V-006); and whether the workspace's independent-approval policy holds (V-047, rule 3:
+ * anything but a stated `false`), under which no draft can be created here.
+ */
 export interface Checks {
   room: Dec;
   claimedBy: (symbol: string) => string | null;
+  independentApproval: boolean;
 }
 
 export type Step =
@@ -102,8 +107,16 @@ export const INTRO =
 
 export const READY = "That's everything. Here is your agent. Create it, or tell me what to change.";
 
+/** The ready line under the independent-approval policy: the draft is whole, but nothing here can create it (V-047, interim). */
+export const READY_NEEDS_SECOND_PERSON = "That's everything. Here is your agent. It can't be created here without a second person's approval.";
+
+/** The one place the ready line is chosen: it invites a create only where a passkey alone may create. */
+function readyLine(checks: Checks): string {
+  return checks.independentApproval ? READY_NEEDS_SECOND_PERSON : READY;
+}
+
 /** The question for a step, with no example amounts or returns. */
-export function question(step: Step, c: Conversation): string {
+export function question(step: Step, c: Conversation, checks: Checks): string {
   switch (step.kind) {
     case "money":
       return "How much money can it use, in dollars? It trades on paper, with simulated money.";
@@ -118,7 +131,7 @@ export function question(step: Step, c: Conversation): string {
     case "param":
       return MODELS.flatMap((m) => m.params).find((p) => p.key === step.key)?.question ?? "";
     case "ready":
-      return READY;
+      return readyLine(checks);
     default: {
       const unhandled: never = step;
       throw new Error(`unhandled step ${JSON.stringify(unhandled)}`);
@@ -268,16 +281,16 @@ function list(items: string[]): string {
  * Ends the platform's turn: what it has to say, then the next question when the conversation moved
  * on or there is nothing else to say. Once nothing is missing, a change shows the whole agent again.
  */
-function reply(before: Conversation, after: Conversation, lines: string[], unread = false): Conversation {
+function reply(before: Conversation, after: Conversation, lines: string[], checks: Checks, unread = false): Conversation {
   const was = nextStep(before);
   const step = nextStep(after);
   const moved = !sameStep(was, step);
   const mark = unread ? { unread: true as const } : {};
   if (step.kind === "ready") {
-    if (moved || after.revision !== before.revision) return push(after, { kind: "said", lines: [...lines, READY], asks: step }, { kind: "summary", revision: after.revision });
+    if (moved || after.revision !== before.revision) return push(after, { kind: "said", lines: [...lines, readyLine(checks)], asks: step }, { kind: "summary", revision: after.revision });
     return push(after, { kind: "said", lines, asks: step, ...mark });
   }
-  return push(after, { kind: "said", lines: moved || lines.length === 0 ? [...lines, question(step, after)] : lines, asks: step, ...mark });
+  return push(after, { kind: "said", lines: moved || lines.length === 0 ? [...lines, question(step, after, checks)] : lines, asks: step, ...mark });
 }
 
 /** The compiler's checked turn, applied: the model's reply, what was noted or refused, then what comes next. */
@@ -314,10 +327,10 @@ export function applyTurn(c: Conversation, messageId: string, turn: Turn, checks
   if (noted.length > 0) lines.push(`Got it: ${list(noted)}.`, ...readAs);
   if (announced.length > 0) lines.push(`No limit can check ${list(announced.map((n) => `“${n}”`))}, so it isn't enforced. The agent gets it as a note.`);
   lines.push(...refused);
-  if (noted.length > 0 || refused.length > 0) return reply(c, next, lines);
+  if (noted.length > 0 || refused.length > 0) return reply(c, next, lines, checks);
   const step = nextStep(next);
-  if (!turn.reply && !turn.withheld) return reply(c, next, [...lines, unreadFor(step, missedBefore(c, step))], true);
-  return reply(c, next, step.kind === "ready" ? lines : [...lines, question(step, next)]);
+  if (!turn.reply && !turn.withheld) return reply(c, next, [...lines, unreadFor(step, missedBefore(c, step))], checks, true);
+  return reply(c, next, step.kind === "ready" ? lines : [...lines, question(step, next, checks)], checks);
 }
 
 /** The compiler did not answer, or answered outside its schema: the owner's words stay, and nothing changed. */
@@ -335,10 +348,10 @@ function chosen(c: Conversation, model: Strategy["model"]): Conversation {
   return changed(c, { strategy: { model, params } });
 }
 
-export function chooseModel(c: Conversation, model: Strategy["model"]): Conversation {
+export function chooseModel(c: Conversation, model: Strategy["model"], checks: Checks): Conversation {
   const spec = MODELS.find((m) => m.id === model);
   if (!spec || c.strategy.model === model) return c;
-  return reply(c, chosen(push(c, { kind: "owner", text: spec.name }), model), [`Got it: the ${spec.name} model.`]);
+  return reply(c, chosen(push(c, { kind: "owner", text: spec.name }), model), [`Got it: the ${spec.name} model.`], checks);
 }
 
 /** The draft as the owner's values stand, or null while money, goal or loss is missing. */
