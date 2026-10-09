@@ -270,7 +270,7 @@ pub trait Executor {
     fn reset(&mut self) -> Result<(), Cause>;
     /// Hands the executor the connector's capability profile, which its protection reads, after
     /// the fold at every start (DEC-838 item 5). Required, so every executor states what it does
-    /// with the profile; the tracer does not call it yet (E7-23 B2a wires it).
+    /// with the profile.
     fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause>;
     fn step(
         &mut self,

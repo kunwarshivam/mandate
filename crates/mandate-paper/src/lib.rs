@@ -23,9 +23,10 @@ use std::path::PathBuf;
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
-use mandate_alpaca::{DataTransport, Pause, TradingTransport};
+use mandate_alpaca::{AlpacaPaperHttp, DataTransport, Pause, TokioPause, TradingTransport};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
 use mandate_journal::{ArtifactRef, ArtifactStore};
@@ -336,4 +337,64 @@ fn closes_object(closes: &[(Date, Price)], asset_id: &str) -> Result<Vec<u8>, Pa
         object.insert(key, value);
     }
     Ok(to_canonical(&Value::Object(object)))
+}
+
+/// The binary's ports (DEC-846 item 1): the control stream read from the Postgres journal at
+/// `journal`, the paper credentials from the environment with the Alpaca paper client, and the
+/// system clock. Without a journal there is no control stream to read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Production {
+    pub journal: Option<String>,
+}
+
+impl Ports for Production {
+    type Transport = AlpacaPaperHttp;
+    type Pause = SystemClock;
+
+    /// `ctl:{workspace}`'s records from the journal, read once, or [`PaperError::Control`] when
+    /// there is no journal or it cannot be read. The error never names the DSN (rule 7).
+    fn control_stream(&mut self, workspace: &str) -> Result<Vec<ControlRecord>, PaperError> {
+        let _ = (&self.journal, workspace);
+        Err(PaperError::Unimplemented { story: "E7-19" })
+    }
+
+    /// `Credentials::from_env` and one [`AlpacaPaperHttp`], or [`PaperError::Credentials`]; the
+    /// error never names a key.
+    fn connect(&mut self) -> Result<AlpacaPaperHttp, PaperError> {
+        Err(PaperError::Unimplemented { story: "E7-19" })
+    }
+
+    fn pause(&self) -> SystemClock {
+        SystemClock
+    }
+}
+
+/// The process's clock and timer: the system clock, read with nanoseconds, and the tokio timer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemClock;
+
+impl Pause for SystemClock {
+    fn now(&self) -> UtcNanos {
+        TokioPause.now()
+    }
+
+    fn pause(&self, duration: Duration) -> impl Future<Output = ()> {
+        TokioPause.pause(duration)
+    }
+}
+
+/// The binary's whole run over the process's arguments (after the program name) and environment:
+/// [`parse`], [`run`] over [`Production`], and the lines to print: the order a dry run would place,
+/// each submitted order, or the model's `Flat` or `Undecided`. The binary prints an error's message
+/// alone on stderr and exits non-zero; no line or message names a DSN or a key (rule 7).
+///
+/// # Errors
+/// Every [`PaperError`] of [`parse`] and [`run`].
+pub fn process<A, V>(args: A, vars: V) -> Result<Vec<String>, PaperError>
+where
+    A: IntoIterator<Item = String>,
+    V: IntoIterator<Item = (String, String)>,
+{
+    let _ = (args.into_iter(), vars.into_iter());
+    Err(PaperError::Unimplemented { story: "E7-19" })
 }

@@ -142,7 +142,6 @@ const SESSIONS: [MarketSession; 5] = [
 const CRYPTO: (AssetClass, MarketSession) = (AssetClass::Crypto, MarketSession::Crypto);
 
 #[test]
-#[ignore = "pending E7-23"]
 fn an_alpaca_equity_with_a_take_profit_is_covered_by_a_gtc_oco() {
     let sent = equity_shape(&alpaca_equity(), "100", true, true)
         .expect("Alpaca's limit cell offers an OCO (§5.2, DEC-630 item 1)");
@@ -163,7 +162,6 @@ fn an_alpaca_equity_with_a_take_profit_is_covered_by_a_gtc_oco() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn an_alpaca_crypto_position_is_covered_by_one_gtc_stop_limit_below_its_stop() {
     let row = simple_stop_limit(Qf::Fractional);
     let crypto = profile(&[(AssetClass::Crypto, MarketSession::Crypto, &row)]);
@@ -188,7 +186,6 @@ fn an_alpaca_crypto_position_is_covered_by_one_gtc_stop_limit_below_its_stop() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn a_profile_with_no_oco_covers_an_equity_with_one_stop_limit_and_no_take_profit_leg() {
     let sent = equity_shape(&simple_stop_limit(Qf::Whole), "100", true, true)
         .expect("the stop-limit is the strongest form this profile offers (§5.1, §5.4)");
@@ -203,7 +200,6 @@ fn a_profile_with_no_oco_covers_an_equity_with_one_stop_limit_and_no_take_profit
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn an_oco_outranks_the_stop_limit_and_a_bracket_is_never_placed_on_a_position() {
     let mut both = alpaca_equity();
     both.insert(
@@ -229,7 +225,6 @@ fn an_oco_outranks_the_stop_limit_and_a_bracket_is_never_placed_on_a_position() 
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn a_form_needs_gtc_the_right_quantity_form_and_its_own_cell() {
     let day_only = table(&[
         (Kind::Limit, Qf::Whole, &[Tif::Day], &[Form::Oco]),
@@ -254,7 +249,6 @@ fn a_form_needs_gtc_the_right_quantity_form_and_its_own_cell() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn a_missing_row_offers_nothing_and_the_offset_is_the_stop_limits_alone() {
     let stop_limit = simple_stop_limit(Qf::Whole);
     let crypto = shape(&regular(&stop_limit), CRYPTO, "100", false, true);
@@ -318,7 +312,6 @@ fn expected(table: &Table, quantity_form: Qf, take_profit: bool, offset: bool) -
 
 proptest! {
     #[test]
-    #[ignore = "pending E7-23"]
     fn every_protective_order_sent_is_one_the_generated_profile_allows(
         spec in specs(),
         take_profit in any::<bool>(),
@@ -344,7 +337,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E7-23"]
     fn the_shape_never_depends_on_the_asset_class_or_the_clocks_session(
         spec in specs(),
         take_profit in any::<bool>(),
@@ -368,7 +360,6 @@ proptest! {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn protection_reads_its_own_session_not_the_clocks() {
     let equity = alpaca_equity();
     let oco = profile(&[(AssetClass::UsEquity, MarketSession::Regular, &equity)]);
@@ -394,7 +385,6 @@ fn protection_reads_its_own_session_not_the_clocks() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn re_place_no_longer_reads_the_asset_class_and_asks_the_profile() {
     let source = include_str!("../src/protection.rs");
     let start = source
@@ -418,7 +408,6 @@ fn re_place_no_longer_reads_the_asset_class_and_asks_the_profile() {
 }
 
 #[test]
-#[ignore = "pending E7-23"]
 fn an_offset_of_one_is_refused_and_never_sent_as_a_zero_limit() {
     let sent = protective_shape(
         &regular(&simple_stop_limit(Qf::Whole)),
