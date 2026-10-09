@@ -186,67 +186,90 @@ pub enum UlidTextError {
     /// Not 26 characters of uppercase Crockford base32 whose first is at most `7`.
     #[error("not 26 characters of uppercase Crockford base32 whose first is at most 7")]
     Invalid,
-    /// The stub of a story not yet implemented; it goes when E9-2 is implemented.
-    #[error("{story} has not been implemented yet")]
-    Unimplemented {
-        /// The story.
-        story: &'static str,
-    },
+}
+
+const ULID_LEN: usize = 26;
+const CROCKFORD: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// The 26 uppercase Crockford base32 digits of `value`, most significant first. The first digit is
+/// at most `7` because 128 bits leave 3 for it.
+fn encode_ulid(mut value: u128) -> Result<String, UlidTextError> {
+    let mut reversed = String::with_capacity(ULID_LEN);
+    for _ in 0..ULID_LEN {
+        let digit = usize::try_from(value % 32).map_err(|_| UlidTextError::Invalid)?;
+        let ch = CROCKFORD.chars().nth(digit).ok_or(UlidTextError::Invalid)?;
+        reversed.push(ch);
+        value /= 32;
+    }
+    Ok(reversed.chars().rev().collect())
+}
+
+/// The value of a canonical ULID text: exactly 26 characters of the uppercase Crockford alphabet,
+/// the first at most `7`; anything else, such as lowercase, `I`, `L`, `O`, `U` or a space, is
+/// [`UlidTextError::Invalid`].
+fn decode_ulid(text: &str) -> Result<u128, UlidTextError> {
+    if text.chars().count() != ULID_LEN
+        || !text.starts_with(['0', '1', '2', '3', '4', '5', '6', '7'])
+    {
+        return Err(UlidTextError::Invalid);
+    }
+    text.chars().try_fold(0u128, |acc, ch| {
+        let digit = CROCKFORD
+            .chars()
+            .position(|c| c == ch)
+            .and_then(|d| u128::try_from(d).ok())
+            .ok_or(UlidTextError::Invalid)?;
+        acc.checked_mul(32)
+            .and_then(|shifted| shifted.checked_add(digit))
+            .ok_or(UlidTextError::Invalid)
+    })
 }
 
 impl PrincipalId {
     /// The principal's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
     pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        let _ = self;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        encode_ulid(self.0)
     }
 
     /// The principal a ULID's text names, or [`UlidTextError::Invalid`].
     pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        let _ = text;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        decode_ulid(text).map(Self)
     }
 }
 
 impl OrgId {
     /// The organization's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
     pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        let _ = self;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        encode_ulid(self.0)
     }
 
     /// The organization a ULID's text names, or [`UlidTextError::Invalid`].
     pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        let _ = text;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        decode_ulid(text).map(Self)
     }
 }
 
 impl WorkspaceId {
     /// The workspace's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
     pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        let _ = self;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        encode_ulid(self.0)
     }
 
     /// The workspace a ULID's text names, or [`UlidTextError::Invalid`].
     pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        let _ = text;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        decode_ulid(text).map(Self)
     }
 }
 
 impl SessionRef {
     /// The session reference's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
     pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        let _ = self;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        encode_ulid(self.0)
     }
 
     /// The session reference a ULID's text names, or [`UlidTextError::Invalid`].
     pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        let _ = text;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        decode_ulid(text).map(Self)
     }
 }
 
