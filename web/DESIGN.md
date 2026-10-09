@@ -135,8 +135,8 @@ Flat controls and panels; soft corners, rounder the larger the surface: `xs`/`sm
 ticks, `lg`/`xl` for buttons and menus, `2xl` for panels (the mandate field, a well), `3xl` for the
 sheet, dialog and dock, `full` for pills. In light mode only what floats casts a soft ink-tinted
 shadow; in dark mode nothing does. Glass is on the frame only (the header, the tab bar, the dock;
-DEC-208), at 72% so muted text keeps AA over anything under it, and solid where the browser cannot
-blur. Everything else is flat.
+DEC-208), translucent but opaque enough that muted text keeps AA over anything under it (how
+opaque is look, DEC-739), and solid where the browser cannot blur. Everything else is flat.
 
 ## Components
 

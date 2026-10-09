@@ -5,9 +5,9 @@ import { agentHref } from "../src/lib/screens";
 /**
  * From 1024 px the header carries a wide command bar between its two sides: a search icon, the
  * prompt and a ⌘K key on a muted fill with a hairline. It opens the command palette, like ⌘K. The
- * header keeps its height, and the bar never overlaps the paper badge, the theme menu, the approvals
- * and alerts links, the account menus, the brand or the trail. Below 1024 px it is the compact icon
- * beside the theme menu.
+ * header covers none of the page (its height is look, DEC-739 item 1), and the bar never overlaps
+ * the paper badge, the theme menu, the approvals and alerts links, the account menus, the brand or
+ * the trail. Below 1024 px it is the compact icon beside the theme menu.
  */
 
 const bar = (page: Page) => page.locator("[data-slot=command-bar]");
@@ -30,6 +30,7 @@ async function boxes(page: Page) {
     ].filter((el) => el.getAttribute("data-slot") !== "command-bar" && !el.closest("[data-slot=command-bar]") && shown(el));
     return {
       header: rect(header),
+      main: rect(document.getElementById("main")!),
       bar: rect(document.querySelector("[data-slot=command-bar]")!),
       others: others.map((el) => ({ name: el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 24) ?? el.tagName, ...rect(el) })),
     };
@@ -38,13 +39,13 @@ async function boxes(page: Page) {
 
 for (const width of [1024, 1280, 1440]) {
   for (const route of ROUTES) {
-    test(`${width} px, ${route}: a wide bar that overlaps nothing in a header of fixed height`, async ({ page }) => {
+    test(`${width} px, ${route}: a wide bar that overlaps nothing in a header that covers none of the page`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(route);
       await page.waitForLoadState("networkidle");
       await expect(bar(page)).toBeVisible();
       const found = await boxes(page);
-      expect(found.header.height, "the header keeps its height").toBe(65);
+      expect(found.main.top, "the header covers none of the page").toBeGreaterThanOrEqual(found.header.bottom);
       expect(found.bar.top, "the bar sits inside the header").toBeGreaterThanOrEqual(found.header.top);
       expect(found.bar.bottom, "the bar sits inside the header").toBeLessThanOrEqual(found.header.bottom);
       expect(found.bar.width).toBeLessThanOrEqual(460);
@@ -99,13 +100,14 @@ test("a press opens the command palette, and ⌘K does the same", async ({ page 
 });
 
 for (const width of [390, 768, 1023]) {
-  test(`${width} px: the bar gives way to Search in the More sheet, and the header keeps its height`, async ({ page }) => {
+  test(`${width} px: the bar gives way to Search in the More sheet, and the header covers none of the page`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
     await page.waitForLoadState("networkidle");
     await expect(bar(page)).toBeHidden();
     await expect(page.getByRole("banner").getByRole("button", { name: "Go to…", exact: true })).toHaveCount(0);
-    expect((await page.locator("header").boundingBox())!.height).toBe(65);
+    const top = (await page.locator("header").boundingBox())!;
+    expect((await page.locator("#main").boundingBox())!.y, "the header covers none of the page").toBeGreaterThanOrEqual(top.y + top.height);
     await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }).click();
     await page.getByRole("dialog", { name: "More" }).getByRole("button", { name: /^Search/ }).click();
     const palette = commandPalette(page);
