@@ -48,7 +48,8 @@ const UNBOUND_OCCASIONS: [&str; 3] = ["connect", "reconnect", "reauthorize"];
 /// The brokers that connect through MCP (journal spec §9.8), whose checks always list `contract`.
 const MCP_BROKERS: [&str; 1] = ["robinhood"];
 
-/// A §9.8 stream rule: 66 (establishment), 67 (rotation and refusal), 68 (the account stream).
+/// A §9.8 stream rule: 66 (establishment), 67 (rotation and refusal), 68 (the account stream), and
+/// 131 (the pending connection, journal spec v0.32, DEC-699).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ConnectionStreamRule {
     /// A connection is established again only after its revocation, for the same broker,
@@ -59,6 +60,9 @@ pub enum ConnectionStreamRule {
     Rotated,
     /// One account stream, one connection: its binding, contract, rotations, and state changes.
     AccountStream,
+    /// From a control stream's first `ConnectionRequested` on, every connect closes its own open
+    /// request once, repeating its members, and a request names a new connection and `account_ref`.
+    Requested,
 }
 
 impl ConnectionStreamRule {
@@ -68,6 +72,7 @@ impl ConnectionStreamRule {
             Self::Established => 66,
             Self::Rotated => 67,
             Self::AccountStream => 68,
+            Self::Requested => 131,
         }
     }
 }
@@ -103,6 +108,10 @@ pub struct ConnectionFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionVerifyError {
     Mismatch(ConnectionFailure),
+    /// The check is not built yet (DEC-77).
+    Unimplemented {
+        story: &'static str,
+    },
 }
 
 /// §11's `connection_lifecycle_mismatch`: the first row that breaks rule 66, 67, or 68.
@@ -127,6 +136,17 @@ pub fn verify_connection_lifecycle(rows: &[StoredEvent]) -> Result<(), Connectio
         }
     }
     Ok(())
+}
+
+/// §11's `connection_lifecycle_mismatch` on a range whose fold starts empty at its trusted start:
+/// rules 66, 67, 68, and 131, except rule 131's requirement that a connect's establishment or
+/// refusal has an open request, which only the full-chain run checks, since the request may sit
+/// before the range (journal spec v0.32 §9.8 rule 131, §11). `rows` are given as
+/// [`verify_connection_lifecycle`] takes them, from the range's first event of each stream.
+pub fn verify_connection_lifecycle_range(
+    _rows: &[StoredEvent],
+) -> Result<(), ConnectionVerifyError> {
+    Err(ConnectionVerifyError::Unimplemented { story: "E7-17" })
 }
 
 /// §11's `connection_cause_mismatch`: the first version-2 `ConnectionEstablished` or

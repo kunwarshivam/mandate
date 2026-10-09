@@ -24,6 +24,12 @@ import { StepUpDialog } from "./step-up-dialog";
 type Tone = "ink" | "outline";
 
 /**
+ * The Stop sheet popup's `data-slot`. The command palette reads it so that its focus return never
+ * runs while the sheet is open (rule 13).
+ */
+export const STOP_SHEET_SLOT = "stop-sheet";
+
+/**
  * Pausing is ink, like a paused agent. The kill switch is `KillSwitchButton`, the only crimson. The
  * account's three choices share one weight, an outlined row each, so the most drastic is not also
  * the loudest (DEC-515): pausing comes first and reads first.
@@ -172,7 +178,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
         <Dialog.Popup
           ref={focusOnMount}
           initialFocus={popupRef}
-          data-slot="stop-sheet"
+          data-slot={STOP_SHEET_SLOT}
           className="fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-y-auto overscroll-contain border-l border-border bg-card text-foreground shadow-2xl outline-none sm:max-w-md sm:rounded-l-3xl"
         >
           <div className="grid gap-2 border-b border-border/70 px-5 pt-6 pr-16 pb-5">

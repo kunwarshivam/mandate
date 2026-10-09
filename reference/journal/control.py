@@ -1106,10 +1106,17 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     if event_type == "ProtectionChanged":
         action = p["action"]
         priced = action in ("intended", "placed", "passive_start", "unprotected_start")
-        covers_orders = action in ("placed", "cancelled", "passive_start", "unprotected_start")
-        rule("41", (len(p["orders"]) == 0) != covers_orders or "rule.41" in skip, "schema", "payload.orders")
-        covers_awaiting = action in ("interval_limit", "unprotected_end")
-        rule("41.awaiting", (len(p["awaiting"]) == 0) != covers_awaiting or "rule.41" in skip, "schema", "payload.awaiting")
+        starts = action in ("passive_start", "unprotected_start")
+        if "tighten.41.starts" in skip:
+            starts = False
+        names_orders = action in ("placed", "cancelled", "passive_start", "unprotected_start")
+        orders_fit = starts or (len(p["orders"]) == 0) != names_orders
+        rule("41", orders_fit or "rule.41" in skip, "schema", "payload.orders")
+        may_await = action in ("interval_limit", "unprotected_end")
+        awaiting_fit = may_await or len(p["awaiting"]) == 0
+        if "tighten.41.awaiting" in skip:
+            awaiting_fit = (len(p["awaiting"]) == 0) != may_await
+        rule("41.awaiting", awaiting_fit or "rule.41" in skip, "schema", "payload.awaiting")
         if action == "placed":
             rule("42", p["qty"] is not None or "rule.42" in skip, "schema", "payload.qty")
         elif action != "cancelled":
@@ -1118,8 +1125,16 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         rule("43.tp", p["stop"] is not None or p["take_profit"] is None or "rule.43" in skip, "schema", "payload.take_profit")
         intents = action in ("intended", "rung_short")
         if action in ("passive_start", "unprotected_start"):
-            set_ = p["intent_id"] is not None
-            wrong = [m for m in ("intent_id", "entry", "agent_id") if (p[m] is not None) != set_]
+            replaces = (p["replacing"] is True or "rule.44.replacing_only" in skip) and "tighten.44.trio" not in skip
+            if p["intent_id"] is not None:
+                set_ = True
+            elif replaces:
+                set_ = p["entry"] is not None
+            else:
+                set_ = False
+            wrong = [m for m in ("entry", "agent_id") if (p[m] is not None) != set_]
+            if replaces and p["intent_id"] is None and "rule.44.pair" in skip:
+                wrong = []
             rule("44.trio", not wrong or "rule.44.trio" in skip, "schema", f"payload.{wrong[0]}" if wrong else "")
         else:
             if (p["intent_id"] is not None) != intents:

@@ -1691,6 +1691,56 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
     Ok(problems)
 }
 
+/// `cargo metadata`'s `resolve`: the packages one build resolves (E7-28).
+#[derive(Deserialize)]
+struct Resolve {
+    #[cfg_attr(not(test), expect(dead_code, reason = "E7-28 reads it"))]
+    nodes: Vec<ResolvedNode>,
+}
+
+/// A [`Resolve`]'s package by id, its features turned on, and the ids it depends on, of any kind.
+#[derive(Deserialize)]
+#[expect(dead_code, reason = "E7-28's implementation reads it")]
+struct ResolvedNode {
+    id: String,
+    #[serde(default)]
+    features: Vec<String>,
+    #[serde(default)]
+    dependencies: Vec<String>,
+}
+
+/// Every CI build that resolves `live`, from what cargo resolves: DEC-851 item 6's artifact-level
+/// check (E7-28, DEC-868). `resolve_for` resolves an invocation's words, `[]` the default build.
+/// Neither it nor any cargo invocation of a `.github/workflows/` job's `run:` (up to a shell
+/// operator) may turn `live` on, hold a live-only package (`dep:<name>` in the runner's `live`) or
+/// pass `--all-features`, but one `cargo check -p <runner>` with only `live` may turn it on in the
+/// runner. Problems name the file and job, the package with each package turning `live` on or
+/// depending on it; a failed resolve or an expanding word is a problem, not an abort.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "E7-28 wires it into live-feature")
+)]
+fn resolved_live_problems(
+    policy: &Layers,
+    meta: &Metadata,
+    workflows: &[CiFile],
+    resolve_for: &dyn Fn(&[String]) -> Result<Resolve>,
+) -> Result<Vec<String>> {
+    let _ = (policy, meta, workflows, resolve_for);
+    bail!("resolved_live_problems is not yet implemented (E7-28)")
+}
+
+/// The [`Resolve`] `cargo metadata --format-version 1 --locked` gives at `root` for the feature
+/// flags among a cargo invocation's `words`.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "E7-28 wires it into live-feature")
+)]
+fn cargo_resolve(root: &Path, words: &[String]) -> Result<Resolve> {
+    let _ = (root, words);
+    bail!("cargo_resolve is not yet implemented (E7-28)")
+}
+
 /// The cargo feature that holds the live hosts (ES-23, DEC-529 item 3).
 const LIVE: &str = "live";
 
@@ -5474,7 +5524,7 @@ fn report(problems: Vec<String>, check: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::collections::{BTreeMap, BTreeSet};
     use std::env;
     use std::ffi::OsStr;
@@ -5484,7 +5534,7 @@ mod tests {
     use std::process::Command;
     use std::time::Duration;
 
-    use anyhow::{Context, Result};
+    use anyhow::{Context, Result, bail};
     use serde_json::{Value, json};
 
     use super::{
@@ -5506,6 +5556,7 @@ mod tests {
         test_order_config, test_outcomes, unjudged_mutants, verdicts, workspace_closure,
         workspace_packages,
     };
+    use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
 
     #[test]
     fn finds_plain_comments_but_not_docs_or_literals() {
@@ -10220,6 +10271,310 @@ jq -r "$filter" "$src"
         let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
         let problems = live_feature_problems(&policy, &metadata_in(&root)?, &ci_files(&root)?)?;
         assert_eq!(problems, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// The words of a cargo invocation after `cargo`, split on spaces.
+    fn words(text: &str) -> Vec<String> {
+        text.split_whitespace().map(str::to_owned).collect()
+    }
+
+    /// A [`Resolve`] of packages by name under [`member`]'s ids, each with the features the build
+    /// turns on in it and the packages it depends on.
+    fn resolved(nodes: &[(&str, &[&str], &[&str])]) -> Resolve {
+        let id = |name: &str| format!("{name} 0.0.0");
+        let node = |(name, on, deps): &(&str, &[&str], &[&str])| ResolvedNode {
+            id: id(name),
+            features: on.iter().map(|f| (*f).to_owned()).collect(),
+            dependencies: deps.iter().map(|dep| id(dep)).collect(),
+        };
+        Resolve {
+            nodes: nodes.iter().map(node).collect(),
+        }
+    }
+
+    /// [`live_workspace`] as a build resolves it, with `on` turned on in the runner alone.
+    fn three(on: &[&str]) -> Resolve {
+        resolved(&[(RUNNER, on, &[]), ("a-lib", &[], &[]), ("a-tool", &[], &[])])
+    }
+
+    /// The test's own reading of what cargo resolves: the runner turns `live` on exactly when an
+    /// invocation passes `--all-features` or a word ending in `live`.
+    fn by_flags(words: &[String]) -> Resolve {
+        let all = |w: &String| w == "--all-features" || w.ends_with("live");
+        three(if words.iter().any(all) {
+            &["live"]
+        } else {
+            &[]
+        })
+    }
+
+    /// `.github/workflows/ci.yml` with one job a `(job, run line)`.
+    fn workflow(jobs: &[(&str, &str)]) -> CiFile {
+        let mut text = String::from("on: push\njobs:\n");
+        for (job, run) in jobs {
+            text.push_str(&format!("  {job}:\n    steps:\n      - run: {run}\n"));
+        }
+        ci_file(".github/workflows/ci.yml", &text)
+    }
+
+    /// [`resolved_live_problems`] over `crates` and `flows`, every resolve given by `resolve`.
+    fn check(
+        policy: &Layers,
+        crates: Vec<Package>,
+        flows: &[CiFile],
+        resolve: impl Fn(&[String]) -> Resolve,
+    ) -> Result<Vec<String>> {
+        resolved_live_problems(policy, &workspace(crates), flows, &|w| Ok(resolve(w)))
+    }
+
+    /// [`live_workspace`] with the runner declaring `live`, and `others` in place of the rest.
+    fn with_runner(others: Vec<Package>) -> Vec<Package> {
+        let mut crates = vec![with_features(member(RUNNER, &[]), &[("live", &[])])];
+        crates.extend(others);
+        crates
+    }
+
+    /// The one form a job may resolve `live` with (DEC-529 item 3).
+    const COMPILE_ONLY: &str = "cargo check -p the-runner --features live";
+
+    /// Asserts that the problems name, in backticks, each of `yes` (never empty) and none of `no`.
+    fn names(problems: &[String], yes: &[&str], no: &[&str]) {
+        assert!(!yes.is_empty(), "a check names something");
+        let named = |what: &&str| problems.iter().any(|p| p.contains(&format!("`{what}`")));
+        assert!(yes.iter().all(named), "names {yes:?}: {problems:?}");
+        assert!(!no.iter().any(named), "names none of {no:?}: {problems:?}");
+    }
+
+    /// A workspace whose builds resolve no `live` passes, and the check asks cargo for the default
+    /// build and for each job's invocation, up to a shell operator.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_workspace_that_resolves_no_live_passes() -> Result<()> {
+        let crates = with_runner(vec![member("a-lib", &[(RUNNER, None)])]);
+        let flows = [workflow(&[
+            ("fast", "cargo xtask ci fast"),
+            ("tests", "cargo test --workspace >> \"$GITHUB_OUTPUT\""),
+        ])];
+        let asked = RefCell::new(Vec::new());
+        let problems = check(&live_policy(), crates, &flows, |w| {
+            asked.borrow_mut().push(w.to_vec());
+            resolved(&[(RUNNER, &[], &[]), ("a-lib", &[], &[RUNNER])])
+        })?;
+        assert_eq!(problems, Vec::<String>::new());
+        let asked = asked.into_inner();
+        for expected in [vec![], words("xtask ci fast"), words("test --workspace")] {
+            assert!(asked.contains(&expected), "asks {expected:?}: {asked:?}");
+        }
+        Ok(())
+    }
+
+    /// A package whose default build resolves `live` is named, whether its `default` turns it on
+    /// or only the resolve shows it; a package that resolves no `live` is not.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_default_feature_that_resolves_live_fails_naming_the_package() -> Result<()> {
+        let default_on =
+            |name| with_features(member(name, &[]), &[("live", &[]), ("default", &["live"])]);
+        let crates = vec![default_on(RUNNER), member("a-lib", &[])];
+        let on_runner = check(&live_policy(), crates, &[], |_| three(&["default", "live"]))?;
+        names(&on_runner, &[RUNNER], &["a-lib"]);
+        let crates = with_runner(vec![default_on("a-lib")]);
+        let on_lib = check(&live_policy(), crates, &[], |_| {
+            resolved(&[(RUNNER, &[], &[]), ("a-lib", &["default", "live"], &[])])
+        })?;
+        names(&on_lib, &["a-lib"], &[RUNNER]);
+        let only_resolved = check(&live_policy(), live_workspace(), &[], |_| {
+            resolved(&[(RUNNER, &[], &[]), ("a-tool", &["live"], &[])])
+        })?;
+        names(&only_resolved, &["a-tool"], &["a-lib"]);
+        Ok(())
+    }
+
+    /// A dependency on the runner listing `live`, or a feature naming `<runner>/live`, is named
+    /// beside the runner it turns `live` on in; a plain dependency on the runner is not.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_dependency_edge_that_turns_on_live_fails() -> Result<()> {
+        let resolve = |tool_on: &'static [&'static str]| {
+            move |_: &[String]| {
+                resolved(&[
+                    (RUNNER, &["live"], &[]),
+                    ("a-lib", &[], &[RUNNER]),
+                    ("a-tool", tool_on, &[RUNNER]),
+                ])
+            }
+        };
+        let mut lib = member("a-lib", &[(RUNNER, None)]);
+        lib.dependencies[0].features = vec!["live".to_owned()];
+        let crates = with_runner(vec![lib, member("a-tool", &[(RUNNER, None)])]);
+        let edge = check(&live_policy(), crates, &[], resolve(&[]))?;
+        names(&edge, &[RUNNER, "a-lib"], &["a-tool"]);
+        let tool = with_features(
+            member("a-tool", &[(RUNNER, None)]),
+            &[("x", &["the-runner/live"])],
+        );
+        let crates = with_runner(vec![member("a-lib", &[(RUNNER, None)]), tool]);
+        let feature = check(&live_policy(), crates, &[], resolve(&["x"]))?;
+        names(&feature, &[RUNNER, "a-tool"], &["a-lib"]);
+        Ok(())
+    }
+
+    /// A job whose invocation passes `live` (`--features live`, `-F live`, `--features=live`, in a
+    /// one-line or block `run:`) or `--all-features` is named with its file, `--all-features` even
+    /// when nothing declares `live` (DEC-868 item 1); a job that resolves no `live` is not.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_job_passing_live_or_all_features_fails_naming_the_job() -> Result<()> {
+        let flows = [
+            workflow(&[
+                ("lint-all", "cargo clippy --workspace --all-features"),
+                ("build-live", "cargo build -p the-runner --features live"),
+                ("short-flag", "cargo test -p the-runner -F live"),
+                ("plain", "cargo test --workspace"),
+            ]),
+            ci_file(
+                ".github/workflows/nightly.yml",
+                "jobs:\n  block-live:\n    steps:\n      - run: |\n          echo go\n          \
+                 cargo run -p the-runner --features=live\n",
+            ),
+        ];
+        let problems = check(&live_policy(), with_runner(vec![]), &flows, by_flags)?;
+        let jobs = ["lint-all", "build-live", "short-flag", "block-live"];
+        names(&problems, &jobs, &["plain"]);
+        let nightly = problems
+            .iter()
+            .any(|p| p.contains(".github/workflows/nightly.yml"));
+        assert!(nightly, "names the file: {problems:?}");
+        let all = [workflow(&[("lint-all", "cargo clippy --all-features")])];
+        let undeclared = check(&live_policy(), live_workspace(), &all, |_| three(&[]))?;
+        names(&undeclared, &["lint-all"], &[]);
+        Ok(())
+    }
+
+    /// One job may run `cargo check -p <runner> --features live` when its resolve turns `live` on
+    /// in the runner alone; a second such job, a check of the workspace or of another crate, a
+    /// resolve that turns `live` on elsewhere too, and the form with no crate marked are named.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn only_the_one_compile_only_job_may_resolve_live() -> Result<()> {
+        let run = |jobs: &[(&str, &str)]| {
+            check(
+                &live_policy(),
+                with_runner(vec![]),
+                &[workflow(jobs)],
+                by_flags,
+            )
+        };
+        let once = [("check-live", COMPILE_ONLY), ("plain", "cargo test")];
+        assert_eq!(run(&once)?, Vec::<String>::new());
+        let twice = run(&[("check-live", COMPILE_ONLY), ("check-again", COMPILE_ONLY)])?;
+        names(&twice, &["check-again"], &["check-live"]);
+        let all = run(&[(
+            "check-all",
+            "cargo check --workspace --features the-runner/live",
+        )])?;
+        names(&all, &["check-all"], &[]);
+        let lib = run(&[("check-lib", "cargo check -p a-lib --features live")])?;
+        names(&lib, &["check-lib"], &[]);
+        let once = [workflow(&once)];
+        let crates = with_runner(vec![member("a-lib", &[])]);
+        let spread = check(&live_policy(), crates, &once, |w| match w.first() {
+            Some(check) if check == "check" => {
+                resolved(&[(RUNNER, &["live"], &["a-lib"]), ("a-lib", &["live"], &[])])
+            }
+            _ => three(&[]),
+        })?;
+        names(&spread, &["a-lib", "check-live"], &["plain"]);
+        let unmarked = policy(&[(RUNNER, 9), ("a-lib", 5), ("a-tool", 6)], &[], &[]);
+        let problems = check(&unmarked, with_runner(vec![]), &once, by_flags)?;
+        names(&problems, &["check-live"], &["plain"]);
+        Ok(())
+    }
+
+    /// A live-only crate, one the runner's `live` brings in as `dep:<name>`, in a build that is
+    /// not the compile-only job is named with each crate depending on it, a dev-dependency
+    /// included (DEC-868 item 2), and the runner is not; the compile-only job may resolve it.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_live_only_crate_in_a_non_live_build_fails() -> Result<()> {
+        let crates = |lib: Package| {
+            let runner = member(RUNNER, &[("rh-host", None)]);
+            vec![
+                with_features(runner, &[("live", &["dep:rh-host"])]),
+                lib,
+                member("rh-host", &[]),
+            ]
+        };
+        let flows = [workflow(&[("check-live", COMPILE_ONLY)])];
+        let quiet = check(
+            &live_policy(),
+            crates(member("a-lib", &[])),
+            &flows,
+            |w| match w {
+                [] => resolved(&[(RUNNER, &[], &[]), ("a-lib", &[], &[])]),
+                _ => resolved(&[(RUNNER, &["live"], &["rh-host"]), ("rh-host", &[], &[])]),
+            },
+        )?;
+        assert_eq!(quiet, Vec::<String>::new());
+        for kind in [None, Some("dev")] {
+            let lib = member("a-lib", &[("rh-host", kind)]);
+            let problems = check(&live_policy(), crates(lib), &[], |_| {
+                resolved(&[
+                    (RUNNER, &[], &[]),
+                    ("a-lib", &[], &["rh-host"]),
+                    ("rh-host", &[], &[]),
+                ])
+            })?;
+            names(&problems, &["rh-host", "a-lib"], &[RUNNER]);
+        }
+        Ok(())
+    }
+
+    /// A resolve that fails, or an invocation word the shell expands, is a problem naming the job
+    /// rather than an abort, and so is a default build that cannot be resolved (DEC-868 item 3).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_job_that_cannot_be_resolved_fails_closed() -> Result<()> {
+        let flows = [workflow(&[
+            ("broken", "cargo test --features broken"),
+            ("expands", "cargo build $FLAGS"),
+            ("plain", "cargo test"),
+        ])];
+        let meta = workspace(live_workspace());
+        let problems = resolved_live_problems(&live_policy(), &meta, &flows, &|w| {
+            if w.iter().any(|word| word == "broken") {
+                bail!("cargo metadata failed")
+            }
+            Ok(three(&[]))
+        })?;
+        names(&problems, &["broken", "expands"], &["plain"]);
+        let default = resolved_live_problems(&live_policy(), &meta, &[], &|_| bail!("no resolve"))?;
+        assert_ne!(default, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// The repository as it stands: cargo's resolve of the default build holds every workspace
+    /// member, the check asks it for `ci.yml`'s `cargo xtask ci fast`, and nothing resolves `live`.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_repository_resolves_no_live_build() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let meta = metadata_in(&root)?;
+        let ids: BTreeSet<String> = cargo_resolve(&root, &[])?
+            .nodes
+            .into_iter()
+            .map(|node| node.id)
+            .collect();
+        assert!(meta.workspace_members.iter().all(|m| ids.contains(m)) && !ids.is_empty());
+        let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
+        let asked = RefCell::new(Vec::new());
+        let problems = resolved_live_problems(&policy, &meta, &ci_files(&root)?, &|w| {
+            asked.borrow_mut().push(w.to_vec());
+            cargo_resolve(&root, w)
+        })?;
+        assert_eq!(problems, Vec::<String>::new());
+        assert!(asked.into_inner().contains(&words("xtask ci fast")));
         Ok(())
     }
 
