@@ -1467,7 +1467,6 @@ fn the_model_invocation_stays_open_on_the_agent_stream() {
 /// there at schema version 1: an unlisted member is refused `schema`, never `unknown_schema`, and any
 /// other version has no schema.
 #[test]
-#[ignore = "pending E12-3"]
 fn the_records_access_records_are_catalogued_and_closed_on_the_control_stream() {
     closed_on_the_control_stream(&CLOSED_BY_E12_3);
 }

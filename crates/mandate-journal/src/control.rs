@@ -87,6 +87,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
             CONTROL.contains(&event_type)
                 || crate::connections::CONTROL.contains(&event_type)
                 || crate::workspace::CONTROL.contains(&event_type)
+                || crate::records::CONTROL.contains(&event_type)
         }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
@@ -125,6 +126,7 @@ pub(crate) fn payload(
     let stream_type = stream.stream_type();
     let schema = crate::workspace::schema(event_type, schema_version, stream_type)
         .or_else(|| crate::connections::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::records::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
             _ => schema(event_type, schema_version),
@@ -140,6 +142,7 @@ pub(crate) fn payload(
         actor,
         causation_id,
     )?;
+    crate::records::rules(event_type, &payload, stream, actor, causation_id)?;
     let p = Payload(&payload);
     match event_type {
         "MandateVersionCreated" => {

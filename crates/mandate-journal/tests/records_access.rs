@@ -138,7 +138,6 @@ fn every_case_of(name: &str, event_type: &str, valid: usize, invalid: usize, rul
 /// order); rule 108's accessor, actor kind, an operator's break-glass `causation_id`, and sorted
 /// resources; and a client's read in §3's one shape (rules 81 and 82), as its own accessor.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_records_accessed_draft_parses_or_is_refused_as_its_case_says() {
     every_case_of(
         RECORDS_ACCESS,
@@ -152,7 +151,6 @@ fn every_records_accessed_draft_parses_or_is_refused_as_its_case_says() {
 /// `ExportCreated`: its closed members and types, rule 107's ranges, rule 109's writer and its
 /// `view` exactly for a view, and rule 83's refusal of a client.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_export_created_draft_parses_or_is_refused_as_its_case_says() {
     every_case_of(RECORDS_ACCESS, "ExportCreated", 2, 23, &[83, 107, 109]);
 }
@@ -161,7 +159,6 @@ fn every_export_created_draft_parses_or_is_refused_as_its_case_says() {
 /// trigger, rule 111's `failure.seq` and `to_hash`, rule 112's result, and rule 83's refusal of a
 /// client.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_verification_run_draft_parses_or_is_refused_as_its_case_says() {
     every_case_of(
         RECORDS_ACCESS,
@@ -199,7 +196,6 @@ const PER_RANGE: [&str; 4] = [
 /// failure names its `seq` exactly when its check is reported at an event, and is refused at
 /// `failure.seq` otherwise.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_check_code_names_its_seq_exactly_when_it_is_reported_at_an_event() {
     let section = section(RECORDS_ACCESS);
     let mut failed = Vec::new();
