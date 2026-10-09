@@ -9937,7 +9937,11 @@ jq -r "$filter" "$src"
     /// cannot be read statically because it expands (DEC-851 item 2; X1 tests correction 10). A
     /// quoted word a shell runs (`echo "$C" | sh`) is read through the same definitions. A
     /// variable `read` sets is a definition whose value cannot be read, so it is refused as a
-    /// command word and allowed as an argument (the coordinator's ruling on #970).
+    /// command word and allowed as an argument (the coordinator's ruling on #970). `export`,
+    /// `declare`, `local`, `readonly`, `typeset` and `printf -v` define too: a readable value is
+    /// read through and an unreadable one is unreadable, and a wrapper before a bare variable
+    /// command word (`env $C`, `sudo $C`, `xargs $C`) is read as `$C` alone (#970's review; X1
+    /// tests correction 11).
     /// An expansion of a variable the file never assigns, `"$@"`, a positional parameter or an
     /// environment input, is not refused by this rule, and a clean definition stays allowed.
     #[test]
@@ -9956,6 +9960,17 @@ jq -r "$filter" "$src"
             "read -r C < f\n$C".to_owned(),
             "while read -r C; do $C; done < f".to_owned(),
             format!("{built_across_lines}\necho \"$C\" | sh"),
+            "export C=$(cat f)\n$C".to_owned(),
+            "declare C=$(cat f)\n$C".to_owned(),
+            "local C=$(cat f)\n$C".to_owned(),
+            "readonly C=$(cat f)\n$C".to_owned(),
+            "typeset C=$(cat f)\n$C".to_owned(),
+            "printf -v C %s \"$X\"\n$C".to_owned(),
+            format!("export {built_across_lines}\n$C"),
+            format!("declare -x {built_across_lines}\n$C"),
+            "C=$(cat f)\nenv $C".to_owned(),
+            "C=$(cat f)\nsudo $C".to_owned(),
+            "C=$(cat f)\nxargs $C".to_owned(),
         ];
         for text in refused_at_the_expansion {
             let files = [ci_file(
@@ -9978,6 +9993,9 @@ jq -r "$filter" "$src"
             "C=echo; $C hi",
             "C=echo\nC+=\" hi\"\n$C",
             "read -r C < f\necho \"$C\"",
+            "export C=echo\n$C hi",
+            "export PATH=\"$PATH:/opt/bin\"\necho \"$PATH\"",
+            "C=echo\nenv $C hi",
         ];
         for text in allowed {
             let files = [ci_file(
@@ -9998,8 +10016,11 @@ jq -r "$filter" "$src"
     /// `timeout N` are skipped to find the command that runs an expanding command line, and `.`
     /// or `source` of a process substitution or a here-string that expands is refused too (the
     /// coordinator's ruling on #962's review, under DEC-176; X1 tests correction 10). A `{` is
-    /// skipped like a keyword, and `dash`, `ksh` and `mksh` are shells too (#969's review). A
-    /// wrapped script, and `.` of a file path built by a substitution, stay allowed.
+    /// skipped like a keyword, and `dash`, `ksh` and `mksh` are shells too (#969's review).
+    /// `stdbuf` (with its options), `builtin` and `time` are wrappers too, and `env --`,
+    /// `exec -a name`, a bare `nice` and a `-lc` cluster are pinned (#970's review; X1 tests
+    /// correction 11). A wrapped script, and `.` of a file path built by a substitution, stay
+    /// allowed.
     #[test]
     #[ignore = "pending E7-26"]
     fn wrapped_shells_and_sourced_expansions_are_refused() -> Result<()> {
@@ -10028,6 +10049,13 @@ jq -r "$filter" "$src"
             "ksh -c \"$C\"",
             "mksh -c \"$C\"",
             "/bin/dash -c \"$C\"",
+            "stdbuf -o0 sh -c \"$C\"",
+            "builtin eval \"$C\"",
+            "time sh -c \"$C\"",
+            "env -- bash -c \"$C\"",
+            "exec -a name sh -c \"$C\"",
+            "nice sh -c \"$C\"",
+            "bash -lc \"$C\"",
         ];
         for line in refused {
             let files = [ci_file(
@@ -10048,6 +10076,7 @@ jq -r "$filter" "$src"
             "env FOO=1 bash script.sh \"$A\"",
             "timeout 5 ./x.sh \"$A\"",
             "xargs -r sudo rm -f",
+            "stdbuf -o0 ./x.sh \"$A\"",
         ];
         for line in allowed {
             let files = [ci_file(
