@@ -3205,6 +3205,8 @@ fn mutants_scheduled(
         eprintln!("    mutants: the diff generates no mutants");
         return Ok(());
     }
+    let meta = metadata_in(root)?;
+    let harnesses = simulator_harnesses(&meta);
     let mut test_packages: Vec<&str> = diff
         .crates
         .iter()
@@ -3215,7 +3217,8 @@ fn mutants_scheduled(
         })
         .map(|krate| krate.package.as_str())
         .collect();
-    external_oracles(&mut test_packages, &workspace_closure(&metadata_in(root)?));
+    external_oracles(&mut test_packages, &workspace_closure(&meta));
+    simulator_oracles(&mut test_packages, &harnesses);
     live_tests_judge_every_mutant(root, &listed, &test_packages)?;
     let first = TestOrder::write(&shard_packages(root, diff.path()?, shard, &listed)?)?;
     let args = mutants_args(diff.path()?, shard, &test_packages, first.as_ref())?;
@@ -3480,6 +3483,87 @@ fn external_oracles(
     }
     packages.push(REFCASES);
     true
+}
+
+/// The name ending that marks a workspace package as a simulator, the broker a connector's tests
+/// run against (DEC-866).
+const SIMULATOR_SUFFIX: &str = "-sim";
+
+/// Each workspace package with the simulator harnesses that judge it (DEC-866), read from cargo's
+/// graph rather than written down, as DEC-497 reads the reference suites' reach.
+///
+/// A package `S` is the simulator harness of `M` when all of these hold:
+///
+/// 1. `S`'s name ends in [`SIMULATOR_SUFFIX`];
+/// 2. no workspace package takes `S` as a normal or build dependency, so `S` sits outside every
+///    product graph and exists only to be tested against, which is where `xtask/layers.toml`
+///    places `mandate-rh-sim`;
+/// 3. `S` takes `M` as a direct dev-dependency, so `S`'s tests link `M` and can fail on it;
+/// 4. `M` is not built into another of `S`'s workspace dev-dependencies: `M` is the top of what
+///    the harness drives, and the crates under it (the executor, the MCP client, accounting) are
+///    plumbing the connector is built on, judged by their own tests and by DEC-497's suites.
+///
+/// The connector's own tests live in its simulator's package because the simulator depends on
+/// the connector and not the reverse, so cargo-mutants, which runs only the mutated package's
+/// tests, never discovers them: on #1097 nineteen shards reported a `mandate-robinhood` mutant
+/// missed that `crates/mandate-rh-sim/tests/robinhood.rs` kills.
+fn simulator_harnesses(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
+    let dirs = member_dirs(meta);
+    let members = workspace_packages(meta);
+    let closure = workspace_closure(meta);
+    let product_dependencies: BTreeSet<&str> = members
+        .iter()
+        .flat_map(|pkg| &pkg.dependencies)
+        .filter(|dep| on_member(dep, &dirs) && dep.kind.as_deref() != Some("dev"))
+        .map(|dep| dep.name.as_str())
+        .collect();
+    let mut harnesses: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for harness in members.iter().filter(|pkg| {
+        pkg.name.ends_with(SIMULATOR_SUFFIX) && !product_dependencies.contains(pkg.name.as_str())
+    }) {
+        let driven: BTreeSet<&str> = harness
+            .dependencies
+            .iter()
+            .filter(|dep| on_member(dep, &dirs) && dep.kind.as_deref() == Some("dev"))
+            .map(|dep| dep.name.as_str())
+            .filter(|name| *name != harness.name)
+            .collect();
+        for top in driven.iter().filter(|candidate| {
+            !driven.iter().any(|other| {
+                other != *candidate
+                    && closure
+                        .get(*other)
+                        .is_some_and(|built_on| built_on.contains(**candidate))
+            })
+        }) {
+            harnesses
+                .entry((*top).to_owned())
+                .or_default()
+                .insert(harness.name.clone());
+        }
+    }
+    harnesses
+}
+
+/// Adds to the packages a mutation run tests the simulator harness of each package it mutates,
+/// from [`simulator_harnesses`], and reports whether it added any (DEC-866). The whole harness
+/// package runs, as DEC-497 runs the whole reference package: a test that exists is a test that
+/// judges.
+fn simulator_oracles<'a>(
+    packages: &mut Vec<&'a str>,
+    harnesses: &'a BTreeMap<String, BTreeSet<String>>,
+) -> bool {
+    let added: Vec<&'a str> = packages
+        .iter()
+        .filter_map(|package| harnesses.get(*package))
+        .flatten()
+        .map(String::as_str)
+        .filter(|harness| !packages.contains(harness))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    packages.extend(&added);
+    !added.is_empty()
 }
 
 /// Mutates, builds and tests in the repository itself rather than in a scratch copy of it, so the
@@ -5417,9 +5501,10 @@ mod tests {
         metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
         mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
         pending_tests, plain_comment_lines, preflight_args, proptest_seeds_in, repo_root,
-        schema_mutants, shard_packages, shellcheck_scripts, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
-        test_outcomes, unjudged_mutants, verdicts, workspace_closure, workspace_packages,
+        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_order_config, test_outcomes, unjudged_mutants, verdicts, workspace_closure,
+        workspace_packages,
     };
 
     #[test]
@@ -5871,6 +5956,102 @@ mod tests {
                 "and the run must name the package that holds them: {mutated:?}"
             );
         }
+        Ok(())
+    }
+
+    /// A graph shaped like the Robinhood connector's: the simulator dev-depends on the connector
+    /// and on the crates the connector is built on, and a product simulator that another crate
+    /// builds on is no harness (DEC-866).
+    fn simulated_graph() -> Metadata {
+        workspace(vec![
+            member("mandate-num", &[]),
+            member("mandate-executor", &[("mandate-num", None)]),
+            member(
+                "mandate-robinhood",
+                &[("mandate-executor", None), ("mandate-num", None)],
+            ),
+            member(
+                "mandate-rh-sim",
+                &[
+                    ("mandate-num", None),
+                    ("mandate-executor", Some("dev")),
+                    ("mandate-robinhood", Some("dev")),
+                ],
+            ),
+            member(
+                "mandate-sim",
+                &[("mandate-num", None), ("mandate-executor", Some("dev"))],
+            ),
+            member("mandate-backtest", &[("mandate-sim", None)]),
+            member("mandate-marketdata", &[("mandate-num", None)]),
+        ])
+    }
+
+    #[test]
+    fn a_mutated_connector_is_judged_by_its_simulator_harness() {
+        let harnesses = simulator_harnesses(&simulated_graph());
+
+        let mut connector = vec!["mandate-robinhood"];
+        assert!(
+            simulator_oracles(&mut connector, &harnesses),
+            "the connector's tests live in its simulator's package, which cargo-mutants never \
+             discovers on its own: #1097's nineteen missed mutants"
+        );
+        assert_eq!(
+            connector,
+            ["mandate-robinhood", "mandate-rh-sim"],
+            "the harness is named so cargo-mutants builds and runs its tests"
+        );
+
+        let mut unrelated = vec!["mandate-marketdata"];
+        assert!(
+            !simulator_oracles(&mut unrelated, &harnesses),
+            "a package no simulator drives has no harness to add"
+        );
+        assert_eq!(
+            unrelated,
+            ["mandate-marketdata"],
+            "and costs the run no extra test package"
+        );
+
+        let mut plumbing = vec!["mandate-executor"];
+        assert!(
+            !simulator_oracles(&mut plumbing, &harnesses),
+            "a crate the connector is built on is the harness's plumbing, not what it was written \
+             to judge, and a product crate like `mandate-sim` is no harness: {harnesses:?}"
+        );
+
+        let mut already = vec!["mandate-robinhood", "mandate-rh-sim"];
+        assert!(
+            !simulator_oracles(&mut already, &harnesses),
+            "a run that already tests the harness adds nothing"
+        );
+        assert_eq!(
+            already,
+            ["mandate-robinhood", "mandate-rh-sim"],
+            "and names it once"
+        );
+    }
+
+    /// Over the real graph: which crates a simulator harness judges today. A new `-sim` harness,
+    /// or a new dev-dependency of one, changes what mutation runs cost, so it changes this list in
+    /// the same PR rather than silently (DEC-866).
+    #[test]
+    fn the_simulator_harnesses_judge_the_connectors_they_drive() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the workspace root above xtask")?;
+        let harnesses = simulator_harnesses(&metadata_in(root)?);
+        let expected: BTreeMap<String, BTreeSet<String>> = [(
+            "mandate-robinhood".to_owned(),
+            BTreeSet::from(["mandate-rh-sim".to_owned()]),
+        )]
+        .into_iter()
+        .collect();
+        assert_eq!(harnesses, expected);
+        let mut mutated = vec!["mandate-robinhood"];
+        assert!(simulator_oracles(&mut mutated, &harnesses));
+        assert_eq!(mutated, ["mandate-robinhood", "mandate-rh-sim"]);
         Ok(())
     }
 
