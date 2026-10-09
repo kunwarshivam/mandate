@@ -269,7 +269,7 @@ fn a_head_that_always_moves_is_contended() {
     assert_eq!(counts, (ATTEMPTS, ATTEMPTS), "only the concurrent records");
 }
 
-/// DEC-646 item 2 fixes the number of attempts at eight, not just at whatever [`ATTEMPTS`] says.
+/// DEC-646 item 3 fixes the number of attempts at eight, not just at whatever [`ATTEMPTS`] says.
 #[test]
 fn the_writer_makes_eight_attempts() {
     assert_eq!(ATTEMPTS, 8);
