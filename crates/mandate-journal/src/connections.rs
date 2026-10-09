@@ -1,10 +1,10 @@
 //! The connection records journal spec v0.20 §9.8 closes (E7-17, DEC-800): on the control stream,
-//! `ConnectionEstablished` at version 2, `ConnectionRefused`, and `ConnectionCredentialRotated`; on
-//! the account stream, the executor's `ConnectionChecked`, `ConnectionStateChanged`, and
-//! `ConnectionCredentialRefreshed`, and its copies of the establishment (version 2 only) and of
-//! each rotation, with `risk_clock`. Consistency rules 54 to 60, 62, 64 and 65, and copy rules 61
-//! and 63. The owner's fold (rules 66 to 68) and §11 are not `append`'s. Every rule only refuses a
-//! draft.
+//! `ConnectionEstablished` at version 2, `ConnectionRefused`, `ConnectionCredentialRotated`, and
+//! v0.32's `ConnectionRequested` (DEC-699); on the account stream, the executor's
+//! `ConnectionChecked`, `ConnectionStateChanged`, and `ConnectionCredentialRefreshed`, and its
+//! copies of the establishment (version 2 only) and of each rotation, with `risk_clock`.
+//! Consistency rules 54 to 60, 62, 64 and 65, and copy rules 61 and 63. The owner's fold (rules 66
+//! to 68 and 131) and §11 are not `append`'s. Every rule only refuses a draft.
 
 use mandate_canon::Value;
 
@@ -12,7 +12,7 @@ use crate::schema::Ty;
 use crate::{Invalid, InvalidReason, StreamType};
 
 /// The control-stream event types §9.8 adds to [`crate::control::governs`].
-pub(crate) const CONTROL: [&str; 2] = ["ConnectionRefused", ROTATED];
+pub(crate) const CONTROL: [&str; 3] = ["ConnectionRefused", "ConnectionRequested", ROTATED];
 
 /// The account-stream event types §9.8 adds to [`crate::control::governs`].
 pub(crate) const ACCOUNT: [&str; 5] = [
@@ -69,6 +69,7 @@ pub(crate) fn schema(
         (ESTABLISHED, 2, StreamType::Control) => Some(&ESTABLISHED_V2),
         (ESTABLISHED, 2, StreamType::Account) => Some(&ESTABLISHED_COPY),
         ("ConnectionRefused", 1, StreamType::Control) => Some(&CONNECTION_REFUSED),
+        ("ConnectionRequested", 1, StreamType::Control) => Some(&CONNECTION_REQUESTED),
         (ROTATED, 1, StreamType::Control) => Some(&ROTATED_RECORD),
         (ROTATED, 1, StreamType::Account) => Some(&ROTATED_COPY),
         ("ConnectionChecked", 1, StreamType::Account) => Some(&CONNECTION_CHECKED),
@@ -337,6 +338,16 @@ static CONNECTION_REFUSED: Ty = Ty::Record(&[
         ]),
     ),
     ("existing_connection_id", Ty::Nullable(&Ty::Ident)),
+    ("user", Ty::Str),
+    ("step_up", STEP_UP),
+]);
+
+/// The pending connection at a connect's start; no member carries a secret (CN-1, CN-10).
+static CONNECTION_REQUESTED: Ty = Ty::Record(&[
+    ("connection_id", Ty::Ident),
+    ("account_ref", Ty::Ulid),
+    ("broker", Ty::Str),
+    ("environment", Ty::OneOf(&["paper", "live"])),
     ("user", Ty::Str),
     ("step_up", STEP_UP),
 ]);

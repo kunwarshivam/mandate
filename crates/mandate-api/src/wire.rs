@@ -26,6 +26,10 @@ use crate::problem::Violation;
 /// - `enum`: a value outside its closed set;
 /// - any rule of [`Validate`], checked after the shape decodes.
 ///
+/// Both `malformed` checks are needed: `from_utf8` refuses a byte that is not UTF-8 anywhere,
+/// which serde_json leaves unchecked inside a string it skips, and [`duplicate`]'s `IgnoredAny`
+/// pass proves the body one JSON value before [`walk`]'s byte scan, which assumes one.
+///
 /// # Errors
 /// [`Refused::Invalid`], which the server answers as `invalid` (422).
 pub fn decode<T: DeserializeOwned + Validate>(body: &[u8]) -> Result<T, Refused> {
@@ -213,6 +217,43 @@ macro_rules! rules {
     };
 }
 pub(crate) use rules;
+
+/// `Serialize` and `Deserialize` for each shape derived with `serde(remote = "Self")`, so that a
+/// shape reads only from a JSON object (DEC-881, DEC-882). serde's derived structs and internally
+/// tagged enums also read a JSON array through `visit_seq`, their members or tag and members in
+/// order, which no schema of the crate allows. `remote = "Self"` turns the derives into the
+/// shape's own `serialize` and `deserialize` functions; the impls here write through the derived
+/// one unchanged, and read by asking for a map: an array, or any other JSON type, is refused by
+/// serde_json as an invalid type at the shape's own path, which [`located`] answers as `type`
+/// there, never at an item inside the array. The map's members go to the derived reader through
+/// `MapAccessDeserializer`, so a refusal inside the object keeps the member path DEC-880 tracks.
+macro_rules! object_only {
+    ($($shape:ident),+) => {
+        $(impl serde::Serialize for $shape {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                $shape::serialize(self, serializer)
+            }
+        }
+
+        impl<'de> serde::Deserialize<'de> for $shape {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                struct Members;
+                impl<'de> serde::de::Visitor<'de> for Members {
+                    type Value = $shape;
+                    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        f.write_str("an object")
+                    }
+                    fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<$shape, A::Error> {
+                        $shape::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    }
+                }
+                deserializer.deserialize_map(Members)
+            }
+        })+
+    };
+}
+pub(crate) use object_only;
+
 rules!(none: Decimal, Ref, Timestamp, Asset, Id, EventId);
 
 /// A shape's rules beyond serde's, each broken one reported at its pointer under `at`.

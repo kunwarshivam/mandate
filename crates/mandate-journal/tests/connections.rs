@@ -144,7 +144,6 @@ fn every_invalid_connection_draft_is_refused_with_its_reason_at_its_path() {
 /// a member the record does not have (`note`), the authorization code, and the account fingerprint,
 /// which no member can carry (CN-1, CN-10).
 #[test]
-#[ignore = "pending E7-17"]
 fn the_connection_request_is_registered_closed_and_secret_free() {
     let section = section_named("connection_requests");
     let mut failed = Vec::new();

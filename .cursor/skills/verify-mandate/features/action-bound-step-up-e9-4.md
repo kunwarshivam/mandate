@@ -2,11 +2,13 @@
 
 - **Spec:** identity spec §7.1 to §7.3 and §10.1's cool-off; mandate spec §6.1 (valid step-up);
   workspace API spec §3.6 (the action kinds); DEC-662 (refusal codes and their order); §7.2 step 1
-  and DEC-665 (who may obtain a challenge).
+  and DEC-665 (who may obtain a challenge); ID-8 and DEC-649 (a presentation's workspace and
+  principal come from the request's context).
 - **Code:** `crates/mandate-passkey/src/stepup.rs` (`ChallengeRecord` and its canonical form and
   WebAuthn challenge, `consume`, `reverify`, `StepUpRefusal`, and `issue_challenge`, which takes
   the `TenantContext` `authorize` yields and refuses `forbidden` unless its row is the one the
-  action's kind needs), over `mandate-identity`'s
+  action's kind needs, and `Presentation::new`, which takes the workspace and principal from the
+  request's `TenantContext`), over `mandate-identity`'s
   `PrincipalId`, `WorkspaceId`, `AssertionId`, `StepUpActionKind`, `StepUpMethod`, and
   `StepUpEvidence`.
 - **Tests:** `crates/mandate-passkey/tests/stepup_api.rs` (the refusal codes),
@@ -14,7 +16,8 @@
   re-verification), `tests/consume_properties.rs` (the refusal is the first injected failure
   in DEC-662's order), with the fixture in `tests/stepup/mod.rs`; `tests/issue.rs` (issuance
   against `authorize` and an oracle parsed from §4.2, and no context for a service account or the
-  host CLI); and the `compile_fail` doctests on
-  `ChallengeRecord`, `Used`, `Consumed` (no caller builds one), and `issue_challenge` (no call
-  without a context).
+  host CLI); `tests/presentation.rs` (a challenge counts only under the context it was issued
+  to); and the `compile_fail` doctests on
+  `ChallengeRecord`, `Used`, `Consumed` (no caller builds one), and `issue_challenge` and
+  `Presentation::new` (no call without a context).
 - **Run:** `cargo nextest run -p mandate-passkey` and `cargo test -p mandate-passkey --doc`.

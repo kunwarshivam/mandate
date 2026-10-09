@@ -360,6 +360,15 @@ impl Subscription {
     }
 }
 
+/// DEC-727 item 2's role mailboxes, the only local parts a relayed subject may have.
+const RELAYED_ROLES: [&str; 5] = ["push", "notifications", "postmaster", "abuse", "security"];
+
+/// One byte of a relayed subject's domain: a lowercase ASCII letter, a digit, `.` or `-`
+/// (DEC-727 item 2).
+fn is_domain_byte(byte: u8) -> bool {
+    byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'.' || byte == b'-'
+}
+
 /// The VAPID `sub` claim: one contact URI for the deployment, the same on every notice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VapidSubject(String);
@@ -379,6 +388,24 @@ impl VapidSubject {
             return Err(WebPushError::InvalidSubject);
         }
         Ok(Self(uri.to_owned()))
+    }
+
+    /// DEC-727: the subject a deployment signs with when it sends through the relay is
+    /// `mailto:<role>@<domain>`, `<role>` exactly one of DEC-727 item 2's role mailboxes and
+    /// `<domain>` a non-empty run of lowercase letters, digits, `.` and `-` with nothing after it,
+    /// never a person's address; anything else, an `https:` subject included, is
+    /// [`WebPushError::InvalidSubject`]. A direct send keeps [`VapidSubject::parse`]'s rule.
+    pub fn check_relayed(&self) -> Result<(), WebPushError> {
+        let domain = self
+            .0
+            .strip_prefix("mailto:")
+            .and_then(|rest| rest.split_once('@'))
+            .filter(|(role, _)| RELAYED_ROLES.contains(role))
+            .map(|(_, domain)| domain);
+        match domain {
+            Some(domain) if !domain.is_empty() && domain.bytes().all(is_domain_byte) => Ok(()),
+            _ => Err(WebPushError::InvalidSubject),
+        }
     }
 }
 

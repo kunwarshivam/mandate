@@ -8,7 +8,7 @@ import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { GateDecision, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { clock } from "@/lib/format";
-import { actionSentence, gateRule, verdictBadge } from "@/lib/gate-reasons";
+import { actionSentence, decidedRule, verdictBadge } from "@/lib/gate-reasons";
 import { PURPOSE_LABEL, withRuleSentences } from "@/lib/labels";
 import { mandateAt } from "@/lib/mandate-history";
 import { decisionHref } from "@/lib/screens";
@@ -43,7 +43,7 @@ export function DecisionTimeline({ ws, decisions }: { ws: Workspace; decisions: 
     <ol aria-label="Decisions, newest first" data-slot="decision-timeline" className={cn("grid", VERDICT_COLUMN)}>
       {decisions.map((d, i) => {
         const agent = findAgent(ws, d.agent_id);
-        const rule = d.reason_code && agent ? gateRule(d.reason_code, agent.mandate) : null;
+        const rule = agent ? decidedRule(d, agent) : null;
         const decidedUnder = agent ? mandateAt(agent, d.mandate_version) : null;
         return (
           <li

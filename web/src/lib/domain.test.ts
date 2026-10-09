@@ -114,6 +114,13 @@ describe("gate decisions render as rules", () => {
     expect(rule).not.toMatch(/error|failed|try again|retry|\b[a-z]+_[a-z_]+\b/i);
   });
 
+  it.each(codes)("%s without the mandate it was decided under is a plain sentence that states no limit's figure", (code) => {
+    const rule = gateRule(code, null);
+    expect(rule).toMatch(/^[A-Z].*\.$/);
+    expect(rule).not.toMatch(/error|failed|try again|retry|\b[a-z]+_[a-z_]+\b/i);
+    if (rule !== gateRule(code, swing.mandate)) expect(rule).not.toMatch(/\d/);
+  });
+
   it("uses the mandate's own figures", () => {
     expect(gateRule("max_order_size", swing.mandate)).toBe("Orders are at most $1,000.00.");
   });

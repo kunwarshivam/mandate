@@ -1,10 +1,10 @@
-# Notifications and Approval Channels Spec (v0.4, draft)
+# Notifications and Approval Channels Spec (v0.5, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.4: the relay carries the deployment's VAPID header, the founder's choice on DEC-724 item 9 ([DEC-726](../project/decisions/DEC-726.md), §4.6, §9); v0.3: wording and consistency only (DEC-712, DEC-722, and [#763](https://github.com/kunwarshivam/mandate/pull/763)'s review minors; freeze rule); v0.2 fixed round 1's minors (E8-16); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
+| **Status** | Draft v0.5: a relayed send's VAPID `sub` is a role mailbox, never a person's address ([DEC-727](../project/decisions/DEC-727.md), §4.6); v0.4: the relay carries the deployment's VAPID header, the founder's choice on DEC-724 item 9 ([DEC-726](../project/decisions/DEC-726.md), §4.6, §9); v0.3: wording and consistency only (DEC-712, DEC-722, and [#763](https://github.com/kunwarshivam/mandate/pull/763)'s review minors; freeze rule); v0.2 fixed round 1's minors (E8-16); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent); v0.3's readings DEC-712 (who dereferences the address, and `send` renders) and DEC-722 (allowlist labels) (Accepted, agent); v0.4's relay request, [DEC-726](../project/decisions/DEC-726.md) (item 1 decided by the founder; items 2 to 8 Accepted, agent) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent); v0.3's readings DEC-712 (who dereferences the address, and `send` renders) and DEC-722 (allowlist labels) (Accepted, agent); v0.4's relay request, [DEC-726](../project/decisions/DEC-726.md) (item 1 decided by the founder; items 2 to 8 Accepted, agent); v0.5's relayed subject, [DEC-727](../project/decisions/DEC-727.md) (Accepted, agent) |
 | **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
@@ -380,8 +380,14 @@ as the design for when chat is taken up.
   as the `Authorization` header. It never logs, stores, or echoes it: its log stays the `relay_id`
   and the closed answer, and its refusals are closed codes that carry no input. The token's claims
   are encoded, not encrypted: `aud` is the push service's origin, `exp` a fixed 12 hours after
-  signing (never a deadline, NT-1), and `sub` the deployment's one contact URI (DEC-790 item 4).
-  So NT-1's captured-payload scan, and control plane design CP-1's canary scan, decode the claims
+  signing (never a deadline, NT-1), and `sub` the deployment's one contact URI (DEC-790 item 4). On a relayed send that URI
+  must be a role mailbox, never a person's address, so the claims name no member to the relay or
+  the push service (NT-2): exactly `mailto:<role>@<domain>`, `<role>` one of `push`,
+  `notifications`, `postmaster`, `abuse`, or `security`, and `<domain>` lowercase ASCII letters,
+  digits, dots, and hyphens with nothing after it; an `https:` subject is refused
+  ([DEC-727](../project/decisions/DEC-727.md)). The deployment checks it before it builds any
+  relayed header and sends nothing through the relay with a subject that fails; the relay reads no
+  claim (DEC-726 item 2). A direct send keeps DEC-790 item 4's rule. So NT-1's captured-payload scan, and control plane design CP-1's canary scan, decode the claims
   segment and scan it as well as the raw bytes.
 - **The envelope is fixed per class** (NT-1, DEC-700 item 3). `urgency` and `ttl_s` are a pair per
   class, the same whether the push goes through the relay or straight to the push service:
@@ -793,7 +799,9 @@ dereferences the address handle and renders the notice) and DEC-722 (an allowlis
 least two labels, and no host label has an edge hyphen); each only tightens (DEC-176). v0.4 records
 the founder's choice on DEC-724 item 9 in [DEC-726](../project/decisions/DEC-726.md) item 1 (the
 relay request carries the deployment's VAPID header, loosening control plane design CP-1 by that
-one field); its items 2 to 8 only tighten (DEC-176).
+one field); its items 2 to 8 only tighten (DEC-176). v0.5 records
+[DEC-727](../project/decisions/DEC-727.md) (a relayed send's `sub` is one of five role mailboxes,
+never a person's address), which only tightens (DEC-176).
 
 ---
 
