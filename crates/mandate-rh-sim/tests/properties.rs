@@ -233,7 +233,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
     #[test]
-    #[ignore = "pending E7-25"]
     fn a_ref_id_never_yields_a_second_order(ops in scripts()) {
         let trace = run(&ops)?;
         for (first, returned) in &trace.resent {
@@ -244,7 +243,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E7-25"]
     fn a_terminal_order_never_changes_and_is_refused(ops in scripts()) {
         for step in run(&ops)?.steps {
             for old in step.before.iter().filter(|o| is_terminal(o.state)) {
@@ -257,7 +255,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E7-25"]
     fn a_fill_never_exceeds_the_quantity_and_filled_means_complete(ops in scripts()) {
         let trace = run(&ops)?;
         prop_assert!(trace.sold <= trace.bought, "a sell never fills more than the shares held");
@@ -273,7 +270,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E7-25"]
     fn every_state_change_is_a_legal_transition(ops in scripts()) {
         for step in run(&ops)?.steps {
             for new in &step.after {

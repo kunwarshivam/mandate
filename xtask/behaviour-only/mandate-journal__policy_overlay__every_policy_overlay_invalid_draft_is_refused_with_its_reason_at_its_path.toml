@@ -1,9 +1,0 @@
-file = "crates/mandate-journal/tests/policy_overlay.rs"
-test = "every_policy_overlay_invalid_draft_is_refused_with_its_reason_at_its_path"
-reason = """
-J3's (DEC-536): one of the two rows for journal spec v0.18's `policy_overlay` label. It checks
-`Draft::parse`, the journal's existing draft check, against the vectors' `policy_overlay` section.
-There is no stub to stop at: until J3's implementation adds the label, the journal answers
-`non_canonical`, which is the behaviour it fails on. J3's implementation deletes this file with
-its `#[ignore]` line.
-"""

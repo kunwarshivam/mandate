@@ -27,6 +27,12 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
+- **2026-10-09, the coordinator handover.** The previous coordinator and its lane leads ended;
+  session `01BFjCWYU2cDwPmFkR3RAHQK` took the role, ran Sonnet reviews, merged `main` into stalled
+  branches and fixed findings across the five demo lanes (DEC-820). The founder decided DEC-833 and
+  DEC-834 and closed #174. Lessons: a PR stacked on another's branch is closed when that branch is
+  deleted, so retarget stacked PRs to `main` first; a DEC-176 acceptance must be a pure tightening
+  (DEC-834's first draft was not). The paper path is dispatched again (claims #850, #851).
 - **2026-10-08, after #669 merged: the faster process.** The founder asked for a process that is
   not the bottleneck. DEC-516 (proposed) draws two lanes, makes a PR one item, puts the pictures
   (`npm run shots`) at the centre of review, and limits what a session leaves behind to one tracker
