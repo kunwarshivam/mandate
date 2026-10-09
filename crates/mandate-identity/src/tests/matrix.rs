@@ -41,6 +41,8 @@ use crate::{
 use super::rows::{ORG_ROLES, OWED, RISK_REDUCING, ROLE_COLUMNS, ROWS};
 use super::{ByMember, Everything, Failing, O1, O2, Unreadable, W1, W2, W3, hosted_in, paired};
 
+mod seeded;
+
 const SPEC: &str = include_str!("../../../../docs/specs/identity.md");
 
 const USER: PrincipalId = PrincipalId(0x31);
