@@ -5,10 +5,13 @@
   NT-2 and NT-3; DEC-701 (the dispatcher crate and its `forbidden_internal` list), DEC-726 item 3,
   DEC-727, DEC-724 item 4 (the relay's `address_rejected` marks the address), DEC-728 (a relay
   refusal for a fault in the deployment's own request, and a relayed subject that is not a role
-  mailbox, is a permanent `provider_error`), DEC-790 item 4 (`exp` 12 hours after the attempt).
+  mailbox, is a permanent `provider_error`), DEC-790 item 4 (`exp` 12 hours after the attempt),
+  DEC-729 (a push service's status, which the relay returns unchanged under DEC-724 item 6, mapped
+  to §5.2's outcome).
 - **Code:** `mandate-dispatcher` (layer 3, safety-critical, over `mandate-notify`,
   `mandate-webpush` and `mandate-push-relay`): `crates/mandate-dispatcher/src/lib.rs` (`prepare`,
-  `Attempt`, `Route`, `Prepared`, `Relayed`, `relay_refusal`, the closed `DispatchError`). A
+  `Attempt`, `Route`, `Prepared`, `Relayed`, `relay_refusal`, `push_status`, the closed
+  `DispatchError`). A
   relayed attempt checks its subject before it signs; every attempt signs its own header with its
   own time through `mandate_webpush::vapid_authorization`.
 - **Tests:** `crates/mandate-dispatcher/src/tests.rs`: two attempts sign two headers whose `exp`
@@ -16,4 +19,7 @@
   schedule; a relayed send with a person's subject builds no header and is refused
   `provider_error`; the relay's `address_rejected` marks the address, its `unreachable` is a
   retried timeout, and every other refusal is a permanent `provider_error` that marks nothing; and a canary subject reaches no outcome or error.
+  Three tests are pending on the `push_status` stub (DEC-77): each status's row, that over every
+  `u16` only a `3xx`, `404` or `410` marks the address and none is `auth_failed`, and that every
+  other status but a `2xx`, `400`, `401`, `403` and `413` is retried inside the `safety` window.
 - **Run:** `cargo nextest run -p mandate-dispatcher`.
