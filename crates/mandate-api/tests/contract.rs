@@ -11,7 +11,10 @@ use mandate_api::problem::{
     AncestorLevel, CurrentBase, Effect, PolicyLevel, PolicyValue, Problem, ProblemCode,
     ProblemError, Violation,
 };
-use mandate_api::wire::{Asset, Decimal, EventId, Id, Ref, Refused, Timestamp, decode, encode};
+use mandate_api::responses::CommandStatus;
+use mandate_api::wire::{
+    Asset, Decimal, EventId, Id, Ref, Refused, Timestamp, Validate, decode, encode,
+};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -112,6 +115,11 @@ const TITLES: &[(&str, &str)] = &[
     ("stale_base", "Changed since loaded"),
     ("classification_changed", "Classification changed"),
     ("step_up_required", "Confirmation required"),
+    ("step_up_missing", "Confirmation not valid"),
+    ("step_up_stale", "Confirmation expired"),
+    ("step_up_reused", "Confirmation already used"),
+    ("step_up_method", "Confirmation method not allowed"),
+    ("step_up_mismatch", "Confirmation does not match"),
     ("live_unavailable", "Live trading unavailable"),
     ("control_stream_frozen", "Changes are frozen"),
     ("journal_unavailable", "Temporarily unavailable"),
@@ -134,7 +142,6 @@ fn title_of(name: &str) -> &'static str {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn every_problem_code_has_the_spec_tables_status() {
     let served: Vec<SpecCode> = spec_codes()
         .into_iter()
@@ -169,7 +176,6 @@ fn every_problem_code_has_the_spec_tables_status() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn event_id_is_present_exactly_when_something_may_be_recorded() {
     let event = ulid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     let invalid = Problem::of(
@@ -196,19 +202,18 @@ fn event_id_is_present_exactly_when_something_may_be_recorded() {
 /// `journal_unavailable`'s row). Identity spec §4.5's refusals (`own_roles`,
 /// `owner_role_reserved`, `last_owner`, `last_admin`, `reduction_only`, `membership_unavailable`)
 /// are the authorization step's, which commits nothing (§4.5, DEC-643), so they carry only `none`. Only §5.6's batch refuses its revocation after its kill switch was
-/// recorded, with `step_up_required` or while frozen with `control_stream_frozen`. Only
+/// recorded, with a `step_up_*` code (DEC-686) or while frozen with `control_stream_frozen`. Only
 /// `outcome_unknown` reports `unknown`, and it reports nothing else (#788's §3.5 row, DEC-681 item
 /// 11).
 fn may_carry(name: &str, effect: Effect) -> bool {
     match effect {
         Effect::None => name != "outcome_unknown",
-        Effect::Recorded => matches!(name, "step_up_required" | "control_stream_frozen"),
+        Effect::Recorded => name.starts_with("step_up_") || name == "control_stream_frozen",
         Effect::Unknown => name == "outcome_unknown",
     }
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn each_code_carries_only_the_effects_the_spec_allows_it() {
     let event = ulid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     let served: Vec<SpecCode> = spec_codes()
@@ -238,7 +243,6 @@ fn each_code_carries_only_the_effects_the_spec_allows_it() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_problem_serializes_every_member_and_refuses_one_it_does_not_name() {
     let problem = Problem::of(ProblemCode::Invalid, Effect::None, None, None).expect("invalid");
     let written: Value = serde_json::from_slice(&encode(&problem).expect("encodes")).expect("json");
@@ -302,8 +306,14 @@ struct Fixture {
     effect: Effect,
 }
 
+impl Validate for Fixture {
+    fn validate(&self) -> Result<(), Refused> {
+        Ok(())
+    }
+}
+
 /// The `(path, code)` of each violation `decode` reports for `body`.
-fn refusal<T: DeserializeOwned + Debug>(body: &[u8]) -> Vec<(String, String)> {
+fn refusal<T: DeserializeOwned + Validate + Debug>(body: &[u8]) -> Vec<(String, String)> {
     match decode::<T>(body) {
         Err(Refused::Invalid { violations }) => violations
             .into_iter()
@@ -321,7 +331,6 @@ fn is_pointer(path: &str) -> bool {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn decode_refuses_every_malformed_body_with_one_located_violation() {
     let good = decode::<Fixture>(br#"{"bid": "1.5", "effect": "recorded"}"#);
     assert!(good.is_ok(), "{good:?}");
@@ -377,8 +386,34 @@ fn decode_refuses_every_malformed_body_with_one_located_violation() {
     }
 }
 
+/// A refusal on a later line of a pretty-printed body is located there (DEC-681 item 10): the
+/// unknown member `x` on the third line is `/x`.
 #[test]
-#[ignore = "pending E10-10"]
+fn decode_locates_a_refusal_on_a_later_line_of_the_body() {
+    let body = b"{\n  \"bid\": \"1.5\",\n  \"x\": 1,\n  \"effect\": \"none\"\n}\n";
+    assert_eq!(
+        refusal::<Fixture>(body),
+        [("/x".to_owned(), "unknown_member".to_owned())]
+    );
+}
+
+/// A refusal inside an array is located by the item's index (RFC 6901, DEC-681 item 10): an
+/// unknown member of a command status's second step is `/steps/1/extra`, after an earlier array.
+#[test]
+fn decode_locates_a_refusal_inside_an_array_by_its_index() {
+    let example =
+        include_str!("../../../schemas/workspace-api/examples/commands.command-status.json");
+    let mut status: Value = serde_json::from_str(example).expect("JSON");
+    let mut second = status["steps"][0].clone();
+    second["extra"] = json!(1);
+    status["steps"].as_array_mut().expect("steps").push(second);
+    assert_eq!(
+        refusal::<CommandStatus>(status.to_string().as_bytes()),
+        [("/steps/1/extra".to_owned(), "unknown_member".to_owned())]
+    );
+}
+
+#[test]
 fn idempotency_keys_are_16_to_64_url_safe_characters() {
     for good in [
         "a".repeat(16),
@@ -457,7 +492,6 @@ fn derived(
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn event_ids_derive_from_workspace_principal_operation_key_and_position() {
     let long = "A".repeat(64);
     let fixed = [
@@ -520,7 +554,9 @@ fn is_invalid<T: Debug>(decoded: Result<T, Refused>) -> bool {
 
 /// Every value encodes to the spec's spelling and decodes back; a value outside the set, or the
 /// right word in another case, is refused.
-fn closed<T: Serialize + DeserializeOwned + PartialEq + Debug + Copy>(cases: &[(T, &str)]) {
+fn closed<T: Serialize + DeserializeOwned + Validate + PartialEq + Debug + Copy>(
+    cases: &[(T, &str)],
+) {
     for (value, spelling) in cases {
         let quoted = format!("\"{spelling}\"");
         assert_eq!(
@@ -538,7 +574,6 @@ fn closed<T: Serialize + DeserializeOwned + PartialEq + Debug + Copy>(cases: &[(
 /// Each scalar takes its canonical text and refuses a JSON number, a non-canonical spelling, and
 /// anything else of the wrong shape (§3.1; DEC-681 items 2 and 3).
 #[test]
-#[ignore = "pending E10-10"]
 fn scalars_are_canonical_strings_and_never_numbers() {
     let quoted = |text: &str| format!("\"{text}\"");
     let finest = format!("0.{}1", "0".repeat(27));
@@ -635,7 +670,7 @@ fn scalars_are_canonical_strings_and_never_numbers() {
     }
 }
 
-fn round_trips<T: Serialize + DeserializeOwned + Debug>(texts: &[&str]) {
+fn round_trips<T: Serialize + DeserializeOwned + Validate + Debug>(texts: &[&str]) {
     for text in texts {
         let quoted = format!("\"{text}\"");
         let value = decode::<T>(quoted.as_bytes()).expect(text);
@@ -644,7 +679,6 @@ fn round_trips<T: Serialize + DeserializeOwned + Debug>(texts: &[&str]) {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_safety_enums_of_a_problem_are_closed() {
     closed(&[
         (Effect::None, "none"),
@@ -724,7 +758,6 @@ fn every_stub_reports_its_story() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_last_batch_position_and_only_route_names_derive_an_id() {
     let text = "0123456789abcdef";
     let last = Some(u32::MAX);
@@ -757,7 +790,6 @@ fn the_last_batch_position_and_only_route_names_derive_an_id() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_stale_base_problem_names_the_current_base_and_no_other_code_does() {
     let stale = Problem::of(ProblemCode::StaleBase, Effect::None, None, Some(base()));
     let stale = stale.expect("stale_base with its base");
@@ -798,7 +830,6 @@ fn a_stale_base_problem_names_the_current_base_and_no_other_code_does() {
 /// `outcome_unknown` (#788's §3.5 row, planned under E10-10): an append whose outcome could not be
 /// confirmed, 503, `effect: unknown` with the derived `event_id`, never retryable, and nothing else.
 #[test]
-#[ignore = "pending E10-10"]
 fn outcome_unknown_reports_unknown_with_its_event_and_nothing_else() {
     let code: ProblemCode = decode(b"\"outcome_unknown\"").expect("outcome_unknown is served");
     let event = ulid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
@@ -918,7 +949,6 @@ fn a_policy_violation_serializes_its_levels_and_values() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_policy_violation_carries_a_number_as_its_decimal_string() {
     let body = br#"{"kind": "policy", "path": "/limits/max_drawdown", "key": "max_drawdown", "level": "workspace", "value": "0.25", "ancestor_level": "organization", "ancestor_value": "0.2", "message": "Looser than the organization allows"}"#;
     let finding = decode::<Violation>(body).expect("a policy finding");

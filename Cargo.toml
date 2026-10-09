@@ -8,6 +8,7 @@ mandate-accounting = { path = "crates/mandate-accounting", version = "0.0.0" }
 mandate-alpaca = { path = "crates/mandate-alpaca", version = "0.0.0" }
 mandate-api = { path = "crates/mandate-api", version = "0.0.0" }
 mandate-approval = { path = "crates/mandate-approval", version = "0.0.0" }
+mandate-audit = { path = "crates/mandate-audit", version = "0.0.0" }
 mandate-artifacts-fs = { path = "crates/mandate-artifacts-fs", version = "0.0.0" }
 mandate-authn = { path = "crates/mandate-authn", version = "0.0.0" }
 mandate-backtest = { path = "crates/mandate-backtest", version = "0.0.0" }
@@ -30,11 +31,13 @@ mandate-modelhost = { path = "crates/mandate-modelhost", version = "0.0.0" }
 mandate-notify = { path = "crates/mandate-notify", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-passkey = { path = "crates/mandate-passkey", version = "0.0.0" }
+mandate-push-relay = { path = "crates/mandate-push-relay", version = "0.0.0" }
 mandate-risk = { path = "crates/mandate-risk", version = "0.0.0" }
 mandate-runtime = { path = "crates/mandate-runtime", version = "0.0.0" }
 mandate-rh-sim = { path = "crates/mandate-rh-sim", version = "0.0.0" }
 mandate-research = { path = "crates/mandate-research", version = "0.0.0" }
 mandate-sim = { path = "crates/mandate-sim", version = "0.0.0" }
+mandate-shell = { path = "crates/mandate-shell", version = "0.0.0" }
 mandate-spec = { path = "crates/mandate-spec", version = "0.0.0" }
 mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
 mandate-webpush = { path = "crates/mandate-webpush", version = "0.0.0" }
@@ -45,6 +48,7 @@ arrow-schema = { version = "60.0.0", default-features = false }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 base64ct = { version = "1.8.3", default-features = false, features = ["alloc"] }
 clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+getrandom = { version = "0.2.17", default-features = false }
 hkdf = { version = "0.13.0", default-features = false }
 jiff = { version = "0.2.37", default-features = false, features = ["std", "tzdb-bundle-always"] }
 libtest-mimic = "0.8.2"

@@ -129,6 +129,9 @@ test.describe("Stop answers a press while the page cross-fades (brief §5, rule 
       await page.waitForLoadState("networkidle");
       const stop = page.getByRole("button", { name: "Stop", exact: true });
       const before = await page.evaluate(() => window.__viewTransitions.started);
+      const perHop: string[] = [];
+      let from = new URL(page.url()).pathname;
+      let hopStart = before;
       for (const href of HOPS) {
         const sampled = stop.evaluate(
           (el) =>
@@ -153,9 +156,21 @@ test.describe("Stop answers a press while the page cross-fades (brief §5, rule 
         await expect(page).toHaveURL(href);
         expect(covering, `${href}: elements over Stop's centre`).toEqual([]);
         expect(missed, `${href}: frames of ${frames} in which Stop took no press`).toBeLessThanOrEqual(CAPTURE_FRAMES);
+        const hopEnd = await page.evaluate(() => window.__viewTransitions.started);
+        const hopStarted = hopEnd - hopStart;
+        perHop.push(`${from}→${href}: ${hopStarted}`);
+        expect(
+          hopStarted,
+          `${from}→${href}: view transitions started by this hop (${hopStarted}); a hop without a cross-fade proves nothing for rule 13; per hop so far (route→route: started) ${perHop.join(", ")}`,
+        ).toBeGreaterThanOrEqual(1);
+        from = href;
+        hopStart = hopEnd;
       }
       const ran = (await page.evaluate(() => window.__viewTransitions.started)) - before;
-      expect(ran, "view transitions during the navigations").toBeGreaterThanOrEqual(HOPS.length);
+      expect(
+        ran,
+        `view transitions during the navigations, per hop (route→route: started) ${perHop.join(", ")}`,
+      ).toBeGreaterThanOrEqual(HOPS.length);
     });
   }
 });

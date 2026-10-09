@@ -57,4 +57,7 @@
 /crates/mandate-vault-local/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-modelhost/  @kunwarshivam
+/crates/mandate-paper/      @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam
+/crates/mandate-push-relay/ @kunwarshivam
+/crates/mandate-audit/      @kunwarshivam

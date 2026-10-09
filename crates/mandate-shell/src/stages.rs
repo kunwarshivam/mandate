@@ -7,11 +7,13 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 use mandate_backtest::Signal;
 use mandate_canon::Digest;
+use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
-use mandate_journal::{AppendOutcome, Environment, StoredEvent};
+use mandate_journal::{AppendOutcome, ArtifactSource, Environment, StoredEvent};
 use mandate_num::Price;
 use mandate_risk::Decision;
 use mandate_runtime::{
@@ -266,6 +268,10 @@ pub trait Sink {
 pub trait Executor {
     /// Starts one process-local fold from an empty state while retaining its trusted context.
     fn reset(&mut self) -> Result<(), Cause>;
+    /// Hands the executor the connector's capability profile, which its protection reads, after
+    /// the fold at every start (DEC-838 item 5). Required, so every executor states what it does
+    /// with the profile.
+    fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause>;
     fn step(
         &mut self,
         input: mandate_executor::Input,
@@ -277,6 +283,13 @@ pub trait Executor {
 
 /// Step 13: one broker round trip. An `Err` is never a rejection (`BrokerConnector`'s contract).
 pub trait Connector {
+    /// The broker's capability profile, from its published contract alone
+    /// (`BrokerConnector::profile`, DEC-531 item 1). The default is Alpaca's, which every
+    /// connector the shell holds is until B3 (DEC-838 item 5).
+    fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+        mandate_alpaca::alpaca_profile()
+    }
+
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError>;
 }
 
@@ -311,9 +324,16 @@ pub struct Stages {
     pub sink: Box<dyn Sink>,
     pub executor: Box<dyn Executor>,
     pub connector: Box<dyn Connector>,
+    /// The content-addressed store the run's artifacts were put in, the one the journal appends
+    /// against. An observation's data is checked here before the runtime is handed the
+    /// observation, so a missing or altered artifact never puts a runtime batch in doubt (E15-13,
+    /// the brief's slice H3; `AGENTS.md` rule 13).
+    pub artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
 }
 
 #[cfg(test)]
 mod doubles;
 #[cfg(test)]
 mod fail_closed;
+#[cfg(test)]
+mod observed;

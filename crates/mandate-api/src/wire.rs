@@ -2,12 +2,14 @@
 //! (workspace API spec §3.1). Each scalar is a string in the journal's canonical form (journal spec
 //! §4, §9.3); a JSON number in a decimal member is refused as `invalid`, never rounded.
 
-use mandate_canon::DecStr;
+use std::collections::BTreeSet;
+
+use mandate_canon::{DecStr, decode_ulid};
 use mandate_domain::AssetId;
 use mandate_journal::ArtifactRef;
 use mandate_time::UtcNanos;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::de::{DeserializeOwned, Error as _, IgnoredAny, Unexpected};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Unimplemented;
 use crate::problem::Violation;
@@ -21,23 +23,303 @@ use crate::problem::Violation;
 /// - `type`: a member of the wrong JSON type, such as a number where a decimal string belongs;
 /// - `non_canonical`: a scalar not in its canonical form;
 /// - `missing`: a required member absent;
-/// - `enum`: a value outside its closed set.
+/// - `enum`: a value outside its closed set;
+/// - any rule of [`Validate`], checked after the shape decodes.
 ///
 /// # Errors
 /// [`Refused::Invalid`], which the server answers as `invalid` (422).
-pub fn decode<T: DeserializeOwned>(body: &[u8]) -> Result<T, Refused> {
-    let _ = body;
-    Err(Refused::Unimplemented(Unimplemented))
+pub fn decode<T: DeserializeOwned + Validate>(body: &[u8]) -> Result<T, Refused> {
+    if let Some(path) = duplicate(body)? {
+        return Err(refuse(path, "duplicate_member"));
+    }
+    let value: T = serde_json::from_slice(body).map_err(|error| located(body, &error))?;
+    value.validate()?;
+    Ok(value)
+}
+
+/// The one message every schema violation carries: the code and the pointer say what and where,
+/// and nothing from the body is echoed (rule 6).
+const MESSAGE: &str = "The body does not match its schema.";
+
+fn refuse(path: String, code: &str) -> Refused {
+    Refused::Invalid {
+        violations: vec![violation(path, code)],
+    }
+}
+
+fn violation(path: String, code: &str) -> Violation {
+    Violation::Schema {
+        path,
+        code: code.to_owned(),
+        message: MESSAGE.to_owned(),
+    }
+}
+
+/// The pointer of the first member an object names twice, `None` when there is none, or
+/// `malformed` for a body that is not exactly one JSON value.
+fn duplicate(body: &[u8]) -> Result<Option<String>, Refused> {
+    serde_json::from_slice::<IgnoredAny>(body).map_err(|_| refuse(String::new(), "malformed"))?;
+    let walked = walk(body);
+    Ok(walked.twice.then(|| pointer(&walked.frames)))
+}
+
+/// `parent`'s member `name` as a JSON pointer, `~` and `/` escaped (RFC 6901).
+fn member(parent: &str, name: &str) -> String {
+    format!("{parent}/{}", name.replace('~', "~0").replace('/', "~1"))
+}
+
+/// The violation for serde's refusal of a body already known to be one JSON value with no
+/// duplicate member: its code read from serde's message, and its pointer from where serde stopped.
+fn located(body: &[u8], error: &serde_json::Error) -> Refused {
+    let text = error.to_string();
+    let code = CODES
+        .iter()
+        .find(|(start, _)| text.starts_with(start))
+        .map_or("type", |(_, code)| code);
+    let start = body
+        .split_inclusive(|byte| *byte == b'\n')
+        .take(error.line().saturating_sub(1))
+        .fold(0_usize, |sum, line| sum.saturating_add(line.len()));
+    let end = start.saturating_add(error.column());
+    refuse(pointer(&walk(body.get(..end).unwrap_or(body)).frames), code)
+}
+
+/// serde's refusals by the start of their message, each with its wire code (DEC-681 item 10).
+/// Any other refusal is a wrong JSON type or value.
+const CODES: [(&str, &str); 4] = [
+    ("unknown field", "unknown_member"),
+    ("missing field", "missing"),
+    ("unknown variant", "enum"),
+    ("not in canonical form", "non_canonical"),
+];
+
+/// Where a reader stands in its JSON: an object's last member named and every name it has read,
+/// or an array's current item.
+enum Frame {
+    Object {
+        name: Option<String>,
+        next_is_name: bool,
+        seen: BTreeSet<String>,
+    },
+    Array(usize),
+}
+
+/// How far [`walk`] read: the frames open where it stopped, and whether it stopped at a member
+/// its object had already named.
+struct Walked {
+    frames: Vec<Frame>,
+    twice: bool,
+}
+
+/// Reads `prefix` to its end, or to the first member an object names twice. One reader serves both
+/// the duplicate check and the pointer of serde's refusal, so the two can never disagree on where
+/// a member is.
+fn walk(prefix: &[u8]) -> Walked {
+    let mut frames = Vec::new();
+    let mut at = 0_usize;
+    while let Some(byte) = prefix.get(at) {
+        let mut step = 1_usize;
+        match (byte, frames.last_mut()) {
+            (b'"', top) => {
+                let rest = prefix.get(at..).unwrap_or_default();
+                let mut strings = serde_json::Deserializer::from_slice(rest).into_iter::<String>();
+                let Some(Ok(text)) = strings.next() else {
+                    break;
+                };
+                step = strings.byte_offset();
+                if let Some(Frame::Object {
+                    name,
+                    next_is_name: next @ true,
+                    seen,
+                }) = top
+                {
+                    let again = !seen.insert(text.clone());
+                    *name = Some(text);
+                    *next = false;
+                    if again {
+                        return Walked {
+                            frames,
+                            twice: true,
+                        };
+                    }
+                }
+            }
+            (b'{', _) => frames.push(Frame::Object {
+                name: None,
+                next_is_name: true,
+                seen: BTreeSet::new(),
+            }),
+            (b'[', _) => frames.push(Frame::Array(0)),
+            (b'}' | b']', _) => drop(frames.pop()),
+            (b',', Some(Frame::Object { next_is_name, .. })) => *next_is_name = true,
+            (b',', Some(Frame::Array(index))) => *index = index.saturating_add(1),
+            _ => {}
+        }
+        at = at.saturating_add(step);
+    }
+    Walked {
+        frames,
+        twice: false,
+    }
+}
+
+/// The pointer of the member being read where a [`walk`] stopped: serde stops just after the
+/// member it refuses, or just after the object that lacks one.
+fn pointer(frames: &[Frame]) -> String {
+    frames
+        .iter()
+        .fold(String::new(), |path, frame| match frame {
+            Frame::Object {
+                name: Some(name), ..
+            } => member(&path, name),
+            Frame::Object { name: None, .. } => path,
+            Frame::Array(index) => format!("{path}/{index}"),
+        })
+}
+
+/// What a schema requires that serde cannot express: a pattern on a plain string, a numeric bound,
+/// an array's length or uniqueness, or one member conditioned on another (DEC-689 item 1).
+pub trait Validate {
+    /// # Errors
+    /// [`Refused::Invalid`] with one located violation per broken rule.
+    fn validate(&self) -> Result<(), Refused>;
+}
+
+/// [`Validate`] for shapes: `none` whose serde types enforce every rule, `checked` whose
+/// [`Rules`] hold the rest, and `pending` stubbed until E10-10.
+macro_rules! rules {
+    (none: $($shape:ty),+) => {
+        $(impl $crate::wire::Validate for $shape {
+            fn validate(&self) -> Result<(), $crate::wire::Refused> {
+                Ok(())
+            }
+        })+
+    };
+    (checked: $($shape:ty),+) => {
+        $(impl $crate::wire::Validate for $shape {
+            fn validate(&self) -> Result<(), $crate::wire::Refused> {
+                let mut check = $crate::wire::Check::default();
+                $crate::wire::Rules::rules(self, "", &mut check);
+                check.done()
+            }
+        })+
+    };
+    (pending: $($shape:ty),+) => {
+        $(impl $crate::wire::Validate for $shape {
+            fn validate(&self) -> Result<(), $crate::wire::Refused> {
+                let _ = self;
+                Err($crate::wire::Refused::Unimplemented($crate::Unimplemented))
+            }
+        })+
+    };
+}
+pub(crate) use rules;
+rules!(none: Decimal, Ref, Timestamp, Asset, Id, EventId);
+
+/// A shape's rules beyond serde's, each broken one reported at its pointer under `at`.
+pub(crate) trait Rules {
+    fn rules(&self, at: &str, check: &mut Check);
+}
+
+/// The violations a shape's [`Rules`] found.
+#[derive(Debug, Default)]
+pub(crate) struct Check(Vec<Violation>);
+
+impl Check {
+    /// Records `code` at `path` unless `holds`.
+    pub(crate) fn rule(&mut self, holds: bool, path: &str, code: &str) {
+        if !holds {
+            self.0.push(violation(path.to_owned(), code));
+        }
+    }
+
+    pub(crate) fn done(self) -> Result<(), Refused> {
+        if self.0.is_empty() {
+            Ok(())
+        } else {
+            Err(Refused::Invalid { violations: self.0 })
+        }
+    }
+}
+
+/// A JSON pointer (RFC 6901), the root `""` among them, whose segments hold no control character
+/// `U+0000` to `U+001F`.
+pub(crate) fn is_pointer(text: &str) -> bool {
+    let escapes = text
+        .split('~')
+        .skip(1)
+        .all(|after| after.starts_with(['0', '1']));
+    let shaped = text.is_empty() || text.starts_with('/');
+    shaped && escapes && !text.chars().any(|c| c < ' ')
+}
+
+/// `^[a-z][a-z0-9_]*$`: a wire code, a policy key, a refusal reason.
+pub(crate) fn is_word(text: &str) -> bool {
+    let mut chars = text.chars();
+    let first = chars.next().is_some_and(|c| c.is_ascii_lowercase());
+    first && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// A journal stream id (journal spec §2): `acct` and `agent` with two segments, and each of
+/// `single` with the workspace id alone.
+pub(crate) fn is_stream_id(text: &str, single: &[&str]) -> bool {
+    let mut parts = text.split(':');
+    let kind = parts.next().unwrap_or_default();
+    let segments: Vec<&str> = parts.collect();
+    let arity = match kind {
+        "acct" | "agent" => 2,
+        other if single.contains(&other) => 1,
+        _ => 0,
+    };
+    segments.len() == arity && segments.iter().all(|s| is_segment(s))
+}
+
+/// `^[A-Za-z0-9_-]+$`, journal spec §2's identifier segment.
+pub(crate) fn is_segment(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// An optional member the schema lets be absent but never `null`: with `#[serde(default)]`, an
+/// absent member is `None` and a `null` one is refused as the wrong type.
+///
+/// # Errors
+/// `T`'s, including for `null`.
+pub fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+/// A member the schema pins to `null`, as `()`: any value is refused, `{}` and `[]` among them,
+/// which a bare `()` inside a tagged enum would take.
+///
+/// # Errors
+/// The wrong type, for anything but `null`.
+pub fn null<'de, D: Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+    match Option::<IgnoredAny>::deserialize(deserializer)? {
+        None => Ok(()),
+        Some(IgnoredAny) => Err(D::Error::invalid_type(
+            Unexpected::Other("a value"),
+            &"null",
+        )),
+    }
 }
 
 /// The JSON bytes of a response member or body.
 ///
 /// # Errors
-/// [`Unimplemented`] until E10-10.
-pub fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>, Unimplemented> {
-    let _ = value;
-    Err(Unimplemented)
+/// [`EncodeError`] for a value serde cannot write as JSON, which no shape of this crate is.
+pub fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>, EncodeError> {
+    serde_json::to_vec(value).map_err(|_| EncodeError)
 }
+
+/// Why [`encode`] could not write a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the value has no JSON form")]
+pub struct EncodeError;
 
 /// Why [`decode`] refused a body.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -51,8 +333,6 @@ pub enum Refused {
 /// Why a scalar's text was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum WireError {
-    #[error(transparent)]
-    Unimplemented(Unimplemented),
     #[error("not in canonical form")]
     NotCanonical,
 }
@@ -67,8 +347,11 @@ impl TryFrom<String> for Decimal {
     type Error = WireError;
 
     fn try_from(text: String) -> Result<Self, Self::Error> {
-        let _ = text;
-        Err(WireError::Unimplemented(Unimplemented))
+        DecStr::parse(&text)
+            .ok()
+            .filter(|canonical| canonical.as_str() == text)
+            .map(Self)
+            .ok_or(WireError::NotCanonical)
     }
 }
 
@@ -152,8 +435,17 @@ impl TryFrom<String> for Id {
     type Error = WireError;
 
     fn try_from(text: String) -> Result<Self, Self::Error> {
-        let _ = text;
-        Err(WireError::Unimplemented(Unimplemented))
+        if is_segment(&text) && text.len() <= 64 {
+            Ok(Self(text))
+        } else {
+            Err(WireError::NotCanonical)
+        }
+    }
+}
+
+impl Id {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -172,8 +464,17 @@ impl TryFrom<String> for EventId {
     type Error = WireError;
 
     fn try_from(text: String) -> Result<Self, Self::Error> {
-        let _ = text;
-        Err(WireError::Unimplemented(Unimplemented))
+        match decode_ulid(&text) {
+            Ok(_) => Ok(Self(text)),
+            Err(_) => Err(WireError::NotCanonical),
+        }
+    }
+}
+
+impl EventId {
+    /// The id spelling `value` (journal spec §3).
+    pub(crate) fn of(value: u128) -> Self {
+        Self(mandate_canon::encode_ulid(value))
     }
 }
 

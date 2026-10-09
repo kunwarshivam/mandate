@@ -1,0 +1,18 @@
+[package]
+name = "mandate-push-relay"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The web-push relay's pure core: checks a relay request and forwards it through an injected push service, storing nothing (backlog E8-14, slice S8b)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-webpush.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+mandate-notify.workspace = true
+proptest.workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "mandate-audit"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Workspace-scoped, read-only audit reads over the journal: streams, pages and events (workspace API §4.8, backlog E12-6)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-identity.workspace = true
+mandate-journal.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+mandate-identity-testkit.workspace = true
+mandate-time.workspace = true
+proptest.workspace = true

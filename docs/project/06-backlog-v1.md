@@ -104,6 +104,15 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   runner is slower; the same 691 tests run, so the saving comes from the harness and not from
   running fewer cases; and DEC-498's 180-second cap and its 192 shards are re-derived from a
   fresh `ubuntu-24.04` measurement, or a successor decision records that they stand.
+- **E1-7 (Should)** As an engineer, I want `xtask`'s own checks under the mutants gate, so that a
+  safety check written in `xtask`, such as X1's live-feature check (E7-26, DEC-529 item 3), cannot
+  lose a rule without a test failing. `xtask/layers.toml` marks `xtask` `safety_critical = false`,
+  so `cargo xtask ci mutants` never mutates it today; X1's mutants were run by hand on its diff
+  (#738 review, finding 3).
+  *Accepted when:* CI runs `cargo mutants -p xtask` on the diff of every PR that changes
+  `xtask/src`, as a shard within DEC-464's ten-minute budget, and fails on any missed mutant; the
+  mutants of `xtask` code that predates the job are either caught or listed, each with its reason,
+  in a follow-up story, so the job starts green.
 
 ### E2 Market data
 
@@ -743,6 +752,18 @@ after U-A1 to U-A5 are recorded.
   default build contains no Robinhood host (LT-1); the runner built from the
   paper path's E1a takes any broker connector and environment through `ProductionCycle::run`
   (LT-4); and a restart after a run sends no second order (LT-6).
+  *Follow-up ([DEC-851](decisions/DEC-851.md) item 5, #976's review):* X1's word scan does not
+  read through `time -p`, the wrappers `setsid`, `flock`, `ionice`, `taskset`, `unbuffer`,
+  `doas`, `su -c` and `runuser`, `env -S`, or a dynamic `printf -v "$N"`. They are disclosed
+  residuals; the build-file and live-feature checks and review stand behind them. Close them with
+  a tests correction that pins each form as refused, then the implementation that refuses it.
+  *Follow-up ([DEC-851](decisions/DEC-851.md) item 6, #979's review):* the live-feature scan's
+  shell reading still has limits: a here-doc body fed to a command other than a shell is read as
+  commands, `case` arm patterns and `[[ =~ ]]` regex parentheses split a command, and a
+  single-quoted string outside the here-doc and text reading is not joined. None hides a refusal
+  rule 1′ makes today; fix each with a pin when a real line needs it. Rule 2 judges pipelines
+  only, so a shell fed from a file (`sh < <(echo $C)`, `echo $C > f; sh f`) is a disclosed
+  residual (DEC-851 item 5, #985's review); pin and refuse it the same way.
 - **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
   want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
   so that a token that may reach both environments is on the record before it is used
@@ -751,6 +772,15 @@ after U-A1 to U-A5 are recorded.
   defines the event that records, with the connection, whether the token may reach the other
   environment, and the disclosure the owner confirmed, with vectors, tests first; and no Alpaca
   OAuth connect appends `ConnectionEstablished` before that event.
+
+- **E7-28 (Should, M6, after E7-26; tooling)** As the founder, I want X1's shell reading to
+  parse `case` arm patterns, `[[ … ]]` tests (their `|` and parentheses), single-quoted strings
+  that span lines, and `${…}` holding a space, so that the live-feature check's interim exact-line
+  list ([DEC-851](decisions/DEC-851.md) item 6) can be emptied. *Accepted when:* a tests
+  correction pins each form on real-line shapes, the tokenizer reads them, the exact-line list in
+  `xtask/src/main.rs` is empty, and `cargo xtask live-feature` still exits 0 on the repository.
+  Beside it, the stronger artifact-level check DEC-851 item 6's threat model names: assert from
+  `cargo metadata` and the build plan that no CI job resolves the `live` feature.
 
 ### E8 Escalation and approvals
 
@@ -1223,6 +1253,19 @@ story buys a service, and none uses a real identity-provider account in tests (s
   removed members, clients, service accounts, and agents counting zero and an unreadable count reading
   as one (ID-7); and no request authorized after a deactivation commits succeeds, with open streams
   closed within 60 s (ID-3).
+  *Follow-ups* (#789's second review, minors backlogged under the freeze rule):
+  - Identity spec §5.1's state diagram has no edge for removing a role from a `deactivated` member,
+    which journal spec §9.12's fold accepts (DEC-654 item 7); add the self-edge.
+  - DEC-654 item 7 lets `change_roles` remove a role from an `invited` membership, but §9.12 has no
+    record for it: an invitation's roles are fixed by `MemberInvited`. Until a record exists, the
+    writer maps it to `MemberInvitationRevoked` then `MemberInvited` with the reduced roles (merge
+    coordinator, 2026-10-09); whether to add a record stays open.
+  - Fold vectors (#812's review, access-reducing): a reactivation with a strict subset of the kept
+    roles, an activation with a strict subset of the invitation's roles, and a grant of a role held
+    but still cooling off are each refused, but only disjoint roles are tested; add a valid and a
+    refused history and a fold mutant for each.
+  - Rule 103's non-cooling branch has no vector with a gap under 1 s (#789's delta review); add an
+    invalid 1 ns gap and a mutant.
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
@@ -1529,8 +1572,21 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 ### E12 Audit explorer
 
 - **E12-1 (Must)** As an auditor, I want a causal trace from any fill back to its causes.
+  *Follow-ups (A2 review):* the quoted items' `author` reads `owner_selected` for an owner-selected
+  signal model's output through `config_refs.mandate_version`, with the founder's label, once
+  [DEC-773](decisions/DEC-773.md) is decided. Slice A2b tests: `payload.client_order_id` with its
+  lower-`seq` filter, `OrderRequestRecorded`, `payload.approval`, `payload.outputs_used[]`, the
+  approval's `outputs[]`, `payload.thesis_id`, `OrderSubmitted` version 1, the quoted members of
+  `ThesisProposed` and `ModelInvocationRecorded`, a missing singular `IntentReceived`, and
+  [DEC-772](decisions/DEC-772.md) items 8 and 9.
 - **E12-2 (Must)** As an auditor, I want per-agent timelines with filters and JSON/CSV export.
 - **E12-3 (Should)** As an auditor, I want to run chain verification from the UI.
+  *Follow-ups ([#772](https://github.com/kunwarshivam/mandate/pull/772) review, journal spec):* rule 81
+  does not check that a client's `on_behalf_of` differs from its own `id` (predates #772); rule
+  108's break-glass check requires only a `causation_id` for a `platform_operator` read, not that it
+  cites a `PlatformOperatorAction` (with the E12-3 tests PR); "never a ticker" in
+  `RecordsAccessed.resources` and `operation` is prose only, both being `id`-typed; and the client
+  clause of rules 109 and 110 is unreachable, since rule 83 refuses a client first.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
@@ -1551,6 +1607,11 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `ExportCreated` before it is served, its canonical form passes the journal verifier, and derived
   JSON and CSV name their manifest hash (API-16); a viewer can read none of it and an auditor can act
   on nothing (API-2).
+  *Follow-up (#797 review; [DEC-770](decisions/DEC-770.md) item 5):* journal spec §2 defines the
+  notice stream `ntf:{workspace_id}`, but `mandate_journal::StreamId::parse` does not parse `ntf:`,
+  so `mandate-audit`'s `StreamType::Notice` is unreachable and an `ntf:` id reads as absent. Owed:
+  `StreamId` parses notice streams (journal, E5), then the audit reads list and page them, with a
+  case in `crates/mandate-audit/tests/scope.rs`.
 
 ### E13 Hybrid deployment
 
@@ -4560,6 +4621,15 @@ From the workspace API contract's drift rule (DEC-683, E10-10):
 - **Run `schemas/workspace-api/`'s checkers in CI** (`check_examples.py`, `check_planned.py`, and
   the mutation sweep) from a `cargo xtask` job; until then reviewers run them.
 
+From the independent review of the E10-10 A1 implementation, part 1 ([#993](https://github.com/kunwarshivam/mandate/pull/993), minors; [DEC-681](decisions/DEC-681.md) item 10):
+
+- **Locate a custom refusal on an object's last member by its name.** serde_json reports a custom
+  error such as `non_canonical` after the object's closing brace when the bad member is the last
+  one, so `decode` points at the parent. Locate custom errors by member name, as DEC-681 item 10
+  says ("where serde can name it"). The body is still refused, and no sibling is ever named.
+- **Refuse invalid UTF-8 inside a string value as `malformed` at `""`.** Today it is refused as
+  `type` at the member. It is still refused either way.
+
 From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
 
 - **The mutation plan's tests** (#768).
@@ -4582,3 +4652,29 @@ From the independent reviews of three CI and xtask conflict-and-queue fixes ([#7
   - Refuse two feature files with the same `# ` title, which `--index` would list twice.
   - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
     the README is never read as a feature.
+
+From E7-16's M2 implementation (`mandate-mcp`, claim #859; the shared check is lane L2's):
+
+- **E7-16: switch `mandate-mcp`'s private fund-movement tokenizer to `mandate_domain::fund_movement`**
+  once lane L2 lands it (E7-12, DEC-839 item 3). `client.rs`'s `moves_funds`, `words` and
+  `FUND_TOKENS` then go, and the crate gains its `mandate-domain` dependency, so the connector and
+  the scope check cannot disagree on a name.
+
+From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-841](decisions/DEC-841.md)):
+
+- **Delete the transitional Alpaca profile** (`mandate-executor`'s `shape::transitional_alpaca`,
+  which `ExecutorState::new` starts with, and the default body of the shell's
+  `Connector::profile`) in B3, before the first non-Alpaca executor
+  path merges. Until then an executor built without a profile is Alpaca-only by contract. Once every
+  constructor passes a profile, `ExecutorState`'s profile stops being an `Option` and DEC-841 item
+  2's defensive path goes with it.
+
+From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.md)):
+
+- Close `SegmentEvicted` (journal spec §6.2, §9): which segment left the hot store, by its
+  `SegmentExported` manifest hash, and when. Left out of DEC-783 by the lead's ruling, so a hot-store
+  eviction record stays prose until a story needs to read it.
+- The anchor stamp record (§10, DEC-783 item 8): a control-stream record, `AnchorStamped`, that names
+  an `AnchorComputed` as its `causation_id` and carries a timestamp token for its root. It backfills
+  the token of an anchor appended during a timestamping outage, which until then is not a trusted
+  start (§9.14), and re-stamps an anchor before its token expires.

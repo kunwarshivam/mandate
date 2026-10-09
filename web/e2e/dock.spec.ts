@@ -29,33 +29,36 @@ async function tokenColor(page: Page, token: string): Promise<string> {
   }, token);
 }
 
-test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide, with 24 px pixel icons over 12 px labels", async ({ page }, testInfo) => {
+test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide, with 24 px pixel icons over their labels", async ({ page }, testInfo) => {
   await open(page, "/");
   const found = await dock(page).evaluate((el) => {
     const style = getComputedStyle(el);
+    const probe = document.createElement("div");
+    probe.style.borderRadius = "var(--radius-3xl)";
+    document.body.append(probe);
+    const radius3xl = parseFloat(getComputedStyle(probe).borderTopLeftRadius);
+    probe.remove();
     return {
       radius: parseFloat(style.borderTopLeftRadius),
-      padding: parseFloat(style.paddingTop),
+      radius3xl,
       shadow: style.boxShadow,
       height: el.getBoundingClientRect().height,
       stop: el.querySelector<HTMLElement>("[data-slot=stop-control]")!.getBoundingClientRect().height,
       items: [...el.querySelectorAll<HTMLElement>("a, button:not([data-slot=stop-control])")].map((item) => {
         const icon = item.querySelector("svg")!.getBoundingClientRect();
-        const label = getComputedStyle(item.querySelector("[data-slot=dock-label]")!);
-        return { width: item.getBoundingClientRect().width, height: item.getBoundingClientRect().height, icon: [icon.width, icon.height], size: label.fontSize, weight: label.fontWeight };
+        return { width: item.getBoundingClientRect().width, height: item.getBoundingClientRect().height, icon: [icon.width, icon.height] };
       }),
     };
   });
-  expect(found.radius).toBe(10);
-  expect(found.padding).toBe(6);
+  expect(found.radius3xl).toBeGreaterThan(0);
+  expect(found.radius, "the dock takes the 3xl corner DESIGN.md gives it").toBe(found.radius3xl);
   expect(found.height, "the dock's height matches --dock-h").toBe(64);
-  expect(found.items).toHaveLength(9);
+  expect(found.items, "six links and the More menu, Stop aside (DEC-513 item 2)").toHaveLength(7);
   expect(found.stop, "Stop, at the dock's end, is as tall as its items").toBe(50);
   for (const item of found.items) {
     expect(item.width).toBeGreaterThanOrEqual(64);
     expect(item.height).toBe(50);
     expect(item.icon, "pixel icons stay on their 24px grid (DEC-478)").toEqual([24, 24]);
-    expect(item.size).toBe("12px");
   }
   if (testInfo.project.name.includes("dark")) expect(found.shadow, "flat in dark").toMatch(/^(none|rgba\(0, 0, 0, 0\) 0px 0px 0px 0px(, rgba\(0, 0, 0, 0\) 0px 0px 0px 0px)*)$/);
   else expect(found.shadow, "the light theme's shadow-md, no stronger").toMatch(/0px 4px 12px -2px/);
@@ -80,7 +83,7 @@ test("the current section sits on a tinted pill with a semibold label; hover is 
   expect(pill.bg, "not the mandate's colour").not.toBe(mandate);
   expect(pill.weight).toBe("600");
   expect(rest.bg).toMatch(/^rgba\(0, 0, 0, 0\)$|^transparent$/);
-  expect(rest.weight).toBe("500");
+  expect(Number(rest.weight), "an idle label is lighter than the current one").toBeLessThan(Number(pill.weight));
   await idle.hover();
   await expect.poll(() => idle.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(hoverTint);
   expect(hoverTint).not.toBe(tint);

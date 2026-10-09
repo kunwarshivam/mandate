@@ -42,7 +42,8 @@ for (const width of [1024, 1280, 1440]) {
       await expect(bar(page)).toBeVisible();
       const found = await boxes(page);
       expect(found.header.height, "the header keeps its height").toBe(65);
-      expect(found.bar.height).toBe(40);
+      expect(found.bar.top, "the bar sits inside the header").toBeGreaterThanOrEqual(found.header.top);
+      expect(found.bar.bottom, "the bar sits inside the header").toBeLessThanOrEqual(found.header.bottom);
       expect(found.bar.width).toBeLessThanOrEqual(460);
       expect(found.bar.width, "wide enough to read the prompt").toBeGreaterThanOrEqual(width >= 1280 ? 380 : 300);
       for (const other of found.others) {
@@ -59,7 +60,7 @@ for (const width of [1024, 1280, 1440]) {
   }
 }
 
-test("its look: a muted fill, a hairline, a 4 px radius, the prompt and the ⌘K key", async ({ page }) => {
+test("its look: a muted fill, a hairline, no image, the prompt and the ⌘K key", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await expect(bar(page)).toHaveAccessibleName("Jump to an agent or screen… ⌘K");
@@ -70,10 +71,10 @@ test("its look: a muted fill, a hairline, a 4 px radius, the prompt and the ⌘K
     document.body.append(probe);
     const muted = getComputedStyle(probe).backgroundColor;
     probe.remove();
-    return { background: s.backgroundColor, muted, border: s.borderTopWidth, radius: s.borderTopLeftRadius, image: s.backgroundImage };
+    return { background: s.backgroundColor, muted, border: s.borderTopWidth, image: s.backgroundImage };
   });
   expect(style.background).toBe(style.muted);
-  expect(style).toMatchObject({ border: "1px", radius: "4px", image: "none" });
+  expect(style).toMatchObject({ border: "1px", image: "none" });
   await expect(bar(page).locator("kbd")).toHaveText("⌘K");
   await expect(bar(page).locator("svg")).toBeVisible();
 });

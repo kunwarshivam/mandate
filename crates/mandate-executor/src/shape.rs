@@ -6,8 +6,11 @@
 //! profile says which forms an order of each type and quantity form may be sent as, and this
 //! module takes the strongest one the executor can place on a position that already exists.
 
-use mandate_domain::{AssetClass, CapabilityProfile, MarketSession, ProtectionForm};
-use mandate_num::{Fraction, Qty};
+use mandate_domain::{
+    AssetClass, CapabilityProfile, Cell, Idempotency, MarketSession, OrderType as CellType,
+    ProfileError, ProtectionForm, QuantityForm, Retry, Row, TimeInForce as CellTif,
+};
+use mandate_num::{Adverse, Fraction, Qty, ShareIncrement};
 
 use crate::error::ExecutorError;
 use crate::types::{OcoLegs, OrderType, ProtectionPrices, TimeInForce};
@@ -39,12 +42,126 @@ pub struct ProtectiveShape {
 /// triggers in the regular session (§5.4; DEC-838 item 4). Re-placement runs in pre-market and
 /// after the close, and must not lose its protection to the clock.
 pub fn protective_shape(
-    _profile: &CapabilityProfile,
-    _asset_class: AssetClass,
+    profile: &CapabilityProfile,
+    asset_class: AssetClass,
     _clock_session: MarketSession,
-    _qty: Qty,
-    _prices: ProtectionPrices,
-    _stop_limit_offset: Option<Fraction>,
+    qty: Qty,
+    prices: ProtectionPrices,
+    stop_limit_offset: Option<Fraction>,
 ) -> Result<Option<ProtectiveShape>, ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-23" })
+    let session = resting_session(asset_class);
+    let quantity_form = if qty.portion(Fraction::ONE, ShareIncrement::Whole)? == qty {
+        QuantityForm::Whole
+    } else {
+        QuantityForm::Fractional
+    };
+    let offered = |order_type: CellType, form: ProtectionForm| {
+        profile
+            .cell(asset_class, session, order_type, quantity_form)
+            .is_ok_and(|cell| {
+                cell.protection_forms.contains(&form) && cell.times_in_force.contains(&CellTif::Gtc)
+            })
+    };
+    if let Some(take_profit) = prices.take_profit
+        && offered(CellType::Limit, ProtectionForm::Oco)
+    {
+        return Ok(Some(ProtectiveShape {
+            form: ProtectionForm::Oco,
+            order_type: OrderType::Limit,
+            tif: TimeInForce::Gtc,
+            limit_price: None,
+            stop_price: None,
+            oco: Some(OcoLegs {
+                take_profit,
+                stop: prices.stop,
+                qty,
+            }),
+        }));
+    }
+    if let Some(offset) = stop_limit_offset
+        && offered(CellType::StopLimit, ProtectionForm::StopLimit)
+    {
+        return Ok(Some(ProtectiveShape {
+            form: ProtectionForm::StopLimit,
+            order_type: OrderType::StopLimit,
+            tif: TimeInForce::Gtc,
+            limit_price: Some(prices.stop.collar_bound(offset, Adverse::Down)?),
+            stop_price: Some(prices.stop),
+            oco: None,
+        }));
+    }
+    Ok(None)
+}
+
+/// The session a GTC protective order rests and triggers in, whatever the clock reads: a US
+/// equity's regular session and crypto's continuous one (§5.4, DEC-838 item 4).
+fn resting_session(asset_class: AssetClass) -> MarketSession {
+    match asset_class {
+        AssetClass::UsEquity => MarketSession::Regular,
+        AssetClass::Crypto => MarketSession::Crypto,
+    }
+}
+
+/// The transitional profile of an [`crate::ExecutorState`] built without one: trading spec
+/// §5.2's Alpaca table, cell for cell as `mandate-alpaca`'s profile declares it, so its content
+/// hash is the same (DEC-838 item 5). Alpaca-only by contract; the story that lands the first
+/// non-Alpaca executor path (B3) deletes it before that path merges.
+pub(crate) fn transitional_alpaca() -> Result<CapabilityProfile, ProfileError> {
+    let cell = |order_type, quantity_form, tifs: &[CellTif], forms: &[ProtectionForm]| Cell {
+        order_type,
+        quantity_form,
+        times_in_force: tifs.iter().copied().collect(),
+        protection_forms: forms.iter().copied().collect(),
+    };
+    let equity = [
+        (CellType::Market, &[ProtectionForm::Bracket][..]),
+        (
+            CellType::Limit,
+            &[ProtectionForm::Bracket, ProtectionForm::Oco],
+        ),
+        (CellType::Stop, &[]),
+        (CellType::StopLimit, &[]),
+    ]
+    .into_iter()
+    .flat_map(|(order_type, forms)| {
+        [
+            cell(
+                order_type,
+                QuantityForm::Whole,
+                &[CellTif::Day, CellTif::Gtc],
+                forms,
+            ),
+            cell(order_type, QuantityForm::Fractional, &[CellTif::Day], &[]),
+            cell(order_type, QuantityForm::Notional, &[CellTif::Day], &[]),
+        ]
+    })
+    .collect();
+    let crypto = [QuantityForm::Whole, QuantityForm::Fractional]
+        .map(|form| {
+            cell(
+                CellType::StopLimit,
+                form,
+                &[CellTif::Gtc],
+                &[ProtectionForm::StopLimit],
+            )
+        })
+        .into();
+    let rows = vec![
+        Row {
+            asset_class: AssetClass::UsEquity,
+            session: MarketSession::Regular,
+            cells: equity,
+        },
+        Row {
+            asset_class: AssetClass::Crypto,
+            session: MarketSession::Crypto,
+            cells: crypto,
+        },
+    ];
+    let idempotency = Idempotency {
+        client_order_id: true,
+        retry: Retry::Idempotent,
+        query_by_client_order_id: true,
+    };
+    CapabilityProfile::new(1, rows, idempotency)
 }

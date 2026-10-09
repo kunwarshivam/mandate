@@ -62,6 +62,34 @@ pub enum McpError {
     NoResponse,
     #[error("the server answered JSON-RPC error {code}")]
     Rpc { code: i64, detail: ServerText },
+    #[error("the tool is not on the allowlist; nothing was sent")]
+    ToolNotAllowed,
+    #[error("the server lists a tool that can move funds")]
+    FundMovementTool,
+    #[error("the server's tool list lacks an allowlisted tool")]
+    ContractMissingTool,
+    #[error("the server's tool contract differs from the pinned one")]
+    ContractDrift,
+    #[error("an authorization host or endpoint is not on the pinned authorization hosts")]
+    AuthHostNotPinned,
+    #[error("the protected-resource metadata names another resource")]
+    ResourceMismatch,
+    #[error("the authorization server metadata names another issuer")]
+    IssuerMismatch,
+    #[error("the authorization server does not offer PKCE with S256")]
+    PkceUnsupported,
+    #[error("the authorization server offers no client registration")]
+    RegistrationUnavailable,
+    #[error("the registration would need a client secret")]
+    ClientSecretIssued,
+    #[error("the registration does not keep the one loopback redirect sent")]
+    RedirectChanged,
+    #[error("the operating system's random generator failed; no login was begun")]
+    RandomUnavailable,
+    #[error("the callback's state is not the login's")]
+    StateMismatch,
+    #[error("the authorization server refused the login")]
+    AuthorizationDenied,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -87,6 +115,20 @@ impl McpError {
             Self::Malformed => "malformed",
             Self::NoResponse => "no_response",
             Self::Rpc { .. } => "rpc_error",
+            Self::ToolNotAllowed => "tool_not_allowed",
+            Self::FundMovementTool => "fund_movement_tool",
+            Self::ContractMissingTool => "contract_missing_tool",
+            Self::ContractDrift => "contract_drift",
+            Self::AuthHostNotPinned => "auth_host_not_pinned",
+            Self::ResourceMismatch => "resource_mismatch",
+            Self::IssuerMismatch => "issuer_mismatch",
+            Self::PkceUnsupported => "pkce_unsupported",
+            Self::RegistrationUnavailable => "registration_unavailable",
+            Self::ClientSecretIssued => "client_secret_issued",
+            Self::RedirectChanged => "redirect_changed",
+            Self::RandomUnavailable => "random_unavailable",
+            Self::StateMismatch => "state_mismatch",
+            Self::AuthorizationDenied => "authorization_denied",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }
