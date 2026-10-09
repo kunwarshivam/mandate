@@ -52,7 +52,7 @@ the owl, the rules and the record.
       chart blank in dark mode on Home at 390 and 1440px (captured 900ms after load) while the
       agent's chart drew and the same screens in light drew; earlier captures at 1500ms showed it.
       Find whether the dark-mode redraw (`setChartMode`) races the draw-in, and pin it with a test
-      that reads the canvas after the mode switch. (#PR) Cause: hydration read the chart mode
+      that reads the canvas after the mode switch. (#1032) Cause: hydration read the chart mode
       from the server's default, so a dark Home drew a light chart, then tore it down for a dark
       one, later than light; the blank captures themselves (C-22, both themes) were taken before
       the dev server hydrated, with no canvas yet, not a sizing or draw-in race. Fix: charts read
