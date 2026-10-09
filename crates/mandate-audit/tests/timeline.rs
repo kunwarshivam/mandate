@@ -803,9 +803,9 @@ fn order_links_are_version_two_and_read_every_timeline_stream() {
 
 /// DEC-779's tripwire. DEC-764 item 2 makes `AccountRestrictionChanged` and a connection- or
 /// workspace-scope `KillSwitchActivated` on an account stream the agent's, but the journal registers
-/// neither payload yet, so `append` refuses both and the timeline leaves that clause out. The day
-/// either becomes recordable this test fails, and DEC-779 lapses: that change's tests PR adds those
-/// timeline cases, and the clause follows them (DEC-77).
+/// neither payload at schema version 1 or 2, so `append` refuses both and the timeline leaves that
+/// clause out. The day either becomes recordable this test fails, and DEC-779 lapses: that change's
+/// tests PR adds those timeline cases, and the clause follows them (DEC-77).
 #[test]
 fn the_account_wide_records_the_timeline_omits_are_not_yet_recordable() {
     let mut j = Journal::new();
@@ -829,12 +829,12 @@ fn the_account_wide_records_the_timeline_omits_are_not_yet_recordable() {
             format!(r#"{{"scope":"agent","subject":"{ME}","reason":"owner"}}"#),
         ),
     ];
-    for (typed, payload) in offers {
+    for ((typed, payload), version) in offers.iter().flat_map(|o| [(o, 1), (o, 2)]) {
         j.next += 1;
         let id = event_id(j.next);
         let body = format!(
             r#"{{"envelope_version":1,"environment":"paper","event_id":"{id}","stream_id":"{to}",
-            "event_type":"{typed}","schema_version":1,"event_time":"{T}","clock_source":"local",
+            "event_type":"{typed}","schema_version":{version},"event_time":"{T}","clock_source":"local",
             "causation_id":null,"correlation_id":null,"actor":{},"config_refs":{{}},
             "payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#,
             actor()
@@ -846,6 +846,6 @@ fn the_account_wide_records_the_timeline_omits_are_not_yet_recordable() {
             }
             _ => false,
         };
-        assert!(refused, "{typed} {payload}: {outcome:?}");
+        assert!(refused, "{typed} v{version} {payload}: {outcome:?}");
     }
 }
