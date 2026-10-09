@@ -10,6 +10,7 @@ use std::fmt;
 
 use mandate_backtest::Signal;
 use mandate_canon::Digest;
+use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_num::Price;
@@ -266,6 +267,13 @@ pub trait Sink {
 pub trait Executor {
     /// Starts one process-local fold from an empty state while retaining its trusted context.
     fn reset(&mut self) -> Result<(), Cause>;
+    /// Hands the executor the connector's capability profile, which its protection reads, after
+    /// the fold at every start (DEC-838 item 5). The default keeps the executor's own transitional
+    /// Alpaca profile, for an executor that places no protection.
+    fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
+        let _ = profile;
+        Ok(())
+    }
     fn step(
         &mut self,
         input: mandate_executor::Input,
@@ -277,6 +285,14 @@ pub trait Executor {
 
 /// Step 13: one broker round trip. An `Err` is never a rejection (`BrokerConnector`'s contract).
 pub trait Connector {
+    /// The broker's capability profile, from its published contract alone
+    /// (`BrokerConnector::profile`, DEC-531 item 1). The default is Alpaca's: until the first
+    /// non-Alpaca executor path (B3) every connector the shell holds is Alpaca's by contract, as
+    /// the executor's transitional default is (DEC-838 item 5).
+    fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+        mandate_alpaca::alpaca_profile()
+    }
+
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError>;
 }
 

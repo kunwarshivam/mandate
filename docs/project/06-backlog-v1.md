@@ -4582,3 +4582,12 @@ From the independent reviews of three CI and xtask conflict-and-queue fixes ([#7
   - Refuse two feature files with the same `# ` title, which `--index` would list twice.
   - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
     the README is never read as a feature.
+
+From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-841](decisions/DEC-841.md)):
+
+- **Delete the transitional Alpaca profile** (`mandate-executor`'s `shape::transitional_alpaca`,
+  which `ExecutorState::new` starts with, and the default bodies of the shell's
+  `Connector::profile` and `Executor::use_profile`) in B3, before the first non-Alpaca executor
+  path merges. Until then an executor built without a profile is Alpaca-only by contract. Once every
+  constructor passes a profile, `ExecutorState`'s profile stops being an `Option` and DEC-841 item
+  2's defensive path goes with it.

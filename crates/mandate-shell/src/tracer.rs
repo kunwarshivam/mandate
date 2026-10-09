@@ -283,6 +283,15 @@ impl<'s> Session<'s> {
         let agent_epoch = self.epoch(&self.agent_stream.clone());
         self.feed(Input::Started(WriterEpoch(agent_epoch)))?;
         let account_epoch = self.epoch(&self.account_stream.clone());
+        let profile = self.stages.connector.profile().map_err(|_| {
+            refused(Stage::Connector)(Cause::Untrusted {
+                what: "the connector's capability profile",
+            })
+        })?;
+        self.stages
+            .executor
+            .use_profile(profile)
+            .map_err(refused(Stage::Executor))?;
         let executor_effects = self
             .stages
             .executor

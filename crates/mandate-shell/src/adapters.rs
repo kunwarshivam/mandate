@@ -30,6 +30,7 @@
 
 use std::cell::{Ref, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -43,7 +44,9 @@ use mandate_builder::{
     ModelOutput as BuilderModelOutput, RiskContext as BuilderRiskContext,
 };
 use mandate_canon::{Digest, Key, Object, Value};
-use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
+use mandate_domain::{
+    AutonomyDecision, CapabilityProfile, ProfileError, Purpose as BuilderPurpose,
+};
 use mandate_executor::{
     AccountRef, AccountScope, AgentId as ExecutorAgentId, BindingGateSource, BrokerConnector,
     BrokerOutcome, BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState,
@@ -1833,6 +1836,14 @@ impl Executor for CoreExecutor {
         Ok(())
     }
 
+    fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
+        let scope = self.state.borrow().scope().clone();
+        let mut state = self.state.borrow_mut();
+        let folded = mem::replace(&mut *state, ExecutorState::new(scope));
+        *state = folded.with_profile(profile);
+        Ok(())
+    }
+
     fn step(
         &mut self,
         input: mandate_executor::Input,
@@ -1866,6 +1877,10 @@ pub struct AlpacaConnector<T> {
 }
 
 impl<T: TradingTransport + Clone> Connector for AlpacaConnector<T> {
+    fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+        TradingClient::new(self.transport.clone(), TokioPause, RetryPolicy::default()).profile()
+    }
+
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_io()
