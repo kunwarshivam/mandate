@@ -2151,7 +2151,6 @@ fn assert_overlay_denied(
 /// rule and the ask fixture's `ask` rule both become `deny`, named `policy_overlay`. The run
 /// records the deny and places nothing.
 #[test]
-#[ignore = "pending E7-19"]
 fn an_opening_under_a_nonconforming_mandate_is_denied_by_the_policy_overlay() {
     let mut context = run_context(true);
     context.governance = Some(nonconforming());
@@ -2169,7 +2168,6 @@ fn an_opening_under_a_nonconforming_mandate_is_denied_by_the_policy_overlay() {
 /// DEC-534 item 2 (D4d): an increase is denied the same way. No fixture sizes an increase, since
 /// the tracer's account starts flat, so the run's own sizing is retargeted to one.
 #[test]
-#[ignore = "pending E7-19"]
 fn an_increase_under_a_nonconforming_mandate_is_denied_by_the_policy_overlay() {
     let mut context = run_context(true);
     context.governance = Some(nonconforming());
@@ -2182,6 +2180,80 @@ fn an_increase_under_a_nonconforming_mandate_is_denied_by_the_policy_overlay() {
     let (outcome, stages, seen) =
         retargeted_run("overlay-increase", Some(governed.clone()), store, increase);
     assert_overlay_denied(outcome, &stages, &seen, &governed, "increase");
+}
+
+/// What D4b reads for the deny fixture under the workspace level that forbids `auto`: its later
+/// `routine` rule still says `auto`, so this mandate is nonconforming in its own right.
+fn nonconforming_deny_fixture() -> Governance {
+    let source = fs::read(fixtures().join("mandate-deny.json")).unwrap();
+    let mandate = mandate_spec::Mandate::parse(&mandate_canon::parse(&source).unwrap()).unwrap();
+    let no_auto = PolicyLevel {
+        name: LevelName::Workspace,
+        values: BTreeMap::from([(PolicyKey::AutoAllowed, PolicyValue::Flag(false))]),
+    };
+    let checked = mandate_spec::policy::check(&mandate, &[no_auto]).unwrap();
+    assert!(!checked.violations.is_empty(), "the deny fixture conforms");
+    Governance {
+        overlay: checked.overlay,
+        violations: checked.violations,
+        ..nonconforming()
+    }
+}
+
+/// Mandate spec §6.2 step 5c and DEC-536 item 2 (D4d): the overlay names itself only when it
+/// changed the decision. Under the deny fixture, nonconforming because its `routine` rule says
+/// `auto`, an opening that its first rule `no_opens` already denies stays `deny` labelled
+/// `rule:no_opens`, never `policy_overlay`, and the run journals that label and places nothing.
+/// An increase, which `routine` makes `auto`, is the overlay's own deny, so the same fixture
+/// shows the label follows the step that decided.
+#[test]
+fn a_deny_the_rules_decided_under_a_nonconforming_mandate_keeps_the_rule_label() {
+    let governed = nonconforming_deny_fixture();
+    let by_rule = Classified {
+        autonomy: Autonomy::Deny,
+        decided_by: Some("rule:no_opens".to_owned()),
+    };
+    let mut context = run_context(true);
+    context.governance = Some(governed.clone());
+    let opening = proposal_as(&mut context, Purpose::Open, RuntimePurpose::Open);
+    let answer = classify_under("mandate-deny.json", &context, &opening);
+    assert_eq!(answer, Ok(by_rule));
+    let mut context = run_context(true);
+    context.governance = Some(governed.clone());
+    let increase = proposal_as(&mut context, Purpose::Increase, RuntimePurpose::Increase);
+    let answer = classify_under("mandate-deny.json", &context, &increase);
+    assert_eq!(answer, Ok(overlay_deny()));
+    let scratch = Scratch::new("deny-keeps-rule");
+    let closes = rising();
+    let closes: Vec<&str> = closes.iter().map(String::as_str).collect();
+    let dataset = bars(&scratch.0, &closes);
+    let transport = Scripted::new(Broker::Fresh);
+    let seen = Rc::clone(&transport.seen);
+    let store = Some(Arc::new(governed_store(&governed)) as Arc<dyn ArtifactSource + Send + Sync>);
+    let mut context = run_context(true);
+    context.governance = Some(governed);
+    let mut stages = governed_stages("mandate-deny.json", dataset, transport, context, store);
+    let error = refused(run(&mut stages, &setup(true)));
+    let denied = matches!(
+        &error,
+        ShellError::Refused {
+            stage: Stage::Classify,
+            cause: Cause::NotAuto { autonomy: "deny" },
+        }
+    );
+    assert!(denied, "{error}: {error:?}");
+    assert_eq!(seen.borrow().posts(), 0, "the broker saw an order");
+    let agent = committed(&stages, &agent_stream());
+    let decisions = of_type(&agent, "DecisionMade");
+    assert_eq!(decisions.len(), 1);
+    for (field, expected) in [
+        ("autonomy", "deny"),
+        ("decided_by", "rule:no_opens"),
+        ("purpose", "open"),
+    ] {
+        let found = payload_field(&decisions[0], field);
+        assert_eq!(found.as_deref(), Some(expected), "{field}");
+    }
 }
 
 /// `AGENTS.md` rules 3 and 13, DEC-534 item 2 (D4d): a discretionary exit goes through the whole
