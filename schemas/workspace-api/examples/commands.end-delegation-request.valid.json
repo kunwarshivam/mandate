@@ -1,0 +1,20 @@
+[
+  {
+    "label": "an empty body",
+    "remove": [
+      "/record"
+    ]
+  },
+  {
+    "label": "a null record",
+    "set": {
+      "/record": null
+    }
+  },
+  {
+    "label": "auto: /record null",
+    "set": {
+      "/record": null
+    }
+  }
+]

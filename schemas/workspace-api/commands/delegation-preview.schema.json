@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/delegation-preview.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "preview_id",
+    "mandate_version",
+    "unasked_usd_after",
+    "classification",
+    "step_up_digest",
+    "delegation"
+  ],
+  "properties": {
+    "preview_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "mandate_version": {
+      "$ref": "../common.schema.json#/$defs/ContentRef"
+    },
+    "unasked_usd_after": {
+      "$ref": "../common.schema.json#/$defs/Decimal"
+    },
+    "classification": {
+      "const": "risk_increasing"
+    },
+    "step_up_digest": {
+      "$ref": "../common.schema.json#/$defs/ContentRef"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    },
+    "delegation": {
+      "description": "The delegation the version adds, as the owner entered it (\u00a75.3). Its other mandate spec \u00a76.5 members (planned: E8-15) join with the story that builds the preview.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shape",
+        "max_orders",
+        "max_order_usd",
+        "max_total_usd",
+        "expires_at",
+        "source_approval_id"
+      ],
+      "properties": {
+        "shape": {
+          "enum": [
+            "until_close",
+            "instrument_for_time",
+            "kind_for_time"
+          ]
+        },
+        "max_orders": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "max_order_usd": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "max_total_usd": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_approval_id": {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        }
+      }
+    }
+  },
+  "description": "A delegation preview (\u00a75.3). The delegation's own mandate spec \u00a76.5 members join with E8-15.",
+  "unevaluatedProperties": false
+}
